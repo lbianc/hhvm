@@ -63,6 +63,7 @@ bool loadsCell(Opcode op) {
     switch (arch()) {
     case Arch::X64: return true;
     case Arch::ARM: return false;
+    case Arch::PPC64: return false;
     }
     not_reached();
 
@@ -80,6 +81,7 @@ bool storesCell(const IRInstruction& inst, uint32_t srcIdx) {
   switch (arch()) {
   case Arch::X64: break;
   case Arch::ARM: return false;
+  case Arch::PPC64: return false;
   }
 
   // If this function returns true for an operand, then the register allocator
@@ -121,6 +123,7 @@ PhysReg forceAlloc(const SSATmp& tmp) {
     switch (arch()) {
     case Arch::X64: return false;
     case Arch::ARM: return true;
+    case Arch::PPC64: return true;
     }
     not_reached();
   }();
@@ -236,6 +239,8 @@ void getEffects(const Abi& abi, const Vinstr& i,
         case Arch::X64:
           defs.remove(reg::rbp);
           break;
+        case Arch::PPC64:
+          break;
       }
       break;
     case Vinstr::bindcall:
@@ -243,6 +248,8 @@ void getEffects(const Abi& abi, const Vinstr& i,
       switch (arch()) {
       case Arch::ARM: break;
       case Arch::X64: defs.remove(x64::rVmTl); break;
+      case Arch::PPC64: break;
+
       }
       break;
     case Vinstr::contenter:
@@ -251,6 +258,8 @@ void getEffects(const Abi& abi, const Vinstr& i,
       switch (arch()) {
       case Arch::ARM: defs.remove(PhysReg(arm::rVmFp)); break;
       case Arch::X64: defs -= reg::rbp | x64::rVmTl; break;
+      case Arch::PPC64: break;
+
       }
       break;
     case Vinstr::callfaststub:

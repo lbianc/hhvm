@@ -56,7 +56,9 @@ SYSTEMLIB_CLASSES(SYSTEM_CLASS_STRING)
 void ProcessInit() {
   // Create the global mcg object
   jit::mcg = new jit::MCGenerator();
+#if !defined(__powerpc64__)
   jit::mcg->initUniqueStubs();
+#endif
 
   // Save the current options, and set things up so that
   // systemlib.php can be read from and stored in the

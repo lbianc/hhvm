@@ -102,6 +102,8 @@ Vauto::~Vauto() {
         case Arch::ARM:
           finishARM(unit(), areas, vauto_abi, nullptr);
           break;
+        case Arch::PPC64:
+          break;
       }
       return;
     }

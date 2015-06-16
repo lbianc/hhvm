@@ -32,6 +32,7 @@ void only_x64() {
   switch (arch()) {
   case Arch::ARM: always_assert_flog(false, "not implemented");
   case Arch::X64: break;
+  case Arch::PPC64: break;
   }
 }
 
