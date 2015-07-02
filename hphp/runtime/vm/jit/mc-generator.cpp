@@ -73,6 +73,7 @@
 #include "hphp/runtime/vm/debug/debug.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/jit/back-end-x64.h" // XXX Layering violation.
+#include "hphp/runtime/vm/jit/back-end-ppc64.h" // XXX Layering violation.
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/code-gen.h"
 #include "hphp/runtime/vm/jit/debug-guards.h"
