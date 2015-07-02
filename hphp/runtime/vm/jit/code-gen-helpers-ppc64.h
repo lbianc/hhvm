@@ -14,21 +14,19 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_CODEGENHELPERS_X64_H_
-#define incl_HPHP_VM_CODEGENHELPERS_X64_H_
+#ifndef incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
+#define incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/ringbuffer.h"
 
 #include "hphp/runtime/base/types.h"
-#include "hphp/runtime/vm/jit/abi-x64.h"
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/cpp-call.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
-#include "hphp/runtime/vm/jit/service-requests-x64.h"
 #include "hphp/runtime/vm/jit/service-requests-ppc64.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/translator.h"
@@ -47,7 +45,7 @@ namespace jit {
 struct Fixup;
 struct SSATmp;
 
-namespace x64 {
+namespace ppc64 {
 //////////////////////////////////////////////////////////////////////
 
 typedef X64Assembler Asm;
@@ -150,7 +148,7 @@ void emitCheckSurpriseFlagsEnter(CodeBlock& mainCode, CodeBlock& coldCode,
  * only have access to bitwise linear addresses.
  *
  * TLS data live at negative virtual addresses off FS: the first datum
- * is typically at VA(FS:-sizeof(datum)). Linux's x64 ABI stores the linear
+ * is typically at VA(FS:-sizeof(datum)). Linux's ppc64 ABI stores the linear
  * address of the base of TLS at VA(FS:0). While this is just a convention, it
  * is firm: gcc builds binaries that assume it when, e.g., evaluating
  * "&myTlsDatum".

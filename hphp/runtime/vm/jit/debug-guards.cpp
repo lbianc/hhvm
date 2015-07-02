@@ -20,6 +20,7 @@
 #include "hphp/runtime/vm/jit/service-requests-inline.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/back-end-x64.h" // XXX Layering violation.
+#include "hphp/runtime/vm/jit/back-end-ppc64.h"
 
 namespace HPHP { namespace jit {
 

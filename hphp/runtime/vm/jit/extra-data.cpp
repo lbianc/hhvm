@@ -18,6 +18,7 @@
 
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/util/text-util.h"
 
 namespace HPHP { namespace jit {

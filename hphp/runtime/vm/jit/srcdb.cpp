@@ -22,6 +22,8 @@
 #include "hphp/util/trace.h"
 #include "hphp/runtime/vm/jit/back-end-x64.h"
 #include "hphp/runtime/vm/jit/service-requests-x64.h"
+#include "hphp/runtime/vm/jit/back-end-ppc64.h"
+#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/service-requests-inline.h"
 #include "hphp/runtime/vm/jit/relocation.h"

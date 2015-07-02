@@ -23,6 +23,7 @@
 #include "hphp/runtime/vm/bytecode.h"
 
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 struct _Unwind_Exception;

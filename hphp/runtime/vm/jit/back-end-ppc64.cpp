@@ -107,6 +107,20 @@ std::unique_ptr<jit::BackEnd> newBackEnd() {
   return folly::make_unique<BackEnd>();
 }
 
+//////////////////////////////////////////////////////////////////////
+
+bool isSmashable(Address frontier, int nBytes, int offset /* = 0 */) {
+  return false;
+}
+
+void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset) {}
+
+void smashJmp(TCA jmpAddr, TCA newDest) {}
+
+void smashCall(TCA callAddr, TCA newDest) {}
+
+//////////////////////////////////////////////////////////////////////
+
 //void BackEnd::genCodeImpl(IRUnit& unit, AsmInfo* asmInfo) {}
 
 }}}
