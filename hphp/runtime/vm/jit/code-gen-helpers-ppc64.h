@@ -17,7 +17,7 @@
 #ifndef incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
 #define incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
 
-#include "hphp/util/asm-x64.h"
+#include "hphp/util/asm-ppc64.h"
 #include "hphp/util/ringbuffer.h"
 
 #include "hphp/runtime/base/types.h"
@@ -48,7 +48,7 @@ struct SSATmp;
 namespace ppc64 {
 //////////////////////////////////////////////////////////////////////
 
-typedef X64Assembler Asm;
+typedef PPC64Assembler Asm;
 
 constexpr size_t kJmpTargetAlign = 16;
 
@@ -77,27 +77,7 @@ Vreg emitDecRef(Vout& v, Vreg base);
  */
 template<class Destroy>
 void emitDecRefWork(Vout& v, Vout& vcold, Vreg rData,
-                    Destroy destroy, bool unlikelyDestroy) {
-  auto const sf = v.makeReg();
-  v << cmplim{1, rData[FAST_REFCOUNT_OFFSET], sf};
-  ifThenElse(
-    v, vcold, CC_E, sf,
-    destroy,
-    [&] (Vout& v) {
-      /*
-       * If it's not static, actually reduce the reference count.  This does
-       * another branch using the same status flags from the cmplim above.
-       */
-      ifThen(
-        v, CC_NL, sf,
-        [&] (Vout& v) {
-          emitDecRef(v, rData);
-        }
-      );
-    },
-    unlikelyDestroy
-  );
-}
+                    Destroy destroy, bool unlikelyDestroy) {}
 
 void emitIncRef(Asm& as, PhysReg base);
 void emitIncRef(Vout& v, Vreg base);
@@ -171,10 +151,7 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg reg) {
 
 template<typename T>
 inline void
-emitTLSLoad(X64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {
-  uintptr_t virtualAddress = uintptr_t(&datum.m_node.m_p) - tlsBase();
-  a.fs().loadq(baseless(virtualAddress), reg);
-}
+emitTLSLoad(PPC64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {}
 
 #else // USE_GCC_FAST_TLS
 
@@ -197,20 +174,7 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg dest) {
 
 template<typename T>
 inline void
-emitTLSLoad(X64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 dest) {
-  PhysRegSaver(a, kGPCallerSaved); // we don't know for sure what's alive
-  a.    emitImmReg(datum.m_key, argNumToRegName[0]);
-  const TCA addr = (TCA)pthread_getspecific;
-  if (deltaFits((uintptr_t)addr, sz::dword)) {
-    a.    call(addr);
-  } else {
-    a.    movq(addr, reg::rax);
-    a.    call(reg::rax);
-  }
-  if (dest != reg::rax) {
-    a.    movq(reg::rax, dest);
-  }
-}
+emitTLSLoad(PPC64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 dest) {}
 
 #endif // USE_GCC_FAST_TLS
 
@@ -227,12 +191,7 @@ void pack2(Vout& v, Vreg s0, Vreg s1, Vreg d0);
 Vreg zeroExtendIfBool(Vout& v, const SSATmp* src, Vreg reg);
 
 template<ConditionCode Jcc, class Lambda>
-void jccBlock(Asm& a, Lambda body) {
-  Label exit;
-  exit.jcc8(a, Jcc);
-  body();
-  asm_label(a, exit);
-}
+void jccBlock(Asm& a, Lambda body) {}
 
 /*
  * lookupDestructor --
@@ -240,38 +199,9 @@ void jccBlock(Asm& a, Lambda body) {
  * Return a MemoryRef pointer to the destructor for the type in typeReg.
  */
 
-inline MemoryRef lookupDestructor(X64Assembler& a, PhysReg typeReg) {
-  auto const table = reinterpret_cast<intptr_t>(g_destructors);
-  always_assert_flog(deltaFits(table, sz::dword),
-    "Destructor function table is expected to be in the data "
-    "segment, with addresses less than 2^31"
-  );
-  static_assert((KindOfString        >> kShiftDataTypeToDestrIndex == 1) &&
-                (KindOfArray         >> kShiftDataTypeToDestrIndex == 2) &&
-                (KindOfObject        >> kShiftDataTypeToDestrIndex == 3) &&
-                (KindOfResource      >> kShiftDataTypeToDestrIndex == 4) &&
-                (KindOfRef           >> kShiftDataTypeToDestrIndex == 5),
-                "lookup of destructors depends on KindOf* values");
-  a.    shrl   (kShiftDataTypeToDestrIndex, r32(typeReg));
-  return baseless(typeReg*8 + table);
-}
+inline MemoryRef lookupDestructor(PPC64Assembler& a, PhysReg typeReg) {}
 
-inline Vptr lookupDestructor(Vout& v, Vreg typeReg) {
-  auto const table = reinterpret_cast<intptr_t>(g_destructors);
-  always_assert_flog(deltaFits(table, sz::dword),
-    "Destructor function table is expected to be in the data "
-    "segment, with addresses less than 2^31"
-  );
-  static_assert((KindOfString        >> kShiftDataTypeToDestrIndex == 1) &&
-                (KindOfArray         >> kShiftDataTypeToDestrIndex == 2) &&
-                (KindOfObject        >> kShiftDataTypeToDestrIndex == 3) &&
-                (KindOfResource      >> kShiftDataTypeToDestrIndex == 4) &&
-                (KindOfRef           >> kShiftDataTypeToDestrIndex == 5),
-                "lookup of destructors depends on KindOf* values");
-  auto shiftedType = v.makeReg();
-  v << shrli{kShiftDataTypeToDestrIndex, typeReg, shiftedType, v.makeReg()};
-  return Vptr{Vreg{}, shiftedType, 8, safe_cast<int>(table)};
-}
+inline Vptr lookupDestructor(Vout& v, Vreg typeReg) {}
 
 //////////////////////////////////////////////////////////////////////
 

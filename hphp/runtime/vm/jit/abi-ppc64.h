@@ -26,7 +26,7 @@
 #ifndef incl_HPHP_VM_RUNTIME_TRANSLATOR_ABI_PPC64_H_
 #define incl_HPHP_VM_RUNTIME_TRANSLATOR_ABI_PPC64_H_
 
-#include "hphp/util/asm-x64.h"
+#include "hphp/util/asm-ppc64.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
@@ -44,23 +44,27 @@ namespace HPHP { namespace jit { namespace ppc64 {
  * Frame pointer.  When mid-trace, points to the ActRec for the
  * function currently executing.
  */
-constexpr PhysReg rVmFp      = reg::rbp;
+//TODO
+constexpr PhysReg rVmFp      = reg::r1;
 
 /*
  * Stack pointer.  When mid-trace, points to the top of the eval stack
  * (lowest valid address) at the start of the current tracelet.
  */
-constexpr PhysReg rVmSp      = reg::rbx;
+//TODO
+constexpr PhysReg rVmSp      = reg::r1;
 
 /*
  * RDS base pointer.  Always points to the base of the RDS block for
  * the current request.
  */
+//TODO
 constexpr PhysReg rVmTl      = reg::r12;
 
 /*
  * scratch register
  */
+//TODO
 constexpr Reg64 rAsm         = reg::r10;
 
 //////////////////////////////////////////////////////////////////////
@@ -73,25 +77,28 @@ constexpr Reg64 rAsm         = reg::r10;
  */
 
 const RegSet kGPCallerSaved =
-  reg::rax | reg::rcx | reg::rdx | reg::rsi | reg::rdi |
-  reg::r8  | reg::r9  | reg::r10 | reg::r11;
+  reg::r2 | reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 |
+  reg::r8  | reg::r9  | reg::r10 | reg::r11 | reg::r12;
 
 const RegSet kGPCalleeSaved =
-  reg::rbx | reg::r13 | reg::r14 | reg::r15;
+  reg::r14 | reg::r15 | reg::r16 | reg::r17 | reg::r18 | reg::r19
+  | reg::r20 | reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25
+  | reg::r26 | reg::r27 | reg::r28 | reg::r29 | reg::r30 | reg::r31;
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = reg::rsp | rVmFp | rVmTl;
+//TODO
+const RegSet kGPReserved = reg::r1 | reg::r13;
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
 const RegSet kXMMCallerSaved =
-  reg::xmm0  | reg::xmm1  | reg::xmm2  | reg::xmm3 |
-  reg::xmm4  | reg::xmm5  | reg::xmm6  | reg::xmm7 |
-  reg::xmm8  | reg::xmm9  | reg::xmm10 | reg::xmm11 |
-  reg::xmm12 | reg::xmm13 | reg::xmm14 | reg::xmm15;
+  reg::v0 | reg::v1 | reg::v2 | reg::v3 | reg::v4 | reg::v5 | reg::v6 | reg::v7
+  | reg::v8 | reg::v9 | reg::v10 | reg::v11 | reg::v12 | reg::v13 | reg::v14 | reg::v15
+  | reg::v16 | reg::v17 | reg::v18 | reg::v19;
 
-const RegSet kXMMCalleeSaved;
+const RegSet kXMMCalleeSaved =  reg::v20 | reg::v21 | reg::v22 | reg::v23 | reg::v24
+		 | reg::v25 | reg::v26 | reg::v27 | reg::v28 | reg::v29 | reg::v30 | reg::v31;
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
 
@@ -164,7 +171,7 @@ const RegSet kScratchCrossTraceRegs = kXMMCallerSaved |
 
 // ppc64 INTEGER class argument registers.
 const PhysReg argNumToRegName[] = {
-  reg::rdi, reg::rsi, reg::rdx, reg::rcx, reg::r8, reg::r9
+  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9, reg::r10
 };
 const int kNumRegisterArgs = sizeof(argNumToRegName) / sizeof(PhysReg);
 
@@ -178,8 +185,8 @@ inline RegSet argSet(int n) {
 
 // ppc64 SSE class argument registers.
 const PhysReg argNumToSIMDRegName[] = {
-  reg::xmm0, reg::xmm1, reg::xmm2, reg::xmm3,
-  reg::xmm4, reg::xmm5, reg::xmm6, reg::xmm7,
+  reg::v2, reg::v3, reg::v4, reg::v5, reg::v6, reg::v7, reg::v8,
+  reg::v9, reg::v10, reg::v11, reg::v12, reg::v13
 };
 const int kNumSIMDRegisterArgs = sizeof(argNumToSIMDRegName) / sizeof(PhysReg);
 
@@ -189,7 +196,8 @@ const int kNumSIMDRegisterArgs = sizeof(argNumToSIMDRegName) / sizeof(PhysReg);
  */
 constexpr PhysReg serviceReqArgRegs[] = {
   // rdi: contains request number
-  reg::rsi, reg::rdx, reg::rcx, reg::r8
+		//TODO
+  /*reg::rsi, reg::rdx, reg::rcx, */reg::r8
 };
 constexpr int kNumServiceReqArgRegs =
   sizeof(serviceReqArgRegs) / sizeof(PhysReg);

@@ -26,23 +26,38 @@
 
 #include "hphp/runtime/vm/jit/back-end-ppc64.h"
 
-#include "hphp/util/asm-x64.h"
+#include "hphp/util/asm-ppc64.h"
 #include "hphp/util/disasm.h"
 #include "hphp/util/text-color.h"
 
+#include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/check.h"
+#include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
+#include "hphp/runtime/vm/jit/code-gen-ppc64.h"
+#include "hphp/runtime/vm/jit/func-prologues-ppc64.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
 #include "hphp/runtime/vm/jit/timer.h"
+#include "hphp/runtime/vm/jit/unique-stubs-ppc64.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-llvm.h"
+#include "hphp/runtime/vm/jit/relocation.h"
 
 namespace HPHP { namespace jit {
 
 namespace ppc64 {
+
+extern "C" void enterTCHelper(Cell* vm_sp,
+                              ActRec* vm_fp,
+                              TCA start,
+                              ActRec* firstAR,
+                              void* targetCacheBase,
+                              ActRec* stashedAR);
 
 struct BackEnd final : public jit::BackEnd {
   BackEnd() {}
@@ -54,8 +69,27 @@ struct BackEnd final : public jit::BackEnd {
    PhysReg rVmSp() override {};
    PhysReg rVmFp() override {};
    PhysReg rVmTl() override {};
-   void enterTCHelper(TCA start, ActRec* stashedAR) override {};
-   UniqueStubs emitUniqueStubs() override {};
+
+//TODO PPC64 review this code, since it is duplicated
+#if defined (__powerpc64__)
+  #define CALLEE_SAVED_BARRIER()
+#else
+  #define CALLEE_SAVED_BARRIER()                                    \
+      asm volatile("" : : : "rbx", "r12", "r13", "r14", "r15");
+#endif
+
+   void enterTCHelper(TCA start, ActRec* stashedAR) override {
+	    // We have to force C++ to spill anything that might be in a callee-saved
+	    // register (aside from rbp). enterTCHelper does not save them.
+	    CALLEE_SAVED_BARRIER();
+	    auto& regs = vmRegsUnsafe();
+	    jit::ppc64::enterTCHelper(regs.stack.top(), regs.fp, start,
+	                       vmFirstAR(), rds::tl_base, stashedAR);
+	    CALLEE_SAVED_BARRIER();
+   };
+   UniqueStubs emitUniqueStubs() override {
+	   return ppc64::emitUniqueStubs();
+   };
    TCA emitServiceReqWork(
     CodeBlock& cb,
     TCA start,

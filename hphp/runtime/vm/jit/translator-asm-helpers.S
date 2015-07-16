@@ -130,17 +130,64 @@ enterTCServiceReq:
   brk 0
 
 #elif defined(__powerpc64__)
-  .globl enterTCHelper
-enterTCHelper:
-  .globl enterTCExit
-enterTCExit:
-  .globl handleSRResumeTC
-handleSRResumeTC:
-  .globl handleSRHelper
-handleSRHelper:
-  .globl enterTCServiceReq
-enterTCServiceReq:
+// ==== enterTCHelper ====
+// r3: regs.stack.top()
+// r4: regs.fp
+// r5: start
+// r6: vmFirstAR()
+// r7: rds::tl_base
+// r8: stashedAR
+ETCH_SECTION(enterTCHelper)
+.globl ETCH_NAME(enterTCHelper)
+ETCH_NAME(enterTCHelper):
+  // Prologue
+  mflr %r0
+  std %r0, 16(%r1)
+  stdu %r1, -32(%r1)
+  mtctr %r5
+  bctr
+  ld %r0, 16(%r1)
+  mtlr %r0
+//  ld %r1, 0(%r1)
   blr
+
+
+/*  stdu %r1, -112(%r1)
+  mflr %r0
+  std %r0, 128(%r1)
+  mtctr %r5
+  bctr
+  ld %r0, 128(%r1)
+  mtlr %r0
+  ld %r1, 0(%r1)
+  blr*/
+ETCH_SIZE(enterTCHelper)
+// ==== enterTCHelper ====
+
+ETCH_SECTION(handleSRHelper)
+.globl ETCH_NAME(handleSRHelper)
+ETCH_NAME(handleSRHelper):
+  blr
+ETCH_SIZE(handleSRHelper)
+
+ETCH_SECTION(handleSRResumeTC)
+.globl ETCH_NAME(handleSRResumeTC)
+ETCH_NAME(handleSRResumeTC):
+  blr
+ETCH_SIZE(handleSRResumeTC)
+
+ETCH_SECTION(enterTCServiceReq)
+.globl ETCH_NAME(enterTCServiceReq)
+ETCH_NAME(enterTCServiceReq):
+  blr
+ETCH_SIZE(enterTCServiceReq)
+
+ETCH_SECTION(enterTCExit)
+.globl ETCH_NAME(enterTCExit)
+ETCH_NAME(enterTCExit):
+  blr
+ETCH_SIZE(enterTCExit)
+
 
 
 #endif
