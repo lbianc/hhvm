@@ -708,7 +708,7 @@ public:
   void orc () {}
   void ecowx () {}
   void sthux () {}
-  void or_ (Reg64 rt, Reg64 ra, Reg64 rb) { emitRRR(instr_or, rn(rt), rn(ra), rn(rb)); } //primeira instrucao
+  void or_ (Reg64 rt, Reg64 ra, Reg64 rb) { emitRRR(instr_or, rn(rt), rn(ra), rn(rb)); }
   void mr () {}
   void divdu () {}
   void divwu () {}
@@ -2511,7 +2511,6 @@ public:
   RegNumber rn(RegXMM r) { return RegNumber(int(r)); }
 
 public:
-  //const PPC64Instr instr_or =  { {0x7C, 0x00, 0x03, 0x78/*RR~R.*/}, 0x00000 };
   ALWAYS_INLINE
   void emitRRR(PPC64Instr op, RegNumber nrt, RegNumber nra, RegNumber nrb) {
 	int rt = int(nrt);
