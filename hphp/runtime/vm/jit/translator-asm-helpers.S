@@ -148,19 +148,8 @@ ETCH_NAME(enterTCHelper):
   bctr
   ld %r0, 16(%r1)
   mtlr %r0
-//  ld %r1, 0(%r1)
+  addi %r1, %r1, 32
   blr
-
-
-/*  stdu %r1, -112(%r1)
-  mflr %r0
-  std %r0, 128(%r1)
-  mtctr %r5
-  bctr
-  ld %r0, 128(%r1)
-  mtlr %r0
-  ld %r1, 0(%r1)
-  blr*/
 ETCH_SIZE(enterTCHelper)
 // ==== enterTCHelper ====
 
