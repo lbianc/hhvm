@@ -537,11 +537,6 @@ struct X64Instr {
   unsigned long flags;
 };
 
-struct PPC64Instr {
-  unsigned char table[6];
-  unsigned long flags;
-};
-
 //                                    0    1    2    3    4    5     flags
 const X64Instr instr_divsd =   { { 0x5E,0xF1,0xF1,0x00,0xF1,0xF1 }, 0x10102 };
 const X64Instr instr_movups =  { { 0x10,0x11,0xF1,0x00,0xF1,0xF1 }, 0x0103  };

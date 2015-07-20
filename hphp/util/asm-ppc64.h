@@ -165,26 +165,6 @@ enum X64InstrFlags {
 	  IF_ROUND       = 0x40000, // instruction is round(sp)d
 };
 
-/*
-  Address mode to table index map:
-      Table index 0 <- R_R / M_R(n) / R_M(r) / R(n)
-      Table index 1 <- R_M(n) / M_R(r) / R(r)
-      Table index 2 <- I / R_I / M_I / R_R_I / M_R_I / R_M_I
-      Table index 3 <- "/digit" value used by the above address modes
-      Table index 4 <- special R_I (for rax)
-      Table index 5 <- compact-R / none
-
-  (n) - for normal instructions only (IF_REVERSE flag is not set)
-  (r) - for reverse instructions only (IF_REVERSE flag is set)
-
-  0xF1 is used to indicate invalid opcodes.
-*/
-
-struct X64Instr {
-  unsigned char table[6];
-  unsigned long flags;
-};
-
 struct PPC64Instr {
   unsigned char table[6];
   unsigned long flags;
