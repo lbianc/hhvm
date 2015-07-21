@@ -2513,10 +2513,10 @@ public:
 public:
   ALWAYS_INLINE
   void emitRRR(PPC64Instr op, RegNumber nrt, RegNumber nra, RegNumber nrb) {
-	int rt = int(nrt);
-	int ra = int(nra);
-	int rb = int(nrb);
-	dword (op.base | rt << 21 | ra << 16 | rb << 11 );
+    int rt = int(nrt);  // output
+    int ra = int(nra);
+    int rb = int(nrb);
+    dword (op.base | rt << 16 | ra << 21 | rb << 11 );
   }
 
 
