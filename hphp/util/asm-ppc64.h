@@ -319,7 +319,7 @@ public:
   void bdz () {}
   void sc_0 () {}
   void b () {}
-  void bl () {}
+  void bl (Address addr) { emitJ(instr_bl, addr); }
   void rlwimi () {}
   void rlwinm () {}
   void rlwnm () {}
@@ -587,13 +587,13 @@ public:
   void crorc () {}
   void cror () {}
   void crmove () {}
-  void bclr () {}
+  void bclr (uint8_t bo, uint8_t bi, uint8_t bh) { emitAA(instr_bclr, bo, bi, bh); }
   void bclrl () {}
   void bcctr () {}
   void bcctrl () {}
   void bctar () {}
   void bctarl () {}
-  void blr_0 () {}
+  void blr_0 (void) { emit_(instr_blr_0); }
   void blrl_0 () {}
   void bctr_0 () {}
   void bctrl_0 () {}
@@ -709,7 +709,7 @@ public:
   void ecowx () {}
   void sthux () {}
   void or_ (Reg64 rt, Reg64 ra, Reg64 rb) { emitRRR(instr_or, rn(rt), rn(ra), rn(rb)); }
-  void mr () {}
+  void mr (Reg64 rt, Reg64 ra) { emitRRR(instr_mr, rn(rt), rn(ra), rn(ra)); }
   void divdu () {}
   void divwu () {}
   void mtspefscr () {}
@@ -2516,7 +2516,29 @@ public:
     int rt = int(nrt);  // output
     int ra = int(nra);
     int rb = int(nrb);
+    assert(rt < 1 << 6);  // parameter is 5 bits long
+    assert(ra < 1 << 6);  // parameter is 5 bits long
+    assert(rb < 1 << 6);  // parameter is 5 bits long
     dword (op.base | rt << 16 | ra << 21 | rb << 11 );
+  }
+
+  ALWAYS_INLINE
+  void emitAA(PPC64Instr op, uint8_t bo, uint8_t bi, uint8_t bh) {
+    assert(bo < 1 << 6);  // parameter is 5 bits long
+    assert(bi < 1 << 6);  // parameter is 5 bits long
+    assert(bh < 1 << 3);  // parameter is 2 bits long
+    dword (op.base | bo << 21 | bi << 16 | bh << 11);
+  }
+
+  ALWAYS_INLINE
+  void emitJ(PPC64Instr op, Address addr) {
+    int li = reinterpret_cast<uintptr_t>(addr);
+    dword (op.base | ((li >> 2) << 2));
+  }
+
+  ALWAYS_INLINE
+  void emit_(PPC64Instr op) {
+    dword (op.base);
   }
 
 
