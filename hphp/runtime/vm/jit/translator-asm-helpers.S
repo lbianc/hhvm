@@ -216,9 +216,9 @@ ETCH_NAME(enterTCExit):
   ld %r30, 160(%r1)   // local variable #17
   ld %r31, 168(%r1)   // local variable #18
 
+  addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
   ld %r0, 16(%r1)
   mtlr %r0
-  addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
   blr
 ETCH_SIZE(enterTCExit)
 
