@@ -450,7 +450,7 @@ void Assembler::mullwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool r
     EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 235, rc);
 }
 
-void nand(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc) {
+void Assembler::nand(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc) {
      EmitXForm(31, rn(rs), rn(ra), rn(rb), 476, rc);
 }
 
