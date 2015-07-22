@@ -49,56 +49,90 @@ struct BackEnd final : public jit::BackEnd {
   ~BackEnd() {}
 
    Abi abi() override {};
+
    size_t cacheLineSize() override {};
+
    PhysReg rSp() override {};
+
    PhysReg rVmSp() override {};
+
    PhysReg rVmFp() override {};
+
    PhysReg rVmTl() override {};
+
    void enterTCHelper(TCA start, ActRec* stashedAR) override {};
+
    UniqueStubs emitUniqueStubs() override {};
-   TCA emitServiceReqWork(
-    CodeBlock& cb,
-    TCA start,
-    SRFlags flags,
-    folly::Optional<FPInvOffset> spOff,
-    ServiceRequest req,
-    const ServiceReqArgVec& argv) override {};
+
+   TCA emitServiceReqWork(CodeBlock& cb,
+                          TCA start,
+                          SRFlags flags,
+                          folly::Optional<FPInvOffset> spOff,
+                          ServiceRequest req,
+                          const ServiceReqArgVec& argv) override {};
+
    size_t reusableStubSize() const override {};
+
    void emitInterpReq(CodeBlock& code,
                              SrcKey sk,
                              FPInvOffset spOff) override {};
+
    bool funcPrologueHasGuard(TCA prologue, const Func* func) override {};
+
    TCA funcPrologueToGuard(TCA prologue, const Func* func) override {};
+
    SrcKey emitFuncPrologue(TransID transID, Func* func, int argc,
                                   TCA& start) override {};
+
    TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {};
+
    void funcPrologueSmashGuard(TCA prologue, const Func* func) override {};
+
    void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {};
+
    void prepareForTestAndSmash(CodeBlock& cb, int testBytes,
                                       TestAndSmashFlags flags) override {};
+
    void smashJmp(TCA jmpAddr, TCA newDest) override {};
+
    void smashCall(TCA callAddr, TCA newDest) override {};
+
    void smashJcc(TCA jccAddr, TCA newDest) override {};
+
    void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {};
+
    void emitSmashableCall(CodeBlock& cb, TCA dest) override {};
+
    TCA smashableCallFromReturn(TCA returnAddr) override {};
+
    TCA jmpTarget(TCA jmp) override {};
+
    TCA jccTarget(TCA jmp) override {};
+
    ConditionCode jccCondCode(TCA jmp) override {};
+
    TCA callTarget(TCA call) override {};
+
    void addDbgGuard(CodeBlock& codeMain, CodeBlock& codeCold,
                            SrcKey sk, size_t dbgOff) override {};
 
+
    void streamPhysReg(std::ostream& os, PhysReg reg) override {};
+
    void disasmRange(std::ostream& os, int indent, bool dumpIR,
                            TCA begin, TCA end) override {};
 
+
    void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override {};
+
 
 private:
    void do_moveToAlign(CodeBlock&, MoveToAlignFlags) override {};
+
    bool do_isSmashable(Address, int, int) override {};
+
    void do_prepareForSmash(CodeBlock&, int, int) override {};
+
 
 };
 
