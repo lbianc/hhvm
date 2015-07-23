@@ -17,6 +17,9 @@
 
 namespace ppc64_asm {
 
+
+
+
 void Assembler::add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 266, rc);
 }
@@ -366,7 +369,7 @@ void Assembler::lmw(const Reg64& rt, const Reg64& rb, uint16_t imm) {
 
 void Assembler::lq(const Reg64& rtp, const Reg64& ra, uint16_t imm) {
     //assert invalid instruction form
-    assert(rn(rtp) != rn(rn(ra)));
+    assert(rn(rtp) == rn(rn(ra)));
     EmitDQForm(56, rn(rtp), rn(ra), imm);
 }
 

@@ -72,9 +72,22 @@ enum class RegNumber : uint32_t {};
 RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
 RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
 
+
+/**
+* This class is used to represent address modes to load/store instructions
+*/
 class MemoryRef {
 
 };
+
+// inline MemoryRef SimpleRegister::operator[](const ptrdiff_t offset) const {
+//   return MemoryRef { *this, offset };
+// }
+
+// inline MemoryRef SimpleRegister::operator[](const SimpleRegister& offset) const {
+//   return MemoryRef { *this, offset };
+// }
+
 
 /**
  * Real register class can hold data. Can be used for debug purpose or for decoding
