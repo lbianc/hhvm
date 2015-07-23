@@ -46,16 +46,20 @@ enum class RegisterType {
     kSignalProcessingEmbeddedFPStatusRegister,
 };
 
+class MemoryRef; // Forward class declaration
+
 /**
- * This is a Simple Register class. This
- * implementation can't carry any data, this can only 
- * holds the register number who is used to encode instruction. This is based on
+ * This is a Simple Register class. This is based on
  * X64 assembler of HHVM
  */
 class SimpleRegister {
 public:
    explicit constexpr SimpleRegister(int rn) : rn_(rn){}
    explicit constexpr operator uint32_t() const { return rn_; }
+
+   MemoryRef operator[](intptr_t disp) const;
+   MemoryRef operator[](SimpleRegister) const;
+
    constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_; }
    constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_; }
 private:
@@ -67,6 +71,10 @@ enum class RegNumber : uint32_t {};
 
 RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
 RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
+
+class MemoryRef {
+
+};
 
 /**
  * Real register class can hold data. Can be used for debug purpose or for decoding

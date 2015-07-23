@@ -43,6 +43,11 @@ namespace HPHP { namespace jit { namespace ppc64 {
 
 // const RegSet kGPCalleSaved = Callee-save: r14-r31, CR2-4 
 
+
+// const RegSet kSIMDCallerSaved = reg::v20-v21 vrsave
+// const RegSet kSIMDCalleSaved = v0-v13 ?????
+
+// kSIMDReserved 
 //const RegSet kSF = RegSet(RegSF{0});
 
  /*
@@ -52,6 +57,8 @@ namespace HPHP { namespace jit { namespace ppc64 {
 // UNUSED const Abi abi {
 //   kGPUnreserved,
 //   kGPReserved,
+//   kSIMDUnreserved,
+//   kSIMDReserved
 //   kCalleeSaved,
 //   kSF 
 // };
