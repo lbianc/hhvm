@@ -76,6 +76,32 @@ RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
 /**
 * This class is used to represent address modes to load/store instructions
 */
+
+/*
+  The PowerPC architecture supports the following simple addressing modes for memory
+access instructions: 
+•    EA = (RA|0) (register indirect) (D-Form)
+•    EA = (RA|0) + immediate(register indirect with immediate index) (D-Form/DS-Form/DQ-Form)
+•    EA = (RA|0) + RB (register indirect with index) (X-Form)
+     For Branch instructions:
+•    EA = immediate (absolute) (I-Form)
+•    EA = PC + immediate (relative) (I-Form ?)
+•    EA = EA - LR/CR (B-Form)
+*/
+
+/*
+ This is Displacement Register Address mode or DForm address mode.
+ This class will overload the operators () and [] to allow use the register 
+ like pointers
+*/
+class DFormAddressMode {
+
+};
+
+struct XFormAddressMode {
+
+};
+
 class MemoryRef {
 
 };
@@ -149,12 +175,21 @@ private:
     std::vector<Register<T2>* >* registers_; //TODO(IBM): use smart_ptr
 };
 
+
+/*
+ TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
+ if don't we need to implement this like ARM calling a backend to squash the N instructions to perform
+ vasm operations into one.
+*/
 class Label {
 public:
   Label() {}
   ~Label() {}
 
 friend class Assembler;
+
+private:
+  void addJump(){}
 };
 
 
