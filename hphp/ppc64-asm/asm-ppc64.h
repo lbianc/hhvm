@@ -193,6 +193,32 @@ private:
 };
 
 
+//////////////////////////////////////////////////////////////////////
+
+/*
+  This is extracted from X64 assembler. For PPC64 we maybe need to 
+  implement a TOC as decribed in PPC64 ABI. To futher information see
+  http://physinfo.ulb.ac.be/divers_html/powerpc_programming_info/intro_to_ppc/ppc4_runtime4.html
+*/
+
+/*
+ * Select the assembler which contains a given address.
+ *
+ * Asm& a = codeBlockChoose(toPatch, a, acold);
+ *   a.patchJmp(...);
+ */
+// inline HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr) {
+//   always_assert_flog(false,
+//                      "address {} was not part of any known code block", addr);
+// }
+// template<class... Blocks>
+// HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr, HPHP::CodeBlock& a, Blocks&... as) {
+//   if (a.contains(addr)) return a;
+//   return codeBlockChoose(addr, as...);
+// }
+
+//////////////////////////////////////////////////////////////////////
+
 class Assembler {
 public:
    explicit Assembler(HPHP::CodeBlock& cb) : codeBlock(cb) {}
