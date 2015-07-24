@@ -25,6 +25,7 @@
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
+#include "hphp/util/asm-x64.h"
 
 namespace ppc64_asm {
 
@@ -62,12 +63,6 @@ public:
 private:
    uint32_t rn_;
 };
-
-typedef SimpleRegister Reg64;
-enum class RegNumber : uint32_t {};
-
-RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
-RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
 
 namespace reg {
   constexpr Reg64 r0(0);
@@ -1728,6 +1723,13 @@ private:
   }
 
   HPHP::CodeBlock& codeBlock;
+
+  RegNumber rn(Reg64 r) {
+    return RegNumber(uint32_t(r));
+  }
+  RegNumber rn(int n) {
+    return RegNumber(uint32_t(n));
+  }
 
 };
 
