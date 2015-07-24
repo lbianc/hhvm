@@ -92,7 +92,7 @@ void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
 
 	  // This helper is called via a direct jump from the TC (from
 	  // fcallArrayHelper). So the stack parity is already correct.
-	  a.    or_(rVmFp, argNumToRegName[0], argNumToRegName[0]);
+	  a.    or_(rVmFp, argNumToRegName[0], argNumToRegName[0], false);
 //	  a.    movq   (rVmFp, argNumToRegName[0]);
 //	  emitCall(a, CppCall::direct(helper), argSet(1));
 //	  a.    jmp    (rax);

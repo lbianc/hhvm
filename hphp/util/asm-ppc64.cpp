@@ -1,4 +1,5 @@
 /*
+
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
@@ -12,7 +13,7 @@
    | obtain it through the world-wide-web, please send a note to          |
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-*/
+
 #include "hphp/util/asm-ppc64.h"
 
 #include <folly/Format.h>
@@ -23,7 +24,7 @@ namespace HPHP { namespace jit {
 
 // These are in order according to the binary encoding of the X64
 // condition codes.
-/*
+
 const char* cc_names[] = {
   "O", "NO", "B", "AE", "E", "NE", "BE", "A",
   "S", "NS", "P", "NP", "L", "GE", "LE", "G"
@@ -38,7 +39,8 @@ const char* show(RoundDirection rd) {
   }
   not_reached();
 }
-*/
+
 
 
 } }
+*/

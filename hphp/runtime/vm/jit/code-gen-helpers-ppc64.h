@@ -17,7 +17,7 @@
 #ifndef incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
 #define incl_HPHP_VM_CODEGENHELPERS_PPC64_H_
 
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/ringbuffer.h"
 
 #include "hphp/runtime/base/types.h"
@@ -48,7 +48,7 @@ struct SSATmp;
 namespace ppc64 {
 //////////////////////////////////////////////////////////////////////
 
-typedef PPC64Assembler Asm;
+typedef ppc64_asm::Assembler Asm;
 
 constexpr size_t kJmpTargetAlign = 16;
 
@@ -151,7 +151,7 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg reg) {
 
 template<typename T>
 inline void
-emitTLSLoad(PPC64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {}
+emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {}
 
 #else // USE_GCC_FAST_TLS
 
@@ -174,7 +174,7 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg dest) {
 
 template<typename T>
 inline void
-emitTLSLoad(PPC64Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 dest) {}
+emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 dest) {}
 
 #endif // USE_GCC_FAST_TLS
 
@@ -199,7 +199,7 @@ void jccBlock(Asm& a, Lambda body) {}
  * Return a MemoryRef pointer to the destructor for the type in typeReg.
  */
 
-inline MemoryRef lookupDestructor(PPC64Assembler& a, PhysReg typeReg) {}
+inline MemoryRef lookupDestructor(ppc64_asm::Assembler& a, PhysReg typeReg) {}
 
 inline Vptr lookupDestructor(Vout& v, Vreg typeReg) {}
 
