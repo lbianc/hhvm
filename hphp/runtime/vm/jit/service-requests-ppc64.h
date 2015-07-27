@@ -18,7 +18,7 @@
 
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/data-block.h"
 
 namespace HPHP { namespace jit {

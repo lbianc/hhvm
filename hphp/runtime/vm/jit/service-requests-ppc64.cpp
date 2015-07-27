@@ -28,7 +28,7 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/srckey.h"
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/ringbuffer.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {

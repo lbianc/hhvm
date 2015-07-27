@@ -13,9 +13,10 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
 #include "hphp/runtime/vm/jit/func-prologues-ppc64.h"
 
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/ringbuffer.h"
 
 #include "hphp/runtime/ext/ext_closure.h"

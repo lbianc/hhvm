@@ -64,6 +64,9 @@ private:
    uint32_t rn_;
 };
 
+typedef SimpleRegister Reg64;
+enum class RegNumber : uint32_t {};
+
 namespace reg {
   constexpr Reg64 r0(0);
   constexpr Reg64 r1(1);
@@ -1722,15 +1725,10 @@ private:
     codeBlock.bytes(n, bs);
   }
 
+  RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
+  RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
+
   HPHP::CodeBlock& codeBlock;
-
-  RegNumber rn(Reg64 r) {
-    return RegNumber(uint32_t(r));
-  }
-  RegNumber rn(int n) {
-    return RegNumber(uint32_t(n));
-  }
-
 };
 
 } // namespace ppc64_asm

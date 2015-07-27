@@ -16,7 +16,7 @@
 #ifndef incl_HPHP_JIT_FUNC_PROLOGUES_PPC64_H
 #define incl_HPHP_JIT_FUNC_PROLOGUES_PPC64_H
 
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/vm/jit/code-gen-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"

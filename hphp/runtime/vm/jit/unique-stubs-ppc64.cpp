@@ -13,6 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 
 #include <boost/implicit_cast.hpp>
@@ -32,8 +33,6 @@
 #include "hphp/runtime/vm/jit/service-requests-inline.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/runtime.h"
-
-#pragma GCC diagnostic ignored "-Wreturn-type"
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -137,4 +136,3 @@ UniqueStubs emitUniqueStubs() {
 
 }}}
 
-#pragma GCC diagnostic pop

@@ -22,11 +22,9 @@
  * This is a work in progress to port HHVM Jit to PPC64 architecture.
  * */
 
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
 #include "hphp/runtime/vm/jit/back-end-ppc64.h"
 
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/disasm.h"
 #include "hphp/util/text-color.h"
 
@@ -158,6 +156,4 @@ void smashCall(TCA callAddr, TCA newDest) {}
 //void BackEnd::genCodeImpl(IRUnit& unit, AsmInfo* asmInfo) {}
 
 }}}
-
-#pragma GCC diagnostic pop
 
