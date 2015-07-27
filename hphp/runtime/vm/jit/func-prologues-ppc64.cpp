@@ -18,7 +18,6 @@
    
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/ext/ext_closure.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
 #include "hphp/runtime/vm/jit/back-end.h"
 #include "hphp/runtime/vm/jit/service-requests-ppc64.h"

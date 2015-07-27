@@ -19,6 +19,7 @@
 
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -26,25 +27,25 @@ namespace HPHP { namespace jit { namespace ppc64 {
   TODO(IBM):This is a draft for PPC64 abi, must validate all these informations
 
 */
-// constexpr RegisterPhys rVmFp(reg::gpr1) // Frame Pointer (PPC has no frame pointer?)
-// constexpr RegisterPhys rVmSp(reg::gpr1) //Stack Pointer
-// constexpr RegisterPhys rAsm(reg::grp10) //Scratch Register 
-// constexpr PhysReg rVmToC(reg::gpr2) //Base of Stack 
-// constexpr RegisterPhys rLinkReg(reg::rLK) //Link register
-// constexpr RegisterPhys rReturnReg(reg::gpr3) //Return Register
+// constexpr RegisterPhys rVmFp(regs::gpr::r1)        // Frame Pointer
+// constexpr RegisterPhys rVmSp(regs::gpr::gpr1)      // Stack Pointer
+// constexpr RegisterPhys rAsm(regs::gpr::grp10)      // Scratch Register 
+// constexpr RegisterPhys rVmToC(regs::gpr::gpr2)     // Base of Stack 
+// constexpr RegisterPhys rLinkReg(regs::lr)          // Link register
+// constexpr RegisterPhys rReturnReg(regs::gpr::gpr3) // Return Register
 
-//kGPReserved =  rLinkReg | rVmSp | reg::gpr13 
+// kGPReserved =  rVmSp | regs::gpr::gpr13 
 
-//const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved; 
+// const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved; 
 
-//calling conventions
-// const RegSet kGPCallerSaved = reg::r2 | reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 | 
-//                               reg::r8  | reg::r9  | reg::r10 | reg::r11 | reg::r12;
+// Calling conventions
+// const RegSet kGPCallerSaved = regs::gpr::r2 | regs::gpr::r3 | regs::gpr::r4 | regs::gpr::r5 | regs::gpr::r6 | regs::gpr::r7 | 
+//                               regs::gpr::r8  | regs::gpr::r9  | regs::gpr::r10 | regs::gpr::r11 | regs::gpr::r12;
 
 
-// const RegSet kGPCalleeSaved = reg::r14 | reg::r15 | reg::r16 | reg::r17 | reg::r18 | reg::r19 | 
-//                               reg::r20 | reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25 | 
-//                               reg::r26 | reg::r27 | reg::r28 | reg::r29 | reg::r30 | reg::r31; + CR2-4 
+// const RegSet kGPCalleeSaved = regs::gpr::r14 | regs::gpr::r15 | regs::gpr::r16 | regs::gpr::r17 | regs::gpr::r18 | regs::gpr::r19 | 
+//                               regs::gpr::r20 | regs::gpr::r21 | regs::gpr::r22 | regs::gpr::r23 | regs::gpr::r24 | regs::gpr::r25 | 
+//                               regs::gpr::r26 | regs::gpr::r27 | regs::gpr::r28 | regs::gpr::r29 | regs::gpr::r30 | regs::gpr::r31;
 
 // const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 

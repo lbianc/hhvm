@@ -17,9 +17,6 @@
 
 namespace ppc64_asm {
 
-
-
-
 void Assembler::add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 266, rc);
 }

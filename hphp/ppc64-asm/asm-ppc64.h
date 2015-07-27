@@ -23,7 +23,6 @@
 
 #include "hphp/util/data-block.h"
 #include "hphp/runtime/vm/jit/types.h"
-
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
@@ -46,7 +45,7 @@ enum class RegisterType {
     kSignalProcessingEmbeddedFPStatusRegister,
 };
 
-class MemoryRef; // Forward class declaration
+class MemRef; // Forward class declaration
 
 /**
  * This is a Simple Register class. This is based on
@@ -58,8 +57,8 @@ public:
    explicit constexpr SimpleRegister(int rn, RegisterType type) : rn_(rn), type_(type){}
    explicit constexpr operator uint32_t() const { return rn_; }
 
-   MemoryRef operator[](intptr_t disp) const;
-   MemoryRef operator[](SimpleRegister) const;
+   MemRef operator[](intptr_t disp) const;
+   MemRef operator[](SimpleRegister) const;
 
    constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_ && type_ == reg.type_; }
    constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_ || type_ != reg.type_; }
@@ -71,9 +70,6 @@ private:
 
 typedef SimpleRegister Reg64;
 enum class RegNumber : uint32_t {};
-
-RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
-RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
 
 /**
 * This class is used to represent address modes to load/store instructions
@@ -104,7 +100,7 @@ struct XFormAddressMode {
 
 };
 
-class MemoryRef {
+class MemRef {
 
 };
 
@@ -1834,6 +1830,9 @@ private:
   }
 
   HPHP::CodeBlock& codeBlock;
+
+  RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
+  RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
 
 };
 

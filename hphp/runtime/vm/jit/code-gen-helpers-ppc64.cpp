@@ -18,7 +18,6 @@
 
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/back-end.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/vasm.h"

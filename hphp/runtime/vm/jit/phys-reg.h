@@ -19,6 +19,7 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/bitops.h"
 #include "hphp/vixl/a64/assembler-a64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 
 #include <folly/Optional.h>
 
@@ -59,6 +60,9 @@ struct PhysReg {
   constexpr /* implicit */ PhysReg(vixl::Register r) : n(r.code()) {}
   constexpr /* implicit */ PhysReg(vixl::FPRegister r)
     : n(r.code() + kSIMDOffset) {}
+
+  //PPC64
+  constexpr /* implicit */ PhysReg(ppc64_asm::Reg64 r) : n(uint32_t(r)) {}
 
   /* implicit */ operator Reg64() const {
     assertx(isGP() || n == -1);
