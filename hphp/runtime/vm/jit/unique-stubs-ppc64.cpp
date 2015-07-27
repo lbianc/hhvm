@@ -19,7 +19,7 @@
 #include <sstream>
 
 #include "hphp/util/abi-cxx.h"
-#include "hphp/util/asm-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/disasm.h"
 
 #include "hphp/runtime/vm/bytecode.h"
@@ -32,6 +32,8 @@
 #include "hphp/runtime/vm/jit/service-requests-inline.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/runtime.h"
+
+#pragma GCC diagnostic ignored "-Wreturn-type"
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -134,3 +136,5 @@ UniqueStubs emitUniqueStubs() {
 //////////////////////////////////////////////////////////////////////
 
 }}}
+
+#pragma GCC diagnostic pop
