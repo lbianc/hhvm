@@ -684,7 +684,19 @@ struct xorq { Vreg64 s0, s1, d; VregSF sf; };
 struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 
 ///////////////////////////////////////////////////////////////////////////////
+//PPC64.
 
+//TODO(IBM): Create specific vasm opcodes for PPC64 instructions if need so.
+
+/**
+ * PPC64-specific intrinsics
+ */
+
+/**
+ * PPC64-specific instructions
+ */
+
+///////////////////////////////////////////////////////////////////////////////
 struct Vinstr {
 #define O(name, imms, uses, defs) name,
   enum Opcode : uint8_t { VASM_OPCODES };

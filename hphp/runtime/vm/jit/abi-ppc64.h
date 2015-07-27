@@ -28,27 +28,28 @@ namespace HPHP { namespace jit { namespace ppc64 {
 */
 // constexpr RegisterPhys rVmFp(reg::gpr1) // Frame Pointer (PPC has no frame pointer?)
 // constexpr RegisterPhys rVmSp(reg::gpr1) //Stack Pointer
-// constexpr RegisterPhys rAsm(reg::grp0) //Scratch Register 
+// constexpr RegisterPhys rAsm(reg::grp10) //Scratch Register 
 // constexpr PhysReg rVmToC(reg::gpr2) //Base of Stack 
 // constexpr RegisterPhys rLinkReg(reg::rLK) //Link register
 // constexpr RegisterPhys rReturnReg(reg::gpr3) //Return Register
 
-//kGPReserved =  rLinkReg | rVmSp //Maybe CR register here ?
+//kGPReserved =  rLinkReg | rVmSp | reg::gpr13 
 
 //const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved; 
 
-//This is calling conventions
-//const RegSet kGPCallerSaved = reg::gpr0 | reg::gpr3 | reg::gpr4 | reg::gpr5 | reg::gpr6 | reg::gpr7 | reg::gpr8 | reg::gpr9 | 
-// reg::gpr10 | reg::gpr11 | reg::gpr12 | reg::gpr13 | + CTR, CR0, CR1, CR5-7  
+//calling conventions
+// const RegSet kGPCallerSaved = reg::r2 | reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 | 
+//                               reg::r8  | reg::r9  | reg::r10 | reg::r11 | reg::r12;
 
-// const RegSet kGPCalleSaved = Callee-save: r14-r31, CR2-4 
 
+// const RegSet kGPCalleeSaved = reg::r14 | reg::r15 | reg::r16 | reg::r17 | reg::r18 | reg::r19 | 
+//                               reg::r20 | reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25 | 
+//                               reg::r26 | reg::r27 | reg::r28 | reg::r29 | reg::r30 | reg::r31; + CR2-4 
+
+// const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
 // const RegSet kSIMDCallerSaved = reg::v20-v21 vrsave
 // const RegSet kSIMDCalleSaved = v0-v13 ?????
-
-// kSIMDReserved 
-//const RegSet kSF = RegSet(RegSF{0});
 
  /*
    TODO(IBM) Need to check ABI for Vector Instructions.

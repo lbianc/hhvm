@@ -50,20 +50,23 @@ class MemoryRef; // Forward class declaration
 
 /**
  * This is a Simple Register class. This is based on
- * X64 assembler of HHVM
+ * X64 assembler
  */
 class SimpleRegister {
 public:
-   explicit constexpr SimpleRegister(int rn) : rn_(rn){}
+  explicit constexpr SimpleRegister(int rn) : rn_(rn), type_(RegisterType::kInvalid){}
+   explicit constexpr SimpleRegister(int rn, RegisterType type) : rn_(rn), type_(type){}
    explicit constexpr operator uint32_t() const { return rn_; }
 
    MemoryRef operator[](intptr_t disp) const;
    MemoryRef operator[](SimpleRegister) const;
 
-   constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_; }
-   constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_; }
+   constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_ && type_ == reg.type_; }
+   constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_ || type_ != reg.type_; }
+
 private:
    uint32_t rn_;
+   RegisterType type_;
 };
 
 typedef SimpleRegister Reg64;
@@ -71,7 +74,6 @@ enum class RegNumber : uint32_t {};
 
 RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
 RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
-
 
 /**
 * This class is used to represent address modes to load/store instructions
@@ -113,6 +115,71 @@ class MemoryRef {
 // inline MemoryRef SimpleRegister::operator[](const SimpleRegister& offset) const {
 //   return MemoryRef { *this, offset };
 // }
+
+
+namespace regs {
+namespace gpr {
+  constexpr Reg64 r0(0, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r1(1, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r2(2, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r3(3, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r4(4, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r5(5, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r6(6, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r7(7, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r8(8, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r9(9, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r10(10, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r11(11, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r12(12, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r13(13, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r14(14, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r15(15, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r16(16, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r17(17, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r18(18, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r19(19, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r20(20, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r21(21, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r22(22, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r23(23, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r24(24, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r25(25, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r26(26, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r27(27, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r28(28, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r29(29, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r30(30, RegisterType::kGeneralPurpouseRegister);
+  constexpr Reg64 r31(31, RegisterType::kGeneralPurpouseRegister);
+} //namespace gpr
+  constexpr Reg64 lr(0, RegisterType::kLinkRegister);
+  constexpr Reg64 ctr(0, RegisterType::kCountRegister);
+  //TODO(IBM) Check if we need to maintain onde CR register or 7/4 bits cr bank
+  constexpr Reg64 cr0(0, RegisterType::kConditionRegister);
+  constexpr Reg64 cr1(1, RegisterType::kConditionRegister);
+  constexpr Reg64 cr2(2, RegisterType::kConditionRegister);
+  constexpr Reg64 cr3(3, RegisterType::kConditionRegister);
+  constexpr Reg64 cr4(4, RegisterType::kConditionRegister);
+  constexpr Reg64 cr5(5, RegisterType::kConditionRegister);
+  constexpr Reg64 cr6(6, RegisterType::kConditionRegister);
+  constexpr Reg64 cr7(7, RegisterType::kConditionRegister);
+  /*
+    Register names this is based on X64 assembler implementation
+  */
+  using namespace gpr;
+
+  #define RName(x) if (r == x) return "%"#x
+  inline const char* rname(Reg64& r) {
+    RName(r0);  RName(r1);  RName(r2);  RName(r3);  RName(r4);  RName(r5);  RName(r6);  RName(r7);  RName(r8); 
+    RName(r9);  RName(r10); RName(r11); RName(r12); RName(r13); RName(r14); RName(r15); RName(r16); RName(r17); 
+    RName(r18); RName(r19); RName(r20); RName(r21); RName(r22); RName(r23); RName(r24); RName(r25); RName(r26); 
+    RName(r27); RName(r29); RName(r30); RName(r31); RName(lr); RName(ctr); RName(cr0); RName(cr1); RName(cr2);
+    RName(cr3); RName(cr4); RName(cr5); RName(cr6); RName(cr7);
+    return nullptr;
+  }
+  #undef RName
+
+} //namespace regs
 
 
 /**
