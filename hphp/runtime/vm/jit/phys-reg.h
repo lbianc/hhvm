@@ -52,7 +52,6 @@ struct PhysReg {
   };
   explicit constexpr PhysReg() : n(-1) {}
   constexpr /* implicit */ PhysReg(Reg64 r) : n(int(r)) {}
-  constexpr /* implicit */ PhysReg(ppc64_asm::Reg64 r) : n(int(r)) {}
   constexpr /* implicit */ PhysReg(RegXMM r) : n(int(r) + kSIMDOffset) {}
   constexpr /* implicit */ PhysReg(RegSF r) : n(int(r) + kSFOffset) {}
   explicit constexpr PhysReg(Reg32 r) : n(int(r)) {}
@@ -65,10 +64,6 @@ struct PhysReg {
   /* implicit */ operator Reg64() const {
     assertx(isGP() || n == -1);
     return Reg64(n);
-  }
-  /* implicit */ operator ppc64_asm::Reg64() const {
-    assertx(isGP() || n == -1);
-    return ppc64_asm::Reg64(n);
   }
   /* implicit */ operator RegXMM() const {
     assertx(isSIMD() || n == -1);
@@ -109,8 +104,6 @@ struct PhysReg {
   constexpr bool operator!=(PhysReg r) const { return n != r.n; }
   constexpr bool operator==(Reg64 r) const { return Reg64(n) == r; }
   constexpr bool operator!=(Reg64 r) const { return Reg64(n) != r; }
-  constexpr bool operator==(ppc64_asm::Reg64 r) const { return ppc64_asm::Reg64(n) == r; }
-  constexpr bool operator!=(ppc64_asm::Reg64 r) const { return ppc64_asm::Reg64(n) != r; }
   constexpr bool operator==(Reg32 r) const { return Reg32(n) == r; }
   constexpr bool operator!=(Reg32 r) const { return Reg32(n) != r; }
 

@@ -29,6 +29,8 @@
 
 namespace ppc64_asm {
 
+using HPHP::jit::Reg64;
+
 enum class RegisterType {
     kInvalid = 0,
     kConditionRegister,
@@ -47,24 +49,6 @@ enum class RegisterType {
     kSignalProcessingEmbeddedFPStatusRegister,
 };
 
-/**
- * This is a Simple Register class. This
- * implementation can't carry any data, this can only 
- * holds the register number who is used to encode instruction. This is based on
- * X64 assembler of HHVM
- */
-class SimpleRegister {
-public:
-   explicit constexpr SimpleRegister(int rn) : rn_(rn){}
-   explicit constexpr operator uint32_t() const { return rn_; }
-   explicit constexpr operator int() const { return rn_; }
-   constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_; }
-   constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_; }
-private:
-   uint32_t rn_;
-};
-
-typedef SimpleRegister Reg64;
 enum class RegNumber : uint32_t {};
 
 namespace reg {
