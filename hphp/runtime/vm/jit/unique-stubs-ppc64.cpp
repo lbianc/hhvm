@@ -34,6 +34,8 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/runtime.h"
 
+#pragma GCC diagnostic ignored "-Wreturn-type"
+
 namespace HPHP { namespace jit { namespace ppc64 {
 
 //////////////////////////////////////////////////////////////////////
@@ -136,3 +138,4 @@ UniqueStubs emitUniqueStubs() {
 
 }}}
 
+#pragma GCC diagnostic pop
