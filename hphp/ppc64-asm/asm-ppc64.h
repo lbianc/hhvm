@@ -4,8 +4,8 @@
  *
  * @author: Rogerio Alves
  *
- * This is a experimental macro assembler for PPC64. 
- * Don't expect to find all instructions here. 
+ * This is a experimental macro assembler for PPC64.
+ * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
  * to consider use Nanojit or LLVM, both of which translate abstract virtual machine
@@ -116,7 +116,7 @@ namespace reg {
 template<typename T>
 class Register {
 public:
-   
+
    constexpr Register() : type_(RegisterType::kInvalid), register_number_(0), data_(0){}
    constexpr Register(unsigned rn): type_(RegisterType::kInvalid), register_number_(rn), data_(0){}
    constexpr Register(unsigned rn, RegisterType type) : type_(type), register_number_(rn), data_(0){}
@@ -127,7 +127,7 @@ public:
    unsigned size() { return sizeof(T); }
 
    T read() { return data_; }
-   void write(T data) { data_ = data; }; 
+   void write(T data) { data_ = data; };
 
 
    ~Register(){}
@@ -225,11 +225,11 @@ public:
      assert(capacity() >= used());
      return nBytes < (capacity() - used());
    }
-   
+
   /*
-    TODO(IBM): Must create a macro for these similar instructions. 
+    TODO(IBM): Must create a macro for these similar instructions.
                This will make code more clean.
-    
+
     #define CC_ARITH_REG_OP(name, opcode, x_opcode)
     void name##c
     void name##co
@@ -299,15 +299,15 @@ public:
   void divdo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void divdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void divduo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
-  void divw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc); 
+  void divw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
   void extsb(const Reg64& ra, const Reg64& rs, bool rc);
   void extsh(const Reg64& ra, const Reg64& rs, bool rc);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc);
@@ -410,7 +410,7 @@ public:
   void subfc(const Reg64& rt, const Reg64& ra, const Reg64& rb,  bool rc);
   void subfco(const Reg64& rt, const Reg64& ra, const Reg64& rb,  bool rc);
   void subfe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
-  void subfeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);   
+  void subfeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void subfic(const Reg64& rt, const Reg64& ra,  uint16_t imm);
   void subfme(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void subfmeo(const Reg64& rt,  const Reg64& ra, const Reg64& rb, bool rc);
@@ -839,7 +839,7 @@ public:
   void lfsu() {}
   void lfsux() {}
   void lfsx() {}
-  void lharx() {}   
+  void lharx() {}
   void lvebx() {}
   void lvehx() {}
   void lvepx() {}
@@ -1453,15 +1453,15 @@ protected:
   // type instruction emitters
   // TODO(IBM): try remove cast for uint32_t
   // TODO(IBM): make those functions inline
-  void EmitXOForm(const uint8_t op, 
-                  const RegNumber rt, 
-                  const RegNumber ra, 
+  void EmitXOForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
                   const RegNumber rb,
                   const bool oe,
                   const uint16_t xop,
                   const bool rc = 0) {
 
-    XO_form_t xo_formater { 
+    XO_form_t xo_formater {
                             rc,
                             xop,
                             oe,
@@ -1474,12 +1474,12 @@ protected:
     dword(xo_formater.instruction);
   }
 
-  void EmitDForm(const uint8_t op, 
-                 const RegNumber rt, 
+  void EmitDForm(const uint8_t op,
+                 const RegNumber rt,
                  const RegNumber ra,
                  const uint16_t imm) {
 
-    D_form_t d_formater { 
+    D_form_t d_formater {
                           imm,
                           static_cast<uint32_t>(ra),
                           static_cast<uint32_t>(rt),
@@ -1489,12 +1489,12 @@ protected:
     dword(d_formater.instruction);
   }
 
-  void EmitIForm(const uint8_t op, 
+  void EmitIForm(const uint8_t op,
                  const uint32_t imm,
                  const bool aa = 0,
                  const bool lk = 0) {
 
-      I_form_t i_formater { 
+      I_form_t i_formater {
                             lk,
                             aa,
                             imm,
@@ -1504,10 +1504,10 @@ protected:
       dword(i_formater.instruction);
   }
 
-   void EmitBForm(const uint8_t op, 
-                  const uint8_t bo, 
-                  const uint8_t bi, 
-                  const uint16_t bd, 
+   void EmitBForm(const uint8_t op,
+                  const uint8_t bo,
+                  const uint8_t bi,
+                  const uint16_t bd,
                   const bool aa = 0,
                   const bool lk = 0) {
       B_form_t b_formater {
@@ -1521,8 +1521,8 @@ protected:
 
        dword(b_formater.instruction);
    }
-   
-   void EmitSCForm(const uint8_t op, 
+
+   void EmitSCForm(const uint8_t op,
                    const uint16_t lev) {
       SC_form_t sc_formater {
                               1,
@@ -1533,10 +1533,10 @@ protected:
       dword(sc_formater.instruction);
    }
 
-   void EmitXForm(const uint8_t op, 
-                  const RegNumber rt, 
-                  const RegNumber ra, 
-                  const RegNumber rb, 
+   void EmitXForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
+                  const RegNumber rb,
                   const uint16_t xop,
                   const bool rc = 0){
 
@@ -1552,8 +1552,8 @@ protected:
       dword(x_formater.instruction);
    }
 
-   void EmitDSForm(const uint8_t op, 
-                   const RegNumber rt, 
+   void EmitDSForm(const uint8_t op,
+                   const RegNumber rt,
                    const RegNumber ra,
                    const uint16_t imm,
                    const uint16_t xop) {
@@ -1569,8 +1569,8 @@ protected:
       dword(ds_formater.instruction);
    }
 
-   void EmitDQForm(const uint8_t op, 
-                   const RegNumber rtp, 
+   void EmitDQForm(const uint8_t op,
+                   const RegNumber rtp,
                    const RegNumber ra,
                    uint16_t imm){
 
@@ -1587,9 +1587,9 @@ protected:
 
 
    void EmitXLForm(const uint8_t op,
-                   const uint8_t bt, 
-                   const uint8_t ba, 
-                   const uint8_t bb, 
+                   const uint8_t bt,
+                   const uint8_t ba,
+                   const uint8_t bb,
                    const uint16_t xop,
                    const bool lk = 0) {
 
@@ -1626,7 +1626,7 @@ protected:
       dword(a_formater.instruction);
    }
 
-   void EmitMForm(const uint8_t op, 
+   void EmitMForm(const uint8_t op,
                   const RegNumber rs,
                   const RegNumber ra,
                   const RegNumber rb,
@@ -1647,7 +1647,7 @@ protected:
       dword(m_formater.instruction);
    }
 
-   void EmitMDForm(const uint8_t op, 
+   void EmitMDForm(const uint8_t op,
                    const RegNumber rs,
                    const RegNumber ra,
                    const uint8_t Sh,
@@ -1670,7 +1670,7 @@ protected:
       dword(md_formater.instruction);
    }
 
-   void EmitMDSForm(const uint8_t op, 
+   void EmitMDSForm(const uint8_t op,
                     const RegNumber rs,
                     const RegNumber ra,
                     const RegNumber rb,

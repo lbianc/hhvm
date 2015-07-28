@@ -4,8 +4,8 @@
  *
  * @author: Rogerio Alves
  *
- * This is a experimental macro assembler for PPC64. 
- * Don't expect to find all instructions here. 
+ * This is a experimental macro assembler for PPC64.
+ * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
  * to consider use Nanojit or LLVM, both of which translate abstract virtual machine
@@ -409,6 +409,5 @@ namespace ppc64_asm {
   } Z23_form_t;
 
 } // namespace ppc64_asm
-
 
 #endif
