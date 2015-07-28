@@ -41,31 +41,20 @@ namespace HPHP { namespace jit { namespace ppc64 {
  */
 
 /*
- * Frame pointer.  When mid-trace, points to the ActRec for the
- * function currently executing.
+ * Table of Contents.
  */
-//TODO
-constexpr PhysReg rVmFp      = ppc64_asm::reg::r1;
+constexpr PhysReg rVmToc     = ppc64_asm::reg::r2;
 
 /*
  * Stack pointer.  When mid-trace, points to the top of the eval stack
  * (lowest valid address) at the start of the current tracelet.
  */
-//TODO
 constexpr PhysReg rVmSp      = ppc64_asm::reg::r1;
-
-/*
- * RDS base pointer.  Always points to the base of the RDS block for
- * the current request.
- */
-//TODO
-constexpr PhysReg rVmTl      = ppc64_asm::reg::r12;
 
 /*
  * scratch register
  */
-//TODO
-constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::r10;
+constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::f0;
 
 //////////////////////////////////////////////////////////////////////
 /*
@@ -77,28 +66,40 @@ constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::r10;
  */
 
 const RegSet kGPCallerSaved =
-		ppc64_asm::reg::r2 | ppc64_asm::reg::r3 | ppc64_asm::reg::r4 | ppc64_asm::reg::r5 | ppc64_asm::reg::r6 | ppc64_asm::reg::r7 |
-		ppc64_asm::reg::r8  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10 | ppc64_asm::reg::r11 | ppc64_asm::reg::r12;
+    ppc64_asm::reg::r0  | ppc64_asm::reg::r3  | ppc64_asm::reg::r4
+  | ppc64_asm::reg::r5  | ppc64_asm::reg::r6  | ppc64_asm::reg::r7
+  | ppc64_asm::reg::r8  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10
+  | ppc64_asm::reg::r11 | ppc64_asm::reg::r12;
 
 const RegSet kGPCalleeSaved =
-		ppc64_asm::reg::r14 | ppc64_asm::reg::r15 | ppc64_asm::reg::r16 | ppc64_asm::reg::r17 | ppc64_asm::reg::r18 | ppc64_asm::reg::r19
-  | ppc64_asm::reg::r20 | ppc64_asm::reg::r21 | ppc64_asm::reg::r22 | ppc64_asm::reg::r23 | ppc64_asm::reg::r24 | ppc64_asm::reg::r25
-  | ppc64_asm::reg::r26 | ppc64_asm::reg::r27 | ppc64_asm::reg::r28 | ppc64_asm::reg::r29 | ppc64_asm::reg::r30 | ppc64_asm::reg::r31;
+    ppc64_asm::reg::r1  | ppc64_asm::reg::r20 | ppc64_asm::reg::r14
+  | ppc64_asm::reg::r15 | ppc64_asm::reg::r16 | ppc64_asm::reg::r17
+  | ppc64_asm::reg::r18 | ppc64_asm::reg::r19 | ppc64_asm::reg::r20
+  | ppc64_asm::reg::r21 | ppc64_asm::reg::r22 | ppc64_asm::reg::r23
+  | ppc64_asm::reg::r24 | ppc64_asm::reg::r25 | ppc64_asm::reg::r26
+  | ppc64_asm::reg::r27 | ppc64_asm::reg::r28 | ppc64_asm::reg::r29
+  | ppc64_asm::reg::r30 | ppc64_asm::reg::r31;
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-//TODO
-const RegSet kGPReserved = ppc64_asm::reg::r1 | ppc64_asm::reg::r13;
+const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13);
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
-const RegSet kXMMCallerSaved/* =
-  reg::v0 | reg::v1 | reg::v2 | reg::v3 | reg::v4 | reg::v5 | reg::v6 | reg::v7
-  | reg::v8 | reg::v9 | reg::v10 | reg::v11 | reg::v12 | reg::v13 | reg::v14 | reg::v15
-  | reg::v16 | reg::v17 | reg::v18 | reg::v19*/;
+const RegSet kXMMCallerSaved =
+    ppc64_asm::reg::v0  | ppc64_asm::reg::v1  | ppc64_asm::reg::v2
+  | ppc64_asm::reg::v3  | ppc64_asm::reg::v4  | ppc64_asm::reg::v5
+  | ppc64_asm::reg::v6  | ppc64_asm::reg::v7  | ppc64_asm::reg::v8
+  | ppc64_asm::reg::v9  | ppc64_asm::reg::v10 | ppc64_asm::reg::v11
+  | ppc64_asm::reg::v12 | ppc64_asm::reg::v13 | ppc64_asm::reg::v14
+  | ppc64_asm::reg::v15 | ppc64_asm::reg::v16 | ppc64_asm::reg::v17
+  | ppc64_asm::reg::v18 | ppc64_asm::reg::v19;
 
-const RegSet kXMMCalleeSaved /*=  reg::v20 | reg::v21 | reg::v22 | reg::v23 | reg::v24
-		 | reg::v25 | reg::v26 | reg::v27 | reg::v28 | reg::v29 | reg::v30 | reg::v31*/;
+const RegSet kXMMCalleeSaved =
+    ppc64_asm::reg::v20 | ppc64_asm::reg::v21 | ppc64_asm::reg::v22
+  | ppc64_asm::reg::v23 | ppc64_asm::reg::v24 | ppc64_asm::reg::v25
+  | ppc64_asm::reg::v26 | ppc64_asm::reg::v27 | ppc64_asm::reg::v28
+  | ppc64_asm::reg::v29 | ppc64_asm::reg::v30 | ppc64_asm::reg::v31;
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
 
@@ -110,6 +111,7 @@ const RegSet kCallerSaved = kGPCallerSaved | kXMMCallerSaved;
 
 const RegSet kCalleeSaved = kGPCalleeSaved | kXMMCalleeSaved;
 
+//TODO
 const RegSet kSF = RegSet(RegSF{0});
 
 //////////////////////////////////////////////////////////////////////
@@ -125,7 +127,7 @@ const RegSet kSF = RegSet(RegSF{0});
  * Registers that are live between tracelets, in two flavors, depending whether
  * we are between tracelets in a resumed function.
  */
-const RegSet kCrossTraceRegs        = rVmFp | rVmTl;
+const RegSet kCrossTraceRegs        = RegSet(rVmToc);
 const RegSet kCrossTraceRegsResumed = kCrossTraceRegs | rVmSp;
 
 /*
@@ -171,8 +173,9 @@ const RegSet kScratchCrossTraceRegs = kXMMCallerSaved |
 
 // ppc64 INTEGER class argument registers.
 const PhysReg argNumToRegName[] = {
-		ppc64_asm::reg::r3, ppc64_asm::reg::r4, ppc64_asm::reg::r5, ppc64_asm::reg::r6,
-		ppc64_asm::reg::r7, ppc64_asm::reg::r8, ppc64_asm::reg::r9, ppc64_asm::reg::r10
+    ppc64_asm::reg::r3, ppc64_asm::reg::r4, ppc64_asm::reg::r5,
+    ppc64_asm::reg::r6, ppc64_asm::reg::r7, ppc64_asm::reg::r8,
+    ppc64_asm::reg::r9, ppc64_asm::reg::r10
 };
 const int kNumRegisterArgs = sizeof(argNumToRegName) / sizeof(PhysReg);
 
@@ -184,10 +187,12 @@ inline RegSet argSet(int n) {
   return regs;
 }
 
-// ppc64 SSE class argument registers.
+// ppc64 vector argument registers.
 const PhysReg argNumToSIMDRegName[] = {
-  /*reg::v2, reg::v3, reg::v4, reg::v5, reg::v6, reg::v7, reg::v8,
-  reg::v9, reg::v10, reg::v11, reg::v12, reg::v13*/
+  ppc64_asm::reg::v2,  ppc64_asm::reg::v3,  ppc64_asm::reg::v4,
+  ppc64_asm::reg::v5,  ppc64_asm::reg::v6,  ppc64_asm::reg::v7,
+  ppc64_asm::reg::v8,  ppc64_asm::reg::v9,  ppc64_asm::reg::v10,
+  ppc64_asm::reg::v11, ppc64_asm::reg::v12, ppc64_asm::reg::v13
 };
 const int kNumSIMDRegisterArgs = sizeof(argNumToSIMDRegName) / sizeof(PhysReg);
 
@@ -197,7 +202,7 @@ const int kNumSIMDRegisterArgs = sizeof(argNumToSIMDRegName) / sizeof(PhysReg);
  */
 constexpr PhysReg serviceReqArgRegs[] = {
   // rdi: contains request number
-		//TODO
+    //TODO
   /*reg::rsi, reg::rdx, reg::rcx, */reg::r8
 };
 constexpr int kNumServiceReqArgRegs =
