@@ -55,7 +55,7 @@ class SimpleRegister {
 public:
   explicit constexpr SimpleRegister(int rn) : rn_(rn), type_(RegisterType::kInvalid){}
    explicit constexpr SimpleRegister(int rn, RegisterType type) : rn_(rn), type_(type){}
-   explicit constexpr operator uint32_t() const { return rn_; }
+   explicit constexpr operator int() const { return rn_; }
 
    MemRef operator[](intptr_t disp) const;
    MemRef operator[](SimpleRegister) const;
@@ -64,12 +64,12 @@ public:
    constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_ || type_ != reg.type_; }
 
 private:
-   uint32_t rn_;
+   int rn_;
    RegisterType type_;
 };
 
 typedef SimpleRegister Reg64;
-enum class RegNumber : uint32_t {};
+enum class RegNumber : int {};
 
 /**
 * This class is used to represent address modes to load/store instructions
@@ -1831,8 +1831,8 @@ private:
 
   HPHP::CodeBlock& codeBlock;
 
-  RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
-  RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
+  RegNumber rn(Reg64 r)  { return RegNumber(int(r)); }
+  RegNumber rn(int n) {  return RegNumber(int(n)); }
 
 };
 

@@ -61,8 +61,7 @@ struct PhysReg {
   constexpr /* implicit */ PhysReg(vixl::FPRegister r)
     : n(r.code() + kSIMDOffset) {}
 
-  //PPC64
-  constexpr /* implicit */ PhysReg(ppc64_asm::Reg64 r) : n(uint32_t(r)) {}
+  constexpr /* implicit */ PhysReg(ppc64_asm::Reg64 r) : n(int(r)) {}
 
   /* implicit */ operator Reg64() const {
     assertx(isGP() || n == -1);
@@ -94,6 +93,13 @@ struct PhysReg {
     }
   }
 
+  /* implicit */ operator ppc64_asm::Reg64() const {
+    assertx(isGP());
+    if(n == -1)
+       return ppc64_asm::Reg64(n); //kInvalidRegister
+    return ppc64_asm::Reg64(n, ppc64_asm::RegisterType::kGeneralPurpouseRegister);
+  }
+
   Type type() const {
     assertx(n >= 0 && n < kMaxRegs);
     return isGP() ? GP :
@@ -109,6 +115,10 @@ struct PhysReg {
   constexpr bool operator!=(Reg64 r) const { return Reg64(n) != r; }
   constexpr bool operator==(Reg32 r) const { return Reg32(n) == r; }
   constexpr bool operator!=(Reg32 r) const { return Reg32(n) != r; }
+
+  //ppc64
+  constexpr bool operator==(ppc64_asm::Reg64 r) const { return ppc64_asm::Reg64(n) == r; }
+  constexpr bool operator!=(ppc64_asm::Reg64 r) const { return ppc64_asm::Reg64(n) != r; }
 
   MemoryRef operator[](intptr_t p) const {
     assertx(type() == GP);
@@ -130,6 +140,13 @@ struct PhysReg {
     assertx(type() == GP);
     return *(*this + ScaledIndex(dr.base, 0x1) + dr.disp);
   }
+
+  // TODO(IBM): Needs to overload operators +, -, *, [] in asm-ppc64
+  // MemoryRef operator[](ppc64_asm::Reg64 i) const {
+  //   assertx(type() == GP);
+  //   return *(*this + i);
+  // }
+
 
   static int getNumGP();
   static int getNumSIMD();
@@ -223,6 +240,12 @@ inline Reg8 rbyte(PhysReg r) { return Reg8(int(Reg64(r))); }
 inline Reg16 r16(PhysReg r) { return Reg16(int(Reg64(r))); }
 inline Reg32 r32(PhysReg r) { return Reg32(int(Reg64(r))); }
 inline Reg64 r64(PhysReg r) { return Reg64(r); }
+
+/*
+ * Coversion between physical registers and ppc64 registers
+ */
+//TODO(IBM) convert between other registers size
+inline ppc64_asm::Reg64 reg64(PhysReg r) { return ppc64_asm::Reg64(r); }
 
 constexpr PhysReg InvalidReg;
 
