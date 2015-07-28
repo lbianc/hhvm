@@ -52,9 +52,10 @@ enum class RegisterType {
 enum class RegNumber : uint32_t {};
 
 namespace reg {
-  constexpr Reg64 r0(0);
-  constexpr Reg64 r1(1);
-  constexpr Reg64 r2(2);
+  constexpr Reg64 r0(0);    /* volatile, used in function prologue / linkage */
+  constexpr Reg64 r1(1);    /* nonvolatile, stack pointer */
+  constexpr Reg64 r2(2);    /* nonvolatile, TOC */
+  /* volatile, argument passing registers */
   constexpr Reg64 r3(3);
   constexpr Reg64 r4(4);
   constexpr Reg64 r5(5);
@@ -64,9 +65,10 @@ namespace reg {
   constexpr Reg64 r9(9);
   constexpr Reg64 r10(10);
 
-  constexpr Reg64 r11(11);
-  constexpr Reg64 r12(12);
-  constexpr Reg64 r13(13);
+  constexpr Reg64 r11(11);  /* volatile, environment pointer */
+  constexpr Reg64 r12(12);  /* volatile, function entry address */
+  constexpr Reg64 r13(13);  /* reserved, thread pointer */
+  /* nonvolatile, local variables */
   constexpr Reg64 r14(14);
   constexpr Reg64 r15(15);
   constexpr Reg64 r16(16);
@@ -86,10 +88,77 @@ namespace reg {
   constexpr Reg64 r30(30);
   constexpr Reg64 r31(31);
 
-  //TODO Add vector registers
+  constexpr Reg64 f0(0);   /* volatile scratch register */
+  /* volatile, argument passing floating point registers */
+  constexpr Reg64 f1(1);
+  constexpr Reg64 f2(2);
+  constexpr Reg64 f3(3);
+  constexpr Reg64 f4(4);
+  constexpr Reg64 f5(5);
+  constexpr Reg64 f6(6);
+  constexpr Reg64 f7(7);
+  constexpr Reg64 f8(8);
+  constexpr Reg64 f9(9);
+  constexpr Reg64 f10(10);
+  constexpr Reg64 f11(11);
+  constexpr Reg64 f12(12);
+  constexpr Reg64 f13(13);
+  /* nonvolatile, local variables */
+  constexpr Reg64 f14(14);
+  constexpr Reg64 f15(15);
+  constexpr Reg64 f16(16);
+  constexpr Reg64 f17(17);
+  constexpr Reg64 f18(18);
+  constexpr Reg64 f19(19);
+  constexpr Reg64 f20(20);
+  constexpr Reg64 f21(21);
+  constexpr Reg64 f22(22);
+  constexpr Reg64 f23(23);
+  constexpr Reg64 f24(24);
+  constexpr Reg64 f25(25);
+  constexpr Reg64 f26(26);
+  constexpr Reg64 f27(27);
+  constexpr Reg64 f28(28);
+  constexpr Reg64 f29(29);
+  constexpr Reg64 f30(30);
+  constexpr Reg64 f31(31);
 
-#undef X
-
+  /* volatile, local variables */
+  constexpr Reg64 v0(0);
+  constexpr Reg64 v1(1);
+  /* volatile, argument passing vector registers */
+  constexpr Reg64 v2(2);
+  constexpr Reg64 v3(3);
+  constexpr Reg64 v4(4);
+  constexpr Reg64 v5(5);
+  constexpr Reg64 v6(6);
+  constexpr Reg64 v7(7);
+  constexpr Reg64 v8(8);
+  constexpr Reg64 v9(9);
+  constexpr Reg64 v10(10);
+  constexpr Reg64 v11(11);
+  constexpr Reg64 v12(12);
+  constexpr Reg64 v13(13);
+  /* volatile, local variables */
+  constexpr Reg64 v14(14);
+  constexpr Reg64 v15(15);
+  constexpr Reg64 v16(16);
+  constexpr Reg64 v17(17);
+  constexpr Reg64 v18(18);
+  constexpr Reg64 v19(19);
+  /* nonvolatile, local variables */
+  constexpr Reg64 v20(20);
+  constexpr Reg64 v21(21);
+  constexpr Reg64 v22(22);
+  constexpr Reg64 v23(23);
+  constexpr Reg64 v24(24);
+  constexpr Reg64 v25(25);
+  constexpr Reg64 v26(26);
+  constexpr Reg64 v27(27);
+  constexpr Reg64 v28(28);
+  constexpr Reg64 v29(29);
+  constexpr Reg64 v30(30);
+  constexpr Reg64 v31(31);
 }
 
 
@@ -1709,10 +1778,15 @@ private:
     codeBlock.bytes(n, bs);
   }
 
-  RegNumber rn(Reg64 r)  { return RegNumber(uint32_t(r)); }
-  RegNumber rn(int n) {  return RegNumber(uint32_t(n)); }
-
   HPHP::CodeBlock& codeBlock;
+
+  RegNumber rn(Reg64 r) {
+    return RegNumber(int(r));
+  }
+  RegNumber rn(int n) {
+    return RegNumber(int(n));
+  }
+
 };
 
 } // namespace ppc64_asm
