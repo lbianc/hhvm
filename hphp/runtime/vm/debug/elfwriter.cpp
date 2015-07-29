@@ -35,12 +35,7 @@ namespace HPHP {
 namespace Debug {
 
 TRACE_SET_MOD(debuginfo);
-
-#if !defined(__powerpc64__)
-static const uint8_t CFA_OFFSET = 8;
-#else
 static const uint8_t CFA_OFFSET = 16;
-#endif
 
 void ElfWriter::logError(const std::string& msg) {
   perror("");
@@ -420,12 +415,6 @@ bool ElfWriter::addFrameInfo(DwarfChunk* d) {
   b.clear();
   /* Define common set of rules for unwinding frames in the VM stack*/
 
-#if !defined(__powerpc64__)
-  /* Frame pointer (CFA) for previous frame is in SP */
-  b.dwarf_cfa_def_cfa(SP, 0);
-  /* Previous LR is at CFA - 2 . DWARF_DATA_ALIGN (8) */
-  b.dwarf_cfa_offset_extended_sf(LR, -2);
-#else
   /* Frame pointer (CFA) for previous frame is in RBP + 16 */
   b.dwarf_cfa_def_cfa(RBP, CFA_OFFSET);
   /* Previous RIP is at CFA - 1 . DWARF_DATA_ALIGN (8) */
@@ -442,7 +431,6 @@ bool ElfWriter::addFrameInfo(DwarfChunk* d) {
    * to change.
    */
   b.dwarf_cfa_same_value(RSP);
-#endif
 
   /* register above rules in a CIE (common information entry) */
   Dwarf_Signed cie_index = dwarf_add_frame_cie(
