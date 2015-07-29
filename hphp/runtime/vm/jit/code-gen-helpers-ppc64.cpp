@@ -58,15 +58,18 @@ TRACE_SET_MOD(hhir);
  * Satisfy an alignment constraint. Bridge the gap with int3's.
  */
 void moveToAlign(CodeBlock& cb,
-                 const size_t align /* =kJmpTargetAlign */) {}
+                 const size_t align /* =kJmpTargetAlign */) {
+  not_implemented();
+}
 
-void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp, Vreg vmsp) {}
+void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp,
+                            Vreg vmsp) { not_implemented(); }
 
 void emitGetGContext(Vout& v, Vreg dest) {
   emitTLSLoad<ExecutionContext>(v, g_context, dest);
 }
 
-void emitGetGContext(Asm& as, PhysReg dest) {}
+void emitGetGContext(Asm& as, PhysReg dest) { not_implemented(); }
 
 // IfCountNotStatic --
 //   Emits if (%reg->_count < 0) { ... }.
@@ -83,77 +86,96 @@ struct IfCountNotStatic {
   static_assert(UncountedValue < 0 && StaticValue < 0, "");
   NonStaticCondBlock *m_cb; // might be null
   IfCountNotStatic(Asm& as, PhysReg reg,
-                   MaybeDataType t = folly::none) {}
+                   MaybeDataType t = folly::none) { not_implemented(); }
 
   ~IfCountNotStatic() {
     delete m_cb;
   }
 };
 
-void emitTransCounterInc(Vout& v) {}
+void emitTransCounterInc(Vout& v) { not_implemented(); }
 
-void emitTransCounterInc(Asm& a) {}
+void emitTransCounterInc(Asm& a) { not_implemented(); }
 
-Vreg emitDecRef(Vout& v, Vreg base) {}
+Vreg emitDecRef(Vout& v, Vreg base) { not_implemented(); }
 
-void emitIncRef(Vout& v, Vreg base) {}
+void emitIncRef(Vout& v, Vreg base) { not_implemented(); }
 
-void emitIncRef(Asm& as, PhysReg base) {}
+void emitIncRef(Asm& as, PhysReg base) { not_implemented(); }
 
-void emitIncRefCheckNonStatic(Asm& as, PhysReg base, DataType dtype) {}
+void emitIncRefCheckNonStatic(Asm& as, PhysReg base, DataType dtype) {
+  not_implemented();
+}
 
-void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp, PhysReg tmpReg) {}
+void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp,
+                                  PhysReg tmpReg) { not_implemented(); }
 
-void emitAssertFlagsNonNegative(Vout& v, Vreg sf) {}
+void emitAssertFlagsNonNegative(Vout& v, Vreg sf) { not_implemented(); }
 
-void emitAssertRefCount(Vout& v, Vreg base) {}
+void emitAssertRefCount(Vout& v, Vreg base) { not_implemented(); }
 
 // Logical register move: ensures the value in src will be in dest
 // after execution, but might do so in strange ways. Do not count on
 // being able to smash dest to a different register in the future, e.g.
-void emitMovRegReg(Asm& as, PhysReg srcReg, PhysReg dstReg) {}
+void emitMovRegReg(Asm& as, PhysReg srcReg, PhysReg dstReg) {
+  not_implemented();
+}
 
-void emitLea(Asm& as, MemoryRef mr, PhysReg dst) {}
+void emitLea(Asm& as, MemoryRef mr, PhysReg dst) { not_implemented(); }
 
-Vreg emitLdObjClass(Vout& v, Vreg objReg, Vreg dstReg) {}
+Vreg emitLdObjClass(Vout& v, Vreg objReg, Vreg dstReg) { not_implemented(); }
 
-Vreg emitLdClsCctx(Vout& v, Vreg src, Vreg dst) {}
+Vreg emitLdClsCctx(Vout& v, Vreg src, Vreg dst) { not_implemented(); }
 
-void emitCall(Asm& a, TCA dest, RegSet args) {}
+void emitCall(Asm& a, TCA dest, RegSet args) { not_implemented(); }
 
-void emitCall(Asm& a, CppCall call, RegSet args) {}
+void emitCall(Asm& a, CppCall call, RegSet args) { not_implemented(); }
 
-void emitCall(Vout& v, CppCall target, RegSet args) {}
+void emitCall(Vout& v, CppCall target, RegSet args) { not_implemented(); }
 
-void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) {}
+void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) { not_implemented(); }
 
-void emitImmStoreq(Asm& a, Immed64 imm, MemoryRef ref) {}
+void emitImmStoreq(Asm& a, Immed64 imm, MemoryRef ref) { not_implemented(); }
 
-void emitRB(Vout& v, Trace::RingBufferType t, const char* msg) {}
+void emitRB(Vout& v, Trace::RingBufferType t, const char* msg) {
+  not_implemented();
+}
 
-void emitTestSurpriseFlags(Asm& a, PhysReg rds) {}
+void emitTestSurpriseFlags(Asm& a, PhysReg rds) { not_implemented(); }
 
-Vreg emitTestSurpriseFlags(Vout& v, Vreg rds) {}
+Vreg emitTestSurpriseFlags(Vout& v, Vreg rds) { not_implemented(); }
 
 void emitCheckSurpriseFlagsEnter(CodeBlock& mainCode, CodeBlock& coldCode,
-                                 PhysReg rds, Fixup fixup) {}
+                                 PhysReg rds, Fixup fixup) {
+  not_implemented();
+}
 
 void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vcold, Vreg fp, Vreg rds,
-                                 Fixup fixup, Vlabel catchBlock) {}
+                                 Fixup fixup, Vlabel catchBlock) {
+  not_implemented();
+}
 
-void emitLdLowPtr(Vout& v, Vptr mem, Vreg reg, size_t size) {}
+void emitLdLowPtr(Vout& v, Vptr mem, Vreg reg, size_t size) {
+  not_implemented();
+}
 
-void emitCmpClass(Vout& v, Vreg sf, const Class* c, Vptr mem) {}
+void emitCmpClass(Vout& v, Vreg sf, const Class* c, Vptr mem) {
+  not_implemented();
+}
 
-void emitCmpClass(Vout& v, Vreg sf, Vreg reg, Vptr mem) {}
+void emitCmpClass(Vout& v, Vreg sf, Vreg reg, Vptr mem) { not_implemented(); }
 
-void emitCmpClass(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {}
+void emitCmpClass(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {
+  not_implemented();
+}
 
-void copyTV(Vout& v, Vloc src, Vloc dst, Type destType) {}
+void copyTV(Vout& v, Vloc src, Vloc dst, Type destType) { not_implemented(); }
 
 // copy 2 64-bit values into one 128-bit value
-void pack2(Vout& v, Vreg s0, Vreg s1, Vreg d0) {}
+void pack2(Vout& v, Vreg s0, Vreg s1, Vreg d0) { not_implemented(); }
 
-Vreg zeroExtendIfBool(Vout& v, const SSATmp* src, Vreg reg) {}
+Vreg zeroExtendIfBool(Vout& v, const SSATmp* src, Vreg reg) {
+  not_implemented();
+}
 
 }}}

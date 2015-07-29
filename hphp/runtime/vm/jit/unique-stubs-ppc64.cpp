@@ -49,41 +49,43 @@ TRACE_SET_MOD(ustubs);
 
 namespace {
 
-TCA emitRetFromInterpretedFrame() {}
+TCA emitRetFromInterpretedFrame() { not_implemented(); }
 
-TCA emitRetFromInterpretedGeneratorFrame() {}
+TCA emitRetFromInterpretedGeneratorFrame() { not_implemented(); }
 
-TCA emitDebuggerRetFromInterpretedFrame() {}
+TCA emitDebuggerRetFromInterpretedFrame() { not_implemented(); }
 
-TCA emitDebuggerRetFromInterpretedGenFrame() {}
+TCA emitDebuggerRetFromInterpretedGenFrame() { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 
 extern "C" void enterTCExit();
 
-void emitCallToExit(UniqueStubs& uniqueStubs) {}
+void emitCallToExit(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitReturnHelpers(UniqueStubs& us) {}
+void emitReturnHelpers(UniqueStubs& us) { not_implemented(); }
 
-void emitResumeInterpHelpers(UniqueStubs& uniqueStubs) {}
+void emitResumeInterpHelpers(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitThrowSwitchMode(UniqueStubs& uniqueStubs) {}
+void emitThrowSwitchMode(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitCatchHelper(UniqueStubs& uniqueStubs) {}
+void emitCatchHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitStackOverflowHelper(UniqueStubs& uniqueStubs) {}
+void emitStackOverflowHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitFreeLocalsHelpers(UniqueStubs& uniqueStubs) {}
+void emitFreeLocalsHelpers(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitDecRefHelper(UniqueStubs& us) {}
+void emitDecRefHelper(UniqueStubs& us) { not_implemented(); }
 
-void emitFuncPrologueRedispatch(UniqueStubs& uniqueStubs) {}
+void emitFuncPrologueRedispatch(UniqueStubs& uniqueStubs) {
+  not_implemented();
+}
 
-void emitFCallArrayHelper(UniqueStubs& uniqueStubs) {}
+void emitFCallArrayHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 
-void emitFCallHelperThunk(UniqueStubs& uniqueStubs) {}
+void emitFCallHelperThunk(UniqueStubs& uniqueStubs) { not_implemented(); }
 
 //TODO PPC64 start here
 void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
@@ -104,9 +106,9 @@ void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
 	  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
 }
 
-void emitFunctionEnterHelper(UniqueStubs& uniqueStubs) {}
+void emitFunctionEnterHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
 
-void emitBindCallStubs(UniqueStubs& uniqueStubs) {}
+void emitBindCallStubs(UniqueStubs& uniqueStubs) { not_implemented(); }
 
 }
 

@@ -42,17 +42,24 @@ namespace {
 
 // Generate an if-then block into a.  thenBlock is executed if cc is true.
 template <class Then>
-void ifThen(jit::X64Assembler& a, ConditionCode cc, Then thenBlock) {}
+void ifThen(jit::X64Assembler& a, ConditionCode cc, Then thenBlock) {
+  not_implemented();
+}
 
-void emitStackCheck(X64Assembler& a, int funcDepth, Offset pc) {}
+void emitStackCheck(X64Assembler& a, int funcDepth, Offset pc) {
+  not_implemented();
+}
 
 /*
  * This will omit overflow checks if it is a leaf function that can't
  * use more than kStackCheckLeafPadding cells.
  */
-void maybeEmitStackCheck(X64Assembler& a, const Func* func) {}
+void maybeEmitStackCheck(X64Assembler& a, const Func* func) {
+  not_implemented();
+}
 
-TCA emitFuncGuard(X64Assembler& a, const Func* func) {}
+#pragma GCC diagnostic ignored "-Wreturn-type"
+TCA emitFuncGuard(X64Assembler& a, const Func* func) { not_implemented(); }
 
 // Initialize at most this many locals inline in function body prologue; more
 // than this, and emitting a loop is more compact. To be precise, the actual
@@ -64,17 +71,24 @@ constexpr auto kLocalsToInitializeInline = 9;
 // unroll. Beyond this, a loop is generated.
 constexpr auto kMaxParamsInitUnroll = 5;
 
-SrcKey emitPrologueWork(TransID transID, Func* func, int nPassed) {}
+SrcKey emitPrologueWork(TransID transID, Func* func, int nPassed) {
+  not_implemented();
+}
 
 } // anonymous namespace
 
 //////////////////////////////////////////////////////////////////////
 
-TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) {}
+TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) {
+  not_implemented();
+}
 
-SrcKey emitFuncPrologue(TransID transID, Func* func, int nPassed, TCA& start) {}
+SrcKey emitFuncPrologue(TransID transID, Func* func, int nPassed, TCA& start) {
+  not_implemented();
+}
 
 SrcKey emitMagicFuncPrologue(TransID transID, Func* func, int nPassed,
-                             TCA& start) {}
+                             TCA& start) { not_implemented(); }
+#pragma GCC diagnostic pop
 
 }}}

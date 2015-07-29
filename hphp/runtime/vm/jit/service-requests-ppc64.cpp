@@ -91,7 +91,7 @@ void emitBindJPost(CodeBlock& cb,
                    CodeBlock& frozen,
                    ConditionCode cc,
                    SmashInfo smashInfo,
-                   TCA sr) {}
+                   TCA sr) { not_implemented(); }
 
 const int kExtraRegs = 2; // we also set rdi and r10
 static constexpr int maxStubSpace() {
@@ -100,13 +100,13 @@ static constexpr int maxStubSpace() {
 }
 
 // fill remaining space in stub with ud2 or int3
-void padStub(CodeBlock& stub) {}
+void padStub(CodeBlock& stub) { not_implemented(); }
 
 void emitServiceReqImpl(CodeBlock& stub,
                         SRFlags flags,
                         folly::Optional<FPInvOffset> spOff,
                         ServiceRequest req,
-                        const ServiceReqArgVec& argv) {}
+                        const ServiceReqArgVec& argv) { not_implemented(); }
 
 } // anonymous namespace
 
@@ -177,13 +177,13 @@ TCA emitBindAddr(CodeBlock& cb,
                  CodeBlock& frozen,
                  TCA* addr,
                  SrcKey sk,
-                 FPInvOffset spOff) {}
+                 FPInvOffset spOff) { not_implemented(); }
 
 void emitBindJmpccFirst(CodeBlock& cb,
                         CodeBlock& frozen,
                         ConditionCode cc,
                         SrcKey targetSk0,
                         SrcKey targetSk1,
-                        FPInvOffset spOff) {}
+                        FPInvOffset spOff) { not_implemented(); }
 
 }}}

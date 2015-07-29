@@ -63,17 +63,17 @@ struct BackEnd final : public jit::BackEnd {
   BackEnd() {}
   ~BackEnd() {}
 
-   Abi abi() override {};
+   Abi abi() override { not_implemented(); };
 
-   size_t cacheLineSize() override {};
+   size_t cacheLineSize() override { not_implemented(); };
 
-   PhysReg rSp() override {};
+   PhysReg rSp() override { not_implemented(); };
 
-   PhysReg rVmSp() override {};
+   PhysReg rVmSp() override { not_implemented(); };
 
-   PhysReg rVmFp() override {};
+   PhysReg rVmFp() override { not_implemented(); };
 
-   PhysReg rVmTl() override {};
+   PhysReg rVmTl() override { not_implemented(); };
 
 //TODO PPC64 review this code, since it is duplicated
 #if defined (__powerpc64__)
@@ -101,68 +101,98 @@ struct BackEnd final : public jit::BackEnd {
     SRFlags flags,
     folly::Optional<FPInvOffset> spOff,
     ServiceRequest req,
-    const ServiceReqArgVec& argv) override {};
-   size_t reusableStubSize() const override {};
+    const ServiceReqArgVec& argv) override { not_implemented(); };
+   size_t reusableStubSize() const override { not_implemented(); };
 
    void emitInterpReq(CodeBlock& code,
                              SrcKey sk,
-                             FPInvOffset spOff) override {};
+                             FPInvOffset spOff) override {
+     not_implemented();
+   };
 
-   bool funcPrologueHasGuard(TCA prologue, const Func* func) override {};
+   bool funcPrologueHasGuard(TCA prologue, const Func* func) override {
+     not_implemented();
+   };
 
-   TCA funcPrologueToGuard(TCA prologue, const Func* func) override {};
+   TCA funcPrologueToGuard(TCA prologue, const Func* func) override {
+     not_implemented();
+   };
 
    SrcKey emitFuncPrologue(TransID transID, Func* func, int argc,
-                                  TCA& start) override {};
+                                  TCA& start) override { not_implemented(); };
 
-   TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {};
+   TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {
+     not_implemented();
+   };
 
-   void funcPrologueSmashGuard(TCA prologue, const Func* func) override {};
+   void funcPrologueSmashGuard(TCA prologue, const Func* func) override {
+     not_implemented();
+   };
 
-   void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {};
+   void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {
+     not_implemented();
+   };
 
    void prepareForTestAndSmash(CodeBlock& cb, int testBytes,
-                                      TestAndSmashFlags flags) override {};
+                                      TestAndSmashFlags flags) override {
+     not_implemented();
+   };
 
-   void smashJmp(TCA jmpAddr, TCA newDest) override {};
+   void smashJmp(TCA jmpAddr, TCA newDest) override { not_implemented(); };
 
-   void smashCall(TCA callAddr, TCA newDest) override {};
+   void smashCall(TCA callAddr, TCA newDest) override { not_implemented(); };
 
-   void smashJcc(TCA jccAddr, TCA newDest) override {};
+   void smashJcc(TCA jccAddr, TCA newDest) override { not_implemented(); };
 
-   void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {};
+   void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {
+     not_implemented();
+   };
 
-   void emitSmashableCall(CodeBlock& cb, TCA dest) override {};
+   void emitSmashableCall(CodeBlock& cb, TCA dest) override {
+     not_implemented();
+   };
 
-   TCA smashableCallFromReturn(TCA returnAddr) override {};
+   TCA smashableCallFromReturn(TCA returnAddr) override {
+     not_implemented();
+   };
 
-   TCA jmpTarget(TCA jmp) override {};
+   TCA jmpTarget(TCA jmp) override { not_implemented(); };
 
-   TCA jccTarget(TCA jmp) override {};
+   TCA jccTarget(TCA jmp) override { not_implemented(); };
 
-   ConditionCode jccCondCode(TCA jmp) override {};
+   ConditionCode jccCondCode(TCA jmp) override { not_implemented(); };
 
-   TCA callTarget(TCA call) override {};
+   TCA callTarget(TCA call) override { not_implemented(); };
 
    void addDbgGuard(CodeBlock& codeMain, CodeBlock& codeCold,
-                           SrcKey sk, size_t dbgOff) override {};
+                           SrcKey sk, size_t dbgOff) override {
+     not_implemented();
+   };
 
 
-   void streamPhysReg(std::ostream& os, PhysReg reg) override {};
+   void streamPhysReg(std::ostream& os, PhysReg reg) override {
+     not_implemented();
+   };
 
    void disasmRange(std::ostream& os, int indent, bool dumpIR,
-                           TCA begin, TCA end) override {};
+                           TCA begin, TCA end) override { not_implemented(); };
 
 
-   void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override {};
+   void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override {
+     not_implemented();
+   };
 
 
 private:
-   void do_moveToAlign(CodeBlock&, MoveToAlignFlags) override {};
+   void do_moveToAlign(CodeBlock&, MoveToAlignFlags) override {
+     not_implemented();
+   };
 
-   bool do_isSmashable(Address, int, int) override {};
+   bool do_isSmashable(Address, int, int) override { not_implemented(); };
 
-   void do_prepareForSmash(CodeBlock&, int, int) override {};
+   void do_prepareForSmash(CodeBlock&, int, int) override {
+     not_implemented();
+   };
 
 
 };
@@ -178,15 +208,19 @@ bool isSmashable(Address frontier, int nBytes, int offset /* = 0 */) {
   return false;
 }
 
-void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset) {}
+void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset) {
+  not_implemented();
+}
 
-void smashJmp(TCA jmpAddr, TCA newDest) {}
+void smashJmp(TCA jmpAddr, TCA newDest) { not_implemented(); }
 
-void smashCall(TCA callAddr, TCA newDest) {}
+void smashCall(TCA callAddr, TCA newDest) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 
-//void BackEnd::genCodeImpl(IRUnit& unit, AsmInfo* asmInfo) {}
+//void BackEnd::genCodeImpl(IRUnit& unit, AsmInfo* asmInfo) {
+//  not_implemented();
+//}
 
 }}}
 

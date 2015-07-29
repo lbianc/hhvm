@@ -77,7 +77,9 @@ Vreg emitDecRef(Vout& v, Vreg base);
  */
 template<class Destroy>
 void emitDecRefWork(Vout& v, Vout& vcold, Vreg rData,
-                    Destroy destroy, bool unlikelyDestroy) {}
+                    Destroy destroy, bool unlikelyDestroy) {
+  not_implemented();
+}
 
 void emitIncRef(Asm& as, PhysReg base);
 void emitIncRef(Vout& v, Vreg base);
@@ -151,7 +153,8 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg reg) {
 
 template<typename T>
 inline void
-emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {}
+emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
+                Reg64 reg) { not_implemented(); }
 
 #else // USE_GCC_FAST_TLS
 
@@ -174,7 +177,8 @@ emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg dest) {
 
 template<typename T>
 inline void
-emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 dest) {}
+emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
+                Reg64 dest) { not_implemented(); }
 
 #endif // USE_GCC_FAST_TLS
 
@@ -191,7 +195,7 @@ void pack2(Vout& v, Vreg s0, Vreg s1, Vreg d0);
 Vreg zeroExtendIfBool(Vout& v, const SSATmp* src, Vreg reg);
 
 template<ConditionCode Jcc, class Lambda>
-void jccBlock(Asm& a, Lambda body) {}
+void jccBlock(Asm& a, Lambda body) { not_implemented(); }
 
 /*
  * lookupDestructor --
@@ -199,9 +203,11 @@ void jccBlock(Asm& a, Lambda body) {}
  * Return a MemoryRef pointer to the destructor for the type in typeReg.
  */
 
-inline MemoryRef lookupDestructor(ppc64_asm::Assembler& a, PhysReg typeReg) {}
+inline MemoryRef lookupDestructor(ppc64_asm::Assembler& a, PhysReg typeReg) {
+  not_implemented();
+}
 
-inline Vptr lookupDestructor(Vout& v, Vreg typeReg) {}
+inline Vptr lookupDestructor(Vout& v, Vreg typeReg) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 

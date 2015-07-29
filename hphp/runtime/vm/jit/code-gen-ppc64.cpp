@@ -164,17 +164,21 @@ void ifRefCountedNonStatic(Vout& v, Type ty, Vloc loc, Then then) {
 /*
  * Emit code to store `loc', the registers representing `src', to `dst'.
  */
-void emitStoreTV(Vout& v, Vptr dst, Vloc loc, const SSATmp* src) {}
+void emitStoreTV(Vout& v, Vptr dst, Vloc loc, const SSATmp* src) {
+  not_implemented();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void debug_trashsp(Vout& v) {
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {}
+  if (RuntimeOption::EvalHHIRGenerateAsserts) { not_implemented(); }
 }
 
-void maybe_syncsp(Vout& v, BCMarker marker, Vreg irSP, IRSPOffset off) {}
+void maybe_syncsp(Vout& v, BCMarker marker, Vreg irSP, IRSPOffset off) {
+  not_implemented();
+}
 
-RegSet leave_trace_args(BCMarker marker) {}
+RegSet leave_trace_args(BCMarker marker) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 
@@ -182,16 +186,22 @@ RegSet leave_trace_args(BCMarker marker) {}
 
 //////////////////////////////////////////////////////////////////////
 
-Vloc CodeGenerator::srcLoc(const IRInstruction* inst, unsigned i) const {}
+Vloc CodeGenerator::srcLoc(const IRInstruction* inst, unsigned i) const {
+  not_implemented();
+}
 
-Vloc CodeGenerator::dstLoc(const IRInstruction* inst, unsigned i) const {}
+Vloc CodeGenerator::dstLoc(const IRInstruction* inst, unsigned i) const {
+  not_implemented();
+}
 
-ArgGroup CodeGenerator::argGroup(const IRInstruction* inst) const {}
+ArgGroup CodeGenerator::argGroup(const IRInstruction* inst) const {
+  not_implemented();
+}
 
-void CodeGenerator::cgInst(IRInstruction* inst) {}
+void CodeGenerator::cgInst(IRInstruction* inst) { not_implemented(); }
 
 #define NOOP_OPCODE(opcode) \
-  void CodeGenerator::cg##opcode(IRInstruction*) {}
+  void CodeGenerator::cg##opcode(IRInstruction*) { not_implemented(); }
 
 #define CALL_OPCODE(opcode) \
   void CodeGenerator::cg##opcode(IRInstruction* i) { cgCallNative(vmain(), i); }
@@ -345,7 +355,7 @@ Vlabel CodeGenerator::label(Block* b) {
 }
 
 void CodeGenerator::emitFwdJcc(Vout& v, ConditionCode cc, Vreg sf,
-                               Block* target) {}
+                               Block* target) { not_implemented(); }
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -362,109 +372,135 @@ void CodeGenerator::cgDefSP(IRInstruction* inst) {
   v << lea{fp[-cellsToBytes(inst->extra<DefSP>()->offset.offset)], sp};
 }
 
-void CodeGenerator::cgCheckNullptr(IRInstruction* inst) {}
+void CodeGenerator::cgCheckNullptr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckNonNull(IRInstruction* inst) {}
+void CodeGenerator::cgCheckNonNull(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAssertNonNull(IRInstruction* inst) {}
+void CodeGenerator::cgAssertNonNull(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAssertType(IRInstruction* inst) {}
+void CodeGenerator::cgAssertType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdUnwinderValue(IRInstruction* inst) {}
+void CodeGenerator::cgLdUnwinderValue(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgBeginCatch(IRInstruction* inst) {}
+void CodeGenerator::cgBeginCatch(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgEndCatch(IRInstruction* inst) {}
+void CodeGenerator::cgEndCatch(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgUnwindCheckSideExit(IRInstruction* inst) {}
+void CodeGenerator::cgUnwindCheckSideExit(IRInstruction* inst) {
+  not_implemented();
+}
 
 //////////////////////////////////////////////////////////////////////
 
-void CodeGenerator::cgHalt(IRInstruction* inst) {}
+void CodeGenerator::cgHalt(IRInstruction* inst) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
 
-void CodeGenerator::cgCallNative(Vout& v, IRInstruction* inst) {}
+void CodeGenerator::cgCallNative(Vout& v, IRInstruction* inst) {
+  not_implemented();
+}
 
-CallDest CodeGenerator::callDest(Vreg reg0) const {}
+CallDest CodeGenerator::callDest(Vreg reg0) const { not_implemented(); }
 
-CallDest CodeGenerator::callDest(Vreg reg0, Vreg reg1) const {}
+CallDest CodeGenerator::callDest(Vreg reg0, Vreg reg1) const {
+  not_implemented();
+}
 
-CallDest CodeGenerator::callDest(const IRInstruction* inst) const {}
+CallDest CodeGenerator::callDest(const IRInstruction* inst) const {
+  not_implemented();
+}
 
-CallDest CodeGenerator::callDestTV(const IRInstruction* inst) const {}
+CallDest CodeGenerator::callDestTV(const IRInstruction* inst) const {
+  not_implemented();
+}
 
-CallDest CodeGenerator::callDestDbl(const IRInstruction* inst) const {}
+CallDest CodeGenerator::callDestDbl(const IRInstruction* inst) const {
+  not_implemented();
+}
 
 // We can't really compile using the compact call if the address of the array
 // vtable is in high memory (there is only an encoding for 32bit displacement).
 // This can happen, for example, if we have address space randomization
 // enabled.  For now just punt these cases.
 template<class Arg> CppCall
-CodeGenerator::arrayCallIfLowMem(const IRInstruction* inst, Arg vtable) const {}
+CodeGenerator::arrayCallIfLowMem(const IRInstruction* inst, Arg vtable) const {
+  not_implemented();
+}
 
 /*
  * Prepare the given ArgDest for a call by shifting or zero-extending as
  * appropriate, then append its Vreg to the given VregList.
  */
-static void prepareArg(const ArgDesc& arg, Vout& v, VregList& vargs) {}
+static void prepareArg(const ArgDesc& arg, Vout& v, VregList& vargs) {
+  not_implemented();
+}
 
 void
 CodeGenerator::cgCallHelper(Vout& v, CppCall call, const CallDest& dstInfo,
-                            SyncOptions sync, const ArgGroup& args) {}
+                            SyncOptions sync, const ArgGroup& args) {
+  not_implemented();
+}
 
-void CodeGenerator::cgMov(IRInstruction* inst) {}
+void CodeGenerator::cgMov(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAbsDbl(IRInstruction* inst) {}
+void CodeGenerator::cgAbsDbl(IRInstruction* inst) { not_implemented(); }
 
-Vreg CodeGenerator::emitAddInt(Vout& v, IRInstruction* inst) {}
+Vreg CodeGenerator::emitAddInt(Vout& v, IRInstruction* inst) {
+  not_implemented();
+}
 
-Vreg CodeGenerator::emitSubInt(Vout& v, IRInstruction* inst) {}
+Vreg CodeGenerator::emitSubInt(Vout& v, IRInstruction* inst) {
+  not_implemented();
+}
 
-Vreg CodeGenerator::emitMulInt(Vout& v, IRInstruction* inst) {}
+Vreg CodeGenerator::emitMulInt(Vout& v, IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgAddIntO(IRInstruction* inst) {}
+void CodeGenerator::cgAddIntO(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgSubIntO(IRInstruction* inst) {}
+void CodeGenerator::cgSubIntO(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMulIntO(IRInstruction* inst) {}
+void CodeGenerator::cgMulIntO(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgFloor(IRInstruction* inst) {}
+void CodeGenerator::cgFloor(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCeil(IRInstruction* inst) {}
+void CodeGenerator::cgCeil(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAddInt(IRInstruction* inst) {}
+void CodeGenerator::cgAddInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgSubInt(IRInstruction* inst) {}
+void CodeGenerator::cgSubInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMulInt(IRInstruction* inst) {}
+void CodeGenerator::cgMulInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAddDbl(IRInstruction* inst) {}
+void CodeGenerator::cgAddDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgSubDbl(IRInstruction* inst) {}
+void CodeGenerator::cgSubDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMulDbl(IRInstruction* inst) {}
+void CodeGenerator::cgMulDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDivDbl(IRInstruction* inst) {}
+void CodeGenerator::cgDivDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAndInt(IRInstruction* inst) {}
+void CodeGenerator::cgAndInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgOrInt(IRInstruction* inst) {}
+void CodeGenerator::cgOrInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgXorInt(IRInstruction* inst) {}
+void CodeGenerator::cgXorInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgXorBool(IRInstruction* inst) {}
+void CodeGenerator::cgXorBool(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMod(IRInstruction* inst) {}
+void CodeGenerator::cgMod(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgSqrt(IRInstruction* inst) {}
+void CodeGenerator::cgSqrt(IRInstruction* inst) { not_implemented(); }
 
 template<class Op, class Opi>
-void CodeGenerator::cgShiftCommon(IRInstruction* inst) {}
+void CodeGenerator::cgShiftCommon(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgShl(IRInstruction* inst) {}
+void CodeGenerator::cgShl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgShr(IRInstruction* inst) {}
+void CodeGenerator::cgShr(IRInstruction* inst) { not_implemented(); }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Comparison Operators
@@ -580,31 +616,35 @@ void CodeGenerator::cgGteX(IRInstruction* inst) {
   CG_OP_CMP(inst, CC_GE, gte);
 }
 
-void CodeGenerator::emitCmpInt(IRInstruction* inst, ConditionCode cc) {}
+void CodeGenerator::emitCmpInt(IRInstruction* inst, ConditionCode cc) {
+  not_implemented();
+}
 
-void CodeGenerator::cgEqInt(IRInstruction* inst)  {}
-void CodeGenerator::cgNeqInt(IRInstruction* inst) {}
-void CodeGenerator::cgLtInt(IRInstruction* inst)  {}
-void CodeGenerator::cgGtInt(IRInstruction* inst)  {}
-void CodeGenerator::cgLteInt(IRInstruction* inst) {}
-void CodeGenerator::cgGteInt(IRInstruction* inst) {}
+void CodeGenerator::cgEqInt(IRInstruction* inst)  { not_implemented(); }
+void CodeGenerator::cgNeqInt(IRInstruction* inst) { not_implemented(); }
+void CodeGenerator::cgLtInt(IRInstruction* inst)  { not_implemented(); }
+void CodeGenerator::cgGtInt(IRInstruction* inst)  { not_implemented(); }
+void CodeGenerator::cgLteInt(IRInstruction* inst) { not_implemented(); }
+void CodeGenerator::cgGteInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::emitCmpEqDbl(IRInstruction* inst, ComparisonPred pred) {}
+void CodeGenerator::emitCmpEqDbl(IRInstruction* inst, ComparisonPred pred) {
+  not_implemented();
+}
 
 void CodeGenerator::emitCmpRelDbl(IRInstruction* inst, ConditionCode cc,
-                                  bool flipOperands) {}
+                                  bool flipOperands) { not_implemented(); }
 
-void CodeGenerator::cgEqDbl(IRInstruction* inst)  {}
+void CodeGenerator::cgEqDbl(IRInstruction* inst)  { not_implemented(); }
 
-void CodeGenerator::cgNeqDbl(IRInstruction* inst) {}
+void CodeGenerator::cgNeqDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLtDbl(IRInstruction* inst)  {}
+void CodeGenerator::cgLtDbl(IRInstruction* inst)  { not_implemented(); }
 
-void CodeGenerator::cgGtDbl(IRInstruction* inst)  {}
+void CodeGenerator::cgGtDbl(IRInstruction* inst)  { not_implemented(); }
 
-void CodeGenerator::cgLteDbl(IRInstruction* inst) {}
+void CodeGenerator::cgLteDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgGteDbl(IRInstruction* inst) {}
+void CodeGenerator::cgGteDbl(IRInstruction* inst) { not_implemented(); }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Type check operators
@@ -629,34 +669,42 @@ Vreg getDataPtrEnregistered(Vout& v, Vptr dataSrc) {
 
 template<class Loc1, class Loc2, class JmpFn>
 void CodeGenerator::emitTypeTest(Type type, Loc1 typeSrc, Loc2 dataSrc,
-                                 Vreg sf, JmpFn doJcc) {}
+                                 Vreg sf, JmpFn doJcc) { not_implemented(); }
 
 template<class DataLoc, class JmpFn>
 void CodeGenerator::emitSpecializedTypeTest(Type type, DataLoc dataSrc, Vreg sf,
-                                            JmpFn doJcc) {}
+                                            JmpFn doJcc) { not_implemented(); }
 
 template<class JmpFn>
-void CodeGenerator::emitIsTypeTest(IRInstruction* inst, Vreg sf, JmpFn doJcc) {}
+void CodeGenerator::emitIsTypeTest(IRInstruction* inst, Vreg sf, JmpFn doJcc) {
+  not_implemented();
+}
 
 template<class Loc>
 void CodeGenerator::emitTypeCheck(Type type, Loc typeSrc, Loc dataSrc,
-                                  Block* taken) {}
+                                  Block* taken) { not_implemented(); }
 
-void CodeGenerator::emitSetCc(IRInstruction* inst, ConditionCode cc, Vreg sf) {}
+void CodeGenerator::emitSetCc(IRInstruction* inst, ConditionCode cc, Vreg sf) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIsTypeMemCommon(IRInstruction* inst, bool negate) {}
+void CodeGenerator::cgIsTypeMemCommon(IRInstruction* inst, bool negate) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIsTypeCommon(IRInstruction* inst, bool negate) {}
+void CodeGenerator::cgIsTypeCommon(IRInstruction* inst, bool negate) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIsType(IRInstruction* inst) {}
+void CodeGenerator::cgIsType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIsScalarType(IRInstruction* inst) {}
+void CodeGenerator::cgIsScalarType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIsNType(IRInstruction* inst) {}
+void CodeGenerator::cgIsNType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIsTypeMem(IRInstruction* inst) {}
+void CodeGenerator::cgIsTypeMem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIsNTypeMem(IRInstruction* inst) {}
+void CodeGenerator::cgIsNTypeMem(IRInstruction* inst) { not_implemented(); }
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -667,98 +715,118 @@ void CodeGenerator::cgIsNTypeMem(IRInstruction* inst) {}
  * if it doesn't exist than the candidate can't be an instance of it
  * and will fail this check.
  */
-Vreg CodeGenerator::emitInstanceBitmaskCheck(Vout& v, IRInstruction* inst) {}
+Vreg CodeGenerator::emitInstanceBitmaskCheck(Vout& v, IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInstanceOfBitmask(IRInstruction* inst) {}
+void CodeGenerator::cgInstanceOfBitmask(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgNInstanceOfBitmask(IRInstruction* inst) {}
+void CodeGenerator::cgNInstanceOfBitmask(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInstanceOf(IRInstruction* inst) {}
+void CodeGenerator::cgInstanceOf(IRInstruction* inst) { not_implemented(); }
 
 /*
  * Check instanceof using the superclass vector on the end of the
  * Class entry.
  */
-void CodeGenerator::cgExtendsClass(IRInstruction* inst) {}
+void CodeGenerator::cgExtendsClass(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgClsNeq(IRInstruction* inst) {}
+void CodeGenerator::cgClsNeq(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvDblToInt(IRInstruction* inst) {}
+void CodeGenerator::cgConvDblToInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvDblToBool(IRInstruction* inst) {}
+void CodeGenerator::cgConvDblToBool(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvIntToBool(IRInstruction* inst) {}
+void CodeGenerator::cgConvIntToBool(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvArrToBool(IRInstruction* inst) {}
+void CodeGenerator::cgConvArrToBool(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgColIsEmpty(IRInstruction* inst) {}
+void CodeGenerator::cgColIsEmpty(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgColIsNEmpty(IRInstruction* inst) {}
+void CodeGenerator::cgColIsNEmpty(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvObjToBool(IRInstruction* inst) {}
+void CodeGenerator::cgConvObjToBool(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::emitConvBoolOrIntToDbl(IRInstruction* inst) {}
+void CodeGenerator::emitConvBoolOrIntToDbl(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgConvBoolToDbl(IRInstruction* inst) {}
+void CodeGenerator::cgConvBoolToDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvIntToDbl(IRInstruction* inst) {}
+void CodeGenerator::cgConvIntToDbl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvBoolToInt(IRInstruction* inst) {}
+void CodeGenerator::cgConvBoolToInt(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgOrdStr(IRInstruction* inst) {}
+void CodeGenerator::cgOrdStr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvBoolToStr(IRInstruction* inst) {}
+void CodeGenerator::cgConvBoolToStr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConvClsToCctx(IRInstruction* inst) {}
+void CodeGenerator::cgConvClsToCctx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgUnboxPtr(IRInstruction* inst) {}
+void CodeGenerator::cgUnboxPtr(IRInstruction* inst) { not_implemented(); }
 
-Vreg CodeGenerator::cgLdFuncCachedCommon(IRInstruction* inst, Vreg dst) {}
+Vreg CodeGenerator::cgLdFuncCachedCommon(IRInstruction* inst, Vreg dst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdFuncCached(IRInstruction* inst) {}
+void CodeGenerator::cgLdFuncCached(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdFuncCachedSafe(IRInstruction* inst) {}
+void CodeGenerator::cgLdFuncCachedSafe(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdFuncCachedU(IRInstruction* inst) {}
+void CodeGenerator::cgLdFuncCachedU(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdFunc(IRInstruction* inst) {}
+void CodeGenerator::cgLdFunc(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdObjClass(IRInstruction* inst) {}
+void CodeGenerator::cgLdObjClass(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdArrFuncCtx(IRInstruction* inst) {}
+void CodeGenerator::cgLdArrFuncCtx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdArrFPushCuf(IRInstruction* inst) {}
+void CodeGenerator::cgLdArrFPushCuf(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdStrFPushCuf(IRInstruction* inst) {}
+void CodeGenerator::cgLdStrFPushCuf(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupClsMethod(IRInstruction* inst) {}
+void CodeGenerator::cgLookupClsMethod(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdObjMethod(IRInstruction* inst) {}
+void CodeGenerator::cgLdObjMethod(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdObjInvoke(IRInstruction* inst) {}
+void CodeGenerator::cgLdObjInvoke(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStRetVal(IRInstruction* inst) {}
+void CodeGenerator::cgStRetVal(IRInstruction* inst) { not_implemented(); }
 
-void traceRet(ActRec* fp, Cell* sp, void* rip) {}
+void traceRet(ActRec* fp, Cell* sp, void* rip) { not_implemented(); }
 
-void CodeGenerator::cgRetCtrl(IRInstruction* inst) {}
+void CodeGenerator::cgRetCtrl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAsyncRetCtrl(IRInstruction* inst) {}
+void CodeGenerator::cgAsyncRetCtrl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdBindAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdBindAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgProfileSwitchDest(IRInstruction* inst) {}
+void CodeGenerator::cgProfileSwitchDest(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgJmpSwitchDest(IRInstruction* inst) {}
+void CodeGenerator::cgJmpSwitchDest(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdSSwitchDestFast(IRInstruction* inst) {}
+void CodeGenerator::cgLdSSwitchDestFast(IRInstruction* inst) {
+  not_implemented();
+}
 
 static TCA sswitchHelperSlow(TypedValue typedVal,
                              const StringData** strs,
                              int numStrs,
-                             TCA* jmptab) {}
+                             TCA* jmptab) { not_implemented(); }
 
-void CodeGenerator::cgLdSSwitchDestSlow(IRInstruction* inst) {}
+void CodeGenerator::cgLdSSwitchDestSlow(IRInstruction* inst) {
+  not_implemented();
+}
 
 /*
  * It'd be nice not to have the cgMov here (and just copy propagate
@@ -770,35 +838,45 @@ void CodeGenerator::cgLdSSwitchDestSlow(IRInstruction* inst) {}
  * unused activation records, so it's usually not going to happen
  * anyway.
  */
-void CodeGenerator::cgDefInlineFP(IRInstruction* inst) {}
+void CodeGenerator::cgDefInlineFP(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgInlineReturn(IRInstruction* inst) {}
+void CodeGenerator::cgInlineReturn(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgFreeActRec(IRInstruction* inst) {}
+void CodeGenerator::cgFreeActRec(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStMem(IRInstruction* inst) {}
+void CodeGenerator::cgStMem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStRef(IRInstruction* inst) {}
+void CodeGenerator::cgStRef(IRInstruction* inst) { not_implemented(); }
 
-int CodeGenerator::iterOffset(const BCMarker& marker, uint32_t id) {}
+int CodeGenerator::iterOffset(const BCMarker& marker, uint32_t id) {
+  not_implemented();
+}
 
-void CodeGenerator::cgStLoc(IRInstruction* inst) {}
+void CodeGenerator::cgStLoc(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStLocRange(IRInstruction* inst) {}
+void CodeGenerator::cgStLocRange(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgEagerSyncVMRegs(IRInstruction* inst) {}
+void CodeGenerator::cgEagerSyncVMRegs(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgReqBindJmp(IRInstruction* inst) {}
+void CodeGenerator::cgReqBindJmp(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgReqRetranslateOpt(IRInstruction* inst) {}
+void CodeGenerator::cgReqRetranslateOpt(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgReqRetranslate(IRInstruction* inst) {}
+void CodeGenerator::cgReqRetranslate(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIncRef(IRInstruction* inst) {}
+void CodeGenerator::cgIncRef(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIncRefCtx(IRInstruction* inst) {}
+void CodeGenerator::cgIncRefCtx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {}
+void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {
+  not_implemented();
+}
 
 /*
  * Depending on the current translation kind, do nothing, profile, or collect
@@ -809,7 +887,7 @@ void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {}
  */
 float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
                                        OptDecRefProfile& profile,
-                                       Type type) {}
+                                       Type type) { not_implemented(); }
 
 /*
  * We've tried a variety of tweaks to this and found the current state of
@@ -838,172 +916,224 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
  */
 void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                                const OptDecRefProfile& profile,
-                               bool unlikelyDestroy) {}
+                               bool unlikelyDestroy) { not_implemented(); }
 
-void CodeGenerator::emitDecRefTypeStat(Vout& v, const IRInstruction* inst) {}
+void CodeGenerator::emitDecRefTypeStat(Vout& v, const IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgDecRef(IRInstruction *inst) {}
+void CodeGenerator::cgDecRef(IRInstruction *inst) { not_implemented(); }
 
-void CodeGenerator::cgDecRefNZ(IRInstruction* inst) {}
+void CodeGenerator::cgDecRefNZ(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCufIterSpillFrame(IRInstruction* inst) {}
+void CodeGenerator::cgCufIterSpillFrame(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgSpillFrame(IRInstruction* inst) {}
+void CodeGenerator::cgSpillFrame(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStClosureFunc(IRInstruction* inst) {}
+void CodeGenerator::cgStClosureFunc(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStClosureArg(IRInstruction* inst) {}
+void CodeGenerator::cgStClosureArg(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStClosureCtx(IRInstruction* inst) {}
+void CodeGenerator::cgStClosureCtx(IRInstruction* inst) { not_implemented(); }
 
 void CodeGenerator::emitInitObjProps(const IRInstruction* inst, Vreg dstReg,
-                                     const Class* cls, size_t nProps) {}
+                                     const Class* cls, size_t nProps) {
+  not_implemented();
+}
 
-void CodeGenerator::cgConstructInstance(IRInstruction* inst) {}
+void CodeGenerator::cgConstructInstance(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckInitProps(IRInstruction* inst) {}
+void CodeGenerator::cgCheckInitProps(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckInitSProps(IRInstruction* inst) {}
+void CodeGenerator::cgCheckInitSProps(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgNewInstanceRaw(IRInstruction* inst) {}
+void CodeGenerator::cgNewInstanceRaw(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInitObjProps(IRInstruction* inst) {}
+void CodeGenerator::cgInitObjProps(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCallArray(IRInstruction* inst) {}
+void CodeGenerator::cgCallArray(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCall(IRInstruction* inst) {}
+void CodeGenerator::cgCall(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCastStk(IRInstruction *inst) {}
+void CodeGenerator::cgCastStk(IRInstruction *inst) { not_implemented(); }
 
-void CodeGenerator::cgCoerceStk(IRInstruction *inst) {}
+void CodeGenerator::cgCoerceStk(IRInstruction *inst) { not_implemented(); }
 
-void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {}
+void CodeGenerator::cgCallBuiltin(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStStk(IRInstruction* inst) {}
+void CodeGenerator::cgStStk(IRInstruction* inst) { not_implemented(); }
 
 // Fill the entire 16-byte space for a TypedValue with trash.  Note: it will
 // clobber the Aux area of a TypedValueAux.
-void CodeGenerator::emitTrashTV(Vreg ptr, int32_t offset, char fillByte) {}
+void CodeGenerator::emitTrashTV(Vreg ptr, int32_t offset, char fillByte) {
+  not_implemented();
+}
 
-void CodeGenerator::cgDbgTrashStk(IRInstruction* inst) {}
+void CodeGenerator::cgDbgTrashStk(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDbgTrashFrame(IRInstruction* inst) {}
+void CodeGenerator::cgDbgTrashFrame(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDbgTrashMem(IRInstruction* inst) {}
+void CodeGenerator::cgDbgTrashMem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgNativeImpl(IRInstruction* inst) {}
+void CodeGenerator::cgNativeImpl(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCastCtxThis(IRInstruction* inst) {}
+void CodeGenerator::cgCastCtxThis(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckCtxThis(IRInstruction* inst) {}
+void CodeGenerator::cgCheckCtxThis(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsCtx(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsCtx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsCctx(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsCctx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdCtx(IRInstruction* inst) {}
+void CodeGenerator::cgLdCtx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdCctx(IRInstruction* inst) {}
+void CodeGenerator::cgLdCctx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsName(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsName(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdARFuncPtr(IRInstruction* inst) {}
+void CodeGenerator::cgLdARFuncPtr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdARNumParams(IRInstruction* inst) {}
+void CodeGenerator::cgLdARNumParams(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdStaticLocCached(IRInstruction* inst) {}
+void CodeGenerator::cgLdStaticLocCached(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckStaticLocInit(IRInstruction* inst) {}
+void CodeGenerator::cgCheckStaticLocInit(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgStaticLocInitCached(IRInstruction* inst) {}
+void CodeGenerator::cgStaticLocInitCached(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::emitLoad(SSATmp* dst, Vloc dstLoc, Vptr base) {}
+void CodeGenerator::emitLoad(SSATmp* dst, Vloc dstLoc, Vptr base) {
+  not_implemented();
+}
 
-void CodeGenerator::emitLoadTypedValue(SSATmp* dst, Vloc dstLoc, Vptr ref) {}
+void CodeGenerator::emitLoadTypedValue(SSATmp* dst, Vloc dstLoc, Vptr ref) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdContField(IRInstruction* inst) {}
+void CodeGenerator::cgLdContField(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdMem(IRInstruction* inst) {}
+void CodeGenerator::cgLdMem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdRef(IRInstruction* inst) {}
+void CodeGenerator::cgLdRef(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckRefInner(IRInstruction* inst) {}
+void CodeGenerator::cgCheckRefInner(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStringIsset(IRInstruction* inst) {}
+void CodeGenerator::cgStringIsset(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgProfilePackedArray(IRInstruction* inst) {}
+void CodeGenerator::cgProfilePackedArray(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgProfileStructArray(IRInstruction* inst) {}
+void CodeGenerator::cgProfileStructArray(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckPackedArrayBounds(IRInstruction* inst) {}
+void CodeGenerator::cgCheckPackedArrayBounds(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdPackedArrayElemAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdPackedArrayElemAddr(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckRange(IRInstruction* inst) {}
+void CodeGenerator::cgCheckRange(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdVectorSize(IRInstruction* inst) {}
+void CodeGenerator::cgLdVectorSize(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdVectorBase(IRInstruction* inst) {}
+void CodeGenerator::cgLdVectorBase(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdColArray(IRInstruction* inst) {}
+void CodeGenerator::cgLdColArray(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgVectorHasImmCopy(IRInstruction* inst) {}
+void CodeGenerator::cgVectorHasImmCopy(IRInstruction* inst) {
+  not_implemented();
+}
 
 /**
  * Given the base of a vector object, pass it to a helper
  * which is responsible for triggering COW.
  */
-void CodeGenerator::cgVectorDoCow(IRInstruction* inst) {}
+void CodeGenerator::cgVectorDoCow(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdPairBase(IRInstruction* inst) {}
+void CodeGenerator::cgLdPairBase(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdElem(IRInstruction* inst) {}
+void CodeGenerator::cgLdElem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStElem(IRInstruction* inst) {}
+void CodeGenerator::cgStElem(IRInstruction* inst) { not_implemented(); }
 
-Fixup CodeGenerator::makeFixup(const BCMarker& marker, SyncOptions sync) {}
+Fixup CodeGenerator::makeFixup(const BCMarker& marker, SyncOptions sync) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdMIStateAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdMIStateAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdLoc(IRInstruction* inst) {}
+void CodeGenerator::cgLdLoc(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdLocAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdLocAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdLocPseudoMain(IRInstruction* inst) {}
+void CodeGenerator::cgLdLocPseudoMain(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgStLocPseudoMain(IRInstruction* inst) {}
+void CodeGenerator::cgStLocPseudoMain(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdStkAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdStkAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdStk(IRInstruction* inst) {}
+void CodeGenerator::cgLdStk(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckStk(IRInstruction* inst) {}
+void CodeGenerator::cgCheckStk(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckLoc(IRInstruction* inst) {}
+void CodeGenerator::cgCheckLoc(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDefMIStateBase(IRInstruction* inst) {}
+void CodeGenerator::cgDefMIStateBase(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckType(IRInstruction* inst) {}
+void CodeGenerator::cgCheckType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckTypeMem(IRInstruction* inst) {}
+void CodeGenerator::cgCheckTypeMem(IRInstruction* inst) { not_implemented(); }
 
 template <class JmpFn>
 void CodeGenerator::emitReffinessTest(IRInstruction* inst, Vreg sf,
-                                      JmpFn doJcc) {}
+                                      JmpFn doJcc) { not_implemented(); }
 
-void CodeGenerator::cgCheckRefs(IRInstruction* inst)  {}
+void CodeGenerator::cgCheckRefs(IRInstruction* inst)  { not_implemented(); }
 
-void CodeGenerator::cgLdPropAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdPropAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsMethod(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsMethod(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupClsMethodCache(IRInstruction* inst) {}
+void CodeGenerator::cgLookupClsMethodCache(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdClsMethodCacheCommon(IRInstruction* inst, Offset off) {}
+void CodeGenerator::cgLdClsMethodCacheCommon(IRInstruction* inst, Offset off) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdClsMethodCacheFunc(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsMethodCacheFunc(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdClsMethodCacheCls(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsMethodCacheCls(IRInstruction* inst) {
+  not_implemented();
+}
 
 /**
  * Helper to emit getting the value for ActRec's m_this/m_cls slot
@@ -1011,239 +1141,323 @@ void CodeGenerator::cgLdClsMethodCacheCls(IRInstruction* inst) {}
  * static or not.
  */
 void CodeGenerator::emitGetCtxFwdCallWithThis(Vreg srcCtx, Vreg dstCtx,
-                                              bool staticCallee) {}
+                                              bool staticCallee) {
+  not_implemented();
+}
 
-void CodeGenerator::cgGetCtxFwdCall(IRInstruction* inst) {}
+void CodeGenerator::cgGetCtxFwdCall(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsMethodFCacheFunc(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsMethodFCacheFunc(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLookupClsMethodFCache(IRInstruction* inst) {}
+void CodeGenerator::cgLookupClsMethodFCache(IRInstruction* inst) {
+  not_implemented();
+}
 
 Vreg CodeGenerator::emitGetCtxFwdCallWithThisDyn(Vreg destCtxReg, Vreg thisReg,
-                                                 rds::Handle ch) {}
+                                                 rds::Handle ch) {
+  not_implemented();
+}
 
 /**
  * This method is similar to emitGetCtxFwdCall above, but whether or not the
  * callee is a static method is unknown at JIT time, and that is determined
  * dynamically by looking up into the StaticMethodFCache.
  */
-void CodeGenerator::cgGetCtxFwdCallDyn(IRInstruction* inst) {}
+void CodeGenerator::cgGetCtxFwdCallDyn(IRInstruction* inst) {
+  not_implemented();
+}
 
 rds::Handle CodeGenerator::cgLdClsCachedCommon(Vout& v, IRInstruction* inst,
-                                               Vreg dst, Vreg sf) {}
+                                               Vreg dst, Vreg sf) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdClsCached(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsCached(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsCachedSafe(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsCachedSafe(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgDerefClsRDSHandle(IRInstruction* inst) {}
+void CodeGenerator::cgDerefClsRDSHandle(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdCls(IRInstruction* inst) {}
+void CodeGenerator::cgLdCls(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdRDSAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdRDSAddr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupClsCns(IRInstruction* inst) {}
+void CodeGenerator::cgLookupClsCns(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdCns(IRInstruction* inst) {}
+void CodeGenerator::cgLdCns(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupCnsCommon(IRInstruction* inst) {}
+void CodeGenerator::cgLookupCnsCommon(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLookupCns(IRInstruction* inst) {}
+void CodeGenerator::cgLookupCns(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupCnsE(IRInstruction* inst) {}
+void CodeGenerator::cgLookupCnsE(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLookupCnsU(IRInstruction* inst) {}
+void CodeGenerator::cgLookupCnsU(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAKExistsArr(IRInstruction* inst) {}
+void CodeGenerator::cgAKExistsArr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgAKExistsObj(IRInstruction* inst) {}
+void CodeGenerator::cgAKExistsObj(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdGblAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdGblAddr(IRInstruction* inst) { not_implemented(); }
 
-Vreg CodeGenerator::emitTestZero(Vout& v, SSATmp* src, Vloc srcLoc) {}
+Vreg CodeGenerator::emitTestZero(Vout& v, SSATmp* src, Vloc srcLoc) {
+  not_implemented();
+}
 
-void CodeGenerator::cgJmpZero(IRInstruction* inst) {}
+void CodeGenerator::cgJmpZero(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgJmpNZero(IRInstruction* inst) {}
+void CodeGenerator::cgJmpNZero(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgJmp(IRInstruction* inst) {}
+void CodeGenerator::cgJmp(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDefLabel(IRInstruction* inst) {}
+void CodeGenerator::cgDefLabel(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgJmpSSwitchDest(IRInstruction* inst) {}
+void CodeGenerator::cgJmpSSwitchDest(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgNewCol(IRInstruction* inst) {}
+void CodeGenerator::cgNewCol(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgNewColFromArray(IRInstruction* inst) {}
+void CodeGenerator::cgNewColFromArray(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckInit(IRInstruction* inst) {}
+void CodeGenerator::cgCheckInit(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckInitMem(IRInstruction* inst) {}
+void CodeGenerator::cgCheckInitMem(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckSurpriseFlags(IRInstruction* inst) {}
+void CodeGenerator::cgCheckSurpriseFlags(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCheckCold(IRInstruction* inst) {}
+void CodeGenerator::cgCheckCold(IRInstruction* inst) { not_implemented(); }
 
 static const StringData* s_ReleaseVV = makeStaticString("ReleaseVV");
 
-void CodeGenerator::cgReleaseVVAndSkip(IRInstruction* inst) {}
+void CodeGenerator::cgReleaseVVAndSkip(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgBoxPtr(IRInstruction* inst) {}
+void CodeGenerator::cgBoxPtr(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgInterpOne(IRInstruction* inst) {}
+void CodeGenerator::cgInterpOne(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgInterpOneCF(IRInstruction* inst) {}
+void CodeGenerator::cgInterpOneCF(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgContEnter(IRInstruction* inst) {}
+void CodeGenerator::cgContEnter(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgContPreNext(IRInstruction* inst) {}
+void CodeGenerator::cgContPreNext(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgContStartedCheck(IRInstruction* inst) {}
+void CodeGenerator::cgContStartedCheck(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgContValid(IRInstruction* inst) {}
+void CodeGenerator::cgContValid(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgContArIncKey(IRInstruction* inst) {}
+void CodeGenerator::cgContArIncKey(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgContArUpdateIdx(IRInstruction* inst) {}
+void CodeGenerator::cgContArUpdateIdx(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdContActRec(IRInstruction* inst) {}
+void CodeGenerator::cgLdContActRec(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdContArValue(IRInstruction* inst) {}
+void CodeGenerator::cgLdContArValue(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStContArValue(IRInstruction* inst) {}
+void CodeGenerator::cgStContArValue(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdContArKey(IRInstruction* inst) {}
+void CodeGenerator::cgLdContArKey(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStContArKey(IRInstruction* inst) {}
+void CodeGenerator::cgStContArKey(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStAsyncArSucceeded(IRInstruction* inst) {}
+void CodeGenerator::cgStAsyncArSucceeded(IRInstruction* inst) {
+  not_implemented();
+}
 
 void CodeGenerator::resumableStResumeImpl(IRInstruction* inst,
                                           ptrdiff_t offAddr,
-                                          ptrdiff_t offOffset) {}
+                                          ptrdiff_t offOffset) {
+  not_implemented();
+}
 
-void CodeGenerator::cgStAsyncArResume(IRInstruction* inst) {}
+void CodeGenerator::cgStAsyncArResume(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgStContArResume(IRInstruction* inst) {}
+void CodeGenerator::cgStContArResume(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdContResumeAddr(IRInstruction* inst) {}
+void CodeGenerator::cgLdContResumeAddr(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgContArIncIdx(IRInstruction* inst) {}
+void CodeGenerator::cgContArIncIdx(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStContArState(IRInstruction* inst) {}
+void CodeGenerator::cgStContArState(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgStAsyncArResult(IRInstruction* inst) {}
+void CodeGenerator::cgStAsyncArResult(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdAsyncArParentChain(IRInstruction* inst) {}
+void CodeGenerator::cgLdAsyncArParentChain(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgAFWHBlockOn(IRInstruction* inst) {}
+void CodeGenerator::cgAFWHBlockOn(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIsWaitHandle(IRInstruction* inst) {}
+void CodeGenerator::cgIsWaitHandle(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdWHState(IRInstruction* inst) {}
+void CodeGenerator::cgLdWHState(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdWHResult(IRInstruction* inst) {}
+void CodeGenerator::cgLdWHResult(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdAFWHActRec(IRInstruction* inst) {}
+void CodeGenerator::cgLdAFWHActRec(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdResumableArObj(IRInstruction* inst) {}
+void CodeGenerator::cgLdResumableArObj(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIterInit(IRInstruction* inst) {}
+void CodeGenerator::cgIterInit(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIterInitK(IRInstruction* inst) {}
+void CodeGenerator::cgIterInitK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgWIterInit(IRInstruction* inst) {}
+void CodeGenerator::cgWIterInit(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgWIterInitK(IRInstruction* inst) {}
+void CodeGenerator::cgWIterInitK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIterInitCommon(IRInstruction* inst) {}
+void CodeGenerator::cgIterInitCommon(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgMIterInit(IRInstruction* inst) {}
+void CodeGenerator::cgMIterInit(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMIterInitK(IRInstruction* inst) {}
+void CodeGenerator::cgMIterInitK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMIterInitCommon(IRInstruction* inst) {}
+void CodeGenerator::cgMIterInitCommon(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIterNext(IRInstruction* inst) {}
+void CodeGenerator::cgIterNext(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIterNextK(IRInstruction* inst) {}
+void CodeGenerator::cgIterNextK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgWIterNext(IRInstruction* inst) {}
+void CodeGenerator::cgWIterNext(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgWIterNextK(IRInstruction* inst) {}
+void CodeGenerator::cgWIterNextK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgIterNextCommon(IRInstruction* inst) {}
+void CodeGenerator::cgIterNextCommon(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgMIterNext(IRInstruction* inst) {}
+void CodeGenerator::cgMIterNext(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMIterNextK(IRInstruction* inst) {}
+void CodeGenerator::cgMIterNextK(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMIterNextCommon(IRInstruction* inst) {}
+void CodeGenerator::cgMIterNextCommon(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIterFree(IRInstruction* inst) {}
+void CodeGenerator::cgIterFree(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgMIterFree(IRInstruction* inst) {}
+void CodeGenerator::cgMIterFree(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDecodeCufIter(IRInstruction* inst) {}
+void CodeGenerator::cgDecodeCufIter(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCIterFree(IRInstruction* inst) {}
+void CodeGenerator::cgCIterFree(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgNewStructArray(IRInstruction* inst) {}
+void CodeGenerator::cgNewStructArray(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIncStat(IRInstruction *inst) {}
+void CodeGenerator::cgIncStat(IRInstruction *inst) { not_implemented(); }
 
-void CodeGenerator::cgIncTransCounter(IRInstruction* inst) {}
+void CodeGenerator::cgIncTransCounter(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgIncProfCounter(IRInstruction* inst) {}
+void CodeGenerator::cgIncProfCounter(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgDbgTraceCall(IRInstruction* inst) {}
+void CodeGenerator::cgDbgTraceCall(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgDbgAssertRefCount(IRInstruction* inst) {}
+void CodeGenerator::cgDbgAssertRefCount(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgDbgAssertType(IRInstruction* inst) {}
+void CodeGenerator::cgDbgAssertType(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::emitVerifyCls(IRInstruction* inst) {}
+void CodeGenerator::emitVerifyCls(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgVerifyParamCls(IRInstruction* inst) {}
+void CodeGenerator::cgVerifyParamCls(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgVerifyRetCls(IRInstruction* inst) {}
+void CodeGenerator::cgVerifyRetCls(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgRBTraceEntry(IRInstruction* inst) {}
+void CodeGenerator::cgRBTraceEntry(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgRBTraceMsg(IRInstruction* inst) {}
+void CodeGenerator::cgRBTraceMsg(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCountBytecode(IRInstruction* inst) {}
+void CodeGenerator::cgCountBytecode(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdClsInitData(IRInstruction* inst) {}
+void CodeGenerator::cgLdClsInitData(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgConjure(IRInstruction* inst) {}
+void CodeGenerator::cgConjure(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCountArray(IRInstruction* inst) {}
+void CodeGenerator::cgCountArray(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCountArrayFast(IRInstruction* inst) {}
+void CodeGenerator::cgCountArrayFast(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgCountCollection(IRInstruction* inst) {}
+void CodeGenerator::cgCountCollection(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdStrLen(IRInstruction* inst) {}
+void CodeGenerator::cgLdStrLen(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgLdFuncNumParams(IRInstruction* inst) {}
+void CodeGenerator::cgLdFuncNumParams(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInitPackedArray(IRInstruction* inst) {}
+void CodeGenerator::cgInitPackedArray(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInitPackedArrayLoop(IRInstruction* inst) {}
+void CodeGenerator::cgInitPackedArrayLoop(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgLdStructArrayElem(IRInstruction* inst) {}
+void CodeGenerator::cgLdStructArrayElem(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgEnterFrame(IRInstruction* inst) {}
+void CodeGenerator::cgEnterFrame(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckStackOverflow(IRInstruction* inst) {}
+void CodeGenerator::cgCheckStackOverflow(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::cgInitExtraArgs(IRInstruction* inst) {}
+void CodeGenerator::cgInitExtraArgs(IRInstruction* inst) { not_implemented(); }
 
-void CodeGenerator::cgCheckSurpriseFlagsEnter(IRInstruction* inst) {}
+void CodeGenerator::cgCheckSurpriseFlagsEnter(IRInstruction* inst) {
+  not_implemented();
+}
 
-void CodeGenerator::print() const {}
+void CodeGenerator::print() const { not_implemented(); }
 
-void CodeGenerator::cgProfileObjClass(IRInstruction* inst) {}
+void CodeGenerator::cgProfileObjClass(IRInstruction* inst) {
+  not_implemented();
+}
 
 }}}
