@@ -28,10 +28,10 @@ enum class Arch {
 
 inline Arch arch() {
 #if defined(__powerpc64__)
-       return Arch::PPC64;
+  return Arch::PPC64;
 #else
-    if (RuntimeOption::EvalSimulateARM) return Arch::ARM;
-      return Arch::X64;
+  if (RuntimeOption::EvalSimulateARM) return Arch::ARM;
+  return Arch::X64;
 #endif
 }
 
