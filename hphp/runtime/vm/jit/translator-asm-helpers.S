@@ -130,17 +130,98 @@ enterTCServiceReq:
   brk 0
 
 #elif defined(__powerpc64__)
-  .globl enterTCHelper
-enterTCHelper:
-  .globl enterTCExit
-enterTCExit:
-  .globl handleSRResumeTC
-handleSRResumeTC:
-  .globl handleSRHelper
-handleSRHelper:
-  .globl enterTCServiceReq
-enterTCServiceReq:
+// ==== enterTCHelper ====
+// r3: regs.stack.top()
+// r4: regs.fp
+// r5: start
+// r6: vmFirstAR()
+// r7: rds::tl_base
+// r8: stashedAR
+ETCH_SECTION(enterTCHelper)
+.globl ETCH_NAME(enterTCHelper)
+ETCH_NAME(enterTCHelper):
+  // Prologue
+  mflr %r0
+  std %r0, 16(%r1)    // LR on parent call frame
+  stdu %r1, -176(%r1) // aligned with Epilogue: addi %r1, %r1, 176
+
+  // Save non-volatile registers in order to restore it on Epilogue
+  std %r2, 24(%r1)    // TOC
+  std %r14, 32(%r1)   // local variable #1
+  std %r15, 40(%r1)   // local variable #2
+  std %r16, 48(%r1)   // local variable #3
+  std %r17, 56(%r1)   // local variable #4
+  std %r18, 64(%r1)   // local variable #5
+  std %r19, 72(%r1)   // local variable #6
+  std %r20, 80(%r1)   // local variable #7
+  std %r21, 88(%r1)   // local variable #8
+  std %r22, 96(%r1)   // local variable #9
+  std %r23, 104(%r1)  // local variable #10
+  std %r24, 112(%r1)  // local variable #11
+  std %r25, 120(%r1)  // local variable #12
+  std %r26, 128(%r1)  // local variable #13
+  std %r27, 136(%r1)  // local variable #14
+  std %r28, 144(%r1)  // local variable #15
+  std %r29, 152(%r1)  // local variable #16
+  std %r30, 160(%r1)  // local variable #17
+  std %r31, 168(%r1)  // local variable #18
+
+  mr %r12, %r5        // %r12 is the function linkage
+  mtctr %r12
+  bctrl               // mind the 'l' at the end so that it returns here later
+  b enterTCExit
+ETCH_SIZE(enterTCHelper)
+// ==== enterTCHelper ====
+
+ETCH_SECTION(handleSRHelper)
+.globl ETCH_NAME(handleSRHelper)
+ETCH_NAME(handleSRHelper):
   blr
+ETCH_SIZE(handleSRHelper)
+
+ETCH_SECTION(handleSRResumeTC)
+.globl ETCH_NAME(handleSRResumeTC)
+ETCH_NAME(handleSRResumeTC):
+  blr
+ETCH_SIZE(handleSRResumeTC)
+
+ETCH_SECTION(enterTCServiceReq)
+.globl ETCH_NAME(enterTCServiceReq)
+ETCH_NAME(enterTCServiceReq):
+  blr
+ETCH_SIZE(enterTCServiceReq)
+
+ETCH_SECTION(enterTCExit)
+.globl ETCH_NAME(enterTCExit)
+ETCH_NAME(enterTCExit):
+  // Epilogue
+  // Load non-volatile registers saved on Prologue
+  ld %r2, 24(%r1)     // TOC
+  ld %r14, 32(%r1)    // local variable #1
+  ld %r15, 40(%r1)    // local variable #2
+  ld %r16, 48(%r1)    // local variable #3
+  ld %r17, 56(%r1)    // local variable #4
+  ld %r18, 64(%r1)    // local variable #5
+  ld %r19, 72(%r1)    // local variable #6
+  ld %r20, 80(%r1)    // local variable #7
+  ld %r21, 88(%r1)    // local variable #8
+  ld %r22, 96(%r1)    // local variable #9
+  ld %r23, 104(%r1)   // local variable #10
+  ld %r24, 112(%r1)   // local variable #11
+  ld %r25, 120(%r1)   // local variable #12
+  ld %r26, 128(%r1)   // local variable #13
+  ld %r27, 136(%r1)   // local variable #14
+  ld %r28, 144(%r1)   // local variable #15
+  ld %r29, 152(%r1)   // local variable #16
+  ld %r30, 160(%r1)   // local variable #17
+  ld %r31, 168(%r1)   // local variable #18
+
+  addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
+  ld %r0, 16(%r1)
+  mtlr %r0
+  blr
+ETCH_SIZE(enterTCExit)
+
 
 
 #endif

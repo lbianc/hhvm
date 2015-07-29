@@ -23,8 +23,11 @@
 #include "hphp/runtime/base/thread-init-fini.h"
 
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/back-end-x64.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
+#include "hphp/runtime/vm/jit/back-end-ppc64.h"
+#include "hphp/runtime/vm/jit/code-gen-ppc64.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/llvm-locrecs.h"
 #include "hphp/runtime/vm/jit/llvm-stack-maps.h"

@@ -20,6 +20,7 @@
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/vm/jit/abi-arm.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/punt.h"

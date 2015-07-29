@@ -16,69 +16,113 @@
 
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 
+#include <boost/implicit_cast.hpp>
+#include <sstream>
+
+#include "hphp/util/abi-cxx.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/util/disasm.h"
+
+#include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
+#include "hphp/runtime/vm/jit/back-end-ppc64.h"
+#include "hphp/runtime/vm/jit/code-gen-cf.h"
+#include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
+#include "hphp/runtime/vm/jit/mc-generator-internal.h"
+#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/runtime.h"
+
+#pragma GCC diagnostic ignored "-Wreturn-type"
+
 namespace HPHP { namespace jit { namespace ppc64 {
+
+//////////////////////////////////////////////////////////////////////
+
+using namespace jit::reg;
+using boost::implicit_cast;
+
+TRACE_SET_MOD(ustubs);
+
+//////////////////////////////////////////////////////////////////////
 
 namespace {
 
-//TODO(IBM): Needs to implement all emit stubs here
-void emitCallToExit(UniqueStubs& us) {
-  not_implemented();
+TCA emitRetFromInterpretedFrame() {}
+
+TCA emitRetFromInterpretedGeneratorFrame() {}
+
+TCA emitDebuggerRetFromInterpretedFrame() {}
+
+TCA emitDebuggerRetFromInterpretedGenFrame() {}
+
+//////////////////////////////////////////////////////////////////////
+
+extern "C" void enterTCExit();
+
+void emitCallToExit(UniqueStubs& uniqueStubs) {}
+
+void emitReturnHelpers(UniqueStubs& us) {}
+
+void emitResumeInterpHelpers(UniqueStubs& uniqueStubs) {}
+
+void emitThrowSwitchMode(UniqueStubs& uniqueStubs) {}
+
+void emitCatchHelper(UniqueStubs& uniqueStubs) {}
+
+void emitStackOverflowHelper(UniqueStubs& uniqueStubs) {}
+
+void emitFreeLocalsHelpers(UniqueStubs& uniqueStubs) {}
+
+void emitDecRefHelper(UniqueStubs& us) {}
+
+void emitFuncPrologueRedispatch(UniqueStubs& uniqueStubs) {}
+
+void emitFCallArrayHelper(UniqueStubs& uniqueStubs) {}
+
+//////////////////////////////////////////////////////////////////////
+
+void emitFCallHelperThunk(UniqueStubs& uniqueStubs) {}
+
+//TODO PPC64 start here
+void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
+	  TCA (*helper)(ActRec*) = &funcBodyHelper;
+	  Asm a { mcg->code.main() };
+
+	  moveToAlign(mcg->code.main());
+	  uniqueStubs.funcBodyHelperThunk = a.frontier();
+
+	  // This helper is called via a direct jump from the TC (from
+	  // fcallArrayHelper). So the stack parity is already correct.
+	  a.    or_(rVmSp, argNumToRegName[0], argNumToRegName[0], false);
+//	  a.    movq   (rVmFp, argNumToRegName[0]);
+//	  emitCall(a, CppCall::direct(helper), argSet(1));
+//	  a.    jmp    (rax);
+//	  a.    ud2    ();
+
+	  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
 }
 
-void emitReturnHelpers(UniqueStubs& us) {
-  not_implemented();
+void emitFunctionEnterHelper(UniqueStubs& uniqueStubs) {}
+
+void emitBindCallStubs(UniqueStubs& uniqueStubs) {}
+
 }
-
-void emitResumeHelpers(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitStackOverflowHelper(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFreeLocalsHelpers(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFuncPrologueRedispatch(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFCallArrayHelper(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFCallHelperThunk(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFuncBodyHelperThunk(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitFunctionEnterHelper(UniqueStubs& us) {
-  not_implemented();
-}
-
-void emitBindCallStubs(UniqueStubs& uniqueStubs) {
-  not_implemented();
-}
-
-} // anonymous namespace
-
 
 //////////////////////////////////////////////////////////////////////
 
 UniqueStubs emitUniqueStubs() {
   UniqueStubs us;
-  //TODO(IBM): 
-  auto functions {    
+  auto functions = {
     emitCallToExit,
     emitReturnHelpers,
-    emitResumeHelpers,
+    emitResumeInterpHelpers,
+    emitThrowSwitchMode,
+    emitCatchHelper,
     emitStackOverflowHelper,
     emitFreeLocalsHelpers,
+    emitDecRefHelper,
     emitFuncPrologueRedispatch,
     emitFCallArrayHelper,
     emitFCallHelperThunk,
@@ -86,7 +130,6 @@ UniqueStubs emitUniqueStubs() {
     emitFunctionEnterHelper,
     emitBindCallStubs,
   };
-
   for (auto& f : functions) f(us);
   return us;
 }
@@ -94,3 +137,5 @@ UniqueStubs emitUniqueStubs() {
 //////////////////////////////////////////////////////////////////////
 
 }}}
+
+#pragma GCC diagnostic pop

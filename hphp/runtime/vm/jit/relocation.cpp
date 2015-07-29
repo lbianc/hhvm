@@ -290,9 +290,7 @@ void liveRelocate(int time) {
     // Relocation is not supported on arm.
     return;
   case Arch::PPC64:
-    // Relocation is not supported on arm.
-    return;
-
+    break;
   }
 
   if (RuntimeOption::EvalJitLLVM) {

@@ -1,4 +1,3 @@
-
 /*
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
@@ -14,18 +13,19 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-
-#ifdef incl_HPHP_JIT_UNIQUE_STUB_PPC64_H_
+#ifndef incl_HPHP_JIT_UNIQUE_STUB_PPC64_H_
 #define incl_HPHP_JIT_UNIQUE_STUB_PPC64_H_
 
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
+
 //////////////////////////////////////////////////////////////////////
 
 UniqueStubs emitUniqueStubs();
 
 //////////////////////////////////////////////////////////////////////
+
 }}}
 
 #endif

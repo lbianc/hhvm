@@ -19,6 +19,7 @@
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 
@@ -103,6 +104,8 @@ Vauto::~Vauto() {
           finishARM(unit(), areas, vauto_abi, nullptr);
           break;
         case Arch::PPC64:
+          //optimizeX64(unit(), vauto_abi);
+          emitX64(unit(), areas, nullptr);
           break;
       }
       return;

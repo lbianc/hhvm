@@ -4,8 +4,8 @@
  *
  * @author: Rogerio Alves
  *
- * This is a experimental macro assembler for PPC64. 
- * Don't expect to find all instructions here. 
+ * This is a experimental macro assembler for PPC64.
+ * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
  * to consider use Nanojit or LLVM, both of which translate abstract virtual machine
@@ -23,9 +23,13 @@
 
 #include "hphp/util/data-block.h"
 #include "hphp/runtime/vm/jit/types.h"
+
 #include "hphp/ppc64-asm/isa-ppc64.h"
+#include "hphp/util/asm-x64.h"
 
 namespace ppc64_asm {
+
+using HPHP::jit::Reg64;
 
 enum class RegisterType {
     kInvalid = 0,
@@ -45,137 +49,117 @@ enum class RegisterType {
     kSignalProcessingEmbeddedFPStatusRegister,
 };
 
-class MemRef; // Forward class declaration
+enum class RegNumber : uint32_t {};
 
-/**
- * This is a Simple Register class. This is based on
- * X64 assembler
- */
-class SimpleRegister {
-public:
-  explicit constexpr SimpleRegister(int rn) : rn_(rn), type_(RegisterType::kInvalid){}
-   explicit constexpr SimpleRegister(int rn, RegisterType type) : rn_(rn), type_(type){}
-   explicit constexpr operator int() const { return rn_; }
+namespace reg {
+  constexpr Reg64 r0(0);    /* volatile, used in function prologue / linkage */
+  constexpr Reg64 r1(1);    /* nonvolatile, stack pointer */
+  constexpr Reg64 r2(2);    /* nonvolatile, TOC */
+  /* volatile, argument passing registers */
+  constexpr Reg64 r3(3);
+  constexpr Reg64 r4(4);
+  constexpr Reg64 r5(5);
+  constexpr Reg64 r6(6);
+  constexpr Reg64 r7(7);
+  constexpr Reg64 r8(8);
+  constexpr Reg64 r9(9);
+  constexpr Reg64 r10(10);
 
-   MemRef operator[](intptr_t disp) const;
-   MemRef operator[](SimpleRegister) const;
+  constexpr Reg64 r11(11);  /* volatile, environment pointer */
+  constexpr Reg64 r12(12);  /* volatile, function entry address */
+  constexpr Reg64 r13(13);  /* reserved, thread pointer */
+  /* nonvolatile, local variables */
+  constexpr Reg64 r14(14);
+  constexpr Reg64 r15(15);
+  constexpr Reg64 r16(16);
+  constexpr Reg64 r17(17);
+  constexpr Reg64 r18(18);
+  constexpr Reg64 r19(19);
+  constexpr Reg64 r20(20);
+  constexpr Reg64 r21(21);
+  constexpr Reg64 r22(22);
+  constexpr Reg64 r23(23);
+  constexpr Reg64 r24(24);
+  constexpr Reg64 r25(25);
+  constexpr Reg64 r26(26);
+  constexpr Reg64 r27(27);
+  constexpr Reg64 r28(28);
+  constexpr Reg64 r29(29);
+  constexpr Reg64 r30(30);
+  constexpr Reg64 r31(31);
 
-   constexpr bool operator==(SimpleRegister reg) const { return rn_ == reg.rn_ && type_ == reg.type_; }
-   constexpr bool operator!=(SimpleRegister reg) const { return rn_ != reg.rn_ || type_ != reg.type_; }
+  constexpr Reg64 f0(0);   /* volatile scratch register */
+  /* volatile, argument passing floating point registers */
+  constexpr Reg64 f1(1);
+  constexpr Reg64 f2(2);
+  constexpr Reg64 f3(3);
+  constexpr Reg64 f4(4);
+  constexpr Reg64 f5(5);
+  constexpr Reg64 f6(6);
+  constexpr Reg64 f7(7);
+  constexpr Reg64 f8(8);
+  constexpr Reg64 f9(9);
+  constexpr Reg64 f10(10);
+  constexpr Reg64 f11(11);
+  constexpr Reg64 f12(12);
+  constexpr Reg64 f13(13);
+  /* nonvolatile, local variables */
+  constexpr Reg64 f14(14);
+  constexpr Reg64 f15(15);
+  constexpr Reg64 f16(16);
+  constexpr Reg64 f17(17);
+  constexpr Reg64 f18(18);
+  constexpr Reg64 f19(19);
+  constexpr Reg64 f20(20);
+  constexpr Reg64 f21(21);
+  constexpr Reg64 f22(22);
+  constexpr Reg64 f23(23);
+  constexpr Reg64 f24(24);
+  constexpr Reg64 f25(25);
+  constexpr Reg64 f26(26);
+  constexpr Reg64 f27(27);
+  constexpr Reg64 f28(28);
+  constexpr Reg64 f29(29);
+  constexpr Reg64 f30(30);
+  constexpr Reg64 f31(31);
 
-private:
-   int rn_;
-   RegisterType type_;
-};
-
-typedef SimpleRegister Reg64;
-enum class RegNumber : int {};
-
-/**
-* This class is used to represent address modes to load/store instructions
-*/
-
-/*
-  The PowerPC architecture supports the following simple addressing modes for memory
-access instructions: 
-•    EA = (RA|0) (register indirect) (D-Form)
-•    EA = (RA|0) + immediate(register indirect with immediate index) (D-Form/DS-Form/DQ-Form)
-•    EA = (RA|0) + RB (register indirect with index) (X-Form)
-     For Branch instructions:
-•    EA = immediate (absolute) (I-Form)
-•    EA = PC + immediate (relative) (I-Form ?)
-•    EA = EA - LR/CR (B-Form)
-*/
-
-/*
- This is Displacement Register Address mode or DForm address mode.
- This class will overload the operators () and [] to allow use the register 
- like pointers
-*/
-class DFormAddressMode {
-
-};
-
-struct XFormAddressMode {
-
-};
-
-class MemRef {
-
-};
-
-// inline MemoryRef SimpleRegister::operator[](const ptrdiff_t offset) const {
-//   return MemoryRef { *this, offset };
-// }
-
-// inline MemoryRef SimpleRegister::operator[](const SimpleRegister& offset) const {
-//   return MemoryRef { *this, offset };
-// }
-
-
-namespace regs {
-namespace gpr {
-  constexpr Reg64 r0(0, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r1(1, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r2(2, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r3(3, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r4(4, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r5(5, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r6(6, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r7(7, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r8(8, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r9(9, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r10(10, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r11(11, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r12(12, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r13(13, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r14(14, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r15(15, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r16(16, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r17(17, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r18(18, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r19(19, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r20(20, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r21(21, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r22(22, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r23(23, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r24(24, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r25(25, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r26(26, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r27(27, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r28(28, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r29(29, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r30(30, RegisterType::kGeneralPurpouseRegister);
-  constexpr Reg64 r31(31, RegisterType::kGeneralPurpouseRegister);
-} //namespace gpr
-  constexpr Reg64 lr(0, RegisterType::kLinkRegister);
-  constexpr Reg64 ctr(0, RegisterType::kCountRegister);
-  //TODO(IBM) Check if we need to maintain onde CR register or 7/4 bits cr bank
-  constexpr Reg64 cr0(0, RegisterType::kConditionRegister);
-  constexpr Reg64 cr1(1, RegisterType::kConditionRegister);
-  constexpr Reg64 cr2(2, RegisterType::kConditionRegister);
-  constexpr Reg64 cr3(3, RegisterType::kConditionRegister);
-  constexpr Reg64 cr4(4, RegisterType::kConditionRegister);
-  constexpr Reg64 cr5(5, RegisterType::kConditionRegister);
-  constexpr Reg64 cr6(6, RegisterType::kConditionRegister);
-  constexpr Reg64 cr7(7, RegisterType::kConditionRegister);
-  /*
-    Register names this is based on X64 assembler implementation
-  */
-  using namespace gpr;
-
-  #define RName(x) if (r == x) return "%"#x
-  inline const char* rname(Reg64& r) {
-    RName(r0);  RName(r1);  RName(r2);  RName(r3);  RName(r4);  RName(r5);  RName(r6);  RName(r7);  RName(r8); 
-    RName(r9);  RName(r10); RName(r11); RName(r12); RName(r13); RName(r14); RName(r15); RName(r16); RName(r17); 
-    RName(r18); RName(r19); RName(r20); RName(r21); RName(r22); RName(r23); RName(r24); RName(r25); RName(r26); 
-    RName(r27); RName(r29); RName(r30); RName(r31); RName(lr); RName(ctr); RName(cr0); RName(cr1); RName(cr2);
-    RName(cr3); RName(cr4); RName(cr5); RName(cr6); RName(cr7);
-    return nullptr;
-  }
-  #undef RName
-
-} //namespace regs
+  /* volatile, local variables */
+  constexpr Reg64 v0(0);
+  constexpr Reg64 v1(1);
+  /* volatile, argument passing vector registers */
+  constexpr Reg64 v2(2);
+  constexpr Reg64 v3(3);
+  constexpr Reg64 v4(4);
+  constexpr Reg64 v5(5);
+  constexpr Reg64 v6(6);
+  constexpr Reg64 v7(7);
+  constexpr Reg64 v8(8);
+  constexpr Reg64 v9(9);
+  constexpr Reg64 v10(10);
+  constexpr Reg64 v11(11);
+  constexpr Reg64 v12(12);
+  constexpr Reg64 v13(13);
+  /* volatile, local variables */
+  constexpr Reg64 v14(14);
+  constexpr Reg64 v15(15);
+  constexpr Reg64 v16(16);
+  constexpr Reg64 v17(17);
+  constexpr Reg64 v18(18);
+  constexpr Reg64 v19(19);
+  /* nonvolatile, local variables */
+  constexpr Reg64 v20(20);
+  constexpr Reg64 v21(21);
+  constexpr Reg64 v22(22);
+  constexpr Reg64 v23(23);
+  constexpr Reg64 v24(24);
+  constexpr Reg64 v25(25);
+  constexpr Reg64 v26(26);
+  constexpr Reg64 v27(27);
+  constexpr Reg64 v28(28);
+  constexpr Reg64 v29(29);
+  constexpr Reg64 v30(30);
+  constexpr Reg64 v31(31);
+}
 
 
 /**
@@ -185,7 +169,7 @@ namespace gpr {
 template<typename T>
 class Register {
 public:
-   
+
    constexpr Register() : type_(RegisterType::kInvalid), register_number_(0), data_(0){}
    constexpr Register(unsigned rn): type_(RegisterType::kInvalid), register_number_(rn), data_(0){}
    constexpr Register(unsigned rn, RegisterType type) : type_(type), register_number_(rn), data_(0){}
@@ -196,7 +180,7 @@ public:
    unsigned size() { return sizeof(T); }
 
    T read() { return data_; }
-   void write(T data) { data_ = data; }; 
+   void write(T data) { data_ = data; };
 
 
    ~Register(){}
@@ -329,11 +313,11 @@ public:
      assert(capacity() >= used());
      return nBytes < (capacity() - used());
    }
-   
+
   /*
-    TODO(IBM): Must create a macro for these similar instructions. 
+    TODO(IBM): Must create a macro for these similar instructions.
                This will make code more clean.
-    
+
     #define CC_ARITH_REG_OP(name, opcode, x_opcode)
     void name##c
     void name##co
@@ -403,15 +387,15 @@ public:
   void divdo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void divdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void divduo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
-  void divw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divweuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc); 
-  void eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc); 
+  void divw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divweuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
+  void eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
   void extsb(const Reg64& ra, const Reg64& rs, bool rc);
   void extsh(const Reg64& ra, const Reg64& rs, bool rc);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc);
@@ -514,7 +498,7 @@ public:
   void subfc(const Reg64& rt, const Reg64& ra, const Reg64& rb,  bool rc);
   void subfco(const Reg64& rt, const Reg64& ra, const Reg64& rb,  bool rc);
   void subfe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
-  void subfeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);   
+  void subfeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void subfic(const Reg64& rt, const Reg64& ra,  uint16_t imm);
   void subfme(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void subfmeo(const Reg64& rt,  const Reg64& ra, const Reg64& rb, bool rc);
@@ -943,7 +927,7 @@ public:
   void lfsu() {}
   void lfsux() {}
   void lfsx() {}
-  void lharx() {}   
+  void lharx() {}
   void lvebx() {}
   void lvehx() {}
   void lvepx() {}
@@ -1557,15 +1541,15 @@ protected:
   // type instruction emitters
   // TODO(IBM): try remove cast for uint32_t
   // TODO(IBM): make those functions inline
-  void EmitXOForm(const uint8_t op, 
-                  const RegNumber rt, 
-                  const RegNumber ra, 
+  void EmitXOForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
                   const RegNumber rb,
                   const bool oe,
                   const uint16_t xop,
                   const bool rc = 0) {
 
-    XO_form_t xo_formater { 
+    XO_form_t xo_formater {
                             rc,
                             xop,
                             oe,
@@ -1578,12 +1562,12 @@ protected:
     dword(xo_formater.instruction);
   }
 
-  void EmitDForm(const uint8_t op, 
-                 const RegNumber rt, 
+  void EmitDForm(const uint8_t op,
+                 const RegNumber rt,
                  const RegNumber ra,
                  const uint16_t imm) {
 
-    D_form_t d_formater { 
+    D_form_t d_formater {
                           imm,
                           static_cast<uint32_t>(ra),
                           static_cast<uint32_t>(rt),
@@ -1593,12 +1577,12 @@ protected:
     dword(d_formater.instruction);
   }
 
-  void EmitIForm(const uint8_t op, 
+  void EmitIForm(const uint8_t op,
                  const uint32_t imm,
                  const bool aa = 0,
                  const bool lk = 0) {
 
-      I_form_t i_formater { 
+      I_form_t i_formater {
                             lk,
                             aa,
                             imm,
@@ -1608,10 +1592,10 @@ protected:
       dword(i_formater.instruction);
   }
 
-   void EmitBForm(const uint8_t op, 
-                  const uint8_t bo, 
-                  const uint8_t bi, 
-                  const uint16_t bd, 
+   void EmitBForm(const uint8_t op,
+                  const uint8_t bo,
+                  const uint8_t bi,
+                  const uint16_t bd,
                   const bool aa = 0,
                   const bool lk = 0) {
       B_form_t b_formater {
@@ -1625,8 +1609,8 @@ protected:
 
        dword(b_formater.instruction);
    }
-   
-   void EmitSCForm(const uint8_t op, 
+
+   void EmitSCForm(const uint8_t op,
                    const uint16_t lev) {
       SC_form_t sc_formater {
                               1,
@@ -1637,10 +1621,10 @@ protected:
       dword(sc_formater.instruction);
    }
 
-   void EmitXForm(const uint8_t op, 
-                  const RegNumber rt, 
-                  const RegNumber ra, 
-                  const RegNumber rb, 
+   void EmitXForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
+                  const RegNumber rb,
                   const uint16_t xop,
                   const bool rc = 0){
 
@@ -1656,8 +1640,8 @@ protected:
       dword(x_formater.instruction);
    }
 
-   void EmitDSForm(const uint8_t op, 
-                   const RegNumber rt, 
+   void EmitDSForm(const uint8_t op,
+                   const RegNumber rt,
                    const RegNumber ra,
                    const uint16_t imm,
                    const uint16_t xop) {
@@ -1673,8 +1657,8 @@ protected:
       dword(ds_formater.instruction);
    }
 
-   void EmitDQForm(const uint8_t op, 
-                   const RegNumber rtp, 
+   void EmitDQForm(const uint8_t op,
+                   const RegNumber rtp,
                    const RegNumber ra,
                    uint16_t imm){
 
@@ -1691,9 +1675,9 @@ protected:
 
 
    void EmitXLForm(const uint8_t op,
-                   const uint8_t bt, 
-                   const uint8_t ba, 
-                   const uint8_t bb, 
+                   const uint8_t bt,
+                   const uint8_t ba,
+                   const uint8_t bb,
                    const uint16_t xop,
                    const bool lk = 0) {
 
@@ -1730,7 +1714,7 @@ protected:
       dword(a_formater.instruction);
    }
 
-   void EmitMForm(const uint8_t op, 
+   void EmitMForm(const uint8_t op,
                   const RegNumber rs,
                   const RegNumber ra,
                   const RegNumber rb,
@@ -1751,7 +1735,7 @@ protected:
       dword(m_formater.instruction);
    }
 
-   void EmitMDForm(const uint8_t op, 
+   void EmitMDForm(const uint8_t op,
                    const RegNumber rs,
                    const RegNumber ra,
                    const uint8_t Sh,
@@ -1774,7 +1758,7 @@ protected:
       dword(md_formater.instruction);
    }
 
-   void EmitMDSForm(const uint8_t op, 
+   void EmitMDSForm(const uint8_t op,
                     const RegNumber rs,
                     const RegNumber ra,
                     const RegNumber rb,
@@ -1831,8 +1815,12 @@ private:
 
   HPHP::CodeBlock& codeBlock;
 
-  RegNumber rn(Reg64 r)  { return RegNumber(int(r)); }
-  RegNumber rn(int n) {  return RegNumber(int(n)); }
+  RegNumber rn(Reg64 r) {
+    return RegNumber(int(r));
+  }
+  RegNumber rn(int n) {
+    return RegNumber(int(n));
+  }
 
 };
 
