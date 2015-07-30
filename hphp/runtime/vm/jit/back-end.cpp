@@ -28,16 +28,19 @@
 namespace HPHP { namespace jit {
 
 std::unique_ptr<BackEnd> newBackEnd() {
-#if defined(__powerpc64__)
-  return ppc64::newBackEnd();
-#else
+
   switch (arch()) {
   case Arch::X64:
     return x64::newBackEnd();
   case Arch::ARM:
     return arm::newBackEnd();
+  case Arch::PPC64: 
+    {
+    #if defined(__powerpc64__)
+    return ppc64::newBackEnd();
+    #endif
+    }
   }
-#endif
   not_reached();
 }
 
