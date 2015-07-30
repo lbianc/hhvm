@@ -18,12 +18,9 @@
 
 #include "hphp/runtime/base/arch.h"
 
-#if defined(__powerpc64__)
 #include "hphp/runtime/vm/jit/back-end-ppc64.h"
-#else
 #include "hphp/runtime/vm/jit/back-end-x64.h"
 #include "hphp/runtime/vm/jit/back-end-arm.h"
-#endif
 
 namespace HPHP { namespace jit {
 
@@ -35,11 +32,7 @@ std::unique_ptr<BackEnd> newBackEnd() {
   case Arch::ARM:
     return arm::newBackEnd();
   case Arch::PPC64:
-    {
-    #if defined(__powerpc64__)
     return ppc64::newBackEnd();
-    #endif
-    }
   }
   not_reached();
 }
