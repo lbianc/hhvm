@@ -18,7 +18,7 @@
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/runtime/base/arch.h"
-#include "hphp/runtime/vm/jit/code-gen-ppc64.h"
+#include "hphp/runtime/vm/jit/code-gen-x64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/types.h"
 

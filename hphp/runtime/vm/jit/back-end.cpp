@@ -34,7 +34,7 @@ std::unique_ptr<BackEnd> newBackEnd() {
     return x64::newBackEnd();
   case Arch::ARM:
     return arm::newBackEnd();
-  case Arch::PPC64: 
+  case Arch::PPC64:
     {
     #if defined(__powerpc64__)
     return ppc64::newBackEnd();

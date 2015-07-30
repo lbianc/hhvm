@@ -21,7 +21,6 @@
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/jit/back-end.h"
-#include "hphp/runtime/vm/jit/code-gen-ppc64.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/mc-generator-internal.h"
