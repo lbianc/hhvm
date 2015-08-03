@@ -52,6 +52,12 @@ constexpr PhysReg rVmToc     = ppc64_asm::reg::r2;
 constexpr PhysReg rVmSp      = ppc64_asm::reg::r1;
 
 /*
+ * RDS base pointer.  Always points to the base of the RDS block for
+ * the current request.
+ */
+constexpr PhysReg rVmTl      = ppc64_asm::reg::r14;
+
+/*
  * scratch register
  */
 constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::f0;
@@ -82,7 +88,7 @@ const RegSet kGPCalleeSaved =
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13);
+const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13) | rVmTl;
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
@@ -127,7 +133,7 @@ const RegSet kSF = RegSet(RegSF{0});
  * Registers that are live between tracelets, in two flavors, depending whether
  * we are between tracelets in a resumed function.
  */
-const RegSet kCrossTraceRegs        = RegSet(rVmToc);
+const RegSet kCrossTraceRegs        = RegSet(rVmToc) | rVmTl;
 const RegSet kCrossTraceRegsResumed = kCrossTraceRegs | rVmSp;
 
 /*
