@@ -351,7 +351,7 @@ public:
   void andis(const Reg64& rs, const Reg64& ra, uint16_t imm);
   void b(uint32_t target_addr);
   void ba(uint32_t target_addr);
-  void bl(uint32_t target_addr);
+  void bl(HPHP::CodeAddress target_addr);
   void bla(uint32_t target_addr);
   void bc(uint8_t bo, uint8_t bi, uint16_t target_addr);
   void bca(uint8_t bo, uint8_t bi, uint16_t target_addr);

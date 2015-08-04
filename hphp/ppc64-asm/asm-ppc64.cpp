@@ -93,8 +93,9 @@ void Assembler::ba(uint32_t target_addr) {
     EmitIForm(18, target_addr, 1, 0);
 }
 
-void Assembler::bl(uint32_t target_addr) {
-    EmitIForm(18, target_addr, 0, 1);
+void Assembler::bl(HPHP::CodeAddress target_addr) {
+    //TODO(IBM): target_address need to be zero extend 0b00
+    EmitIForm(18, size_t(target_addr), 0, 1);
 }
 
 void Assembler::bla(uint32_t target_addr) {

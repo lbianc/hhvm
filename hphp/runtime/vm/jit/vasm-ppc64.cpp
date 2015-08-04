@@ -111,7 +111,7 @@ struct Vgen {
   void emit(addqi i) { not_implemented(); }
   void emit(const addqim& i) { not_implemented(); }
   void emit(addsd i) { not_implemented(); }
-  void emit(const call& i) { not_implemented(); }
+  void emit(const call& i) { a->bl(i.target); }
   void emit(const callm& i) { not_implemented(); }
   void emit(const callr& i) { not_implemented(); }
   void emit(const cloadq& i) { not_implemented(); }
