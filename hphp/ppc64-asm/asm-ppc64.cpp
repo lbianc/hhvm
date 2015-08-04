@@ -37,8 +37,8 @@ void Assembler::addeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc
     EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 138, rc);
 }
 
-void Assembler::addi(const Reg64& rt, const Reg64& ra, uint16_t imm) {
-    EmitDForm(14, rn(rt), rn(ra), imm);
+void Assembler::addi(const Reg64& rt, const Reg64& ra, Immed imm) {
+    EmitDForm(14, rn(rt), rn(ra), imm.w());
 }
 
 void Assembler::addic(const Reg64& rt, const Reg64& ra, uint16_t imm, bool rc) {
@@ -77,8 +77,8 @@ void Assembler::andc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc)
     EmitXForm(31, rn(rs), rn(ra), rn(rb), 60, rc);
 }
 
-void Assembler::andi(const Reg64& rs, const Reg64& ra, uint16_t imm) {
-    EmitDForm(28, rn(rs), rn(ra), imm);
+void Assembler::andi(const Reg64& rs, const Reg64& ra, Immed imm) {
+    EmitDForm(28, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::andis(const Reg64& rs, const Reg64& ra, uint16_t imm) {
@@ -146,12 +146,12 @@ void Assembler::bpermd(const Reg64& rs, const Reg64& ra, const Reg64& rv) {
     EmitXForm(31, rn(rs), rn(ra), rn(0), 252);    
 }
 
-void Assembler::cmp(uint16_t bf, bool l, Reg64& ra, Reg64& rb) {
+void Assembler::cmp(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb) {
     EmitXForm(31, rn((bf+(uint16_t)l) & 0x1d), rn(ra), rn(rb), 0);
 }
 
-void Assembler::cmpi(uint16_t bf, bool l, Reg64& ra, uint16_t imm) {
-    EmitDForm(11, rn((bf+(uint16_t)l) & 0x1d), rn(ra), imm);
+void Assembler::cmpi(uint16_t bf, bool l, const Reg64& ra, Immed imm) {
+    EmitDForm(11, rn((bf+(uint16_t)l) & 0x1d), rn(ra), imm.w());
 }
 
 void Assembler::cmpb(const Reg64& rs, const Reg64& ra, const Reg64& rb) {

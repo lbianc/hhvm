@@ -26,10 +26,12 @@
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/util/asm-x64.h"
+#include "hphp/util/immed.h"
 
 namespace ppc64_asm {
 
 using HPHP::jit::Reg64;
+using HPHP::jit::Immed;
 
 enum class RegisterType {
     kInvalid = 0,
@@ -337,7 +339,7 @@ public:
   void addco(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void adde(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void addeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
-  void addi(const Reg64& rt, const Reg64& ra, uint16_t imm);
+  void addi(const Reg64& rt, const Reg64& ra, Immed imm);
   void addic(const Reg64& rt, const Reg64& ra, uint16_t imm, bool rc);
   void addis(const Reg64& rt, const Reg64& ra, uint16_t imm);
   void addme(const Reg64& rt, const Reg64& ra, bool rc);
@@ -347,7 +349,7 @@ public:
   void addzeo(const Reg64& rt, const Reg64& ra, bool rc);
   void and_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
   void andc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
-  void andi(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void andi(const Reg64& rs, const Reg64& ra, Immed imm);
   void andis(const Reg64& rs, const Reg64& ra, uint16_t imm);
   void b(uint32_t target_addr);
   void ba(uint32_t target_addr);
@@ -364,8 +366,8 @@ public:
   void bctar(uint8_t bo, uint8_t bi, uint16_t bh);
   void bctarl(uint8_t bo, uint8_t bi, uint16_t bh);
   void bpermd(const Reg64& rs, const Reg64& ra, const Reg64& rv);
-  void cmp(uint16_t bf, bool l, Reg64& ra, Reg64& rb);
-  void cmpi(uint16_t bf, bool l, Reg64& ra, uint16_t imm);
+  void cmp(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb);
+  void cmpi(uint16_t bf, bool l, const Reg64& ra, Immed imm);
   void cmpb(const Reg64& rs, const Reg64& ra, const Reg64& rb);
   void cmpl(uint16_t bf, bool l, Reg64& ra, Reg64& rb);
   void cmpli(uint16_t bf, bool l, Reg64& ra, uint16_t imm);
@@ -1565,10 +1567,10 @@ protected:
   void EmitDForm(const uint8_t op,
                  const RegNumber rt,
                  const RegNumber ra,
-                 const uint16_t imm) {
+                 const int16_t imm) {
 
     D_form_t d_formater {
-                          imm,
+                          static_cast<uint32_t>(imm),
                           static_cast<uint32_t>(ra),
                           static_cast<uint32_t>(rt),
                           op

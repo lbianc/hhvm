@@ -98,19 +98,19 @@ struct Vgen {
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
+  void emit(addli i) { not_implemented(); }
+  void emit(const addlm& i) { not_implemented(); }
+  void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
+  void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
+  void emit(const addqim& i) { not_implemented(); }
+  void emit(addsd i) { not_implemented(); }
   void emit(andb i) { not_implemented(); }
   void emit(andbi i) { not_implemented(); }
   void emit(const andbim& i) { not_implemented(); }
   void emit(andl i) { not_implemented(); }
   void emit(andli i) { not_implemented(); }
-  void emit(andq i) { not_implemented(); }
-  void emit(andqi i) { not_implemented(); }
-  void emit(addli i) { not_implemented(); }
-  void emit(const addlm& i) { not_implemented(); }
-  void emit(addq i) { not_implemented(); }
-  void emit(addqi i) { not_implemented(); }
-  void emit(const addqim& i) { not_implemented(); }
-  void emit(addsd i) { not_implemented(); }
+  void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
+  void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
   void emit(const call& i) { a->bl(i.target); }
   void emit(const callm& i) { not_implemented(); }
   void emit(const callr& i) { not_implemented(); }
@@ -123,8 +123,8 @@ struct Vgen {
   void emit(const cmpli& i) { not_implemented(); }
   void emit(const cmplim& i) { not_implemented(); }
   void emit(const cmplm& i) { not_implemented(); }
-  void emit(const cmpq& i) { not_implemented(); }
-  void emit(const cmpqi& i) { not_implemented(); }
+  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); } //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
+  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
   void emit(const cmpqim& i) { not_implemented(); }
   void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
@@ -203,7 +203,7 @@ struct Vgen {
   void emit(subbi i) { not_implemented(); }
   void emit(subl i) { not_implemented(); }
   void emit(subli i) { not_implemented(); }
-  void emit(subq i) { not_implemented(); }
+  void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { not_implemented(); }
   void emit(subsd i) { not_implemented(); }
   void emit(const testb& i) { not_implemented(); }
