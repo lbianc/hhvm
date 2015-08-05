@@ -448,7 +448,7 @@ public:
   void nor(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
   void or_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
   void orc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
-  void ori(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void ori(const Reg64& rs, const Reg64& ra, Immed imm);
   void oris(const Reg64& rs, const Reg64& ra, uint16_t imm);
   void popcntb(const Reg64& ra, const Reg64& rs);
   void popcntd(const Reg64& ra, const Reg64& rs);
@@ -511,7 +511,7 @@ public:
   void tw(uint16_t to, const Reg64& ra, const Reg64& rb);
   void twi(uint16_t to, const Reg64& ra, uint16_t imm);
   void xor_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc);
-  void xori(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void xori(const Reg64& rs, const Reg64& ra, Immed imm);
   void xoris(const Reg64& rs, const Reg64& ra, uint16_t imm);
 
   //Unimplemented Instructions

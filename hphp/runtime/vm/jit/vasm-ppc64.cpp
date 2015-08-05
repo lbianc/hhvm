@@ -123,8 +123,8 @@ struct Vgen {
   void emit(const cmpli& i) { not_implemented(); }
   void emit(const cmplim& i) { not_implemented(); }
   void emit(const cmplm& i) { not_implemented(); }
-  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); } //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
-  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
+  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
+  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); } //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
   void emit(const cmpqim& i) { not_implemented(); }
   void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
@@ -167,13 +167,13 @@ struct Vgen {
   void emit(const movzbl& i) { not_implemented(); }
   void emit(const movzbq& i) { not_implemented(); }
   void emit(mulsd i) { not_implemented(); }
-  void emit(neg i) { not_implemented(); }
-  void emit(const nop& i) { not_implemented(); }
-  void emit(not i) { not_implemented(); }
+  void emit(neg i) { a->neg(i.d, i.s, false); }
+  void emit(const nop& i) { /*a->ori(0,0,0)*/; }
+  void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
   void emit(const orwim& i) { not_implemented(); }
-  void emit(orq i) { not_implemented(); }
-  void emit(orqi i) { not_implemented(); }
+  void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
+  void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
   void emit(const orqim& i) { not_implemented(); }
   void emit(const pop& i) { not_implemented(); }
   void emit(const popm& i) { not_implemented(); }
@@ -222,8 +222,8 @@ struct Vgen {
   void emit(xorb i) { not_implemented(); }
   void emit(xorbi i) { not_implemented(); }
   void emit(xorl i) { not_implemented(); }
-  void emit(xorq i) { not_implemented(); }
-  void emit(xorqi i) { not_implemented(); }
+  void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
+  void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
 
   CodeAddress start(Vlabel b) {
     auto area = unit.blocks[b].area;

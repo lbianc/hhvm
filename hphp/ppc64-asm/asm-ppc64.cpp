@@ -475,8 +475,8 @@ void Assembler::orc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc) 
     EmitXForm(31, rn(rs), rn(ra), rn(rb), 412, rc);
 }
 
-void Assembler::ori(const Reg64& rs, const Reg64& ra, uint16_t imm) {
-    EmitDForm(24, rn(rs), rn(ra), imm);
+void Assembler::ori(const Reg64& rs, const Reg64& ra, Immed imm) {
+    EmitDForm(24, rn(rs), rn(ra), imm.l());
 }
 
 void Assembler::oris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
@@ -727,8 +727,8 @@ void Assembler::xor_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc)
     EmitXForm(31, rn(rs), rn(ra), rn(rb), 316, rc);
 }
 
-void Assembler::xori(const Reg64& rs, const Reg64& ra, uint16_t imm) {
-    EmitDForm(26, rn(rs), rn(ra), imm);
+void Assembler::xori(const Reg64& rs, const Reg64& ra, Immed imm) {
+    EmitDForm(26, rn(rs), rn(ra), imm.l());
 }
 
 void Assembler::xoris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
