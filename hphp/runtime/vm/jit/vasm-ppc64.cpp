@@ -93,8 +93,8 @@ struct Vgen {
   void emit(const syncpoint& i) { not_implemented(); }
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
-  void emit(const vretm& i) { not_implemented(); }
-  void emit(const vret& i) { not_implemented(); }
+  void emit(const vretm& i);
+  void emit(const vret& i);
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
@@ -135,14 +135,14 @@ struct Vgen {
   void emit(const cvtsi2sdm& i) { not_implemented(); }
   void emit(decl i) { not_implemented(); }
   void emit(const declm& i) { not_implemented(); }
-  void emit(decq i) { not_implemented(); }
+  void emit(decq i) { a->addi(i.d, i.s, -1); }
   void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
   void emit(imul i) { not_implemented(); }
   void emit(const idiv& i) { not_implemented(); }
   void emit(incl i) { not_implemented(); }
   void emit(const inclm& i) { not_implemented(); }
-  void emit(incq i) { not_implemented(); }
+  void emit(incq i) { a->addi(i.d, i.s, 1); }
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
   void emit(const incwm& i) { not_implemented(); }
@@ -168,20 +168,20 @@ struct Vgen {
   void emit(const movzbq& i) { not_implemented(); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
-  void emit(const nop& i) { /*a->ori(0,0,0)*/; }
+  void emit(const nop& i) { a->ori((Reg64)0,(Reg64)0, 0); } //no-op preffered form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
   void emit(const orwim& i) { not_implemented(); }
   void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
   void emit(const orqim& i) { not_implemented(); }
-  void emit(const pop& i) { not_implemented(); }
+  void emit(const pop& i);
   void emit(const popm& i) { not_implemented(); }
   void emit(psllq i) { not_implemented(); }
   void emit(psrlq i) { not_implemented(); }
-  void emit(const push& i) { not_implemented(); }
+  void emit(const push& i);
   void emit(const roundsd& i) { not_implemented(); }
-  void emit(const ret& i) { not_implemented(); }
+  void emit(const ret& i) { a->bclr(20,0,0); /*brl 0x4e800020*/}
   void emit(const sarq& i) { not_implemented(); }
   void emit(sarqi i) { not_implemented(); }
   void emit(const setcc& i) { not_implemented(); }
@@ -204,7 +204,7 @@ struct Vgen {
   void emit(subl i) { not_implemented(); }
   void emit(subli i) { not_implemented(); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
-  void emit(subqi i) { not_implemented(); }
+  void emit(subqi i) { a->andi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { not_implemented(); }
   void emit(const testb& i) { not_implemented(); }
   void emit(const testbi& i) { not_implemented(); }
@@ -217,7 +217,7 @@ struct Vgen {
   void emit(const testqm& i) { not_implemented(); }
   void emit(const testqim& i) { not_implemented(); }
   void emit(const ucomisd& i) { not_implemented(); }
-  void emit(const ud2& i) { not_implemented(); }
+  void emit(const ud2& i) { a->unimplemented(); }
   void emit(unpcklpd i) { not_implemented(); }
   void emit(xorb i) { not_implemented(); }
   void emit(xorbi i) { not_implemented(); }
@@ -399,6 +399,34 @@ void Vgen::emit(jit::vector<Vlabel>& labels) {
       }
     }
   }
+}
+
+void Vgen::emit(const pop& i) {
+  not_implemented();
+  //TODO(IBM): Instruction pop. Check if this the best way to do this.
+  //a->lwz r0 0(SP)
+  //a->addi SP, SP +4
+}
+
+void Vgen::emit(const push& i) {
+  not_implemented();
+  //TODO(IBM): Instruction push. Check if this the best way to do this.
+  //a->addi SP, SP -4
+  //a->stw r0 0(SP)
+}
+
+void Vgen::emit(const vretm& i) {
+  not_implemented();
+  //TODO(IBM): Need to be MemoryRef
+  //emit(push{i.retAddr})
+  //a->loadq(i.prevFp, i.d);
+  a->bclr(20,0,0); /*brl 0x4e800020*/
+}
+
+void Vgen::emit(const vret& i) {
+  not_implemented();
+  //TODO(IBM): Need to be MemoryRef
+  a->bclr(20,0,0); /*brl 0x4e800020*/
 }
 
 /*

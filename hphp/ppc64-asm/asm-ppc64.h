@@ -1529,7 +1529,9 @@ public:
   void rotld()          { not_implemented(); }  //Extended
   void insrdi()         { not_implemented(); }  //Extended
   void mtcr()           { not_implemented(); }  //Extended
-
+  
+  //Can be used to generate or force a unimplemented opcode exception
+  void unimplemented();
 
   // Secure high level instruction emitter
   void Emit(PPC64Instr instruction){

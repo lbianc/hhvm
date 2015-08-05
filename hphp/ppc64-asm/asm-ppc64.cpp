@@ -735,4 +735,9 @@ void Assembler::xoris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
     EmitDForm(27, rn(rs), rn(ra), imm);
 }
 
+void Assembler::unimplemented(){
+//Emit a instruction with invalid opcode 0x0
+    EmitDForm(0, rn(0), rn(0), 0);
+}
+
 } // namespace ppc64_asm
