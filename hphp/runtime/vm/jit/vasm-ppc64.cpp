@@ -168,7 +168,7 @@ struct Vgen {
   void emit(const movzbq& i) { not_implemented(); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
-  void emit(const nop& i) { a->ori((Reg64)0,(Reg64)0, 0); } //no-op preffered form
+  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op preffered form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
   void emit(const orwim& i) { not_implemented(); }
@@ -204,7 +204,7 @@ struct Vgen {
   void emit(subl i) { not_implemented(); }
   void emit(subli i) { not_implemented(); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
-  void emit(subqi i) { a->andi(i.s1, i.d, i.s0); /*addi with negative value*/ }
+  void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { not_implemented(); }
   void emit(const testb& i) { not_implemented(); }
   void emit(const testbi& i) { not_implemented(); }
@@ -404,15 +404,15 @@ void Vgen::emit(jit::vector<Vlabel>& labels) {
 void Vgen::emit(const pop& i) {
   not_implemented();
   //TODO(IBM): Instruction pop. Check if this the best way to do this.
-  //a->lwz r0 0(SP)
-  //a->addi SP, SP +4
+  //a->lwz r0 0(rVmSp)
+  //a->addi rVmSp, rVmSp +4
 }
 
 void Vgen::emit(const push& i) {
   not_implemented();
   //TODO(IBM): Instruction push. Check if this the best way to do this.
-  //a->addi SP, SP -4
-  //a->stw r0 0(SP)
+  //a->addi rVmSp, rVmSp -4
+  //a->stw r0 0(rVmSp)
 }
 
 void Vgen::emit(const vretm& i) {
