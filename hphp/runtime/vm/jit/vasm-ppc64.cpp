@@ -159,7 +159,7 @@ struct Vgen {
   void emit(const loadl& i) { not_implemented(); }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
-  void emit(const loadzbl& i) { not_implemented(); }
+  void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} /*TODO(IBM) Chech i.d aka Reg32 to Reg64 conversion*/
   void emit(const loadzbq& i) { not_implemented(); }
   void emit(const loadzlq& i) { not_implemented(); }
   void emit(const movb& i) { not_implemented(); }

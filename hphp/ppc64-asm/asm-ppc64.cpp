@@ -289,8 +289,8 @@ void Assembler::isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint16_t
     EmitAForm(31, rn(rt), rn(ra), rn(rb), bc, 15);
 }
 
-void Assembler::lbz(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-    EmitDForm(34, rn(rt), rn(rb), imm);
+void Assembler::lbz(const Reg64& rt, MemoryRef m) {
+    EmitDForm(34, rn(rt), rn(m.r.base), m.r.disp);
 }
 
 void Assembler::lbzu(const Reg64& rt, const Reg64& rb, uint16_t imm) {

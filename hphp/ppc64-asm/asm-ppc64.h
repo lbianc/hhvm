@@ -31,6 +31,7 @@
 namespace ppc64_asm {
 
 using HPHP::jit::Reg64;
+using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
 
 enum class RegisterType {
@@ -402,7 +403,7 @@ public:
   void extsh(const Reg64& ra, const Reg64& rs, bool rc);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc);
   void isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint16_t bc);
-  void lbz(const Reg64& rt, const Reg64& rb, uint16_t imm);
+  void lbz(const Reg64& rt, MemoryRef m);
   void lbzu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void lbzux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void lbzx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
