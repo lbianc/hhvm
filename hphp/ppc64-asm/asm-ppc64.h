@@ -34,24 +34,6 @@ using HPHP::jit::Reg64;
 using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
 
-enum class RegisterType {
-    kInvalid = 0,
-    kConditionRegister,
-    kLinkRegister,
-    kCountRegister,
-    kGeneralPurpouseRegister,
-    kFixedPointExceptionRegister,
-    kFloatPointStatusControlRegister,
-    kFloatPointRegister,
-    kVectorStatusControlRegister,
-    kVectorRegister,
-    kVectorScalarRegister,
-    kVRSaveRegister,
-    kEmbeddedRegister,
-    kAccumulatorRegister,
-    kSignalProcessingEmbeddedFPStatusRegister,
-};
-
 enum class RegNumber : uint32_t {};
 
 namespace reg {
@@ -163,68 +145,6 @@ namespace reg {
   constexpr Reg64 v30(30);
   constexpr Reg64 v31(31);
 }
-
-
-/**
- * Real register class can hold data. Can be used for debug purpose or for decoding
- * an interpret a instruction
- */
-template<typename T>
-class Register {
-public:
-
-   constexpr Register() : type_(RegisterType::kInvalid), register_number_(0), data_(0){}
-   constexpr Register(unsigned rn): type_(RegisterType::kInvalid), register_number_(rn), data_(0){}
-   constexpr Register(unsigned rn, RegisterType type) : type_(type), register_number_(rn), data_(0){}
-
-   RegisterType type() const { return type_; }
-   unsigned reg_number() const { return register_number_; }
-   bool is_valid() const { return (type_ != RegisterType::kInvalid); }
-   unsigned size() { return sizeof(T); }
-
-   T read() { return data_; }
-   void write(T data) { data_ = data; };
-
-
-   ~Register(){}
-protected:
-   RegisterType type_;
-   unsigned register_number_;
-   T data_;
-};
-
-template<typename T2>
-class RegisterBank {
-public:
-    RegisterBank(unsigned sz) : size_(sz){
-    registers_ = new std::vector<Register<T2>* >(sz);
-   }
-
-   RegisterBank(unsigned sz, RegisterType type) : size_(sz){
-    registers_ = new std::vector<Register<T2>* >(sz);
-    unsigned rn = 0;
-    for (auto& reg : *registers_) {
-        reg = new Register<T2>(rn, type);
-        rn++;
-    }
-   }
-
-   unsigned size() { return size_; }
-
-   ~RegisterBank(){
-      for (auto& reg : *registers_) {
-          delete reg;
-      }
-      delete registers_;
-     registers_ = nullptr;
-   }
-
-private:
-    RegisterBank(); //Disallow default constructor
-    unsigned size_;
-    std::vector<Register<T2>* >* registers_; //TODO(IBM): use smart_ptr
-};
-
 
 /*
  TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
@@ -473,7 +393,7 @@ public:
   void srawi(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
   void srd(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
   void srw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
-  void stb(const Reg64& rt, const Reg64& rb, uint16_t imm);
+  void stb(const Reg64& rt, MemoryRef m);
   void stbu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void stbux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void stbx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
@@ -849,7 +769,7 @@ public:
   void evsubifw()       { not_implemented(); }
   void evxor()          { not_implemented(); }
   void fabs()           { not_implemented(); }
-  void fadd()           { not_implemented(); }
+  void fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb, bool rc);
   void fadds()          { not_implemented(); }
   void fcfid()          { not_implemented(); }
   void fcfids()         { not_implemented(); }

@@ -571,8 +571,8 @@ void Assembler::srw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc) 
     EmitXForm(31, rn(rs), rn(ra), rn(rb), 536, rc);
 }
 
-void Assembler::stb(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-    EmitDForm(38, rn(rt), rn(rb), imm);
+void Assembler::stb(const Reg64& rt, MemoryRef m) {
+    EmitDForm(38, rn(rt), rn(m.r.base), m.r.disp);
 }
 
 void Assembler::stbu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
@@ -733,6 +733,10 @@ void Assembler::xori(const Reg64& rs, const Reg64& ra, Immed imm) {
 
 void Assembler::xoris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
     EmitDForm(27, rn(rs), rn(ra), imm);
+}
+
+void Assembler::fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb, bool rc) {
+    EmitAForm(63, rn(frt), rn(fra), rn(frb), 21, rc);
 }
 
 void Assembler::unimplemented(){

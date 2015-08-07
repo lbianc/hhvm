@@ -123,8 +123,10 @@ struct Vgen {
   void emit(const cmpli& i) { not_implemented(); }
   void emit(const cmplim& i) { not_implemented(); }
   void emit(const cmplm& i) { not_implemented(); }
-  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
-  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); } //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
+  //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
+  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }
+  //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
+  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
   void emit(const cmpqim& i) { not_implemented(); }
   void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
@@ -159,7 +161,8 @@ struct Vgen {
   void emit(const loadl& i) { not_implemented(); }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
-  void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} /*TODO(IBM) Chech i.d aka Reg32 to Reg64 conversion*/
+  /*TODO(IBM) Chech i.d aka Reg32 to Reg64 conversion*/
+  void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} 
   void emit(const loadzbq& i) { not_implemented(); }
   void emit(const loadzlq& i) { not_implemented(); }
   void emit(const movb& i) { not_implemented(); }
@@ -168,7 +171,7 @@ struct Vgen {
   void emit(const movzbq& i) { not_implemented(); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
-  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op preffered form
+  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
   void emit(const orwim& i) { not_implemented(); }
@@ -210,8 +213,9 @@ struct Vgen {
   void emit(const testbi& i) { not_implemented(); }
   void emit(const testbim& i) { not_implemented(); }
   void emit(const testwim& i) { not_implemented(); }
-  void emit(const testl& i) { not_implemented(); }
-  void emit(const testli& i) { not_implemented(); }
+  //TODO(IBM) Depends on CR registers
+  void emit(const testl& i) {  /*a->and_(i.s0, i.s1, false);*/ }
+  void emit(const testli& i) { /*a->addi(i.d, i.s1, i.s0);*/ }
   void emit(const testlim& i) { not_implemented(); }
   void emit(const testq& i) { not_implemented(); }
   void emit(const testqm& i) { not_implemented(); }
@@ -430,8 +434,8 @@ void Vgen::emit(const vret& i) {
 }
 
 /*
- Lower facilitate code generation. In some cases is used because some vasm opcodes
- doesn't have a 1:1 mapping to machine asm code.
+ Lower facilitate code generation. In some cases is used because 
+ some vasm opcodes doesn't have a 1:1 mapping to machine asm code.
 */
 void lowerForX64(Vunit& unit, const Abi& abi) {
   //TODO(IBM) Implement function
