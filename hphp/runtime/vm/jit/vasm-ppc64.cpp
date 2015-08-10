@@ -195,7 +195,7 @@ struct Vgen {
   void emit(shrqi i) { not_implemented(); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
-  void emit(const storeb& i) { not_implemented(); }
+  void emit(const storeb& i) { a->stb(Reg64(i.s), i.m); }
   void emit(const storebi& i) { not_implemented(); }
   void emit(const storel& i) { not_implemented(); }
   void emit(const storeli& i) { not_implemented(); }

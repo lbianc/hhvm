@@ -8,8 +8,8 @@
  * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
- * to consider use Nanojit or LLVM, both of which translate abstract virtual machine
- * instructions to the native target architecture.
+ * to consider use Nanojit or LLVM, both of which translate abstract virtual 
+ * machine instructions to the native target architecture.
  *
  */
 
@@ -168,7 +168,8 @@ private:
 /*
   This is extracted from X64 assembler. For PPC64 we maybe need to 
   implement a TOC as decribed in PPC64 ABI. To futher information see
-  http://physinfo.ulb.ac.be/divers_html/powerpc_programming_info/intro_to_ppc/ppc4_runtime4.html
+  http://physinfo.ulb.ac.be/divers_html/powerpc_programming_info/intro_to_ppc/
+  ppc4_runtime4.html
 */
 
 /*
@@ -179,10 +180,11 @@ private:
  */
 // inline HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr) {
 //   always_assert_flog(false,
-//                      "address {} was not part of any known code block", addr);
+//                     "address {} was not part of any known code block", addr);
 // }
 // template<class... Blocks>
-// HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr, HPHP::CodeBlock& a, Blocks&... as) {
+// HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr, HPHP::CodeBlock& a, 
+// Blocks&... as) {
 //   if (a.contains(addr)) return a;
 //   return codeBlockChoose(addr, as...);
 // }
@@ -376,15 +378,24 @@ public:
   void popcntw(const Reg64& ra, const Reg64& rs);
   void prtyd(const Reg64& ra, const Reg64& rs);
   void prtyw(const Reg64& ra, const Reg64& rs);
-  void rldcl(const Reg64& ra, const Reg64& rs, const Reg64& rb, uint8_t mb, bool rc);
-  void rldcr(const Reg64& ra, const Reg64& rs,  const Reg64& rb, uint8_t mb, bool rc);
-  void rldic(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, bool rc);
-  void rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, bool rc);
-  void rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, bool rc);
-  void rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, bool rc);
-  void rlwimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, uint16_t me, bool rc);
-  void rlwinm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, uint16_t me, bool rc);
-  void rlwnm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, uint16_t me, bool rc);
+  void rldcl(const Reg64& ra, const Reg64& rs, const Reg64& rb, 
+             uint8_t mb, bool rc);
+  void rldcr(const Reg64& ra, const Reg64& rs,  const Reg64& rb, 
+             uint8_t mb, bool rc);
+  void rldic(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+             uint8_t mb, bool rc);
+  void rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+              uint8_t mb, bool rc);
+  void rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+              uint8_t mb, bool rc);
+  void rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+              uint8_t mb, bool rc);
+  void rlwimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+              uint16_t me, bool rc);
+  void rlwinm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+              uint16_t me, bool rc);
+  void rlwnm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+             uint16_t me, bool rc);
   void sc(uint16_t lev);
   void sld(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
   void slw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
@@ -393,7 +404,7 @@ public:
   void srawi(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
   void srd(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
   void srw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc);
-  void stb(const Reg64& rt, MemoryRef m);
+  void stb(const Reg64& rt, MemoryRef m); //TODO(IBM): first parameter is rs
   void stbu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void stbux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void stbx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
