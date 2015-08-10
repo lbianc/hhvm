@@ -154,7 +154,7 @@ struct Vgen {
   void emit(const jmpr& i) { not_implemented(); }
   void emit(const jmpm& i) { not_implemented(); }
   void emit(const jmpi& i) { not_implemented(); }
-  void emit(const lea& i) { not_implemented(); }
+  void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
   void emit(const leap& i) { not_implemented(); }
   void emit(const loadups& i) { not_implemented(); }
   void emit(const loadtqb& i) { not_implemented(); }
@@ -185,14 +185,19 @@ struct Vgen {
   void emit(const push& i);
   void emit(const roundsd& i) { not_implemented(); }
   void emit(const ret& i) { a->bclr(20,0,0); /*brl 0x4e800020*/}
+  /*Immediate-form logical (unsigned) shift operations are
+    obtained by specifying appropriate masks and shift values for 
+    certain Rotate instructions.
+  */
   void emit(const sarq& i) { not_implemented(); }
-  void emit(sarqi i) { not_implemented(); }
+  void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
   void emit(const setcc& i) { not_implemented(); }
   void emit(shlli i) { not_implemented(); }
   void emit(shlq i) { not_implemented(); }
-  void emit(shlqi i) { not_implemented(); }
+  /*TODO Rc=1*/
+  void emit(shlqi i) { a->slw(i.d, i.s1, Reg64(i.s0.w()), false); } 
   void emit(shrli i) { not_implemented(); }
-  void emit(shrqi i) { not_implemented(); }
+  void emit(shrqi i) { a->srw(i.d, i.s1, Reg64(i.s0.w()), false); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
   void emit(const storeb& i) { a->stb(Reg64(i.s), i.m); }
@@ -214,7 +219,7 @@ struct Vgen {
   void emit(const testbim& i) { not_implemented(); }
   void emit(const testwim& i) { not_implemented(); }
   //TODO(IBM) Depends on CR registers
-  void emit(const testl& i) {  /*a->and_(i.s0, i.s1, false);*/ }
+  void emit(const testl& i) { /*a->and_(i.s0, i.s1, false);*/ }
   void emit(const testli& i) { /*a->addi(i.d, i.s1, i.s0);*/ }
   void emit(const testlim& i) { not_implemented(); }
   void emit(const testq& i) { not_implemented(); }
