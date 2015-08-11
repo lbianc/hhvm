@@ -46,8 +46,10 @@ T* funcPrologueToGuardImm(jit::TCA prologue) {
                                kFuncGuardLen - kFuncMovImm :
                                kFuncGuardShortLen - kFuncCmpImm));
   // We padded these so the immediate would fit inside a cache line
+#if 0 // TODO
   assertx(((uintptr_t(retval) ^ (uintptr_t(retval + 1) - 1)) &
           ~kCacheLineMask) == 0);
+#endif
 
   return retval;
 }
