@@ -1760,6 +1760,14 @@ private:
 
 };
 
+class Decoder {
+public:
+  explicit Decoder(uint32_t* ip) { decode(ip); }
+  std::string toString();
+private:
+  void decode(uint32_t* ip);
+};
+
 } // namespace ppc64_asm
 
 #endif

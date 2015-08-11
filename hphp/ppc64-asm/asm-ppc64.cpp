@@ -810,4 +810,10 @@ void Assembler::unimplemented(){
     EmitDForm(0, rn(0), rn(0), 0);
 }
 
+std::string Decoder::toString(){
+    return nullptr;
+}
+
+void Decoder::decode(uint32_t* ip) {}
+
 } // namespace ppc64_asm

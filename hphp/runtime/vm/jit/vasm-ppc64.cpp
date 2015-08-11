@@ -140,7 +140,10 @@ struct Vgen {
   void emit(decq i) { a->addi(i.d, i.s, -1); }
   void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
-  void emit(imul i) { not_implemented(); }
+  void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
+  /*TODO(IBM): idiv instruction takes only one paramenter
+    because x64 idiv divides eax:edx by i.s. There is no 
+    such instruction in PPC64. So maybe we need to create another vasm.*/
   void emit(const idiv& i) { not_implemented(); }
   void emit(incl i) { not_implemented(); }
   void emit(const inclm& i) { not_implemented(); }
