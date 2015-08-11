@@ -101,7 +101,7 @@ void Assembler::ba(uint32_t target_addr) {
     EmitIForm(18, target_addr, 1, 0);
 }
 
-void Assembler::bl(HPHP::CodeAddress target_addr) {
+void Assembler::bl(CodeAddress target_addr) {
     //TODO(IBM): target_address need to be zero extend 0b00
     EmitIForm(18, size_t(target_addr), 0, 1);
 }
@@ -110,12 +110,12 @@ void Assembler::bla(uint32_t target_addr) {
     EmitIForm(18, target_addr, 1, 1);
 }
 
-void Assembler::bc(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-    EmitBForm(18, bo, bi, target_addr, 0, 0);
+void Assembler::bc(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
+    EmitBForm(18, bo, bi, size_t(target_addr), 0, 0);
 }
 
-void Assembler::bca(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-    EmitBForm(18, bo, bi, target_addr, 1, 0);
+void Assembler::bca(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
+    EmitBForm(18, bo, bi, size_t(target_addr), 1, 0);
 }
 
 void Assembler::bcctr(uint8_t bo, uint8_t bi, uint16_t bh) {

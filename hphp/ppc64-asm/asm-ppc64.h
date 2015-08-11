@@ -27,12 +27,44 @@
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
+#include "hphp/util/safe-cast.h"
 
 namespace ppc64_asm {
 
 using HPHP::jit::Reg64;
 using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
+using HPHP::CodeAddress;
+
+#define BRANCHES(cr) \
+  CR##cr##_LessThan,         \
+  CR##cr##_LessThanEqual,    \
+  CR##cr##_GreaterThan,      \
+  CR##cr##_GreaterThanEqual, \
+  CR##cr##_Equal,            \
+  CR##cr##_NotEqual
+
+enum class BranchConditions {
+  BRANCHES(0),
+  BRANCHES(1),
+  BRANCHES(2),
+  BRANCHES(3),
+  BRANCHES(4),
+  BRANCHES(5),
+  BRANCHES(6),
+  BRANCHES(7),
+  Always,
+
+  // mnemonics for the common case by using CR0:
+  LessThan          = CR0_LessThan,
+  LessThanEqual     = CR0_LessThanEqual,
+  GreaterThan       = CR0_GreaterThan,
+  GreaterThanEqual  = CR0_GreaterThanEqual,
+  Equal             = CR0_Equal,
+  NotEqual          = CR0_NotEqual
+};
+
+#undef BRANCHES
 
 enum class RegNumber : uint32_t {};
 
@@ -146,23 +178,6 @@ namespace reg {
   constexpr Reg64 v31(31);
 }
 
-/*
- TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
- if don't we need to implement this like ARM calling a backend to squash the N instructions to perform
- vasm operations into one.
-*/
-class Label {
-public:
-  Label()  { not_implemented(); }
-  ~Label() { not_implemented(); }
-
-friend class Assembler;
-
-private:
-  void addJump() { not_implemented(); }
-};
-
-
 //////////////////////////////////////////////////////////////////////
 
 /*
@@ -178,12 +193,12 @@ private:
  * Asm& a = codeBlockChoose(toPatch, a, acold);
  *   a.patchJmp(...);
  */
-// inline HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr) {
+// inline HPHP::CodeBlock& codeBlockChoose(CodeAddress addr) {
 //   always_assert_flog(false,
 //                     "address {} was not part of any known code block", addr);
 // }
 // template<class... Blocks>
-// HPHP::CodeBlock& codeBlockChoose(HPHP::CodeAddress addr, HPHP::CodeBlock& a, 
+// HPHP::CodeBlock& codeBlockChoose(CodeAddress addr, HPHP::CodeBlock& a,
 // Blocks&... as) {
 //   if (a.contains(addr)) return a;
 //   return codeBlockChoose(addr, as...);
@@ -191,22 +206,27 @@ private:
 
 //////////////////////////////////////////////////////////////////////
 
+class Label;
+
 class Assembler {
 public:
+
+  friend struct Label;
+
    explicit Assembler(HPHP::CodeBlock& cb) : codeBlock(cb) {}
    ~Assembler(){}
 
    HPHP::CodeBlock& code() const { return codeBlock; }
 
-   HPHP::CodeAddress base() const {
+   CodeAddress base() const {
      return codeBlock.base();
    }
 
-   HPHP::CodeAddress frontier() const {
+   CodeAddress frontier() const {
      return codeBlock.frontier();
    }
 
-   void setFrontier(HPHP::CodeAddress newFrontier) {
+   void setFrontier(CodeAddress newFrontier) {
      codeBlock.setFrontier(newFrontier);
    }
 
@@ -222,7 +242,7 @@ public:
      return codeBlock.available();
    }
 
-   bool contains(HPHP::CodeAddress addr) const {
+   bool contains(CodeAddress addr) const {
      return codeBlock.contains(addr);
    }
 
@@ -309,10 +329,10 @@ public:
   void andis(const Reg64& rs, const Reg64& ra, uint16_t imm);
   void b(uint32_t target_addr);
   void ba(uint32_t target_addr);
-  void bl(HPHP::CodeAddress target_addr);
+  void bl(CodeAddress target_addr);
   void bla(uint32_t target_addr);
-  void bc(uint8_t bo, uint8_t bi, uint16_t target_addr);
-  void bca(uint8_t bo, uint8_t bi, uint16_t target_addr);
+  void bc(uint8_t bo, uint8_t bi, CodeAddress target_addr);
+  void bca(uint8_t bo, uint8_t bi, CodeAddress target_addr);
   void bcctr(uint8_t bo, uint8_t bi, uint16_t bh);
   void bcctrl(uint8_t bo, uint8_t bi, uint16_t bh);
   void bcl(uint8_t bo, uint8_t bi, uint16_t target_addr);
@@ -1505,8 +1525,38 @@ public:
     mtspr(SpecialReg::CTR, rx);
   }
   
+  void b(Label&);
+  void ba(Label&);
+  void bc (Label&, BranchConditions);
+  void bca(Label&, BranchConditions);
+  void branchAuto(Label& l, Reg64 tmp, BranchConditions bc);
+
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
+
+  static void patchBc(CodeAddress jmp, CodeAddress dest) {
+    // Opcode located at the first 6 bits
+    assert(((jmp[3] >> 2) & 0x3F) == 16);
+    ssize_t diff = dest - (jmp + 4);  // skip instruction
+    int16_t* BD = (int16_t*)(jmp + 2);
+
+    // Keep AA and LK values
+    *BD = HPHP::safe_cast<int16_t>(diff & 0xFFFC) | ((*BD) & 0x3);
+  }
+
+  static void patchBctr(CodeAddress jmp, CodeAddress dest) {
+    // Check Label::branchAuto for details
+    ssize_t diff = dest - (jmp + 6*4);  // skip instructions
+
+    int16_t *imm = (int16_t*)(jmp + 2); // immediate field of addi
+    *imm = HPHP::safe_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 32)) >> 32);
+
+    imm += 2*4;                         // skip sldi instruction
+    *imm = HPHP::safe_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 16)) >> 16);
+
+    imm += 4;                           // next instruction
+    *imm = HPHP::safe_cast<int16_t>(diff & ssize_t(UINT16_MAX));
+  }
 
   // Secure high level instruction emitter
   void Emit(PPC64Instr instruction){
@@ -1817,6 +1867,212 @@ private:
   }
 
 };
+
+//////////////////////////////////////////////////////////////////////
+// Branches
+//////////////////////////////////////////////////////////////////////
+
+class BranchParams {
+  /* BO and BI parameter mapping related to BranchConditions */
+  public:
+    BranchParams() { assert("BranchParams created without parameter"); }
+
+    enum class BO {
+      CRNotSet              = 4,
+      CRSet                 = 12,
+      Always                = 20
+    };
+
+#define CR_CONDITIONS(cr) \
+      CR##cr##_LessThan          = 0x80000000ULL >> (32 - (0 + (cr * 4))), \
+      CR##cr##_GreaterThan       = 0x80000000ULL >> (32 - (1 + (cr * 4))), \
+      CR##cr##_Equal             = 0x80000000ULL >> (32 - (2 + (cr * 4))), \
+      CR##cr##_SummaryOverflow   = 0x80000000ULL >> (32 - (3 + (cr * 4)))
+
+    enum class BI {
+      CR_CONDITIONS(0),
+      CR_CONDITIONS(1),
+      CR_CONDITIONS(2),
+      CR_CONDITIONS(3),
+      CR_CONDITIONS(4),
+      CR_CONDITIONS(5),
+      CR_CONDITIONS(6),
+      CR_CONDITIONS(7)
+    };
+
+#undef CR_CONDITIONS
+
+    enum class BH {
+      CTR_Loop              = 0,
+      LR_Loop               = 1,
+      Reserved              = 2,
+      NoBranchPrediction    = 3
+    };
+
+#define SWITCHES(cr)                                              \
+  case BranchConditions::CR##cr##_LessThan:                       \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;    break;  \
+  case BranchConditions::CR##cr##_LessThanEqual:                  \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan; break;  \
+  case BranchConditions::CR##cr##_GreaterThan:                    \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan; break;  \
+  case BranchConditions::CR##cr##_GreaterThanEqual:               \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;    break;  \
+  case BranchConditions::CR##cr##_Equal:                          \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;       break;  \
+  case BranchConditions::CR##cr##_NotEqual:                       \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;       break
+
+    BranchParams(BranchConditions bc) {
+      /* TODO(gut): implement other CRs */
+      switch (bc) {
+        SWITCHES(0);
+        SWITCHES(1);
+        SWITCHES(2);
+        SWITCHES(3);
+        SWITCHES(4);
+        SWITCHES(5);
+        SWITCHES(6);
+        SWITCHES(7);
+        case BranchConditions::Always:
+          m_bo = BO::Always; m_bi = BI(0); break;
+      }
+    }
+
+#undef SWITCHES
+
+    ~BranchParams() {}
+
+    uint8_t bo() { return (uint8_t)m_bo; }
+    uint8_t bi() { return (uint8_t)m_bi; }
+
+  private:
+    BranchParams::BO m_bo;
+    BranchParams::BI m_bi;
+};
+
+/*
+ TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
+ if don't we need to implement this like ARM calling a backend to squash the N instructions to perform
+ vasm operations into one.
+*/
+class Label : private boost::noncopyable {
+public:
+  Label() : m_a(nullptr) , m_address(nullptr) {}
+
+  ~Label() {
+    if (!m_toPatch.empty()) {
+      assert(m_a && m_address && "Label had jumps but was never set");
+    }
+    for (auto& ji : m_toPatch) {
+      switch (ji.type) {
+      case BranchType::bc:
+        ji.a->patchBc(ji.addr, m_address);
+        break;
+      case BranchType::bctr:
+        ji.a->patchBctr(ji.addr, m_address);
+        break;
+      }
+    }
+  }
+
+  void branchOffset(Assembler& a, BranchConditions bc) {
+    BranchParams bp(bc);
+    addJump(&a, BranchType::bc);
+
+    /* Address is going to be redefined on patchBc() */
+    a.bc(bp.bo(), bp.bi(), m_address ? m_address : a.frontier());
+  }
+
+  void branchAbsolute(Assembler& a, BranchConditions bc) {
+    BranchParams bp(bc);
+    addJump(&a, BranchType::bc);
+
+    /* Address is going to be redefined on patchBc() */
+    a.bca(bp.bo(), bp.bi(), m_address ? m_address : a.frontier());
+  }
+
+  void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc) {
+    assert(m_address);
+    auto delta = m_address - (a.frontier() + 4); // jumps the branch instr
+    // offset is 14 bits long, a bit shorter than HPHP::sz::word
+    if (HPHP::jit::deltaFits(delta, HPHP::sz::word) && (delta < (1 << 14))) {
+      /* Branch by offset */
+      a.bc(*this, bc);
+    } else {
+      // use CTR to perform absolute branch
+      BranchParams bp(bc);
+      addJump(&a, BranchType::bctr);
+
+      // TODO: is this really the best way? If only there was a register that
+      // was already filled with the address...
+      const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
+
+      // Optimization: the highest 48th up to 63rd bits are never used to
+      // address RAM data so we can assume it's zero
+      a.li   (tmp, HPHP::safe_cast<int16_t>(
+                   (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
+      a.sldi (tmp, tmp, 32);
+      a.addis(tmp, tmp, HPHP::safe_cast<int16_t>(
+                   (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
+      a.addi (tmp, tmp, HPHP::safe_cast<int16_t>(
+                   address & ssize_t(UINT16_MAX)));
+      a.mtctr(tmp);
+      a.bcctr(bp.bo(), bp.bi(), 0);
+    }
+  }
+
+  friend void asm_label(Assembler& a, Label& l) {
+    assert(!l.m_address && !l.m_a && "Label was already set");
+    l.m_a = &a;
+    l.m_address = a.frontier();
+  }
+
+private:
+  enum class BranchType {
+    bc,
+    bctr
+  };
+
+  struct JumpInfo {
+    BranchType type;
+    Assembler* a;
+    CodeAddress addr;
+  };
+
+private:
+  void addJump(Assembler* a, BranchType type) {
+    if (m_address) return;
+    JumpInfo info;
+    info.type = type;
+    info.a = a;
+    info.addr = a->codeBlock.frontier();
+    m_toPatch.push_back(info);
+  }
+
+private:
+  Assembler* m_a;
+  CodeAddress m_address;
+  std::vector<JumpInfo> m_toPatch;
+};
+
+/* Simplify to conditional branch that always branch */
+// TODO: implement also a patchB if b is not a mnemonic to bc
+inline void Assembler::b(Label& l)  { bc (l, BranchConditions::Always); }
+inline void Assembler::ba(Label& l) { bca(l, BranchConditions::Always); }
+
+inline void Assembler::bc (Label& l, BranchConditions bc) {
+  l.branchOffset(*this, bc);
+}
+inline void Assembler::bca(Label& l, BranchConditions bc) {
+  l.branchAbsolute(*this, bc);
+}
+
+inline void Assembler::branchAuto(Label& l,
+                              Reg64 tmp,
+                              BranchConditions bc = BranchConditions::Always) {
+  l.branchAuto(*this, tmp, bc);
+}
 
 class Decoder {
 public:
