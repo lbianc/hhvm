@@ -8,8 +8,8 @@
  * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
- * to consider use Nanojit or LLVM, both of which translate abstract virtual machine
- * instructions to the native target architecture.
+ * to consider use Nanojit or LLVM, both of which translate abstract virtual 
+ * machine instructions to the native target architecture.
  *
  */
 
@@ -22,8 +22,46 @@ namespace ppc64_asm {
 
   typedef uint32_t PPC64Instr;
 
+  enum class InstructionType {
+    kInvalid = 0,
+    kXType,
+    kXOType,
+    kDType,
+    kIType,
+    kBType,
+    kSCType,
+    kDSType,
+    kDQType,
+    kXLType,
+    kXFXType,
+    kXFLType,
+    kXX1Type,
+    kXX2Type,
+    kXX3Type,
+    kXX4Type,
+    kAType,
+    kMType,
+    kMDType,
+    kMDSType,
+    kVAType,
+    kVCType,
+    kVXType,
+    kEVXType,
+    kEVSType,
+    kZ22Type,
+    kZ23Type,
+  };
+
   /*
-   Primary Opcode Table. It's used to decode a instruction. Before decode the instruction
+   This data structure is used to hold basic information about instruction 
+  */
+  typedef struct instructionInfo {
+    InstructionType instr_type;
+    char* name;
+  }instruction_info_t;
+  /*
+   Primary Opcode Table. It's used to decode a instruction. 
+   Before decode the instruction
    we must assert if it's a valid opcode.
   */
   static const uint32_t PrimaryOpcodeTable[] =
@@ -36,6 +74,21 @@ namespace ppc64_asm {
     0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
     0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F
   };
+
+  static const bool isExtended[] = {
+    0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0
+  };
+
+  //Bellow we define a decoder table
+  //static const instruction_info_t PrimaryOpcodeDecoderTable[]{}
+   //TODO(IBM): Get map from ISA Book
+  // static const instruction_info_t ExtendeOpcode31DecoderTable[][] {
+
+  // }
+
 
   /**
    * Instruction Format encoders

@@ -811,9 +811,26 @@ void Assembler::unimplemented(){
 }
 
 std::string Decoder::toString(){
+    /*
+      DRAFT:
+          Print Instruction
+          1- Get decoded instruction and type (and name)
+          3- Read instruction name (already retrieved in decode phase)
+          4- Copy ip to apropriated format
+          5- Cast fields to string
+          5- Return formated string
+    */
     return nullptr;
 }
 
-void Decoder::decode(uint32_t* ip) {}
+void Decoder::decode(uint32_t* ip) {
+     op_ = *ip & (0x3f << 26);
+     if(isExtended[op_]) {
+        if(op_ == 31) {
+           uint16_t xo = *ip & (0x7FE); //XO is 21:30 bits
+           //TODO(IBM): Get instruction info from table
+        }
+     }
+}
 
 } // namespace ppc64_asm

@@ -1766,6 +1766,7 @@ public:
   std::string toString();
 private:
   void decode(uint32_t* ip);
+  uint8_t op_;
 };
 
 } // namespace ppc64_asm
