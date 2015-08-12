@@ -1448,7 +1448,9 @@ public:
   void crclr()          { not_implemented(); }  //Extended crxor Bx,Bx,BX
   void crnot()          { not_implemented(); }  //Extended crnor Bx,By,By
   void crset()          { not_implemented(); }  //Extended creqv Bx,Bx,Bx
-  void li()             { not_implemented(); }  //Extended addi Rx,0,value
+  void li(const Reg64& rt, Immed imm) {
+    addi(rt, Reg64(0), imm);
+  }
   void la()             { not_implemented(); }  //Extended addi Rx,Ry,disp
   void subi()           { not_implemented(); }  //Extended addi Rx,Ry,-value
   void lis()            { not_implemented(); }  //Extended addis Rx,0,value
@@ -1489,7 +1491,9 @@ public:
   void srdi()           { not_implemented(); }  //Extended
   void clrldi()         { not_implemented(); }  //Extended
   void extldi()         { not_implemented(); }  //Extended
-  void sldi()           { not_implemented(); }  //Extended
+  inline void sldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+    rldicr(ra, rs, sh, 63-sh);
+  }
   void clrrdi()         { not_implemented(); }  //Extended
   void clrlsldi()       { not_implemented(); }  //Extended
   void rotld()          { not_implemented(); }  //Extended
