@@ -222,7 +222,8 @@ namespace ppc64_asm {
     {
       uint32_t RSV:1;
       uint32_t XO:10;
-      uint32_t SPR:10;
+      uint32_t SPRlo:5;  // see note 1: the order of the two 5-bit halves
+      uint32_t SPRhi:5;  // of the SPR number is reversed
       uint32_t RT:5;
       uint32_t OP:6;
     };

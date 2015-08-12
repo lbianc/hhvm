@@ -256,7 +256,40 @@ public:
     void name#d
   */
 
-  //PPC64 ISA - Only Fixed Point instructions has been implemented
+  enum class SpecialReg {
+    XER      = 1,
+    DSCR     = 3,
+    LR       = 8,
+    CTR      = 9,
+    AMR      = 13,
+    TFHAR    = 128,
+    TFIAR    = 129,
+    TEXASR   = 130,
+    TEXASRU  = 131,
+    VRSAVE   = 256,
+    SPEFSCR  = 512,
+    MMCR2    = 769,
+    MMCRA    = 770,
+    PMC1     = 771,
+    PMC2     = 772,
+    PMC3     = 773,
+    PMC4     = 774,
+    PMC5     = 775,
+    PMC6     = 776,
+    MMCR0    = 779,
+    BESCRS   = 800,
+    BESCRSU  = 801,
+    BESCRR   = 802,
+    BESCRRU  = 803,
+    EBBHR    = 804,
+    EBBRR    = 805,
+    BESCR    = 806,
+    TAR      = 815,
+    PPR      = 896,
+    PPR32    = 898
+  };
+
+  //PPC64 ISA - Only Fixed Point instructions have been implemented
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void addc(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void addco(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
@@ -356,6 +389,7 @@ public:
   void lwax(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void lwbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void mcrf(uint16_t bf, uint16_t bfa);
+  void mtspr(const SpecialReg spr, const Reg64& rs);
   void mulhd(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void mulhdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
   void mulhw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc);
@@ -1461,6 +1495,9 @@ public:
   void rotld()          { not_implemented(); }  //Extended
   void insrdi()         { not_implemented(); }  //Extended
   void mtcr()           { not_implemented(); }  //Extended
+  void mtctr(const Reg64& rx) {
+    mtspr(SpecialReg::CTR, rx);
+  }
   
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
@@ -1715,8 +1752,23 @@ protected:
       dword(mds_formater.instruction);
    }
 
+  void EmitXFXForm(const uint8_t op,
+                   const RegNumber rs,
+                   const SpecialReg spr,
+                   const uint16_t xo,
+                   const uint8_t rsv = 0) {
+    XFX_form_t xfx_formater {
+      rsv,
+      xo,
+      (static_cast<uint32_t>(spr) >> 5) & 0x1F,
+      static_cast<uint32_t>(spr) & 0x1F,
+      static_cast<uint32_t>(rs),
+      op
+    };
+    dword(xfx_formater.instruction);
+  }
+
   //TODO(IBM): Unimplemented instruction formaters
-  void EmitXFXForm()  { not_implemented(); }
   void EmitXFLForm()  { not_implemented(); }
   void EmitXX1Form()  { not_implemented(); }
   void EmitXX2Form()  { not_implemented(); }

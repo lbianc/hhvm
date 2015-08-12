@@ -441,6 +441,10 @@ void Assembler::mcrf(uint16_t bf, uint16_t bfa) {
     EmitXLForm(19, (bf & 0x1c), (bfa & 0x1c), 0, 0);
 }
 
+void Assembler::mtspr(const SpecialReg spr, const Reg64& rs) {
+    EmitXFXForm(31, rn(rs), spr, 467);
+}
+
 void Assembler::mulhd(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 73, rc);
