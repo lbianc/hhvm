@@ -347,7 +347,7 @@ public:
   void lq(const Reg64& rtp, const Reg64& ra, uint16_t imm);
   void lswi(const Reg64& rt, const Reg64& ra, uint16_t nb);
   void lswx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
-  void lwz(const Reg64& rt, const Reg64& rb, uint16_t imm);
+  void lwz(const Reg64& rt, MemoryRef m);
   void lwzu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void lwzux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void lwzx(const Reg64& rt, const Reg64& ra, const Reg64& rb);

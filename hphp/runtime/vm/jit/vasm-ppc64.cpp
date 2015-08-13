@@ -85,7 +85,7 @@ struct Vgen {
   void emit(const ldimmqs& i) { not_implemented(); }
   void emit(const fallback& i) { not_implemented(); }
   void emit(const fallbackcc& i) { not_implemented(); }
-  void emit(const load& i) { not_implemented(); }
+  void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) { not_implemented(); }
@@ -440,7 +440,13 @@ void Vgen::emit(const vret& i) {
   //TODO(IBM): Need to be MemoryRef
   a->bclr(20,0,0); /*brl 0x4e800020*/
 }
-
+void Vgen::emit(const load& i) {
+  if (i.d.isGP()) {
+    a->lwz(i.d, i.s);
+  } else {
+    not_implemented();//TODO(IBM): SIMD Unsupported
+  }
+}
 /*
  Lower facilitate code generation. In some cases is used because 
  some vasm opcodes doesn't have a 1:1 mapping to machine asm code.

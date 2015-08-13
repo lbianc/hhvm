@@ -405,8 +405,8 @@ void Assembler::lswx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
     EmitXForm(31, rn(rt), rn(ra), rn(rb), 533);
 }
 
-void Assembler::lwz(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-    EmitDForm(32, rn(rt), rn(rb), imm);
+void Assembler::lwz(const Reg64& rt, MemoryRef m) {
+    EmitDForm(32, rn(rt), rn(m.r.base), m.r.disp);
 }
 
 void Assembler::lwzu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
