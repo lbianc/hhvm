@@ -111,11 +111,11 @@ void Assembler::bla(uint32_t target_addr) {
 }
 
 void Assembler::bc(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
-    EmitBForm(18, bo, bi, size_t(target_addr), 0, 0);
+    EmitBForm(16, bo, bi, size_t(target_addr), 0, 0);
 }
 
 void Assembler::bca(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
-    EmitBForm(18, bo, bi, size_t(target_addr), 1, 0);
+    EmitBForm(16, bo, bi, size_t(target_addr), 1, 0);
 }
 
 void Assembler::bcctr(uint8_t bo, uint8_t bi, uint16_t bh) {
@@ -127,11 +127,11 @@ void Assembler::bcctrl(uint8_t bo, uint8_t bi, uint16_t bh) {
 }
 
 void Assembler::bcl(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-    EmitBForm(18, bo, bi, target_addr, 0, 1);
+    EmitBForm(16, bo, bi, target_addr, 0, 1);
 }
 
 void Assembler::bcla(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-    EmitBForm(18, bo, bi, target_addr, 1, 1);
+    EmitBForm(16, bo, bi, target_addr, 1, 1);
 }
 
 void Assembler::bclr(uint8_t bo, uint8_t bi, uint16_t bh) {
