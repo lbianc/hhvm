@@ -1767,22 +1767,21 @@ protected:
    void EmitMDForm(const uint8_t op,
                    const RegNumber rs,
                    const RegNumber ra,
-                   const uint8_t Sh,
+                   const uint8_t sh,
                    const uint8_t mb,
                    const uint8_t xop,
-                   const bool sh = 0,
                    const bool rc = 0) {
 
       MD_form_t md_formater {
-                             rc,
-                             sh,
-                             xop,
-                             mb,
-                             Sh,
-                             static_cast<uint32_t>(ra),
-                             static_cast<uint32_t>(rs),
-                             op
-                            };
+        rc,
+        static_cast<uint32_t>(sh >> 5),                         // sh5
+        xop,
+        static_cast<uint32_t>(((mb >> 5) | (mb << 1)) & 0x3F),  // me5 || me0:4
+        static_cast<uint32_t>(sh & 0x1F),                       // sh0:4
+        static_cast<uint32_t>(ra),
+        static_cast<uint32_t>(rs),
+        op
+      };
 
       dword(md_formater.instruction);
    }

@@ -555,24 +555,24 @@ void Assembler::rldcr(const Reg64& ra, const Reg64& rs,  const Reg64& rb,
     EmitMDSForm(30, rn(rs), rn(ra), rn(rb), mb, 9, rc);
 }
 
-void Assembler::rldic(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+void Assembler::rldic(const Reg64& ra, const Reg64& rs, uint8_t sh,
                       uint8_t mb, bool rc) { 
-    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 2, (sh >> 6), rc);
+    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 2, rc);
 }
 
-void Assembler::rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+void Assembler::rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh,
                       uint8_t mb, bool rc) { 
-    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 0, (sh >> 6), rc);
+    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 0, rc);
 }
 
-void Assembler::rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+void Assembler::rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh,
                       uint8_t mb, bool rc) { 
-    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 1, (sh >> 6), rc);
+    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 1, rc);
 }
 
-void Assembler::rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+void Assembler::rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh,
                       uint8_t mb, bool rc) { 
-    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 3, (sh >> 6), rc);
+    EmitMDForm(30, rn(rs), rn(ra), sh, mb, 3, rc);
 }
 
 void Assembler::rlwimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb,
