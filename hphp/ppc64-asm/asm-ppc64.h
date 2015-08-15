@@ -2033,11 +2033,8 @@ public:
   }
 
   void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc, LinkReg lr) {
-    assert(m_address);
-
-    // jumps the branch instr
-    auto delta = m_address - (a.frontier() + 4);
-
+    assert(m_address && "Cannot evaluate branch size without defined target");
+    auto delta = m_address - a.frontier();
     if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
       // Branch by offset
 
