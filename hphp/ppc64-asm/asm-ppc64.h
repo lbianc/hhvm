@@ -1615,7 +1615,7 @@ protected:
       I_form_t i_formater {
                             lk,
                             aa,
-                            imm,
+                            imm >> 2,
                             op
                           };
 
@@ -1631,9 +1631,9 @@ protected:
       B_form_t b_formater {
                             lk,
                             aa,
-                            bd,
+                            bd >> 2,
                             bi,
-                            bo, //TODO(IBM): extend by 0b00 ??
+                            bo,
                             op
                           };
 
@@ -1996,10 +1996,9 @@ public:
   void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc) {
     assert(m_address);
     auto delta = m_address - (a.frontier() + 4); // jumps the branch instr
-    // offset is 14 bits long, a bit shorter than HPHP::sz::word
-    if (HPHP::jit::deltaFits(delta, HPHP::sz::word) && (delta < (1 << 14))) {
-      /* Branch by offset */
       a.bc(*this, bc);
+    if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
+      // Branch by offset
     } else {
       // use CTR to perform absolute branch
       BranchParams bp(bc);
