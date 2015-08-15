@@ -1529,7 +1529,8 @@ public:
   void ba(Label&);
   void bc (Label&, BranchConditions);
   void bca(Label&, BranchConditions);
-  void branchAuto(Label& l, Reg64 tmp, BranchConditions bc);
+  void branchAuto(Label&, Reg64, BranchConditions);
+  void branchAuto(CodeAddress, Reg64, BranchConditions);
 
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
@@ -1958,6 +1959,7 @@ class BranchParams {
 class Label : private boost::noncopyable {
 public:
   Label() : m_a(nullptr) , m_address(nullptr) {}
+  Label(CodeAddress predefined) : m_a(nullptr) , m_address(predefined) {}
 
   ~Label() {
     if (!m_toPatch.empty()) {
@@ -2070,6 +2072,12 @@ inline void Assembler::bca(Label& l, BranchConditions bc) {
 inline void Assembler::branchAuto(Label& l,
                               Reg64 tmp,
                               BranchConditions bc = BranchConditions::Always) {
+  l.branchAuto(*this, tmp, bc);
+}
+inline void Assembler::branchAuto(CodeAddress c,
+                              Reg64 tmp,
+                              BranchConditions bc = BranchConditions::Always) {
+  Label l(c);
   l.branchAuto(*this, tmp, bc);
 }
 
