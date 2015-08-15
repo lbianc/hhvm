@@ -58,9 +58,9 @@ constexpr PhysReg rVmSp      = ppc64_asm::reg::r1;
 constexpr PhysReg rVmTl      = ppc64_asm::reg::r14;
 
 /*
- * scratch register
+ * scratch register. r11 will not be used as a function linkage.
  */
-constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::f0;
+constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::r11;
 
 //////////////////////////////////////////////////////////////////////
 /*
@@ -75,7 +75,7 @@ const RegSet kGPCallerSaved =
     ppc64_asm::reg::r0  | ppc64_asm::reg::r3  | ppc64_asm::reg::r4
   | ppc64_asm::reg::r5  | ppc64_asm::reg::r6  | ppc64_asm::reg::r7
   | ppc64_asm::reg::r8  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10
-  | ppc64_asm::reg::r11 | ppc64_asm::reg::r12;
+  | ppc64_asm::reg::r12;  // r11 is a scratch register
 
 const RegSet kGPCalleeSaved =
     ppc64_asm::reg::r1  | ppc64_asm::reg::r20 | ppc64_asm::reg::r14

@@ -82,7 +82,7 @@ namespace reg {
   constexpr Reg64 r9(9);
   constexpr Reg64 r10(10);
 
-  constexpr Reg64 r11(11);  /* volatile, environment pointer */
+  constexpr Reg64 r11(11);  /* volatile, environment pointer. Here: scratch */
   constexpr Reg64 r12(12);  /* volatile, function entry address */
   constexpr Reg64 r13(13);  /* reserved, thread pointer */
   /* nonvolatile, local variables */
