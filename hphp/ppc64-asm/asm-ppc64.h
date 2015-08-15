@@ -1538,8 +1538,8 @@ public:
   static void patchBc(CodeAddress jmp, CodeAddress dest) {
     // Opcode located at the first 6 bits
     assert(((jmp[3] >> 2) & 0x3F) == 16);
-    ssize_t diff = dest - (jmp + 4);  // skip instruction
-    int16_t* BD = (int16_t*)(jmp + 2);
+    ssize_t diff = dest - jmp;
+    int16_t* BD = (int16_t*)(jmp);    // target address location in instruction
 
     // Keep AA and LK values
     *BD = HPHP::safe_cast<int16_t>(diff & 0xFFFC) | ((*BD) & 0x3);
@@ -1547,9 +1547,9 @@ public:
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
     // Check Label::branchAuto for details
-    ssize_t diff = dest - (jmp + 6*4);  // skip instructions
+    ssize_t diff = dest - jmp;
 
-    int16_t *imm = (int16_t*)(jmp + 2); // immediate field of addi
+    int16_t *imm = (int16_t*)(jmp);     // immediate field of addi
     *imm = HPHP::safe_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 32)) >> 32);
 
     imm += 2*4;                         // skip sldi instruction
