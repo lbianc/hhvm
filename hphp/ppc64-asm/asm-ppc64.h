@@ -66,6 +66,11 @@ enum class BranchConditions {
 
 #undef BRANCHES
 
+enum class LinkReg {
+  Save,
+  DoNotTouch
+};
+
 enum class RegNumber : uint32_t {};
 
 namespace reg {
@@ -1525,12 +1530,26 @@ public:
     mtspr(SpecialReg::CTR, rx);
   }
   
-  void b(Label&);
-  void ba(Label&);
-  void bc (Label&, BranchConditions);
-  void bca(Label&, BranchConditions);
-  void branchAuto(Label&, Reg64, BranchConditions);
-  void branchAuto(CodeAddress, Reg64, BranchConditions);
+  // Label variants
+  void b(Label& l);
+  void ba(Label& l);
+  void bl(Label& l);
+  void bla(Label& l);
+
+  void bc(Label& l, BranchConditions bc);
+  void bca(Label& l, BranchConditions bc);
+  void bcl(Label& l, BranchConditions bc);
+  void bcla(Label& l, BranchConditions bc);
+
+  void branchAuto(Label& l,
+                  Reg64 tmp,
+                  BranchConditions bc = BranchConditions::Always,
+                  LinkReg lr = LinkReg::DoNotTouch);
+
+  void branchAuto(CodeAddress c,
+                  Reg64 tmp,
+                  BranchConditions bc = BranchConditions::Always,
+                  LinkReg lr = LinkReg::DoNotTouch);
 
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
@@ -1977,35 +1996,62 @@ public:
     }
   }
 
-  void branchOffset(Assembler& a, BranchConditions bc) {
+  void branchOffset(Assembler& a,
+                    BranchConditions bc,
+                    LinkReg lr) {
     BranchParams bp(bc);
     addJump(&a, BranchType::bc);
 
-    /* Address is going to be redefined on patchBc() */
-    a.bc(bp.bo(), bp.bi(), m_address ? m_address : a.frontier());
+    ssize_t diff   = ssize_t(m_address - a.frontier());
+    assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) && "Offset too big");
+
+    // offset can be redefined on patchBc() if no m_address exist
+    int16_t offset = m_address ? diff : ssize_t(a.frontier());
+
+    // TODO(gut): Use a typedef or something to avoid copying code like below:
+    if (LinkReg::Save == lr)
+      a.bcl(bp.bo(), bp.bi(), offset);
+    else
+      a.bc(bp.bo(), bp.bi(), offset);
   }
 
-  void branchAbsolute(Assembler& a, BranchConditions bc) {
+  void branchAbsolute(Assembler& a,
+                    BranchConditions bc,
+                    LinkReg lr) {
     BranchParams bp(bc);
     addJump(&a, BranchType::bc);
 
-    /* Address is going to be redefined on patchBc() */
-    a.bca(bp.bo(), bp.bi(), m_address ? m_address : a.frontier());
+    // Address is going to be redefined on patchBc()
+    const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
+    assert(HPHP::jit::deltaFits(address, HPHP::sz::word) && "Address too big");
+
+    // TODO(gut): Use a typedef or something to avoid copying code like below:
+    if (LinkReg::Save == lr)
+      a.bcla(bp.bo(), bp.bi(), uint16_t(address));
+    else
+      a.bca(bp.bo(), bp.bi(), uint16_t(address));
   }
 
-  void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc) {
+  void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc, LinkReg lr) {
     assert(m_address);
-    auto delta = m_address - (a.frontier() + 4); // jumps the branch instr
-      a.bc(*this, bc);
+
+    // jumps the branch instr
+    auto delta = m_address - (a.frontier() + 4);
+
     if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
       // Branch by offset
+
+      // TODO(gut): Use a typedef or something to avoid copying code like below:
+      if (LinkReg::Save == lr)
+        a.bcl(*this, bc);
+      else
+        a.bc(*this, bc);
     } else {
       // use CTR to perform absolute branch
       BranchParams bp(bc);
-      addJump(&a, BranchType::bctr);
 
-      // TODO: is this really the best way? If only there was a register that
-      // was already filled with the address...
+      // TODO(gut): is this really the best way? If only there was a register
+      // that was already filled with the address...
       const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
 
       // Optimization: the highest 48th up to 63rd bits are never used to
@@ -2018,7 +2064,14 @@ public:
       a.addi (tmp, tmp, HPHP::safe_cast<int16_t>(
                    address & ssize_t(UINT16_MAX)));
       a.mtctr(tmp);
-      a.bcctr(bp.bo(), bp.bi(), 0);
+
+      addJump(&a, BranchType::bctr);
+
+      // TODO(gut): Use a typedef or something to avoid copying code like below:
+      if (LinkReg::Save == lr)
+        a.bcctrl(bp.bo(), bp.bi(), 0);
+      else
+        a.bcctr(bp.bo(), bp.bi(), 0);
     }
   }
 
@@ -2058,26 +2111,37 @@ private:
 
 /* Simplify to conditional branch that always branch */
 // TODO: implement also a patchB if b is not a mnemonic to bc
-inline void Assembler::b(Label& l)  { bc (l, BranchConditions::Always); }
+inline void Assembler::b(Label& l)  { bc(l, BranchConditions::Always); }
 inline void Assembler::ba(Label& l) { bca(l, BranchConditions::Always); }
+inline void Assembler::bl(Label& l)  { bcl(l, BranchConditions::Always); }
+inline void Assembler::bla(Label& l) { bcla(l, BranchConditions::Always); }
 
-inline void Assembler::bc (Label& l, BranchConditions bc) {
-  l.branchOffset(*this, bc);
+
+inline void Assembler::bc(Label& l, BranchConditions bc) {
+  l.branchOffset(*this, bc, LinkReg::DoNotTouch);
 }
 inline void Assembler::bca(Label& l, BranchConditions bc) {
-  l.branchAbsolute(*this, bc);
+  l.branchAbsolute(*this, bc, LinkReg::DoNotTouch);
+}
+inline void Assembler::bcl(Label& l, BranchConditions bc) {
+  l.branchOffset(*this, bc, LinkReg::Save);
+}
+inline void Assembler::bcla(Label& l, BranchConditions bc) {
+  l.branchAbsolute(*this, bc, LinkReg::Save);
 }
 
 inline void Assembler::branchAuto(Label& l,
                               Reg64 tmp,
-                              BranchConditions bc = BranchConditions::Always) {
-  l.branchAuto(*this, tmp, bc);
+                              BranchConditions bc,
+                              LinkReg lr) {
+  l.branchAuto(*this, tmp, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
                               Reg64 tmp,
-                              BranchConditions bc = BranchConditions::Always) {
+                              BranchConditions bc,
+                              LinkReg lr) {
   Label l(c);
-  l.branchAuto(*this, tmp, bc);
+  l.branchAuto(*this, tmp, bc, lr);
 }
 
 class Decoder {

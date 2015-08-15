@@ -111,7 +111,9 @@ struct Vgen {
   void emit(andli i) { not_implemented(); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
-  void emit(const call& i) { a->branchAuto(i.target, rAsm); }
+  void emit(const call& i) {
+    a->branchAuto(i.target, rAsm, BranchConditions::Always, LinkReg::Save);
+  }
   void emit(const callm& i) { not_implemented(); }
   void emit(const callr& i) { not_implemented(); }
   void emit(const cloadq& i) { not_implemented(); }
