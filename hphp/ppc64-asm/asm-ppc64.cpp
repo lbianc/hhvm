@@ -93,29 +93,28 @@ void Assembler::andis(const Reg64& rs, const Reg64& ra, uint16_t imm) {
     EmitDForm(29, rn(rs), rn(ra), imm);
 }
 
-void Assembler::b(uint32_t target_addr) {
-    EmitIForm(18, target_addr);
+void Assembler::b(int32_t target_addr) {
+    EmitIForm(18, uint32_t(target_addr));
 }
 
 void Assembler::ba(uint32_t target_addr) {
     EmitIForm(18, target_addr, 1, 0);
 }
 
-void Assembler::bl(CodeAddress target_addr) {
-    //TODO(IBM): target_address need to be zero extend 0b00
-    EmitIForm(18, size_t(target_addr), 0, 1);
+void Assembler::bl(int32_t target_addr) {
+    EmitIForm(18, uint32_t(target_addr), 0, 1);
 }
 
 void Assembler::bla(uint32_t target_addr) {
     EmitIForm(18, target_addr, 1, 1);
 }
 
-void Assembler::bc(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
-    EmitBForm(16, bo, bi, size_t(target_addr), 0, 0);
+void Assembler::bc(uint8_t bo, uint8_t bi, int16_t target_addr) {
+    EmitBForm(16, bo, bi, uint32_t(target_addr), 0, 0);
 }
 
-void Assembler::bca(uint8_t bo, uint8_t bi, CodeAddress target_addr) {
-    EmitBForm(16, bo, bi, size_t(target_addr), 1, 0);
+void Assembler::bca(uint8_t bo, uint8_t bi, uint16_t target_addr) {
+    EmitBForm(16, bo, bi, target_addr, 1, 0);
 }
 
 void Assembler::bcctr(uint8_t bo, uint8_t bi, uint16_t bh) {
@@ -126,7 +125,7 @@ void Assembler::bcctrl(uint8_t bo, uint8_t bi, uint16_t bh) {
     EmitXLForm(19, bo, bi, (bh & 0x3), 528, 1);
 }
 
-void Assembler::bcl(uint8_t bo, uint8_t bi, uint16_t target_addr) {
+void Assembler::bcl(uint8_t bo, uint8_t bi, int16_t target_addr) {
     EmitBForm(16, bo, bi, target_addr, 0, 1);
 }
 

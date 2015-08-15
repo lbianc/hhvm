@@ -327,15 +327,15 @@ public:
   void andc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void andi(const Reg64& rs, const Reg64& ra, Immed imm);
   void andis(const Reg64& rs, const Reg64& ra, uint16_t imm);
-  void b(uint32_t target_addr);
+  void b(int32_t target_addr);
   void ba(uint32_t target_addr);
-  void bl(CodeAddress target_addr);
+  void bl(int32_t target_addr);
   void bla(uint32_t target_addr);
-  void bc(uint8_t bo, uint8_t bi, CodeAddress target_addr);
-  void bca(uint8_t bo, uint8_t bi, CodeAddress target_addr);
+  void bc(uint8_t bo, uint8_t bi, int16_t target_addr);
+  void bca(uint8_t bo, uint8_t bi, uint16_t target_addr);
   void bcctr(uint8_t bo, uint8_t bi, uint16_t bh);
   void bcctrl(uint8_t bo, uint8_t bi, uint16_t bh);
-  void bcl(uint8_t bo, uint8_t bi, uint16_t target_addr);
+  void bcl(uint8_t bo, uint8_t bi, int16_t target_addr);
   void bcla(uint8_t bo, uint8_t bi, uint16_t target_addr);
   void bclr(uint8_t bo, uint8_t bi, uint16_t bh);
   void bclrl(uint8_t bo, uint8_t bi, uint16_t bh);
@@ -1624,7 +1624,7 @@ protected:
    void EmitBForm(const uint8_t op,
                   const uint8_t bo,
                   const uint8_t bi,
-                  const uint16_t bd,
+                  const uint32_t bd,
                   const bool aa = 0,
                   const bool lk = 0) {
       B_form_t b_formater {
