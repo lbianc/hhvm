@@ -1460,7 +1460,9 @@ public:
   void subc()           { not_implemented(); }  //Extended subfc Rx,Rz,Ry
   void cmpdi()          { not_implemented(); }  //Extended cmpi 0,1,Rx,value
   void cmpwi()          { not_implemented(); }  //Extended cmpi 3,0,Rx,value
-  void cmpd()           { not_implemented(); }  //Extended cmp 0,1,Rx,Ry
+  void cmpd(const Reg64& ra, const Reg64& rb) {
+    cmp(0, 1, ra, rb);
+  }
   void cmpw ()          { not_implemented(); }  //Extended cmp 3,0,Rx,Ry
   void cmpldi()         { not_implemented(); }  //Extended cmpli 0,1,Rx,value
   void cmplwi()         { not_implemented(); }  //Extended cmpli 3,0,Rx,value
