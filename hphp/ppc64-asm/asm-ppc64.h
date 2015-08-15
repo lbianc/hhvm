@@ -259,23 +259,6 @@ public:
      return nBytes < (capacity() - used());
    }
 
-  /*
-    TODO(IBM): Must create a macro for these similar instructions.
-               This will make code more clean.
-
-    #define CC_ARITH_REG_OP(name, opcode, x_opcode)
-    void name##c
-    void name##co
-    ...
-    #define CC_ARITH_IMM_OP(name, opcode)
-
-    #define LOAD_STORE_OP(name, opcode)
-    void name#w
-    void name#b
-    void name#h
-    void name#d
-  */
-
   enum class SpecialReg {
     XER      = 1,
     DSCR     = 3,
@@ -308,6 +291,23 @@ public:
     PPR      = 896,
     PPR32    = 898
   };
+
+  /*
+    TODO(IBM): Must create a macro for these similar instructions.
+               This will make code more clean.
+
+    #define CC_ARITH_REG_OP(name, opcode, x_opcode)
+    void name##c
+    void name##co
+    ...
+    #define CC_ARITH_IMM_OP(name, opcode)
+
+    #define LOAD_STORE_OP(name, opcode)
+    void name#w
+    void name#b
+    void name#h
+    void name#d
+  */
 
   //PPC64 ISA - Only Fixed Point instructions have been implemented
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
