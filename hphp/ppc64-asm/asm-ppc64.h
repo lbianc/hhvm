@@ -1555,8 +1555,8 @@ public:
   void unimplemented();
 
   static void patchBc(CodeAddress jmp, CodeAddress dest) {
-    // Opcode located at the first 6 bits
-    assert(((jmp[3] >> 2) & 0x3F) == 16);
+    // Opcode located at the 6 most significant bits
+    assert(((jmp[3] >> 2) & 0x3F) == 16);  // B-Form
     ssize_t diff = dest - jmp;
     int16_t* BD = (int16_t*)(jmp);    // target address location in instruction
 
@@ -1566,6 +1566,9 @@ public:
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
     // Check Label::branchAuto for details
+
+    // Opcode located at the 6 most significant bits
+    assert(((jmp[3] >> 2) & 0x3F) == 19);  // XL-Form
     ssize_t diff = dest - jmp;
 
     int16_t *imm = (int16_t*)(jmp);     // immediate field of addi
@@ -2062,7 +2065,7 @@ public:
                    address & ssize_t(UINT16_MAX)));
       a.mtctr(tmp);
 
-      addJump(&a, BranchType::bctr);
+      addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
 
       // TODO(gut): Use a typedef or something to avoid copying code like below:
       if (LinkReg::Save == lr)
