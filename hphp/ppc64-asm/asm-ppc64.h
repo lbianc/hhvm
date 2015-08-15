@@ -2005,11 +2005,16 @@ public:
     BranchParams bp(bc);
     addJump(&a, BranchType::bc);
 
-    ssize_t diff   = ssize_t(m_address - a.frontier());
-    assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) && "Offset too big");
+    int16_t offset;
+    if (m_address) {
+      ssize_t diff = ssize_t(m_address - a.frontier());
+      assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) && "Offset too big");
 
-    // offset can be redefined on patchBc() if no m_address exist
-    int16_t offset = m_address ? diff : ssize_t(a.frontier());
+      offset = diff;
+    } else {
+      // offset will be redefined on patchBc()
+      offset = ssize_t(a.frontier());
+    }
 
     // TODO(gut): Use a typedef or something to avoid copying code like below:
     if (LinkReg::Save == lr)
