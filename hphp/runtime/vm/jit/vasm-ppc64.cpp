@@ -98,17 +98,17 @@ struct Vgen {
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
-  void emit(addli i) { not_implemented(); }
+  void emit(addli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(const addlm& i) { not_implemented(); }
   void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
   void emit(const addqim& i) { not_implemented(); }
   void emit(addsd i) { not_implemented(); }
-  void emit(andb i) { not_implemented(); }
-  void emit(andbi i) { not_implemented(); }
+  void emit(andb i) {  a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
+  void emit(andbi i) { a->andi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(const andbim& i) { not_implemented(); }
-  void emit(andl i) { not_implemented(); }
-  void emit(andli i) { not_implemented(); }
+  void emit(andl i) { a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
+  void emit(andli i) {a->andi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
   void emit(const call& i) {
@@ -118,11 +118,11 @@ struct Vgen {
   void emit(const callr& i) { not_implemented(); }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
-  void emit(const cmpb& i) { not_implemented(); }
-  void emit(const cmpbi& i) { not_implemented(); }
+  void emit(const cmpb& i) { a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
+  void emit(const cmpbi& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
   void emit(const cmpbim& i) { not_implemented(); }
-  void emit(const cmpl& i) { not_implemented(); }
-  void emit(const cmpli& i) { not_implemented(); }
+  void emit(const cmpl& i) {  a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
+  void emit(const cmpli& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
   void emit(const cmplim& i) { not_implemented(); }
   void emit(const cmplm& i) { not_implemented(); }
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
@@ -137,7 +137,7 @@ struct Vgen {
   void emit(const cvttsd2siq& i) { not_implemented(); }
   void emit(const cvtsi2sd& i) { not_implemented(); }
   void emit(const cvtsi2sdm& i) { not_implemented(); }
-  void emit(decl i) { not_implemented(); }
+  void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
   void emit(const declm& i) { not_implemented(); }
   void emit(decq i) { a->addi(i.d, i.s, -1); }
   void emit(const decqm& i) { not_implemented(); }
@@ -147,7 +147,7 @@ struct Vgen {
     because x64 idiv divides eax:edx by i.s. There is no 
     such instruction in PPC64. So maybe we need to create another vasm.*/
   void emit(const idiv& i) { not_implemented(); }
-  void emit(incl i) { not_implemented(); }
+  void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(const inclm& i) { not_implemented(); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
   void emit(const incqm& i) { not_implemented(); }
@@ -169,10 +169,10 @@ struct Vgen {
   void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} 
   void emit(const loadzbq& i) { a->lbz(i.d, i.s); }
   void emit(const loadzlq& i) { a->lwz(i.d, i.s); }
-  void emit(const movb& i) { not_implemented(); }
-  void emit(const movl& i) { not_implemented(); }
-  void emit(const movzbl& i) { not_implemented(); }
-  void emit(const movzbq& i) { not_implemented(); }
+  void emit(movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op form
@@ -213,28 +213,28 @@ struct Vgen {
   void emit(const storew& i) { a->sth(Reg64(i.s), i.m); }
   void emit(const storewi& i) { not_implemented(); }
   void emit(subbi i) { not_implemented(); }
-  void emit(subl i) { not_implemented(); }
-  void emit(subli i) { not_implemented(); }
+  void emit(subl i) { a->subf(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), false); }
+  void emit(subli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { not_implemented(); }
-  void emit(const testb& i) { not_implemented(); }
-  void emit(const testbi& i) { not_implemented(); }
+  void emit(const testb& i) { /*a->and_(i.s0, i.s1, false);*/ }
+  void emit(const testbi& i) { /*a->addi(i.d, i.s1, i.s0);*/ }
   void emit(const testbim& i) { not_implemented(); }
   void emit(const testwim& i) { not_implemented(); }
   //TODO(IBM) Depends on CR registers
   void emit(const testl& i) { /*a->and_(i.s0, i.s1, false);*/ }
   void emit(const testli& i) { /*a->addi(i.d, i.s1, i.s0);*/ }
   void emit(const testlim& i) { not_implemented(); }
-  void emit(const testq& i) { not_implemented(); }
+  void emit(const testq& i) { /*a->and_(i.s0, i.s1, false);*/ }
   void emit(const testqm& i) { not_implemented(); }
   void emit(const testqim& i) { not_implemented(); }
   void emit(const ucomisd& i) { not_implemented(); }
   void emit(const ud2& i) { a->unimplemented(); }
   void emit(unpcklpd i) { not_implemented(); }
-  void emit(xorb i) { not_implemented(); }
-  void emit(xorbi i) { not_implemented(); }
-  void emit(xorl i) { not_implemented(); }
+  void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
+  void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
+  void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
 
