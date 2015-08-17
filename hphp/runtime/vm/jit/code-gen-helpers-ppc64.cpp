@@ -58,7 +58,11 @@ TRACE_SET_MOD(hhir);
  */
 void moveToAlign(CodeBlock& cb,
                  const size_t align /* =kJmpTargetAlign */) {
-  not_implemented();
+  Asm a { cb };
+  assertx(folly::isPowTwo(align));
+  size_t leftInBlock = align - ((align - 1) & uintptr_t(cb.frontier()));
+  if (leftInBlock == align) return;
+  a.emitNop(leftInBlock);
 }
 
 void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp,

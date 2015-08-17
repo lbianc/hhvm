@@ -50,7 +50,7 @@ namespace ppc64 {
 
 typedef ppc64_asm::Assembler Asm;
 
-constexpr size_t kJmpTargetAlign = 16;
+constexpr size_t kJmpTargetAlign = 4;
 
 void moveToAlign(CodeBlock& cb, size_t alignment = kJmpTargetAlign);
 
