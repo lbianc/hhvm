@@ -114,8 +114,16 @@ struct Vgen {
   void emit(const call& i) {
     a->branchAuto(i.target, rAsm, BranchConditions::Always, LinkReg::Save);
   }
-  void emit(const callm& i) { not_implemented(); }
-  void emit(const callr& i) { not_implemented(); }
+  void emit(const callm& i) {
+    emit(addq {i.target.index, i.target.base, i.target.base, VregSF(0)});
+    emit(addqi{i.target.disp,  i.target.base, i.target.base, VregSF(0)});
+    emit(load{*i.target.base,   i.target.base});
+    emit(callr{i.target.base,   i.args});
+  }
+  void emit(const callr& i) {
+    a->mtctr(i.target);
+    a->bctrl();
+  }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
   void emit(const cmpb& i) { a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
