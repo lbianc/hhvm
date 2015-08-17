@@ -132,9 +132,45 @@ Vreg emitLdClsCctx(Vout& v, Vreg src, Vreg dst) { not_implemented(); }
 
 void emitCall(Asm& a, TCA dest, RegSet args) { not_implemented(); }
 
-void emitCall(Asm& a, CppCall call, RegSet args) { not_implemented(); }
+void emitCall(Asm& a, CppCall call, RegSet args) {
+  emitCall(Vauto(a.code()).main(), call, args);
+}
 
-void emitCall(Vout& v, CppCall target, RegSet args) { not_implemented(); }
+void emitCall(Vout& v, CppCall target, RegSet args) {
+  switch (target.kind()) {
+  case CppCall::Kind::Direct:
+    v << call{static_cast<TCA>(target.address()), args};
+    return;
+  case CppCall::Kind::Virtual:
+    // Virtual call.
+    // Load method's address from proper offset off of object in 1st arg
+    // using rAsm as scratch.
+    v << load{*argNumToRegName[0], rAsm};
+    v << callm{rAsm[target.vtableOffset()], args};
+    return;
+  case CppCall::Kind::ArrayVirt: {
+    auto const addr = reinterpret_cast<intptr_t>(target.arrayTable());
+    always_assert_flog(
+      deltaFits(addr, sz::dword),
+      "deltaFits on ArrayData vtable calls needs to be checked before "
+      "emitting them"
+    );
+    v << loadzbq{argNumToRegName[0][HeaderKindOffset], rAsm};
+    v << callm{baseless(rAsm*8 + addr), args};
+    static_assert(sizeof(HeaderKind) == 1, "");
+    return;
+  }
+  case CppCall::Kind::Destructor:
+    // this movzbq is only needed because callers aren't required to
+    // zero-extend the type.
+    auto zextType = v.makeReg();
+    v << movzbq{target.reg(), zextType};
+    auto dtor_ptr = lookupDestructor(v, zextType);
+    v << callm{dtor_ptr, args};
+    return;
+  }
+  not_reached();
+}
 
 void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) { not_implemented(); }
 
