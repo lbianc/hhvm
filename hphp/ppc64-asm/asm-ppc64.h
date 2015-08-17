@@ -467,11 +467,11 @@ public:
   void stbu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void stbux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void stbx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
-  void sth(const Reg64& rt, const Reg64& rb, uint16_t imm);
+  void sth(const Reg64& rt, MemoryRef m);
   void sthu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void sthux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void sthx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
-  void stw(const Reg64& rt, const Reg64& rb, uint16_t imm);
+  void stw(const Reg64& rt, MemoryRef m);
   void stwu(const Reg64& rt, const Reg64& rb, uint16_t imm);
   void stwux(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void stwx(const Reg64& rt, const Reg64& ra, const Reg64& rb);

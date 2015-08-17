@@ -644,8 +644,8 @@ void Assembler::stbx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
     EmitXForm(31, rn(rt), rn(ra), rn(rb), 247);
 }
 
-void Assembler::sth(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-    EmitDForm(44, rn(rt), rn(rb), imm);
+void Assembler::sth(const Reg64& rt, MemoryRef m) {
+    EmitDForm(44, rn(rt), rn(m.r.base), m.r.disp);
 }
 
 void Assembler::sthu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
@@ -660,8 +660,8 @@ void Assembler::sthx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
     EmitXForm(31, rn(rt), rn(ra), rn(rb), 439);
 }
 
-void Assembler::stw(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-    EmitDForm(36, rn(rt), rn(rb), imm);
+void Assembler::stw(const Reg64& rt, MemoryRef m) {
+    EmitDForm(36, rn(rt), rn(m.r.base), m.r.disp);
 }
 
 void Assembler::stwu(const Reg64& rt, const Reg64& rb, uint16_t imm) {

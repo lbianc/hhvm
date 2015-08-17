@@ -166,10 +166,9 @@ struct Vgen {
   void emit(const loadl& i) { not_implemented(); }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
-  /*TODO(IBM) Chech i.d aka Reg32 to Reg64 conversion*/
   void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} 
-  void emit(const loadzbq& i) { not_implemented(); }
-  void emit(const loadzlq& i) { not_implemented(); }
+  void emit(const loadzbq& i) { a->lbz(i.d, i.s); }
+  void emit(const loadzlq& i) { a->lwz(i.d, i.s); }
   void emit(const movb& i) { not_implemented(); }
   void emit(const movl& i) { not_implemented(); }
   void emit(const movzbl& i) { not_implemented(); }
@@ -207,11 +206,11 @@ struct Vgen {
   void emit(const storeups& i) { not_implemented(); }
   void emit(const storeb& i) { a->stb(Reg64(i.s), i.m); }
   void emit(const storebi& i) { not_implemented(); }
-  void emit(const storel& i) { not_implemented(); }
+  void emit(const storel& i) { a->stw(Reg64(i.s), i.m); }
   void emit(const storeli& i) { not_implemented(); }
   void emit(const storeqi& i) { not_implemented(); }
   void emit(const storesd& i) { not_implemented(); }
-  void emit(const storew& i) { not_implemented(); }
+  void emit(const storew& i) { a->sth(Reg64(i.s), i.m); }
   void emit(const storewi& i) { not_implemented(); }
   void emit(subbi i) { not_implemented(); }
   void emit(subl i) { not_implemented(); }
