@@ -61,7 +61,7 @@ TCA emitDebuggerRetFromInterpretedGenFrame() { not_implemented(); }
 
 extern "C" void enterTCExit();
 
-void emitCallToExit(UniqueStubs& uniqueStubs) { not_implemented(); }
+void emitCallToExit(UniqueStubs& uniqueStubs) { /*not_implemented();*/ }
 
 void emitReturnHelpers(UniqueStubs& us) { not_implemented(); }
 
@@ -92,7 +92,7 @@ void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
 	  TCA (*helper)(ActRec*) = &funcBodyHelper;
 	  Asm a { mcg->code.main() };
 
-	  moveToAlign(mcg->code.main());
+//	  moveToAlign(mcg->code.main());
 	  uniqueStubs.funcBodyHelperThunk = a.frontier();
 
 	  // This helper is called via a direct jump from the TC (from
@@ -117,20 +117,20 @@ void emitBindCallStubs(UniqueStubs& uniqueStubs) { not_implemented(); }
 UniqueStubs emitUniqueStubs() {
   UniqueStubs us;
   auto functions = {
-    emitCallToExit,
-    emitReturnHelpers,
-    emitResumeInterpHelpers,
-    emitThrowSwitchMode,
-    emitCatchHelper,
-    emitStackOverflowHelper,
-    emitFreeLocalsHelpers,
-    emitDecRefHelper,
-    emitFuncPrologueRedispatch,
-    emitFCallArrayHelper,
-    emitFCallHelperThunk,
+//    emitCallToExit,
+//    emitReturnHelpers,
+//    emitResumeInterpHelpers,
+//    emitThrowSwitchMode,
+//    emitCatchHelper,
+//    emitStackOverflowHelper,
+//    emitFreeLocalsHelpers,
+//    emitDecRefHelper,
+//    emitFuncPrologueRedispatch,
+//    emitFCallArrayHelper,
+//    emitFCallHelperThunk,
     emitFuncBodyHelperThunk,
-    emitFunctionEnterHelper,
-    emitBindCallStubs,
+//    emitFunctionEnterHelper,
+//    emitBindCallStubs,
   };
   for (auto& f : functions) f(us);
   return us;

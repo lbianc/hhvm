@@ -51,6 +51,12 @@ constexpr PhysReg rVmToc     = ppc64_asm::reg::r2;
  */
 constexpr PhysReg rVmSp      = ppc64_asm::reg::r1;
 
+/* TODO
+ * Specifying r1 as Frame Pointer. This may be not necessary for the
+ * Arch. It is being defined for code compatibility
+ */
+constexpr PhysReg rVmFp      = ppc64_asm::reg::r1;
+
 /*
  * RDS base pointer.  Always points to the base of the RDS block for
  * the current request.

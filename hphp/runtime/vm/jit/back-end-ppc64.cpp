@@ -63,17 +63,27 @@ struct BackEnd final : public jit::BackEnd {
   BackEnd() {}
   ~BackEnd() {}
 
-   Abi abi() override { not_implemented(); };
+  Abi abi() override {
+    return ppc64::abi;
+  };
 
    size_t cacheLineSize() override { not_implemented(); };
 
-   PhysReg rSp() override { not_implemented(); };
+  PhysReg rSp() override {
+    return PhysReg(reg::rsp);
+  };
 
-   PhysReg rVmSp() override { not_implemented(); };
+  PhysReg rVmSp() override {
+    return ppc64::rVmSp;
+  };
 
-   PhysReg rVmFp() override { not_implemented(); };
+  PhysReg rVmFp() override {
+    return ppc64::rVmFp;
+  };
 
-   PhysReg rVmTl() override { not_implemented(); };
+   PhysReg rVmTl() override {
+    return ppc64::rVmTl;
+  }; 
 
 //TODO PPC64 review this code, since it is duplicated
 #if defined (__powerpc64__)
