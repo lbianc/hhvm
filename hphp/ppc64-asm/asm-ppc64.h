@@ -1469,6 +1469,12 @@ public:
   void bdnzlr()         { not_implemented(); }  //Extended bclr 16,0,0
   void bltctr()         { not_implemented(); }  //Extended bcctr 12,0,0
   void bnectr()         { not_implemented(); }  //Extended bcctr 4,10,0
+  void bctr() {
+    bcctr(20, 0, 0);
+  }
+  void bctrl() {
+    bcctrl(20, 0, 0);
+  }
   void crmov()          { not_implemented(); }  //Extended cror Bx,By,By
   void crclr()          { not_implemented(); }  //Extended crxor Bx,Bx,BX
   void crnot()          { not_implemented(); }  //Extended crnor Bx,By,By
@@ -1497,7 +1503,9 @@ public:
   void twllei()         { not_implemented(); }  //Extended twi 6,Rx,value
   void tweq()           { not_implemented(); }  //Extended tw 4,Rx,Ry
   void twlge()          { not_implemented(); }  //Extended tw 5,Rx,Ry
-  void trap()           { not_implemented(); }  //Extended tw 31,0,0
+  void trap() {
+    tw(31, Reg64(0), Reg64(0));
+  }
   void tdlti()          { not_implemented(); }  //Extended tdi 16,Rx,value
   void tdnei()          { not_implemented(); }  //Extended tdi 24,Rx,value
   void tdeg()           { not_implemented(); }  //Extended td 12,Rx,Ry
