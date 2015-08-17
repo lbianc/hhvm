@@ -1512,7 +1512,9 @@ public:
   void isellt()         { not_implemented(); }  //Extended isel Rx,Ry,Rz,0
   void iselgt()         { not_implemented(); }  //Extended isel Rx,Ry,Rz,1
   void iseleq()         { not_implemented(); }  //Extended isel Rx,Ry,Rz,1
-  void no_op()          { not_implemented(); }  //Extended
+  void nop() {
+    ori(Reg64(0),Reg64(0),0);
+  }
   void andis()          { not_implemented(); }  //Extended
   void xnop()           { not_implemented(); }  //Extended
   void mr()             { not_implemented(); }  //Extended
@@ -1587,6 +1589,12 @@ public:
 
     imm += 4;                           // next instruction
     *imm = HPHP::safe_cast<int16_t>(diff & ssize_t(UINT16_MAX));
+  }
+
+  void emitNop(int n) {
+    assert((n % 4 == 0) && "This arch supports only 4 bytes alignment");
+    for (; n > 0; n -= 4)
+      nop();
   }
 
   // Secure high level instruction emitter
