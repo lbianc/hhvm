@@ -214,82 +214,82 @@ void Assembler::crxor(uint16_t bt, uint16_t ba, uint16_t bb) {
 
 void Assembler::divd(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                      bool rc) { 
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 489, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 489, rc);
 }
 
 void Assembler::divde(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) { 
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 425, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 425, rc);
 }
 
 void Assembler::divdeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 425, rc); 
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 425, rc); 
 }
 
 void Assembler::divdeu(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) { 
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 393, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 393, rc);
 }
 
 void Assembler::divdeuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 393, rc);  
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 393, rc);  
 }
 
 void Assembler::divdo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 489, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 489, rc);
 }
 
 void Assembler::divdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 457, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 457, rc);
 }
 
 void Assembler::divduo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 457, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 457, rc);
 }
 
 void Assembler::divw(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                      bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 491, rc); 
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 491, rc); 
 } 
 
 void Assembler::divwe(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 427, rc);  
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 427, rc);  
 } 
 
 void Assembler::divweo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 427, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 427, rc);
 } 
 
 void Assembler::divweu(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 395, rc); 
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 395, rc); 
 } 
 
 void Assembler::divweuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 395, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 395, rc);
 } 
 
 void Assembler::divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 491, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 491, rc);
 } 
 
 void Assembler::divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 459, rc); 
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 459, rc); 
 } 
 
 void Assembler::divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                        bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 459, rc); 
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 459, rc); 
 } 
 
 void Assembler::eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, 
@@ -446,12 +446,12 @@ void Assembler::mtspr(const SpecialReg spr, const Reg64& rs) {
 
 void Assembler::mulhd(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 73, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(b), 0, 73, rc);
 }
 
 void Assembler::mulhdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) { 
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 9, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 9, rc);
 }
 
 void Assembler::mulhw(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
@@ -466,12 +466,12 @@ void Assembler::mulhwu(const Reg64& rt, const Reg64& ra, const Reg64& rb,
 
 void Assembler::mulld(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 233, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 0, 233, rc);
 }
 
 void Assembler::mulldo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-    EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 233, rc);
+    EmitXOForm(31, rn(rt), rn(ra), rn(rb), 1, 233, rc);
 }
 
 void Assembler::mulli(const Reg64& rt, const Reg64& ra, uint16_t imm) {
@@ -490,7 +490,7 @@ void Assembler::mullwo(const Reg64& rt, const Reg64& ra, const Reg64& rb,
 
 void Assembler::nand(const Reg64& rs, const Reg64& ra, const Reg64& rb, 
                       bool rc) {
-     EmitXForm(31, rn(rs), rn(ra), rn(rb), 476, rc);
+    EmitXForm(31, rn(rs), rn(ra), rn(rb), 476, rc);
 }
 
 void Assembler::neg(const Reg64& rt, const Reg64& ra, bool rc) {
@@ -754,23 +754,19 @@ void Assembler::subfic(const Reg64& rt, const Reg64& ra,  uint16_t imm) {
     EmitDForm(8, rn(rt), rn(ra), imm);
 }
 
-void Assembler::subfme(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
-                     bool rc) {
+void Assembler::subfme(const Reg64& rt, const Reg64& ra, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 232, rc); 
 }
 
-void Assembler::subfmeo(const Reg64& rt,  const Reg64& ra, const Reg64& rb, 
-                     bool rc) {
+void Assembler::subfmeo(const Reg64& rt,  const Reg64& ra, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 232, rc);
 }
 
-void Assembler::subfze(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
-                     bool rc) {
+void Assembler::subfze(const Reg64& rt, const Reg64& ra, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(0), 0, 200, rc); 
 }
 
-void Assembler::subfzeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, 
-                     bool rc) {
+void Assembler::subfzeo(const Reg64& rt, const Reg64& ra, bool rc) {
     EmitXOForm(31, rn(rt), rn(ra), rn(0), 1, 200, rc);
 }
 

@@ -493,10 +493,10 @@ public:
   void subfe(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void subfeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void subfic(const Reg64& rt, const Reg64& ra,  uint16_t imm);
-  void subfme(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void subfmeo(const Reg64& rt,  const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void subfze(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void subfzeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
+  void subfme(const Reg64& rt, const Reg64& ra, bool rc = 0);
+  void subfmeo(const Reg64& rt,  const Reg64& ra, bool rc = 0);
+  void subfze(const Reg64& rt, const Reg64& ra, bool rc = 0);
+  void subfzeo(const Reg64& rt, const Reg64& ra, bool rc = 0);
   void td(uint16_t to, const Reg64& ra, const Reg64& rb);
   void tdi(uint16_t to, const Reg64& ra, uint16_t imm);
   void tw(uint16_t to, const Reg64& ra, const Reg64& rb);
