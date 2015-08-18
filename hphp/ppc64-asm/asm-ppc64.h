@@ -2077,12 +2077,12 @@ public:
 
       // Optimization: the highest 48th up to 63rd bits are never used to
       // address RAM data so we can assume it's zero
-      a.li   (tmp, HPHP::safe_cast<int16_t>(
+      a.li   (tmp, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
       a.sldi (tmp, tmp, 32);
-      a.addis(tmp, tmp, HPHP::safe_cast<int16_t>(
+      a.oris (tmp, tmp, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
-      a.addi (tmp, tmp, HPHP::safe_cast<int16_t>(
+      a.ori  (tmp, tmp, HPHP::safe_cast<uint16_t>(
                    address & ssize_t(UINT16_MAX)));
       a.mtctr(tmp);
 
