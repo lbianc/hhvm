@@ -34,8 +34,6 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/runtime.h"
 
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
 namespace HPHP { namespace jit { namespace ppc64 {
 
 //////////////////////////////////////////////////////////////////////
@@ -49,43 +47,12 @@ TRACE_SET_MOD(ustubs);
 
 namespace {
 
-TCA emitRetFromInterpretedFrame() { not_implemented(); }
-
-TCA emitRetFromInterpretedGeneratorFrame() { not_implemented(); }
-
-TCA emitDebuggerRetFromInterpretedFrame() { not_implemented(); }
-
-TCA emitDebuggerRetFromInterpretedGenFrame() { not_implemented(); }
-
 //////////////////////////////////////////////////////////////////////
 
 extern "C" void enterTCExit();
 
-void emitCallToExit(UniqueStubs& uniqueStubs) { /*not_implemented();*/ }
-
-void emitReturnHelpers(UniqueStubs& us) { not_implemented(); }
-
-void emitResumeInterpHelpers(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitThrowSwitchMode(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitCatchHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitStackOverflowHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitFreeLocalsHelpers(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitDecRefHelper(UniqueStubs& us) { not_implemented(); }
-
-void emitFuncPrologueRedispatch(UniqueStubs& uniqueStubs) {
-  not_implemented();
-}
-
-void emitFCallArrayHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
 
 //////////////////////////////////////////////////////////////////////
-
-void emitFCallHelperThunk(UniqueStubs& uniqueStubs) { not_implemented(); }
 
 //TODO PPC64 start here
 void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
@@ -97,40 +64,21 @@ void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
 
 	  // This helper is called via a direct jump from the TC (from
 	  // fcallArrayHelper). So the stack parity is already correct.
-	  a.    or_(rVmSp, argNumToRegName[0], argNumToRegName[0], false);
-//	  a.    movq   (rVmFp, argNumToRegName[0]);
-//	  emitCall(a, CppCall::direct(helper), argSet(1));
-//	  a.    jmp    (rax);
-//	  a.    ud2    ();
+	  emitCall(a, CppCall::direct(helper), argSet(1));
+    a.    bctr();
+    a.    trap();
 
 	  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
 }
 
-void emitFunctionEnterHelper(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-void emitBindCallStubs(UniqueStubs& uniqueStubs) { not_implemented(); }
-
-}
+} // end of anonymous namespace
 
 //////////////////////////////////////////////////////////////////////
 
 UniqueStubs emitUniqueStubs() {
   UniqueStubs us;
   auto functions = {
-//    emitCallToExit,
-//    emitReturnHelpers,
-//    emitResumeInterpHelpers,
-//    emitThrowSwitchMode,
-//    emitCatchHelper,
-//    emitStackOverflowHelper,
-//    emitFreeLocalsHelpers,
-//    emitDecRefHelper,
-//    emitFuncPrologueRedispatch,
-//    emitFCallArrayHelper,
-//    emitFCallHelperThunk,
     emitFuncBodyHelperThunk,
-//    emitFunctionEnterHelper,
-//    emitBindCallStubs,
   };
   for (auto& f : functions) f(us);
   return us;
@@ -140,4 +88,3 @@ UniqueStubs emitUniqueStubs() {
 
 }}}
 
-#pragma GCC diagnostic pop
