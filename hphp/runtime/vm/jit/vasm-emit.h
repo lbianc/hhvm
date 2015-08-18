@@ -179,6 +179,19 @@ void emitX64(const Vunit&, Vasm::AreaList&, AsmInfo*);
 void finishARM(Vunit&, Vasm::AreaList&, const Abi&, AsmInfo* asmInfo);
 
 /*
+ * Optimize, lower for PPC64, register allocator, and perform more optimizations
+ * on unit.
+ */
+// void optimizePPC64(Vunit& unit, const Abi&);
+
+/*
+ * Emit code for the given unit using the given code areas. The unit should
+ * have already been through optimizePPC64().
+ */
+void emitPPC64(const Vunit&, Vasm::AreaList&, AsmInfo*);
+
+
+/*
  * Vauto is a convenience helper for emitting small amounts of machine code
  * using vasm.
  *

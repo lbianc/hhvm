@@ -460,19 +460,41 @@ void Vgen::emit(const load& i) {
  Lower facilitate code generation. In some cases is used because 
  some vasm opcodes doesn't have a 1:1 mapping to machine asm code.
 */
-void lowerForX64(Vunit& unit, const Abi& abi) {
-  //TODO(IBM) Implement function
+void lowerForPPC64(Vunit& unit, const Abi& abi) {
+  //TODO(rcardoso) Implement function
   printUnit(kVasmARMFoldLevel, "after lower for PPC64", unit);
 }
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
 void optimizePPC64(Vunit& unit, const Abi& abi) {
- //TODO(IBM) Implement function
+ // TODO(rcardoso) Implement optimizations here
+ //                HHVM have some optimizations for vasm:
+ //                   removeTrivialNops(unit);
+ //                   fuseBranches(unit);
+ //                   optimizeJmps(unit);
+ //                   optimizeExits(unit);
+ //                   optimizeCopies(unit, abi);
+ //                   removeDeadCode(unit);
+ //                   allocateRegisters(unit, abi);
 }
 
 void emitPPC64(const Vunit& unit, Vasm::AreaList& areas, AsmInfo* asmInfo) {
-  //TODO(IBM) Implement function
+
+  /*
+    TODO(rcardoso) 
+    Each thread will have own static 'busy' variable. And we always_assert 
+    We can have many threads emitting code. So we need to guarating that vm will
+    not preempt a thread in emitting process. Why ARM is not using this?
+  */
+  static thread_local bool busy;
+  always_assert(!busy);
+  busy = true;
+  SCOPE_EXIT { busy = false; };
+
+  Timer timer(Timer::vasm_gen);
+  auto blocks = layoutBlocks(unit);
+  Vgen(unit, areas, asmInfo).emit(blocks);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
