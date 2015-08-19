@@ -691,13 +691,6 @@ std::string Decoder::toString(){
 }
 
 void Decoder::decode(uint32_t* ip) {
-     op_ = *ip & (0x3f << 26);
-     if(isExtended[op_]) {
-        if(op_ == 31) {
-           uint16_t xo = *ip & (0x7FE); //XO is 21:30 bits
-           //TODO(IBM): Get instruction info from table
-        }
-     }
 }
 
 } // namespace ppc64_asm

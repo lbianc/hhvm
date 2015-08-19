@@ -2171,6 +2171,7 @@ public:
 private:
   void decode(uint32_t* ip);
   uint8_t op_;
+  DecoderTable dec_;
 };
 
 } // namespace ppc64_asm
