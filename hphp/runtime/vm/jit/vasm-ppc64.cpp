@@ -78,7 +78,7 @@ struct Vgen {
   void emit(const copy& i) { not_implemented(); }
   void emit(const copy2& i) { not_implemented(); }
   void emit(const debugtrap& i) { not_implemented(); }
-  void emit(const fallthru& i) { not_implemented(); }
+  void emit(const fallthru& i) {}
   void emit(const ldimmb& i) { not_implemented(); }
   void emit(const ldimml& i) { not_implemented(); }
   void emit(const ldimmq& i) { not_implemented(); }
