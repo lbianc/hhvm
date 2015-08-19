@@ -1552,12 +1552,10 @@ public:
   void bcla(Label& l, BranchConditions bc);
 
   void branchAuto(Label& l,
-                  Reg64 tmp,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch);
 
   void branchAuto(CodeAddress c,
-                  Reg64 tmp,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch);
 
@@ -2080,12 +2078,13 @@ public:
       a.li   (ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
       a.sldi (ppc64_asm::reg::r12, ppc64_asm::reg::r12, 32);
-      a.oris (ppc64_asm::reg::r12, ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
-                   (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
-      a.ori  (ppc64_asm::reg::r12, ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
-                   address & ssize_t(UINT16_MAX)));
-      //When branching to another context, r12 need to keep the target address to
-      //correctly set r2 (TOC reference).
+      a.oris (ppc64_asm::reg::r12, ppc64_asm::reg::r12,
+              HPHP::safe_cast<uint16_t>(
+                (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
+      a.ori  (ppc64_asm::reg::r12, ppc64_asm::reg::r12,
+              HPHP::safe_cast<uint16_t>(address & ssize_t(UINT16_MAX)));
+      // When branching to another context, r12 need to keep the target address
+      // to correctly set r2 (TOC reference).
       a.mtctr(ppc64_asm::reg::r12);
 
       addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
@@ -2154,13 +2153,11 @@ inline void Assembler::bcla(Label& l, BranchConditions bc) {
 }
 
 inline void Assembler::branchAuto(Label& l,
-                              Reg64 tmp,
                               BranchConditions bc,
                               LinkReg lr) {
   l.branchAuto(*this, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
-                              Reg64 tmp,
                               BranchConditions bc,
                               LinkReg lr) {
   Label l(c);

@@ -112,7 +112,7 @@ struct Vgen {
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
   void emit(const call& i) {
-    a->branchAuto(i.target, rAsm, BranchConditions::Always, LinkReg::Save);
+    a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
   }
   void emit(const callm& i) {
     emit(addq {i.target.index, i.target.base, i.target.base, VregSF(0)});
