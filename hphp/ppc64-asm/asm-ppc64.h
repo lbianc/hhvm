@@ -2056,7 +2056,7 @@ public:
       a.bca(bp.bo(), bp.bi(), uint16_t(address));
   }
 
-  void branchAuto(Assembler& a, Reg64 tmp, BranchConditions bc, LinkReg lr) {
+  void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
     assert(m_address && "Cannot evaluate branch size without defined target");
     auto delta = m_address - a.frontier();
     if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
@@ -2077,14 +2077,16 @@ public:
 
       // Optimization: the highest 48th up to 63rd bits are never used to
       // address RAM data so we can assume it's zero
-      a.li   (tmp, HPHP::safe_cast<uint16_t>(
+      a.li   (ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
-      a.sldi (tmp, tmp, 32);
-      a.oris (tmp, tmp, HPHP::safe_cast<uint16_t>(
+      a.sldi (ppc64_asm::reg::r12, ppc64_asm::reg::r12, 32);
+      a.oris (ppc64_asm::reg::r12, ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
-      a.ori  (tmp, tmp, HPHP::safe_cast<uint16_t>(
+      a.ori  (ppc64_asm::reg::r12, ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
                    address & ssize_t(UINT16_MAX)));
-      a.mtctr(tmp);
+      //When branching to another context, r12 need to keep the target address to
+      //correctly set r2 (TOC reference).
+      a.mtctr(ppc64_asm::reg::r12);
 
       addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
 
@@ -2155,14 +2157,14 @@ inline void Assembler::branchAuto(Label& l,
                               Reg64 tmp,
                               BranchConditions bc,
                               LinkReg lr) {
-  l.branchAuto(*this, tmp, bc, lr);
+  l.branchAuto(*this, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
                               Reg64 tmp,
                               BranchConditions bc,
                               LinkReg lr) {
   Label l(c);
-  l.branchAuto(*this, tmp, bc, lr);
+  l.branchAuto(*this, bc, lr);
 }
 
 class Decoder {
