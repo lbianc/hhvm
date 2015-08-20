@@ -55,14 +55,14 @@ void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
   TCA (*helper)(ActRec*) = &funcBodyHelper;
   Asm a { mcg->code.main() };
 
+  moveToAlign(mcg->code.main());
+  uniqueStubs.funcBodyHelperThunk = a.frontier();
+
   a.    mflr(ppc64_asm::reg::r0);
   // LR on parent call frame
   a.    std(ppc64_asm::reg::r0, ppc64_asm::reg::r1, 16);
   // minimum call stack
   a.    stdu(ppc64_asm::reg::r1, ppc64_asm::reg::r1, -32);
-
-  moveToAlign(mcg->code.main());
-  uniqueStubs.funcBodyHelperThunk = a.frontier();
 
   // This helper is called via a direct jump from the TC (from
   // fcallArrayHelper). So the stack parity is already correct.
