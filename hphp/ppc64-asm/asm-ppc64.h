@@ -1742,7 +1742,7 @@ protected:
                              0x0, //Reserved
                              static_cast<uint32_t>(rtp),
                              static_cast<uint32_t>(ra),
-                             imm,
+                             static_cast<uint32_t>(imm) >> 4,
                              op
                             };
 

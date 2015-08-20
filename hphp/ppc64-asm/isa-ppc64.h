@@ -1626,7 +1626,7 @@ static_assert(sizeof(DS_format) == sizeof(uint32_t), "DS_format_t size != 4");
 typedef union DQ_format {
   struct {
     uint32_t RSV:4;
-    uint32_t DQ:17;
+    uint32_t DQ:12;
     uint32_t RA:5;
     uint32_t RTp:5;
     uint32_t OP:6;
