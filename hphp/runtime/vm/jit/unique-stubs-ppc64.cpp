@@ -16,7 +16,6 @@
 
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 
-#include <boost/implicit_cast.hpp>
 #include <sstream>
 
 #include "hphp/util/abi-cxx.h"
@@ -38,9 +37,6 @@ namespace HPHP { namespace jit { namespace ppc64 {
 
 //////////////////////////////////////////////////////////////////////
 
-using namespace jit::reg;
-using boost::implicit_cast;
-
 TRACE_SET_MOD(ustubs);
 
 //////////////////////////////////////////////////////////////////////
@@ -56,19 +52,31 @@ extern "C" void enterTCExit();
 
 //TODO PPC64 start here
 void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
-	  TCA (*helper)(ActRec*) = &funcBodyHelper;
-	  Asm a { mcg->code.main() };
+  TCA (*helper)(ActRec*) = &funcBodyHelper;
+  Asm a { mcg->code.main() };
 
-//	  moveToAlign(mcg->code.main());
-	  uniqueStubs.funcBodyHelperThunk = a.frontier();
+  a.    mflr(ppc64_asm::reg::r0);
+  // LR on parent call frame
+  a.    std(ppc64_asm::reg::r0, ppc64_asm::reg::r1, 16);
+  // minimum call stack
+  a.    stdu(ppc64_asm::reg::r1, ppc64_asm::reg::r1, -32);
 
-	  // This helper is called via a direct jump from the TC (from
-	  // fcallArrayHelper). So the stack parity is already correct.
-	  emitCall(a, CppCall::direct(helper), argSet(1));
-    a.    bctr();
-    a.    trap();
+  moveToAlign(mcg->code.main());
+  uniqueStubs.funcBodyHelperThunk = a.frontier();
 
-	  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
+  // This helper is called via a direct jump from the TC (from
+  // fcallArrayHelper). So the stack parity is already correct.
+  emitCall(a, CppCall::direct(helper), argSet(1));
+
+  // minimum call stack
+  a.    addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, 32);
+  // LR on parent call frame
+  a.    ld(ppc64_asm::reg::r0, ppc64_asm::reg::r1, 16);
+  a.    mtlr(ppc64_asm::reg::r0);
+  a.    blr();
+  a.    trap();
+
+  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
 }
 
 } // end of anonymous namespace
