@@ -1724,7 +1724,7 @@ protected:
 
       DS_form_t ds_formater {
                              xop,
-                             imm,
+                             static_cast<uint32_t>(imm) >> 2,
                              static_cast<uint32_t>(ra),
                              static_cast<uint32_t>(rt),
                              op

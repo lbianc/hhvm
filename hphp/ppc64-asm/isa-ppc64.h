@@ -1608,7 +1608,7 @@ typedef union SC_format {
 typedef union DS_format {
   struct {
     uint32_t XO:2;
-    uint32_t DS:19;
+    uint32_t DS:14;
     uint32_t RA:5;
     uint32_t RT:5;
     uint32_t OP:6;
