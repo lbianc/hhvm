@@ -66,6 +66,86 @@ enum class BranchConditions {
 
 #undef BRANCHES
 
+class BranchParams {
+  /* BO and BI parameter mapping related to BranchConditions */
+  public:
+    BranchParams() { assert("BranchParams created without parameter"); }
+
+    enum class BO {
+      CRNotSet              = 4,
+      CRSet                 = 12,
+      Always                = 20
+    };
+
+#define CR_CONDITIONS(cr) \
+      CR##cr##_LessThan          = 0x80000000ULL >> (32 - (0 + (cr * 4))), \
+      CR##cr##_GreaterThan       = 0x80000000ULL >> (32 - (1 + (cr * 4))), \
+      CR##cr##_Equal             = 0x80000000ULL >> (32 - (2 + (cr * 4))), \
+      CR##cr##_SummaryOverflow   = 0x80000000ULL >> (32 - (3 + (cr * 4)))
+
+    enum class BI {
+      CR_CONDITIONS(0),
+      CR_CONDITIONS(1),
+      CR_CONDITIONS(2),
+      CR_CONDITIONS(3),
+      CR_CONDITIONS(4),
+      CR_CONDITIONS(5),
+      CR_CONDITIONS(6),
+      CR_CONDITIONS(7)
+    };
+
+#undef CR_CONDITIONS
+
+    enum class BH {
+      CTR_Loop              = 0,
+      LR_Loop               = 1,
+      Reserved              = 2,
+      NoBranchPrediction    = 3
+    };
+
+#define SWITCHES(cr)                                              \
+  case BranchConditions::CR##cr##_LessThan:                       \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;    break;  \
+  case BranchConditions::CR##cr##_LessThanEqual:                  \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan; break;  \
+  case BranchConditions::CR##cr##_GreaterThan:                    \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan; break;  \
+  case BranchConditions::CR##cr##_GreaterThanEqual:               \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;    break;  \
+  case BranchConditions::CR##cr##_Equal:                          \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;       break;  \
+  case BranchConditions::CR##cr##_NotEqual:                       \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;       break
+
+    BranchParams(BranchConditions bc) {
+      /* TODO(gut): implement other CRs */
+      switch (bc) {
+        SWITCHES(0);
+        SWITCHES(1);
+        SWITCHES(2);
+        SWITCHES(3);
+        SWITCHES(4);
+        SWITCHES(5);
+        SWITCHES(6);
+        SWITCHES(7);
+        case BranchConditions::Always:
+          m_bo = BO::Always; m_bi = BI(0); break;
+      }
+    }
+
+#undef SWITCHES
+
+    ~BranchParams() {}
+
+    uint8_t bo() { return (uint8_t)m_bo; }
+    uint8_t bi() { return (uint8_t)m_bi; }
+
+  private:
+    BranchParams::BO m_bo;
+    BranchParams::BI m_bi;
+};
+
+
 enum class LinkReg {
   Save,
   DoNotTouch
@@ -1465,16 +1545,22 @@ public:
   void blt()            { not_implemented(); }  //Extended bc 12,0,target
   void bne()            { not_implemented(); }  //Extended bc 4,10,target
   void bdnz()           { not_implemented(); }  //Extended bc 16,0,target
+  void blr() {
+    BranchParams bp(BranchConditions::Always);
+    bclr(bp.bo(), bp.bi(), 0);
+  }
   void bltlr()          { not_implemented(); }  //Extended bclr 12,0,0
   void bnelr()          { not_implemented(); }  //Extended bclr 4,10,0
   void bdnzlr()         { not_implemented(); }  //Extended bclr 16,0,0
   void bltctr()         { not_implemented(); }  //Extended bcctr 12,0,0
   void bnectr()         { not_implemented(); }  //Extended bcctr 4,10,0
   void bctr() {
-    bcctr(20, 0, 0);
+    BranchParams bp(BranchConditions::Always);
+    bcctr(bp.bo(), bp.bi(), 0);
   }
   void bctrl() {
-    bcctrl(20, 0, 0);
+    BranchParams bp(BranchConditions::Always);
+    bcctrl(bp.bo(), bp.bi(), 0);
   }
   void crmov()          { not_implemented(); }  //Extended cror Bx,By,By
   void crclr()          { not_implemented(); }  //Extended crxor Bx,Bx,BX
@@ -1917,85 +2003,6 @@ private:
 //////////////////////////////////////////////////////////////////////
 // Branches
 //////////////////////////////////////////////////////////////////////
-
-class BranchParams {
-  /* BO and BI parameter mapping related to BranchConditions */
-  public:
-    BranchParams() { assert("BranchParams created without parameter"); }
-
-    enum class BO {
-      CRNotSet              = 4,
-      CRSet                 = 12,
-      Always                = 20
-    };
-
-#define CR_CONDITIONS(cr) \
-      CR##cr##_LessThan          = 0x80000000ULL >> (32 - (0 + (cr * 4))), \
-      CR##cr##_GreaterThan       = 0x80000000ULL >> (32 - (1 + (cr * 4))), \
-      CR##cr##_Equal             = 0x80000000ULL >> (32 - (2 + (cr * 4))), \
-      CR##cr##_SummaryOverflow   = 0x80000000ULL >> (32 - (3 + (cr * 4)))
-
-    enum class BI {
-      CR_CONDITIONS(0),
-      CR_CONDITIONS(1),
-      CR_CONDITIONS(2),
-      CR_CONDITIONS(3),
-      CR_CONDITIONS(4),
-      CR_CONDITIONS(5),
-      CR_CONDITIONS(6),
-      CR_CONDITIONS(7)
-    };
-
-#undef CR_CONDITIONS
-
-    enum class BH {
-      CTR_Loop              = 0,
-      LR_Loop               = 1,
-      Reserved              = 2,
-      NoBranchPrediction    = 3
-    };
-
-#define SWITCHES(cr)                                              \
-  case BranchConditions::CR##cr##_LessThan:                       \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;    break;  \
-  case BranchConditions::CR##cr##_LessThanEqual:                  \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan; break;  \
-  case BranchConditions::CR##cr##_GreaterThan:                    \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan; break;  \
-  case BranchConditions::CR##cr##_GreaterThanEqual:               \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;    break;  \
-  case BranchConditions::CR##cr##_Equal:                          \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;       break;  \
-  case BranchConditions::CR##cr##_NotEqual:                       \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;       break
-
-    BranchParams(BranchConditions bc) {
-      /* TODO(gut): implement other CRs */
-      switch (bc) {
-        SWITCHES(0);
-        SWITCHES(1);
-        SWITCHES(2);
-        SWITCHES(3);
-        SWITCHES(4);
-        SWITCHES(5);
-        SWITCHES(6);
-        SWITCHES(7);
-        case BranchConditions::Always:
-          m_bo = BO::Always; m_bi = BI(0); break;
-      }
-    }
-
-#undef SWITCHES
-
-    ~BranchParams() {}
-
-    uint8_t bo() { return (uint8_t)m_bo; }
-    uint8_t bi() { return (uint8_t)m_bi; }
-
-  private:
-    BranchParams::BO m_bo;
-    BranchParams::BI m_bi;
-};
 
 /*
  TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
