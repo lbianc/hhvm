@@ -1635,7 +1635,7 @@ typedef union DQ_format {
 } DQ_form_t;
 static_assert(sizeof(DQ_format) == sizeof(uint32_t), "DQ_format_t size != 4");
 
-typedef union instruction {
+typedef union XL_form {
   struct {
     uint32_t LK:1;
     uint32_t XO:10;
