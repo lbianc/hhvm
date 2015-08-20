@@ -2092,17 +2092,17 @@ public:
 
       // Optimization: the highest 48th up to 63rd bits are never used to
       // address RAM data so we can assume it's zero
-      a.li   (ppc64_asm::reg::r12, HPHP::safe_cast<uint16_t>(
+      a.li   (reg::r12, HPHP::safe_cast<uint16_t>(
                    (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
-      a.sldi (ppc64_asm::reg::r12, ppc64_asm::reg::r12, 32);
-      a.oris (ppc64_asm::reg::r12, ppc64_asm::reg::r12,
+      a.sldi (reg::r12, reg::r12, 32);
+      a.oris (reg::r12, reg::r12,
               HPHP::safe_cast<uint16_t>(
                 (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
-      a.ori  (ppc64_asm::reg::r12, ppc64_asm::reg::r12,
+      a.ori  (reg::r12, reg::r12,
               HPHP::safe_cast<uint16_t>(address & ssize_t(UINT16_MAX)));
       // When branching to another context, r12 need to keep the target address
       // to correctly set r2 (TOC reference).
-      a.mtctr(ppc64_asm::reg::r12);
+      a.mtctr(reg::r12);
 
       addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
 
