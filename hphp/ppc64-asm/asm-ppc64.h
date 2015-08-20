@@ -414,6 +414,7 @@ public:
   void lwax(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void lwbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb);
   void mcrf(uint16_t bf, uint16_t bfa);
+  void mfspr(const SpecialReg spr, const Reg64& rs);
   void mtspr(const SpecialReg spr, const Reg64& rs);
   void mulhd(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void mulhdu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
@@ -1538,6 +1539,15 @@ public:
   void mtcr()           { not_implemented(); }  //Extended
   void mtctr(const Reg64& rx) {
     mtspr(SpecialReg::CTR, rx);
+  }
+  void mtlr(const Reg64& rx) {
+    mtspr(SpecialReg::LR, rx);
+  }
+  void mfctr(const Reg64& rx) {
+    mfspr(SpecialReg::CTR, rx);
+  }
+  void mflr(const Reg64& rx) {
+    mfspr(SpecialReg::LR, rx);
   }
   
   // Label variants
