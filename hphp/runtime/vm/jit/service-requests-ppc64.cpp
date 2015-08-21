@@ -122,12 +122,51 @@ TCA emitServiceReqWork(CodeBlock& cb,
                        folly::Optional<FPInvOffset> spOff,
                        ServiceRequest req,
                        const ServiceReqArgVec& argv) {
-  auto const is_reused = start != cb.frontier();
+  ppc64_asm::Assembler a { cb };
 
-  CodeBlock stub;
-  stub.init(start, maxStubSpace(), "stubTemp");
-  emitServiceReqImpl(stub, flags, spOff, req, argv);
-  if (!is_reused) cb.skip(stub.used());
+  const bool persist = flags & SRFlags::Persist;
+
+  folly::Optional<CodeCursor> maybeCc = folly::none;
+  if (start != cb.frontier()) {
+    maybeCc.emplace(cb, start);
+  }
+
+  const auto kMaxStubSpace = reusableStubSize();
+
+  for (auto i = 0; i < argv.size(); ++i) {
+    auto reg = ppc64::serviceReqArgRegs[i];
+    auto const& arg = argv[i];
+    switch (arg.m_kind) {
+      case ServiceReqArgInfo::Immediate:
+        //a.   Mov  (reg, arg.m_imm);
+        a.li64  (reg, arg.m_imm);
+        break;
+      case ServiceReqArgInfo::CondCode:
+        not_implemented();
+        break;
+      default: not_reached();
+    }
+  }
+
+  if (persist) {
+    a.   li    (rAsm, 0);
+  } else {
+    a.   li64  (rAsm, reinterpret_cast<intptr_t>(start));
+  }
+  a.     li    (ppc64::serviceReqArgRegs[0], req);
+
+  not_implemented();
+  // TODO(lbianc) Checking if this code will be necessary
+  //a.     Ldr   (rLinkReg, MemOperand(sp, 16, PostIndex));
+  //a.     Ret   ();
+  //a.     Brk   (0);
+
+  if (!persist) {
+    assertx(cb.frontier() - start <= kMaxStubSpace);
+    while (cb.frontier() - start < kMaxStubSpace) {
+      a. nop   ();
+    }
+  }
 
   return start;
 }

@@ -402,7 +402,7 @@ public:
   void addeo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void addi(const Reg64& rt, const Reg64& ra, Immed imm);
   void addic(const Reg64& rt, const Reg64& ra, uint16_t imm, bool rc = 0);
-  void addis(const Reg64& rt, const Reg64& ra, uint16_t imm);
+  void addis(const Reg64& rt, const Reg64& ra, Immed imm);
   void addme(const Reg64& rt, const Reg64& ra, bool rc = 0);
   void addmeo(const Reg64& rt, const Reg64& ra, bool rc = 0);
   void addo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
@@ -1571,7 +1571,9 @@ public:
   }
   void la()             { not_implemented(); }  //Extended addi Rx,Ry,disp
   void subi()           { not_implemented(); }  //Extended addi Rx,Ry,-value
-  void lis()            { not_implemented(); }  //Extended addis Rx,0,value
+  void lis(const Reg64& rt, Immed imm) {
+    addis(rt, Reg64(0), imm);
+  }
   void subis()          { not_implemented(); }  //Extended addis Rx,Ry,-value
   void sub()            { not_implemented(); }  //Extended subf Rx,Rz,Ry
   void subic()          { not_implemented(); }  //Extended addic Rx,Ry,-value
@@ -1612,7 +1614,9 @@ public:
   void rotlw()          { not_implemented(); }  //Extended
   void inslwi()         { not_implemented(); }  //Extended
   void extrdi()         { not_implemented(); }  //Extended
-  void srdi()           { not_implemented(); }  //Extended
+  void srdi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+    rldicl(ra, rs, 64-sh, sh);
+  }
   void clrldi()         { not_implemented(); }  //Extended
   void extldi()         { not_implemented(); }  //Extended
   inline void sldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
@@ -1654,6 +1658,8 @@ public:
   void branchAuto(CodeAddress c,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch);
+
+  void li64 (const Reg64& rt, uint64_t imm64);
 
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();

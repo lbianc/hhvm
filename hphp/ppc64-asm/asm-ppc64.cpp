@@ -113,8 +113,8 @@ void Assembler::addic(const Reg64& rt, const Reg64& ra, uint16_t imm, bool rc) {
     EmitDForm(12 + (uint8_t) rc, rn(rt), rn(ra), imm);
 }
 
-void Assembler::addis(const Reg64& rt, const Reg64& ra, uint16_t imm) {
-    EmitDForm(15, rn(rt), rn(ra), imm);
+void Assembler::addis(const Reg64& rt, const Reg64& ra, Immed imm) {
+    EmitDForm(15, rn(rt), rn(ra), imm.w());
 }
 
 void Assembler::and_(const Reg64& rs, const Reg64& ra, const Reg64& rb, 
@@ -679,6 +679,46 @@ void Assembler::fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb,
 void Assembler::unimplemented(){
 //Emit a instruction with invalid opcode 0x0
     EmitDForm(0, rn(0), rn(0), 0);
+}
+
+void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
+  // if immediate has only low 16 bits set, use simple load immediate
+  if ((imm64 >> 16) == 0)
+  {
+    li(rt, static_cast<int16_t>(imm64));
+    // clear sign
+    sldi (reg::r12, reg::r12, 48);
+    srdi (reg::r12, reg::r12, 48);
+  }
+  // if immediate has only low 32 bits set
+  else if (imm64 >> 32 == 0)
+  {
+    lis(rt, static_cast<int16_t>(imm64 >> 16));
+    ori(rt, rt, static_cast<int16_t>((imm64 << 48) >> 48));
+    // clear sign
+    sldi (reg::r12, reg::r12, 32);
+    srdi (reg::r12, reg::r12, 32);
+  }
+  // if immediate has only low 48 bits set
+  else if (imm64 >> 48 == 0)
+  {
+    lis(rt, static_cast<int16_t>(imm64 >> 48));
+    ori(rt, rt, static_cast<int16_t>((imm64 << 16) >> 48));
+    sldi(rt,rt,16);
+    ori(rt, rt, static_cast<int16_t>((imm64 << 48) >> 48));
+    // clear sign
+    sldi (reg::r12, reg::r12, 16);
+    srdi (reg::r12, reg::r12, 16);
+  }
+  // else load all 64 bits
+  else
+  {
+    lis(rt, static_cast<int16_t>(imm64 >> 48));
+    ori(rt, rt, static_cast<int16_t>((imm64 << 16) >> 48));
+    sldi(rt,rt,32);
+    oris(rt, rt, static_cast<int16_t>((imm64 << 32) >> 48));
+    ori(rt, rt, static_cast<int16_t>((imm64 << 48) >> 48));
+  }
 }
 
 std::string Decoder::toString(){

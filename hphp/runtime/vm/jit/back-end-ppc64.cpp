@@ -111,7 +111,9 @@ struct BackEnd final : public jit::BackEnd {
     SRFlags flags,
     folly::Optional<FPInvOffset> spOff,
     ServiceRequest req,
-    const ServiceReqArgVec& argv) override { not_implemented(); };
+    const ServiceReqArgVec& argv) override {
+	   return ppc64::emitServiceReqWork(cb, start, flags, spOff, req, argv);
+   };
    size_t reusableStubSize() const override { not_implemented(); };
 
    void emitInterpReq(CodeBlock& code,
