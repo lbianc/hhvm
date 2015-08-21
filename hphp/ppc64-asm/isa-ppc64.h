@@ -55,7 +55,40 @@ enum class Form {
   kZ23Form,
 };
 
-//Declare class as struct to initialize like an array
+// Instruction type decoder masks
+const uint32_t kDecoderMask1  = (0x3F << 26);
+const uint32_t kDecoderMask2  = (0x3F << 26) | (0x1);
+const uint32_t kDecoderMask3  = (0x3F << 26) | (0x3);
+const uint32_t kDecoderMask4  = (0x3F << 26) | (0x1 << 1);
+const uint32_t kDecoderMask5  = (0x3F << 26) | (0x3FF << 1) | (0x1);
+const uint32_t kDecoderMask6  = (0x3F << 26) | (0x1FF << 2);
+const uint32_t kDecoderMask7  = (0x3F << 26) | (0x1F << 2) | (0x1);
+const uint32_t kDecoderMask8  = (0x3F << 26) | (0x1 << 2) | (0x1 << 1);
+const uint32_t kDecoderMask9  = (0x3F << 26) | (0x3FF << 1);
+const uint32_t kDecoderMask10 = (0x3F << 26) | (0x3FF << 1) | (0x1 << 20);
+const uint32_t kDecoderMask11 = (0x3F << 26) | (0xFF << 3);
+const uint32_t kDecoderMask12 = (0x3F << 26) | (0x1 << 10) | (0xF << 3);
+const uint32_t kDecoderMask13 = (0x3F << 26) | (0x3 << 4);
+const uint32_t kDecoderMask14 = (0x3F << 26) | (0x1F << 1);
+const uint32_t kDecoderMask15 = (0x3F << 26) | (0x7 << 2) | (0x1);
+const uint32_t kDecoderMask16 = (0x3F << 26) | (0xF << 1) | (0x1);
+const uint32_t kDecoderMask17 = (0x3F << 26) | (0x3F);
+const uint32_t kDecoderMask18 = (0x3F << 26) | (0x1 << 10) | (0x3FF);
+const uint32_t kDecoderMask19 = (0x3F << 26) | (0x7FF);
+const uint32_t kDecoderMask20 = (0x3F << 26) | (0x1FF << 1) | (0x1);
+const uint32_t kDecoderMask21 = (0x3F << 26) | (0xFF << 1) | (0x1);
+
+const uint32_t kDecoderListSize = 21;
+// Decoder List
+const uint32_t DecoderList[] = { kDecoderMask1, kDecoderMask2,   kDecoderMask3,
+                                 kDecoderMask4, kDecoderMask5,   kDecoderMask6,
+                                 kDecoderMask7, kDecoderMask8,   kDecoderMask9,
+                                 kDecoderMask10, kDecoderMask11, kDecoderMask12,
+                                 kDecoderMask13, kDecoderMask14, kDecoderMask15,
+                                 kDecoderMask16, kDecoderMask17, kDecoderMask18,
+                                 kDecoderMask19, kDecoderMask20, kDecoderMask21
+                               };
+
 struct DecoderInfo {
 private:
     uint32_t opcode_;
