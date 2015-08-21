@@ -1617,7 +1617,9 @@ public:
   void srdi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
     rldicl(ra, rs, 64-sh, sh);
   }
-  void clrldi()         { not_implemented(); }  //Extended
+  void clrldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+    rldicl(ra, rs, 0, sh);
+  }
   void extldi()         { not_implemented(); }  //Extended
   inline void sldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
     rldicr(ra, rs, sh, 63-sh);
