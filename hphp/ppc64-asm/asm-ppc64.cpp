@@ -731,7 +731,9 @@ std::string Decoder::toString(){
       CAVEATS:
         If instruction is kInvalid maybe it's data. What to do in this case?
     */
-
+    if(decoded_instr_->form() == Form::kInvalid) {
+      return ".long " + ip_;
+    }
     return decoded_instr_->mnemonic();
 }
 
