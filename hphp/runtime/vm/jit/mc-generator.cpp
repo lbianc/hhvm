@@ -464,7 +464,8 @@ MCGenerator::createTranslation(const TranslArgs& args) {
   sr->setFuncInfo(sk.func());
   sr->setAnchorTranslation(req);
 
-  if (srcRecSPOff) always_assert(sr->nonResumedSPOff() == *srcRecSPOff);
+  //if (srcRecSPOff) always_assert(sr->nonResumedSPOff() == *srcRecSPOff);
+  // TODO PPC64
 
   size_t asize = code.main().frontier() - astart;
   size_t realColdSize   = code.realCold().frontier()   - realColdStart;

@@ -125,6 +125,21 @@ size_t relocate(RelocationInfo& rel,
                 TCA* exitAddr);
 }
 
+namespace ppc64 {
+void adjustForRelocation(RelocationInfo&);
+void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
+void adjustCodeForRelocation(RelocationInfo& rel, CodeGenFixups& fixups);
+void adjustMetaDataForRelocation(RelocationInfo& rel,
+                                 AsmInfo* asmInfo,
+                                 CodeGenFixups& fixups);
+void findFixups(TCA start, TCA end, CodeGenFixups& fixups);
+size_t relocate(RelocationInfo& rel,
+                CodeBlock& destBlock,
+                TCA start, TCA end,
+                CodeGenFixups& fixups,
+                TCA* exitAddr);
+}
+
 //////////////////////////////////////////////////////////////////////
 
 }}

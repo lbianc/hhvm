@@ -143,7 +143,7 @@ ETCH_NAME(enterTCHelper):
   // Prologue
   mflr %r0
   std %r0, 16(%r1)    // LR on parent call frame
-  stdu %r1, -176(%r1) // aligned with Epilogue: addi %r1, %r1, 176
+  stdu %r1, -184(%r1) // aligned with Epilogue: addi %r1, %r1, 176
 
   // Save non-volatile registers in order to restore it on Epilogue
   std %r2, 24(%r1)    // TOC
@@ -165,6 +165,9 @@ ETCH_NAME(enterTCHelper):
   std %r29, 152(%r1)  // local variable #16
   std %r30, 160(%r1)  // local variable #17
   std %r31, 168(%r1)  // local variable #18
+  std %r3,  176(%r1)  // local variable #18 //TODO check if it will be always necessary
+
+  mr %r3, %r4 // change fp to right register
 
   mr %r12, %r5        // %r12 is the function linkage
   mtctr %r12
@@ -215,6 +218,7 @@ ETCH_NAME(enterTCExit):
   ld %r29, 152(%r1)   // local variable #16
   ld %r30, 160(%r1)   // local variable #17
   ld %r31, 168(%r1)   // local variable #18
+  ld %r3, 176(%r1)    // local variable #18 //TODO check if it will be always necessary
 
   addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
   ld %r0, 16(%r1)

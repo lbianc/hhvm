@@ -126,6 +126,16 @@ TCA emitServiceReqWork(CodeBlock& cb,
 
   const bool persist = flags & SRFlags::Persist;
 
+  /*
+   * If we have an spOff, materialize rVmSp so that handleSRHelper can do a vm
+   * reg sync.  When we don't have an spOff, the caller of the service request
+   * was responsible for making sure rVmSp already contained the top of the
+   * stack.
+   */
+//  if (spOff) {
+//    a.    lea(rVmFp[-cellsToBytes(spOff->offset)], rVmSp);
+//  }
+
   folly::Optional<CodeCursor> maybeCc = folly::none;
   if (start != cb.frontier()) {
     maybeCc.emplace(cb, start);
@@ -155,7 +165,6 @@ TCA emitServiceReqWork(CodeBlock& cb,
   }
   a.     li    (ppc64::serviceReqArgRegs[0], req);
 
-  not_implemented();
   // TODO(lbianc) Checking if this code will be necessary
   //a.     Ldr   (rLinkReg, MemOperand(sp, 16, PostIndex));
   //a.     Ret   ();
