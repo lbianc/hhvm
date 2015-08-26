@@ -102,7 +102,7 @@ TCA fcallHelper(ActRec* ar, bool isClonedClosure) {
  * the prologue has run.
  */
 TCA funcBodyHelper(ActRec* fp) {
-//  assert_native_stack_aligned(); TODO PPC64
+  assert_native_stack_aligned();
   void* const sp = reinterpret_cast<Cell*>(fp) - fp->func()->numSlotsInFrame();
   setupAfterPrologue(fp, sp);
   tl_regState = VMRegState::CLEAN;
