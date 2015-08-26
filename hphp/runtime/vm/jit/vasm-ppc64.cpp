@@ -83,8 +83,8 @@ struct Vgen {
   void emit(const ldimml& i) { not_implemented(); }
   void emit(const ldimmq& i) { not_implemented(); }
   void emit(const ldimmqs& i) { not_implemented(); }
-  void emit(const fallback& i) { not_implemented(); }
-  void emit(const fallbackcc& i) { not_implemented(); }
+  void emit(const fallback& i);
+  void emit(const fallbackcc& i);
   void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
@@ -456,6 +456,20 @@ void Vgen::emit(const load& i) {
     not_implemented();//TODO(IBM): SIMD Unsupported
   }
 }
+
+void Vgen::emit(const fallback& i) {
+  emit(fallbackcc{CC_None, InvalidReg, i.dest, i.trflags, i.args});
+}
+
+void Vgen::emit(const fallbackcc& i) {
+  auto const destSR = mcg->tx().getSrcRec(i.dest);
+  if (!i.trflags.packed) {
+    destSR->emitFallbackJump(a->code(), i.cc);
+  } else {
+    destSR->emitFallbackJumpCustom(a->code(), frozen(), i.dest, i.trflags);
+  }
+}
+
 /*
  Lower facilitate code generation. In some cases is used because 
  some vasm opcodes doesn't have a 1:1 mapping to machine asm code.
