@@ -66,6 +66,43 @@ struct Vgen {
                        vinst_names[Vinstr(i).op], size_t(current));
   }
 
+  // auxiliary
+  inline void pushMinCallStack(void)
+  {
+    a->mflr(ppc64_asm::reg::r0);
+    // LR on parent call frame
+    a->std(ppc64_asm::reg::r0,  ppc64_asm::reg::r1, 16);
+    // minimum call stack
+    a->stdu(ppc64_asm::reg::r1, ppc64_asm::reg::r1, -32);
+  }
+
+  inline void popMinCallStack(void)
+  {
+    // minimum call stack
+    a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, 32);
+    // LR on parent call frame
+    a->ld(ppc64_asm::reg::r0,   ppc64_asm::reg::r1, 16);
+    a->mtlr(ppc64_asm::reg::r0);
+  }
+
+  inline void VptrToReg(Vptr s, Vreg d) {
+    // address of Vptr can be calculated by:
+    //    s.base + s.index * s.scale + s.disp
+    // the multiplication will be simplified by a shift left, as s.scale is
+    // always 1, 2, 4 or 8
+    int shift_left = 0;
+    int scale = s.scale;
+    while (scale >>= 1) {
+      ++shift_left;
+    }
+    assert(shift_left >= 3);
+
+    emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
+    emit(addq {s.base,      d,        d, VregSF(0)});
+    emit(addqi{s.disp,      d,        d, VregSF(0)});
+    emit(load{*s.base,      d});
+  }
+
   // intrinsics
   void emit(const bindaddr& i) { not_implemented(); }
   void emit(const bindcall& i) { not_implemented(); }
@@ -112,13 +149,15 @@ struct Vgen {
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
   void emit(const call& i) {
+    // Need to create a new call stack in order to recover LR in the future
+    pushMinCallStack();
+
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
   }
   void emit(const callm& i) {
-    emit(addq {i.target.index, i.target.base, i.target.base, VregSF(0)});
-    emit(addqi{i.target.disp,  i.target.base, i.target.base, VregSF(0)});
-    emit(load{*i.target.base,   i.target.base});
-    emit(callr{i.target.base,   i.args});
+    // uses scratch register
+    VptrToReg(i.target, ppc64::rAsm);
+    emit(callr{ppc64::rAsm, i.args});
   }
   void emit(const callr& i) {
     a->mtctr(i.target);
@@ -163,10 +202,25 @@ struct Vgen {
   void emit(const incwm& i) { not_implemented(); }
   void emit(const jcc& i) { not_implemented(); }
   void emit(const jcci& i) { not_implemented(); }
-  void emit(const jmp& i) { not_implemented(); }
-  void emit(const jmpr& i) { not_implemented(); }
-  void emit(const jmpm& i) { not_implemented(); }
-  void emit(const jmpi& i) { not_implemented(); }
+  void emit(const jmp& i) {
+    if (next == i.target) return;
+    jmps.push_back({a->frontier(), i.target});
+
+    // offset to be determined by a->patchBc
+    a->b(0);
+  }
+  void emit(const jmpr& i) {
+    a->mtctr(i.target);
+    a->bctr();
+  }
+  void emit(const jmpm& i) {
+    // uses scratch register
+    VptrToReg(i.target, ppc64::rAsm);
+    emit(jmpr {ppc64::rAsm, i.args});
+  }
+  void emit(const jmpi& i) {
+    a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
+  }
   void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
   void emit(const leap& i) { not_implemented(); }
   void emit(const loadups& i) { not_implemented(); }
@@ -196,7 +250,11 @@ struct Vgen {
   void emit(psrlq i) { not_implemented(); }
   void emit(const push& i);
   void emit(const roundsd& i) { not_implemented(); }
-  void emit(const ret& i) { a->bclr(20,0,0); /*brl 0x4e800020*/}
+  void emit(const ret& i) {
+    // recover LR from callstack
+    popMinCallStack();
+    a->blr();
+  }
   /*Immediate-form logical (unsigned) shift operations are
     obtained by specifying appropriate masks and shift values for 
     certain Rotate instructions.
@@ -382,9 +440,10 @@ void Vgen::emit(jit::vector<Vlabel>& labels) {
   //   assertx(addrs[p.target]);
   // }
 
-  // for (auto& p : jmps) {
-  //   assertx(addrs[p.target]);
-  // }
+  for (auto& p : jmps) {
+    assertx(addrs[p.target]);
+    a->patchBc(p.instr, addrs[p.target]);
+  }
 
   // for (auto& p : calls) {
   //   assertx(addrs[p.target]);
