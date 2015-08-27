@@ -289,7 +289,7 @@ namespace reg {
     RNAME(v30); RNAME(v31);
     return nullptr;
   }
-#undef RName
+#undef RNAME
 }
 
 //////////////////////////////////////////////////////////////////////
