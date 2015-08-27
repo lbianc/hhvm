@@ -1699,6 +1699,8 @@ public:
     // Opcode located at the 6 most significant bits
     assert(((jmp[3] >> 2) & 0x3F) == 16);  // B-Form
     ssize_t diff = dest - jmp;
+    assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
+        "Patching offset is too big");
     int16_t* BD = (int16_t*)(jmp);    // target address location in instruction
 
     // Keep AA and LK values
