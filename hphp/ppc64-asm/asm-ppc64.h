@@ -261,6 +261,35 @@ namespace reg {
   constexpr Reg64 v29(29);
   constexpr Reg64 v30(30);
   constexpr Reg64 v31(31);
+
+
+// TODO(rcardoso): Need to check if SIMD registers are Reg64
+#define RNAME(x) if (r == x) return "%"#x
+
+  inline const char* regname(Reg64 r) {
+    RNAME(r0);  RNAME(r1);  RNAME(r2);  RNAME(r3);  RNAME(r4);  RNAME(r5); 
+    RNAME(r6);  RNAME(r7);  RNAME(r8);  RNAME(r9);  RNAME(r10); RNAME(r11); 
+    RNAME(r12); RNAME(r13); RNAME(r14); RNAME(r15); RNAME(r16); RNAME(r17); 
+    RNAME(r18); RNAME(r19); RNAME(r20); RNAME(r21); RNAME(r22); RNAME(r23); 
+    RNAME(r24); RNAME(r25); RNAME(r26); RNAME(r27); RNAME(r28); RNAME(r29); 
+    RNAME(r30); RNAME(r31);
+
+    RNAME(f0);  RNAME(f1);  RNAME(f2);  RNAME(f3);  RNAME(f4);  RNAME(f5); 
+    RNAME(f6);  RNAME(f7);  RNAME(f8);  RNAME(f9);  RNAME(f10); RNAME(f11); 
+    RNAME(f12); RNAME(f13); RNAME(f14); RNAME(f15); RNAME(f16); RNAME(f17); 
+    RNAME(f18); RNAME(f19); RNAME(f20); RNAME(f21); RNAME(f22); RNAME(f23); 
+    RNAME(f24); RNAME(f25); RNAME(f26); RNAME(f27); RNAME(f28); RNAME(f29); 
+    RNAME(f30); RNAME(f31);
+
+    RNAME(v0);  RNAME(v1);  RNAME(v2);  RNAME(v3);  RNAME(v4);  RNAME(v5); 
+    RNAME(v6);  RNAME(v7);  RNAME(v8);  RNAME(v9);  RNAME(v10); RNAME(v11); 
+    RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17); 
+    RNAME(v18); RNAME(v19); RNAME(v20); RNAME(v21); RNAME(v22); RNAME(v23); 
+    RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29); 
+    RNAME(v30); RNAME(v31);
+    return nullptr;
+  }
+#undef RName
 }
 
 //////////////////////////////////////////////////////////////////////

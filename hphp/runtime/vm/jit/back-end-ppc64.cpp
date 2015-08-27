@@ -185,9 +185,9 @@ struct BackEnd final : public jit::BackEnd {
 
 
    void streamPhysReg(std::ostream& os, PhysReg reg) override {
-     auto name = (reg.type() == PhysReg::GP) ? reg::regname(Reg64(reg)) :
-       (reg.type() == PhysReg::SIMD) ? reg::regname(RegXMM(reg)) :
-       /* (reg.type() == PhysReg::SF) ? */ reg::regname(RegSF(reg));
+    /// TODO(rcardoso) : Need to check if SIMD registers are Reg64
+     auto name = (reg.type() == PhysReg::GP || reg.type() == PhysReg::SIMD) ? 
+     reg::regname(Reg64(reg)) : "CR0"; //Just print CR0
      os << name;
    };
 

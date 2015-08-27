@@ -89,7 +89,7 @@ struct Vgen {
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) { not_implemented(); }
-  void emit(const store& i) { not_implemented(); }
+  void emit(const store& i);
   void emit(const syncpoint& i) { not_implemented(); }
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
@@ -467,6 +467,15 @@ void Vgen::emit(const fallbackcc& i) {
     destSR->emitFallbackJump(a->code(), i.cc);
   } else {
     destSR->emitFallbackJumpCustom(a->code(), frozen(), i.dest, i.trflags);
+  }
+}
+
+void Vgen::emit(const store& i) {
+  if (i.s.isGP()) {
+    // storeq
+  } else {
+    assertx(i.s.isSIMD());
+    // storesd
   }
 }
 
