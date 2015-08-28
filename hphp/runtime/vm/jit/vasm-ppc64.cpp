@@ -129,7 +129,7 @@ struct Vgen {
   void emit(const store& i);
   void emit(const syncpoint& i) { not_implemented(); }
   void emit(const unwind& i) { not_implemented(); }
-  void emit(const landingpad& i) { not_implemented(); }
+  void emit(const landingpad& i) {}
   void emit(const vretm& i);
   void emit(const vret& i);
   void emit(const leavetc&) { not_implemented(); }
