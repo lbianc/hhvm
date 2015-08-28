@@ -199,7 +199,7 @@ struct Vgen {
   void emit(incq i) { a->addi(i.d, i.s, 1); }
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
-  void emit(const incwm& i) { not_implemented(); }
+  void emit(const incwm& i) { a->addi(i.m.base, i.m.index, i.m.disp); }
   void emit(const jcc& i) { not_implemented(); }
   void emit(const jcci& i) { not_implemented(); }
   void emit(const jmp& i) {
@@ -531,10 +531,10 @@ void Vgen::emit(const fallbackcc& i) {
 
 void Vgen::emit(const store& i) {
   if (i.s.isGP()) {
-    // storeq
+    a->stw(i.s, i.d);
   } else {
     assertx(i.s.isSIMD());
-    // storesd
+    // TODO(rcardoso) : Unsupported
   }
 }
 
