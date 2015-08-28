@@ -85,22 +85,43 @@ struct Vgen {
     a->mtlr(ppc64_asm::reg::r0);
   }
 
-  inline void VptrToReg(Vptr s, Vreg d) {
-    // address of Vptr can be calculated by:
-    //    s.base + s.index * s.scale + s.disp
-    // the multiplication will be simplified by a shift left, as s.scale is
-    // always 1, 2, 4 or 8
-    int shift_left = 0;
-    int scale = s.scale;
-    while (scale >>= 1) {
-      ++shift_left;
-    }
-    assert(shift_left >= 3);
+  /*
+   * Calculates address of s and stores it on d
+   *
+   * The address of Vptr can be calculated by:
+   *    s.base + s.index * s.scale + s.disp
+   * the multiplication will be simplified by a shift left,
+   * as s.scale is always 1, 2, 4 or 8
+   */
+  inline void VptrAddressToReg(Vptr s, Vreg d) {
+    /* s.index is optional */
+    if (s.index.isPhys()) {
+      /* calculate index position before adding base and displacement */
+      int shift_left = 0;
+      int scale = s.scale;
+      while (scale >>= 1) {
+        ++shift_left;
+      }
+      assert(shift_left <= 3);
 
-    emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
-    emit(addq {s.base,      d,        d, VregSF(0)});
-    emit(addqi{s.disp,      d,        d, VregSF(0)});
-    emit(load{*s.base,      d});
+      emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
+      emit(addq {s.base,      d,        d, VregSF(0)});
+      emit(addqi{s.disp,      d,        d, VregSF(0)});
+    } else if (!s.base.isPhys()) {
+      /* Baseless Vptr, solve this for ppc64 */
+      not_implemented();
+    } else {
+      /* Only add base with displacement */
+      emit(addqi{s.disp,      s.base,   d, VregSF(0)});
+    }
+  }
+
+  /*
+   * Stores in d the value pointed by s
+   */
+  inline void VptrToReg(Vptr s, Vreg d) {
+    VptrAddressToReg(s, d);
+    emit(load{*d, d});
   }
 
   // intrinsics
