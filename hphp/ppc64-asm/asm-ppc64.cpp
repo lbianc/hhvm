@@ -207,12 +207,12 @@ void Assembler::cmpb(const Reg64& rs, const Reg64& ra, const Reg64& rb) {
      EmitXForm(31, rn(rs), rn(ra), rn(rb), 508);
 }
 
-void Assembler::cmpl(uint16_t bf, bool l, Reg64& ra, Reg64& rb) {
+void Assembler::cmpl(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb) {
     EmitXForm(31, rn((bf+(uint16_t)l) & 0x1d), rn(ra), rn(rb), 32);
 }
 
-void Assembler::cmpli(uint16_t bf, bool l, Reg64& ra, uint16_t imm) {
-    EmitDForm(10, rn((bf+(uint16_t)l) & 0x1d), rn(ra), imm);
+void Assembler::cmpli(uint16_t bf, bool l, const Reg64& ra, Immed imm) {
+    EmitDForm(10, rn((bf+(uint16_t)l) & 0x1d), rn(ra), imm.w());
 }
 
 void Assembler::cntlzd(const Reg64& ra, const Reg64& rs, bool rc) {

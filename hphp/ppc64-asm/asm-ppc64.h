@@ -459,8 +459,8 @@ public:
   void cmp(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb);
   void cmpi(uint16_t bf, bool l, const Reg64& ra, Immed imm);
   void cmpb(const Reg64& rs, const Reg64& ra, const Reg64& rb);
-  void cmpl(uint16_t bf, bool l, Reg64& ra, Reg64& rb);
-  void cmpli(uint16_t bf, bool l, Reg64& ra, uint16_t imm);
+  void cmpl(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb);
+  void cmpli(uint16_t bf, bool l, const Reg64& ra, Immed imm);
   void cntlzd(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void cntlzw(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void crand(uint16_t bt, uint16_t ba, uint16_t bb);
