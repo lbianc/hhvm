@@ -197,7 +197,10 @@ struct Vgen {
   void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
   void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
-  void emit(const cmpqim& i) { not_implemented(); }
+  void emit(const cmpqim& i) {
+    VptrToReg(i.s1, ppc64::rAsm);
+    a->cmpdi(ppc64::rAsm, i.s0);
+  }
   void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
   void emit(cmpsd i) { not_implemented(); }
