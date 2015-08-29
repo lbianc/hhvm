@@ -541,7 +541,7 @@ public:
   void or_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void orc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void ori(const Reg64& rs, const Reg64& ra, Immed imm);
-  void oris(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void oris(const Reg64& rs, const Reg64& ra, Immed imm);
   void popcntb(const Reg64& ra, const Reg64& rs);
   void popcntd(const Reg64& ra, const Reg64& rs);
   void popcntw(const Reg64& ra, const Reg64& rs);
@@ -2153,14 +2153,14 @@ public:
 
       // Optimization: the highest 48th up to 63rd bits are never used to
       // address RAM data so we can assume it's zero
-      a.li   (reg::r12, HPHP::safe_cast<uint16_t>(
+      a.li   (reg::r12, HPHP::safe_cast<int16_t>(
                    (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
       a.sldi (reg::r12, reg::r12, 32);
       a.oris (reg::r12, reg::r12,
-              HPHP::safe_cast<uint16_t>(
+              HPHP::safe_cast<int16_t>(
                 (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
       a.ori  (reg::r12, reg::r12,
-              HPHP::safe_cast<uint16_t>(address & ssize_t(UINT16_MAX)));
+              HPHP::safe_cast<int16_t>(address & ssize_t(UINT16_MAX)));
       // When branching to another context, r12 need to keep the target address
       // to correctly set r2 (TOC reference).
       a.mtctr(reg::r12);

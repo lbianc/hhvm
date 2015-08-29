@@ -444,8 +444,9 @@ void Assembler::ori(const Reg64& rs, const Reg64& ra, Immed imm) {
   EmitDForm(24, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::oris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
-  EmitDForm(25, rn(rs), rn(ra), imm);
+void Assembler::oris(const Reg64& rs, const Reg64& ra, Immed imm) {
+  assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
+  EmitDForm(25, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::popcntb(const Reg64& ra, const Reg64& rs) {
