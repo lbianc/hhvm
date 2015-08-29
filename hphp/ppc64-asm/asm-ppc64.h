@@ -1607,18 +1607,38 @@ public:
   void sub()            { not_implemented(); }  //Extended subf Rx,Rz,Ry
   void subic()          { not_implemented(); }  //Extended addic Rx,Ry,-value
   void subc()           { not_implemented(); }  //Extended subfc Rx,Rz,Ry
-  void cmpdi()          { not_implemented(); }  //Extended cmpi 0,1,Rx,value
-  void cmpwi()          { not_implemented(); }  //Extended cmpi 3,0,Rx,value
+  void cmpdi(const Reg64& ra, Immed imm) {
+    cmpi(0, 1, ra, imm);
+  }
+  void cmpwi(const Reg64& ra, Immed imm) {
+    //Extended cmpi 3,0,Rx,value
+    // TODO(CRField): if other CRs than 0 is used, please change this to 3
+    cmpi(0, 0, ra, imm);
+  }
   void cmpd(const Reg64& ra, const Reg64& rb) {
     cmp(0, 1, ra, rb);
   }
-  void cmpw ()          { not_implemented(); }  //Extended cmp 3,0,Rx,Ry
+  void cmpw(const Reg64& ra, const Reg64& rb) {
+    //Extended cmp 3,0,Rx,Ry
+    // TODO(CRField): if other CRs than 0 is used, please change this to 3
+    cmp(0, 0, ra, rb);
+  }
   void cmpldi(const Reg64& ra, Immed imm) {
     cmpli(0, 1, ra, imm);
   }
-  void cmplwi()         { not_implemented(); }  //Extended cmpli 3,0,Rx,value
-  void cmpld()          { not_implemented(); }  //Extended cmpl 0,1,Rx,Ry
-  void cmplw()          { not_implemented(); }  //Extended cmpl 3,0,Rx,Ry
+  void cmplwi(const Reg64& ra, Immed imm) {
+    //Extended cmpli 3,0,Rx,value
+    // TODO(CRField): if other CRs than 0 is used, please change this to 3
+    cmpli(0, 0, ra, imm);
+  }
+  void cmpld(const Reg64& ra, const Reg64& rb) {
+    cmpl(0, 1, ra, rb);
+  }
+  void cmplw(const Reg64& ra, const Reg64& rb) {
+    //Extended cmpl 3,0,Rx,Ry
+    // TODO(CRField): if other CRs than 0 is used, please change this to 3
+    cmpl(0, 0, ra, rb);
+  }
   void twgti()          { not_implemented(); }  //Extended twi 8,Rx,value
   void twllei()         { not_implemented(); }  //Extended twi 6,Rx,value
   void tweq()           { not_implemented(); }  //Extended tw 4,Rx,Ry
