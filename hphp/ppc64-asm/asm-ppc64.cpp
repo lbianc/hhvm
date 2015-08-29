@@ -441,7 +441,7 @@ void Assembler::orc(const Reg64& rs, const Reg64& ra, const Reg64& rb,
 
 void Assembler::ori(const Reg64& rs, const Reg64& ra, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
-  EmitDForm(24, rn(rs), rn(ra), imm.l());
+  EmitDForm(24, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::oris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
@@ -671,7 +671,7 @@ void Assembler::xor_(const Reg64& rs, const Reg64& ra, const Reg64& rb,
 
 void Assembler::xori(const Reg64& rs, const Reg64& ra, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
-  EmitDForm(26, rn(rs), rn(ra), imm.l());
+  EmitDForm(26, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::xoris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
