@@ -1665,14 +1665,14 @@ public:
   void rotlw()          { not_implemented(); }  //Extended
   void inslwi()         { not_implemented(); }  //Extended
   void extrdi()         { not_implemented(); }  //Extended
-  void srdi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+  void srdi(const Reg64& ra, const Reg64& rs, int8_t sh) {
     rldicl(ra, rs, 64-sh, sh);
   }
-  void clrldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+  void clrldi(const Reg64& ra, const Reg64& rs, int8_t sh) {
     rldicl(ra, rs, 0, sh);
   }
   void extldi()         { not_implemented(); }  //Extended
-  inline void sldi(const Reg64& ra, const Reg64& rs, uint8_t sh) {
+  inline void sldi(const Reg64& ra, const Reg64& rs, int8_t sh) {
     rldicr(ra, rs, sh, 63-sh);
   }
   void clrrdi()         { not_implemented(); }  //Extended
