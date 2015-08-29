@@ -66,7 +66,12 @@ constexpr PhysReg rVmTl      = ppc64_asm::reg::r14;
 /*
  * scratch register. r11 will not be used as a function linkage.
  */
-constexpr ppc64_asm::Reg64 rAsm         = ppc64_asm::reg::r11;
+constexpr Reg64 rAsm         = ppc64_asm::reg::r11;
+
+/*
+ * Temporary register for vasm instructions
+ */
+constexpr Reg64 rVasmTmp     = ppc64_asm::reg::r31;
 
 //////////////////////////////////////////////////////////////////////
 /*
@@ -84,13 +89,13 @@ const RegSet kGPCallerSaved =
   | ppc64_asm::reg::r12;  // r11 is a scratch register
 
 const RegSet kGPCalleeSaved =
-    ppc64_asm::reg::r1  | ppc64_asm::reg::r20 | ppc64_asm::reg::r14
-  | ppc64_asm::reg::r15 | ppc64_asm::reg::r16 | ppc64_asm::reg::r17
-  | ppc64_asm::reg::r18 | ppc64_asm::reg::r19 | ppc64_asm::reg::r20
-  | ppc64_asm::reg::r21 | ppc64_asm::reg::r22 | ppc64_asm::reg::r23
-  | ppc64_asm::reg::r24 | ppc64_asm::reg::r25 | ppc64_asm::reg::r26
-  | ppc64_asm::reg::r27 | ppc64_asm::reg::r28 | ppc64_asm::reg::r29
-  | ppc64_asm::reg::r30 | ppc64_asm::reg::r31;
+    ppc64_asm::reg::r1  | ppc64_asm::reg::r14 | ppc64_asm::reg::r15
+  | ppc64_asm::reg::r16 | ppc64_asm::reg::r17 | ppc64_asm::reg::r18
+  | ppc64_asm::reg::r19 | ppc64_asm::reg::r20 | ppc64_asm::reg::r21
+  | ppc64_asm::reg::r22 | ppc64_asm::reg::r23 | ppc64_asm::reg::r24
+  | ppc64_asm::reg::r25 | ppc64_asm::reg::r26 | ppc64_asm::reg::r27
+  | ppc64_asm::reg::r28 | ppc64_asm::reg::r29 | ppc64_asm::reg::r30;
+  // r31 is used as rVasmTmp
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 

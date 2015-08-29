@@ -177,8 +177,8 @@ struct Vgen {
   }
   void emit(const callm& i) {
     // uses scratch register
-    VptrToReg(i.target, ppc64::rAsm);
-    emit(callr{ppc64::rAsm, i.args});
+    VptrToReg(i.target, ppc64::rVasmTmp);
+    emit(callr{ppc64::rVasmTmp, i.args});
   }
   void emit(const callr& i) {
     a->mtctr(i.target);
@@ -198,8 +198,8 @@ struct Vgen {
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
   void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
   void emit(const cmpqim& i) {
-    VptrToReg(i.s1, ppc64::rAsm);
-    a->cmpdi(ppc64::rAsm, i.s0);
+    VptrToReg(i.s1, ppc64::rVasmTmp);
+    a->cmpdi(ppc64::rVasmTmp, i.s0);
   }
   void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
@@ -239,8 +239,8 @@ struct Vgen {
   }
   void emit(const jmpm& i) {
     // uses scratch register
-    VptrToReg(i.target, ppc64::rAsm);
-    emit(jmpr {ppc64::rAsm, i.args});
+    VptrToReg(i.target, ppc64::rVasmTmp);
+    emit(jmpr {ppc64::rVasmTmp, i.args});
   }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
