@@ -1613,7 +1613,9 @@ public:
     cmp(0, 1, ra, rb);
   }
   void cmpw ()          { not_implemented(); }  //Extended cmp 3,0,Rx,Ry
-  void cmpldi()         { not_implemented(); }  //Extended cmpli 0,1,Rx,value
+  void cmpldi(const Reg64& ra, Immed imm) {
+    cmpli(0, 1, ra, imm);
+  }
   void cmplwi()         { not_implemented(); }  //Extended cmpli 3,0,Rx,value
   void cmpld()          { not_implemented(); }  //Extended cmpl 0,1,Rx,Ry
   void cmplw()          { not_implemented(); }  //Extended cmpl 3,0,Rx,Ry
