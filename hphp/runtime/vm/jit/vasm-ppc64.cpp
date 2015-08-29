@@ -286,9 +286,9 @@ struct Vgen {
   void emit(shlli i) { not_implemented(); }
   void emit(shlq i) { not_implemented(); }
   /*TODO Rc=1*/
-  void emit(shlqi i) { a->slw(i.d, i.s1, Reg64(i.s0.w()), false); } 
+  void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
   void emit(shrli i) { not_implemented(); }
-  void emit(shrqi i) { a->srw(i.d, i.s1, Reg64(i.s0.w()), false); }
+  void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
   void emit(const storeb& i) { a->stb(Reg64(i.s), i.m); }
