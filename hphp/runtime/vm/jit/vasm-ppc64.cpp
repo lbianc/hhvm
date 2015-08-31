@@ -312,7 +312,7 @@ struct Vgen {
     // explicit conversion from Reg8 to Reg64
     Reg64 s0(i.s0), s1(i.s1);
     if (s0 != s1)
-      a->andi(s0, s1, false);
+      a->and_(ppc64::rVasmTmp, s0, s1, true);
     else
       a->cmpldi(s0, Immed(0));
   }
