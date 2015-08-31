@@ -1662,7 +1662,9 @@ public:
   }
   void andis()          { not_implemented(); }  //Extended
   void xnop()           { not_implemented(); }  //Extended
-  void mr()             { not_implemented(); }  //Extended
+  void mr(const Reg64& rs, const Reg64& ra) {
+    or_(rs, ra, ra);
+  }
   void not_()           { not_implemented(); }  //Extended
   void srwi()           { not_implemented(); }  //Extended
   void clrwi()          { not_implemented(); }  //Extended
