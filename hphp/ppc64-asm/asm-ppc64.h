@@ -32,6 +32,7 @@
 namespace ppc64_asm {
 
 using HPHP::jit::Reg64;
+using HPHP::jit::RegXMM;
 using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
 using HPHP::CodeAddress;
@@ -225,45 +226,46 @@ namespace reg {
   constexpr Reg64 f30(30);
   constexpr Reg64 f31(31);
 
+  // We define vector registers as RegXMM because they are 128.
+  // Check if it's possible they can change this to Reg128.
+
   /* volatile, local variables */
-  constexpr Reg64 v0(0);
-  constexpr Reg64 v1(1);
+  constexpr RegXMM v0(0);
+  constexpr RegXMM v1(1);
   /* volatile, argument passing vector registers */
-  constexpr Reg64 v2(2);
-  constexpr Reg64 v3(3);
-  constexpr Reg64 v4(4);
-  constexpr Reg64 v5(5);
-  constexpr Reg64 v6(6);
-  constexpr Reg64 v7(7);
-  constexpr Reg64 v8(8);
-  constexpr Reg64 v9(9);
-  constexpr Reg64 v10(10);
-  constexpr Reg64 v11(11);
-  constexpr Reg64 v12(12);
-  constexpr Reg64 v13(13);
+  constexpr RegXMM v2(2);
+  constexpr RegXMM v3(3);
+  constexpr RegXMM v4(4);
+  constexpr RegXMM v5(5);
+  constexpr RegXMM v6(6);
+  constexpr RegXMM v7(7);
+  constexpr RegXMM v8(8);
+  constexpr RegXMM v9(9);
+  constexpr RegXMM v10(10);
+  constexpr RegXMM v11(11);
+  constexpr RegXMM v12(12);
+  constexpr RegXMM v13(13);
   /* volatile, local variables */
-  constexpr Reg64 v14(14);
-  constexpr Reg64 v15(15);
-  constexpr Reg64 v16(16);
-  constexpr Reg64 v17(17);
-  constexpr Reg64 v18(18);
-  constexpr Reg64 v19(19);
+  constexpr RegXMM v14(14);
+  constexpr RegXMM v15(15);
+  constexpr RegXMM v16(16);
+  constexpr RegXMM v17(17);
+  constexpr RegXMM v18(18);
+  constexpr RegXMM v19(19);
   /* nonvolatile, local variables */
-  constexpr Reg64 v20(20);
-  constexpr Reg64 v21(21);
-  constexpr Reg64 v22(22);
-  constexpr Reg64 v23(23);
-  constexpr Reg64 v24(24);
-  constexpr Reg64 v25(25);
-  constexpr Reg64 v26(26);
-  constexpr Reg64 v27(27);
-  constexpr Reg64 v28(28);
-  constexpr Reg64 v29(29);
-  constexpr Reg64 v30(30);
-  constexpr Reg64 v31(31);
+  constexpr RegXMM v20(20);
+  constexpr RegXMM v21(21);
+  constexpr RegXMM v22(22);
+  constexpr RegXMM v23(23);
+  constexpr RegXMM v24(24);
+  constexpr RegXMM v25(25);
+  constexpr RegXMM v26(26);
+  constexpr RegXMM v27(27);
+  constexpr RegXMM v28(28);
+  constexpr RegXMM v29(29);
+  constexpr RegXMM v30(30);
+  constexpr RegXMM v31(31);
 
-
-// TODO(rcardoso): Need to check if SIMD registers are Reg64
 #define RNAME(x) if (r == x) return "%"#x
 
   inline const char* regname(Reg64 r) {
@@ -280,7 +282,10 @@ namespace reg {
     RNAME(f18); RNAME(f19); RNAME(f20); RNAME(f21); RNAME(f22); RNAME(f23); 
     RNAME(f24); RNAME(f25); RNAME(f26); RNAME(f27); RNAME(f28); RNAME(f29); 
     RNAME(f30); RNAME(f31);
+    return nullptr;
+  }
 
+  inline const char* regname(RegXMM r) {
     RNAME(v0);  RNAME(v1);  RNAME(v2);  RNAME(v3);  RNAME(v4);  RNAME(v5); 
     RNAME(v6);  RNAME(v7);  RNAME(v8);  RNAME(v9);  RNAME(v10); RNAME(v11); 
     RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17); 
