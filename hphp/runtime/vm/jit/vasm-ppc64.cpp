@@ -21,21 +21,27 @@
 #include "hphp/runtime/vm/jit/back-end-ppc64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
-#include "hphp/runtime/vm/jit/ir-instruction.h"
+#include "hphp/runtime/vm/jit/code-gen.h"
+#include "hphp/runtime/vm/jit/func-guard-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
-#include "hphp/runtime/vm/jit/reg-algorithms.h"
-#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/prof-data.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
+#include "hphp/runtime/vm/jit/target-cache.h"
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
+#include "hphp/runtime/vm/jit/vasm-internal.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-util.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
 
-#include "hphp/ppc64-asm/asm-ppc64.h"
+#include <algorithm>
+#include <tuple>
+
+TRACE_SET_MOD(vasm);
 
 namespace HPHP { namespace jit {
 
@@ -50,17 +56,22 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Vgen {
-  Vgen(const Vunit& u, Vasm::AreaList& areas, AsmInfo* asmInfo)
-    : unit(u)
-    , backend(mcg->backEnd())
-    , areas(areas)
-    , m_asmInfo(asmInfo) {
-    addrs.resize(u.blocks.size());
-    points.resize(u.next_point);
-  }
-  void emit(jit::vector<Vlabel>&);
+  explicit Vgen(Venv& env)
+    : text(env.text)
+    , assem(*env.cb)
+    , a(&assem)
+    , current(env.current)
+    , next(env.next)
+    , jmps(env.jmps)
+    , jccs(env.jccs)
+    , catches(env.catches)
+  {}
 
- private:
+  static void patch(Venv& env);
+  static void pad(CodeBlock& cb);
+
+  /////////////////////////////////////////////////////////////////////////////
+
   template<class Inst> void emit(const Inst& i) {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
@@ -85,22 +96,43 @@ struct Vgen {
     a->mtlr(ppc64_asm::reg::r0);
   }
 
-  inline void VptrToReg(Vptr s, Vreg d) {
-    // address of Vptr can be calculated by:
-    //    s.base + s.index * s.scale + s.disp
-    // the multiplication will be simplified by a shift left, as s.scale is
-    // always 1, 2, 4 or 8
-    int shift_left = 0;
-    int scale = s.scale;
-    while (scale >>= 1) {
-      ++shift_left;
-    }
-    assert(shift_left >= 3);
+  /*
+   * Calculates address of s and stores it on d
+   *
+   * The address of Vptr can be calculated by:
+   *    s.base + s.index * s.scale + s.disp
+   * the multiplication will be simplified by a shift left,
+   * as s.scale is always 1, 2, 4 or 8
+   */
+  inline void VptrAddressToReg(Vptr s, Vreg d) {
+    /* s.index is optional */
+    if (s.index.isPhys()) {
+      /* calculate index position before adding base and displacement */
+      int shift_left = 0;
+      int scale = s.scale;
+      while (scale >>= 1) {
+        ++shift_left;
+      }
+      assert(shift_left <= 3);
 
-    emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
-    emit(addq {s.base,      d,        d, VregSF(0)});
-    emit(addqi{s.disp,      d,        d, VregSF(0)});
-    emit(load{*s.base,      d});
+      emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
+      emit(addq {s.base,      d,        d, VregSF(0)});
+      emit(addqi{s.disp,      d,        d, VregSF(0)});
+    } else if (!s.base.isPhys()) {
+      /* Baseless Vptr, solve this for ppc64 */
+      not_implemented();
+    } else {
+      /* Only add base with displacement */
+      emit(addqi{s.disp,      s.base,   d, VregSF(0)});
+    }
+  }
+
+  /*
+   * Stores in d the value pointed by s
+   */
+  inline void VptrToReg(Vptr s, Vreg d) {
+    VptrAddressToReg(s, d);
+    emit(load{*d, d});
   }
 
   // intrinsics
@@ -109,7 +141,7 @@ struct Vgen {
   void emit(const bindjcc1st& i) { not_implemented(); }
   void emit(const bindjcc& i) { not_implemented(); }
   void emit(const bindjmp& i) { not_implemented(); }
-  void emit(const callstub& i) { not_implemented(); }
+//  void emit(const callstub& i) { not_implemented(); }
   void emit(const callfaststub& i) { not_implemented(); }
   void emit(const contenter& i) { not_implemented(); }
   void emit(const copy& i) { not_implemented(); }
@@ -120,8 +152,6 @@ struct Vgen {
   void emit(const ldimml& i) { not_implemented(); }
   void emit(const ldimmq& i) { not_implemented(); }
   void emit(const ldimmqs& i) { not_implemented(); }
-  void emit(const fallback& i);
-  void emit(const fallbackcc& i);
   void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
@@ -130,7 +160,7 @@ struct Vgen {
   void emit(const syncpoint& i) { not_implemented(); }
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
-  void emit(const vretm& i);
+//  void emit(const vretm& i);
   void emit(const vret& i);
   void emit(const leavetc&) { not_implemented(); }
 
@@ -177,7 +207,7 @@ struct Vgen {
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
   void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
   void emit(const cmpqim& i) { not_implemented(); }
-  void emit(const cmpqims& i) { not_implemented(); }
+//  void emit(const cmpqims& i) { not_implemented(); }
   void emit(const cmpqm& i) { not_implemented(); }
   void emit(cmpsd i) { not_implemented(); }
   void emit(const cqo& i) { not_implemented(); }
@@ -304,182 +334,32 @@ struct Vgen {
   void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
 
-  CodeAddress start(Vlabel b) {
-    auto area = unit.blocks[b].area;
-    return areas[(int)area].start;
-  }
-  CodeBlock& main() { return area(AreaIndex::Main).code; }
-  CodeBlock& cold() { return area(AreaIndex::Cold).code; }
-  CodeBlock& frozen() { return area(AreaIndex::Frozen).code; }
+private:
+  // helpers
+  //void prep(Reg8 s, Reg8 d) { if (s != d) a->movb(s, d); }
+  //void prep(Reg32 s, Reg32 d) { if (s != d) a->movl(s, d); }
+  //void prep(Reg64 s, Reg64 d) { if (s != d) a->movq(s, d); }
+  //void prep(RegXMM s, RegXMM d) { if (s != d) a->movdqa(s, d); }
+
+  template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
+  template<class Inst> void binary(Inst& i) { prep(i.s1, i.d); }
+  template<class Inst> void commuteSF(Inst&);
+  template<class Inst> void commute(Inst&);
+  template<class Inst> void noncommute(Inst&);
+
+  CodeBlock& frozen() { return text.frozen().code; }
 
 private:
-  Vasm::Area& area(AreaIndex i) {
-    assertx((unsigned)i < areas.size());
-    return areas[(unsigned)i];
-  }
-
-private:
-  struct LabelPatch { CodeAddress instr; Vlabel target; };
-  struct PointPatch { CodeAddress instr; Vpoint pos; Vreg d; };
-  const Vunit& unit;
-  BackEnd& backend;
-  jit::vector<Vasm::Area>& areas;
-  AsmInfo* m_asmInfo;
+  Vtext& text;
+  ppc64_asm::Assembler assem;
   ppc64_asm::Assembler* a;
-  CodeBlock* codeBlock;
-  Vlabel current{0}, next{0}; // in linear order
-  jit::vector<CodeAddress> addrs, points;
-  jit::vector<LabelPatch> jccs, jmps, bccs, calls, catches;
-  jit::vector<PointPatch> ldpoints;
+
+  const Vlabel current;
+  const Vlabel next;
+  jit::vector<Venv::LabelPatch>& jmps;
+  jit::vector<Venv::LabelPatch>& jccs;
+  jit::vector<Venv::LabelPatch>& catches;
 };
-
-// toplevel emitter
-void Vgen::emit(jit::vector<Vlabel>& labels) {
-  // Some structures here track where we put things just for debug printing.
-  struct Snippet {
-    const IRInstruction* origin;
-    TcaRange range;
-  };
-  struct BlockInfo {
-    jit::vector<Snippet> snippets;
-  };
-
- // This is under the printir tracemod because it mostly shows you IR and
- // machine code, not vasm and machine code (not implemented).
-  bool shouldUpdateAsmInfo = !!m_asmInfo
-    && Trace::moduleEnabledRelease(HPHP::Trace::printir, kCodeGenLevel);
-
-  std::vector<TransBCMapping>* bcmap = nullptr;
-  if (mcg->tx().isTransDBEnabled() || RuntimeOption::EvalJitUseVtuneAPI) {
-    bcmap = &mcg->cgFixups().m_bcMap;
-  }
-
-  jit::vector<jit::vector<BlockInfo>> areaToBlockInfos;
-  if (shouldUpdateAsmInfo) {
-    areaToBlockInfos.resize(areas.size());
-    for (auto& r : areaToBlockInfos) {
-      r.resize(unit.blocks.size());
-    }
-  }
-
-  for (int i = 0, n = labels.size(); i < n; ++i) {
-    assertx(checkBlockEnd(unit, labels[i]));
-
-    auto b = labels[i];
-    auto& block = unit.blocks[b];
-    codeBlock = &area(block.area).code;
-    //TODO(IBM): Pass codeblock as argument
-    ppc64_asm::Assembler as { area(block.area).code };
-    a = &as;
-    auto blockStart = a->frontier();
-    addrs[b] = blockStart;
-
-    {
-      // Compute the next block we will emit into the current area.
-      auto cur_start = start(labels[i]);
-      auto j = i + 1;
-      while (j < labels.size() && cur_start != start(labels[j])) {
-        j++;
-      }
-      next = j < labels.size() ? labels[j] : Vlabel(unit.blocks.size());
-      //TODO(IBM): why arm code doesn't have current = b in this line?
-    }
-
-    const IRInstruction* currentOrigin = nullptr;
-    auto blockInfo = shouldUpdateAsmInfo
-      ? &areaToBlockInfos[unsigned(block.area)][b]
-      : nullptr;
-    auto start_snippet = [&](const Vinstr& inst) {
-      if (!shouldUpdateAsmInfo) return;
-
-      blockInfo->snippets.push_back(
-        Snippet { inst.origin, TcaRange { codeBlock->frontier(), nullptr } }
-      );
-    };
-    auto finish_snippet = [&] {
-      if (!shouldUpdateAsmInfo) return;
-
-      if (!blockInfo->snippets.empty()) {
-        auto& snip = blockInfo->snippets.back();
-        snip.range = TcaRange { snip.range.start(), codeBlock->frontier() };
-      }
-    };
-
-    //TODO(IBM): check if (is_empty_catch(block)) continue; ??????
-    for (auto& inst : block.code) {
-      if (currentOrigin != inst.origin) {
-        finish_snippet();
-        start_snippet(inst);
-        currentOrigin = inst.origin;
-      }
-
-      if (bcmap && inst.origin) {
-        auto sk = inst.origin->marker().sk();
-        if (bcmap->empty() ||
-            bcmap->back().md5 != sk.unit()->md5() ||
-            bcmap->back().bcStart != sk.offset()) {
-          bcmap->push_back(TransBCMapping{sk.unit()->md5(), sk.offset(),
-                                          main().frontier(), cold().frontier(),
-                                          frozen().frontier()});
-        }
-      }
-
-      switch (inst.op) {
-#define O(name, imms, uses, defs) \
-        case Vinstr::name: emit(inst.name##_); break;
-        VASM_OPCODES
-#undef O
-      }
-    }
-
-    finish_snippet();
-  }
-
-  // TODO(IBM): Implement jump smashers
-  // for (auto& p : jccs) {
-  //   assertx(addrs[p.target]);
-  // }
-
-  for (auto& p : jmps) {
-    assertx(addrs[p.target]);
-    a->patchBc(p.instr, addrs[p.target]);
-  }
-
-  // for (auto& p : calls) {
-  //   assertx(addrs[p.target]);
-  // }
-
-  // for (auto& p : ldpoints) {}
-
-  for (auto& p : catches) {
-    mcg->registerCatchBlock(p.instr, addrs[p.target]);
-  }
-
-  if (!shouldUpdateAsmInfo) {
-    return;
-  }
-
-  for (auto i = 0; i < areas.size(); ++i) {
-    const IRInstruction* currentOrigin = nullptr;
-    auto& blockInfos = areaToBlockInfos[i];
-    for (auto const blockID : labels) {
-      auto const& blockInfo = blockInfos[static_cast<size_t>(blockID)];
-      if (blockInfo.snippets.empty()) continue;
-
-      for (auto const& snip : blockInfo.snippets) {
-        if (currentOrigin != snip.origin && snip.origin) {
-          currentOrigin = snip.origin;
-        }
-
-        m_asmInfo->updateForInstruction(
-          currentOrigin,
-          static_cast<AreaIndex>(i),
-          snip.range.start(),
-          snip.range.end());
-      }
-    }
-  }
-}
 
 void Vgen::emit(const pop& i) {
   not_implemented();
@@ -495,14 +375,6 @@ void Vgen::emit(const push& i) {
   //a->stw r0 0(rVmSp)
 }
 
-void Vgen::emit(const vretm& i) {
-  not_implemented();
-  //TODO(IBM): Need to be MemoryRef
-  //emit(push{i.retAddr})
-  //a->loadq(i.prevFp, i.d);
-  a->bclr(20,0,0); /*brl 0x4e800020*/
-}
-
 void Vgen::emit(const vret& i) {
   not_implemented();
   //TODO(IBM): Need to be MemoryRef
@@ -516,17 +388,12 @@ void Vgen::emit(const load& i) {
   }
 }
 
-void Vgen::emit(const fallback& i) {
-  emit(fallbackcc{CC_None, InvalidReg, i.dest, i.trflags, i.args});
+void Vgen::patch(Venv& env) {
+  not_implemented();
 }
 
-void Vgen::emit(const fallbackcc& i) {
-  auto const destSR = mcg->tx().getSrcRec(i.dest);
-  if (!i.trflags.packed) {
-    destSR->emitFallbackJump(a->code(), i.cc);
-  } else {
-    destSR->emitFallbackJumpCustom(a->code(), frozen(), i.dest, i.trflags);
-  }
+void Vgen::pad(CodeBlock& cb) {
+  not_implemented();
 }
 
 void Vgen::emit(const store& i) {
@@ -561,22 +428,9 @@ void optimizePPC64(Vunit& unit, const Abi& abi) {
  //                   allocateRegisters(unit, abi);
 }
 
-void emitPPC64(const Vunit& unit, Vasm::AreaList& areas, AsmInfo* asmInfo) {
-
-  /*
-    TODO(rcardoso) 
-    Each thread will have own static 'busy' variable. And we always_assert 
-    We can have many threads emitting code. So we need to guarating that vm will
-    not preempt a thread in emitting process. Why ARM is not using this?
-  */
-  static thread_local bool busy;
-  always_assert(!busy);
-  busy = true;
-  SCOPE_EXIT { busy = false; };
-
+void emitPPC64(const Vunit& unit, Vtext& text, AsmInfo* asmInfo) {
   Timer timer(Timer::vasm_gen);
-  auto blocks = layoutBlocks(unit);
-  Vgen(unit, areas, asmInfo).emit(blocks);
+  vasm_emit<Vgen>(unit, text, asmInfo);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

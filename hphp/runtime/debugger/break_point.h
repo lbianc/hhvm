@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -104,6 +104,7 @@ struct InterruptSite {
 
   bool valid() const { return m_valid; }
   bool funcEntry() const { return m_funcEntry; }
+  bool isBuiltin() const { return m_builtin; }
 
 private:
   InterruptSite(ActRec* fp, Offset offset, const Variant& error);
@@ -129,6 +130,7 @@ private:
   Unit* m_unit;
   bool m_valid;
   bool m_funcEntry;
+  bool m_builtin;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

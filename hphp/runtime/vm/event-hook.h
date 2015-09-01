@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -21,16 +21,11 @@
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/rds-header.h"
+#include "hphp/runtime/base/surprise-flags.h"
 
 #include <atomic>
 
 namespace HPHP {
-
-//////////////////////////////////////////////////////////////////////
-
-inline bool checkSurpriseFlags() {
-  return rds::header()->surpriseFlags.load(std::memory_order_acquire);
-}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -59,8 +54,6 @@ class EventHook {
   static void DisableDebug();
   static void EnableIntercept();
   static void DisableIntercept();
-  static ssize_t CheckSurprise();
-  static ssize_t GetSurpriseFlags();
 
   /**
    * Event hooks -- interpreter entry points.
@@ -94,9 +87,9 @@ class EventHook {
     ringbufferExit(ar);
     if (UNLIKELY(checkSurpriseFlags())) { onFunctionReturn(ar, retval); }
   }
-  static inline void FunctionUnwind(ActRec* ar, const Fault& fault) {
+  static inline void FunctionUnwind(ActRec* ar, ObjectData* phpException) {
     ringbufferExit(ar);
-    if (UNLIKELY(checkSurpriseFlags())) { onFunctionUnwind(ar, fault); }
+    if (UNLIKELY(checkSurpriseFlags())) { onFunctionUnwind(ar, phpException); }
   }
 
   /**
@@ -115,11 +108,12 @@ private:
 
   static void onFunctionResumeAwait(const ActRec* ar);
   static void onFunctionResumeYield(const ActRec* ar);
-  static void onFunctionUnwind(ActRec* ar, const Fault& fault);
+  static void onFunctionUnwind(ActRec* ar, ObjectData* phpException);
 
   static void onFunctionEnter(const ActRec* ar, int funcType, ssize_t flags);
   static void onFunctionExit(const ActRec* ar, const TypedValue* retval,
-                             const Fault* fault, ssize_t flags);
+                             bool unwind, ObjectData* phpException,
+                             size_t flags);
 
   static bool RunInterceptHandler(ActRec* ar);
   static const char* GetFunctionNameForProfiler(const Func* func,

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,11 +17,12 @@
 
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/abi-arm.h"
-#include "hphp/runtime/vm/jit/back-end.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/vasm.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
@@ -46,7 +47,7 @@ TCA emitCall(vixl::MacroAssembler& a, CppCall call) {
     a. Mov  (rHostCallReg, reinterpret_cast<intptr_t>(call.address()));
     break;
   case CppCall::Kind::Virtual:
-    a. Ldr  (rHostCallReg, argReg(0)[0]);
+    a. Ldr  (rHostCallReg, x2a(rarg(0))[0]);
     a. Ldr  (rHostCallReg, rHostCallReg[call.vtableOffset()]);
     break;
   case CppCall::Kind::ArrayVirt:
@@ -70,7 +71,7 @@ TCA emitCall(vixl::MacroAssembler& a, CppCall call) {
 }
 
 Vpoint emitCall(Vout& v, CppCall call, RegSet args) {
-  PhysReg arg0(argReg(0));
+  PhysReg arg0(x2a(rarg(0)));
   PhysReg rHostCall(rHostCallReg);
   switch (call.kind()) {
   case CppCall::Kind::Direct:
@@ -129,22 +130,11 @@ void emitRegRegMove(vixl::MacroAssembler& a, const vixl::CPURegister& dst,
 //////////////////////////////////////////////////////////////////////
 
 void emitTestSurpriseFlags(vixl::MacroAssembler& a, PhysReg rds) {
-  // Keep this in sync with vasm version below
-  static_assert(LastSurpriseFlag <= std::numeric_limits<uint32_t>::max(),
-                "Codegen assumes a SurpriseFlag fits in a 32-bit int");
-  a.  Ldr   (rAsm.W(), vixl::Register(rds)[rds::kSurpriseFlagsOff]);
-  a.  Tst   (rAsm.W(), rAsm.W());
+  not_reached();
 }
 
 Vreg emitTestSurpriseFlags(Vout& v, Vreg rds) {
-  // Keep this in sync with arm version above
-  static_assert(LastSurpriseFlag <= std::numeric_limits<uint32_t>::max(),
-                "Codegen assumes a SurpriseFlag fits in a 32-bit int");
-  auto flags = v.makeReg();
-  auto sf = v.makeReg();
-  v << loadl{rds[rds::kSurpriseFlagsOff], flags};
-  v << testl{flags, flags, sf};
-  return sf;
+  not_reached();
 }
 
 void emitCheckSurpriseFlagsEnter(CodeBlock& mainCode, CodeBlock& coldCode,
@@ -154,20 +144,21 @@ void emitCheckSurpriseFlagsEnter(CodeBlock& mainCode, CodeBlock& coldCode,
   vixl::MacroAssembler acold { coldCode };
 
   emitTestSurpriseFlags(a, rds);
-  mcg->backEnd().emitSmashableJump(mainCode, coldCode.frontier(), CC_NZ);
+  emitSmashableJcc(mainCode, coldCode.frontier(), CC_NZ);
 
-  acold.  Mov  (argReg(0), rVmFp);
+  acold.  Mov  (x2a(rarg(0)), vixl::Register(rvmfp()));
 
   auto fixupAddr =
       emitCallWithinTC(acold, mcg->tx().uniqueStubs.functionEnterHelper);
   mcg->recordSyncPoint(fixupAddr, fixup);
-  mcg->backEnd().emitSmashableJump(coldCode, mainCode.frontier(), CC_None);
+
+  emitSmashableJmp(coldCode, mainCode.frontier());
 }
 
 void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vc, Vreg rds,
                                  jit::Fixup fixup) {
   // keep this in sync with arm version above
-  PhysReg fp{rVmFp}, arg0{argReg(0)};
+  PhysReg fp{rvmfp()}, arg0{x2a(rarg(0))};
   auto surprise = vc.makeBlock();
   auto done = v.makeBlock();
   auto sf = emitTestSurpriseFlags(v, rds);
@@ -175,7 +166,7 @@ void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vc, Vreg rds,
 
   vc = surprise;
   vc << copy{fp, arg0};
-  vc << callr{vc.cns(mcg->tx().uniqueStubs.functionEnterHelper), argSet(1)};
+  vc << callr{vc.cns(mcg->tx().uniqueStubs.functionEnterHelper), arg_regs(1)};
   vc << syncpoint{fixup};
   vc << jmp{done};
   v = done;

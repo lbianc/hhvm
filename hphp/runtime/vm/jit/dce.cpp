@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -38,6 +38,7 @@ TRACE_SET_MOD(hhir_dce);
 bool canDCE(IRInstruction* inst) {
   switch (inst->op()) {
   case AssertNonNull:
+  case AssertType:
   case AbsDbl:
   case AddInt:
   case SubInt:
@@ -69,23 +70,17 @@ bool canDCE(IRInstruction* inst) {
   case ConvBoolToDbl:
   case ConvIntToDbl:
   case ConvStrToDbl:
+  case ConvResToDbl:
   case ConvArrToInt:
   case ConvBoolToInt:
   case ConvDblToInt:
   case ConvStrToInt:
+  case ConvResToInt:
   case ConvBoolToStr:
   case ConvDblToStr:
   case ConvIntToStr:
   case ConvClsToCctx:
   case NewColFromArray:
-  case Gt:
-  case Gte:
-  case Lt:
-  case Lte:
-  case Eq:
-  case Neq:
-  case Same:
-  case NSame:
   case GtInt:
   case GteInt:
   case LtInt:
@@ -98,8 +93,39 @@ bool canDCE(IRInstruction* inst) {
   case LteDbl:
   case EqDbl:
   case NeqDbl:
+  case GtStr:
+  case GteStr:
+  case LtStr:
+  case LteStr:
+  case EqStr:
+  case NeqStr:
+  case SameStr:
+  case NSameStr:
+  case GtStrInt:
+  case GteStrInt:
+  case LtStrInt:
+  case LteStrInt:
+  case EqStrInt:
+  case NeqStrInt:
+  case GtBool:
+  case GteBool:
+  case LtBool:
+  case LteBool:
+  case EqBool:
+  case NeqBool:
+  case SameObj:
+  case NSameObj:
+  case SameArr:
+  case NSameArr:
+  case GtRes:
+  case GteRes:
+  case LtRes:
+  case LteRes:
+  case EqRes:
+  case NeqRes:
   case InstanceOf:
   case InstanceOfIface:
+  case InstanceOfIfaceVtable:
   case ExtendsClass:
   case InstanceOfBitmask:
   case NInstanceOfBitmask:
@@ -107,12 +133,14 @@ bool canDCE(IRInstruction* inst) {
   case InterfaceSupportsStr:
   case InterfaceSupportsInt:
   case InterfaceSupportsDbl:
+  case HasToString:
   case IsType:
   case IsNType:
   case IsTypeMem:
   case IsNTypeMem:
   case IsScalarType:
   case IsWaitHandle:
+  case IsCol:
   case ClsNeq:
   case UnboxPtr:
   case BoxPtr:
@@ -126,8 +154,9 @@ bool canDCE(IRInstruction* inst) {
   case LdElem:
   case LdRef:
   case LdCtx:
-  case CastCtxThis:
   case LdCctx:
+  case LdClosure:
+  case CastCtxThis:
   case LdClsCtx:
   case LdClsCctx:
   case DefConst:
@@ -143,6 +172,7 @@ bool canDCE(IRInstruction* inst) {
   case LdClsMethodCacheFunc:
   case LdClsMethodCacheCls:
   case LdClsMethod:
+  case LdIfaceMethod:
   case LdPropAddr:
   case LdObjClass:
   case LdClsName:
@@ -170,6 +200,7 @@ bool canDCE(IRInstruction* inst) {
   case LdSwitchDblIndex:
   case LdSwitchStrIndex:
   case LdSSwitchDestFast:
+  case LdClosureCtx:
   case CreateSSWH:
   case LdContActRec:
   case LdContArValue:
@@ -188,6 +219,8 @@ bool canDCE(IRInstruction* inst) {
   case LdColArray:
   case OrdStr:
   case CheckRange:
+  case LdARInvName:
+  case PackMagicArgs:
     assertx(!inst->isControlFlow());
     return true;
 
@@ -198,7 +231,6 @@ bool canDCE(IRInstruction* inst) {
   case CufIterSpillFrame:
   case CheckType:
   case CheckNullptr:
-  case AssertType:
   case CheckTypeMem:
   case HintLocInner:
   case CheckLoc:
@@ -207,7 +239,9 @@ bool canDCE(IRInstruction* inst) {
   case CheckStk:
   case AssertStk:
   case CastStk:
+  case CastMem:
   case CoerceStk:
+  case CoerceMem:
   case CoerceCellToBool:
   case CoerceCellToInt:
   case CoerceStrToInt:
@@ -234,18 +268,25 @@ bool canDCE(IRInstruction* inst) {
   case ConvObjToStr:
   case ConvResToStr:
   case ConvCellToStr:
-  case GtX:
-  case GteX:
-  case LtX:
-  case LteX:
-  case EqX:
-  case NeqX:
+  case GtObj:
+  case GteObj:
+  case LtObj:
+  case LteObj:
+  case EqObj:
+  case NeqObj:
+  case GtArr:
+  case GteArr:
+  case LtArr:
+  case LteArr:
+  case EqArr:
+  case NeqArr:
   case JmpZero:
   case JmpNZero:
   case JmpSSwitchDest:
   case JmpSwitchDest:
   case ProfileSwitchDest:
   case CheckSurpriseFlags:
+  case CheckSurpriseAndStack:
   case ReturnHook:
   case SuspendHookE:
   case SuspendHookR:
@@ -357,10 +398,10 @@ bool canDCE(IRInstruction* inst) {
   case InterpOneCF:
   case OODeclExists:
   case StClosureCtx:
-  case StClosureFunc:
   case StClosureArg:
   case CreateCont:
   case CreateAFWH:
+  case CreateAFWHNoVV:
   case AFWHPrepareChild:
   case ContEnter:
   case ContPreNext:
@@ -466,14 +507,18 @@ bool canDCE(IRInstruction* inst) {
   case DbgTrashStk:
   case DbgTrashFrame:
   case DbgTrashMem:
-  case PredictLoc:
-  case PredictStk:
   case EnterFrame:
   case CheckStackOverflow:
   case InitExtraArgs:
+  case InitCtx:
   case CheckSurpriseFlagsEnter:
+  case CheckARMagicFlag:
+  case LdARNumArgsAndFlags:
+  case StARNumArgsAndFlags:
+  case StARInvName:
   case ExitPlaceholder:
   case ThrowOutOfBounds:
+  case ThrowInvalidOperation:
   case MapIdx:
     return false;
   }

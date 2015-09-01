@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,16 +26,16 @@
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-arm.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-arm.h"
-#include "hphp/runtime/vm/jit/func-prologues-arm.h"
-#include "hphp/runtime/vm/jit/unique-stubs-arm.h"
+#include "hphp/runtime/vm/jit/func-guard-arm.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/unwind-arm.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
-#include "hphp/runtime/vm/jit/service-requests-arm.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/cfg.h"
+#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 
 namespace HPHP { namespace jit { namespace arm {
@@ -47,31 +47,6 @@ namespace {
 struct BackEnd final : jit::BackEnd {
   BackEnd() {}
   ~BackEnd() {}
-
-  Abi abi() override {
-    return arm::abi;
-  }
-
-  size_t cacheLineSize() override {
-    // Not necessarily correct; depends on manufacturer implementation.
-    return 64;
-  }
-
-  PhysReg rSp() override {
-    return PhysReg(vixl::sp);
-  }
-
-  PhysReg rVmSp() override {
-    return PhysReg(arm::rVmSp);
-  }
-
-  PhysReg rVmFp() override {
-    return PhysReg(arm::rVmFp);
-  }
-
-  PhysReg rVmTl() override {
-    return PhysReg(arm::rVmTl);
-  }
 
 #define CALLEE_SAVED_BARRIER() \
   asm volatile("" : : : "x19", "x20", "x21", "x22", "x23", "x24", "x25", \
@@ -86,9 +61,9 @@ struct BackEnd final : jit::BackEnd {
     sim.   set_xreg(arm::rGContextReg.code(), g_context.getNoCheck());
 
     auto& vmRegs = vmRegsUnsafe();
-    sim.   set_xreg(arm::rVmFp.code(), vmRegs.fp);
-    sim.   set_xreg(arm::rVmSp.code(), vmRegs.stack.top());
-    sim.   set_xreg(arm::rVmTl.code(), rds::tl_base);
+    sim.   set_xreg(x2a(rvmfp()).code(), vmRegs.fp);
+    sim.   set_xreg(x2a(rvmsp()).code(), vmRegs.stack.top());
+    sim.   set_xreg(x2a(rvmtl()).code(), rds::tl_base);
 
     // Leave space for register spilling and MInstrState.
     assertx(sim.is_on_stack(reinterpret_cast<void*>(sim.sp())));
@@ -143,25 +118,8 @@ struct BackEnd final : jit::BackEnd {
 
     assertx(sim.sp() == spOnEntry);
 
-    vmRegsUnsafe().fp = (ActRec*)sim.xreg(arm::rVmFp.code());
-    vmRegsUnsafe().stack.top() = (Cell*)sim.xreg(arm::rVmSp.code());
-  }
-
-  UniqueStubs emitUniqueStubs() override {
-    return arm::emitUniqueStubs();
-  }
-
-  TCA emitServiceReqWork(CodeBlock& cb,
-                         TCA start,
-                         SRFlags flags,
-                         folly::Optional<FPInvOffset> spOff,
-                         ServiceRequest req,
-                         const ServiceReqArgVec& argv) override {
-    return arm::emitServiceReqWork(cb, start, flags, spOff, req, argv);
-  }
-
-  size_t reusableStubSize() const override {
-    return arm::reusableStubSize();
+    vmRegsUnsafe().fp = (ActRec*)sim.xreg(x2a(rvmfp()).code());
+    vmRegsUnsafe().stack.top() = (Cell*)sim.xreg(x2a(rvmsp()).code());
   }
 
   void emitInterpReq(CodeBlock& mainCode,
@@ -172,240 +130,6 @@ struct BackEnd final : jit::BackEnd {
       arm::emitTransCounterInc(a);
     }
     not_implemented();
-  }
-
-  bool funcPrologueHasGuard(TCA prologue, const Func* func) override {
-    return arm::funcPrologueHasGuard(prologue, func);
-  }
-
-  TCA funcPrologueToGuard(TCA prologue, const Func* func) override {
-    return arm::funcPrologueToGuard(prologue, func);
-  }
-
-  SrcKey emitFuncPrologue(TransID transID, Func* func, int argc,
-                          TCA& start) override {
-    return arm::emitFuncPrologue(transID, func, argc, start);
-  }
-
-  TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {
-    return arm::emitCallArrayPrologue(func, dvs);
-  }
-
-  void funcPrologueSmashGuard(TCA prologue, const Func* func) override {
-    arm::funcPrologueSmashGuard(prologue, func);
-  }
-
-  void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {
-    using arm::rAsm;
-    using arm::rAsm2;
-    vixl::MacroAssembler a { cb };
-
-    a.    Mrs   (rAsm2, vixl::TPIDR_EL0);
-    a.    Ldr   (rAsm, rAsm2[disp]);
-    a.    Add   (rAsm, rAsm, n);
-    a.    Str   (rAsm, rAsm2[disp]);
-  }
-
-  void prepareForTestAndSmash(CodeBlock& cb, int testBytes,
-                              TestAndSmashFlags flags) override {
-    // Nothing. See prepareForSmash().
-  }
-
- private:
-  void smashJmpOrCall(TCA addr, TCA dest, bool isCall) {
-    // Assert that this is actually the instruction sequence we expect
-    DEBUG_ONLY auto ldr = vixl::Instruction::Cast(addr);
-    DEBUG_ONLY auto branch = vixl::Instruction::Cast(addr + 4);
-    assertx(ldr->Bits(31, 24) == 0x58);
-    assertx((branch->Bits(31, 10) == 0x3587C0 ||
-            branch->Bits(31, 10) == 0x358FC0) &&
-           branch->Bits(4, 0) == 0);
-
-    // These offsets are asserted in emitSmashableJump and emitSmashableCall. We
-    // wrote two instructions for an unconditional jump, or three for a call,
-    // and then the jump/call destination was written at the next 8-byte
-    // boundary.
-    auto dataPtr = (isCall ? addr + 12 : addr + 8);
-    if ((uintptr_t(dataPtr) & 7) != 0) {
-      dataPtr += 4;
-      assertx((uintptr_t(dataPtr) & 7) == 0);
-    }
-    *reinterpret_cast<TCA*>(dataPtr) = dest;
-  }
-
- public:
-  void smashJmp(TCA jmpAddr, TCA newDest) override {
-    assertx(MCGenerator::canWrite());
-    FTRACE(2, "smashJmp: {} -> {}\n", jmpAddr, newDest);
-    smashJmpOrCall(jmpAddr, newDest, false);
-  }
-
-  void smashCall(TCA callAddr, TCA newDest) override {
-    assertx(MCGenerator::canWrite());
-    FTRACE(2, "smashCall: {} -> {}\n", callAddr, newDest);
-    smashJmpOrCall(callAddr, newDest, true);
-  }
-
-  void smashJcc(TCA jccAddr, TCA newDest) override {
-    // This offset is asserted in emitSmashableJump. We wrote three
-    // instructions.  Then the jump destination was written at the next 8-byte
-    // boundary.
-    auto dataPtr = jccAddr + 12;
-    if ((uintptr_t(dataPtr) & 7) != 0) {
-      dataPtr += 4;
-      assertx((uintptr_t(dataPtr) & 7) == 0);
-    }
-    *reinterpret_cast<TCA*>(dataPtr) = newDest;
-  }
-
-  void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {
-    vixl::MacroAssembler a { cb };
-    vixl::Label targetData;
-    vixl::Label afterData;
-    DEBUG_ONLY auto start = cb.frontier();
-
-    // We emit the target address straight into the instruction stream, and then
-    // do a pc-relative load to read it. This neatly sidesteps the problem of
-    // concurrent modification and execution, as well as the problem of 19- and
-    // 26-bit jump offsets (not big enough). It does, however, entail an
-    // indirect jump.
-    if (cc == CC_None) {
-      a.    Ldr  (arm::rAsm, &targetData);
-      a.    Br   (arm::rAsm);
-      if (!cb.isFrontierAligned(8)) {
-        a.  Nop  ();
-        assertx(cb.isFrontierAligned(8));
-      }
-      a.    bind (&targetData);
-      a.    dc64 (reinterpret_cast<int64_t>(dest));
-
-      // If this assert breaks, you need to change smashJmp
-      assertx(targetData.target() == start + 8 ||
-             targetData.target() == start + 12);
-    } else {
-      a.    B    (&afterData, InvertCondition(arm::convertCC(cc)));
-      a.    Ldr  (arm::rAsm, &targetData);
-      a.    Br   (arm::rAsm);
-      if (!cb.isFrontierAligned(8)) {
-        a.  Nop  ();
-        assertx(cb.isFrontierAligned(8));
-      }
-      a.    bind (&targetData);
-      a.    dc64 (reinterpret_cast<int64_t>(dest));
-      a.    bind (&afterData);
-
-      // If this assert breaks, you need to change smashJcc
-      assertx(targetData.target() == start + 12 ||
-             targetData.target() == start + 16);
-    }
-  }
-
-  TCA smashableCallFromReturn(TCA retAddr) override {
-    return retAddr - 8;
-  }
-
-  void emitSmashableCall(CodeBlock& cb, TCA dest) override {
-    vixl::MacroAssembler a { cb };
-    vixl::Label afterData;
-    vixl::Label targetData;
-    DEBUG_ONLY auto start = cb.frontier();
-
-    a.  Ldr  (arm::rAsm, &targetData);
-    a.  Blr  (arm::rAsm);
-    // When the call returns, jump over the data.
-    a.  B    (&afterData);
-    if (!cb.isFrontierAligned(8)) {
-      a.Nop  ();
-      assertx(cb.isFrontierAligned(8));
-    }
-    a.  bind (&targetData);
-    a.  dc64 (reinterpret_cast<int64_t>(dest));
-    a.  bind (&afterData);
-
-    // If this assert breaks, you need to change smashCall
-    assertx(targetData.target() == start + 12 ||
-           targetData.target() == start + 16);
-  }
-
-  TCA jmpTarget(TCA jmp) override {
-    // This doesn't verify that each of the two or three instructions that make
-    // up this sequence matches; just the first one and the indirect jump.
-    using namespace vixl;
-    Instruction* ldr = Instruction::Cast(jmp);
-    if (ldr->Bits(31, 24) != 0x58) return nullptr;
-
-    Instruction* br = Instruction::Cast(jmp + 4);
-    if (br->Bits(31, 10) != 0x3587C0 || br->Bits(4, 0) != 0) return nullptr;
-
-    uintptr_t dest = reinterpret_cast<uintptr_t>(jmp + 8);
-    if ((dest & 7) != 0) {
-      dest += 4;
-      assertx((dest & 7) == 0);
-    }
-    return *reinterpret_cast<TCA*>(dest);
-  }
-
-  TCA jccTarget(TCA jmp) override {
-    using namespace vixl;
-    Instruction* b = Instruction::Cast(jmp);
-    if (b->Bits(31, 24) != 0x54 || b->Bit(4) != 0) return nullptr;
-
-    Instruction* br = Instruction::Cast(jmp + 8);
-    if (br->Bits(31, 10) != 0x3587C0 || br->Bits(4, 0) != 0) return nullptr;
-
-    uintptr_t dest = reinterpret_cast<uintptr_t>(jmp + 12);
-    if ((dest & 7) != 0) {
-      dest += 4;
-      assertx((dest & 7) == 0);
-    }
-    return *reinterpret_cast<TCA*>(dest);
-  }
-
-  ConditionCode jccCondCode(TCA) override {
-    not_implemented();
-  }
-
-  TCA callTarget(TCA call) override {
-    using namespace vixl;
-    Instruction* ldr = Instruction::Cast(call);
-    if (ldr->Bits(31, 24) != 0x58) return nullptr;
-
-    Instruction* blr = Instruction::Cast(call + 4);
-    if (blr->Bits(31, 10) != 0x358FC0 || blr->Bits(4, 0) != 0) return nullptr;
-
-    uintptr_t dest = reinterpret_cast<uintptr_t>(blr + 8);
-    if ((dest & 7) != 0) {
-      dest += 4;
-      assertx((dest & 7) == 0);
-    }
-    return *reinterpret_cast<TCA*>(dest);
-  }
-
-  void addDbgGuard(CodeBlock& codeMain, CodeBlock& codeCold,
-                   SrcKey sk, size_t dbgOff) override {
-    vixl::MacroAssembler a { codeMain };
-
-    vixl::Label after;
-    vixl::Label interpReqAddr;
-
-    // Get the debugger-attached flag from thread-local storage. Don't bother
-    // saving caller-saved regs around the host call; this is between blocks.
-    emitTLSLoad<ThreadInfo>(a, ThreadInfo::s_threadInfo, rAsm);
-
-    // Is the debugger attached?
-    a.   Ldr  (rAsm.W(), rAsm[dbgOff]);
-    a.   Tst  (rAsm, 0xff);
-    // skip jump to cold if no debugger attached
-    a.   B    (&after, vixl::eq);
-    a.   Ldr  (rAsm, &interpReqAddr);
-    a.   Br   (rAsm);
-    if (!a.isFrontierAligned(8)) {
-      a. Nop  ();
-      assertx(a.isFrontierAligned(8));
-    }
-    a.   bind (&interpReqAddr);
-    not_implemented();
-    a.   bind (&after);
   }
 
   void streamPhysReg(std::ostream& os, PhysReg reg) override {
@@ -434,24 +158,6 @@ struct BackEnd final : jit::BackEnd {
   }
 
   void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override;
-
-private:
-  void do_moveToAlign(CodeBlock& cb, MoveToAlignFlags alignment) override {
-    // TODO(2967396) implement properly
-  }
-
-  bool do_isSmashable(Address frontier, int nBytes, int offset) override {
-    // See prepareForSmash().
-    return true;
-  }
-
-  void do_prepareForSmash(CodeBlock& cb, int nBytes, int offset) override {
-    // Don't do anything. We don't smash code on ARM; we smash non-executable
-    // data -- an 8-byte pointer -- that's embedded in the instruction stream.
-    // As long as that data is 8-byte aligned, it's safe to smash. All
-    // instructions are 4 bytes wide, so we'll just emit a single nop if needed
-    // to align the data.  This is done in emitSmashableJump.
-  }
 };
 
 }
@@ -519,9 +225,9 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     // create vregs for all relevant SSATmps
     assignRegs(unit, vunit, state, blocks);
     vunit.entry = state.labels[unit.entry()];
-    vasm.main(mainCode);
-    vasm.cold(coldCode);
-    vasm.frozen(*frozenCode);
+
+    Vtext vtext { mainCode, coldCode, *frozenCode };
+
     for (auto block : blocks) {
       auto& v = block->hint() == Block::Hint::Unlikely ? vasm.cold() :
                block->hint() == Block::Hint::Unused ? vasm.frozen() :
@@ -539,7 +245,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     }
     printUnit(kInitialVasmLevel, "after initial vasm generation", vunit);
     assertx(check(vunit));
-    finishARM(vasm.unit(), vasm.areas(), arm::abi, state.asmInfo);
+    finishARM(vasm.unit(), vtext, abi(kind), state.asmInfo);
   }
 
   assertx(coldCodeIn.frontier() == coldStart);

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -67,8 +67,7 @@ BinaryOpExpression::BinaryOpExpression
     break;
   case T_COLLECTION: {
     std::string s = m_exp1->getLiteralString();
-    ExpressionListPtr el = static_pointer_cast<ExpressionList>(m_exp2);
-    el->setCollectionElems();
+    static_pointer_cast<ExpressionList>(m_exp2)->setCollectionElems();
     break;
   }
   default:
@@ -82,25 +81,6 @@ ExpressionPtr BinaryOpExpression::clone() {
   exp->m_exp1 = Clone(m_exp1);
   exp->m_exp2 = Clone(m_exp2);
   return exp;
-}
-
-bool BinaryOpExpression::isTemporary() const {
-  switch (m_op) {
-  case '+':
-  case '-':
-  case '*':
-  case '/':
-  case T_SL:
-  case T_SR:
-  case T_BOOLEAN_OR:
-  case T_BOOLEAN_AND:
-  case T_LOGICAL_OR:
-  case T_LOGICAL_AND:
-  case T_INSTANCEOF:
-  case T_COLLECTION:
-    return true;
-  }
-  return false;
 }
 
 bool BinaryOpExpression::isRefable(bool checkError /* = false */) const {
@@ -164,7 +144,6 @@ ExpressionPtr BinaryOpExpression::unneededHelper() {
 
   if (shortCircuit) {
     m_exp2 = m_exp2->unneeded();
-    m_exp2->setExpectedType(Type::Boolean);
   }
   return static_pointer_cast<Expression>(shared_from_this());
 }
@@ -240,17 +219,11 @@ void BinaryOpExpression::setNthKid(int n, ConstructPtr cp) {
   }
 }
 
-bool BinaryOpExpression::canonCompare(ExpressionPtr e) const {
-  return Expression::canonCompare(e) &&
-    getOp() == static_cast<BinaryOpExpression*>(e.get())->getOp();
-}
-
 ExpressionPtr BinaryOpExpression::preOptimize(AnalysisResultConstPtr ar) {
   if (!m_exp2->isScalar()) {
     if (!m_exp1->isScalar()) {
       if (m_exp1->is(KindOfBinaryOpExpression)) {
-        BinaryOpExpressionPtr b(
-          dynamic_pointer_cast<BinaryOpExpression>(m_exp1));
+        auto b = dynamic_pointer_cast<BinaryOpExpression>(m_exp1);
         if (b->m_op == m_op && b->m_exp1->isScalar()) {
           return foldRightAssoc(ar);
         }
@@ -271,30 +244,24 @@ ExpressionPtr BinaryOpExpression::preOptimize(AnalysisResultConstPtr ar) {
 }
 
 static ExpressionPtr makeIsNull(AnalysisResultConstPtr ar,
-                                LocationPtr loc, ExpressionPtr exp,
+                                const Location::Range& r, ExpressionPtr exp,
                                 bool invert) {
   /* Replace "$x === null" with an is_null call; this requires slightly
    * less work at runtime. */
-  ExpressionListPtr expList =
-    ExpressionListPtr(new ExpressionList(exp->getScope(), loc));
+  auto expList = std::make_shared<ExpressionList>(exp->getScope(), r);
   expList->insertElement(exp);
 
-  SimpleFunctionCallPtr call
-    (new SimpleFunctionCall(exp->getScope(), loc,
-                            "is_null", false, expList, ExpressionPtr()));
+  auto call =
+    std::make_shared<SimpleFunctionCall>(
+      exp->getScope(), r, "is_null", false, expList, ExpressionPtr());
 
   call->setValid();
-  call->setActualType(Type::Boolean);
   call->setupScopes(ar);
 
-  ExpressionPtr result(call);
-  if (invert) {
-    result = ExpressionPtr(new UnaryOpExpression(
-                             exp->getScope(), loc,
-                             result, '!', true));
-  }
+  if (!invert) return call;
 
-  return result;
+  return std::make_shared<UnaryOpExpression>(
+    exp->getScope(), r, call, '!', true);
 }
 
 // foldConst() is callable from the parse phase as well as the analysis phase.
@@ -316,7 +283,7 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
         case T_IS_IDENTICAL:
         case T_IS_NOT_IDENTICAL:
           if (v1.isNull()) {
-            return makeIsNull(ar, getLocation(), m_exp2,
+            return makeIsNull(ar, getRange(), m_exp2,
                               m_op == T_IS_NOT_IDENTICAL);
           }
           break;
@@ -329,9 +296,8 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
                                m_op == T_BOOLEAN_AND) ? m_exp2 : m_exp1;
           rep = ExpressionPtr(
               new UnaryOpExpression(
-                getScope(), getLocation(),
+                getScope(), getRange(),
                 rep, T_BOOL_CAST, true));
-          rep->setActualType(Type::Boolean);
           return replaceValue(rep);
         }
         case '+':
@@ -341,12 +307,11 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
         case '|':
         case '^':
           if (m_exp2->is(KindOfBinaryOpExpression)) {
-            BinaryOpExpressionPtr binOpExp =
-              dynamic_pointer_cast<BinaryOpExpression>(m_exp2);
+            auto binOpExp = dynamic_pointer_cast<BinaryOpExpression>(m_exp2);
             if (binOpExp->m_op == m_op && binOpExp->m_exp1->isScalar()) {
-              ExpressionPtr aExp = m_exp1;
-              ExpressionPtr bExp = binOpExp->m_exp1;
-              ExpressionPtr cExp = binOpExp->m_exp2;
+              auto aExp = m_exp1;
+              auto bExp = binOpExp->m_exp1;
+              auto cExp = binOpExp->m_exp2;
               if (aExp->isArray() || bExp->isArray() || cExp->isArray()) {
                 break;
               }
@@ -354,7 +319,7 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
               m_exp2 = cExp;
               binOpExp->m_exp1 = aExp;
               binOpExp->m_exp2 = bExp;
-              if (ExpressionPtr optExp = binOpExp->foldConst(ar)) {
+              if (auto optExp = binOpExp->foldConst(ar)) {
                 m_exp1 = optExp;
               }
               return static_pointer_cast<Expression>(shared_from_this());
@@ -372,10 +337,8 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
   if (m_exp1->isScalar()) {
     if (!m_exp1->getScalarValue(v1)) return ExpressionPtr();
     try {
-      ScalarExpressionPtr scalar1 =
-        dynamic_pointer_cast<ScalarExpression>(m_exp1);
-      ScalarExpressionPtr scalar2 =
-        dynamic_pointer_cast<ScalarExpression>(m_exp2);
+      auto scalar1 = dynamic_pointer_cast<ScalarExpression>(m_exp1);
+      auto scalar2 = dynamic_pointer_cast<ScalarExpression>(m_exp2);
       // Some data, like the values of __CLASS__ and friends, are not available
       // while we're still in the initial parse phase.
       if (ar->getPhase() == AnalysisResult::ParseAllFiles) {
@@ -384,11 +347,11 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
           return ExpressionPtr();
         }
       }
-      if (!Option::WholeProgram || !Option::ParseTimeOpts) {
+      if ((!Option::WholeProgram || !Option::ParseTimeOpts) && getScope()) {
         // In the VM, don't optimize __CLASS__ if within a trait, since
         // __CLASS__ is not resolved yet.
-        ClassScopeRawPtr clsScope = getOriginalClass();
-        if (clsScope && clsScope->isTrait()) {
+        auto cs = getClassScope();
+        if (cs && cs->isTrait()) {
           if ((scalar1 && scalar1->getType() == T_CLASS_C) ||
               (scalar2 && scalar2->getType() == T_CLASS_C)) {
             return ExpressionPtr();
@@ -521,20 +484,17 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
         ExpressionPtr rep = useFirst ? m_exp1 : m_exp2;
         rep = ExpressionPtr(
           new UnaryOpExpression(
-            getScope(), getLocation(),
+            getScope(), getRange(),
             rep, T_BOOL_CAST, true));
-        rep->setActualType(Type::Boolean);
         if (!useFirst) {
           ExpressionListPtr l(
             new ExpressionList(
-              getScope(), getLocation(),
+              getScope(), getRange(),
               ExpressionList::ListKindComma));
           l->addElement(m_exp1);
           l->addElement(rep);
-          l->setActualType(Type::Boolean);
           rep = l;
         }
-        rep->setExpectedType(getExpectedType());
         return replaceValue(rep);
       }
       case T_LOGICAL_XOR:
@@ -550,7 +510,7 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
       case T_IS_IDENTICAL:
       case T_IS_NOT_IDENTICAL:
         if (v2.isNull()) {
-          return makeIsNull(ar, getLocation(), m_exp1,
+          return makeIsNull(ar, getRange(), m_exp1,
                             m_op == T_IS_NOT_IDENTICAL);
         }
         break;
@@ -569,8 +529,7 @@ BinaryOpExpression::foldRightAssoc(AnalysisResultConstPtr ar) {
   case '+':
   case '*':
     if (m_exp1->is(Expression::KindOfBinaryOpExpression)) {
-      BinaryOpExpressionPtr binOpExp =
-        dynamic_pointer_cast<BinaryOpExpression>(m_exp1);
+      auto binOpExp = dynamic_pointer_cast<BinaryOpExpression>(m_exp1);
       if (binOpExp->m_op == m_op) {
         // turn a Op b Op c, namely (a Op b) Op c into a Op (b Op c)
         ExpressionPtr aExp = binOpExp->m_exp1;
@@ -603,7 +562,7 @@ void BinaryOpExpression::outputCodeModel(CodeGenerator &cg) {
     cg.printPropertyHeader("arguments");
     cg.printExpressionVector(static_pointer_cast<ExpressionList>(m_exp2));
     cg.printPropertyHeader("sourceLocation");
-    cg.printLocation(this->getLocation());
+    cg.printLocation(this);
     cg.printObjectFooter();
     return;
   }
@@ -663,7 +622,7 @@ void BinaryOpExpression::outputCodeModel(CodeGenerator &cg) {
 
   cg.printValue(op);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 
@@ -713,7 +672,7 @@ void BinaryOpExpression::outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) {
   case T_IS_GREATER_OR_EQUAL: cg_printf(" >= ");         break;
   case T_INSTANCEOF:          cg_printf(" instanceof "); break;
   case T_COLLECTION: {
-    ExpressionListPtr el = static_pointer_cast<ExpressionList>(m_exp2);
+    auto el = static_pointer_cast<ExpressionList>(m_exp2);
     if (el->getCount() == 0) {
       cg_printf(" {}");
     } else {

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -50,6 +50,15 @@ struct APCObject {
   // Return an instance of a PHP object from the given object handle
   static Variant MakeObject(const APCHandle* handle);
 
+  /*
+   * Make a serialized version of an object.
+   */
+  static APCHandle::Pair MakeSerializedObj(String data) {
+    auto const pair = APCString::MakeSharedString(KindOfObject, data.get());
+    pair.handle->setSerializedObj();
+    return pair;
+  }
+
   // Delete the APC object holding the object data
   static void Delete(APCHandle* handle);
 
@@ -80,13 +89,6 @@ private:
   ~APCObject();
   APCObject(const APCObject&) = delete;
   APCObject& operator=(const APCObject&) = delete;
-
-private:
-  static APCHandle::Pair MakeSharedObj(String data) {
-    auto const pair = APCString::MakeSharedString(KindOfObject, data.get());
-    pair.handle->setSerializedObj();
-    return pair;
-  }
 
 private:
   Object createObject() const;

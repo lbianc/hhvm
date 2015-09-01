@@ -218,7 +218,7 @@
                     ]
                 },
                 {
-                    "name": "getIteratorForTraversable",
+                    "name": "getIterator",
                     "flags": [
                     ],
                     "return": {
@@ -774,7 +774,7 @@
                     ]
                 },
                 {
-                    "name": "getIteratorForTraversable",
+                    "name": "getIterator",
                     "flags": [
                     ],
                     "return": {

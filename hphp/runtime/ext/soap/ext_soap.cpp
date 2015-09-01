@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -171,7 +171,7 @@ static void header_if_not_sent(const String& str);
 // client helpers
 
 static Object create_soap_fault(const String& code, const String& fault) {
-  return Object(SystemLib::AllocSoapFaultObject(code, fault));
+  return SystemLib::AllocSoapFaultObject(code, fault);
 }
 
 static Object create_soap_fault(Exception &e) {
@@ -244,7 +244,7 @@ static xmlNodePtr serialize_parameter(sdlParamPtr param, Variant value,
   if (!value.isNull() && value.isObject()) {
     Object obj_value = value.toObject();
     if (obj_value.instanceof(SoapParam::getClass())) {
-      SoapParam* p = Native::data<SoapParam>(obj_value.get());
+      SoapParam* p = Native::data<SoapParam>(obj_value);
       value = p->m_data;
       name = p->m_name.c_str();
     }
@@ -397,7 +397,7 @@ static xmlDocPtr serialize_function_call(SoapClient *client,
     for (ArrayIter iter(soap_headers); iter; ++iter) {
       Object obj_header = iter.second().toObject();
       assert(obj_header.instanceof(SoapHeader::getClass()));
-      SoapHeader *header = Native::data<SoapHeader>(obj_header.get());
+      SoapHeader *header = Native::data<SoapHeader>(obj_header);
 
       xmlNodePtr h;
       xmlNsPtr nsptr;
@@ -1052,7 +1052,7 @@ static std::shared_ptr<sdlFunction> deserialize_function_call
                                     "mustUnderstand value is not boolean");
           }
         }
-        auto h = makeSmartPtr<soapHeader>();
+        auto h = req::make<soapHeader>();
         h->function = find_function(sdl, hdr_func, h->function_name).get();
         h->mustUnderstand = mustUnderstand;
         h->hdr = nullptr;
@@ -1263,7 +1263,7 @@ static xmlDocPtr serialize_response_call(
       head = xmlNewChild(envelope, ns, BAD_CAST("Header"), nullptr);
       if (hdr_ret.isObject() &&
           hdr_ret.toObject().instanceof(SoapHeader::getClass())) {
-        SoapHeader *ht = Native::data<SoapHeader>(hdr_ret.toObject().get());
+        const SoapHeader *ht = Native::data<SoapHeader>(hdr_ret.toObject());
 
         string key;
         if (!ht->m_namespace.empty()) {
@@ -1471,8 +1471,8 @@ static xmlDocPtr serialize_response_call(
 
           if (h->retval.isObject() &&
               h->retval.toObject().instanceof(SoapHeader::getClass())) {
-            SoapHeader *ht = Native::data<SoapHeader>(
-              h->retval.toObject().get());
+            const SoapHeader *ht = Native::data<SoapHeader>(
+              h->retval.toObject());
             string key;
             if (!ht->m_namespace.empty()) {
               key += ht->m_namespace.data();
@@ -1819,7 +1819,7 @@ const StaticString
 static void send_soap_server_fault(
     std::shared_ptr<sdlFunction> function,
     Variant fault,
-    const SmartPtr<soapHeader>& hdr) {
+    const req::ptr<soapHeader>& hdr) {
   USE_SOAP_GLOBAL;
   bool use_http_error_status = true;
   if (php_global(s__SERVER).toArray()[s_HTTP_USER_AGENT].toString() ==
@@ -1850,7 +1850,7 @@ static void send_soap_server_fault(
 static void send_soap_server_fault(
     std::shared_ptr<sdlFunction> function,
     Exception &e,
-    const SmartPtr<soapHeader>& hdr) {
+    const req::ptr<soapHeader>& hdr) {
   USE_SOAP_GLOBAL;
   if (SOAP_GLOBAL(use_soap_error_handler)) {
     send_soap_server_fault(
@@ -2375,8 +2375,12 @@ void HHVM_METHOD(SoapServer, fault,
   SoapServerScope ss(this_);
   const String& str_actor = actor.isNull() ? null_string : actor.toString();
   const String& str_name = name.isNull() ? null_string : name.toString();
-  Object obj(SystemLib::AllocSoapFaultObject(code, fault, str_actor, detail,
-                                             str_name));
+  auto obj =
+    SystemLib::AllocSoapFaultObject(code,
+                                    fault,
+                                    str_actor,
+                                    detail,
+                                    str_name);
   send_soap_server_fault(std::shared_ptr<sdlFunction>(), obj, nullptr);
 }
 
@@ -2384,7 +2388,7 @@ void HHVM_METHOD(SoapServer, addsoapheader,
                  const Variant& fault) {
   auto* data = Native::data<SoapServer>(this_);
   SoapServerScope ss(this_);
-  auto p = makeSmartPtr<soapHeader>();
+  auto p = req::make<soapHeader>();
   p->function = nullptr;
   p->mustUnderstand = false;
   p->retval = fault.toObject();
@@ -2447,7 +2451,7 @@ void HHVM_METHOD(SoapClient, __construct,
     }
 
     if (options.exists(s_stream_context)) {
-      SmartPtr<StreamContext> sc;
+      req::ptr<StreamContext> sc;
       if (options[s_stream_context].isResource()) {
         sc = cast<StreamContext>(options[s_stream_context]);
       }
@@ -2581,7 +2585,7 @@ Variant HHVM_METHOD(SoapClient, __soapcall,
 
   Array output_headers;
   SCOPE_EXIT {
-    output_headers_ref = output_headers;
+    output_headers_ref.assignIfRef(output_headers);
   };
 
   if (data->m_trace) {
@@ -2799,7 +2803,7 @@ Variant HHVM_METHOD(SoapClient, __dorequest,
   auto* data = Native::data<SoapClient>(this_);
   if (location.empty()) {
     data->m_soap_fault =
-      Object(SystemLib::AllocSoapFaultObject("HTTP", "Unable to parse URL"));
+      SystemLib::AllocSoapFaultObject("HTTP", "Unable to parse URL");
     return init_null();
   }
 
@@ -2868,11 +2872,12 @@ Variant HHVM_METHOD(SoapClient, __dorequest,
 
   if (code == 0) {
     String msg = "Failed Sending HTTP Soap request";
-    if (!http.getLastError().empty()) {
-      msg += ": " + http.getLastError();
+    auto const& error = http.getLastError();
+    if (!error.empty()) {
+      msg += ": ";
+      msg += error;
     }
-    data->m_soap_fault =
-      Object(SystemLib::AllocSoapFaultObject("HTTP", msg));
+    data->m_soap_fault = SystemLib::AllocSoapFaultObject("HTTP", msg);
     return init_null();
   }
 
@@ -2881,8 +2886,7 @@ Variant HHVM_METHOD(SoapClient, __dorequest,
       response = HttpProtocol::GetReasonString(code);
     }
     if (data->m_exceptions) {
-      data->m_soap_fault =
-        Object(SystemLib::AllocSoapFaultObject("HTTP", response));
+      data->m_soap_fault = SystemLib::AllocSoapFaultObject("HTTP", response);
       return init_null();
     }
   }

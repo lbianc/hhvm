@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -136,11 +136,10 @@ SrcKey RegionDesc::lastSrcKey() const {
 
 RegionDesc::Block* RegionDesc::addBlock(SrcKey      sk,
                                         int         length,
-                                        FPInvOffset spOffset,
-                                        uint16_t    inlineLevel) {
+                                        FPInvOffset spOffset) {
   m_blocks.push_back(
     std::make_shared<Block>(sk.func(), sk.resumed(), sk.offset(), length,
-                            spOffset, inlineLevel));
+                            spOffset));
   BlockPtr block = m_blocks.back();
   m_data[block->id()] = BlockData(block);
   return block.get();
@@ -493,8 +492,7 @@ RegionDesc::Block::Block(const Func* func,
                          bool        resumed,
                          Offset      start,
                          int         length,
-                         FPInvOffset initSpOff,
-                         uint16_t    inlineLevel)
+                         FPInvOffset initSpOff)
   : m_id(s_nextId--)
   , m_func(func)
   , m_resumed(resumed)
@@ -502,8 +500,6 @@ RegionDesc::Block::Block(const Func* func,
   , m_last(kInvalidOffset)
   , m_length(length)
   , m_initialSpOffset(initSpOff)
-  , m_inlinedCallee(nullptr)
-  , m_inlineLevel(inlineLevel)
   , m_profTransID(kInvalidTransID)
 {
   assertx(length >= 0);
@@ -533,8 +529,6 @@ void RegionDesc::Block::addInstruction() {
 }
 
 void RegionDesc::Block::truncateAfter(SrcKey final) {
-  assert_not_implemented(!m_inlinedCallee);
-
   auto skIter = start();
   int newLen = -1;
   for (int i = 0; i < m_length; ++i, skIter.advance(unit())) {
@@ -547,28 +541,25 @@ void RegionDesc::Block::truncateAfter(SrcKey final) {
   m_length = newLen;
   m_last = final.offset();
 
-  truncateMap(m_typePredictions, final);
-  truncateMap(m_typePreConditions, final);
   truncateMap(m_byRefs, final);
-  truncateMap(m_refPreds, final);
   truncateMap(m_knownFuncs, final);
 
   checkInstructions();
   checkMetadata();
 }
 
-void RegionDesc::Block::addPredicted(SrcKey sk, TypedLocation locType) {
-  FTRACE(2, "Block::addPredicted({}, {})\n", showShort(sk), show(locType));
+void RegionDesc::Block::addPredicted(TypedLocation locType) {
+  FTRACE(2, "Block::addPredicted({})\n", show(locType));
+  assertx(locType.type != TBottom);
   assertx(locType.type <= TStkElem);
-  assertx(contains(sk));
-  m_typePredictions.insert(std::make_pair(sk, locType));
+  m_typePredictions.push_back(locType);
 }
 
-void RegionDesc::Block::addPreCondition(SrcKey sk, TypedLocation locType) {
-  FTRACE(2, "Block::addPreCondition({}, {})\n", showShort(sk), show(locType));
+void RegionDesc::Block::addPreCondition(TypedLocation locType) {
+  FTRACE(2, "Block::addPreCondition({})\n", show(locType));
+  assertx(locType.type != TBottom);
   assertx(locType.type <= TStkElem);
-  assertx(contains(sk));
-  m_typePreConditions.insert(std::make_pair(sk, locType));
+  m_typePreConditions.push_back(locType);
 }
 
 void RegionDesc::Block::setParamByRef(SrcKey sk, bool byRef) {
@@ -579,10 +570,9 @@ void RegionDesc::Block::setParamByRef(SrcKey sk, bool byRef) {
   m_byRefs.insert(std::make_pair(sk, byRef));
 }
 
-void RegionDesc::Block::addReffinessPred(SrcKey sk, const ReffinessPred& pred) {
-  FTRACE(2, "Block::addReffinessPred({}, {})\n", showShort(sk), show(pred));
-  assertx(contains(sk));
-  m_refPreds.insert(std::make_pair(sk, pred));
+void RegionDesc::Block::addReffinessPred(const ReffinessPred& pred) {
+  FTRACE(2, "Block::addReffinessPred({})\n", show(pred));
+  m_refPreds.push_back(pred);
 }
 
 void RegionDesc::Block::setKnownFunc(SrcKey sk, const Func* func) {
@@ -602,7 +592,7 @@ void RegionDesc::Block::setKnownFunc(SrcKey sk, const Func* func) {
   m_knownFuncs.insert(std::make_pair(sk, func));
 }
 
-void RegionDesc::Block::setPostConditions(const PostConditions& conds) {
+void RegionDesc::Block::setPostConds(const PostConditions& conds) {
   m_postConds = conds;
 }
 
@@ -660,10 +650,9 @@ void RegionDesc::Block::checkMetadata() const {
     }
   };
 
-  auto checkTypedLocations = [&](const char* msg, const TypedLocMap& map) {
-    for (auto& typedLoc : map) {
-      rangeCheck("type prediction", typedLoc.first.offset());
-      auto& loc = typedLoc.second.location;
+  auto checkTypedLocations = [&](const char* msg, const TypedLocVec& vec) {
+    for (auto& typedLoc : vec) {
+      auto& loc = typedLoc.location;
       switch (loc.tag()) {
       case Location::Tag::Local: assertx(loc.localId() < m_func->numLocals());
                                  break;
@@ -678,9 +667,6 @@ void RegionDesc::Block::checkMetadata() const {
 
   for (auto& byRef : m_byRefs) {
     rangeCheck("parameter reference flag", byRef.first.offset());
-  }
-  for (auto& refPred : m_refPreds) {
-    rangeCheck("reffiness prediction", refPred.first.offset());
   }
   for (auto& func : m_knownFuncs) {
     rangeCheck("known Func*", func.first.offset());
@@ -776,11 +762,10 @@ static bool postCondMismatch(const RegionDesc::TypedLocation& postCond,
 }
 
 bool preCondsAreSatisfied(const RegionDesc::BlockPtr& block,
-                          const PostConditions& prevPostConds) {
+                          const TypedLocations& prevPostConds) {
   const auto& preConds = block->typePreConditions();
-  for (const auto& it : preConds) {
+  for (const auto& preCond : preConds) {
     for (const auto& post : prevPostConds) {
-      const RegionDesc::TypedLocation& preCond = it.second;
       if (postCondMismatch(post, preCond)) {
         FTRACE(6, "preCondsAreSatisfied: postcondition check failed!\n"
                "  postcondition was {}, precondition was {}\n",
@@ -1029,8 +1014,11 @@ std::string show(RegionDesc::TypedLocation ta) {
 
 std::string show(const PostConditions& pconds) {
   std::string ret;
-  for (const auto& postCond : pconds) {
-    folly::toAppend("  postcondition: ", show(postCond), "\n", &ret);
+  for (const auto& postCond : pconds.changed) {
+    folly::toAppend("  changed postcondition: ", show(postCond), "\n", &ret);
+  }
+  for (const auto& postCond : pconds.refined) {
+    folly::toAppend("  refined postcondition: ", show(postCond), "\n", &ret);
   }
   return ret;
 }
@@ -1056,7 +1044,7 @@ std::string show(RegionContext::PreLiveAR ar) {
   return folly::format(
     "AR@{}: {} ({})",
     ar.stackOff,
-    ar.func->fullName()->data(),
+    ar.func->fullName(),
     ar.objOrCls.toString()
   ).str();
 }
@@ -1078,49 +1066,39 @@ std::string show(const RegionDesc::Block& b) {
                   b.start().resumed() ? "r" : "",
                   " length ", b.length(),
                   " initSpOff ", b.initialSpOffset().offset,
-                  " inlineLevel ", b.inlineLevel(),
                   " profTransID ", b.profTransID(),
                   '\n',
                   &ret
                  );
 
-  auto predictions = makeMapWalker(b.typePredictions());
-  auto preconditions = makeMapWalker(b.typePreConditions());
-  auto byRefs    = makeMapWalker(b.paramByRefs());
-  auto refPreds  = makeMapWalker(b.reffinessPreds());
-  auto knownFuncs= makeMapWalker(b.knownFuncs());
-  auto skIter    = b.start();
+  auto& predictions   = b.typePredictions();
+  auto& preconditions = b.typePreConditions();
+  auto  byRefs        = makeMapWalker(b.paramByRefs());
+  auto& refPreds      = b.reffinessPreds();
+  auto  knownFuncs    = makeMapWalker(b.knownFuncs());
+  auto  skIter        = b.start();
 
   const Func* topFunc = nullptr;
 
-  for (int i = 0; i < b.length(); ++i) {
-    while (predictions.hasNext(skIter)) {
-      folly::toAppend("  predict: ", show(predictions.next()), "\n", &ret);
-    }
-    while (preconditions.hasNext(skIter)) {
-      folly::toAppend("  precondition: ", show(preconditions.next()), "\n",
-          &ret);
-    }
-    while (refPreds.hasNext(skIter)) {
-      folly::toAppend("  predict reffiness: ", show(refPreds.next()), "\n",
-                      &ret);
-    }
+  for (auto const& p : predictions) {
+    folly::toAppend("  predict: ", show(p), "\n", &ret);
+  }
+  for (auto const& p : preconditions) {
+    folly::toAppend("  precondition: ", show(p), "\n", &ret);
+  }
+  for (auto const& rp : refPreds) {
+    folly::toAppend("  predict reffiness: ", show(rp), "\n", &ret);
+  }
 
+  for (int i = 0; i < b.length(); ++i) {
     std::string knownFunc;
     if (knownFuncs.hasNext(skIter)) {
       topFunc = knownFuncs.next();
     }
     if (topFunc) {
       const char* inlined = "";
-      if (i == b.length() - 1 && b.inlinedCallee()) {
-        assertx(topFunc == b.inlinedCallee());
-        inlined = " (call is inlined)";
-      }
       knownFunc = folly::format(" (top func: {}{})",
-                                topFunc->fullName()->data(), inlined).str();
-    } else {
-      assertx((i < b.length() - 1 || !b.inlinedCallee()) &&
-             "inlined FCall without a known funcd");
+                                topFunc->fullName(), inlined).str();
     }
 
     std::string byRef;
@@ -1153,30 +1131,58 @@ std::string show(const RegionDesc::Block& b) {
 }
 
 std::string show(const RegionDesc& region) {
-  return folly::format(
-    "Region ({} blocks):\n{}",
-    region.blocks().size(),
-    [&]{
-      std::string ret;
-      std::string arcs;
-      for (auto& b : region.blocks()) {
-        folly::toAppend(show(*b), &ret);
-        if (auto r = region.nextRetrans(b->id())) {
-          folly::toAppend(folly::format("{} -R-> {}\n", b->id(), r.value()),
-                          &arcs);
-        }
-        for (auto s : region.succs(b->id())) {
-          folly::toAppend(folly::format("{} -> {}\n", b->id(), s), &arcs);
-        }
-      }
-      folly::toAppend("Arcs:\n" + arcs, &ret);
-      folly::toAppend("Side-exiting Blocks:\n",
-                      folly::join(", ", region.sideExitingBlocks()),
-                      "\n",
+  std::string ret{folly::sformat("Region ({} blocks):\n",
+                                 region.blocks().size())};
+
+  auto profData = mcg->tx().profData();
+
+  auto weight = [&] (RegionDesc::BlockPtr b) -> int64_t {
+    if (!profData) return 0;
+    auto tid = b->profTransID();
+    if (tid == kInvalidTransID) return 0;
+    return profData->absTransCounter(tid);
+  };
+
+  uint64_t maxBlockWgt = 1; // avoid div by 0
+
+  // Print contents of all blocks in pure text format.
+  for (auto& b : region.blocks()) {
+    folly::toAppend(show(*b), &ret);
+    auto w = weight(b);
+    if (w > maxBlockWgt) maxBlockWgt = w;
+  }
+
+  // Print CFG in dot format, coloring the blocks based on hotness.
+  // Print all the blocks first.
+  folly::toAppend("\ndigraph RegionCFG {\n node[shape=box,style=filled]\n",
+                  &ret);
+  for (auto& b : region.blocks()) {
+    auto const id = b->id();
+    uint32_t coldness = 255 - (255 * weight(b) / maxBlockWgt);
+    folly::toAppend(folly::format(" \"B{}\" [label=\"B {}\\np: {}\","
+                                  "fillcolor=\"#ff{:02x}{:02x}\"]\n",
+                                  id, id, weight(b), coldness, coldness),
+                    &ret);
+  }
+
+  // Print arcs in dot format.
+  for (auto& b : region.blocks()) {
+    if (auto r = region.nextRetrans(b->id())) {
+      folly::toAppend(folly::format(" \"B{}\" -> \"B{}\" [label=R,color=red]\n",
+                                    b->id(), r.value()), &ret);
+    }
+    for (auto s : region.succs(b->id())) {
+      folly::toAppend(folly::format(" \"B{}\" -> \"B{}\"\n", b->id(), s),
                       &ret);
-      return ret;
-    }()
-  ).str();
+    }
+  }
+
+  // Print side-exiting blocks
+  folly::toAppend("}\n\nSide-exiting Blocks:\n",
+                  folly::join(", ", region.sideExitingBlocks()),
+                  "\n",
+                  &ret);
+  return ret;
 }
 
 //////////////////////////////////////////////////////////////////////

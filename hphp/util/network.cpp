@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -193,7 +193,7 @@ HostURL::HostURL(const std::string &hosturl, int port) :
       m_hosturl += hosturl.substr(extraPos);
     }
     m_ipv6 = true;
-  } else if (m_scheme == "unix") {
+  } else if (m_scheme == "unix" || m_scheme == "udg") {
     // unix socket
     m_host = hosturl.substr(spos);
     m_hosturl += m_host;

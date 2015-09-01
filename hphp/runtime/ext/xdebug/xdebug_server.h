@@ -194,6 +194,8 @@ private:
 
   const XDebugCommand* m_lastCommand = nullptr;
   char* m_buffer = nullptr;
+  char* m_bufferCur = nullptr;
+  size_t m_bufferAvail = 0;
   size_t m_bufferSize = 0;
 
   AsyncFunc<XDebugServer> m_pollingThread;
@@ -220,7 +222,7 @@ private:
  public:
   // Logs the string defined by the passed format string to the logfile, if the
   // logfile exists.
-  inline void log(const char* format, ...) {
+  void log(const char* format, ...) {
     if (m_logFile == nullptr) {
       return;
     }
@@ -232,7 +234,7 @@ private:
   }
 
   // Flushes the logfile if it exists
-  inline void logFlush() {
+  void logFlush() {
     if (m_logFile != nullptr) {
       fflush(m_logFile);
     }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -352,9 +352,9 @@ Variant php_filter_float(PHP_INPUT_FILTER_PARAM_DECL) {
 
   dt = is_numeric_string(p.data(), p.size(), &lval, &dval, 0);
 
-  if (IS_INT_TYPE(dt)) {
+  if (isIntType(dt)) {
     return (double)lval;
-  } else if (IS_DOUBLE_TYPE(dt)) {
+  } else if (isDoubleType(dt)) {
     if ((!dval && p.size() > 1 && strpbrk(p.data(), "123456789")) ||
          !zend_finite(dval)) {
       goto error;
@@ -778,7 +778,7 @@ Variant php_filter_validate_mac(PHP_INPUT_FILTER_PARAM_DECL) {
 }
 
 Variant php_filter_callback(PHP_INPUT_FILTER_PARAM_DECL) {
-  if (!HHVM_FN(is_callable)(option_array)) {
+  if (!is_callable(option_array)) {
     raise_warning("First argument is expected to be a valid callback");
     return init_null();
   }

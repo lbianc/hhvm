@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -17,6 +17,7 @@
 
 #include "hphp/runtime/ext/pcre/ext_pcre.h"
 #include "hphp/runtime/base/preg.h"
+#include "hphp/runtime/base/builtin-functions.h"
 
 #include <pcre.h>
 
@@ -39,26 +40,24 @@ Variant HHVM_FUNCTION(preg_grep, const String& pattern, const Array& input,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(preg_match, const String& pattern, const String& subject,
-                                  VRefParam matches /* = null */,
-                                  int flags /* = 0 */, int offset /* = 0 */) {
-  if (matches.isReferenced()) {
-    return preg_match(pattern, subject, matches, flags, offset);
-  } else {
-    return preg_match(pattern, subject, flags, offset);
-  }
+Variant HHVM_FUNCTION(preg_match,
+                      const String& pattern, const String& subject,
+                      VRefParam matches /* = null */,
+                      int flags /* = 0 */, int offset /* = 0 */) {
+  return preg_match(pattern, subject,
+                    matches.getVariantOrNull(),
+                    flags, offset);
 }
 
-Variant HHVM_FUNCTION(preg_match_all, const String& pattern,
-                                      const String& subject,
-                                      VRefParam matches /* = null */,
-                                      int flags /* = 0 */,
-                                      int offset /* = 0 */) {
-  if (matches.isReferenced()) {
-    return preg_match_all(pattern, subject, matches, flags, offset);
-  } else {
-    return preg_match_all(pattern, subject, flags, offset);
-  }
+Variant HHVM_FUNCTION(preg_match_all,
+                      const String& pattern,
+                      const String& subject,
+                      VRefParam matches /* = null */,
+                      int flags /* = 0 */,
+                      int offset /* = 0 */) {
+  return preg_match_all(pattern, subject,
+                        matches.getVariantOrNull(),
+                        flags, offset);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -68,27 +67,29 @@ Variant HHVM_FUNCTION(preg_replace, const Variant& pattern, const Variant& repla
                                     const Variant& subject, int limit /* = -1 */,
                                     VRefParam count /* = null */) {
   return preg_replace_impl(pattern, replacement, subject,
-                           limit, count, false, false);
+                           limit, count.getVariantOrNull(), false, false);
 }
 
-Variant HHVM_FUNCTION(preg_replace_callback, const Variant& pattern, const Variant& callback,
-                                             const Variant& subject,
-                                             int limit /* = -1 */,
-                                             VRefParam count /* = null */) {
-  if (!HHVM_FN(is_callable)(callback)) {
+Variant HHVM_FUNCTION(preg_replace_callback,
+                      const Variant& pattern,
+                      const Variant& callback,
+                      const Variant& subject,
+                      int limit /* = -1 */,
+                      VRefParam count /* = null */) {
+  if (!is_callable(callback)) {
     raise_warning("Not a valid callback function %s",
-        callback.toString().data());
+                  callback.toString().data());
     return empty_string_variant();
   }
   return preg_replace_impl(pattern, callback, subject,
-                           limit, count, true, false);
+                           limit, count.getVariantOrNull(), true, false);
 }
 
 Variant HHVM_FUNCTION(preg_filter, const Variant& pattern, const Variant& callback,
                                    const Variant& subject, int limit /* = -1 */,
                                    VRefParam count /* = null */) {
   return preg_replace_impl(pattern, callback, subject,
-                           limit, count, false, true);
+                           limit, count.getVariantOrNull(), false, true);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

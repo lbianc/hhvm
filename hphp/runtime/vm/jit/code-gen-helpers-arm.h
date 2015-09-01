@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,7 +18,6 @@
 
 #include "hphp/vixl/a64/macro-assembler-a64.h"
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi-arm.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
@@ -27,7 +26,7 @@
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/vasm.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
@@ -106,7 +105,7 @@ inline void emitLdLowPtr(Vout& v, Vreg dest, Vptr mem, size_t size) {
 }
 
 inline void emitCmpClass(Vout& v, Vreg sf, Vreg reg, const Class* c) {
-  auto size = sizeof(LowClassPtr);
+  auto size = sizeof(LowPtr<Class>);
   if (size == 8) {
     v << cmpq{v.cns(c), reg, sf};
   } else if (size == 4) {
@@ -123,28 +122,17 @@ inline void emitCmpClass(Vout& v, Vreg sf, Vreg reg, const Class* c) {
  */
 #ifdef USE_GCC_FAST_TLS
 template<typename T>
-inline void emitTLSLoad(vixl::MacroAssembler& a,
+inline void emitTLSLoad(Vout& v,
                         const ThreadLocalNoCheck<T>& datum,
-                        const vixl::Register& destReg) {
-  using namespace vixl;
-  a.   Mov  (rHostCallReg, jit::tlsBaseNoInline);
-  a.   Push (x30, x29);
-  a.   HostCall(0);
-  // tlsBaseNoInline doesn't need a sync point
-  a.   Pop  (x29, x30);
-
-  a.   Add  (rReturnReg, rReturnReg,
-             uintptr_t(&datum.m_node.m_p) - tlsBase());
-  // Now rReturnReg holds a pointer to *a pointer to* the object.
-  a.   Ldr  (destReg, rReturnReg[0]);
+                        Vreg dst) {
+  not_implemented();
 }
-
 
 #else
 template<typename T>
-inline void emitTLSLoad(vixl::MacroAssembler& a,
+inline void emitTLSLoad(Vout& v,
                         const ThreadLocalNoCheck<T>& datum,
-                        const vixl::Register& destReg) {
+                        Vreg dst) {
   // ARM-simulation mode isn't supported yet if FAST_TLS is off.
   not_implemented();
 }

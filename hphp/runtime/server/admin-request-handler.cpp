@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,6 +28,7 @@
 #include "hphp/runtime/base/thread-hooks.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/recycle-tc.h"
 #include "hphp/runtime/vm/jit/relocation.h"
 #include "hphp/runtime/vm/repo.h"
 
@@ -758,6 +759,20 @@ bool AdminRequestHandler::handleCheckRequest(const std::string &cmd,
     appendStat("rds-persistent", rds::usedPersistentBytes());
     appendStat("units", numLoadedUnits());
     appendStat("funcs", Func::nextFuncId());
+
+    if (RuntimeOption::EvalEnableReusableTC) {
+      mCGenerator->code.forEachBlock([&](const char* name, const CodeBlock& a) {
+        appendStat(folly::format("tc-{}-allocs", name).str(), a.numAllocs());
+        appendStat(folly::format("tc-{}-frees", name).str(), a.numFrees());
+        appendStat(folly::format("tc-{}-free-size", name).str(), a.bytesFree());
+        appendStat(folly::format("tc-{}-free-blocks", name).str(),
+                   a.blocksFree());
+      });
+      appendStat("tc-recorded-funcs", jit::recordedFuncs());
+      appendStat("tc-smashed-calls", jit::smashedCalls());
+      appendStat("tc-smashed-branches", jit::smashedBranches());
+    }
+
     out << "}" << endl;
     transport->sendString(out.str());
     return true;
@@ -1076,12 +1091,7 @@ bool AdminRequestHandler::handleDumpCacheRequest(const std::string &cmd,
     if (keyOnlyParam == "true" || keyOnlyParam == "1") {
       keyOnly = true;
     }
-    int waitSeconds = transport->getIntParam("waitseconds");
-    if (!waitSeconds) {
-      waitSeconds = RuntimeOption::RequestTimeoutSeconds > 0 ?
-                    RuntimeOption::RequestTimeoutSeconds : 10;
-    }
-    apc_dump("/tmp/apc_dump", keyOnly, false, waitSeconds);
+    apc_dump("/tmp/apc_dump", keyOnly, false);
     transport->sendString("Done");
     return true;
   }
@@ -1098,12 +1108,7 @@ bool AdminRequestHandler::handleDumpCacheRequest(const std::string &cmd,
       transport->sendString("No APC\n");
       return true;
     }
-    int waitSeconds = transport->getIntParam("waitseconds");
-    if (!waitSeconds) {
-      waitSeconds = RuntimeOption::RequestTimeoutSeconds > 0 ?
-        RuntimeOption::RequestTimeoutSeconds : 10;
-    }
-    apc_dump("/tmp/apc_dump_meta", false, true, waitSeconds);
+    apc_dump("/tmp/apc_dump_meta", false, true);
     transport->sendString("Done");
     return true;
   }

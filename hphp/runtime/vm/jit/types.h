@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -21,7 +21,6 @@
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/hash-map-typedefs.h"
-
 #include "hphp/runtime/base/types.h"
 
 namespace HPHP { namespace jit {
@@ -121,8 +120,20 @@ static_assert(sizeof(TransFlags) <= sizeof(uint64_t), "Too many TransFlags!");
  * cross-trace code has fewer available registers.
  */
 enum class CodeKind {
+  /*
+   * Normal PHP code in the TC.
+   */
   Trace,
+
+  /*
+   * Code at the TC boundaries, e.g., service requests, unique stubs.
+   */
   CrossTrace,
+
+  /*
+   * Helper code that uses scratch registers only.
+   */
+  Helper,
 };
 
 /*
@@ -144,6 +155,17 @@ inline std::string areaAsString(AreaIndex area) {
   }
   always_assert(false);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * Some data structures are accessed often enough from translated code that we
+ * have shortcuts for getting offsets into them.
+ */
+#define TVOFF(nm) int(offsetof(TypedValue, nm))
+#define AROFF(nm) int(offsetof(ActRec, nm))
+#define AFWHOFF(nm) int(offsetof(c_AsyncFunctionWaitHandle, nm))
+#define GENDATAOFF(nm) int(offsetof(Generator, nm))
 
 ///////////////////////////////////////////////////////////////////////////////
 

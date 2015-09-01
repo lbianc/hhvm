@@ -1,6 +1,3 @@
-# Copyright (c) 2014, Facebook, Inc.
-# All rights reserved.
-
 ################################################################################
 #                            Variables to override                             #
 ################################################################################
@@ -39,6 +36,7 @@ MODULES=\
   client\
   deps\
   dfind\
+  emitter\
   format\
   globals\
   h2tp/common\
@@ -69,6 +67,7 @@ NATIVE_OBJECT_FILES=\
   utils/get_build_id.o\
   utils/nproc.o\
   utils/realpath.o\
+  utils/handle_stubs.o\
   $(INOTIFY)/$(notdir $(INOTIFY))_stubs.o
 
 OCAML_LIBRARIES=\
@@ -79,7 +78,8 @@ NATIVE_LIBRARIES=\
   pthread\
   $(ELF)
 
-TARGETS=_build/hh_server.native _build/hh_client.native _build/hh_single_type_check.native \
+TARGETS=_build/hh_server.native _build/hh_client.native \
+		_build/hh_single_type_check.native _build/hh_emitter.native \
 		_build/hh_format.native _build/h2tp.native _build/test_unparser.native
 
 # Find all source files (all files not in _build dir)
@@ -104,6 +104,7 @@ LINKER_FLAGS=$(NATIVE_OBJECT_FILES) $(NATIVE_LIB_OPTS) $(EXTRA_LIB_OPTS) \
 rwildcard=$(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
 
 all: build-hhi-archive build-hack copy-hack-files
+all-ocp: build-hhi-archive build-hack-with-ocp copy-hack-files-ocp
 
 clean:
 	ocamlbuild -clean
@@ -111,6 +112,10 @@ clean:
 	rm -f utils/get_build_id.gen.c
 
 build-hack: $(TARGETS) build-hhi-archive
+
+build-hack-with-ocp: build-hhi-archive build-hack-stubs-with-ocp
+	[ -d ${ROOT}/../_obuild ] || ( cd ${ROOT}/.. && ocp-build init )
+	ocp-build build
 
 # All targets are built in one time, so no parallelization is necessary
 .NOTPARALLEL: $(TARGETS)
@@ -121,22 +126,26 @@ $(TARGETS): $(ALL_SRC_FILES)
 	# build-hack-native-deps is a dependency of $(TARGETS) but as it is phony
 	# we place it here to avoid unnecessary rebuilds
 	$(MAKE) build-hack-native-deps build-hhi-archive
-	ocamlbuild -no-links $(INCLUDE_OPTS) $(LIB_OPTS) \
-		-lflags "$(LINKER_FLAGS)" \
+	ocamlbuild -no-links -cflag -g $(INCLUDE_OPTS) $(LIB_OPTS) \
+		-lflags "-g $(LINKER_FLAGS)" \
 		$(patsubst _build/%,%,$(TARGETS))
 	# Touching the targets is necessary because the ocaml build
-	# doens't change the modification dates of the targets if
+	# doesn't change the modification dates of the targets if
 	# the new binaries are exactly the same as the old ones
 	touch $(TARGETS)
 
 build-hack-native-deps: build-hack-stubs
-	# ocamlbuild before 4.00 does not pass thru cflags when building native C
-	# objects, because they're not important, right? So use this super ugly hack.
-	ocamlbuild -ocamlc "ocamlopt $(EXTRA_INCLUDE_OPTS) $(EXTRA_CC_OPTS)" $(NATIVE_OBJECT_FILES)
+	ocamlbuild -cflags "-g $(EXTRA_INCLUDE_OPTS) $(EXTRA_CC_OPTS)" $(NATIVE_OBJECT_FILES)
 
+# If you modify this rule, do not forget to edit the file
+# `$(ROOT)/scripts/gen_build_id.ml` used on Windows.
 build-hack-stubs:
 	REV="const char* const BuildInfo_kRevision = \"$$(git rev-parse HEAD)\";"; \
 	if [ "$$REV" != "$$(cat utils/get_build_id.gen.c)" ]; then echo "$$REV" > utils/get_build_id.gen.c; fi
+
+build-hack-stubs-with-ocp:
+	ocaml unix.cma $(ROOT)/scripts/gen_build_id.ml \
+                       $(ROOT)/utils/get_build_id.gen.c
 
 build-hhi-archive:
 	mkdir -p ../bin
@@ -151,13 +160,35 @@ else
 endif
 	cp _build/hh_client.native ../bin/hh_client
 	cp _build/hh_single_type_check.native ../bin/hh_single_type_check
+	cp _build/hh_emitter.native ../bin/hh_emitter
 	cp _build/hh_format.native ../bin/hh_format
 	cp _build/h2tp/h2tp.native ../bin/h2tp
 
+copy-hack-files-ocp: build-hack-with-ocp
+	mkdir -p ../bin
+ifeq ($(OS), Linux)
+	objcopy --add-section hhi=../bin/hhi.tar.gz ../_obuild/hh_server/hh_server.asm ../bin/hh_server
+else
+	cp ../_obuild/hh_server/hh_server.asm ../bin/hh_server
+endif
+	cp ../_obuild/hh_client/hh_client.asm ../bin/hh_client
+	cp ../_obuild/hh_single_type_check/hh_single_type_check.asm ../bin/hh_single_type_check
+	cp ../_obuild/hh_format/hh_format.asm ../bin/hh_format
+	cp ../_obuild/h2tp/h2tp.asm ../bin/h2tp
+
+
+.PHONY: test test-ocp do-test
 test: build-hack copy-hack-files
+	${MAKE} do-test
+
+test-ocp: build-hack-with-ocp copy-hack-files-ocp
+	${MAKE} do-test
+
+do-test:
 	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/autocomplete
 	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/color
 	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/coverage
+	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/dumpsymbolinfo
 	python3 ../test/verify.py --program ../bin/hh_format ../test/format
 	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/suggest
 	python3 ../test/verify.py --program ../bin/hh_single_type_check ../test/typecheck
@@ -166,3 +197,4 @@ test: build-hack copy-hack-files
 		--out-extension .format_out \
 		--expect-extension '' \
 		--flags --root .
+	python3 ../test/integration/runner.py hh_server hh_client

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -21,8 +21,8 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/thread-info.h"
 #include "hphp/runtime/ext/ext_closure.h"
-#include "hphp/runtime/ext/ext_generator.h"
-#include "hphp/runtime/ext/ext_collections.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
+#include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/util/trace.h"
@@ -90,7 +90,7 @@ StringData* concat_is(int64_t v1, StringData* v2) {
   char intbuf[21];
   // Convert the int to a string
   auto const s1 = conv_10(v1, intbuf + sizeof(intbuf));
-  StringSlice s2 = v2->slice();
+  auto const s2 = v2->slice();
   return StringData::Make(s1, s2);
 }
 

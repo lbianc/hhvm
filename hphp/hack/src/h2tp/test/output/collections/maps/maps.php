@@ -1,14 +1,12 @@
 <?php
-require_once ($GLOBALS['HACKLIB_ROOT']);
+require_once ($GLOBALS["HACKLIB_ROOT"]);
 class Foo {
   public function __toString() {
     return "Foo";
   }
 }
 function verify_map($m) {
-  echo
-    (\hacklib_cast_as_boolean($m->isEmpty()) ? "empty\n" : "not empty\n")
-  ;
+  echo (\hacklib_cast_as_boolean($m->isEmpty()) ? "empty\n" : "not empty\n");
   echo ($m->count()."\n");
   echo ($m->at("25")."\n");
   echo ($m[\hacklib_id("25")]."\n");
@@ -44,7 +42,7 @@ function verify_map($m) {
   foreach ($m as $i => $mal) {
     $out = var_export($mal, true);
     $t = gettype($i);
-    echo ("($t) $i : $out\n");
+    echo ("(".$t.") ".$i." : ".$out."\n");
   }
   $i = $m->getIterator();
   $i->next();
@@ -82,6 +80,6 @@ $map = $map->add(\HH\Pair::hacklib_new("tweedledee", "tweedledum"));
 foreach ($map as $i => $mal) {
   $out = var_export($mal, true);
   $t = gettype($i);
-  echo ("($t) $i : $out -- ");
+  echo ("(".$t.") ".$i." : ".$out." -- ");
 }
 echo ("\n");

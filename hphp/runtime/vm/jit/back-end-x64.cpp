@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,22 +22,27 @@
 
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#include "hphp/runtime/vm/jit/align-x64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-x64.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
-#include "hphp/runtime/vm/jit/func-prologues-x64.h"
+#include "hphp/runtime/vm/jit/func-guard-x64.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
-#include "hphp/runtime/vm/jit/service-requests-x64.h"
-#include "hphp/runtime/vm/jit/timer.h"
-#include "hphp/runtime/vm/jit/unique-stubs-x64.h"
-#include "hphp/runtime/vm/jit/unwind-x64.h"
-#include "hphp/runtime/vm/jit/vasm-print.h"
-#include "hphp/runtime/vm/jit/vasm-llvm.h"
 #include "hphp/runtime/vm/jit/relocation.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr.h"
+#include "hphp/runtime/vm/jit/timer.h"
+#include "hphp/runtime/vm/jit/translator-inline.h"
+#include "hphp/runtime/vm/jit/unique-stubs.h"
+#include "hphp/runtime/vm/jit/unwind-x64.h"
+#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
+#include "hphp/runtime/vm/jit/vasm-llvm.h"
+#include "hphp/runtime/vm/jit/vasm-print.h"
+#include "hphp/runtime/vm/jit/vasm-text.h"
 
 namespace HPHP { namespace jit {
 
@@ -59,36 +64,19 @@ namespace {
 //////////////////////////////////////////////////////////////////////
 
 struct BackEnd final : jit::BackEnd {
-  Abi abi() override {
-    return x64::abi;
-  }
-
-  size_t cacheLineSize() override {
-    return 64;
-  }
-
-  PhysReg rSp() override {
-    return PhysReg(reg::rsp);
-  }
-
-  PhysReg rVmSp() override {
-    return x64::rVmSp;
-  }
-
-  PhysReg rVmFp() override {
-    return x64::rVmFp;
-  }
-
-  PhysReg rVmTl() override {
-    return x64::rVmTl;
-  }
-
   /*
    * enterTCHelper does not save callee-saved registers except %rbp. This means
    * when we call it from C++, we have to tell gcc to clobber all the other
    * callee-saved registers.
    */
-#if defined (__powerpc64__)
+#if defined(__CYGWIN__) || defined(__MINGW__)
+  #define CALLEE_SAVED_BARRIER()                                    \
+      asm volatile("" : : : "rbx", "rsi", "rdi", "r12", "r13", "r14", "r15");
+#elif defined(_MSC_VER)
+  // Unfortunately, we have no way to tell MSVC to do this, so we'll
+  // probably have to use a pair of assembly stubs to manage this.
+  #define CALLEE_SAVED_BARRIER() always_assert(false);
+#elif defined (__powerpc64__)
   #define CALLEE_SAVED_BARRIER()
 #else
   #define CALLEE_SAVED_BARRIER()                                    \
@@ -99,9 +87,9 @@ struct BackEnd final : jit::BackEnd {
    * enterTCHelper is a handwritten assembly function that transfers control in
    * and out of the TC.
    */
-  static_assert(x64::rVmSp == rbx &&
-                x64::rVmFp == rbp &&
-                x64::rVmTl == r12,
+  static_assert(x64::rvmsp() == rbx &&
+                x64::rvmfp() == rbp &&
+                x64::rvmtl() == r12,
                 "__enterTCHelper needs to be modified to use the correct ABI");
 
   void enterTCHelper(TCA start, ActRec* stashedAR) override {
@@ -114,23 +102,6 @@ struct BackEnd final : jit::BackEnd {
     CALLEE_SAVED_BARRIER();
   }
 
-  UniqueStubs emitUniqueStubs() override {
-    return x64::emitUniqueStubs();
-  }
-
-  TCA emitServiceReqWork(CodeBlock& cb,
-                         TCA start,
-                         SRFlags flags,
-                         folly::Optional<FPInvOffset> spOff,
-                         ServiceRequest req,
-                         const ServiceReqArgVec& argv) override {
-    return x64::emitServiceReqWork(cb, start, flags, spOff, req, argv);
-  }
-
-  size_t reusableStubSize() const override {
-    return x64::reusableStubSize();
-  }
-
   void emitInterpReq(CodeBlock& mainCode,
                      SrcKey sk,
                      FPInvOffset spOff) override {
@@ -139,172 +110,11 @@ struct BackEnd final : jit::BackEnd {
     if (RuntimeOption::EvalJitTransCounters) {
       x64::emitTransCounterInc(a);
     }
-    a.    emitImmReg(uint64_t(sk.pc()), argNumToRegName[0]);
+    a.    emitImmReg(uint64_t(sk.pc()), rarg(0));
     if (!sk.resumed()) {
-      a.  lea(x64::rVmFp[-cellsToBytes(spOff.offset)], x64::rVmSp);
+      a.  lea(x64::rvmfp()[-cellsToBytes(spOff.offset)], x64::rvmsp());
     }
     a.    jmp(mcg->tx().uniqueStubs.interpHelper);
-  }
-
-  bool funcPrologueHasGuard(TCA prologue, const Func* func) override {
-    return x64::funcPrologueHasGuard(prologue, func);
-  }
-
-  TCA funcPrologueToGuard(TCA prologue, const Func* func) override {
-    return x64::funcPrologueToGuard(prologue, func);
-  }
-
-  SrcKey emitFuncPrologue(TransID transID, Func* func, int argc,
-                          TCA& start) override {
-    return func->isMagic()
-      ? x64::emitMagicFuncPrologue(transID, func, argc, start)
-      : x64::emitFuncPrologue(transID, func, argc, start);
-  }
-
-  TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {
-    return x64::emitCallArrayPrologue(func, dvs);
-  }
-
-  void funcPrologueSmashGuard(TCA prologue, const Func* func) override {
-    x64::funcPrologueSmashGuard(prologue, func);
-  }
-
-  void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {
-    X64Assembler a { cb };
-
-    a.    pushf ();
-    //    addq $n, [%fs:disp]
-    a.    fs().addq(n, baseless(disp));
-    a.    popf  ();
-  }
-
-  void prepareForTestAndSmash(CodeBlock& cb, int testBytes,
-                              TestAndSmashFlags flags) override {
-    using namespace x64;
-    switch (flags) {
-      case TestAndSmashFlags::kAlignJcc:
-        prepareForSmash(cb, testBytes + kJmpccLen, testBytes);
-        assertx(isSmashable(cb.frontier() + testBytes, kJmpccLen));
-        break;
-      case TestAndSmashFlags::kAlignJccImmediate:
-        prepareForSmash(cb,
-                        testBytes + kJmpccLen,
-                        testBytes + kJmpccLen - kJmpImmBytes);
-        assertx(isSmashable(cb.frontier() + testBytes, kJmpccLen,
-                           kJmpccLen - kJmpImmBytes));
-        break;
-      case TestAndSmashFlags::kAlignJccAndJmp:
-        // Ensure that the entire jcc, and the entire jmp are smashable
-        // (but we dont need them both to be in the same cache line)
-        prepareForSmashImpl(cb, testBytes + kJmpccLen, testBytes);
-        prepareForSmashImpl(cb, testBytes + kJmpccLen + kJmpLen,
-                            testBytes + kJmpccLen);
-        mcg->cgFixups().m_alignFixups.emplace(
-          cb.frontier(), std::make_pair(testBytes + kJmpccLen, testBytes));
-        mcg->cgFixups().m_alignFixups.emplace(
-          cb.frontier(), std::make_pair(testBytes + kJmpccLen + kJmpLen,
-                                        testBytes + kJmpccLen));
-        assertx(isSmashable(cb.frontier() + testBytes, kJmpccLen));
-        assertx(isSmashable(cb.frontier() + testBytes + kJmpccLen, kJmpLen));
-        break;
-    }
-  }
-
-  void smashJmp(TCA jmpAddr, TCA newDest) override {
-    return x64::smashJmp(jmpAddr, newDest);
-  }
-
-  void smashCall(TCA callAddr, TCA newDest) override {
-    x64::smashCall(callAddr, newDest);
-  }
-
-  void smashJcc(TCA jccAddr, TCA newDest) override {
-    assertx(MCGenerator::canWrite());
-    FTRACE(2, "smashJcc: {} -> {}\n", jccAddr, newDest);
-    // Make sure the encoding is what we expect. It has to be a rip-relative jcc
-    // with a 4-byte delta.
-    assertx(*jccAddr == 0x0F && (*(jccAddr + 1) & 0xF0) == 0x80);
-    assertx(isSmashable(jccAddr, x64::kJmpccLen));
-
-    // Can't use the assembler to write out a new instruction, because we have
-    // to preserve the condition code.
-    auto newDelta = safe_cast<int32_t>(newDest - jccAddr - x64::kJmpccLen);
-    auto deltaAddr = reinterpret_cast<int32_t*>(jccAddr
-                                                + x64::kJmpccLen
-                                                - x64::kJmpImmBytes);
-    *deltaAddr = newDelta;
-  }
-
-  void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {
-    X64Assembler a { cb };
-    if (cc == CC_None) {
-      assertx(isSmashable(cb.frontier(), x64::kJmpLen));
-      a.  jmp(dest);
-    } else {
-      assertx(isSmashable(cb.frontier(), x64::kJmpccLen));
-      a.  jcc(cc, dest);
-    }
-  }
-
-  TCA smashableCallFromReturn(TCA retAddr) override {
-    auto addr = retAddr - x64::kCallLen;
-    assertx(isSmashable(addr, x64::kCallLen));
-    return addr;
-  }
-
-  void emitSmashableCall(CodeBlock& cb, TCA dest) override {
-    X64Assembler a { cb };
-    assertx(isSmashable(cb.frontier(), x64::kCallLen));
-    a.  call(dest);
-  }
-
-  TCA jmpTarget(TCA jmp) override {
-    if (jmp[0] != 0xe9) {
-      if (jmp[0] == 0x0f &&
-          jmp[1] == 0x1f &&
-          jmp[2] == 0x44) {
-        // 5 byte nop
-        return jmp + 5;
-      }
-      return nullptr;
-    }
-    return jmp + 5 + ((int32_t*)(jmp + 5))[-1];
-  }
-
-  TCA jccTarget(TCA jmp) override {
-    if (jmp[0] != 0x0F || (jmp[1] & 0xF0) != 0x80) return nullptr;
-    return jmp + 6 + ((int32_t*)(jmp + 6))[-1];
-  }
-
-  ConditionCode jccCondCode(TCA jmp) override {
-    return DecodedInstruction(jmp).jccCondCode();
-  }
-
-  TCA callTarget(TCA call) override {
-    if (call[0] != 0xE8) return nullptr;
-    return call + 5 + ((int32_t*)(call + 5))[-1];
-  }
-
-  void addDbgGuard(CodeBlock& codeMain,
-                   CodeBlock& codeCold,
-                   SrcKey sk,
-                   size_t dbgOff) override {
-    Asm a { codeMain };
-
-    // Emit the checks for debugger attach
-    auto rtmp = rAsm;
-    emitTLSLoad<ThreadInfo>(a, ThreadInfo::s_threadInfo, rtmp);
-    a.   loadb  (rtmp[dbgOff], rbyte(rtmp));
-    a.   testb  ((int8_t)0xff, rbyte(rtmp));
-
-    if (!sk.resumed()) {
-      auto const off = mcg->tx().getSrcRec(sk)->nonResumedSPOff();
-      a. lea    (x64::rVmFp[-cellsToBytes(off.offset)], x64::rVmSp);
-    }
-
-    // Branch to interpHelper if attached
-    a.   emitImmReg(uint64_t(sk.pc()), argNumToRegName[0]);
-    a.   jnz    (mcg->tx().uniqueStubs.interpHelper);
   }
 
   void streamPhysReg(std::ostream& os, PhysReg reg) override {
@@ -323,57 +133,7 @@ struct BackEnd final : jit::BackEnd {
   }
 
   void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override;
-
-private:
-  void do_moveToAlign(CodeBlock& cb, MoveToAlignFlags alignment) override {
-    size_t x64Alignment;
-
-    switch (alignment) {
-    case MoveToAlignFlags::kJmpTargetAlign:
-      x64Alignment = kJmpTargetAlign;
-      break;
-    case MoveToAlignFlags::kNonFallthroughAlign:
-      x64Alignment = jit::kNonFallthroughAlign;
-      break;
-    case MoveToAlignFlags::kCacheLineAlign:
-      x64Alignment = kCacheLineSize;
-      break;
-    }
-    x64::moveToAlign(cb, x64Alignment);
-  }
-
-  bool do_isSmashable(Address frontier, int nBytes, int offset) override {
-    return x64::isSmashable(frontier, nBytes, offset);
-  }
-
-  void do_prepareForSmash(CodeBlock& cb, int nBytes, int offset) override {
-    prepareForSmashImpl(cb, nBytes, offset);
-    mcg->cgFixups().m_alignFixups.emplace(cb.frontier(),
-                                          std::make_pair(nBytes, offset));
-  }
 };
-
-//////////////////////////////////////////////////////////////////////
-
-void smashJmpOrCall(TCA addr, TCA dest, bool isCall) {
-  // Unconditional rip-relative jmps can also be encoded with an EB as the
-  // first byte, but that means the delta is 1 byte, and we shouldn't be
-  // encoding smashable jumps that way.
-  assertx(kJmpLen == kCallLen);
-  always_assert(isSmashable(addr, kJmpLen));
-
-  auto& cb = mcg->code.blockFor(addr);
-  CodeCursor cursor { cb, addr };
-  X64Assembler a { cb };
-  if (dest > addr && dest - addr <= kJmpLen) {
-    assertx(!isCall);
-    a.  emitNop(dest - addr);
-  } else if (isCall) {
-    a.  call   (dest);
-  } else {
-    a.  jmp    (dest);
-  }
-}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -402,7 +162,7 @@ static size_t genBlock(CodegenState& state, Vout& v, Vout& vc, Block* block) {
  */
 static void printLLVMComparison(const IRUnit& ir_unit,
                                 const Vunit& vasm_unit,
-                                const Vasm::AreaList& areas,
+                                const jit::vector<Varea>& areas,
                                 const CompareLLVMCodeGen* compare) {
   auto const vasm_size = areas[0].code.frontier() - areas[0].start;
   auto const percentage = compare->main_size * 100 / vasm_size;
@@ -492,6 +252,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
   CodeBlock coldCode;
   bool do_relocate = false;
   if (!mcg->useLLVM() &&
+      !RuntimeOption::EvalEnableReusableTC &&
       RuntimeOption::EvalJitRelocationSize &&
       coldCodeIn.canEmit(RuntimeOption::EvalJitRelocationSize * 3)) {
     /*
@@ -504,7 +265,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
      */
 
     static unsigned seed = 42;
-    auto off = rand_r(&seed) & (cacheLineSize() - 1);
+    auto off = rand_r(&seed) & (kCacheLineSize - 1);
     coldCode.init(coldCodeIn.frontier() +
                    RuntimeOption::EvalJitRelocationSize + off,
                    RuntimeOption::EvalJitRelocationSize - off, "cgRelocCold");
@@ -556,9 +317,8 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     // create vregs for all relevant SSATmps
     assignRegs(unit, vunit, state, blocks);
     vunit.entry = state.labels[unit.entry()];
-    vasm.main(mainCode);
-    vasm.cold(coldCode);
-    vasm.frozen(*frozenCode);
+
+    Vtext vtext { mainCode, coldCode, *frozenCode };
 
     for (auto block : blocks) {
       auto& v = block->hint() == Block::Hint::Unlikely ? vasm.cold() :
@@ -578,16 +338,12 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     printUnit(kInitialVasmLevel, "after initial vasm generation", vunit);
     assertx(check(vunit));
 
-    auto const& abi = kind == CodeKind::Trace ? x64::abi
-                                              : x64::cross_trace_abi;
-
     if (mcg->useLLVM()) {
-      auto& areas = vasm.areas();
       auto x64_unit = vunit;
       auto vasm_size = std::numeric_limits<size_t>::max();
 
       jit::vector<UndoMarker> undoAll = {UndoMarker(mcg->globalData())};
-      for (auto const& area : areas) undoAll.emplace_back(area.code);
+      for (auto const& area : vtext.areas()) undoAll.emplace_back(area.code);
       auto resetCode = [&] {
         for (auto& marker : undoAll) marker.undo();
         mcg->cgFixups().clear();
@@ -600,17 +356,18 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
       // vasm, just to see how big it is. The cost of this is trivial compared
       // to the LLVM code generation.
       if (RuntimeOption::EvalJitLLVMKeepSize) {
-        optimizeX64(x64_unit, abi);
+        optimizeX64(x64_unit, abi(kind));
         optimized = true;
-        emitX64(x64_unit, areas, nullptr);
-        vasm_size = areas[0].code.frontier() - areas[0].start;
+        emitX64(x64_unit, vtext, nullptr);
+        vasm_size = vtext.main().code.frontier() - vtext.main().start;
         resetCode();
       }
 
       try {
-        genCodeLLVM(vunit, areas);
+        genCodeLLVM(vunit, vtext);
 
-        auto const llvm_size = areas[0].code.frontier() - areas[0].start;
+        auto const llvm_size = vtext.main().code.frontier() -
+                               vtext.main().start;
         if (llvm_size * 100 / vasm_size > RuntimeOption::EvalJitLLVMKeepSize) {
           throw FailedLLVMCodeGen("LLVM size {}, vasm size {}\n",
                                   llvm_size, vasm_size);
@@ -627,16 +384,16 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
 
         mcg->setUseLLVM(false);
         resetCode();
-        if (!optimized) optimizeX64(x64_unit, abi);
-        emitX64(x64_unit, areas, state.asmInfo);
+        if (!optimized) optimizeX64(x64_unit, abi(kind));
+        emitX64(x64_unit, vtext, state.asmInfo);
 
         if (auto compare = dynamic_cast<const CompareLLVMCodeGen*>(&e)) {
-          printLLVMComparison(unit, vasm.unit(), areas, compare);
+          printLLVMComparison(unit, vasm.unit(), vtext.areas(), compare);
         }
       }
     } else {
-      optimizeX64(vunit, abi);
-      emitX64(vunit, vasm.areas(), state.asmInfo);
+      optimizeX64(vunit, abi(kind));
+      emitX64(vunit, vtext, state.asmInfo);
     }
   }
 
@@ -714,35 +471,6 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
   if (asmInfo) {
     printUnit(kCodeGenLevel, unit, " after code gen ", asmInfo);
   }
-}
-
-//////////////////////////////////////////////////////////////////////
-
-bool isSmashable(Address frontier, int nBytes, int offset /* = 0 */) {
-  assertx(nBytes <= int(kCacheLineSize));
-  uintptr_t iFrontier = uintptr_t(frontier) + offset;
-  uintptr_t lastByte = uintptr_t(frontier) + nBytes - 1;
-  return (iFrontier & ~kCacheLineMask) == (lastByte & ~kCacheLineMask);
-}
-
-void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset) {
-  if (isSmashable(cb.frontier(), nBytes, offset)) return;
-  X64Assembler a { cb };
-  int gapSize = (~(uintptr_t(a.frontier()) + offset) & kCacheLineMask) + 1;
-  a.emitNop(gapSize);
-  assertx(isSmashable(a.frontier(), nBytes, offset));
-}
-
-void smashJmp(TCA jmpAddr, TCA newDest) {
-  assertx(MCGenerator::canWrite());
-  FTRACE(2, "smashJmp: {} -> {}\n", jmpAddr, newDest);
-  smashJmpOrCall(jmpAddr, newDest, false);
-}
-
-void smashCall(TCA callAddr, TCA newDest) {
-  assertx(MCGenerator::canWrite());
-  FTRACE(2, "smashCall: {} -> {}\n", callAddr, newDest);
-  smashJmpOrCall(callAddr, newDest, true);
 }
 
 //////////////////////////////////////////////////////////////////////

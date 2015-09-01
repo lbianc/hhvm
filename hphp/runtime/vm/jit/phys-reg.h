@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -381,7 +381,7 @@ struct RegSet {
 
 private:
   uint64_t m_bits;
-  static_assert(sizeof(m_bits) * 8 >= PhysReg::kMaxRegs, "");
+  static_assert(sizeof(decltype(m_bits)) * 8 >= PhysReg::kMaxRegs, "");
 };
 
 inline RegSet operator|(PhysReg r1, PhysReg r2) {

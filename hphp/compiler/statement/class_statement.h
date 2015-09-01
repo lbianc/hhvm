@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -39,18 +39,18 @@ public:
                  TypeAnnotationPtr enumBaseTy);
 
   DECLARE_BASE_STATEMENT_VIRTUAL_FUNCTIONS;
-  virtual bool hasDecl() const { return true; }
-  virtual bool hasImpl() const;
+  bool hasDecl() const override { return true; }
+  bool hasImpl() const override;
 
   void setPromotedParameterCount(int count) {
     m_promotedParameterCount = count;
   }
 
   // implementing IParseHandler
-  virtual void onParse(AnalysisResultConstPtr ar, FileScopePtr scope);
+  void onParse(AnalysisResultConstPtr ar, FileScopePtr scope) override;
   bool ignored() const { return m_ignored;}
 
-  virtual std::string getName() const;
+  std::string getName() const override;
   StatementPtr addClone(StatementPtr origStmt);
 
   TypeAnnotationPtr getEnumBaseTy() { return m_enumBaseTy; }
@@ -58,7 +58,6 @@ public:
 private:
   int m_type;
   int m_promotedParameterCount;
-  std::string m_parent;
   std::string m_originalParent;
   bool m_ignored;
   TypeAnnotationPtr m_enumBaseTy;

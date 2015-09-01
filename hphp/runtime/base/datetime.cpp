@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -98,8 +98,8 @@ bool DateTime::IsValid(int y, int m, int d) {
     d <= timelib_days_in_month(y, m);
 }
 
-SmartPtr<DateTime> DateTime::Current(bool utc /* = false */) {
-  return makeSmartPtr<DateTime>(time(0), utc);
+req::ptr<DateTime> DateTime::Current(bool utc /* = false */) {
+  return req::make<DateTime>(time(0), utc);
 }
 
 const StaticString
@@ -273,7 +273,7 @@ DateTime::DateTime(int64_t timestamp, bool utc /* = false */) {
   fromTimeStamp(timestamp, utc);
 }
 
-DateTime::DateTime(int64_t timestamp, SmartPtr<TimeZone> tz): m_tz(tz) {
+DateTime::DateTime(int64_t timestamp, req::ptr<TimeZone> tz): m_tz(tz) {
   fromTimeStamp(timestamp);
 }
 
@@ -284,6 +284,8 @@ void DateTime::fromTimeStamp(int64_t timestamp, bool utc /* = false */) {
 
   timelib_time *t = timelib_time_ctor();
   if (utc) {
+    t->zone_type = TIMELIB_ZONETYPE_OFFSET;
+    t->z = 0;
     timelib_unixtime2gmt(t, (timelib_sll)m_timestamp);
   } else {
     if (!m_tz.get()) {
@@ -428,7 +430,7 @@ void DateTime::setTime(int hour, int minute, int second) {
   update();
 }
 
-void DateTime::setTimezone(SmartPtr<TimeZone> timezone) {
+void DateTime::setTimezone(req::ptr<TimeZone> timezone) {
   if (timezone) {
     m_tz = timezone->cloneTimeZone();
     if (m_tz.get() && m_tz->get()) {
@@ -494,12 +496,12 @@ void DateTime::internalModifyRelative(timelib_rel_time *rel,
   timelib_update_from_sse(m_time.get());
 }
 
-void DateTime::add(const SmartPtr<DateInterval>& interval) {
+void DateTime::add(const req::ptr<DateInterval>& interval) {
   timelib_rel_time *rel = interval->get();
   internalModifyRelative(rel, true, TIMELIB_REL_INVERT(rel) ? -1 :  1);
 }
 
-void DateTime::sub(const SmartPtr<DateInterval>& interval) {
+void DateTime::sub(const req::ptr<DateInterval>& interval) {
   timelib_rel_time *rel = interval->get();
   internalModifyRelative(rel, true, TIMELIB_REL_INVERT(rel) ?  1 : -1);
 }
@@ -508,6 +510,7 @@ void DateTime::sub(const SmartPtr<DateInterval>& interval) {
 // conversions
 
 void DateTime::toTm(struct tm &ta) const {
+  // TODO: Fixme under MSVC!
   ta.tm_sec  = second();
   ta.tm_min  = minute();
   ta.tm_hour = hour();
@@ -518,14 +521,18 @@ void DateTime::toTm(struct tm &ta) const {
   ta.tm_yday = doy();
   if (utc()) {
     ta.tm_isdst = 0;
+#ifndef _MSC_VER
     ta.tm_gmtoff = 0;
     ta.tm_zone = "GMT";
+#endif
   } else {
     timelib_time_offset *offset =
       timelib_get_time_zone_info(m_time->sse, m_time->tz_info);
     ta.tm_isdst = offset->is_dst;
+#ifndef _MSC_VER
     ta.tm_gmtoff = offset->offset;
     ta.tm_zone = offset->abbr;
+#endif
     timelib_time_offset_dtor(offset);
   }
 }
@@ -717,6 +724,7 @@ String DateTime::rfcFormat(const String& format) const {
 }
 
 String DateTime::stdcFormat(const String& format) const {
+  // TODO: Fixme under MSVC!
   struct tm ta;
   timelib_time_offset *offset = nullptr;
   ta.tm_sec  = second();
@@ -729,13 +737,17 @@ String DateTime::stdcFormat(const String& format) const {
   ta.tm_yday = doy();
   if (utc()) {
     ta.tm_isdst = 0;
+#ifndef _MSC_VER
     ta.tm_gmtoff = 0;
     ta.tm_zone = "GMT";
+#endif
   } else {
     offset = timelib_get_time_zone_info(m_time->sse, m_time->tz_info);
     ta.tm_isdst = offset->is_dst;
+#ifndef _MSC_VER
     ta.tm_gmtoff = offset->offset;
     ta.tm_zone = offset->abbr;
+#endif
   }
 
   if ((ta.tm_sec < 0 || ta.tm_sec > 60) ||
@@ -825,7 +837,7 @@ Array DateTime::toArray(ArrayFormat format) const {
   return empty_array();
 }
 
-bool DateTime::fromString(const String& input, SmartPtr<TimeZone> tz,
+bool DateTime::fromString(const String& input, req::ptr<TimeZone> tz,
                           const char* format /*=NUL*/,
                           bool throw_on_error /*= true*/) {
   struct timelib_error_container *error;
@@ -853,12 +865,12 @@ bool DateTime::fromString(const String& input, SmartPtr<TimeZone> tz,
     auto msg = folly::format(
       "DateTime::__construct(): Failed to parse time string "
       "({}) at position {} ({}): {}",
-      input.data(),
+      input,
       error->error_messages[0].position,
       error->error_messages[0].character,
       error->error_messages[0].message
     ).str();
-    throw Object(SystemLib::AllocExceptionObject(msg));
+    SystemLib::throwExceptionObject(msg);
   }
 
   if (m_timestamp == -1) {
@@ -884,14 +896,14 @@ bool DateTime::fromString(const String& input, SmartPtr<TimeZone> tz,
 
   m_time = TimePtr(t, time_deleter());
   if (t->tz_info != m_tz->get()) {
-    m_tz = makeSmartPtr<TimeZone>(t->tz_info);
+    m_tz = req::make<TimeZone>(t->tz_info);
   }
   return true;
 }
 
-SmartPtr<DateTime> DateTime::cloneDateTime() const {
+req::ptr<DateTime> DateTime::cloneDateTime() const {
   bool err;
-  auto ret = makeSmartPtr<DateTime>(toTimeStamp(err), true);
+  auto ret = req::make<DateTime>(toTimeStamp(err), true);
   ret->setTimezone(m_tz);
   return ret;
 }
@@ -899,14 +911,14 @@ SmartPtr<DateTime> DateTime::cloneDateTime() const {
 ///////////////////////////////////////////////////////////////////////////////
 // comparison
 
-SmartPtr<DateInterval>
-DateTime::diff(SmartPtr<DateTime> datetime2, bool absolute) {
+req::ptr<DateInterval>
+DateTime::diff(req::ptr<DateTime> datetime2, bool absolute) {
 #ifdef TIMELIB_HAVE_INTERVAL
   timelib_rel_time *rel = timelib_diff(m_time.get(), datetime2.get()->m_time.get());
   if (absolute) {
     TIMELIB_REL_INVERT_SET(rel, 0);
   }
-  return makeSmartPtr<DateInterval>(rel);
+  return req::make<DateInterval>(rel);
 #else
   throw_not_implemented("timelib version too old");
 #endif

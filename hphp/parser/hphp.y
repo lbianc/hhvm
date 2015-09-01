@@ -13,6 +13,11 @@
 #include "hphp/util/text-util.h"
 #include "hphp/util/logger.h"
 
+#define line0 r.line0
+#define char0 r.char0
+#define line1 r.line1
+#define char1 r.char1
+
 #ifdef yyerror
 #undef yyerror
 #endif
@@ -28,8 +33,8 @@
       (Current).first(YYRHSLOC (Rhs, 1));                               \
       (Current).last (YYRHSLOC (Rhs, N));                               \
     } else {                                                            \
-      (Current).line0 = (Current).line1 = YYRHSLOC (Rhs, 0).line1;      \
-      (Current).char0 = (Current).char1 = YYRHSLOC (Rhs, 0).char1;      \
+      (Current).line0 = (Current).line1 = YYRHSLOC (Rhs, 0).line1;\
+      (Current).char0 = (Current).char1 = YYRHSLOC (Rhs, 0).char1;\
     }                                                                   \
   while (0);                                                            \
   _p->setRuleLocation(&Current);
@@ -95,8 +100,8 @@
 
 
 // macros for rules
-#define BEXP(e...) _p->onBinaryOpExp(e);
-#define UEXP(e...) _p->onUnaryOpExp(e);
+#define BEXP(...) _p->onBinaryOpExp(__VA_ARGS__);
+#define UEXP(...) _p->onUnaryOpExp(__VA_ARGS__);
 
 using namespace HPHP::HPHP_PARSER_NS;
 
@@ -931,6 +936,7 @@ statement:
   | T_GLOBAL global_var_list ';'       { _p->onGlobal($$, $2);}
   | T_STATIC static_var_list ';'       { _p->onStatic($$, $2);}
   | T_ECHO expr_list ';'               { _p->onEcho($$, $2, 0);}
+  | T_OPEN_TAG_WITH_ECHO expr_list ';' { _p->onEcho($$, $2, 0);}
   | T_UNSET '(' variable_list ')' ';'  { _p->onUnset($$, $3);}
   | ';'                                { $$.reset(); $$ = ';';}
   | T_INLINE_HTML                      { _p->onEcho($$, $1, 1);}
@@ -967,7 +973,7 @@ statement:
   | T_THROW expr ';'                   { _p->onThrow($$, $2);}
   | T_GOTO ident ';'                   { _p->onGoto($$, $2, true);
                                          _p->addGoto($2.text(),
-                                                     _p->getLocation(),
+                                                     _p->getRange(),
                                                      &$$);}
   | expr ';'                           { _p->onExpStatement($$, $1);}
   | yield_expr ';'                     { _p->onExpStatement($$, $1);}
@@ -981,7 +987,7 @@ statement:
   | T_RETURN query_expr ';'            { _p->onReturn($$, &$2); }
   | ident ':'                          { _p->onLabel($$, $1);
                                          _p->addLabel($1.text(),
-                                                      _p->getLocation(),
+                                                      _p->getRange(),
                                                       &$$);
                                          _p->onScopeLabel($$, $1);}
 ;
@@ -1605,11 +1611,15 @@ xhp_attribute_decl_type:
   | T_CALLABLE                         { $$ = 9; }
 ;
 
-xhp_attribute_enum:
+non_empty_xhp_attribute_enum:
     common_scalar                      { _p->onArrayPair($$,  0,0,$1,0);}
-  | xhp_attribute_enum ','
+  | non_empty_xhp_attribute_enum ','
     common_scalar                      { _p->onArrayPair($$,&$1,0,$3,0);}
 ;
+
+xhp_attribute_enum:
+  non_empty_xhp_attribute_enum
+  possible_comma                       { $$ = $1;}
 
 xhp_attribute_default:
     '=' static_expr                    { $$ = $2;}
@@ -3018,7 +3028,8 @@ hh_name_with_typevar:  /* foo -> foo<X,Y>; this adds a typevar scope
   | ident
     T_TYPELIST_LT
     hh_typevar_list
-    T_TYPELIST_GT                      { _p->pushTypeScope(); $$ = $1; }
+    T_TYPELIST_GT                      { Token t; _p->setTypeVars(t, $1);
+                                         _p->pushTypeScope(); $$ = t; }
 ;
 
 hh_typeargs_opt:
@@ -3078,34 +3089,42 @@ hh_typevar_variance:
 hh_shape_member_type:
     T_CONSTANT_ENCAPSED_STRING
       T_DOUBLE_ARROW
-      hh_type                      { validate_shape_keyname($1, _p); }
+      hh_type                      { validate_shape_keyname($1, _p);
+                                     _p->onTypeAnnotation($$, $1, $3); }
  |   '?'
       T_CONSTANT_ENCAPSED_STRING
       T_DOUBLE_ARROW
-      hh_type                      { validate_shape_keyname($2, _p); }
+      hh_type                      {
+                                     /* should not reach here as
+                                      * optional shape fields are not
+                                      * supported in strict mode */
+                                     validate_shape_keyname($2, _p);
+                                     _p->onTypeAnnotation($$, $2, $4);
+                                   }
  |  class_namespace_string_typeargs
       T_DOUBLE_COLON
       ident
-     T_DOUBLE_ARROW
-      hh_type                      { }
-
+      T_DOUBLE_ARROW
+      hh_type                      { _p->onClsCnsShapeField($$, $1, $3, $5); }
 ;
 
 hh_non_empty_shape_member_list:
     hh_non_empty_shape_member_list ','
-      hh_shape_member_type
-  | hh_shape_member_type
+    hh_shape_member_type               { _p->onTypeList($$, $3); }
+  | hh_shape_member_type               { }
 ;
 
 hh_shape_member_list:
     hh_non_empty_shape_member_list
-    possible_comma                     { $$ = $1; }
-  | /* empty */
-{}
+    possible_comma                     { _p->onShape($$, $1); }
+  | /* empty */                        { Token t; t.reset();
+                                         _p->onShape($$, t); }
+;
 
 hh_shape_type:
     T_SHAPE
-     '(' hh_shape_member_list ')'      { $$.setText("array"); }
+    '(' hh_shape_member_list ')'      { $$ = $3;
+                                        $$.setText("array"); }
 ;
 
 hh_access_type_start:

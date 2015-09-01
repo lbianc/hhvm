@@ -24,7 +24,7 @@
 
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
+#include "hphp/runtime/vm/jit/back-end-x64.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/disasm.h"
@@ -32,25 +32,31 @@
 
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
+#include "hphp/runtime/vm/jit/align-ppc64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
-#include "hphp/runtime/vm/jit/func-prologues-ppc64.h"
+#include "hphp/runtime/vm/jit/func-guard-x64.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
-#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
-#include "hphp/runtime/vm/jit/timer.h"
-#include "hphp/runtime/vm/jit/unique-stubs-ppc64.h"
-#include "hphp/runtime/vm/jit/vasm-print.h"
-#include "hphp/runtime/vm/jit/vasm-llvm.h"
 #include "hphp/runtime/vm/jit/relocation.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr.h"
+#include "hphp/runtime/vm/jit/timer.h"
+#include "hphp/runtime/vm/jit/translator-inline.h"
+#include "hphp/runtime/vm/jit/unique-stubs.h"
+#include "hphp/runtime/vm/jit/unwind-ppc64.h"
+#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
+#include "hphp/runtime/vm/jit/vasm-llvm.h"
+#include "hphp/runtime/vm/jit/vasm-print.h"
+#include "hphp/runtime/vm/jit/vasm-text.h"
 
 namespace HPHP { namespace jit {
 
-namespace ppc64 {
+using namespace ppc64_asm::reg;
 
 extern "C" void enterTCHelper(Cell* vm_sp,
                               ActRec* vm_fp,
@@ -59,33 +65,13 @@ extern "C" void enterTCHelper(Cell* vm_sp,
                               void* targetCacheBase,
                               ActRec* stashedAR);
 
+namespace ppc64 {
+
+TRACE_SET_MOD(hhir);
+
+namespace {
+
 struct BackEnd final : public jit::BackEnd {
-  BackEnd() {}
-  ~BackEnd() {}
-
-  Abi abi() override {
-    return ppc64::abi;
-  };
-
-   size_t cacheLineSize() override {
-     return 64;
-   };
-
-  PhysReg rSp() override {
-    return PhysReg(reg::rsp);
-  };
-
-  PhysReg rVmSp() override {
-    return ppc64::rVmSp;
-  };
-
-  PhysReg rVmFp() override {
-    return ppc64::rVmFp;
-  };
-
-   PhysReg rVmTl() override {
-    return ppc64::rVmTl;
-  }; 
 
 //TODO PPC64 review this code, since it is duplicated
 #if defined (__powerpc64__)
@@ -95,129 +81,69 @@ struct BackEnd final : public jit::BackEnd {
       asm volatile("" : : : "rbx", "r12", "r13", "r14", "r15");
 #endif
 
-   void enterTCHelper(TCA start, ActRec* stashedAR) override {
-      // We have to force C++ to spill anything that might be in a callee-saved
-      // register (aside from rbp). enterTCHelper does not save them.
-      CALLEE_SAVED_BARRIER();
-      auto& regs = vmRegsUnsafe();
-      jit::ppc64::enterTCHelper(regs.stack.top(), regs.fp, start,
-                         vmFirstAR(), rds::tl_base, stashedAR);
-      CALLEE_SAVED_BARRIER();
-   };
-   UniqueStubs emitUniqueStubs() override {
-     return ppc64::emitUniqueStubs();
-   };
-   TCA emitServiceReqWork(
-    CodeBlock& cb,
-    TCA start,
-    SRFlags flags,
-    folly::Optional<FPInvOffset> spOff,
-    ServiceRequest req,
-    const ServiceReqArgVec& argv) override {
-	   return ppc64::emitServiceReqWork(cb, start, flags, spOff, req, argv);
-   };
-   size_t reusableStubSize() const override { not_implemented(); };
+  /*
+   * enterTCHelper is a handwritten assembly function that transfers control in
+   * and out of the TC.
+   */
+/*  static_assert(x64::rvmsp() == rbx &&
+                x64::rvmfp() == rbp &&
+                x64::rvmtl() == r12,
+                "__enterTCHelper needs to be modified to use the correct ABI");*/
 
-   void emitInterpReq(CodeBlock& code,
-                             SrcKey sk,
-                             FPInvOffset spOff) override {
-     not_implemented();
-   };
+  void enterTCHelper(TCA start, ActRec* stashedAR) override {
+    // We have to force C++ to spill anything that might be in a callee-saved
+    // register (aside from rbp). enterTCHelper does not save them.
+    CALLEE_SAVED_BARRIER();
+    auto& regs = vmRegsUnsafe();
+    jit::enterTCHelper(regs.stack.top(), regs.fp, start,
+                       vmFirstAR(), rds::tl_base, stashedAR);
+    CALLEE_SAVED_BARRIER();
+  }
 
-   bool funcPrologueHasGuard(TCA prologue, const Func* func) override {
-     not_implemented();
-   };
+  void emitInterpReq(CodeBlock& mainCode,
+                     SrcKey sk,
+                     FPInvOffset spOff) override {
+/*    Asm a { mainCode };
+    // Add a counter for the translation if requested
+    if (RuntimeOption::EvalJitTransCounters) {
+      x64::emitTransCounterInc(a);
+    }
+    a.    emitImmReg(uint64_t(sk.pc()), rarg(0));
+    if (!sk.resumed()) {
+      a.  lea(x64::rvmfp()[-cellsToBytes(spOff.offset)], x64::rvmsp());
+    }
+    a.    jmp(mcg->tx().uniqueStubs.interpHelper);*/
+    not_implemented();
+  }
 
-   TCA funcPrologueToGuard(TCA prologue, const Func* func) override {
-     not_implemented();
-   };
+  void streamPhysReg(std::ostream& os, PhysReg reg) override {
+    auto name = (reg.type() == PhysReg::GP) ? reg::regname(Reg64(reg)) :
+      (reg.type() == PhysReg::SIMD) ? reg::regname(RegXMM(reg)) :
+      /* (reg.type() == PhysReg::SF) ? */ reg::regname(RegSF(reg));
+    os << name;
+  }
 
-   SrcKey emitFuncPrologue(TransID transID, Func* func, int argc,
-                                  TCA& start) override { not_implemented(); };
+  void disasmRange(std::ostream& os, int indent, bool dumpIR, TCA begin,
+                   TCA end) override {
+    Disasm disasm(Disasm::Options().indent(indent + 4)
+                  .printEncoding(dumpIR)
+                  .color(color(ANSI_COLOR_BROWN)));
+    disasm.disasm(os, begin, end);
+  }
 
-   TCA emitCallArrayPrologue(Func* func, DVFuncletsVec& dvs) override {
-     not_implemented();
-   };
-
-   void funcPrologueSmashGuard(TCA prologue, const Func* func) override {
-     not_implemented();
-   };
-
-   void emitIncStat(CodeBlock& cb, intptr_t disp, int n) override {
-     not_implemented();
-   };
-
-   void prepareForTestAndSmash(CodeBlock& cb, int testBytes,
-                                      TestAndSmashFlags flags) override {
-     not_implemented();
-   };
-
-   void smashJmp(TCA jmpAddr, TCA newDest) override { not_implemented(); };
-
-   void smashCall(TCA callAddr, TCA newDest) override { not_implemented(); };
-
-   void smashJcc(TCA jccAddr, TCA newDest) override { not_implemented(); };
-
-   void emitSmashableJump(CodeBlock& cb, TCA dest, ConditionCode cc) override {
-     not_implemented();
-   };
-
-   void emitSmashableCall(CodeBlock& cb, TCA dest) override {
-     not_implemented();
-   };
-
-   TCA smashableCallFromReturn(TCA returnAddr) override {
-     not_implemented();
-   };
-
-   TCA jmpTarget(TCA jmp) override { not_implemented(); };
-
-   TCA jccTarget(TCA jmp) override { not_implemented(); };
-
-   ConditionCode jccCondCode(TCA jmp) override { not_implemented(); };
-
-   TCA callTarget(TCA call) override { not_implemented(); };
-
-   void addDbgGuard(CodeBlock& codeMain, CodeBlock& codeCold,
-                           SrcKey sk, size_t dbgOff) override {
-     not_implemented();
-   };
-
-
-   void streamPhysReg(std::ostream& os, PhysReg reg) override {
-    /// TODO(rcardoso) : Need to check if SIMD registers are Reg64
-     auto name = (reg.type() == PhysReg::GP || reg.type() == PhysReg::SIMD) ? 
-     reg::regname(Reg64(reg)) : "CR0"; //Just print CR0
-     os << name;
-   };
-
-   void disasmRange(std::ostream& os, int indent, bool dumpIR,
-                           TCA begin, TCA end) override { not_implemented(); };
-
-   void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override;
-
-private:
-   void do_moveToAlign(CodeBlock&, MoveToAlignFlags) override {
-     not_implemented();
-   };
-
-   bool do_isSmashable(Address, int, int) override { not_implemented(); };
-
-   void do_prepareForSmash(CodeBlock&, int, int) override {
-     not_implemented();
-   };
-
-
+  void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override;
 };
 
+//////////////////////////////////////////////////////////////////////
 
+};
 std::unique_ptr<jit::BackEnd> newBackEnd() {
   return folly::make_unique<BackEnd>();
 }
 
 static size_t genBlock(CodegenState& state, Vout& v, Vout& vc, Block* block) {
-//  FTRACE(6, "genBlock: {}\n", block->id());
-  HPHP::jit::x64::CodeGenerator cg(state, v, vc);
+  FTRACE(6, "genBlock: {}\n", block->id());
+  x64::CodeGenerator cg(state, v, vc);
   size_t hhir_count{0};
   for (IRInstruction& inst : *block) {
     hhir_count++;
@@ -227,7 +153,92 @@ static size_t genBlock(CodegenState& state, Vout& v, Vout& vc, Block* block) {
     cg.cgInst(&inst);
   }
   return hhir_count;
-};
+}
+
+/*
+ * Print side-by-side code dumps comparing vasm output with LLVM.
+ */
+static void printLLVMComparison(const IRUnit& ir_unit,
+                                const Vunit& vasm_unit,
+                                const jit::vector<Varea>& areas,
+                                const CompareLLVMCodeGen* compare) {
+  auto const vasm_size = areas[0].code.frontier() - areas[0].start;
+  auto const percentage = compare->main_size * 100 / vasm_size;
+
+  // We accept a few different formats for the runtime option:
+  // - "all": print all tracelets
+  // - "<x": print when llvm code is < x% the size of vasm
+  // - ">x" or "x": print when llvm code is > x% the size of vasm
+  // - "=x": print when llvm code is = x% the size of vasm
+  folly::StringPiece mode(RuntimeOption::EvalJitLLVMCompare);
+  if (mode.empty()) return;
+  if (mode != "all") {
+    auto pred = '>';
+    switch (mode[0]) {
+      case '<':
+      case '=':
+      case '>':
+        pred = mode[0];
+        mode.pop_front();
+        break;
+
+      default:
+        break;
+    }
+    auto const threshold = folly::to<int>(mode);
+    if ((pred == '<' && percentage >= threshold) ||
+        (pred == '=' && percentage != threshold) ||
+        (pred == '>' && percentage <= threshold)) {
+      return;
+    }
+  }
+
+  Trace::ftraceRelease(
+    "{:-^121}\n{}\n{:-^121}\n{}\n{:-^121}\n{}\n",
+    folly::sformat(
+      " vasm: {} bytes | llvm: {} bytes | llvm is {}% of vasm",
+      vasm_size, compare->main_size, percentage
+    ),
+    show(ir_unit),
+    " vasm unit ",
+    show(vasm_unit),
+    " llvm IR ",
+    compare->llvm
+  );
+
+  auto const& llvmAreas = compare->disasm;
+  assert(llvmAreas.size() == areas.size());
+  Disasm disasm;
+
+  for (auto i = 0; i < kNumAreas; ++i) {
+    std::ostringstream vasmOut;
+    auto& area = areas[i];
+    disasm.disasm(vasmOut, area.start, area.code.frontier());
+    auto const vasmCode = vasmOut.str();
+
+    std::vector<folly::StringPiece> llvmLines, vasmLines;
+    folly::split('\n', llvmAreas[i], llvmLines);
+    folly::split('\n', vasmCode, vasmLines);
+
+    Trace::ftraceRelease("{:-^121}\n", folly::sformat(" area {} ", i));
+    for (auto llvmIt = llvmLines.begin(), vasmIt = vasmLines.begin();
+         llvmIt != llvmLines.end() || vasmIt != vasmLines.end(); ) {
+      folly::StringPiece llvmLine, vasmLine;
+      if (llvmIt != llvmLines.end()) {
+        llvmLine = *llvmIt;
+        ++llvmIt;
+      }
+      if (vasmIt != vasmLines.end()) {
+        vasmLine = *vasmIt;
+        ++vasmIt;
+      }
+      if (vasmLine.empty() && llvmLine.empty()) continue;
+
+      Trace::ftraceRelease("{:60.60} {:.60}\n", vasmLine, llvmLine);
+    }
+    Trace::ftraceRelease("\n");
+  }
+}
 
 void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
   Timer _t(Timer::codeGen);
@@ -239,6 +250,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
   CodeBlock coldCode;
   bool do_relocate = false;
   if (!mcg->useLLVM() &&
+      !RuntimeOption::EvalEnableReusableTC &&
       RuntimeOption::EvalJitRelocationSize &&
       coldCodeIn.canEmit(RuntimeOption::EvalJitRelocationSize * 3)) {
     /*
@@ -251,7 +263,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
      */
 
     static unsigned seed = 42;
-    auto off = rand_r(&seed) & (cacheLineSize() - 1);
+    auto off = rand_r(&seed) & (kCacheLineSize - 1);
     coldCode.init(coldCodeIn.frontier() +
                    RuntimeOption::EvalJitRelocationSize + off,
                    RuntimeOption::EvalJitRelocationSize - off, "cgRelocCold");
@@ -303,16 +315,15 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     // create vregs for all relevant SSATmps
     assignRegs(unit, vunit, state, blocks);
     vunit.entry = state.labels[unit.entry()];
-    vasm.main(mainCode);
-    vasm.cold(coldCode);
-    vasm.frozen(*frozenCode);
+
+    Vtext vtext { mainCode, coldCode, *frozenCode };
 
     for (auto block : blocks) {
       auto& v = block->hint() == Block::Hint::Unlikely ? vasm.cold() :
                block->hint() == Block::Hint::Unused ? vasm.frozen() :
                vasm.main();
-//         FTRACE(6, "genBlock {} on {}\n", block->id(),
-//                area_names[(unsigned)v.area()]);
+      FTRACE(6, "genBlock {} on {}\n", block->id(),
+             area_names[(unsigned)v.area()]);
       auto b = state.labels[block];
       vunit.blocks[b].area = v.area();
       v.use(b);
@@ -325,16 +336,12 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     printUnit(kInitialVasmLevel, "after initial vasm generation", vunit);
     assertx(check(vunit));
 
-//       auto const& abi = kind == CodeKind::Trace ? ppc64::abi
-//                                                 : ppc64::cross_trace_abi;
-
     if (mcg->useLLVM()) {
-      auto& areas = vasm.areas();
       auto x64_unit = vunit;
       auto vasm_size = std::numeric_limits<size_t>::max();
 
       jit::vector<UndoMarker> undoAll = {UndoMarker(mcg->globalData())};
-      for (auto const& area : areas) undoAll.emplace_back(area.code);
+      for (auto const& area : vtext.areas()) undoAll.emplace_back(area.code);
       auto resetCode = [&] {
         for (auto& marker : undoAll) marker.undo();
         mcg->cgFixups().clear();
@@ -347,25 +354,26 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
       // vasm, just to see how big it is. The cost of this is trivial compared
       // to the LLVM code generation.
       if (RuntimeOption::EvalJitLLVMKeepSize) {
-//           optimizeX64(x64_unit, abi);
+        optimizeX64(x64_unit, abi(kind));
         optimized = true;
-        emitX64(x64_unit, areas, nullptr);
-        vasm_size = areas[0].code.frontier() - areas[0].start;
+        emitX64(x64_unit, vtext, nullptr);
+        vasm_size = vtext.main().code.frontier() - vtext.main().start;
         resetCode();
       }
 
       try {
-        genCodeLLVM(vunit, areas);
+        genCodeLLVM(vunit, vtext);
 
-        auto const llvm_size = areas[0].code.frontier() - areas[0].start;
+        auto const llvm_size = vtext.main().code.frontier() -
+                               vtext.main().start;
         if (llvm_size * 100 / vasm_size > RuntimeOption::EvalJitLLVMKeepSize) {
           throw FailedLLVMCodeGen("LLVM size {}, vasm size {}\n",
                                   llvm_size, vasm_size);
         }
       } catch (const FailedLLVMCodeGen& e) {
-//           FTRACE_MOD(Trace::llvm,
-//                      1, "LLVM codegen failed ({}); falling back to x64 backend\n",
-//                      e.what());
+        FTRACE_MOD(Trace::llvm,
+                   1, "LLVM codegen failed ({}); falling back to x64 backend\n",
+                   e.what());
         always_assert_flog(
           RuntimeOption::EvalJitLLVM < 3,
           "Mandatory LLVM codegen failed with reason `{}' on unit:\n{}",
@@ -374,27 +382,27 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
 
         mcg->setUseLLVM(false);
         resetCode();
-//           if (!optimized) optimizeX64(x64_unit, abi);
-        emitX64(x64_unit, areas, state.asmInfo);
+        if (!optimized) optimizeX64(x64_unit, abi(kind));
+        emitX64(x64_unit, vtext, state.asmInfo);
 
-//           if (auto compare = dynamic_cast<const CompareLLVMCodeGen*>(&e)) {
-//             printLLVMComparison(unit, vasm.unit(), areas, compare);
-//           }
+        if (auto compare = dynamic_cast<const CompareLLVMCodeGen*>(&e)) {
+          printLLVMComparison(unit, vasm.unit(), vtext.areas(), compare);
+        }
       }
     } else {
-//         optimizeX64(vunit, abi);
-      emitPPC64(vunit, vasm.areas(), state.asmInfo);
+      optimizeX64(vunit, abi(kind));
+      emitX64(vunit, vtext, state.asmInfo);
     }
   }
 
-//  auto bcMap = &mcg->cgFixups().m_bcMap;
-//  if (do_relocate && !bcMap->empty()) {
-//    TRACE(1, "BCMAPS before relocation\n");
-//    for (UNUSED auto& map : *bcMap) {
-//      TRACE(1, "%s %-6d %p %p %p\n", map.md5.toString().c_str(),
-//             map.bcStart, map.aStart, map.acoldStart, map.afrozenStart);
-//    }
-//  }
+  auto bcMap = &mcg->cgFixups().m_bcMap;
+  if (do_relocate && !bcMap->empty()) {
+    TRACE(1, "BCMAPS before relocation\n");
+    for (UNUSED auto& map : *bcMap) {
+      TRACE(1, "%s %-6d %p %p %p\n", map.md5.toString().c_str(),
+             map.bcStart, map.aStart, map.acoldStart, map.afrozenStart);
+    }
+  }
 
   assertx(coldCodeIn.frontier() == coldStart);
   assertx(mainCodeIn.frontier() == mainStart);
@@ -413,7 +421,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     asm_count += relocate(rel, coldCodeIn,
                           coldCode.base(), coldCode.frontier(),
                           mcg->cgFixups(), nullptr);
-//    TRACE(1, "hhir-inst-count %ld asm %ld\n", hhir_count, asm_count);
+    TRACE(1, "hhir-inst-count %ld asm %ld\n", hhir_count, asm_count);
 
     if (frozenCode != &coldCode) {
       rel.recordRange(frozenStart, frozenCode->frontier(),
@@ -434,13 +442,13 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
 
       mainDeltaTot += mainDelta;
       coldDeltaTot += coldDelta;
-/*      if (HPHP::Trace::moduleEnabledRelease(HPHP::Trace::printir, 1)) {
+      if (HPHP::Trace::moduleEnabledRelease(HPHP::Trace::printir, 1)) {
         HPHP::Trace::traceRelease("main delta after relocation: "
                                   "%" PRId64 " (%" PRId64 ")\n",
                                   mainDelta, mainDeltaTot);
         HPHP::Trace::traceRelease("cold delta after relocation: "
                                   "%" PRId64 " (%" PRId64 ")\n",
-                                  coldDelta, coldDeltaTot);*/
+                                  coldDelta, coldDeltaTot);
       }
     }
 #ifndef NDEBUG
@@ -453,10 +461,10 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     memset(mainCode.base(), 0xcc, mainCode.frontier() - mainCode.base());
     memset(coldCode.base(), 0xcc, coldCode.frontier() - coldCode.base());
 #endif
-//  } else {
+  } else {
     coldCodeIn.skip(coldCode.frontier() - coldCodeIn.frontier());
     mainCodeIn.skip(mainCode.frontier() - mainCodeIn.frontier());
-//  }
+  }
 
   if (asmInfo) {
     printUnit(kCodeGenLevel, unit, " after code gen ", asmInfo);
@@ -464,24 +472,6 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
 }
 
 //////////////////////////////////////////////////////////////////////
-
-bool isSmashable(Address frontier, int nBytes, int offset /* = 0 */) {
-  return false;
-}
-
-void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset) {
-  not_implemented();
-}
-
-void smashJmp(TCA jmpAddr, TCA newDest) { not_implemented(); }
-
-void smashCall(TCA callAddr, TCA newDest) { not_implemented(); }
-
-//////////////////////////////////////////////////////////////////////
-
-//void BackEnd::genCodeImpl(IRUnit& unit, AsmInfo* asmInfo) {
-//  not_implemented();
-//}
 
 }}}
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -25,7 +25,6 @@
 
 #include "hphp/runtime/vm/jit/state-vector.h"
 #include "hphp/runtime/vm/jit/type-source.h"
-#include "hphp/runtime/vm/jit/local-effects.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 
 namespace HPHP {
@@ -43,23 +42,25 @@ struct SSATmp;
 Type refinePredictedType(Type oldPrediction, Type newPrediction, Type proven);
 Type updatePredictedType(Type predictedType, Type provenType);
 
+struct FPIInfo {
+  SSATmp* returnSP;
+  FPInvOffset returnSPOff; // return's logical sp offset; stkptr might differ
+  SSATmp* ctx;
+  Op fpushOpc; // bytecode for FPush*
+  bool interp;
+  bool spansCall;
+};
+
 struct EvalStack {
-  struct EvalStackEntry {
-    SSATmp* tmp;
-    Type predictedType;
-  };
-
-  explicit EvalStack() {}
-
   void push(SSATmp* tmp) {
-    m_vector.push_back(EvalStackEntry { tmp, tmp->type() });
+    m_vector.push_back(tmp);
   }
 
   SSATmp* pop() {
     if (m_vector.size() == 0) {
       return nullptr;
     }
-    auto tmp = m_vector.back().tmp;
+    auto tmp = m_vector.back();
     m_vector.pop_back();
     return tmp;
   }
@@ -69,40 +70,25 @@ struct EvalStack {
       return nullptr;
     }
     uint32_t index = m_vector.size() - 1 - offset;
-    const auto& entry = m_vector[index];
-    return entry.tmp;
-  }
-
-  Type topPredictedType(uint32_t offset) const {
-    assert(offset < m_vector.size());
-    uint32_t index = m_vector.size() - 1 - offset;
-    const auto& entry = m_vector[index];
-    return entry.predictedType;
-  }
-
-  void replace(uint32_t offset, SSATmp* tmp, Type predictedType) {
-    assertx(offset < m_vector.size());
-    uint32_t index = m_vector.size() - 1 - offset;
-    auto& entry = m_vector[index];
-    entry.tmp = tmp;
-    entry.predictedType = predictedType;
+    return m_vector[index];
   }
 
   void replace(uint32_t offset, SSATmp* tmp) {
-    auto predictedType = topPredictedType(offset);
-    replace(offset, tmp, updatePredictedType(predictedType, tmp->type()));
+    assertx(offset < m_vector.size());
+    uint32_t index = m_vector.size() - 1 - offset;
+    m_vector[index] = tmp;
   }
 
   bool empty() const { return m_vector.empty(); }
   int  size()  const { return m_vector.size(); }
   void clear()       { m_vector.clear(); }
 
-  void swap(jit::vector<EvalStackEntry>& vector) {
+  void swap(jit::vector<SSATmp*>& vector) {
     m_vector.swap(vector);
   }
 
 private:
-  jit::vector<EvalStackEntry> m_vector;
+  jit::vector<SSATmp*> m_vector;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -115,6 +101,10 @@ private:
  */
 template<bool Stack>
 struct SlotState {
+  static constexpr Type default_type() {
+    return Stack ? TStkElem : TGen;
+  }
+
   /*
    * The current value of the or stack slot.
    */
@@ -128,7 +118,7 @@ struct SlotState {
    * incoming edges.  However, whenever we have a value, the type of
    * the SSATmp must match this `type' field.
    */
-  Type type{Stack ? TStkElem : TGen};
+  Type type{default_type()};
 
   /*
    * Prediction for the type of a local or stack slot, if it's boxed or if
@@ -137,7 +127,7 @@ struct SlotState {
    * Invariants:
    *   always a subtype of `type'
    */
-  Type predictedType{Stack ? TStkElem : TGen};
+  Type predictedType{default_type()};
 
   /*
    * The sources of the currently known type. They may be values. If the value
@@ -145,6 +135,12 @@ struct SlotState {
    * it around in typeSrcs for guard relaxation.
    */
   TypeSourceSet typeSrcs;
+
+  /*
+   * Whether or not the local or stack element may have changed since
+   * the entry of the unit.  This is only used for post-conditions.
+   */
+  bool maybeChanged{false};
 };
 
 using LocalState = SlotState<false>;
@@ -205,6 +201,13 @@ struct FrameState {
   EvalStack evalStack;
 
   /*
+   * The FPI stack is used for inlining---when we start inlining at an FCall,
+   * we look in here to find a definition of the StkPtr,offset that can be used
+   * after the inlined callee "returns".
+   */
+  jit::deque<FPIInfo> fpiStack;
+
+  /*
    * The values in the eval stack that are already in memory, either above or
    * below the current spValue pointer.  These are indexed relative to the base
    * of the eval stack for the whole function.
@@ -216,6 +219,13 @@ struct FrameState {
    * (if the state is initialized).
    */
   jit::vector<LocalState> locals;
+
+  /*
+   * Predicted types for values that lived in a local or stack slot at one
+   * point. Used to preserve predictions for values that move between different
+   * slots.
+   */
+  jit::hash_map<SSATmp*, Type> predictedTypes;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -240,7 +250,7 @@ struct FrameState {
  *
  *   - current function and bytecode offset
  */
-struct FrameStateMgr final : private LocalStateHook {
+struct FrameStateMgr final {
   explicit FrameStateMgr(BCMarker);
 
   FrameStateMgr(const FrameStateMgr&) = delete;
@@ -343,15 +353,24 @@ struct FrameStateMgr final : private LocalStateHook {
   FPInvOffset syncedSpLevel() const { return cur().syncedSpLevel; }
   void syncEvalStack();
 
+  void refinePredictedTmpType(SSATmp*, Type);
+  Type predictedTmpType(SSATmp*) const;
+
   Type localType(uint32_t id) const;
+  bool localMaybeChanged(uint32_t id) const;
   Type predictedLocalType(uint32_t id) const;
   SSATmp* localValue(uint32_t id) const;
   TypeSourceSet localTypeSources(uint32_t id) const;
+  void refineLocalPredictedType(uint32_t id, Type type);
 
   Type stackType(IRSPOffset) const;
+  bool stackMaybeChanged(IRSPOffset) const;
   Type predictedStackType(IRSPOffset) const;
   SSATmp* stackValue(IRSPOffset) const;
   TypeSourceSet stackTypeSources(IRSPOffset) const;
+  void refineStackPredictedType(IRSPOffset, Type);
+
+  const jit::deque<FPIInfo>& fpiStack() const { return cur().fpiStack; }
 
   /*
    * Call a function with const access to the LocalState& for each local we're
@@ -424,20 +443,21 @@ private:
     return const_cast<FrameStateMgr*>(this)->cur();
   }
 
-private: // LocalStateHook overrides
-  void setLocalValue(uint32_t id, SSATmp* value) override;
-  void refineLocalValues(SSATmp* oldVal, SSATmp* newVal) override;
-  void dropLocalRefsInnerTypes() override;
-  void killLocalsForCall(bool) override;
-  void refineLocalType(uint32_t id, Type type, TypeSource typeSrc) override;
-  void setLocalPredictedType(uint32_t id, Type type) override;
-  void refineLocalPredictedType(uint32_t id, Type type);
-  void refineStackPredictedType(IRSPOffset, Type);
-  void setLocalType(uint32_t id, Type type) override;
-  void setBoxedLocalPrediction(uint32_t id, Type type) override;
-  void updateLocalRefPredictions(SSATmp*, SSATmp*) override;
-  void setLocalTypeSource(uint32_t id, TypeSource typeSrc) override;
-  void clearLocals() override;
+  template<bool Stack>
+  void syncPrediction(SlotState<Stack>&);
+
+private: // local tracking helpers
+  void setLocalValue(uint32_t id, SSATmp* value);
+  void refineLocalValues(SSATmp* oldVal, SSATmp* newVal);
+  void dropLocalRefsInnerTypes();
+  void killLocalsForCall(bool);
+  void refineLocalType(uint32_t id, Type type, TypeSource typeSrc);
+  void setLocalPredictedType(uint32_t id, Type type);
+  void setLocalType(uint32_t id, Type type);
+  void setBoxedLocalPrediction(uint32_t id, Type type);
+  void updateLocalRefPredictions(SSATmp*, SSATmp*);
+  void setLocalTypeSource(uint32_t id, TypeSource typeSrc);
+  void clearLocals();
 
 private: // stack tracking helpers
   void setStackValue(IRSPOffset, SSATmp*);
@@ -446,7 +466,7 @@ private: // stack tracking helpers
   void refineStackType(IRSPOffset, Type, TypeSource typeSrc);
   void clearStackForCall();
   void setBoxedStkPrediction(IRSPOffset, Type type);
-  void spillFrameStack(IRSPOffset);
+  void spillFrameStack(IRSPOffset, FPInvOffset, const IRInstruction*);
 
 private:
   Status m_status{Status::None};

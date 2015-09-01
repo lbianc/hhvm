@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -200,7 +200,8 @@ Type predictedTypeFromLocal(const IRGS& env, uint32_t locId) {
 
 Type predictedTypeFromStack(const IRGS& env, BCSPOffset offset) {
   if (offset < env.irb->evalStack().size()) {
-    return env.irb->evalStack().topPredictedType(offset.offset);
+    return env.irb->fs().predictedTmpType(
+      env.irb->evalStack().top(offset.offset));
   }
   return env.irb->predictedStackType(offsetFromIRSP(env, offset));
 }
@@ -274,6 +275,12 @@ void endBlock(IRGS& env, Offset next, bool nextIsMerge) {
     // If there's no fp, we've already executed a RetCtrl or similar, so
     // there's no reason to try to jump anywhere now.
     return;
+  }
+  // Don't emit the jump if it would be unreachable.  This avoids
+  // unreachable blocks appearing to be reachable, which would cause
+  // translateRegion to process them.
+  if (auto const curBlock = env.irb->curBlock()) {
+    if (!curBlock->empty() && curBlock->back().isTerminal()) return;
   }
   jmpImpl(env, next, nextIsMerge ? JmpFlagNextIsMerge : JmpFlagNone);
 }

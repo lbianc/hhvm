@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -46,7 +46,7 @@ const StaticString
   s_formatID("e"),
   s_formatAbbr("T");
 
-static String zone_type_to_string(int zoneType, SmartPtr<DateTime> dt) {
+static String zone_type_to_string(int zoneType, req::ptr<DateTime> dt) {
   switch (zoneType) {
     case TIMELIB_ZONETYPE_OFFSET:
       return dt->toString(s_formatOffset);
@@ -121,7 +121,7 @@ void HHVM_METHOD(DateTime, __construct,
                              ? null_object
                              : timezone.toObject();
   DateTimeData* data = Native::data<DateTimeData>(this_);
-  data->m_dt = makeSmartPtr<DateTime>(TimeStamp::Current(),
+  data->m_dt = req::make<DateTime>(TimeStamp::Current(),
                                       DateTimeZoneData::unwrap(obj_timezone));
   if (!time.empty()) {
     data->m_dt->fromString(time, DateTimeZoneData::unwrap(obj_timezone));
@@ -139,16 +139,16 @@ Variant HHVM_STATIC_METHOD(DateTime, createFromFormat,
   const Object& obj_timezone = timezone.isNull()
                              ? null_object
                              : timezone.toObject();
-  ObjectData* obj = ObjectData::newInstance(DateTimeData::getClass());
+  Object obj{DateTimeData::getClass()};
   DateTimeData* data = Native::data<DateTimeData>(obj);
   const auto curr = (format.find("!") != String::npos) ? 0 : f_time() ;
-  data->m_dt = makeSmartPtr<DateTime>(curr, false);
+  data->m_dt = req::make<DateTime>(curr, false);
   if (!data->m_dt->fromString(time, DateTimeZoneData::unwrap(obj_timezone),
                               format.data(), false)) {
     return false;
   }
 
-  return Object(obj);
+  return obj;
 }
 
 static const StaticString s_DateTimeInterface("DateTimeInterface");
@@ -202,7 +202,7 @@ int64_t HHVM_METHOD(DateTime, getTimestamp) {
 
 Variant HHVM_METHOD(DateTime, getTimezone) {
   DateTimeData* data = Native::data<DateTimeData>(this_);
-  SmartPtr<TimeZone> tz = data->m_dt->timezone();
+  req::ptr<TimeZone> tz = data->m_dt->timezone();
   if (tz->isValid()) {
     return DateTimeZoneData::wrap(tz);
   }
@@ -281,11 +281,11 @@ Array HHVM_METHOD(DateTime, __sleep) {
 }
 
 void HHVM_METHOD(DateTime, __wakeup) {
-  ObjectData* dtz_obj = ObjectData::newInstance(DateTimeZoneData::getClass());
-  HHVM_MN(DateTimeZone, __construct)(dtz_obj,
+  Object dtz_obj{DateTimeZoneData::getClass()};
+  HHVM_MN(DateTimeZone, __construct)(dtz_obj.get(),
                                      this_->o_get(s_timezone).toString());
   HHVM_MN(DateTime, __construct)(this_, this_->o_get(s_date).toString(),
-                                 Object(dtz_obj));
+                                 std::move(dtz_obj));
 
   // cleanup
   Class* cls = this_->getVMClass();
@@ -312,7 +312,7 @@ Array DateTimeData::getDebugInfo() const {
 
 int64_t DateTimeData::getTimestamp(const Object& obj) {
   if (LIKELY(obj.instanceof(getClass()))) {
-    return Native::data<DateTimeData>(obj.get())->getTimestamp();
+    return Native::data<DateTimeData>(obj)->getTimestamp();
   }
   assert(obj->instanceof(SystemLib::s_DateTimeInterfaceClass));
   Variant result = obj->o_invoke(s_getTimestamp, Array::Create());
@@ -323,16 +323,16 @@ int64_t DateTimeData::getTimestamp(const ObjectData* od) {
   return getTimestamp(Object(const_cast<ObjectData*>(od)));
 }
 
-Object DateTimeData::wrap(SmartPtr<DateTime> dt) {
-  ObjectData* obj = ObjectData::newInstance(getClass());
+Object DateTimeData::wrap(req::ptr<DateTime> dt) {
+  Object obj{getClass()};
   DateTimeData* data = Native::data<DateTimeData>(obj);
   data->m_dt = dt;
-  return Object(obj);
+  return obj;
 }
 
-SmartPtr<DateTime> DateTimeData::unwrap(const Object& datetime) {
+req::ptr<DateTime> DateTimeData::unwrap(const Object& datetime) {
   if (LIKELY(datetime.instanceof(getClass()))) {
-    DateTimeData* data = Native::data<DateTimeData>(datetime.get());
+    DateTimeData* data = Native::data<DateTimeData>(datetime);
     return data->m_dt;
   }
   if (datetime->instanceof(SystemLib::s_DateTimeImmutableClass)) {
@@ -345,7 +345,7 @@ SmartPtr<DateTime> DateTimeData::unwrap(const Object& datetime) {
     Object impl(tv->m_data.pobj);
     return unwrap(impl);
   }
-  return SmartPtr<DateTime>();
+  return req::ptr<DateTime>();
 }
 
 IMPLEMENT_GET_CLASS(DateTimeData)
@@ -359,12 +359,12 @@ const StaticString DateTimeZoneData::s_className("DateTimeZone");
 void HHVM_METHOD(DateTimeZone, __construct,
                  const String& timezone) {
   DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
-  data->m_tz = makeSmartPtr<TimeZone>(timezone);
+  data->m_tz = req::make<TimeZone>(timezone);
   if (!data->m_tz->isValid()) {
     std::string msg = "DateTimeZone::__construct(): Unknown or bad timezone (";
     msg += timezone.data();
     msg += ")";
-    throw Object(SystemLib::AllocExceptionObject(msg));
+    SystemLib::throwExceptionObject(msg);
   }
 }
 
@@ -428,19 +428,19 @@ Variant HHVM_STATIC_METHOD(DateTimeZone, listIdentifiers,
 ///////////////////////////////////////////////////////////////////////////////
 // DateTimeZone helpers
 
-Object DateTimeZoneData::wrap(SmartPtr<TimeZone> tz) {
-  ObjectData* obj = ObjectData::newInstance(getClass());
+Object DateTimeZoneData::wrap(req::ptr<TimeZone> tz) {
+  Object obj{getClass()};
   DateTimeZoneData* data = Native::data<DateTimeZoneData>(obj);
   data->m_tz = tz;
-  return Object(obj);
+  return obj;
 }
 
-SmartPtr<TimeZone> DateTimeZoneData::unwrap(const Object& timezone) {
+req::ptr<TimeZone> DateTimeZoneData::unwrap(const Object& timezone) {
   if (timezone.instanceof(getClass())) {
-    DateTimeZoneData* data = Native::data<DateTimeZoneData>(timezone.get());
+    DateTimeZoneData* data = Native::data<DateTimeZoneData>(timezone);
     return data->m_tz;
   }
-  return SmartPtr<TimeZone>();
+  return req::ptr<TimeZone>();
 }
 
 IMPLEMENT_GET_CLASS(DateTimeZoneData)
@@ -454,12 +454,12 @@ const StaticString DateIntervalData::s_className("DateInterval");
 void HHVM_METHOD(DateInterval, __construct,
                  const String& interval_spec) {
   DateIntervalData* data = Native::data<DateIntervalData>(this_);
-  data->m_di = makeSmartPtr<DateInterval>(interval_spec);
+  data->m_di = req::make<DateInterval>(interval_spec);
   if (!data->m_di->isValid()) {
     std::string msg = "DateInterval::__construct: Invalid interval (";
     msg += interval_spec.data();
     msg += ")";
-    throw Object(SystemLib::AllocExceptionObject(msg));
+    SystemLib::throwExceptionObject(msg);
   }
 }
 
@@ -509,7 +509,7 @@ Variant HHVM_METHOD(DateInterval, __get,
   std::string msg = "Undefined property '";
   msg += member.toString().data();
   msg += ") on DateInterval object";
-  throw Object(SystemLib::AllocExceptionObject(msg));
+  SystemLib::throwExceptionObject(msg);
 }
 
 Variant HHVM_METHOD(DateInterval, __set,
@@ -554,12 +554,12 @@ Variant HHVM_METHOD(DateInterval, __set,
   std::string msg = "Undefined property '";
   msg += member.toString().data();
   msg += ") on DateInterval object";
-  throw Object(SystemLib::AllocExceptionObject(msg));
+  SystemLib::throwExceptionObject(msg);
 }
 
 Object HHVM_STATIC_METHOD(DateInterval, createFromDateString,
                           const String& time) {
-  return DateIntervalData::wrap(makeSmartPtr<DateInterval>(time, true));
+  return DateIntervalData::wrap(req::make<DateInterval>(time, true));
 }
 
 String HHVM_METHOD(DateInterval, format,
@@ -571,20 +571,20 @@ String HHVM_METHOD(DateInterval, format,
 ///////////////////////////////////////////////////////////////////////////////
 // DateInterval helpers
 
-Object DateIntervalData::wrap(SmartPtr<DateInterval> di) {
-  ObjectData* obj = ObjectData::newInstance(getClass());
+Object DateIntervalData::wrap(req::ptr<DateInterval> di) {
+  Object obj{getClass()};
   DateIntervalData* data = Native::data<DateIntervalData>(obj);
   data->m_di = di;
-  return Object(obj);
+  return obj;
 }
 
-SmartPtr<DateInterval> DateIntervalData::unwrap(const Object& obj) {
+req::ptr<DateInterval> DateIntervalData::unwrap(const Object& obj) {
   if (obj.instanceof(getClass())) {
-    DateIntervalData* data = Native::data<DateIntervalData>(obj.get());
+    DateIntervalData* data = Native::data<DateIntervalData>(obj);
     return data->m_di;
   }
 
-  return SmartPtr<DateInterval>();
+  return req::ptr<DateInterval>();
 }
 
 IMPLEMENT_GET_CLASS(DateIntervalData)
@@ -625,6 +625,11 @@ Variant HHVM_FUNCTION(mktime,
   month = month < INT_MAX ? month : INT_MAX;
   day = day < INT_MAX ? day : INT_MAX;
   year = year < INT_MAX ? year : INT_MAX;
+  if (hour == INT_MAX && minute == INT_MAX && second == INT_MAX &&
+      month == INT_MAX && day == INT_MAX && year == INT_MAX) {
+    raise_strict_warning("mktime(): You should be using "
+                         "the time() function instead");
+  }
   bool error;
   int64_t ts = TimeStamp::Get(error, hour, minute, second, month, day, year,
                               false);
@@ -657,7 +662,7 @@ static Variant idateImpl(const String& format, int64_t timestamp) {
     throw_invalid_argument("format: %s", format.data());
     return false;
   }
-  auto dt = makeSmartPtr<DateTime>(timestamp, false);
+  auto dt = req::make<DateTime>(timestamp, false);
   int64_t ret = dt->toInteger(*format.data());
   if (ret == -1) return false;
   return ret;
@@ -666,7 +671,7 @@ static Variant idateImpl(const String& format, int64_t timestamp) {
 #define GET_ARGS_AND_CALL(ar, func)                                            \
   try {                                                                        \
     return arReturn(ar, func(                                                  \
-      getArgStrict<KindOfString>(ar, 0),                                       \
+      String{getArgStrict<KindOfString>(ar, 0)},                               \
       getArgStrict<KindOfInt64>(ar, 1, TimeStamp::Current())));                \
   } catch (const IncoercibleArgumentException& e) {                            \
     return arReturn(ar, false);                                                \
@@ -678,7 +683,7 @@ TypedValue* HHVM_FN(idate)(ActRec* ar) {
 
 static Variant dateImpl(const String& format, int64_t timestamp) {
   if (format.empty()) return empty_string_variant();
-  auto dt = makeSmartPtr<DateTime>(timestamp, false);
+  auto dt = req::make<DateTime>(timestamp, false);
   String ret = dt->toString(format, false);
   if (ret.isNull()) return false;
   return ret;
@@ -689,7 +694,7 @@ TypedValue* HHVM_FN(date)(ActRec* ar) {
 }
 
 static Variant gmdateImpl(const String& format, int64_t timestamp) {
-  auto dt = makeSmartPtr<DateTime>(timestamp, true);
+  auto dt = req::make<DateTime>(timestamp, true);
   String ret = dt->toString(format, false);
   if (ret.isNull()) return false;
   return ret;
@@ -700,7 +705,7 @@ TypedValue* HHVM_FN(gmdate)(ActRec* ar) {
 }
 
 static Variant strftimeImpl(const String& format, int64_t timestamp) {
-  auto dt = makeSmartPtr<DateTime>(timestamp, false);
+  auto dt = req::make<DateTime>(timestamp, false);
   String ret = dt->toString(format, true);
   if (ret.isNull()) return false;
   return ret;
@@ -711,7 +716,7 @@ TypedValue* HHVM_FN(strftime)(ActRec* ar) {
 }
 
 static String gmstrftimeImpl(const String& format, int64_t timestamp) {
-  auto dt = makeSmartPtr<DateTime>(timestamp, true);
+  auto dt = req::make<DateTime>(timestamp, true);
   String ret = dt->toString(format, true);
   if (ret.isNull()) return false;
   return ret;
@@ -725,8 +730,8 @@ static Variant strtotimeImpl(const String& input, int64_t timestamp) {
   if (input.empty()) {
     return false;
   }
-  auto dt = makeSmartPtr<DateTime>(timestamp);
-  if (!dt->fromString(input, SmartPtr<TimeZone>(), nullptr, false)) {
+  auto dt = req::make<DateTime>(timestamp);
+  if (!dt->fromString(input, req::ptr<TimeZone>(), nullptr, false)) {
     return false;
   }
   bool error;
@@ -740,7 +745,7 @@ TypedValue* HHVM_FN(strtotime)(ActRec* ar) {
 #undef GET_ARGS_AND_CALL
 
 static Array getdateImpl(int64_t timestamp) {
-  auto dt = makeSmartPtr<DateTime>(timestamp, false);
+  auto dt = req::make<DateTime>(timestamp, false);
   return dt->toArray(DateTime::ArrayFormat::TimeMap);
 }
 
@@ -758,7 +763,7 @@ static Array localtimeImpl(int64_t timestamp, bool is_associative) {
     is_associative ? DateTime::ArrayFormat::TmMap :
                      DateTime::ArrayFormat::TmVector;
 
-  return makeSmartPtr<DateTime>(timestamp, false)->toArray(format);
+  return req::make<DateTime>(timestamp, false)->toArray(format);
 }
 
 TypedValue* HHVM_FN(localtime)(ActRec* ar) {
@@ -790,7 +795,7 @@ String HHVM_FUNCTION(date_default_timezone_get) {
 
 bool HHVM_FUNCTION(date_default_timezone_set,
                    const String& name) {
-  return TimeZone::SetCurrent(name);
+  return TimeZone::SetCurrent(name.c_str());
 }
 
 Variant HHVM_FUNCTION(timezone_name_from_abbr,
@@ -835,10 +840,9 @@ Variant HHVM_FUNCTION(date_create,
   const Object& obj_timezone = timezone.isNull()
                              ? null_object
                              : timezone.toObject();
-  ObjectData* obj = ObjectData::newInstance(DateTimeData::getClass());
-  Object ret(obj);
+  Object ret{DateTimeData::getClass()};
   // Don't set the time here because it will throw if it is bad
-  HHVM_MN(DateTime, __construct)(obj);
+  HHVM_MN(DateTime, __construct)(ret.get());
   if (str_time.empty()) {
     // zend does this, so so do we
     return ret;
@@ -869,73 +873,32 @@ Variant HHVM_FUNCTION(date_parse,
 ///////////////////////////////////////////////////////////////////////////////
 // sun
 
-double get_date_default_latitude() {
-  return s_date_globals->default_latitude;
-}
-
-double get_date_default_longitude() {
-  return s_date_globals->default_longitude;
-}
-
-double get_date_default_sunset_zenith() {
-  return s_date_globals->sunset_zenith;
-}
-
-double get_date_default_sunrise_zenith() {
-  return s_date_globals->sunrise_zenith;
-}
-
-double get_date_default_gmt_offset() {
-  SmartPtr<TimeZone> tzi = TimeZone::Current();
-  // just get the offset form utc time
-  // set the timestamp 0 is ok
-  return tzi->offset(0) / 3600;
-}
-
 Array HHVM_FUNCTION(date_sun_info,
                     int64_t timestamp,
                     double latitude,
                     double longitude) {
-  auto dt = makeSmartPtr<DateTime>(timestamp, false);
+  auto dt = req::make<DateTime>(timestamp, false);
   return dt->getSunInfo(latitude, longitude);
 }
 
-#define GET_ARGS_AND_CALL(ar, func)                                            \
-  try {                                                                        \
-    return arReturn(ar, func(                                                  \
-      getArgStrict<KindOfInt64>(ar, 0),                                        \
-      getArgStrict<KindOfInt64>(ar, 1, 1),                                     \
-      getArgStrict<KindOfDouble>(ar, 2, get_date_default_latitude()),          \
-      getArgStrict<KindOfDouble>(ar, 3, get_date_default_longitude()),         \
-      getArgStrict<KindOfDouble>(ar, 4, get_date_default_sunset_zenith()),     \
-      getArgStrict<KindOfDouble>(ar, 5, get_date_default_gmt_offset())));      \
-  } catch (const IncoercibleArgumentException& e) {                            \
-    return arReturn(ar, false);                                                \
-  }                                                                            \
-
-Variant date_sunriseImpl(int64_t timestamp, int format, double latitude,
-                         double longitude, double zenith, double gmt_offset) {
-  return makeSmartPtr<DateTime>(timestamp, false)->getSunInfo
+template<bool sunset>
+Variant date_sunrise_sunset(int64_t numArgs,
+                            int64_t timestamp, int64_t format,
+                            double latitude, double longitude,
+                            double zenith, double offset) {
+  /* Fill in dynamic args (3..6) as needed */
+  switch (numArgs) {
+    case 0: case 1: /* fallthrough */
+    case 2: latitude  = s_date_globals->default_latitude;
+    case 3: longitude = s_date_globals->default_longitude;
+    case 4: zenith = sunset ? s_date_globals->sunset_zenith
+                            : s_date_globals->sunrise_zenith;
+    case 5: offset = TimeZone::Current()->offset(0) / 3600;
+  }
+  return req::make<DateTime>(timestamp, false)->getSunInfo
     (static_cast<DateTime::SunInfoFormat>(format), latitude, longitude,
-     zenith, gmt_offset, false);
+     zenith, offset, sunset);
 }
-
-TypedValue* HHVM_FN(date_sunrise)(ActRec* ar) {
-  GET_ARGS_AND_CALL(ar, date_sunriseImpl)
-}
-
-Variant date_sunsetImpl(int64_t timestamp, int format, double latitude,
-                        double longitude, double zenith, double gmt_offset) {
-  return makeSmartPtr<DateTime>(timestamp, false)->getSunInfo
-    (static_cast<DateTime::SunInfoFormat>(format), latitude, longitude,
-     zenith, gmt_offset, true);
-}
-
-TypedValue* HHVM_FN(date_sunset)(ActRec* ar) {
-  GET_ARGS_AND_CALL(ar, date_sunsetImpl)
-}
-
-#undef GET_ARGS_AND_CALL
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1015,8 +978,8 @@ public:
     HHVM_FE(date_format);
     HHVM_FE(date_parse);
     HHVM_FE(date_sun_info);
-    HHVM_FE(date_sunrise);
-    HHVM_FE(date_sunset);
+    HHVM_NAMED_FE(date_sunrise, date_sunrise_sunset<false>);
+    HHVM_NAMED_FE(date_sunset, date_sunrise_sunset<true>);
     HHVM_FE(date);
     HHVM_FE(getdate);
     HHVM_FE(gettimeofday);
@@ -1034,6 +997,15 @@ public:
     HHVM_FE(timezone_name_from_abbr);
     HHVM_FE(timezone_version_get);
 
+#define SUNFUNCS_CNS(name, type) \
+    Native::registerConstant<KindOfInt64> \
+      (makeStaticString("SUNFUNCS_RET_" #name), \
+      (int64_t)DateTime::SunInfoFormat::Return##type);
+    SUNFUNCS_CNS(DOUBLE, Double);
+    SUNFUNCS_CNS(STRING, String);
+    SUNFUNCS_CNS(TIMESTAMP, TimeStamp);
+#undef SUNFUNCS_CNS
+
     loadSystemlib("datetime");
   }
 
@@ -1041,7 +1013,7 @@ public:
     IniSetting::Bind(
       this, IniSetting::PHP_INI_ALL,
       "date.timezone",
-      g_context->getDefaultTimeZone().c_str(),
+      "",
       IniSetting::SetAndGet<std::string>(
         dateTimezoneIniUpdate, dateTimezoneIniGet
       )
@@ -1073,15 +1045,11 @@ private:
     if (value.empty()) {
       return false;
     }
-    return f_date_default_timezone_set(value);
+    return TimeZone::SetCurrent(value.c_str());
   }
 
   static std::string dateTimezoneIniGet() {
-    auto ret = g_context->getTimeZone();
-    if (ret.isNull()) {
-      return "";
-    }
-    return ret.toCppString();
+    return RID().getTimeZone();
   }
 } s_date_extension;
 

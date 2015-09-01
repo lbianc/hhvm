@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -34,7 +34,13 @@ inline SrcRec* Translator::getSrcRec(SrcKey sk) {
   // XXX: Add a insert-or-find primitive to THM.
   if (SrcRec* r = m_srcDB.find(sk)) return r;
   assertx(s_writeLease.amOwner());
-  return m_srcDB.insert(sk);
+
+  auto rec = m_srcDB.insert(sk);
+  if (RuntimeOption::EvalEnableReusableTC) {
+    recordFuncSrcRec(sk.func(), rec);
+  }
+
+  return rec;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -62,7 +68,8 @@ inline void Translator::setUseAHot(bool val) {
 inline bool Translator::isTransDBEnabled() {
   return debug ||
          RuntimeOption::EvalDumpTC ||
-         RuntimeOption::EvalDumpIR;
+         RuntimeOption::EvalDumpIR ||
+         RuntimeOption::EvalDumpRegion;
 }
 
 inline const TransRec* Translator::getTransRec(TCA tca) const {

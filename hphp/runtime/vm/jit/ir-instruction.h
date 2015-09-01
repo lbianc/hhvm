@@ -17,7 +17,6 @@
 #ifndef incl_HPHP_IR_INSTRUCTION_H_
 #define incl_HPHP_IR_INSTRUCTION_H_
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/jit/bc-marker.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
@@ -120,12 +119,11 @@ struct IRInstruction {
   bool isPassthrough() const;
 
   /*
-   * Whether the src/dst numbered `srcNo'/`dstNo' consumes a reference, kills a
-   * source, or produces a reference.
+   * Whether the src numbered srcNo consumes a reference, or the dest produces
+   * a reference.
    */
   bool consumesReference(int srcNo) const;
-  bool killsSource(int srcNo) const;
-  bool producesReference(int dstNo) const;
+  bool producesReference() const;
 
   /*
    * Get the src that is passed through.

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -111,8 +111,11 @@ TransCFG::TransCFG(FuncId funcId,
     TransIDSet predIDs = findPredTrans(dstId, profData, srcDB, jmpToTransID);
     for (auto predId : predIDs) {
       if (hasNode(predId)) {
-        auto predPostConds =
-          profData->transRegion(predId)->blocks().back()->postConds();
+        const auto  predBlock = profData->transRegion(predId)->blocks().back();
+        const auto& postConds = predBlock->postConds();
+        auto predPostConds = postConds.changed;
+        predPostConds.insert(predPostConds.end(), postConds.refined.begin(),
+                             postConds.refined.end());
         SrcKey predSK = profData->transSrcKey(predId);
         if (preCondsAreSatisfied(dstBlock, predPostConds) &&
             predSK.resumed() == dstSK.resumed()) {

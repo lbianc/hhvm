@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,18 +17,18 @@
 #ifndef incl_HPHP_STRING_DATA_H_
 #define incl_HPHP_STRING_DATA_H_
 
-#include "hphp/util/slice.h"
-#include "hphp/util/hash.h"
+#include <folly/Range.h>
+
 #include "hphp/util/alloc.h"
+#include "hphp/util/bstring.h"
+#include "hphp/util/hash.h"
 #include "hphp/util/word-mem.h"
 
-#include "hphp/runtime/base/datatype.h"
-#include "hphp/runtime/base/types.h"
-#include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/countable.h"
-#include "hphp/runtime/base/bstring.h"
-#include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/cap-code.h"
+#include "hphp/runtime/base/countable.h"
+#include "hphp/runtime/base/datatype.h"
+#include "hphp/runtime/base/exceptions.h"
+#include "hphp/runtime/base/memory-manager.h"
 
 namespace HPHP {
 
@@ -44,8 +44,8 @@ class String;
 enum AttachStringMode { AttachString };
 
 // const char* points to client-owned memory, StringData will copy it
-// at construct-time using smart_malloc.  This is only ok when the StringData
-// itself was smart-allocated.
+// at construct-time using req::malloc.  This is only ok when the StringData
+// itself was request-allocated.
 enum CopyStringMode { CopyString };
 
 /*
@@ -70,15 +70,16 @@ enum CopyStringMode { CopyString };
  *   Shared |        |          |    X
  */
 struct StringData {
+  friend class APCString;
+  friend StringData* allocFlatSmallImpl(size_t len);
+  friend StringData* allocFlatSlowImpl(size_t len);
+
   /*
    * Max length of a string, not counting the terminal 0.
    *
-   * This is MAX_INT-1 to avoid this kind of hazard in client code:
-   *
-   *   int size = string_data->size();
-   *   ... = size + 1; // oops, wraparound.
+   * This is smaller than MAX_INT, and we want a CapCode to precisely encode it.
    */
-  static constexpr uint32_t MaxSize = 0x7ffffffe; // 2^31-2
+  static constexpr uint32_t MaxSize = 0x7ff00000; // 11 bits of 1's
 
   /*
    * Creates an empty request-local string with an unspecified amount of
@@ -97,7 +98,7 @@ struct StringData {
   static StringData* Make(const char* data, CopyStringMode);
   static StringData* Make(const char* data, size_t len, CopyStringMode);
   static StringData* Make(const StringData* s, CopyStringMode);
-  static StringData* Make(StringSlice r1, CopyStringMode);
+  static StringData* Make(folly::StringPiece r1, CopyStringMode);
 
   /*
    * Attach constructors for request-local strings.
@@ -113,14 +114,14 @@ struct StringData {
    * strings. Ref-count is pre-initialized to 1.
    */
   static StringData* Make(const StringData* s1, const StringData* s2);
-  static StringData* Make(const StringData* s1, StringSlice s2);
+  static StringData* Make(const StringData* s1, folly::StringPiece s2);
   static StringData* Make(const StringData* s1, const char* lit2);
-  static StringData* Make(StringSlice s1, const char* lit2);
-  static StringData* Make(StringSlice s1, StringSlice s2);
-  static StringData* Make(StringSlice s1, StringSlice s2,
-                          StringSlice s3);
-  static StringData* Make(StringSlice s1, StringSlice s2,
-                          StringSlice s3, StringSlice s4);
+  static StringData* Make(folly::StringPiece s1, const char* lit2);
+  static StringData* Make(folly::StringPiece s1, folly::StringPiece s2);
+  static StringData* Make(folly::StringPiece s1, folly::StringPiece s2,
+                          folly::StringPiece s3);
+  static StringData* Make(folly::StringPiece s1, folly::StringPiece s2,
+                          folly::StringPiece s3, folly::StringPiece s4);
 
   /*
    * Create a new request-local empty string big enough to hold strings of
@@ -143,14 +144,14 @@ struct StringData {
    * StringData is not expected to be reference counted, and must be
    * deallocated using destructStatic.
    */
-  static StringData* MakeStatic(StringSlice);
+  static StringData* MakeStatic(folly::StringPiece);
 
   /*
    * Same as MakeStatic but the string allocated will *not* be in the static
    * string table, will not be in low-memory, and should be deleted using
    * destructUncounted once the root goes out of scope.
    */
-  static StringData* MakeUncounted(StringSlice);
+  static StringData* MakeUncounted(folly::StringPiece);
 
   /*
    * Same as MakeStatic but initializes the empty string in aligned storage.
@@ -172,7 +173,7 @@ struct StringData {
   static unsigned sweepAll();
 
   /*
-   * Called to return a StringData to the smart allocator.  This is
+   * Called to return a StringData to the request allocator.  This is
    * normally called when the reference count goes to zero (e.g. with
    * a helper like decRefStr).
    */
@@ -194,9 +195,9 @@ struct StringData {
   /*
    * Reference-counting related.
    */
-  IMPLEMENT_COUNTABLE_METHODS_NO_STATIC
-  bool isStatic() const;
-  bool isUncounted() const;
+  IMPLEMENT_COUNTABLE_METHODS_WITH_STATIC
+
+  bool kindIsValid() const { return m_hdr.kind == HeaderKind::String; }
 
   /*
    * Append the supplied range to this string.  If there is not sufficient
@@ -206,9 +207,11 @@ struct StringData {
    * Pre: !hasMultipleRefs()
    * Pre: the string is request-local
    */
-  StringData* append(StringSlice r);
-  StringData* append(StringSlice r1, StringSlice r2);
-  StringData* append(StringSlice r1, StringSlice r2, StringSlice r3);
+  StringData* append(folly::StringPiece r);
+  StringData* append(folly::StringPiece r1, folly::StringPiece r2);
+  StringData* append(folly::StringPiece r1,
+                     folly::StringPiece r2,
+                     folly::StringPiece r3);
 
   /*
    * Reserve space for a string of length `maxLen' (not counting null
@@ -243,7 +246,7 @@ struct StringData {
    * include a null-terminator if possible.  (We would like to make
    * this unnecessary eventually.)
    */
-  StringSlice slice() const;
+  folly::StringPiece slice() const;
 
   /*
    * Returns a mutable slice with extents sized to the *buffer* this
@@ -253,7 +256,7 @@ struct StringData {
    * Note: please do not introduce new uses of this API that write
    * nulls 1 byte past slice.len---we want to weed those out.
    */
-  MutableSlice bufferSlice();
+  folly::MutableStringPiece bufferSlice();
 
   /*
    * If external users of this object want to modify it (e.g. through
@@ -448,7 +451,7 @@ private:
   };
 
 private:
-  static StringData* MakeShared(StringSlice sl, bool trueStatic);
+  static StringData* MakeShared(folly::StringPiece sl, bool trueStatic);
   static StringData* MakeAPCSlowPath(const APCString*);
 
   StringData(const StringData&) = delete;
@@ -472,8 +475,6 @@ private:
   void incrementHelper();
   bool checkSane() const;
   void preCompute();
-  void setStatic();
-  void setUncounted();
 
 private:
   char* m_data;
@@ -489,8 +490,6 @@ private:
     };
     uint64_t m_lenAndHash;
   };
-
-  friend class APCString;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -499,7 +498,7 @@ private:
  * A reasonable length to reserve for small strings.  This is the
  * default reserve size for StringData::Make(), also.
  */
-const uint32_t SmallStringReserve = 64 - sizeof(StringData) - 1;
+constexpr uint32_t SmallStringReserve = 64 - sizeof(StringData) - 1;
 
 /*
  * DecRef a string s, calling release if its reference count goes to
@@ -539,16 +538,29 @@ ALWAYS_INLINE StringData* staticEmptyString() {
 }
 
 namespace folly {
-template<> struct FormatValue<HPHP::StringData> {
-  explicit FormatValue(const HPHP::StringData& str) : m_val(str) {}
+template<> struct FormatValue<const HPHP::StringData*> {
+  explicit FormatValue(const HPHP::StringData* str) : m_val(str) {}
 
   template<typename Callback>
   void format(FormatArg& arg, Callback& cb) const {
-    format_value::formatString(m_val.data(), arg, cb);
+    auto piece = folly::StringPiece(m_val->data(), m_val->size());
+    format_value::formatString(piece, arg, cb);
   }
 
  private:
-  const HPHP::StringData& m_val;
+  const HPHP::StringData* m_val;
+};
+
+template<> struct FormatValue<HPHP::StringData*> {
+  explicit FormatValue(const HPHP::StringData* str) : m_val(str) {}
+
+  template<typename Callback>
+  void format(FormatArg& arg, Callback& cb) const {
+    FormatValue<const HPHP::StringData*>(m_val).format(arg, cb);
+  }
+
+ private:
+  const HPHP::StringData* m_val;
 };
 }
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -103,19 +103,19 @@
 #include "hphp/runtime/base/annot-type.h"
 
 #define NEW_EXP0(cls)                                           \
-  cls##Ptr(new cls(BlockScopePtr(),                             \
-                   getLocation()))
-#define NEW_EXP(cls, e...)                                      \
-  cls##Ptr(new cls(BlockScopePtr(),                             \
-                   getLocation(), ##e))
+  std::make_shared<cls>(BlockScopePtr(),                        \
+                        getRange())
+#define NEW_EXP(cls, ...)                                      \
+  std::make_shared<cls>(BlockScopePtr(),                        \
+                        getRange(), ##__VA_ARGS__)
 #define NEW_STMT0(cls)                                          \
-  cls##Ptr(new cls(BlockScopePtr(), getLabelScope(),            \
-                   getLocation()))
-#define NEW_STMT(cls, e...)                                     \
-  cls##Ptr(new cls(BlockScopePtr(), getLabelScope(),            \
-                   getLocation(), ##e))
+  std::make_shared<cls>(BlockScopePtr(), getLabelScope(),       \
+                        getRange())
+#define NEW_STMT(cls, ...)                                     \
+  std::make_shared<cls>(BlockScopePtr(), getLabelScope(),       \
+                        getRange(), ##__VA_ARGS__)
 
-#define PARSE_ERROR(fmt, args...)  HPHP_PARSER_ERROR(fmt, this, ##args)
+#define PARSE_ERROR(fmt, ...)  HPHP_PARSER_ERROR(fmt, this, ##__VA_ARGS__)
 
 using namespace HPHP::Compiler;
 
@@ -125,18 +125,18 @@ SimpleFunctionCallPtr NewSimpleFunctionCall(
   EXPRESSION_CONSTRUCTOR_PARAMETERS,
   const std::string &name, bool hadBackslash, ExpressionListPtr params,
   ExpressionPtr cls) {
-  return SimpleFunctionCallPtr(
-    new SimpleFunctionCall(
+  return
+    std::make_shared<SimpleFunctionCall>(
       EXPRESSION_CONSTRUCTOR_DERIVED_PARAMETER_VALUES,
-      name, hadBackslash, params, cls));
+      name, hadBackslash, params, cls);
 }
 
 static std::string fully_qualified_name_as_alias_key(const std::string &fqn,
                                                      const std::string &as) {
-  string key = as;
+  auto key = as;
   if (key.empty()) {
-    size_t pos = fqn.rfind(NAMESPACE_SEP);
-    if (pos == string::npos) {
+    auto const pos = fqn.rfind(NAMESPACE_SEP);
+    if (pos == std::string::npos) {
       key = fqn;
     } else {
       key = fqn.substr(pos + 1);
@@ -178,10 +178,10 @@ Parser::Parser(Scanner &scanner, const char *fileName,
   auto const md5str = mangleUnitMd5(scanner.getMd5());
   MD5 md5 = MD5(md5str.c_str());
 
-  m_file = FileScopePtr(new FileScope(m_fileName, fileSize, md5));
+  m_file = std::make_shared<FileScope>(m_fileName, fileSize, md5);
 
   newScope();
-  m_staticVars.push_back(StringToExpressionPtrVecMap());
+  m_staticVars.emplace_back();
   m_inTrait = false;
 
   Lock lock(m_ar->getMutex());
@@ -213,7 +213,7 @@ bool Parser::parse() {
 void Parser::error(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  string msg;
+  std::string msg;
   string_vsnprintf(msg, fmt, ap);
   va_end(ap);
 
@@ -221,9 +221,6 @@ void Parser::error(const char* fmt, ...) {
 }
 
 void Parser::parseFatal(const Location* loc, const char* msg) {
-  // we can't use loc->file, as the bison parser doesn't track that in YYLTYPE
-  auto file = m_file->getName().c_str();
-
   // If the parser has a message, prepend it to the given message. Otherwise
   // just use the given message.
   std::string str = getMessage();
@@ -234,17 +231,18 @@ void Parser::parseFatal(const Location* loc, const char* msg) {
   }
   strInput += msg;
 
-  auto exn = ParseTimeFatalException(file, loc->line0, "%s", strInput.c_str());
+  auto exn = ParseTimeFatalException(m_file->getName(), loc->r.line0,
+                                     "%s", strInput.c_str());
 
   exn.setParseFatal();
   throw exn;
 }
 
 void Parser::fatal(const Location* loc, const char* msg) {
-  throw ParseTimeFatalException(loc->file, loc->line0, "%s", msg);
+  throw ParseTimeFatalException(m_file->getName(), loc->r.line0, "%s", msg);
 }
 
-string Parser::errString() {
+std::string Parser::errString() {
   return m_error.empty() ? getMessage() : m_error;
 }
 
@@ -263,12 +261,12 @@ std::string Parser::popComment() {
 }
 
 void Parser::newScope() {
-  m_scopes.push_back(BlockScopePtrVec());
+  m_scopes.emplace_back();
 }
 
 void Parser::completeScope(BlockScopePtr inner) {
   always_assert(inner);
-  BlockScopePtrVec &sv = m_scopes.back();
+  auto& sv = m_scopes.back();
   for (int i = 0, n = sv.size(); i < n; i++) {
     BlockScopePtr scope = sv[i];
     scope->setOuterScope(inner);
@@ -289,10 +287,10 @@ LabelScopePtr Parser::getLabelScope() const {
 
 void Parser::onNewLabelScope(bool fresh) {
   if (fresh) {
-    m_labelScopes.push_back(LabelScopePtrVec());
+    m_labelScopes.emplace_back();
   }
   assert(!m_labelScopes.empty());
-  LabelScopePtr labelScope(new LabelScope());
+  auto labelScope = std::make_shared<LabelScope>();
   m_labelScopes.back().push_back(labelScope);
 }
 
@@ -334,7 +332,7 @@ void Parser::onStaticVariable(Token &out, Token *exprs, Token &var,
                               Token *value) {
   onVariable(out, exprs, var, value);
   if (m_staticVars.size()) {
-    StringToExpressionPtrVecMap &m = m_staticVars.back();
+    auto& m = m_staticVars.back();
     m[var->text()].push_back(out->exp);
   }
 }
@@ -359,15 +357,19 @@ void Parser::onClassTypeConstant(Token &out, Token &var, Token &value) {
 
   if (isAbstract) {
     onClassAbstractConstant(typeConst, nullptr, var);
+    typeConst.typeAnnotation = nullptr;
   } else {
     value.setText(value.typeAnnotationName());
     Token typeConstValue;
     onScalar(typeConstValue, T_STRING, value);
 
     onClassConstant(typeConst, nullptr, var, typeConstValue);
+    typeConst.typeAnnotation = value.typeAnnotation;
   }
 
-  onClassVariableStart(out, nullptr, typeConst, nullptr, isAbstract, true);
+  onClassVariableStart(out, nullptr, typeConst, nullptr, isAbstract,
+                       /* isTypeConst = */ true,
+                       typeConst.typeAnnotation);
 }
 
 void Parser::onVariable(Token &out, Token *exprs, Token &var, Token *value,
@@ -440,12 +442,12 @@ void Parser::onRefDim(Token &out, Token &var, Token &offset) {
 
 ExpressionPtr Parser::getDynamicVariable(ExpressionPtr exp, bool encap) {
   if (encap) {
-    ConstantExpressionPtr var = dynamic_pointer_cast<ConstantExpression>(exp);
+    auto var = dynamic_pointer_cast<ConstantExpression>(exp);
     if (var) {
       return NEW_EXP(SimpleVariable, var->getName());
     }
   } else {
-    ScalarExpressionPtr var = dynamic_pointer_cast<ScalarExpression>(exp);
+    auto var = dynamic_pointer_cast<ScalarExpression>(exp);
     if (var) {
       return NEW_EXP(SimpleVariable, var->getString());
     }
@@ -476,7 +478,7 @@ void Parser::onCallParam(Token &out, Token *params, Token &expr,
   }
   if (unpack) {
     (dynamic_pointer_cast<ExpressionList>(out->exp))->setContainsUnpack();
-    expr->exp->setContext(Expression::UnpackParameter);
+    expr->exp->setIsUnpack();
   }
   out->exp->addElement(expr->exp);
 }
@@ -488,16 +490,18 @@ void Parser::onCall(Token &out, bool dynamic, Token &name, Token &params,
     clsExp = cls->exp;
   }
   if (dynamic) {
-    out->exp = NEW_EXP(DynamicFunctionCall, name->exp,
-                       dynamic_pointer_cast<ExpressionList>(params->exp),
-                       clsExp);
+    auto call = NEW_EXP(DynamicFunctionCall, name->exp,
+                        dynamic_pointer_cast<ExpressionList>(params->exp),
+                        clsExp);
+    call->onParse(m_ar, m_file);
+    out->exp = call;
   } else {
-    string funcName = name.text();
+    std::string funcName = name.text();
     // strip out namespaces for func_get_args and friends check
     size_t lastBackslash = funcName.find_last_of(NAMESPACE_SEP);
-    string stripped = lastBackslash == string::npos
-                      ? funcName
-                      : funcName.substr(lastBackslash+1);
+    auto const stripped = lastBackslash == std::string::npos
+      ? funcName
+      : funcName.substr(lastBackslash+1);
     bool hadBackslash = name->num() & 2;
 
     if (stripped == "set_frame_metadata" && m_funcContexts.size() > 0) {
@@ -523,12 +527,14 @@ void Parser::onCall(Token &out, bool dynamic, Token &name, Token &params,
            stripped == "invariant_callback_register" ||
            stripped == "invariant" ||
            stripped == "invariant_violation" ||
+           stripped == "idx" ||
            stripped == "asio_get_current_context_idx" ||
            stripped == "asio_get_running_in_context" ||
            stripped == "asio_get_running" ||
            stripped == "xenon_get_data" ||
            stripped == "objprof_get_strings" ||
            stripped == "objprof_get_data" ||
+           stripped == "objprof_get_paths" ||
            stripped == "objprof_start" ||
            stripped == "server_warmup_status"
           )) {
@@ -541,19 +547,10 @@ void Parser::onCall(Token &out, bool dynamic, Token &name, Token &params,
       }
     }
 
-    SimpleFunctionCallPtr call
-      (new SimpleFunctionCall
-       (BlockScopePtr(), getLocation(),
-        funcName, hadBackslash,
-        dynamic_pointer_cast<ExpressionList>(params->exp), clsExp));
-    if (m_scanner.isHHSyntaxEnabled() && !(name->num() & 2)) {
-      // If the function name is without any backslashes or
-      // namespace qualification then we treat this as a candidate
-      // for optimization via bytecode promotion.
-      // "idx" is the only function in that class for now but it's
-      // cheaper to set the bit that to check for the function name
-      call->setOptimizable();
-    }
+    auto call = NEW_EXP(SimpleFunctionCall,
+                        funcName, hadBackslash,
+                        dynamic_pointer_cast<ExpressionList>(params->exp),
+                        clsExp);
     out->exp = call;
 
     call->onParse(m_ar, m_file);
@@ -577,6 +574,7 @@ void Parser::onObjectProperty(Token &out, Token &base,
     auto om = NEW_EXP(ObjectMethodExpression, base->exp,
                       getAttributeMethodName, paramsExp,
                       propAccessType == PropAccessType::NullSafe);
+    om->onParse(m_ar, m_file);
     om->setIsXhpGetAttr();
     out->exp = om;
     return;
@@ -613,8 +611,10 @@ void Parser::onObjectMethodCall(Token &out, Token &base, bool nullsafe,
   } else {
     paramsExp = NEW_EXP0(ExpressionList);
   }
-  out->exp = NEW_EXP(ObjectMethodExpression, base->exp, prop->exp, paramsExp,
-                     nullsafe);
+  auto mcall = NEW_EXP(ObjectMethodExpression, base->exp, prop->exp, paramsExp,
+                       nullsafe);
+  mcall->onParse(m_ar, m_file);
+  out->exp = mcall;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -626,19 +626,14 @@ void Parser::onEncapsList(Token &out, int type, Token &list) {
 }
 
 void Parser::addEncap(Token &out, Token *list, Token &expr, int type) {
-  ExpressionListPtr expList;
-  if (list && list->exp) {
-    expList = dynamic_pointer_cast<ExpressionList>(list->exp);
-  } else {
-    expList = NEW_EXP0(ExpressionList);
-  }
-  ExpressionPtr exp;
-  if (type == -1) {
-    exp = expr->exp;
-  } else {
-    exp = NEW_EXP(ScalarExpression, T_ENCAPSED_AND_WHITESPACE,
-                  expr->text(), true);
-  }
+  auto expList = (list && list->exp)
+    ? dynamic_pointer_cast<ExpressionList>(list->exp)
+    :  NEW_EXP0(ExpressionList);
+
+  auto exp = (type == -1)
+    ? expr->exp
+    : NEW_EXP(ScalarExpression, T_ENCAPSED_AND_WHITESPACE, expr->text(), true);
+
   expList->addElement(exp);
   out->exp = expList;
 }
@@ -766,17 +761,14 @@ void Parser::checkAllowedInWriteContext(ExpressionPtr e) {
   }
   if (dynamic_pointer_cast<FunctionCall>(e)) {
     if (e->is(Expression::KindOfObjectMethodExpression)) {
-      ObjectMethodExpressionPtr om =
-        static_pointer_cast<ObjectMethodExpression>(e);
+      auto om = static_pointer_cast<ObjectMethodExpression>(e);
       if (om->isXhpGetAttr()) {
         PARSE_ERROR("Using ->: syntax in write context is not supported");
       }
     }
     PARSE_ERROR("Can't use return value in write context");
   } if (e->is(Expression::KindOfObjectPropertyExpression)) {
-    ObjectPropertyExpressionPtr op(
-      static_pointer_cast<ObjectPropertyExpression>(e)
-    );
+    auto op = static_pointer_cast<ObjectPropertyExpression>(e);
     if (op->isNullSafe()) {
       PARSE_ERROR(Strings::NULLSAFE_PROP_WRITE_ERROR);
     }
@@ -785,7 +777,7 @@ void Parser::checkAllowedInWriteContext(ExpressionPtr e) {
 
 void Parser::onListAssignment(Token &out, Token &vars, Token *expr,
                               bool rhsFirst /* = false */) {
-  ExpressionListPtr el(dynamic_pointer_cast<ExpressionList>(vars->exp));
+  auto el = dynamic_pointer_cast<ExpressionList>(vars->exp);
   for (int i = 0; i < el->getCount(); i++) {
     checkAllowedInWriteContext((*el)[i]);
     checkThisContext((*el)[i], ThisContextError::Assign);
@@ -813,7 +805,7 @@ void Parser::onAListSub(Token &out, Token *list, Token &sublist) {
   onExprListElem(out, list, out);
 }
 
-void Parser::checkThisContext(string var, ThisContextError error) {
+void Parser::checkThisContext(const std::string& var, ThisContextError error) {
   if (var != "this") {
     return;
   }
@@ -829,13 +821,13 @@ void Parser::checkThisContext(string var, ThisContextError error) {
 }
 
 void Parser::checkThisContext(Token &var, ThisContextError error) {
-  if (SimpleVariablePtr simp = dynamic_pointer_cast<SimpleVariable>(var.exp)) {
+  if (auto simp = dynamic_pointer_cast<SimpleVariable>(var.exp)) {
     checkThisContext(simp->getName(), error);
   }
 }
 
 void Parser::checkThisContext(ExpressionPtr e, ThisContextError error) {
-  if (SimpleVariablePtr simp = dynamic_pointer_cast<SimpleVariable>(e)) {
+  if (auto simp = dynamic_pointer_cast<SimpleVariable>(e)) {
     checkThisContext(simp->getName(), error);
   }
 }
@@ -843,8 +835,7 @@ void Parser::checkThisContext(ExpressionPtr e, ThisContextError error) {
 void Parser::checkThisContext(ExpressionListPtr params,
                               ThisContextError error) {
   for (int i = 0, count = params->getCount(); i < count; i++) {
-    ParameterExpressionPtr param =
-        dynamic_pointer_cast<ParameterExpression>((*params)[i]);
+    auto param = dynamic_pointer_cast<ParameterExpression>((*params)[i]);
     checkThisContext(param->getName(), error);
   }
 }
@@ -859,16 +850,15 @@ void Parser::onAssign(Token &out, Token &var, Token &expr, bool ref,
 void Parser::onAssignNew(Token &out, Token &var, Token &name, Token &args) {
   checkAllowedInWriteContext(var->exp);
   checkThisContext(var, ThisContextError::Assign);
-  ExpressionPtr exp =
-    NEW_EXP(NewObjectExpression, name->exp,
-            dynamic_pointer_cast<ExpressionList>(args->exp));
+  auto exp = NEW_EXP(NewObjectExpression, name->exp,
+                     dynamic_pointer_cast<ExpressionList>(args->exp));
+  exp->onParse(m_ar, m_file);
   out->exp = NEW_EXP(AssignmentExpression, var->exp, exp, true);
 }
 
 void Parser::onNewObject(Token &out, Token &name, Token &args) {
-  NewObjectExpressionPtr new_obj =
-    NEW_EXP(NewObjectExpression, name->exp,
-            dynamic_pointer_cast<ExpressionList>(args->exp));
+  auto new_obj = NEW_EXP(NewObjectExpression, name->exp,
+                         dynamic_pointer_cast<ExpressionList>(args->exp));
   new_obj->onParse(m_ar, m_file);
   out->exp = new_obj;
 }
@@ -1038,7 +1028,7 @@ void Parser::onFunctionStart(Token &name, bool doPushComment /* = true */) {
   newScope();
   m_funcContexts.push_back(FunctionContext());
   m_funcName = name.text();
-  m_staticVars.push_back(StringToExpressionPtrVecMap());
+  m_staticVars.emplace_back();
 }
 
 void Parser::onMethodStart(Token &name, Token &mods,
@@ -1047,20 +1037,18 @@ void Parser::onMethodStart(Token &name, Token &mods,
 }
 
 void Parser::fixStaticVars() {
-  StringToExpressionPtrVecMap &m = m_staticVars.back();
-  for (StringToExpressionPtrVecMap::iterator it = m.begin(), end = m.end();
-       it != end; ++it) {
-    const ExpressionPtrVec &v = it->second;
+  for (const auto& var : m_staticVars.back()) {
+    const auto& v = var.second;
     if (v.size() > 1) {
       ExpressionPtr last;
       for (int i = v.size(); i--; ) {
-        ExpressionListPtr el(dynamic_pointer_cast<ExpressionList>(v[i]));
+        auto el = dynamic_pointer_cast<ExpressionList>(v[i]);
         for (int j = el->getCount(); j--; ) {
-          ExpressionPtr s = (*el)[j];
-          SimpleVariablePtr v = dynamic_pointer_cast<SimpleVariable>(
+          auto s = (*el)[j];
+          auto v = dynamic_pointer_cast<SimpleVariable>(
             s->is(Expression::KindOfAssignmentExpression) ?
             static_pointer_cast<AssignmentExpression>(s)->getVariable() : s);
-          if (v->getName() == it->first) {
+          if (v->getName() == var.first) {
             if (!last) {
               last = s;
             } else {
@@ -1075,7 +1063,7 @@ void Parser::fixStaticVars() {
   m_staticVars.pop_back();
 }
 
-void Parser::checkFunctionContext(string funcName,
+void Parser::checkFunctionContext(const std::string& funcName,
                                   FunctionContext& funcContext,
                                   ModifierExpressionPtr modifiers,
                                   int returnsRef) {
@@ -1104,27 +1092,29 @@ void Parser::prepareConstructorParameters(StatementListPtr stmts,
                                           ExpressionListPtr params,
                                           bool isAbstract) {
   for (int i = 0, count = params->getCount(); i < count; i++) {
-    ParameterExpressionPtr param =
-        dynamic_pointer_cast<ParameterExpression>((*params)[i]);
+    auto param = dynamic_pointer_cast<ParameterExpression>((*params)[i]);
     TokenID mod = param->getModifier();
     if (mod == 0) continue;
 
     if (isAbstract) {
-       param->parseTimeFatal(Compiler::InvalidAttribute,
-                             "parameter modifiers not allowed on "
-                             "abstract __construct");
+      param->parseTimeFatal(getFileScope(),
+                            Compiler::InvalidAttribute,
+                            "parameter modifiers not allowed on "
+                            "abstract __construct");
     }
     if (!stmts) {
-       param->parseTimeFatal(Compiler::InvalidAttribute,
-                             "parameter modifiers not allowed on "
-                             "__construct without a body");
+      param->parseTimeFatal(getFileScope(),
+                            Compiler::InvalidAttribute,
+                            "parameter modifiers not allowed on "
+                            "__construct without a body");
     }
     if (param->annotation()) {
       std::vector<std::string> typeNames;
       param->annotation()->getAllSimpleNames(typeNames);
       for (auto& typeName : typeNames) {
         if (isTypeVarInImmediateScope(typeName)) {
-          param->parseTimeFatal(Compiler::InvalidAttribute,
+          param->parseTimeFatal(getFileScope(),
+                                Compiler::InvalidAttribute,
                                 "parameter modifiers not supported with "
                                 "type variable annotation");
         }
@@ -1143,7 +1133,7 @@ void Parser::prepareConstructorParameters(StatementListPtr stmts,
   }
 }
 
-string Parser::getFunctionName(FunctionType type, Token* name) {
+std::string Parser::getFunctionName(FunctionType type, Token* name) {
   switch (type) {
     case FunctionType::Closure:
       return newClosureName(m_namespace, m_clsName, m_containingFuncName);
@@ -1162,11 +1152,11 @@ string Parser::getFunctionName(FunctionType type, Token* name) {
 }
 
 StatementPtr Parser::onFunctionHelper(FunctionType type,
-                              Token *modifiers, Token &ret,
-                              Token &ref, Token *name, Token &params,
-                              Token &stmt, Token *attr, bool reloc) {
+                                      Token *modifiers, Token &ret,
+                                      Token &ref, Token *name, Token &params,
+                                      Token &stmt, Token *attr, bool reloc) {
   // prepare and validate function modifiers
-  ModifierExpressionPtr modifiersExp = modifiers && modifiers->exp ?
+  auto modifiersExp = modifiers && modifiers->exp ?
     dynamic_pointer_cast<ModifierExpression>(modifiers->exp)
     : NEW_EXP0(ModifierExpression);
   modifiersExp->setHasPrivacy(type == FunctionType::Method);
@@ -1181,19 +1171,18 @@ StatementPtr Parser::onFunctionHelper(FunctionType type,
     m_fnTable.insert(name->text());
   }
 
-  StatementListPtr stmts = stmt->stmt || stmt->num() != 1 ?
+  auto stmts = stmt->stmt || stmt->num() != 1 ?
     dynamic_pointer_cast<StatementList>(stmt->stmt)
     : NEW_STMT0(StatementList);
 
-  ExpressionListPtr old_params =
-    dynamic_pointer_cast<ExpressionList>(params->exp);
+  auto old_params = dynamic_pointer_cast<ExpressionList>(params->exp);
 
   if (type == FunctionType::Method && old_params &&
      !modifiersExp->isStatic()) {
     checkThisContext(old_params, ThisContextError::Assign);
   }
 
-  string funcName = getFunctionName(type, name);
+  auto const funcName = getFunctionName(type, name);
 
   if (type == FunctionType::Method && old_params &&
       funcName == "__construct") {
@@ -1204,7 +1193,7 @@ StatementPtr Parser::onFunctionHelper(FunctionType type,
   fixStaticVars();
 
   int attribute = m_file->popAttribute();
-  string comment = popComment();
+  auto const comment = popComment();
 
   ExpressionListPtr attrList;
   if (attr && attr->exp) {
@@ -1243,10 +1232,9 @@ StatementPtr Parser::onFunctionHelper(FunctionType type,
   mth->getFunctionScope()->setAsync(modifiersExp->isAsync());
   m_funcContexts.pop_back();
 
-  LocationPtr loc = popFuncLocation();
+  auto loc = popFuncLocation();
   if (reloc) {
-    mth->getLocation()->line0 = loc->line0;
-    mth->getLocation()->char0 = loc->char0;
+    mth->setFirst(loc.line0, loc.char0);
   }
 
   return mth;
@@ -1421,7 +1409,7 @@ void Parser::onClass(Token &out, int type, Token &name, Token &base,
 
   // look for argument promotion in ctor
   ExpressionListPtr promote = NEW_EXP(ExpressionList);
-  cls->checkArgumentsToPromote(promote, type);
+  cls->checkArgumentsToPromote(m_file, promote, type);
   auto count = promote->getCount();
   cls->setPromotedParameterCount(count);
   for (int i = 0; i < count; i++) {
@@ -1429,22 +1417,21 @@ void Parser::onClass(Token &out, int type, Token &name, Token &base,
         dynamic_pointer_cast<ParameterExpression>((*promote)[i]);
     TokenID mod = param->getModifier();
     std::string name = param->getName();
-    std::string type = param->hasUserType() ?
-                                  param->getUserTypeHint() : "";
+    std::string type = param->hasUserType() ? param->getUserTypeHint() : "";
 
     // create the class variable and change the location to
     // point to the parameter location for error reporting
-    LocationPtr location = param->getLocation();
-    ModifierExpressionPtr modifier = NEW_EXP0(ModifierExpression);
+    auto range = param->getRange();
+    ModifierExpressionPtr modifier = std::make_shared<ModifierExpression>(
+      BlockScopePtr(), range);
     modifier->add(mod);
-    modifier->setLocation(location);
-    SimpleVariablePtr svar = NEW_EXP(SimpleVariable, name);
-    svar->setLocation(location);
-    ExpressionListPtr expList = NEW_EXP0(ExpressionList);
+    SimpleVariablePtr svar = std::make_shared<SimpleVariable>(
+      BlockScopePtr(), range, name);
+    ExpressionListPtr expList = std::make_shared<ExpressionList>(
+      BlockScopePtr(), range);
     expList->addElement(svar);
-    expList->setLocation(location);
-    ClassVariablePtr var = NEW_STMT(ClassVariable, modifier, type, expList);
-    var->setLocation(location);
+    ClassVariablePtr var = std::make_shared<ClassVariable>(
+      BlockScopePtr(), getLabelScope(), range, modifier, type, expList);
     cls->getStmts()->addElement(var);
   }
 
@@ -1565,8 +1552,7 @@ void Parser::onTraitAliasRuleStart(Token &out, Token &traitName,
 void Parser::onTraitAliasRuleModify(Token &out, Token &rule,
                                     Token &accessModifiers,
                                     Token &newMethodName) {
-  TraitAliasStatementPtr ruleStmt=
-    dynamic_pointer_cast<TraitAliasStatement>(rule->stmt);
+  auto ruleStmt = dynamic_pointer_cast<TraitAliasStatement>(rule->stmt);
 
   assert(ruleStmt);
 
@@ -1591,9 +1577,10 @@ void Parser::onTraitAliasRuleModify(Token &out, Token &rule,
 
 void Parser::onClassVariableStart(Token &out, Token *modifiers, Token &decl,
                                   Token *type, bool abstract /* = false */,
-                                  bool typeconst /* = false */) {
+                                  bool typeconst /* = false */,
+                                  const TypeAnnotationPtr& typeAnnot) {
   if (modifiers) {
-    ModifierExpressionPtr exp = modifiers->exp ?
+    auto exp = modifiers->exp ?
       dynamic_pointer_cast<ModifierExpression>(modifiers->exp)
       : NEW_EXP0(ModifierExpression);
 
@@ -1607,7 +1594,8 @@ void Parser::onClassVariableStart(Token &out, Token *modifiers, Token &decl,
       (type) ? type->typeAnnotationName() : "",
       dynamic_pointer_cast<ExpressionList>(decl->exp),
       abstract,
-      typeconst);
+      typeconst,
+      typeAnnot);
   }
 }
 
@@ -1636,9 +1624,7 @@ void Parser::finiParseTree() {
   pseudoMain->setOuterScope(m_file);
   m_file->setOuterScope(m_ar);
   m_ar->parseExtraCode(m_file->getName());
-  LocationPtr loc = getLocation();
-  loc->line0 = loc->char0 = 1;
-  pseudoMain->getStmt()->setLocation(loc);
+  pseudoMain->getStmt()->setFirst(1, 1);
 }
 
 void Parser::onHaltCompiler() {
@@ -1816,16 +1802,14 @@ void Parser::onReturn(Token &out, Token *expr) {
 }
 
 void Parser::invalidYield() {
-  ExpressionPtr exp(new SimpleFunctionCall(BlockScopePtr(),
-                                           getLocation(),
-                                           "yield",
-                                           false,
-                                           ExpressionListPtr(),
-                                           ExpressionPtr()));
+  ExpressionPtr exp = std::make_shared<SimpleFunctionCall>(
+    BlockScopePtr(), getRange(), "yield", false,
+    ExpressionListPtr(), ExpressionPtr());
   Compiler::Error(Compiler::InvalidYield, exp);
 }
 
-bool Parser::canBeAsyncOrGenerator(string funcName, string clsName) {
+bool Parser::canBeAsyncOrGenerator(const std::string& funcName,
+                                   const std::string& clsName) {
   if (clsName.empty()) {
     return true;
   }
@@ -1887,12 +1871,9 @@ void Parser::onYieldBreak(Token &out) {
 }
 
 void Parser::invalidAwait() {
-  ExpressionPtr exp(new SimpleFunctionCall(BlockScopePtr(),
-                                           getLocation(),
-                                           "async",
-                                           false,
-                                           ExpressionListPtr(),
-                                           ExpressionPtr()));
+  auto exp = std::make_shared<SimpleFunctionCall>(
+    BlockScopePtr(), getRange(), "async", false,
+    ExpressionListPtr(), ExpressionPtr());
   Compiler::Error(Compiler::InvalidAwait, exp);
 }
 
@@ -1963,8 +1944,8 @@ void Parser::onHashBang(Token &out, Token &text) {
 
 void Parser::onEcho(Token &out, Token &expr, bool html) {
   if (html) {
-    LocationPtr loc = getLocation();
-    if (loc->line1 == 2 && loc->char1 == 0 && expr->text()[0] == '#') {
+    auto const& loc = getRange();
+    if (loc.line1 == 2 && loc.char1 == 0 && expr->text()[0] == '#') {
       // skipping linux interpreter declaration
       out->stmt = NEW_STMT0(StatementList);
     } else {
@@ -1981,7 +1962,7 @@ void Parser::onEcho(Token &out, Token &expr, bool html) {
 }
 
 void Parser::onUnset(Token &out, Token &expr) {
-  ExpressionListPtr exps = dynamic_pointer_cast<ExpressionList>(expr->exp);
+  auto exps = dynamic_pointer_cast<ExpressionList>(expr->exp);
   for (int i = 0, n = exps->getCount(); i < n; i++) {
     checkAllowedInWriteContext((*exps)[i]);
   }
@@ -2102,11 +2083,10 @@ Token Parser::onClosure(ClosureType type,
     true
   );
 
-  ExpressionListPtr vars = dynamic_pointer_cast<ExpressionList>(cparams->exp);
+  auto vars = dynamic_pointer_cast<ExpressionList>(cparams->exp);
   if (vars) {
     for (int i = vars->getCount() - 1; i >= 0; i--) {
-      ParameterExpressionPtr param(
-        dynamic_pointer_cast<ParameterExpression>((*vars)[i]));
+      auto param = dynamic_pointer_cast<ParameterExpression>((*vars)[i]);
       if (param->getName() == "this") {
         PARSE_ERROR("Cannot use $this as lexical variable");
       }
@@ -2155,12 +2135,30 @@ void Parser::onGoto(Token &out, Token &label, bool limited) {
   out->stmt = NEW_STMT(GotoStatement, label.text());
 }
 
+/* save the type variables before pushTypeScope clears it out; for
+ * typedefs only */
+void Parser::setTypeVars(Token &out, const Token &name) {
+  out = name;
+  if (!out.typeAnnotation) {
+    out.typeAnnotation =
+      std::make_shared<TypeAnnotation>(name.text(), TypeAnnotationPtr());
+  }
+  std::string tvars;
+  folly::join(",", m_typeVars, tvars);
+  out.typeAnnotation->setGenerics(tvars);
+}
+
 void Parser::onTypedef(Token& out, const Token& name, const Token& type) {
   // Note: we don't always get TypeAnnotations (e.g. for shape types
   // currently).
-  auto const annot = type.typeAnnotation
-    ? type.typeAnnotation
-    : std::make_shared<TypeAnnotation>(type.text(), TypeAnnotationPtr());
+  auto annot = type.typeAnnotation;
+  if (!annot) {
+    annot = std::make_shared<TypeAnnotation>(type.text(), TypeAnnotationPtr());
+  }
+  // save the type variables (generics)
+  if (name.typeAnnotation) {
+    annot->setGenerics(name.typeAnnotation->getGenerics());
+  }
 
   auto td_stmt = NEW_STMT(TypedefStatement, name.text(), annot);
   td_stmt->onParse(m_ar, m_file);
@@ -2170,8 +2168,8 @@ void Parser::onTypedef(Token& out, const Token& name, const Token& type) {
 void Parser::onTypeAnnotation(Token& out, const Token& name,
                                           const Token& typeArgs) {
   out.set(name.num(), name.text());
-  out.typeAnnotation = TypeAnnotationPtr(
-    new TypeAnnotation(name.text(), typeArgs.typeAnnotation));
+  out.typeAnnotation = std::make_shared<TypeAnnotation>(
+    name.text(), typeArgs.typeAnnotation);
 
   // Namespaced identifiers (num & 1) can never be type variables.
   if ((name.num() & 1) && isTypeVar(name.text())) {
@@ -2189,6 +2187,24 @@ void Parser::onTypeList(Token& type1, const Token& type2) {
   if (type2.typeAnnotation) {
     type1.typeAnnotation->appendToTypeList(type2.typeAnnotation);
   }
+}
+
+void Parser::onClsCnsShapeField(Token& out,
+                                const Token& cls,
+                                const Token& cns,
+                                const Token& value) {
+  std::string name;
+  folly::toAppend(cls.text(), "::", cns.text(), &name);
+  Token t; t.reset();
+  t.setText(name);
+  onTypeAnnotation(out, t, value);
+  out.typeAnnotation->setClsCnsShapeField();
+}
+
+void Parser::onShape(Token &out, const Token &shapeFieldsList) {
+  out.typeAnnotation = std::make_shared<TypeAnnotation>(
+    "array", shapeFieldsList.typeAnnotation);
+  out.typeAnnotation->setShape();
 }
 
 void Parser::onTypeSpecialization(Token& type, char specialization) {
@@ -2225,7 +2241,7 @@ void Parser::onQuery(Token &out, Token &head, Token &body) {
 void appendList(ExpressionListPtr expList, Token *exps) {
   if (exps != nullptr) {
     assert(exps->exp->is(Expression::KindOfExpressionList));
-    ExpressionListPtr el(static_pointer_cast<ExpressionList>(exps->exp));
+    auto el = static_pointer_cast<ExpressionList>(exps->exp);
     for (unsigned int i = 0; i < el->getCount(); i++) {
       if ((*el)[i]) expList->addElement((*el)[i]);
     }
@@ -2324,7 +2340,7 @@ void Parser::AliasTable::setFalseOracle() {
   m_autoOracle = [] () { return false; };
 }
 
-std::string Parser::AliasTable::getName(std::string alias, int line_no) {
+std::string Parser::AliasTable::getName(const std::string& alias, int line_no) {
   auto it = m_aliases.find(alias);
   if (it != m_aliases.end()) {
     return it->second.name;
@@ -2337,7 +2353,7 @@ std::string Parser::AliasTable::getName(std::string alias, int line_no) {
   return "";
 }
 
-std::string Parser::AliasTable::getNameRaw(std::string alias) {
+std::string Parser::AliasTable::getNameRaw(const std::string& alias) {
   auto it = m_aliases.find(alias);
   if (it != m_aliases.end()) {
     return it->second.name;
@@ -2345,17 +2361,19 @@ std::string Parser::AliasTable::getNameRaw(std::string alias) {
   return "";
 }
 
-Parser::AliasTable::AliasType Parser::AliasTable::getType(std::string alias) {
+Parser::AliasTable::AliasType Parser::AliasTable::getType(
+  const std::string& alias
+) {
   auto it = m_aliases.find(alias);
   return it != m_aliases.end() ? it->second.type : AliasType::NONE;
 }
 
-int Parser::AliasTable::getLine(std::string alias) {
+int Parser::AliasTable::getLine(const std::string& alias) {
   auto it = m_aliases.find(alias);
   return (it != m_aliases.end()) ? it->second.line_no : -1;
 }
 
-bool Parser::AliasTable::isAliased(std::string alias) {
+bool Parser::AliasTable::isAliased(const std::string& alias) {
   auto t = getType(alias);
   if (t == AliasType::USE || t == AliasType::AUTO_USE) {
     return true;
@@ -2363,11 +2381,11 @@ bool Parser::AliasTable::isAliased(std::string alias) {
   return m_autoOracle() && m_autoAliases.find(alias) != m_autoAliases.end();
 }
 
-void Parser::AliasTable::set(std::string alias,
-                             std::string name,
+void Parser::AliasTable::set(const std::string& alias,
+                             const std::string& name,
                              AliasType type,
                              int line_no) {
-  m_aliases[alias] = (NameEntry){name, type, line_no};
+  m_aliases[alias] = NameEntry{name, type, line_no};
 }
 
 /*
@@ -2402,68 +2420,69 @@ hphp_string_imap<std::string> Parser::getAutoAliasedClassesHelper() {
   hphp_string_imap<std::string> autoAliases;
   typedef AliasTable::AliasEntry AliasEntry;
   std::vector<AliasEntry> aliases {
-    (AliasEntry){"AsyncIterator", "HH\\AsyncIterator"},
-    (AliasEntry){"AsyncKeyedIterator", "HH\\AsyncKeyedIterator"},
-    (AliasEntry){"Traversable", "HH\\Traversable"},
-    (AliasEntry){"Container", "HH\\Container"},
-    (AliasEntry){"KeyedTraversable", "HH\\KeyedTraversable"},
-    (AliasEntry){"KeyedContainer", "HH\\KeyedContainer"},
-    (AliasEntry){"Iterator", "HH\\Iterator"},
-    (AliasEntry){"KeyedIterator", "HH\\KeyedIterator"},
-    (AliasEntry){"Iterable", "HH\\Iterable"},
-    (AliasEntry){"KeyedIterable", "HH\\KeyedIterable"},
-    (AliasEntry){"Collection", "HH\\Collection"},
-    (AliasEntry){"Vector", "HH\\Vector"},
-    (AliasEntry){"Map", "HH\\Map"},
-    (AliasEntry){"Set", "HH\\Set"},
-    (AliasEntry){"Pair", "HH\\Pair"},
-    (AliasEntry){"ImmVector", "HH\\ImmVector"},
-    (AliasEntry){"ImmMap", "HH\\ImmMap"},
-    (AliasEntry){"ImmSet", "HH\\ImmSet"},
-    (AliasEntry){"InvariantException", "HH\\InvariantException"},
-    (AliasEntry){"IMemoizeParam", "HH\\IMemoizeParam"},
+    AliasEntry{"AsyncIterator", "HH\\AsyncIterator"},
+    AliasEntry{"AsyncKeyedIterator", "HH\\AsyncKeyedIterator"},
+    AliasEntry{"Traversable", "HH\\Traversable"},
+    AliasEntry{"Container", "HH\\Container"},
+    AliasEntry{"KeyedTraversable", "HH\\KeyedTraversable"},
+    AliasEntry{"KeyedContainer", "HH\\KeyedContainer"},
+    AliasEntry{"Iterator", "HH\\Iterator"},
+    AliasEntry{"KeyedIterator", "HH\\KeyedIterator"},
+    AliasEntry{"Iterable", "HH\\Iterable"},
+    AliasEntry{"KeyedIterable", "HH\\KeyedIterable"},
+    AliasEntry{"Collection", "HH\\Collection"},
+    AliasEntry{"Vector", "HH\\Vector"},
+    AliasEntry{"Map", "HH\\Map"},
+    AliasEntry{"Set", "HH\\Set"},
+    AliasEntry{"Pair", "HH\\Pair"},
+    AliasEntry{"ImmVector", "HH\\ImmVector"},
+    AliasEntry{"ImmMap", "HH\\ImmMap"},
+    AliasEntry{"ImmSet", "HH\\ImmSet"},
+    AliasEntry{"InvariantException", "HH\\InvariantException"},
+    AliasEntry{"IMemoizeParam", "HH\\IMemoizeParam"},
+    AliasEntry{"Shapes", "HH\\Shapes"},
 
-    (AliasEntry){"Awaitable", "HH\\Awaitable"},
-    (AliasEntry){"AsyncGenerator", "HH\\AsyncGenerator"},
-    (AliasEntry){"WaitHandle", "HH\\WaitHandle"},
+    AliasEntry{"Awaitable", "HH\\Awaitable"},
+    AliasEntry{"AsyncGenerator", "HH\\AsyncGenerator"},
+    AliasEntry{"WaitHandle", "HH\\WaitHandle"},
     // Keep in sync with order in hphp/runtime/ext/asio/wait-handle.h
-    (AliasEntry){"StaticWaitHandle", "HH\\StaticWaitHandle"},
-    (AliasEntry){"WaitableWaitHandle", "HH\\WaitableWaitHandle"},
-    (AliasEntry){"ResumableWaitHandle", "HH\\ResumableWaitHandle"},
-    (AliasEntry){"AsyncFunctionWaitHandle", "HH\\AsyncFunctionWaitHandle"},
-    (AliasEntry){"AsyncGeneratorWaitHandle", "HH\\AsyncGeneratorWaitHandle"},
-    (AliasEntry){"AwaitAllWaitHandle", "HH\\AwaitAllWaitHandle"},
-    (AliasEntry){"GenArrayWaitHandle", "HH\\GenArrayWaitHandle"},
-    (AliasEntry){"GenMapWaitHandle", "HH\\GenMapWaitHandle"},
-    (AliasEntry){"GenVectorWaitHandle", "HH\\GenVectorWaitHandle"},
-    (AliasEntry){"ConditionWaitHandle", "HH\\ConditionWaitHandle"},
-    (AliasEntry){"RescheduleWaitHandle", "HH\\RescheduleWaitHandle"},
-    (AliasEntry){"SleepWaitHandle", "HH\\SleepWaitHandle"},
-    (AliasEntry){
+    AliasEntry{"StaticWaitHandle", "HH\\StaticWaitHandle"},
+    AliasEntry{"WaitableWaitHandle", "HH\\WaitableWaitHandle"},
+    AliasEntry{"ResumableWaitHandle", "HH\\ResumableWaitHandle"},
+    AliasEntry{"AsyncFunctionWaitHandle", "HH\\AsyncFunctionWaitHandle"},
+    AliasEntry{"AsyncGeneratorWaitHandle", "HH\\AsyncGeneratorWaitHandle"},
+    AliasEntry{"AwaitAllWaitHandle", "HH\\AwaitAllWaitHandle"},
+    AliasEntry{"GenArrayWaitHandle", "HH\\GenArrayWaitHandle"},
+    AliasEntry{"GenMapWaitHandle", "HH\\GenMapWaitHandle"},
+    AliasEntry{"GenVectorWaitHandle", "HH\\GenVectorWaitHandle"},
+    AliasEntry{"ConditionWaitHandle", "HH\\ConditionWaitHandle"},
+    AliasEntry{"RescheduleWaitHandle", "HH\\RescheduleWaitHandle"},
+    AliasEntry{"SleepWaitHandle", "HH\\SleepWaitHandle"},
+    AliasEntry{
       "ExternalThreadEventWaitHandle",
       "HH\\ExternalThreadEventWaitHandle"
     },
 
-    (AliasEntry){"bool", "HH\\bool"},
-    (AliasEntry){"int", "HH\\int"},
-    (AliasEntry){"float", "HH\\float"},
-    (AliasEntry){"num", "HH\\num"},
-    (AliasEntry){"arraykey", "HH\\arraykey"},
-    (AliasEntry){"string", "HH\\string"},
-    (AliasEntry){"resource", "HH\\resource"},
-    (AliasEntry){"mixed", "HH\\mixed"},
-    (AliasEntry){"noreturn", "HH\\noreturn"},
-    (AliasEntry){"void", "HH\\void"},
-    (AliasEntry){"this", "HH\\this"},
-    (AliasEntry){"classname", "HH\\string"}, // for ::class
+    AliasEntry{"bool", "HH\\bool"},
+    AliasEntry{"int", "HH\\int"},
+    AliasEntry{"float", "HH\\float"},
+    AliasEntry{"num", "HH\\num"},
+    AliasEntry{"arraykey", "HH\\arraykey"},
+    AliasEntry{"string", "HH\\string"},
+    AliasEntry{"resource", "HH\\resource"},
+    AliasEntry{"mixed", "HH\\mixed"},
+    AliasEntry{"noreturn", "HH\\noreturn"},
+    AliasEntry{"void", "HH\\void"},
+    AliasEntry{"this", "HH\\this"},
+    AliasEntry{"classname", "HH\\string"}, // for ::class
 
     // Support a handful of synonyms for backwards compat with code written
     // against older versions of HipHop, and to be consistent with PHP5 casting
     // syntax (for example, PHP5 supports both "(bool)$x" and "(boolean)$x")
-    (AliasEntry){"boolean", "HH\\bool"},
-    (AliasEntry){"integer", "HH\\int"},
-    (AliasEntry){"double", "HH\\float"},
-    (AliasEntry){"real", "HH\\float"},
+    AliasEntry{"boolean", "HH\\bool"},
+    AliasEntry{"integer", "HH\\int"},
+    AliasEntry{"double", "HH\\float"},
+    AliasEntry{"real", "HH\\float"},
   };
   for (auto entry : aliases) {
     autoAliases[entry.alias] = entry.name;
@@ -2536,7 +2555,7 @@ void Parser::onUse(const std::string &ns, const std::string &as) {
     error("You seem to be trying to use a different language. "
           "May I recommend Hack? http://hacklang.org");
   }
-  string key = fully_qualified_name_as_alias_key(ns, as);
+  auto const key = fully_qualified_name_as_alias_key(ns, as);
 
   if (m_nsAliasTable.getType(key) == AliasType::AUTO_USE) {
     error("Cannot use %s as %s because the name was implicitly used "
@@ -2572,7 +2591,7 @@ void Parser::onUse(const std::string &ns, const std::string &as) {
 }
 
 void Parser::onUseFunction(const std::string &fn, const std::string &as) {
-  string key = fully_qualified_name_as_alias_key(fn, as);
+  auto const key = fully_qualified_name_as_alias_key(fn, as);
 
   if (m_fnTable.count(key) || m_fnAliasTable.count(key)) {
     error(
@@ -2584,7 +2603,7 @@ void Parser::onUseFunction(const std::string &fn, const std::string &as) {
 }
 
 void Parser::onUseConst(const std::string &cnst, const std::string &as) {
-  string key = fully_qualified_name_as_alias_key(cnst, as);
+  auto const key = fully_qualified_name_as_alias_key(cnst, as);
 
   if (m_cnstTable.count(key) || m_cnstAliasTable.count(key)) {
     error(
@@ -2612,8 +2631,8 @@ std::string Parser::nsDecl(const std::string &name) {
 }
 
 std::string Parser::resolve(const std::string &ns, bool cls) {
-  size_t pos = ns.find(NAMESPACE_SEP);
-  string alias = (pos != string::npos) ? ns.substr(0, pos) : ns;
+  auto const pos = ns.find(NAMESPACE_SEP);
+  auto const alias = (pos != std::string::npos) ? ns.substr(0, pos) : ns;
 
   // Don't expand type variables into the current namespace.
   if (isTypeVar(ns)) {
@@ -2623,7 +2642,7 @@ std::string Parser::resolve(const std::string &ns, bool cls) {
   if (m_nsAliasTable.isAliased(alias)) {
     auto name = m_nsAliasTable.getName(alias, line1());
     // Was it a namespace alias?
-    if (pos != string::npos) {
+    if (pos != std::string::npos) {
       return name + ns.substr(pos);
     }
     // Only classes can appear directly in "use" statements
@@ -2638,7 +2657,7 @@ std::string Parser::resolve(const std::string &ns, bool cls) {
   }
 
   // if qualified name, prepend current namespace
-  if (pos != string::npos) {
+  if (pos != std::string::npos) {
     return nsDecl(ns);
   }
 
@@ -2675,8 +2694,8 @@ TStatementPtr Parser::extractStatement(ScannerToken *stmt) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void Parser::registerAlias(std::string name) {
-  size_t pos = name.rfind(NAMESPACE_SEP);
-  string key = (pos != string::npos) ? name.substr(pos + 1) : name;
+  auto const pos = name.rfind(NAMESPACE_SEP);
+  auto const key = (pos != std::string::npos) ? name.substr(pos + 1) : name;
   if (m_nsAliasTable.getType(key) != AliasType::USE &&
       m_nsAliasTable.getType(key) != AliasType::AUTO_USE) {
     m_nsAliasTable.set(key, name, AliasType::DEF, line1());

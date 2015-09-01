@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -204,7 +204,7 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
   if (!containsCalls) { attrs |= AttrPhpLeafFn; }
 
   assert(!m_pce == !preClass);
-  auto f = m_ue.newFunc(this, unit, name, attrs, params.size(), isClosureBody);
+  auto f = m_ue.newFunc(this, unit, name, attrs, params.size());
 
   f->m_isPreFunc = !!preClass;
 
@@ -395,7 +395,9 @@ struct EHEntComp {
   bool operator()(const EHEntEmitter& e1, const EHEntEmitter& e2) const {
     if (e1.m_base == e2.m_base) {
       if (e1.m_past == e2.m_past) {
-        return e1.m_type == EHEnt::Type::Catch;
+        static_assert(!static_cast<uint8_t>(EHEnt::Type::Catch),
+            "Catch should be the smallest type");
+        return e1.m_type < e2.m_type;
       }
       return e1.m_past > e2.m_past;
     }
@@ -500,7 +502,8 @@ static const StaticString
   s_variadicbyref("VariadicByRef"),
   s_noinjection("NoInjection"),
   s_zendcompat("ZendCompat"),
-  s_numargs("NumArgs");
+  s_numargs("NumArgs"),
+  s_opcodeimpl("OpCodeImpl");
 
 int FuncEmitter::parseNativeAttributes(Attr& attrs_) const {
   int ret = Native::AttrNone;
@@ -529,6 +532,8 @@ int FuncEmitter::parseNativeAttributes(Attr& attrs_) const {
         ret |= Native::AttrActRec;
       } else if (userAttrStrVal.get()->isame(s_numargs.get())) {
         attrs_ |= AttrNumArgs;
+      } else if (userAttrStrVal.get()->isame(s_opcodeimpl.get())) {
+        ret |= Native::AttrOpCodeImpl;
       }
     }
   }

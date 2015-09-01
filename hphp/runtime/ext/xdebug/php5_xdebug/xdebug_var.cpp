@@ -18,6 +18,8 @@
 
 #include "hphp/runtime/ext/xdebug/php5_xdebug/xdebug_var.h"
 
+#include "hphp/runtime/ext/xdebug/php5_xdebug/xdebug_mm.h"
+
 #include <cstdint>
 
 #include "hphp/runtime/ext/string/ext_string.h"
@@ -480,10 +482,10 @@ xdebug_xml_node* xdebug_var_export_xml_node(const char* name,
     // Done at this level
     exporter.level--;
   } else if (var.isResource()) {
-    ResourceData* res = var.toResource().get();
+    auto res = var.toResource();
     xdebug_xml_add_attribute(node, "type", "resource");
     const char* text = xdebug_sprintf("resource id='%ld' type='%s'",
-                                      res->o_getId(),
+                                      res->getId(),
                                       res->o_getResourceName().data());
     xdebug_xml_add_text(node, const_cast<char*>(text));
   } else {
@@ -571,7 +573,7 @@ void xdebug_var_export_text_ansi(
     break;
   case KindOfInt64:
     sb.printf(
-      "%sint%s(%s%ld%s)",
+      "%sint%s(%s%" PRId64 "%s)",
       ANSI_COLOR_BOLD,
       ANSI_COLOR_BOLD_OFF,
       ANSI_COLOR_LONG,
@@ -633,7 +635,7 @@ void xdebug_var_export_text_ansi(
       ANSI_COLOR_BOLD,
       ANSI_COLOR_BOLD_OFF,
       ANSI_COLOR_RESOURCE,
-      res->o_getId(),
+      res->getId(),
       ANSI_COLOR_RESET,
       res->o_getClassName().c_str()
     );
@@ -666,7 +668,7 @@ void xdebug_var_export_text_ansi(
         switch (first.m_type) {
         case KindOfInt64:
           sb.printf(
-            "[%ld] %s=>%s\n",
+            "[%" PRId64 "] %s=>%s\n",
             first.m_data.num,
             ANSI_COLOR_POINTER,
             ANSI_COLOR_RESET
@@ -742,7 +744,7 @@ void xdebug_var_export_text_ansi(
 
       auto first = *iter.first().asTypedValue();
 
-      auto prop_name = IS_STRING_TYPE(first.m_type)
+      auto prop_name = isStringType(first.m_type)
         ? String{first.m_data.pstr}
         : String{first.m_data.num};
 
@@ -973,7 +975,7 @@ void xdebug_var_export_fancy(
         continue;
       }
 
-      auto prop_name = IS_STRING_TYPE(first.m_type)
+      auto prop_name = isStringType(first.m_type)
         ? String{first.m_data.pstr}
       : empty_string();
 

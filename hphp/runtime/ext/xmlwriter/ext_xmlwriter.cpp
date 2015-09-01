@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -540,7 +540,7 @@ struct XMLWriterData {
 public:
   xmlTextWriterPtr  m_ptr;
   xmlBufferPtr      m_output;
-  SmartPtr<File>    m_uri;
+  req::ptr<File>    m_uri;
 
 private:
 ///////////////////////////////////////////////////////////////////////////////
@@ -680,7 +680,7 @@ void XMLWriterResource::sweep() {
 XMLWRITER_METHOD_NO_ARGS(bool, openMemory)
 
 static Variant HHVM_FUNCTION(xmlwriter_open_memory) {
-  auto data = makeSmartPtr<XMLWriterResource>();
+  auto data = req::make<XMLWriterResource>();
 
   bool opened = data->m_writer.openMemory();
   if (!opened) {
@@ -694,7 +694,7 @@ XMLWRITER_METHOD(bool, openURI,
 
 static Variant HHVM_FUNCTION(xmlwriter_open_uri,
                              const String& uri) {
-  auto data = makeSmartPtr<XMLWriterResource>();
+  auto data = req::make<XMLWriterResource>();
 
   bool opened = data->m_writer.openURI(uri);
   if (!opened) {

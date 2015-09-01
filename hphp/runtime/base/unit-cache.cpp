@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -29,7 +29,7 @@
 #include "hphp/util/rank.h"
 #include "hphp/util/mutex.h"
 #include "hphp/util/process.h"
-#include "hphp/runtime/ext/ext_system_profiler.h"
+#include "hphp/runtime/base/system-profiler.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/string-util.h"
@@ -138,7 +138,11 @@ struct CachedUnitWithFree {
 
 struct CachedUnitNonRepo {
   std::shared_ptr<CachedUnitWithFree> cachedUnit;
+#ifdef _MSC_VER
+  time_t mtime;
+#else
   struct timespec mtime;
+#endif
   ino_t ino;
   dev_t devId;
 };
@@ -151,11 +155,13 @@ using NonRepoUnitCache = RankedCHM<
 >;
 NonRepoUnitCache s_nonRepoUnitCache;
 
+#ifndef _MSC_VER
 int64_t timespecCompare(const struct timespec& l,
                         const struct timespec& r) {
   if (l.tv_sec != r.tv_sec) return l.tv_sec - r.tv_sec;
   return l.tv_nsec - r.tv_nsec;
 }
+#endif
 
 bool isChanged(const CachedUnitNonRepo& cu, const struct stat& s) {
   // If the cached unit is null, we always need to consider it out of date (in
@@ -164,7 +170,11 @@ bool isChanged(const CachedUnitNonRepo& cu, const struct stat& s) {
   // open() it.
   return !cu.cachedUnit ||
          cu.cachedUnit->cu.unit == nullptr ||
+#ifdef _MSC_VER
+         cu.mtime - s.st_mtime < 0 ||
+#else
          timespecCompare(cu.mtime, s.st_mtim) < 0 ||
+#endif
          cu.ino != s.st_ino ||
          cu.devId != s.st_dev;
 }
@@ -172,7 +182,7 @@ bool isChanged(const CachedUnitNonRepo& cu, const struct stat& s) {
 folly::Optional<String> readFileAsString(const StringData* path) {
   auto const fd = open(path->data(), O_RDONLY);
   if (!fd) return folly::none;
-  auto file = makeSmartPtr<PlainFile>(fd);
+  auto file = req::make<PlainFile>(fd);
   return file->read();
 }
 
@@ -220,7 +230,7 @@ CachedUnit loadUnitNonRepoAuth(StringData* requestedPath,
       // XXX: it seems weird we have to do this even though we already ran
       // resolveVmInclude.
       (requestedPath->data()[0] == '/'
-        ? requestedPath
+       ?  String{requestedPath}
         : String(SourceRootInfo::GetCurrentSourceRoot()) + StrNR(requestedPath)
       ).get()
     );
@@ -259,7 +269,11 @@ CachedUnit loadUnitNonRepoAuth(StringData* requestedPath,
 
     auto const cu = createUnitFromFile(rpath);
     rpathAcc->second.cachedUnit = std::make_shared<CachedUnitWithFree>(cu);
+#ifdef _MSC_VER
+    rpathAcc->second.mtime      = statInfo.st_mtime;
+#else
     rpathAcc->second.mtime      = statInfo.st_mtim;
+#endif
     rpathAcc->second.ino        = statInfo.st_ino;
     rpathAcc->second.devId      = statInfo.st_dev;
 
@@ -270,7 +284,11 @@ CachedUnit loadUnitNonRepoAuth(StringData* requestedPath,
     NonRepoUnitCache::accessor pathAcc;
     s_nonRepoUnitCache.insert(pathAcc, path);
     pathAcc->second.cachedUnit = cuptr;
+#ifdef _MSC_VER
+    pathAcc->second.mtime      = statInfo.st_mtime;
+#else
     pathAcc->second.mtime      = statInfo.st_mtim;
+#endif
     pathAcc->second.ino        = statInfo.st_ino;
     pathAcc->second.devId      = statInfo.st_dev;
   }
@@ -387,14 +405,18 @@ CachedUnit checkoutFile(StringData* path, const struct stat& statInfo) {
 
 std::string mangleUnitMd5(const std::string& fileMd5) {
   std::string t = fileMd5 + '\0'
-    + (RuntimeOption::EnableEmitSwitch ? '1' : '0')
+    + (RuntimeOption::EvalEmitSwitch ? '1' : '0')
+    + (RuntimeOption::EvalEmitNewMInstrs ? '1' : '0')
     + (RuntimeOption::EnableHipHopExperimentalSyntax ? '1' : '0')
     + (RuntimeOption::EnableHipHopSyntax ? '1' : '0')
     + (RuntimeOption::EnableXHP ? '1' : '0')
     + (RuntimeOption::EvalAllowHhas ? '1' : '0')
     + (RuntimeOption::EvalJitEnableRenameFunction ? '1' : '0')
     + (RuntimeOption::IntsOverflowToInts ? '1' : '0')
-    + (RuntimeOption::EvalEnableCallBuiltin ? '1' : '0');
+    + (RuntimeOption::EvalEnableCallBuiltin ? '1' : '0')
+    + RuntimeOption::EvalUseExternalEmitter + '\0'
+    + (RuntimeOption::EvalExternalEmitterFallback ? '1' : '0')
+    + (RuntimeOption::EvalExternalEmitterAllowPartial ? '1' : '0');
   return string_md5(t.c_str(), t.size());
 }
 
@@ -413,7 +435,7 @@ String resolveVmInclude(StringData* path,
   ctx.s = s;
   ctx.allow_dir = allow_dir;
   void* vpCtx = &ctx;
-  resolve_include(path, currentDir, findFileWrapper, vpCtx);
+  resolve_include(String{path}, currentDir, findFileWrapper, vpCtx);
   // If resolve_include() could not find the file, return NULL
   return ctx.path;
 }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,11 +18,13 @@
 #define incl_HPHP_VM_CG_X64_H_
 
 #include "hphp/runtime/vm/jit/code-gen.h"
+
+#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
-#include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
+#include "hphp/runtime/vm/jit/vasm.h"
 
 namespace HPHP { namespace jit {
 ///////////////////////////////////////////////////////////////////////////////
@@ -33,11 +35,6 @@ namespace arm { struct CodeGenerator; }
 
 namespace x64 {
 ///////////////////////////////////////////////////////////////////////////////
-
-// Cache alignment is required for mutable instructions to make sure
-// mutations don't "tear" on remote cpus.
-constexpr size_t kCacheLineSize = 64;
-constexpr size_t kCacheLineMask = kCacheLineSize - 1;
 
 struct CodeGenerator {
   friend struct arm::CodeGenerator;
@@ -67,8 +64,6 @@ private:
   CallDest callDest(const IRInstruction*) const;
   CallDest callDestTV(const IRInstruction*) const;
   CallDest callDestDbl(const IRInstruction*) const;
-  template<class Arg>
-  CppCall arrayCallIfLowMem(const IRInstruction* inst, Arg vtable) const;
 
   // Main call helper:
   void cgCallHelper(Vout& v, CppCall call, const CallDest& dstInfo,
@@ -105,16 +100,13 @@ private:
                                     rds::Handle ch);
 
   void emitCmpInt(IRInstruction* inst, ConditionCode cc);
+  void emitCmpBool(IRInstruction* inst, ConditionCode cc);
   void emitCmpEqDbl(IRInstruction* inst, ComparisonPred pred);
   void emitCmpRelDbl(IRInstruction* inst, ConditionCode cc, bool flipOperands);
-  void cgCmpHelper(IRInstruction* inst, ConditionCode cc,
-                   int64_t (*str_cmp_str)(StringData*, StringData*),
-                   int64_t (*str_cmp_int)(StringData*, int64_t),
-                   int64_t (*str_cmp_obj)(StringData*, ObjectData*),
-                   int64_t (*obj_cmp_obj)(ObjectData*, ObjectData*),
-                   int64_t (*obj_cmp_int)(ObjectData*, int64_t),
-                   int64_t (*arr_cmp_arr)(ArrayData*, ArrayData*));
 
+  void cgCoerceHelper(IRInstruction* inst, Vreg base, int offset,
+                      Func const* callee, int argNum);
+  void cgCastHelper(IRInstruction* inst, Vreg base, int offset);
   Vreg emitTestZero(Vout& v, SSATmp* src, Vloc srcLoc);
   template<class Inst>
   bool emitIncDec(Vout& v, Vloc dst, SSATmp* src0, Vloc loc0,

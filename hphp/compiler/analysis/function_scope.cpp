@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -50,20 +50,20 @@ using namespace HPHP;
 ///////////////////////////////////////////////////////////////////////////////
 
 FunctionScope::FunctionScope(AnalysisResultConstPtr ar, bool method,
-                             const std::string &name, StatementPtr stmt,
+                             const std::string &originalName, StatementPtr stmt,
                              bool reference, int minParam, int numDeclParam,
                              ModifierExpressionPtr modifiers,
                              int attribute, const std::string &docComment,
                              FileScopePtr file,
                              const std::vector<UserAttributePtr> &attrs,
                              bool inPseudoMain /* = false */)
-    : BlockScope(name, docComment, stmt, BlockScope::FunctionScope),
+    : BlockScope(originalName, docComment, stmt, BlockScope::FunctionScope),
       m_minParam(minParam), m_numDeclParams(numDeclParam),
       m_attribute(attribute), m_modifiers(modifiers), m_hasVoid(false),
       m_method(method), m_refReturn(reference), m_virtual(false),
-      m_hasOverride(false), m_overriding(false),
+      m_hasOverride(false),
       m_volatile(false), m_persistent(false), m_pseudoMain(inPseudoMain),
-      m_magicMethod(false), m_system(false),
+      m_system(false),
       m_containsThis(false), m_containsBareThis(0),
       m_generator(false),
       m_async(false),
@@ -74,7 +74,8 @@ FunctionScope::FunctionScope(AnalysisResultConstPtr ar, bool method,
 
   for (unsigned i = 0; i < attrs.size(); ++i) {
     if (m_userAttributes.find(attrs[i]->getName()) != m_userAttributes.end()) {
-      attrs[i]->parseTimeFatal(Compiler::DeclaredAttributeTwice,
+      attrs[i]->parseTimeFatal(file,
+                               Compiler::DeclaredAttributeTwice,
                                "Redeclared attribute %s",
                                attrs[i]->getName().c_str());
     }
@@ -109,21 +110,20 @@ FunctionScope::FunctionScope(AnalysisResultConstPtr ar, bool method,
 
 FunctionScope::FunctionScope(FunctionScopePtr orig,
                              AnalysisResultConstPtr ar,
-                             const string &name,
-                             const string &originalName,
+                             const std::string &originalName,
                              StatementPtr stmt,
                              ModifierExpressionPtr modifiers,
                              bool user)
-    : BlockScope(name, orig->m_docComment, stmt,
+    : BlockScope(originalName, orig->m_docComment, stmt,
                  BlockScope::FunctionScope),
       m_minParam(orig->m_minParam), m_numDeclParams(orig->m_numDeclParams),
       m_attribute(orig->m_attribute), m_modifiers(modifiers),
       m_userAttributes(orig->m_userAttributes), m_hasVoid(orig->m_hasVoid),
       m_method(orig->m_method), m_refReturn(orig->m_refReturn),
       m_virtual(orig->m_virtual), m_hasOverride(orig->m_hasOverride),
-      m_overriding(orig->m_overriding), m_volatile(orig->m_volatile),
+      m_volatile(orig->m_volatile),
       m_persistent(orig->m_persistent),
-      m_pseudoMain(orig->m_pseudoMain), m_magicMethod(orig->m_magicMethod),
+      m_pseudoMain(orig->m_pseudoMain),
       m_system(!user),
       m_containsThis(orig->m_containsThis),
       m_containsBareThis(orig->m_containsBareThis),
@@ -136,22 +136,13 @@ FunctionScope::FunctionScope(FunctionScopePtr orig,
       m_inlineIndex(orig->m_inlineIndex), m_optFunction(orig->m_optFunction),
       m_nextID(0) {
   init(ar);
-  m_originalName = originalName;
   setParamCounts(ar, m_minParam, m_numDeclParams);
 }
 
 void FunctionScope::init(AnalysisResultConstPtr ar) {
   m_dynamicInvoke = false;
-  if (m_pseudoMain) {
-    m_variables->forceVariants(ar, VariableTable::AnyVars);
-    setReturnType(ar, Type::Variant);
-  }
 
-  if (m_refReturn) {
-    m_returnType = Type::Variant;
-  }
-
-  if (!strcasecmp(m_name.c_str(), "__autoload")) {
+  if (isNamed("__autoload")) {
     setVolatile();
   }
 
@@ -184,9 +175,7 @@ void FunctionScope::init(AnalysisResultConstPtr ar) {
     m_volatile = true;
   }
 
-  m_dynamic = Option::IsDynamicFunction(m_method, m_name) ||
-    Option::EnableEval == Option::FullEval || Option::AllDynamic;
-  if (!m_method && Option::DynamicInvokeFunctions.find(m_name) !=
+  if (!m_method && Option::DynamicInvokeFunctions.find(m_scopeName) !=
       Option::DynamicInvokeFunctions.end()) {
     setDynamicInvoke();
   }
@@ -195,14 +184,14 @@ void FunctionScope::init(AnalysisResultConstPtr ar) {
   }
 
   if (m_stmt) {
-    MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
+    auto stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
     StatementListPtr stmts = stmt->getStmts();
     if (stmts) {
       for (int i = 0; i < stmts->getCount(); i++) {
         StatementPtr stmt = (*stmts)[i];
         stmt->setFileLevel();
         if (stmt->is(Statement::KindOfExpStatement)) {
-          ExpStatementPtr expStmt = dynamic_pointer_cast<ExpStatement>(stmt);
+          auto expStmt = dynamic_pointer_cast<ExpStatement>(stmt);
           ExpressionPtr exp = expStmt->getExpression();
           exp->setTopLevel();
         }
@@ -217,9 +206,9 @@ FunctionScope::FunctionScope(bool method, const std::string &name,
       m_minParam(0), m_numDeclParams(0), m_attribute(0),
       m_modifiers(ModifierExpressionPtr()), m_hasVoid(false),
       m_method(method), m_refReturn(reference), m_virtual(false),
-      m_hasOverride(false), m_overriding(false),
+      m_hasOverride(false),
       m_volatile(false), m_persistent(false), m_pseudoMain(false),
-      m_magicMethod(false), m_system(true),
+      m_system(true),
       m_containsThis(false), m_containsBareThis(0),
       m_generator(false),
       m_async(false),
@@ -227,17 +216,14 @@ FunctionScope::FunctionScope(bool method, const std::string &name,
       m_hasTry(false), m_hasGoto(false), m_localRedeclaring(false),
       m_redeclaring(-1), m_inlineIndex(0),
       m_optFunction(0) {
-  m_dynamic = Option::IsDynamicFunction(method, m_name) ||
-    Option::EnableEval == Option::FullEval || Option::AllDynamic;
   m_dynamicInvoke = false;
-  if (!method && Option::DynamicInvokeFunctions.find(m_name) !=
+  if (!method && Option::DynamicInvokeFunctions.find(name) !=
       Option::DynamicInvokeFunctions.end()) {
     setDynamicInvoke();
   }
 }
 
 void FunctionScope::setDynamicInvoke() {
-  m_returnType = Type::Variant;
   m_dynamicInvoke = true;
 }
 
@@ -253,18 +239,16 @@ void FunctionScope::setParamCounts(AnalysisResultConstPtr ar, int minParam,
   assert(IMPLIES(hasVariadicParam(), m_numDeclParams > 0));
   if (m_numDeclParams > 0) {
     m_paramNames.resize(m_numDeclParams);
-    m_paramTypes.resize(m_numDeclParams);
     m_refs.resize(m_numDeclParams);
 
     if (m_stmt) {
-      MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
+      auto stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
       ExpressionListPtr params = stmt->getParams();
 
       for (int i = 0; i < m_numDeclParams; i++) {
         if (stmt->isRef(i)) m_refs[i] = true;
 
-        ParameterExpressionPtr param =
-          dynamic_pointer_cast<ParameterExpression>((*params)[i]);
+        auto param = dynamic_pointer_cast<ParameterExpression>((*params)[i]);
         m_paramNames[i] = param->getName();
       }
       assert(m_paramNames.size() == m_numDeclParams);
@@ -318,8 +302,7 @@ bool FunctionScope::allowsVariableArguments() const {
 }
 
 bool FunctionScope::usesVariableArgumentFunc() const {
-  bool res = (m_attribute & FileScope::VariableArgument) && !m_overriding;
-  return res;
+  return m_attribute & FileScope::VariableArgument;
 }
 
 bool FunctionScope::allowOverride() const {
@@ -327,8 +310,7 @@ bool FunctionScope::allowOverride() const {
 }
 
 bool FunctionScope::isReferenceVariableArgument() const {
-  bool res = (m_attribute & FileScope::ReferenceVariableArgument) &&
-             !m_overriding;
+  bool res = m_attribute & FileScope::ReferenceVariableArgument;
   // If this method returns true, then usesVariableArgumentFunc() must also
   // return true.
   assert(!res || usesVariableArgumentFunc());
@@ -351,7 +333,7 @@ bool FunctionScope::mayContainThis() {
 }
 
 bool FunctionScope::isClosure() const {
-  return ParserBase::IsClosureName(name());
+  return ParserBase::IsClosureName(getScopeName());
 }
 
 void FunctionScope::setVariableArgument(int reference) {
@@ -381,7 +363,7 @@ bool FunctionScope::isFoldable() const {
     return true;
   }
   // Systemlib (PHP&HNI) builtins
-  auto f = Unit::lookupFunc(String(getName()).get());
+  auto f = Unit::lookupFunc(String(getScopeName()).get());
   return f && f->isFoldable();
 }
 
@@ -406,7 +388,7 @@ void FunctionScope::setContainsThis(bool f /* = true */) {
 
   BlockScopePtr bs(this->getOuterScope());
   while (bs && bs->is(BlockScope::FunctionScope)) {
-    FunctionScopePtr fs = static_pointer_cast<FunctionScope>(bs);
+    auto fs = static_pointer_cast<FunctionScope>(bs);
     if (!fs->isClosure()) {
       break;
     }
@@ -428,7 +410,7 @@ void FunctionScope::setContainsBareThis(bool f, bool ref /* = false */) {
 
   BlockScopePtr bs(this->getOuterScope());
   while (bs && bs->is(BlockScope::FunctionScope)) {
-    FunctionScopePtr fs = static_pointer_cast<FunctionScope>(bs);
+    auto fs = static_pointer_cast<FunctionScope>(bs);
     if (!fs->isClosure()) {
       break;
     }
@@ -446,20 +428,25 @@ bool FunctionScope::hasImpl() const {
     return !isAbstract();
   }
   if (m_stmt) {
-    MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
+    auto stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
     return stmt->getStmts() != nullptr;
   }
   return false;
 }
 
+bool FunctionScope::isNamed(const char* n) const {
+  return !strcasecmp(getScopeName().c_str(), n);
+}
+
 bool FunctionScope::isConstructor(ClassScopePtr cls) const {
-  return m_stmt && cls
-    && (getName() == "__construct"
-     || (cls->classNameCtor() && getName() == cls->getName()));
+  return m_stmt && cls &&
+    (isNamed("__construct") ||
+     (cls->classNameCtor() && isNamed(cls->getScopeName())));
 }
 
 bool FunctionScope::isMagic() const {
-  return m_name.size() >= 2 && m_name[0] == '_' && m_name[1] == '_';
+  return m_scopeName.size() >= 2 &&
+    m_scopeName[0] == '_' && m_scopeName[1] == '_';
 }
 
 bool FunctionScope::needsLocalThis() const {
@@ -472,29 +459,17 @@ bool FunctionScope::needsLocalThis() const {
 }
 
 static std::string s_empty;
-const string &FunctionScope::getOriginalName() const {
+const std::string &FunctionScope::getOriginalName() const {
   if (m_pseudoMain) return s_empty;
-  if (m_stmt) {
-    MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
-    return stmt->getOriginalName();
-  }
-  return m_originalName;
+  return m_scopeName;
 }
 
-string FunctionScope::getFullName() const {
+std::string FunctionScope::getOriginalFullName() const {
   if (m_stmt) {
-    MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
-    return stmt->getFullName();
-  }
-  return m_name;
-}
-
-string FunctionScope::getOriginalFullName() const {
-  if (m_stmt) {
-    MethodStatementPtr stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
+    auto stmt = dynamic_pointer_cast<MethodStatement>(m_stmt);
     return stmt->getOriginalFullName();
   }
-  return m_name;
+  return m_scopeName;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -520,35 +495,6 @@ bool FunctionScope::mayUseVV() const {
      variables->getAttribute(VariableTable::ContainsGetDefinedVars) ||
      (!Option::EnableHipHopSyntax &&
       variables->getAttribute(VariableTable::ContainsDynamicFunctionCall)));
-}
-
-TypePtr FunctionScope::setParamType(AnalysisResultConstPtr ar, int index,
-                                    TypePtr type) {
-  assert(index >= 0 && index < (int)m_paramTypes.size());
-  TypePtr paramType = m_paramTypes[index];
-
-  if (!paramType) paramType = Type::Some;
-  type = Type::Coerce(ar, paramType, type);
-  if (type && !Type::SameType(paramType, type)) {
-    addUpdates(UseKindCallerParam);
-    if (!isFirstPass()) {
-      Logger::Verbose("Corrected type of parameter %d of %s: %s -> %s",
-                      index, m_name.c_str(),
-                      paramType->toString().c_str(), type->toString().c_str());
-    }
-  }
-  m_paramTypes[index] = type;
-  return type;
-}
-
-TypePtr FunctionScope::getParamType(int index) {
-  assert(index >= 0 && index < (int)m_paramTypes.size());
-  TypePtr paramType = m_paramTypes[index];
-  if (!paramType) {
-    paramType = Type::Some;
-    m_paramTypes[index] = paramType;
-  }
-  return paramType;
 }
 
 bool FunctionScope::isRefParam(int index) const {
@@ -581,49 +527,10 @@ void FunctionScope::setParamName(int index, const std::string &name) {
 
 void FunctionScope::addModifier(int mod) {
   if (!m_modifiers) {
-    m_modifiers =
-      ModifierExpressionPtr(new ModifierExpression(
-                              shared_from_this(), LocationPtr()));
+    m_modifiers = std::make_shared<ModifierExpression>(shared_from_this(),
+                                                       Location::Range());
   }
   m_modifiers->add(mod);
-}
-
-void FunctionScope::setReturnType(AnalysisResultConstPtr ar, TypePtr type) {
-  if (inTypeInference()) {
-    getInferTypesMutex().assertOwnedBySelf();
-  }
-  // no change can be made to virtual function's prototype
-  if (m_overriding || m_dynamicInvoke) return;
-
-  if (!type) {
-    m_hasVoid = true;
-    if (!m_returnType) return;
-  }
-
-  if (m_hasVoid) {
-    type = Type::Variant;
-  } else if (m_returnType) {
-    type = Type::Coerce(ar, m_returnType, type);
-  }
-  m_returnType = type;
-  assert(m_returnType);
-}
-
-void FunctionScope::setOverriding(TypePtr returnType,
-                                  TypePtr param1 /* = TypePtr() */,
-                                  TypePtr param2 /* = TypePtr() */) {
-  m_returnType = returnType;
-  m_overriding = true;
-
-  if (param1 && m_paramTypes.size() >= 1) m_paramTypes[0] = param1;
-  if (param2 && m_paramTypes.size() >= 2) m_paramTypes[1] = param2;
-
-  // TODO: remove this block and replace with stronger typing
-  // Right now, we have to avoid a situation where a parameter is assigned
-  // with different values, making them a Variant.
-  for (unsigned int i = 0; i < m_paramTypes.size(); i++) {
-    m_paramTypes[i] = Type::Variant;
-  }
 }
 
 std::vector<std::string> FunctionScope::getUserAttributeStringParams(
@@ -659,7 +566,7 @@ std::vector<std::string> FunctionScope::getUserAttributeStringParams(
 }
 
 std::string FunctionScope::getDocName() const {
-  string name = getOriginalName();
+  auto const& name = getScopeName();
   if (m_redeclaring < 0) {
     return name;
   }
@@ -668,9 +575,9 @@ std::string FunctionScope::getDocName() const {
 
 std::string FunctionScope::getDocFullName() const {
   FunctionScope *self = const_cast<FunctionScope*>(this);
-  const string &docName = getDocName();
+  auto const& docName = getDocName();
   if (ClassScopeRawPtr cls = self->getContainingClass()) {
-    return cls->getDocName() + string("::") + docName;
+    return cls->getDocName() + std::string("::") + docName;
   }
   return docName;
 }
@@ -692,13 +599,6 @@ void FunctionScope::serialize(JSON::CodeError::OutputStream &out) const {
   if (isAbstract()) mod = ClassScope::Abstract;
   else if (isFinal()) mod = ClassScope::Final;
 
-  if (!m_returnType) {
-    ms.add("retTp", -1);
-  } else if (m_returnType->isSpecificObject()) {
-    ms.add("retTp", m_returnType->getName());
-  } else {
-    ms.add("retTp", m_returnType->getKindOf());
-  }
   ms.add("minArgs", m_minParam)
     .add("maxArgs", m_numDeclParams)
     .add("varArgs", allowsVariableArguments())
@@ -713,7 +613,7 @@ void FunctionScope::serialize(JSON::DocTarget::OutputStream &out) const {
   JSON::DocTarget::MapStream ms(out);
 
   ms.add("name", getDocName());
-  ms.add("line", getStmt() ? getStmt()->getLocation()->line0 : 0);
+  ms.add("line", getStmt() ? getStmt()->line0() : 0);
   ms.add("docs", m_docComment);
 
   int mods = 0;
@@ -726,12 +626,11 @@ void FunctionScope::serialize(JSON::DocTarget::OutputStream &out) const {
   ms.add("modifiers", mods);
 
   ms.add("refreturn", isRefReturn());
-  ms.add("return",    getReturnType());
 
-  vector<SymParamWrapper> paramSymbols;
+  std::vector<SymParamWrapper> paramSymbols;
   auto const limit = getDeclParamCount();
   for (int i = 0; i < limit; i++) {
-    const string &name = getParamName(i);
+    auto const& name = getParamName(i);
     const Symbol *sym = getVariables()->getSymbol(name);
     assert(sym && sym->isParameter());
     paramSymbols.push_back(SymParamWrapper(sym));
@@ -739,15 +638,11 @@ void FunctionScope::serialize(JSON::DocTarget::OutputStream &out) const {
   ms.add("parameters", paramSymbols);
 
   // scopes that call this scope (callers)
-  vector<string> callers;
-  const BlockScopeRawPtrFlagsPtrVec &deps = getDeps();
-  for (BlockScopeRawPtrFlagsPtrVec::const_iterator it = deps.begin();
-       it != deps.end(); ++it) {
-    const BlockScopeRawPtrFlagsPtrPair &p(*it);
+  std::vector<std::string> callers;
+  for (const auto& p : getDeps()) {
     if ((*p.second & BlockScope::UseKindCaller) &&
         p.first->is(BlockScope::FunctionScope)) {
-      FunctionScopeRawPtr f(
-          static_pointer_cast<FunctionScope>(p.first));
+      auto f = static_pointer_cast<FunctionScope>(p.first);
       callers.push_back(f->getDocFullName());
     }
   }
@@ -756,15 +651,11 @@ void FunctionScope::serialize(JSON::DocTarget::OutputStream &out) const {
   // scopes that this scope calls (callees)
   // TODO(stephentu): this list only contains *user* functions,
   // we should also include builtins
-  vector<string> callees;
-  const BlockScopeRawPtrFlagsVec &users = getOrderedUsers();
-  for (BlockScopeRawPtrFlagsVec::const_iterator uit = users.begin();
-       uit != users.end(); ++uit) {
-    BlockScopeRawPtrFlagsVec::value_type pf = *uit;
+  std::vector<std::string> callees;
+  for (const auto pf : getOrderedUsers()) {
     if ((pf->second & BlockScope::UseKindCaller) &&
         pf->first->is(BlockScope::FunctionScope)) {
-      FunctionScopeRawPtr f(
-          static_pointer_cast<FunctionScope>(pf->first));
+      auto f = static_pointer_cast<FunctionScope>(pf->first);
       callees.push_back(f->getDocFullName());
     }
   }
@@ -781,9 +672,8 @@ void FunctionScope::getClosureUseVars(
   assert(isClosure());
   VariableTablePtr variables = getVariables();
   for (int i = 0; i < m_closureVars->getCount(); i++) {
-    ParameterExpressionPtr param =
-      dynamic_pointer_cast<ParameterExpression>((*m_closureVars)[i]);
-    const string &name = param->getName();
+    auto param = dynamic_pointer_cast<ParameterExpression>((*m_closureVars)[i]);
+    auto const& name = param->getName();
     if (!filterUsed || variables->isUsed(name)) {
       useVars.push_back(ParameterExpressionPtrIdxPair(param, i));
     }
@@ -793,13 +683,14 @@ void FunctionScope::getClosureUseVars(
 FunctionScope::StringToFunctionInfoPtrMap FunctionScope::s_refParamInfo;
 static Mutex s_refParamInfoLock;
 
-void FunctionScope::RecordFunctionInfo(string fname, FunctionScopePtr func) {
+void FunctionScope::RecordFunctionInfo(std::string fname,
+                                       FunctionScopePtr func) {
   VariableTablePtr variables = func->getVariables();
   if (Option::WholeProgram) {
     Lock lock(s_refParamInfoLock);
     FunctionInfoPtr &info = s_refParamInfo[fname];
     if (!info) {
-      info = FunctionInfoPtr(new FunctionInfo());
+      info = std::make_shared<FunctionInfo>();
     }
     if (func->isStatic()) {
       info->setMaybeStatic();
@@ -817,13 +708,15 @@ void FunctionScope::RecordFunctionInfo(string fname, FunctionScopePtr func) {
   auto limit = func->getDeclParamCount();
   for (int i = 0; i < limit; i++) {
     variables->addParam(func->getParamName(i),
-                        TypePtr(), AnalysisResultPtr(), ConstructPtr());
+                        AnalysisResultPtr(), ConstructPtr());
   }
 }
 
-FunctionScope::FunctionInfoPtr FunctionScope::GetFunctionInfo(string fname) {
+FunctionScope::FunctionInfoPtr FunctionScope::GetFunctionInfo(
+  const std::string& fname
+) {
   assert(Option::WholeProgram);
-  StringToFunctionInfoPtrMap::iterator it = s_refParamInfo.find(fname);
+  auto it = s_refParamInfo.find(fname);
   if (it == s_refParamInfo.end()) {
     return FunctionInfoPtr();
   }

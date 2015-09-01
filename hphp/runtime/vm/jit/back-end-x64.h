@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -23,26 +23,6 @@ namespace HPHP { namespace jit { namespace x64 {
 //////////////////////////////////////////////////////////////////////
 
 std::unique_ptr<BackEnd> newBackEnd();
-
-//////////////////////////////////////////////////////////////////////
-
-constexpr int kCallLen = 5;
-constexpr int kJmpLen = 5;
-constexpr int kJmpccLen = 6;
-constexpr int kJmpImmBytes = 4;
-constexpr int kRipLeaLen = 7;
-
-constexpr int kMovLen = 10;
-constexpr int kMovImmOff = 2;
-constexpr int kCmpLen = 14;
-constexpr int kCmpImmOff = 6;
-
-//////////////////////////////////////////////////////////////////////
-
-bool isSmashable(Address frontier, int nBytes, int offset = 0);
-void prepareForSmashImpl(CodeBlock& cb, int nBytes, int offset);
-void smashJmp(TCA jmpAddr, TCA newDest);
-void smashCall(TCA callAddr, TCA newDest);
 
 //////////////////////////////////////////////////////////////////////
 

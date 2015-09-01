@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -68,11 +68,11 @@ void ObjectMethodExpression::analyzeProgram(AnalysisResultPtr ar) {
 
   if (ar->getPhase() == AnalysisResult::AnalyzeAll) {
     FunctionScopePtr func = m_funcScope;
-    if (!func && m_object->isThis() && !m_name.empty()) {
+    if (!func && m_object->isThis() && !m_origName.empty()) {
       ClassScopePtr cls = getClassScope();
       if (cls) {
         m_classScope = cls;
-        func = cls->findFunction(ar, m_name, true, true);
+        func = cls->findFunction(ar, m_origName, true, true);
         if (func &&
             !cls->isInterface() &&
             !(func->isVirtual() &&
@@ -85,19 +85,7 @@ void ObjectMethodExpression::analyzeProgram(AnalysisResultPtr ar) {
       }
     }
 
-    markRefParams(func, m_name);
-  }
-
-  // This is OK because AnalyzeFinal is guaranteed to run for a CPP
-  // target, regardless of opts (and we only need the following
-  // for CPP targets)
-  if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
-    // necessary because we set the expected type of m_object to
-    // Type::Some during type inference.
-    TypePtr at(m_object->getActualType());
-    if (!m_object->isThis() && at && at->is(Type::KindOfObject)) {
-      m_object->setExpectedType(at);
-    }
+    markRefParams(func, m_origName);
   }
 }
 
@@ -136,7 +124,7 @@ void ObjectMethodExpression::outputCodeModel(CodeGenerator &cg) {
     cg.printExpressionVector(m_params);
   }
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 

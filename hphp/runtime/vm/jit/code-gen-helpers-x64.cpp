@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,7 +19,6 @@
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/stats.h"
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/jit/back-end.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
@@ -28,7 +27,7 @@
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
@@ -54,24 +53,6 @@ TRACE_SET_MOD(hhir);
  * mcg that hardcode these registers.)
  */
 
-/*
- * Satisfy an alignment constraint. Bridge the gap with int3's.
- */
-void moveToAlign(CodeBlock& cb,
-                 const size_t align /* =kJmpTargetAlign */) {
-  X64Assembler a { cb };
-  assertx(folly::isPowTwo(align));
-  size_t leftInBlock = align - ((align - 1) & uintptr_t(cb.frontier()));
-  if (leftInBlock == align) return;
-  if (leftInBlock > 2) {
-    a.ud2();
-    leftInBlock -= 2;
-  }
-  if (leftInBlock > 0) {
-    a.emitInt3s(leftInBlock);
-  }
-}
-
 void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp, Vreg vmsp) {
   v << store{vmfp, rds[rds::kVmfpOff]};
   v << store{vmsp, rds[rds::kVmspOff]};
@@ -79,42 +60,8 @@ void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp, Vreg vmsp) {
 }
 
 void emitGetGContext(Vout& v, Vreg dest) {
-  emitTLSLoad<ExecutionContext>(v, g_context, dest);
+  emitTLSLoad(v, g_context, dest);
 }
-
-void emitGetGContext(Asm& as, PhysReg dest) {
-  emitGetGContext(Vauto(as.code()).main(), dest);
-}
-
-// IfCountNotStatic --
-//   Emits if (%reg->_count < 0) { ... }.
-//   This depends on UncountedValue and StaticValue
-//   being the only valid negative refCounts and both indicating no
-//   ref count is needed.
-//   May short-circuit this check if the type is known to be
-//   static already.
-struct IfCountNotStatic {
-  typedef CondBlock<FAST_REFCOUNT_OFFSET,
-                    0,
-                    CC_S,
-                    int32_t> NonStaticCondBlock;
-  static_assert(UncountedValue < 0 && StaticValue < 0, "");
-  NonStaticCondBlock *m_cb; // might be null
-  IfCountNotStatic(Asm& as, PhysReg reg,
-                   MaybeDataType t = folly::none) {
-
-    // Objects and variants cannot be static
-    if (t != KindOfObject && t != KindOfResource && t != KindOfRef) {
-      m_cb = new NonStaticCondBlock(as, reg);
-    } else {
-      m_cb = nullptr;
-    }
-  }
-
-  ~IfCountNotStatic() {
-    delete m_cb;
-  }
-};
 
 void emitTransCounterInc(Vout& v) {
   if (!mcg->tx().isTransDBEnabled()) return;
@@ -126,13 +73,6 @@ void emitTransCounterInc(Asm& a) {
   emitTransCounterInc(Vauto(a.code()).main());
 }
 
-Vreg emitDecRef(Vout& v, Vreg base) {
-  auto const sf = v.makeReg();
-  v << declm{base[FAST_REFCOUNT_OFFSET], sf};
-  emitAssertFlagsNonNegative(v, sf);
-  return sf;
-}
-
 void emitIncRef(Vout& v, Vreg base) {
   if (RuntimeOption::EvalHHIRGenerateAsserts) {
     emitAssertRefCount(v, base);
@@ -141,28 +81,6 @@ void emitIncRef(Vout& v, Vreg base) {
   auto const sf = v.makeReg();
   v << inclm{base[FAST_REFCOUNT_OFFSET], sf};
   emitAssertFlagsNonNegative(v, sf);
-}
-
-void emitIncRef(Asm& as, PhysReg base) {
-  emitIncRef(Vauto(as.code()).main(), base);
-}
-
-void emitIncRefCheckNonStatic(Asm& as, PhysReg base, DataType dtype) {
-  { // if !static then
-    IfCountNotStatic ins(as, base, dtype);
-    emitIncRef(as, base);
-  } // endif
-}
-
-void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp, PhysReg tmpReg) {
-  { // if RC
-    IfRefCounted irc(as, base, disp);
-    as.   loadq  (base[disp + TVOFF(m_data)], tmpReg);
-    { // if !static
-      IfCountNotStatic ins(as, tmpReg);
-      as. incl(tmpReg[FAST_REFCOUNT_OFFSET]);
-    } // endif
-  } // endif
 }
 
 void emitAssertFlagsNonNegative(Vout& v, Vreg sf) {
@@ -180,46 +98,9 @@ void emitAssertRefCount(Vout& v, Vreg base) {
   });
 }
 
-// Logical register move: ensures the value in src will be in dest
-// after execution, but might do so in strange ways. Do not count on
-// being able to smash dest to a different register in the future, e.g.
-void emitMovRegReg(Asm& as, PhysReg srcReg, PhysReg dstReg) {
-  assertx(srcReg != InvalidReg);
-  assertx(dstReg != InvalidReg);
-
-  if (srcReg == dstReg) return;
-
-  if (srcReg.isGP()) {
-    if (dstReg.isGP()) {                 // GP => GP
-      as. movq(srcReg, dstReg);
-    } else {                             // GP => XMM
-      // This generates a movq x86 instruction, which zero extends
-      // the 64-bit value in srcReg into a 128-bit XMM register
-      as. movq_rx(srcReg, dstReg);
-    }
-  } else {
-    if (dstReg.isGP()) {                 // XMM => GP
-      as. movq_xr(srcReg, dstReg);
-    } else {                             // XMM => XMM
-      // This copies all 128 bits in XMM,
-      // thus avoiding partial register stalls
-      as. movdqa(srcReg, dstReg);
-    }
-  }
-}
-
-void emitLea(Asm& as, MemoryRef mr, PhysReg dst) {
-  if (dst == InvalidReg) return;
-  if (mr.r.disp == 0) {
-    emitMovRegReg(as, mr.r.base, dst);
-  } else {
-    as. lea(mr, dst);
-  }
-}
-
 Vreg emitLdObjClass(Vout& v, Vreg objReg, Vreg dstReg) {
   emitLdLowPtr(v, objReg[ObjectData::getVMClassOffset()],
-               dstReg, sizeof(LowClassPtr));
+               dstReg, sizeof(LowPtr<Class>));
   return dstReg;
 }
 
@@ -261,13 +142,14 @@ void emitCall(Vout& v, CppCall target, RegSet args) {
     return;
   case CppCall::Kind::ArrayVirt: {
     auto const addr = reinterpret_cast<intptr_t>(target.arrayTable());
-    always_assert_flog(
-      deltaFits(addr, sz::dword),
-      "deltaFits on ArrayData vtable calls needs to be checked before "
-      "emitting them"
-    );
     v << loadzbl{rdi[HeaderKindOffset], eax};
-    v << callm{baseless(rax*8 + addr), args};
+    if (deltaFits(addr, sz::dword)) {
+      v << callm{baseless(rax*8 + addr), args};
+    } else {
+      auto const base = v.makeReg();
+      v << ldimmq{addr, base};
+      v << callm{Vptr{base, rax, 8, 0}, args};
+    }
     static_assert(sizeof(HeaderKind) == 1, "");
     return;
   }
@@ -293,15 +175,6 @@ void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) {
   }
 }
 
-void emitImmStoreq(Asm& a, Immed64 imm, MemoryRef ref) {
-  if (imm.fits(sz::dword)) {
-    a.storeq(imm.l(), ref);
-  } else {
-    a.storel(int32_t(imm.q()), ref);
-    a.storel(int32_t(imm.q() >> 32), MemoryRef(ref.r + 4));
-  }
-}
-
 void emitRB(Vout& v, Trace::RingBufferType t, const char* msg) {
   if (!Trace::moduleEnabled(Trace::ringbuffer, 1)) {
     return;
@@ -311,50 +184,21 @@ void emitRB(Vout& v, Trace::RingBufferType t, const char* msg) {
              v.makeTuple({})};
 }
 
-void emitTestSurpriseFlags(Asm& a, PhysReg rds) {
-  static_assert(LastSurpriseFlag <= std::numeric_limits<uint32_t>::max(),
-                "Codegen assumes a SurpriseFlag fits in a 32-bit int");
-  a.cmpl(0, rds[rds::kSurpriseFlagsOff]);
-}
-
-Vreg emitTestSurpriseFlags(Vout& v, Vreg rds) {
-  static_assert(LastSurpriseFlag <= std::numeric_limits<uint32_t>::max(),
-                "Codegen assumes a SurpriseFlag fits in a 32-bit int");
-  auto const sf = v.makeReg();
-  v << cmplim{0, rds[rds::kSurpriseFlagsOff], sf};
-  return sf;
-}
-
-void emitCheckSurpriseFlagsEnter(CodeBlock& mainCode, CodeBlock& coldCode,
-                                 PhysReg rds, Fixup fixup) {
-  // warning: keep this in sync with the vasm version below.
-  Asm a { mainCode };
-  Asm acold { coldCode };
-
-  emitTestSurpriseFlags(a, rds);
-  a.  jnz(coldCode.frontier());
-
-  acold.  movq  (rVmFp, argNumToRegName[0]);
-  emitCall(acold, mcg->tx().uniqueStubs.functionEnterHelper, argSet(1));
-  mcg->recordSyncPoint(acold.frontier(), fixup);
-  acold.  jmp   (a.frontier());
-}
-
 void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vcold, Vreg fp, Vreg rds,
                                  Fixup fixup, Vlabel catchBlock) {
   auto cold = vcold.makeBlock();
   auto done = v.makeBlock();
 
-  auto const sf = emitTestSurpriseFlags(v, rds);
-  v << jcc{CC_NZ, sf, {done, cold}};
+  auto const sf = v.makeReg();
+  v << cmpqm{fp, rds[rds::kSurpriseFlagsOff], sf};
+  v << jcc{CC_NBE, sf, {done, cold}};
 
   v = done;
   vcold = cold;
 
-  auto call = CppCall::direct(
-      reinterpret_cast<void(*)()>(mcg->tx().uniqueStubs.functionEnterHelper));
-  auto args = v.makeVcallArgs({{fp}});
-
+  auto const call = CppCall::direct(
+    reinterpret_cast<void(*)()>(mcg->tx().uniqueStubs.functionEnterHelper));
+  auto const args = v.makeVcallArgs({});
   vcold << vinvoke{call, args, v.makeTuple({}), {done, catchBlock}, fixup};
 }
 
@@ -369,7 +213,7 @@ void emitLdLowPtr(Vout& v, Vptr mem, Vreg reg, size_t size) {
 }
 
 void emitCmpClass(Vout& v, Vreg sf, const Class* c, Vptr mem) {
-  auto size = sizeof(LowClassPtr);
+  auto size = sizeof(LowPtr<Class>);
   if (size == 8) {
     v << cmpqm{v.cns(c), mem, sf};
   } else if (size == 4) {
@@ -381,7 +225,7 @@ void emitCmpClass(Vout& v, Vreg sf, const Class* c, Vptr mem) {
 }
 
 void emitCmpClass(Vout& v, Vreg sf, Vreg reg, Vptr mem) {
-  auto size = sizeof(LowClassPtr);
+  auto size = sizeof(LowPtr<Class>);
   if (size == 8) {
     v << cmpqm{reg, mem, sf};
   } else if (size == 4) {
@@ -394,11 +238,22 @@ void emitCmpClass(Vout& v, Vreg sf, Vreg reg, Vptr mem) {
 }
 
 void emitCmpClass(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {
-  auto size = sizeof(LowClassPtr);
+  auto size = sizeof(LowPtr<Class>);
   if (size == 8) {
     v << cmpq{reg1, reg2, sf};
   } else if (size == 4) {
     v << cmpl{reg1, reg2, sf};
+  } else {
+    not_implemented();
+  }
+}
+
+void emitCmpVecLen(Vout& v, Vreg sf, Vptr mem, Immed val) {
+  auto const size = sizeof(Class::veclen_t);
+  if (size == 2) {
+    v << cmpwim{val, mem, sf};
+  } else if (size == 4) {
+    v << cmplim{val, mem, sf};
   } else {
     not_implemented();
   }

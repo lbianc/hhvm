@@ -1,14 +1,12 @@
 <?php
-require_once ($GLOBALS['HACKLIB_ROOT']);
+require_once ($GLOBALS["HACKLIB_ROOT"]);
 class Foo {
   public function __toString() {
     return "Foo";
   }
 }
 function verify_set($s) {
-  echo
-    (\hacklib_cast_as_boolean($s->isEmpty()) ? "empty\n" : "not empty\n")
-  ;
+  echo (\hacklib_cast_as_boolean($s->isEmpty()) ? "empty\n" : "not empty\n");
   echo ($s->count()."\n");
   echo
     (\hacklib_cast_as_boolean($s->contains("25"))
@@ -26,7 +24,7 @@ function verify_set($s) {
        : "does not contain 25\n")
   ;
   echo (gettype($s[\hacklib_id("25")])."\n");
-  echo (gettype($s[\hacklib_id('25')])."\n");
+  echo (gettype($s[\hacklib_id("25")])."\n");
   echo (gettype($s[25])."\n");
   try {
     $s[\hacklib_id("truman")];
@@ -37,7 +35,7 @@ function verify_set($s) {
   foreach ($s as $i => $val) {
     $out = var_export($val, true);
     $t = gettype($i);
-    echo ("($t) $i : $out\n");
+    echo ("(".$t.") ".$i." : ".$out."\n");
   }
   $i = $s->getIterator();
   $i->next();

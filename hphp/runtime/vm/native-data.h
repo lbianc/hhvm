@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,7 +18,7 @@
 
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/typed-value.h"
-#include "hphp/runtime/base/types.h"
+#include "hphp/runtime/base/type-object.h"
 
 namespace HPHP { namespace Native {
 //////////////////////////////////////////////////////////////////////////////
@@ -56,6 +56,26 @@ T* data(ObjectData *obj) {
 template<class T>
 const T* data(const ObjectData *obj) {
   return reinterpret_cast<const T*>(obj) - 1;
+}
+
+template <class T>
+T* data(Object& obj) {
+  return data<T>(obj.get());
+}
+
+template <class T>
+T* data(const Object& obj) {
+  return data<T>(obj.get());
+}
+
+template<class T>
+constexpr ptrdiff_t dataOffset() {
+  return -sizeof(T);
+}
+
+template<class T>
+ObjectData* object(T *data) {
+  return reinterpret_cast<ObjectData*>(data + 1);
 }
 
 void registerNativeDataInfo(const StringData* name,
@@ -182,22 +202,28 @@ void nativeDataInstanceDtor(ObjectData* obj, const Class* cls);
 Variant nativeDataSleep(const ObjectData* obj);
 void nativeDataWakeup(ObjectData* obj, const Variant& data);
 
+size_t ndsize(const ObjectData* obj, const NativeDataInfo* ndi);
+
 // return the full native header size, which is also the distance from
 // the allocated pointer to the ObjectData*.
-inline size_t ndsize(const NativeDataInfo* ndi) {
-  return alignTypedValue(ndi->sz + sizeof(NativeNode));
+inline size_t ndsize(size_t dataSize) {
+  return alignTypedValue(dataSize + sizeof(NativeNode));
+ }
+
+inline size_t ndextra(const ObjectData* obj, const NativeDataInfo* ndi) {
+  return ndsize(obj, ndi) - ndsize(ndi->sz);
 }
 
-inline NativeNode* getNativeNode(ObjectData *obj, const NativeDataInfo* ndi) {
+inline NativeNode* getNativeNode(ObjectData* obj, const NativeDataInfo* ndi) {
   return reinterpret_cast<NativeNode*>(
-    reinterpret_cast<char*>(obj) - ndsize(ndi)
+    reinterpret_cast<char*>(obj) - ndsize(obj, ndi)
   );
 }
 
 inline const NativeNode*
-getNativeNode(const ObjectData *obj, const NativeDataInfo* ndi) {
+getNativeNode(const ObjectData* obj, const NativeDataInfo* ndi) {
   return reinterpret_cast<const NativeNode*>(
-    reinterpret_cast<const char*>(obj) - ndsize(ndi)
+    reinterpret_cast<const char*>(obj) - ndsize(obj, ndi)
   );
 }
 

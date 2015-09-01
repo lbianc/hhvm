@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -86,7 +86,7 @@ bool cellRelOp(Op op, Cell cell, int64_t val) {
         : op(cell.m_data.pobj->toInt64(), val);
 
     case KindOfResource:
-      return op(cell.m_data.pres->o_toInt64(), val);
+      return op(cell.m_data.pres->data()->o_toInt64(), val);
 
     case KindOfRef:
     case KindOfClass:
@@ -130,7 +130,7 @@ bool cellRelOp(Op op, Cell cell, double val) {
         : op(cell.m_data.pobj->toDouble(), val);
 
     case KindOfResource:
-      return op(cell.m_data.pres->o_toDouble(), val);
+      return op(cell.m_data.pres->data()->o_toDouble(), val);
 
     case KindOfRef:
     case KindOfClass:
@@ -183,7 +183,7 @@ bool cellRelOp(Op op, Cell cell, const StringData* val) {
 
     case KindOfResource: {
       auto const rd = cell.m_data.pres;
-      return op(rd->o_toDouble(), val->toDouble());
+      return op(rd->data()->o_toDouble(), val->toDouble());
     }
 
     case KindOfRef:
@@ -313,13 +313,17 @@ bool cellRelOp(Op op, Cell cell, const ResourceData* rd) {
       return op(true, false);
 
     case KindOfResource:
-      return op(cell.m_data.pres, rd);
+      return op(cell.m_data.pres->data(), rd);
 
     case KindOfRef:
     case KindOfClass:
       break;
   }
   not_reached();
+}
+template<class Op>
+bool cellRelOp(Op op, Cell cell, const ResourceHdr* r) {
+  return cellRelOp(op, cell, r->data());
 }
 
 template<class Op>
@@ -330,7 +334,7 @@ bool cellRelOp(Op op, Cell c1, Cell c2) {
   switch (c2.m_type) {
   case KindOfUninit:
   case KindOfNull:
-    return IS_STRING_TYPE(c1.m_type) ? op(c1.m_data.pstr, staticEmptyString()) :
+    return isStringType(c1.m_type) ? op(c1.m_data.pstr, staticEmptyString()) :
            c1.m_type == KindOfObject ? op(true, false) :
            cellRelOp(op, c1, false);
 
@@ -388,33 +392,15 @@ struct Eq {
   }
 
   bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    if (od1 == od2) return true;
-    if (od1->isCollection()) {
-      return collections::equals(od1, od2);
-    }
-    if (UNLIKELY(od1->instanceof(SystemLib::s_DateTimeInterfaceClass)
-        && od2->instanceof(SystemLib::s_DateTimeInterfaceClass))) {
-      return DateTimeData::getTimestamp(od1) == DateTimeData::getTimestamp(od2);
-    }
-    if (od1->getVMClass() != od2->getVMClass()) return false;
-    if (UNLIKELY(od1->instanceof(SystemLib::s_ArrayObjectClass))) {
-      // Compare the whole object, not just the array representation
-      Array ar1(ArrayData::Create());
-      Array ar2(ArrayData::Create());
-      od1->o_getArray(ar1);
-      od2->o_getArray(ar2);
-      return ar1->equal(ar2.get(), false);
-    }
-    if (UNLIKELY(od1->instanceof(SystemLib::s_ClosureClass))) {
-      // First comparison already proves they are different
-      return false;
-    }
-    auto ar1 = od1->toArray();
-    auto ar2 = od2->toArray();
-    return ar1->equal(ar2.get(), false);
+    assert(od1);
+    assert(od2);
+    return od1->equal(*od2);
   }
 
   bool operator()(const ResourceData* od1, const ResourceData* od2) const {
+    return od1 == od2;
+  }
+  bool operator()(const ResourceHdr* od1, const ResourceHdr* od2) const {
     return od1 == od2;
   }
 
@@ -438,27 +424,16 @@ struct Lt {
   }
 
   bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    if (od1->isCollection() || od2->isCollection()) {
-      throw_collection_compare_exception();
-    }
-    if (od1 == od2) return false;
-    if (UNLIKELY(od1->instanceof(SystemLib::s_DateTimeInterfaceClass)
-        && od2->instanceof(SystemLib::s_DateTimeInterfaceClass))) {
-      return DateTimeData::getTimestamp(od1) < DateTimeData::getTimestamp(od2);
-    }
-    if (UNLIKELY(od1->instanceof(SystemLib::s_ClosureClass))) {
-      return false;
-    }
-    if (od1->getVMClass() != od2->getVMClass()) {
-      return false;
-    }
-    auto ar1 = od1->toArray();
-    auto ar2 = od2->toArray();
-    return (*this)(ar1.get(), ar2.get());
+    assert(od1);
+    assert(od2);
+    return od1->less(*od2);
   }
 
   bool operator()(const ResourceData* rd1, const ResourceData* rd2) const {
     return rd1->o_toInt64() < rd2->o_toInt64();
+  }
+  bool operator()(const ResourceHdr* rd1, const ResourceHdr* rd2) const {
+    return rd1->data()->o_toInt64() < rd2->data()->o_toInt64();
   }
 
   bool collectionVsNonObj() const {
@@ -484,27 +459,16 @@ struct Gt {
   }
 
   bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    if (od1->isCollection() || od2->isCollection()) {
-      throw_collection_compare_exception();
-    }
-    if (od1 == od2) return false;
-    if (UNLIKELY(od1->instanceof(SystemLib::s_DateTimeInterfaceClass)
-        && od2->instanceof(SystemLib::s_DateTimeInterfaceClass))) {
-      return DateTimeData::getTimestamp(od1) > DateTimeData::getTimestamp(od2);
-    }
-    if (UNLIKELY(od1->instanceof(SystemLib::s_ClosureClass))) {
-      return false;
-    }
-    if (od1->getVMClass() != od2->getVMClass()) {
-      return false;
-    }
-    auto ar1 = od1->toArray();
-    auto ar2 = od2->toArray();
-    return (*this)(ar1.get(), ar2.get());
+    assert(od1);
+    assert(od2);
+    return od1->more(*od2);
   }
 
   bool operator()(const ResourceData* rd1, const ResourceData* rd2) const {
     return rd1->o_toInt64() > rd2->o_toInt64();
+  }
+  bool operator()(const ResourceHdr* rd1, const ResourceHdr* rd2) const {
+    return rd1->data()->o_toInt64() > rd2->data()->o_toInt64();
   }
 
   bool collectionVsNonObj() const {
@@ -521,8 +485,8 @@ bool cellSame(Cell c1, Cell c2) {
   assert(cellIsPlausible(c1));
   assert(cellIsPlausible(c2));
 
-  bool const null1 = IS_NULL_TYPE(c1.m_type);
-  bool const null2 = IS_NULL_TYPE(c2.m_type);
+  bool const null1 = isNullType(c1.m_type);
+  bool const null2 = isNullType(c2.m_type);
   if (null1 && null2) return true;
   if (null1 || null2) return false;
 
@@ -538,7 +502,7 @@ bool cellSame(Cell c1, Cell c2) {
 
     case KindOfStaticString:
     case KindOfString:
-      if (!IS_STRING_TYPE(c2.m_type)) return false;
+      if (!isStringType(c2.m_type)) return false;
       return c1.m_data.pstr->same(c2.m_data.pstr);
 
     case KindOfArray:
@@ -597,6 +561,9 @@ bool cellEqual(Cell cell, const ObjectData* val) {
 bool cellEqual(Cell cell, const ResourceData* val) {
   return cellRelOp(Eq(), cell, val);
 }
+bool cellEqual(Cell cell, const ResourceHdr* val) {
+  return cellRelOp(Eq(), cell, val);
+}
 
 bool cellEqual(Cell c1, Cell c2) {
   return cellRelOp(Eq(), c1, c2);
@@ -633,6 +600,9 @@ bool cellLess(Cell cell, const ObjectData* val) {
 bool cellLess(Cell cell, const ResourceData* val) {
   return cellRelOp(Lt(), cell, val);
 }
+bool cellLess(Cell cell, const ResourceHdr* val) {
+  return cellRelOp(Lt(), cell, val);
+}
 
 bool cellLess(Cell c1, Cell c2) {
   return cellRelOp(Lt(), c1, c2);
@@ -667,6 +637,9 @@ bool cellGreater(Cell cell, const ObjectData* val) {
 }
 
 bool cellGreater(Cell cell, const ResourceData* val) {
+  return cellRelOp(Gt(), cell, val);
+}
+bool cellGreater(Cell cell, const ResourceHdr* val) {
   return cellRelOp(Gt(), cell, val);
 }
 

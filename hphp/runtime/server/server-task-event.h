@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -51,15 +51,15 @@ class ServerTaskEvent final : public AsioExternalThreadEvent {
  protected:
   void unserialize(Cell& result) override final {
     if (UNLIKELY(!m_job)) {
-      throw Object(SystemLib::AllocInvalidOperationExceptionObject(
-        "The async operation was incorrectly initialized."));
+      SystemLib::throwInvalidOperationExceptionObject(
+        "The async operation was incorrectly initialized.");
     }
 
     Variant ret;
 
-    int code = TServer::TaskResult(m_job, 0, ret);
+    int code = TServer::TaskResult(m_job, 0, &ret);
     if (code != 200) {
-      throw Object(SystemLib::AllocExceptionObject(ret));
+      SystemLib::throwExceptionObject(ret);
     }
 
     cellDup(*ret.asCell(), result);

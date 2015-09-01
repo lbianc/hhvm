@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -82,7 +82,6 @@ void ProxyArray::Release(ArrayData*ad) {
 void ProxyArray::reseatable(const ArrayData* oldArr, ArrayData* newArr) {
   if (innerArr(oldArr) != newArr) {
     auto old = innerArr(oldArr);
-    newArr->incRefCount();
     asProxyArray(oldArr)->m_ref->tv()->m_data.parr = newArr;
     decRefArr(old);
   }
@@ -269,9 +268,7 @@ ProxyArray::AppendWithRef(ArrayData* ad, const Variant& v, bool copy) {
 
 ArrayData*
 ProxyArray::PlusEq(ArrayData* ad, const ArrayData* elems) {
-  auto const ret = ad->hasMultipleRefs() ? Make(innerArr(ad))
-                                         : asProxyArray(ad);
-  auto r = innerArr(ret)->plusEq(elems);
+  auto r = innerArr(ad)->plusEq(elems);
   reseatable(ad, r);
   return ad;
 }
@@ -413,8 +410,8 @@ ArrayData* ProxyArray::CopyWithStrongIterators(const ArrayData* ad) {
   return innerArr(ad)->copyWithStrongIterators();
 }
 
-ArrayData* ProxyArray::NonSmartCopy(const ArrayData* ad) {
-  return innerArr(ad)->nonSmartCopy();
+ArrayData* ProxyArray::CopyStatic(const ArrayData* ad) {
+  return innerArr(ad)->copyStatic();
 }
 
 void ProxyArray::proxyAppend(void* data, uint32_t data_size, void** dest) {
@@ -445,10 +442,10 @@ void ProxyArray::proxyInit(uint32_t nSize,
   m_destructor = pDestructor;
 }
 
-SmartPtr<ResourceData>
-ProxyArray::makeElementResource(void* pData, uint nDataSize,
+req::ptr<ResourceData>
+ProxyArray::makeElementResource(void* pData, uint32_t nDataSize,
                                 void** pDest) const {
-  auto elt = makeSmartPtr<ZendCustomElement>(pData, nDataSize, m_destructor);
+  auto elt = req::make<ZendCustomElement>(pData, nDataSize, m_destructor);
   if (pDest) *pDest = elt->data();
   return elt;
 }
@@ -502,7 +499,7 @@ void * ProxyArray::elementToData(Variant * v) const {
     return (void*)(&tv->m_data.pref);
   } else {
     always_assert(tv->m_type == KindOfResource);
-    auto elt = dynamic_cast<ZendCustomElement*>(tv->m_data.pres);
+    auto elt = dynamic_cast<ZendCustomElement*>(tv->m_data.pres->data());
     always_assert(elt);
     return elt->data();
   }

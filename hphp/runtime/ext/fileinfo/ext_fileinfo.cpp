@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -68,7 +68,7 @@ static Variant HHVM_FUNCTION(finfo_open,
     return false;
   }
 
-  return Variant(makeSmartPtr<FileinfoResource>(magic));
+  return Variant(req::make<FileinfoResource>(magic));
 }
 
 static bool HHVM_FUNCTION(finfo_close, const Resource& finfo) {
@@ -235,7 +235,7 @@ static String HHVM_FUNCTION(finfo_file,
 }
 
 static String HHVM_FUNCTION(mime_content_type, const Variant& filename) {
-  return php_finfo_get_type(nullptr, filename, 0, uninit_null(), -1, 1);
+  return php_finfo_get_type(Resource{}, filename, 0, uninit_null(), -1, 1);
 }
 
 //////////////////////////////////////////////////////////////////////////////

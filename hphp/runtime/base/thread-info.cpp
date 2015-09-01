@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,7 +28,6 @@
 #include "hphp/runtime/base/code-coverage.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/surprise-flags.h"
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/ext/process/ext_process.h"
 
 namespace HPHP {
@@ -168,7 +167,7 @@ static Exception* generate_memory_exceeded_exception() {
     "request has exceeded memory limit", exceptionStack);
 }
 
-ssize_t check_request_surprise() {
+size_t check_request_surprise() {
   auto& info = TI();
   auto& p = info.m_reqInjectionData;
 
@@ -178,6 +177,7 @@ ssize_t check_request_surprise() {
   auto const do_signaled = flags & SignaledFlag;
   auto const do_cpuTimedOut =
     (flags & CPUTimedOutFlag) && !p.getDebuggerAttached();
+  auto const do_GC = flags & PendingGCFlag;
 
   // Start with any pending exception that might be on the thread.
   auto pendingException = info.m_pendingException;
@@ -207,6 +207,9 @@ ssize_t check_request_surprise() {
       pendingException = generate_memory_exceeded_exception();
     }
   }
+  if (do_GC) {
+    MM().collect();
+  }
   if (do_signaled) {
     HHVM_FN(pcntl_signal_dispatch)();
   }
@@ -217,13 +220,8 @@ ssize_t check_request_surprise() {
   return flags;
 }
 
-ssize_t check_request_surprise_unlikely() {
-  auto const flags = surpriseFlags().load();
-
-  if (UNLIKELY(flags)) {
-    check_request_surprise();
-  }
-  return flags;
+void check_request_surprise_unlikely() {
+  if (UNLIKELY(checkSurpriseFlags())) check_request_surprise();
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -39,11 +39,11 @@ SOFTWARE.
 #include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/thread-info.h"
-#include "hphp/runtime/base/thread-init-fini.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/utf8-decode.h"
 #include "hphp/runtime/base/zend-strtod.h"
 #include "hphp/runtime/ext/json/ext_json.h"
-#include "hphp/runtime/ext/ext_collections.h"
+#include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/system/systemlib.h"
 
 #define MAX_LENGTH_OF_LONG 20
@@ -168,7 +168,7 @@ namespace HPHP {
     This table maps the 128 ASCII characters into the 32 character classes.
     The remaining Unicode characters should be mapped to S_ETC.
 */
-static const int8_t ascii_class[128] __attribute__((__aligned__(64))) = {
+alignas(64) static const int8_t ascii_class[128] = {
     S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR,
     S_ERR, S_WSP, S_WSP, S_ERR, S_ERR, S_WSP, S_ERR, S_ERR,
     S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR,
@@ -191,7 +191,7 @@ static const int8_t ascii_class[128] __attribute__((__aligned__(64))) = {
 };
 
 /*<fb>*/
-static const int8_t loose_ascii_class[128] __attribute__((__aligned__(64))) = {
+alignas(64) static const int8_t loose_ascii_class[128] = {
   S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR,
   S_ERR, S_WSP, S_WSP, S_ERR, S_ERR, S_WSP, S_ERR, S_ERR,
   S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR, S_ERR,
@@ -222,7 +222,7 @@ static const int8_t loose_ascii_class[128] __attribute__((__aligned__(64))) = {
     0 and 29. An action is a negative number between -1 and -9. A JSON text is
     accepted if the end of the text is in state 9 and mode is MODE_DONE.
 */
-static const int8_t state_transition_table[30][32] __attribute__((__aligned__(64))) = {
+alignas(64) static const int8_t state_transition_table[30][32] = {
 /* 0*/ { 0, 0,-8,-1,-6,-1,-1,-1, 3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
 /* 1*/ { 1, 1,-1,-9,-1,-1,-1,-1, 3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
 /* 2*/ { 2, 2,-8,-1,-6,-5,-1,-1, 3,-1,-1,-1,20,-1,21,22,-1,-1,-1,-1,-1,13,-1,17,-1,-1,10,-1,-1,-1,-1},
@@ -259,7 +259,7 @@ static const int8_t state_transition_table[30][32] __attribute__((__aligned__(64
 /*
   Alternate "loose" transition table to support unquoted keys.
 */
-static const int8_t loose_state_transition_table[31][32] __attribute__((__aligned__(64))) = {
+alignas(64) static const int8_t loose_state_transition_table[31][32] = {
 /* 0*/ { 0, 0,-8,-1,-6,-1,-1,-1, 3,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1},
 /* 1*/ { 1, 1,-1,-9,-1,-1,-1,-1, 3,-1,-1,-1,-1,-1,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30,30},
 /* 2*/ { 2, 2,-8,-1,-6,-5,-1,-1, 3,-1,-1,-1,20,-1,21,22,-1,-1,-1,-1,-1,13,-1,17,-1,-1,10,-1,-1,-1,-1},
@@ -356,7 +356,7 @@ const char *json_get_last_error_msg() {
 // Inline the function to do that reset.
 static InitFiniNode init(
   []{ s_json_parser->error_code = JSON_ERROR_NONE; },
-  InitFiniNode::When::ThreadInit
+  InitFiniNode::When::RequestInit
 );
 
 class JsonParserCleaner {
@@ -717,7 +717,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           /*<fb>*/
           if (collections) {
             // stable_maps is meaningless
-            top = makeSmartPtr<c_Map>();
+            top = req::make<c_Map>();
           } else {
           /*</fb>*/
             if (!assoc) {
@@ -788,7 +788,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           }
           /*<fb>*/
           if (collections) {
-            top = makeSmartPtr<c_Vector>();
+            top = req::make<c_Vector>();
           } else {
             top = Array::Create();
           }

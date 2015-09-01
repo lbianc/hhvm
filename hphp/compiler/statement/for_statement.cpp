@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -27,8 +27,7 @@ using namespace HPHP;
 static void setListKind(ExpressionPtr e)
 {
   if (e && e->is(Expression::KindOfExpressionList)) {
-    ExpressionListPtr list =
-      static_pointer_cast<ExpressionList>(e);
+    auto list = static_pointer_cast<ExpressionList>(e);
     list->setListKind(ExpressionList::ListKindComma);
   }
 }
@@ -130,7 +129,7 @@ void ForStatement::outputCodeModel(CodeGenerator &cg) {
   cg.printPropertyHeader("block");
   cg.printAsBlock(m_stmt);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 

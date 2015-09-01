@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -80,6 +80,11 @@ struct ISS {
 //////////////////////////////////////////////////////////////////////
 
 namespace {
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#endif
 
 void nothrow(ISS& env) {
   FTRACE(2, "    nothrow\n");
@@ -595,6 +600,9 @@ void loseNonRefSelfPropTypes(ISS& env) {
   }
 }
 
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////

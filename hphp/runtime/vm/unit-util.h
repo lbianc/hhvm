@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,10 +17,10 @@
 #ifndef incl_HPHP_VM_UNIT_UTIL_H_
 #define incl_HPHP_VM_UNIT_UTIL_H_
 
+#include <folly/Range.h>
+
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/base/type-string.h"
-
-#include "hphp/util/slice.h"
 
 namespace HPHP {
 
@@ -48,7 +48,10 @@ inline bool needsNSNormalization(const StringData* name) {
  */
 inline const StringData* normalizeNS(const StringData* name) {
   if (needsNSNormalization(name)) {
-    return makeStaticString(StringSlice(name->data() + 1, name->size() - 1));
+    assert(name->size() != 0);
+    auto const size  = static_cast<size_t>(name->size() - 1);
+    auto const piece = folly::StringPiece{name->data() + 1, size};
+    return makeStaticString(piece);
   }
   return name;
 }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -59,9 +59,9 @@ void NewObjectExpression::analyzeProgram(AnalysisResultPtr ar) {
   if (ar->getPhase() == AnalysisResult::AnalyzeAll ||
       ar->getPhase() == AnalysisResult::AnalyzeFinal) {
     FunctionScopePtr func;
-    if (!m_name.empty()) {
+    if (!m_origName.empty()) {
       if (ClassScopePtr cls = resolveClass()) {
-        m_name = m_className;
+        m_origName = m_origClassName;
         func = cls->findConstructor(ar, true);
         if (func) func->addNewObjCaller(getScope());
       }
@@ -69,13 +69,6 @@ void NewObjectExpression::analyzeProgram(AnalysisResultPtr ar) {
 
     if (m_params) {
       markRefParams(func, "");
-    }
-
-    if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
-      TypePtr at(getActualType());
-      if (at && at->isSpecificObject() && !getExpectedType()) {
-        setExpectedType(at);
-      }
     }
   }
 }
@@ -96,7 +89,7 @@ void NewObjectExpression::outputCodeModel(CodeGenerator &cg) {
     cg.printExpressionVector(m_params);
   }
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -85,7 +85,8 @@ Variant HHVM_FUNCTION(get_headers, const String& url, int format /* = 0 */) {
 
   Array assoc;
   for (ArrayIter iter(ret); iter; ++iter) {
-    Array tokens = HHVM_FN(explode)(": ", iter.second(), 2).toArray();
+    Array tokens =
+      HHVM_FN(explode)(": ", iter.second().toString(), 2).toArray();
     if (tokens.size() == 2) {
       assoc.set(tokens[0], tokens[1]);
     } else {
@@ -117,8 +118,8 @@ Array HHVM_FUNCTION(get_meta_tags, const String& filename,
   String f = HHVM_FN(file_get_contents)(filename);
 
   Variant matches;
-  HHVM_FN(preg_match_all)("/<meta\\s+name=\"(.*?)\"\\s+content=\"(.*?)\".*?>/s",
-                          f, ref(matches), PREG_SET_ORDER);
+  preg_match_all("/<meta\\s+name=\"(.*?)\"\\s+content=\"(.*?)\".*?>/s",
+                 f, &matches, PREG_SET_ORDER);
 
   Array ret = Array::Create();
   for (ArrayIter iter(matches.toArray()); iter; ++iter) {

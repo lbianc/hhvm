@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -119,10 +119,6 @@ Variant HHVM_FUNCTION(array_push,
 Variant HHVM_FUNCTION(array_rand,
                       const Variant& input,
                       int num_req = 1);
-Variant HHVM_FUNCTION(array_reduce,
-                      const Variant& input,
-                      const Variant& callback,
-                      const Variant& initial = null_variant);
 Variant HHVM_FUNCTION(array_reverse,
                       const Variant& array,
                       bool preserve_keys = false);

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -30,14 +30,14 @@ public:
 
   DECLARE_STATEMENT_VIRTUAL_FUNCTIONS;
 
-  StatementPtr preOptimize(AnalysisResultConstPtr ar);
-  virtual int getLocalEffects() const { return NoEffect;}
+  StatementPtr preOptimize(AnalysisResultConstPtr ar) override;
+  int getLocalEffects() const override { return NoEffect;}
 
   ExpressionPtr getExpression() { return m_exp;}
 
-  void onParse(AnalysisResultConstPtr ar, FileScopePtr scope);
+  void onParse(AnalysisResultConstPtr ar, FileScopePtr scope) override;
 
-  virtual bool kidUnused(int i) const { return i == 0; }
+  bool kidUnused(int i) const override { return i == 0; }
 private:
   ExpressionPtr m_exp;
   bool shouldEmitStatement() const;

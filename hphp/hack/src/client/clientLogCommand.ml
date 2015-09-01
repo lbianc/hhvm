@@ -27,10 +27,9 @@ type build_kind =
   | Incremental
   | Steps
 
- type log_command =
-  | LCCheck of Path.t * string
+type log_command =
+  | LCCheck of Path.t * (* from *) string * (* mode *) string
   | LCStart of Path.t
   | LCStop of Path.t
   | LCRestart of Path.t
   | LCBuild of Path.t * build_kind
-  | LCProlog of Path.t

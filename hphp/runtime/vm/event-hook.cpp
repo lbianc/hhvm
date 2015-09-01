@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,10 +19,9 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/intercept.h"
 #include "hphp/runtime/base/surprise-flags.h"
-#include "hphp/runtime/base/types.h"
 
 #include "hphp/runtime/ext/asio/asio-session.h"
-#include "hphp/runtime/ext/ext_hotprofiler.h"
+#include "hphp/runtime/ext/hotprofiler/ext_hotprofiler.h"
 #include "hphp/runtime/ext/intervaltimer/ext_intervaltimer.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/xenon/ext_xenon.h"
@@ -84,14 +83,6 @@ void EventHook::DisableIntercept() {
   clearSurpriseFlag(InterceptFlag);
 }
 
-ssize_t EventHook::CheckSurprise() {
-  return check_request_surprise();
-}
-
-ssize_t EventHook::GetSurpriseFlags() {
-  return surpriseFlags().load();
-}
-
 struct ExecutingSetprofileCallbackGuard {
   ExecutingSetprofileCallbackGuard() {
     g_context->m_executingSetprofileCallback = true;
@@ -148,7 +139,7 @@ void runUserProfilerOnFunctionExit(const ActRec* ar, const TypedValue* retval,
   if (retval) {
     frameinfo.set(s_return, tvAsCVarRef(retval));
   } else if (exception) {
-    frameinfo.set(s_exception, exception);
+    frameinfo.set(s_exception, Variant{exception});
   }
   params.append(frameinfo);
 
@@ -307,7 +298,8 @@ void EventHook::onFunctionEnter(const ActRec* ar, int funcType, ssize_t flags) {
 }
 
 void EventHook::onFunctionExit(const ActRec* ar, const TypedValue* retval,
-                               const Fault* fault, ssize_t flags) {
+                               bool unwind, ObjectData* phpException,
+                               size_t flags) {
   // Xenon
   if (flags & XenonSignalFlag) {
     Xenon::getInstance().log(Xenon::ExitSample);
@@ -317,7 +309,7 @@ void EventHook::onFunctionExit(const ActRec* ar, const TypedValue* retval,
   // there's a pending exception or we're unwinding from a C++ exception.
   if (flags & IntervalTimerFlag
       && ThreadInfo::s_threadInfo->m_pendingException == nullptr
-      && (!fault || fault->m_faultType == Fault::Type::UserException)) {
+      && (!unwind || phpException)) {
     IntervalTimer::RunCallbacks(IntervalTimer::ExitSample);
   }
 
@@ -346,10 +338,10 @@ void EventHook::onFunctionExit(const ActRec* ar, const TypedValue* retval,
       if (ThreadInfo::s_threadInfo->m_pendingException != nullptr) {
         // Avoid running PHP code when exception from destructor is pending.
         // TODO(#2329497) will not happen once CheckSurprise is used
-      } else if (!fault) {
+      } else if (!unwind) {
         runUserProfilerOnFunctionExit(ar, retval, nullptr);
-      } else if (fault->m_faultType == Fault::Type::UserException) {
-        runUserProfilerOnFunctionExit(ar, retval, fault->m_userException);
+      } else if (phpException) {
+        runUserProfilerOnFunctionExit(ar, retval, phpException);
       } else {
         // Avoid running PHP code when unwinding C++ exception.
       }
@@ -363,7 +355,7 @@ void EventHook::onFunctionExit(const ActRec* ar, const TypedValue* retval,
 }
 
 bool EventHook::onFunctionCall(const ActRec* ar, int funcType) {
-  ssize_t flags = CheckSurprise();
+  auto const flags = check_request_surprise();
   if (flags & InterceptFlag &&
       !RunInterceptHandler(const_cast<ActRec*>(ar))) {
     return false;
@@ -383,7 +375,7 @@ bool EventHook::onFunctionCall(const ActRec* ar, int funcType) {
 }
 
 void EventHook::onFunctionResumeAwait(const ActRec* ar) {
-  ssize_t flags = CheckSurprise();
+  auto const flags = check_request_surprise();
 
   // Xenon
   if (flags & XenonSignalFlag) {
@@ -398,7 +390,7 @@ void EventHook::onFunctionResumeAwait(const ActRec* ar) {
 }
 
 void EventHook::onFunctionResumeYield(const ActRec* ar) {
-  ssize_t flags = CheckSurprise();
+  auto const flags = check_request_surprise();
 
   // Xenon
   if (flags & XenonSignalFlag) {
@@ -415,8 +407,8 @@ void EventHook::onFunctionResumeYield(const ActRec* ar) {
 // Child is the AFWH we're going to block on, nullptr iff this is a suspending
 // generator.
 void EventHook::onFunctionSuspendR(ActRec* suspending, ObjectData* child) {
-  ssize_t flags = CheckSurprise();
-  onFunctionExit(suspending, nullptr, nullptr, flags);
+  auto const flags = check_request_surprise();
+  onFunctionExit(suspending, nullptr, false, nullptr, flags);
 
   if ((flags & AsyncEventHookFlag) &&
       suspending->func()->isAsyncFunction()) {
@@ -445,8 +437,8 @@ void EventHook::onFunctionSuspendE(ActRec* suspending,
   suspending->setVarEnv(nullptr);
 
   try {
-    ssize_t flags = CheckSurprise();
-    onFunctionExit(resumableAR, nullptr, nullptr, flags);
+    auto const flags = check_request_surprise();
+    onFunctionExit(resumableAR, nullptr, false, nullptr, flags);
 
     if ((flags & AsyncEventHookFlag) &&
         resumableAR->func()->isAsyncFunction()) {
@@ -463,7 +455,9 @@ void EventHook::onFunctionSuspendE(ActRec* suspending,
         return frame_afwh(resumableAR);
       }
       assert(resumableAR->func()->isGenerator());
-      return frame_base_generator(resumableAR);
+      return !resumableAR->func()->isAsync()
+        ? frame_generator(resumableAR)->toObject()
+        : frame_async_generator(resumableAR)->toObject();
     }();
     decRefObj(resumableObj);
     throw;
@@ -477,8 +471,8 @@ void EventHook::onFunctionReturn(ActRec* ar, TypedValue retval) {
   ar->setVarEnv(nullptr);
 
   try {
-    ssize_t flags = CheckSurprise();
-    onFunctionExit(ar, &retval, nullptr, flags);
+    auto const flags = check_request_surprise();
+    onFunctionExit(ar, &retval, false, nullptr, flags);
 
     // Async profiler
     if ((flags & AsyncEventHookFlag) &&
@@ -500,15 +494,16 @@ void EventHook::onFunctionReturn(ActRec* ar, TypedValue retval) {
   }
 }
 
-void EventHook::onFunctionUnwind(ActRec* ar, const Fault& fault) {
+void EventHook::onFunctionUnwind(ActRec* ar, ObjectData* phpException) {
   // The locals are already gone. Null out everything.
   ar->setThisOrClassAllowNull(nullptr);
   ar->setLocalsDecRefd();
   ar->setVarEnv(nullptr);
 
-  // TODO(#2329497) can't CheckSurprise() yet, unwinder unable to replace fault
-  auto const flags = GetSurpriseFlags();
-  onFunctionExit(ar, nullptr, &fault, flags);
+  // TODO(#2329497) can't check_request_surprise() yet, unwinder unable to
+  // replace fault
+  auto const flags = stackLimitAndSurprise().load() & kSurpriseFlagMask;
+  onFunctionExit(ar, nullptr, true, phpException, flags);
 }
 
 } // namespace HPHP

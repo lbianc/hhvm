@@ -1,14 +1,12 @@
 <?php
-require_once ($GLOBALS['HACKLIB_ROOT']);
+require_once ($GLOBALS["HACKLIB_ROOT"]);
 class Foo {
   public function __toString() {
     return "Foo";
   }
 }
 function verify_vector($v) {
-  echo
-    (\hacklib_cast_as_boolean($v->isEmpty()) ? "empty\n" : "not empty\n")
-  ;
+  echo (\hacklib_cast_as_boolean($v->isEmpty()) ? "empty\n" : "not empty\n");
   echo ($v->count()."\n");
   echo ($v->at(1)."\n");
   echo ($v[1]."\n");
@@ -39,7 +37,7 @@ function verify_vector($v) {
   ;
   foreach ($v as $i => $val) {
     $out = var_export($val, true);
-    echo ("$i : $out\n");
+    echo ($i." : ".$out."\n");
   }
   $i = $v->getIterator();
   $i->next();

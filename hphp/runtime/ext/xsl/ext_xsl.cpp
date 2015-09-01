@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -20,7 +20,7 @@
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/vm/native-data.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
-#include "hphp/runtime/ext/ext_simplexml.h"
+#include "hphp/runtime/ext/simplexml/ext_simplexml.h"
 #include "hphp/runtime/ext/domdocument/ext_domdocument.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/libxml/ext_libxml.h"
@@ -262,8 +262,8 @@ static xmlChar *xslt_string_to_xpathexpr(const char *str) {
 
 static Object newNode(const String name, xmlNodePtr obj) {
   auto const cls = Unit::lookupClass(name.get());
-  Object ret = ObjectData::newInstance(cls);
-  auto retData = Native::data<DOMNode>(ret.get());
+  Object ret{cls};
+  auto retData = Native::data<DOMNode>(ret);
   retData->setNode(obj);
   return ret;
 }
@@ -376,7 +376,7 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
   String handler((char*)obj->stringval, CopyString);
   xmlXPathFreeObject(obj);
 
-  if (!HHVM_FN(is_callable)(handler)) {
+  if (!is_callable(handler)) {
     raise_warning("Unable to call handler %s()", handler.data());
     // Push an empty string to get an xslt result.
     valuePush(ctxt, xmlXPathNewString((xmlChar*)""));
@@ -464,7 +464,7 @@ static void HHVM_METHOD(XSLTProcessor, importStylesheet,
   xmlDocPtr doc = nullptr;
 
   if (stylesheet.instanceof(s_DOMDocument)) {
-    auto domdoc = Native::data<DOMNode>(stylesheet.get());
+    auto domdoc = Native::data<DOMNode>(stylesheet);
     // This doc will be freed by xsltFreeStylesheet.
     doc = xmlCopyDoc((xmlDocPtr)domdoc->nodep(), /*recursive*/ 1);
     if (doc == nullptr) {
@@ -613,13 +613,13 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToDoc,
   auto data = Native::data<XSLTProcessorData>(this_);
 
   if (doc.instanceof(s_DOMNode)) {
-    auto domnode = Native::data<DOMNode>(doc.get());
+    auto domnode = Native::data<DOMNode>(doc);
     data->m_doc =
       libxml_register_node(xmlCopyDoc((xmlDocPtr)domnode->nodep(),
                                       /*recursive*/ 1));
 
     auto ret = newDOMDocument(false /* construct */);
-    DOMNode* doc_data = Native::data<DOMNode>(ret.get());
+    DOMNode* doc_data = Native::data<DOMNode>(ret);
     doc_data->setNode((xmlNodePtr)data->apply_stylesheet());
 
     return ret;
@@ -634,7 +634,7 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToURI,
   auto data = Native::data<XSLTProcessorData>(this_);
 
   if (doc.instanceof(s_DOMDocument)) {
-    auto domdoc = Native::data<DOMNode>(doc.get());
+    auto domdoc = Native::data<DOMNode>(doc);
     data->m_doc =
       libxml_register_node(xmlCopyDoc ((xmlDocPtr)domdoc->nodep(),
                                        /*recursive*/ 1));
@@ -671,7 +671,7 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToXML,
   auto data = Native::data<XSLTProcessorData>(this_);
 
   if (doc.instanceof(s_DOMDocument)) {
-    auto domdoc = Native::data<DOMNode>(doc.get());
+    auto domdoc = Native::data<DOMNode>(doc);
     data->m_doc =
       libxml_register_node(xmlCopyDoc ((xmlDocPtr)domdoc->nodep(),
                                        /*recursive*/ 1));

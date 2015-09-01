@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,33 +16,37 @@
 #include "hphp/compiler/analysis/file_scope.h"
 
 #include <sys/stat.h>
-#include <map>
 #include <folly/ScopeGuard.h>
+#include <map>
 
-#include "hphp/compiler/analysis/code_error.h"
-#include "hphp/compiler/analysis/lambda_names.h"
 #include "hphp/compiler/analysis/analysis_result.h"
 #include "hphp/compiler/analysis/class_scope.h"
-#include "hphp/compiler/statement/statement_list.h"
-#include "hphp/compiler/statement/exp_statement.h"
-#include "hphp/compiler/option.h"
+#include "hphp/compiler/analysis/code_error.h"
 #include "hphp/compiler/analysis/constant_table.h"
 #include "hphp/compiler/analysis/function_scope.h"
-#include "hphp/compiler/parser/parser.h"
-#include "hphp/util/logger.h"
-#include "hphp/util/deprecated/base.h"
-#include "hphp/compiler/expression/expression_list.h"
-#include "hphp/compiler/statement/function_statement.h"
+#include "hphp/compiler/analysis/lambda_names.h"
 #include "hphp/compiler/analysis/variable_table.h"
-#include "hphp/compiler/expression/simple_function_call.h"
+
+#include "hphp/compiler/expression/expression_list.h"
 #include "hphp/compiler/expression/include_expression.h"
+#include "hphp/compiler/expression/simple_function_call.h"
 #include "hphp/compiler/expression/user_attribute.h"
+
+#include "hphp/compiler/option.h"
+
+#include "hphp/compiler/parser/parser.h"
+
+#include "hphp/compiler/statement/exp_statement.h"
+#include "hphp/compiler/statement/function_statement.h"
+#include "hphp/compiler/statement/statement_list.h"
+
+#include "hphp/util/logger.h"
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-FileScope::FileScope(const string &fileName, int fileSize, const MD5 &md5)
+FileScope::FileScope(const std::string &fileName, int fileSize, const MD5 &md5)
   : BlockScope("", "", StatementPtr(), BlockScope::FileScope),
     m_size(fileSize), m_md5(md5), m_system(false),
     m_isHHFile(false), m_preloadPriority(0),
@@ -58,7 +62,7 @@ void FileScope::setFileLevel(StatementListPtr stmtList) {
     StatementPtr stmt = (*stmtList)[i];
     stmt->setFileLevel();
     if (stmt->is(Statement::KindOfExpStatement)) {
-      ExpStatementPtr expStmt = dynamic_pointer_cast<ExpStatement>(stmt);
+      auto expStmt = dynamic_pointer_cast<ExpStatement>(stmt);
       ExpressionPtr exp = expStmt->getExpression();
       exp->setFileLevel();
     }
@@ -85,8 +89,7 @@ FunctionScopePtr FileScope::setTree(AnalysisResultConstPtr ar,
 }
 
 void FileScope::cleanupForError(AnalysisResultConstPtr ar) {
-  for (StringToClassScopePtrVecMap::const_iterator iter = m_classes.begin();
-       iter != m_classes.end(); ++iter) {
+  for (auto iter = m_classes.begin(); iter != m_classes.end(); ++iter) {
     for (ClassScopePtr cls: iter->second) {
       cls->getVariables()->cleanupForError(ar);
     }
@@ -108,26 +111,23 @@ void makeFatalMeth(FileScope& file,
                    const std::string& msg,
                    int line,
                    Meth meth) {
-  LocationPtr loc(new Location());
-  LabelScopePtr labelScope(new LabelScope());
-  loc->file = file.getName().c_str();
-  loc->first(line, 0);
-  loc->last(line, 0);
+  auto labelScope = std::make_shared<LabelScope>();
+  auto r = Location::Range(line, 0, line, 0);
   BlockScopePtr scope;
-  ExpressionListPtr args(new ExpressionList(scope, loc));
-  args->addElement(Expression::MakeScalarExpression(ar, scope, loc, msg));
-  SimpleFunctionCallPtr e(
-    new SimpleFunctionCall(scope, loc, "throw_fatal", false, args,
-      ExpressionPtr()));
+  auto args = std::make_shared<ExpressionList>(scope, r);
+  args->addElement(Expression::MakeScalarExpression(ar, scope, r, msg));
+  auto e =
+    std::make_shared<SimpleFunctionCall>(scope, r, "throw_fatal", false, args,
+                                         ExpressionPtr());
   meth(e);
-  ExpStatementPtr exp(new ExpStatement(scope, labelScope, loc, e));
-  StatementListPtr stmts(new StatementList(scope, labelScope, loc));
+  auto exp = std::make_shared<ExpStatement>(scope, labelScope, r, e);
+  auto stmts = std::make_shared<StatementList>(scope, labelScope, r);
   stmts->addElement(exp);
 
   FunctionScopePtr fs = file.setTree(ar, stmts);
   fs->setOuterScope(file.shared_from_this());
   fs->getStmt()->resetScope(fs);
-  fs->getStmt()->setLocation(loc);
+  exp->copyLocationTo(fs->getStmt());
   file.setOuterScope(const_cast<AnalysisResult*>(ar.get())->shared_from_this());
 }
 
@@ -148,13 +148,12 @@ void FileScope::makeParseFatal(AnalysisResultConstPtr ar,
 bool FileScope::addFunction(AnalysisResultConstPtr ar,
                             FunctionScopePtr funcScope) {
   if (ar->declareFunction(funcScope)) {
-    FunctionScopePtr &fs = m_functions[funcScope->getName()];
+    FunctionScopePtr &fs = m_functions[funcScope->getScopeName()];
     if (fs) {
       if (!m_redeclaredFunctions) {
         m_redeclaredFunctions = new StringToFunctionScopePtrVecMap;
       }
-      FunctionScopePtrVec &funcVec =
-        (*m_redeclaredFunctions)[funcScope->getName()];
+      auto& funcVec = (*m_redeclaredFunctions)[funcScope->getScopeName()];
       if (!funcVec.size()) {
         fs->setLocalRedeclaring();
         funcVec.push_back(fs);
@@ -171,14 +170,14 @@ bool FileScope::addFunction(AnalysisResultConstPtr ar,
 
 bool FileScope::addClass(AnalysisResultConstPtr ar, ClassScopePtr classScope) {
   if (ar->declareClass(classScope)) {
-    m_classes[classScope->getName()].push_back(classScope);
+    m_classes[classScope->getScopeName()].push_back(classScope);
     return true;
   }
   return false;
 }
 
 ClassScopePtr FileScope::getClass(const char *name) {
-  StringToClassScopePtrVecMap::const_iterator iter = m_classes.find(name);
+  auto iter = m_classes.find(name);
   if (iter == m_classes.end()) return ClassScopePtr();
   return iter->second.back();
 }
@@ -186,23 +185,12 @@ ClassScopePtr FileScope::getClass(const char *name) {
 
 int FileScope::getFunctionCount() const {
   int total = FunctionContainer::getFunctionCount();
-  for (StringToClassScopePtrVecMap::const_iterator iter = m_classes.begin();
-       iter != m_classes.end(); ++iter) {
+  for (auto iter = m_classes.begin(); iter != m_classes.end(); ++iter) {
     for (ClassScopePtr cls: iter->second) {
       total += cls->getFunctionCount();
     }
   }
   return total;
-}
-
-void FileScope::countReturnTypes(std::map<std::string, int> &counts) {
-  FunctionContainer::countReturnTypes(counts, m_redeclaredFunctions);
-  for (StringToClassScopePtrVecMap::const_iterator iter = m_classes.begin();
-       iter != m_classes.end(); ++iter) {
-    for (ClassScopePtr cls: iter->second) {
-      cls->countReturnTypes(counts, 0);
-    }
-  }
 }
 
 void FileScope::pushAttribute() {
@@ -235,15 +223,15 @@ ExpressionPtr FileScope::getEffectiveImpl(AnalysisResultConstPtr ar) const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void FileScope::declareConstant(AnalysisResultPtr ar, const string &name) {
+void FileScope::declareConstant(AnalysisResultPtr ar, const std::string &name) {
   ar->declareConst(shared_from_this(), name);
 }
 
-void FileScope::addConstant(const string &name, TypePtr type,
+void FileScope::addConstant(const std::string &name,
                             ExpressionPtr value,
                             AnalysisResultPtr ar, ConstructPtr con) {
   BlockScopePtr f = ar->findConstantDeclarer(name);
-  f->getConstants()->add(name, type, value, ar, con);
+  f->getConstants()->add(name, value, ar, con);
 }
 
 void FileScope::analyzeProgram(AnalysisResultPtr ar) {
@@ -261,7 +249,7 @@ void FileScope::visit(AnalysisResultPtr ar,
   }
 }
 
-const string &FileScope::pseudoMainName() {
+const std::string &FileScope::pseudoMainName() {
   if (m_pseudoMainName.empty()) {
     m_pseudoMainName = Option::MangleFilename(m_fileName, true);
   }
@@ -270,27 +258,29 @@ const string &FileScope::pseudoMainName() {
 
 FunctionScopePtr FileScope::createPseudoMain(AnalysisResultConstPtr ar) {
   StatementListPtr st = m_tree;
-  LabelScopePtr labelScope(new LabelScope());
-  FunctionStatementPtr f
-    (new FunctionStatement(BlockScopePtr(),
-                           labelScope,
-                           LocationPtr(),
-                           ModifierExpressionPtr(),
-                           false, pseudoMainName(),
-                           ExpressionListPtr(), TypeAnnotationPtr(),
-                           st, 0, "", ExpressionListPtr()));
+  auto labelScope = std::make_shared<LabelScope>();
+  auto f =
+    std::make_shared<FunctionStatement>(
+      BlockScopePtr(),
+      labelScope,
+      Location::Range(),
+      ModifierExpressionPtr(),
+      false, pseudoMainName(),
+      ExpressionListPtr(), TypeAnnotationPtr(),
+      st, 0, "", ExpressionListPtr());
   f->setFileLevel();
-  FunctionScopePtr pseudoMain(
-    new HPHP::FunctionScope(ar, true,
-                            pseudoMainName().c_str(),
-                            f, false, 0, 0,
-                            ModifierExpressionPtr(),
-                            m_attributes[0], "",
-                            shared_from_this(),
-                            vector<UserAttributePtr>(),
-                            true));
+  auto pseudoMain =
+    std::make_shared<HPHP::FunctionScope>(
+      ar, true,
+      pseudoMainName(),
+      f, false, 0, 0,
+      ModifierExpressionPtr(),
+      m_attributes[0], "",
+      shared_from_this(),
+      std::vector<UserAttributePtr>(),
+      true);
   f->setBlockScope(pseudoMain);
-  FunctionScopePtr &fs = m_functions[pseudoMainName()];
+  auto& fs = m_functions[pseudoMainName()];
   always_assert(!fs);
   fs = pseudoMain;
   m_pseudoMain = pseudoMain;
@@ -326,7 +316,7 @@ void FileScope::getScopesSet(BlockScopeRawPtrQueue &v) {
   }
 }
 
-void FileScope::getClassesFlattened(ClassScopePtrVec &classes) const {
+void FileScope::getClassesFlattened(std::vector<ClassScopePtr>& classes) const {
   for (const auto& clsVec : m_classes) {
     for (auto cls : clsVec.second) {
       classes.push_back(cls);
@@ -338,11 +328,11 @@ void FileScope::serialize(JSON::DocTarget::OutputStream &out) const {
   JSON::DocTarget::MapStream ms(out);
   ms.add("name", getName());
 
-  ClassScopePtrVec classes;
+  std::vector<ClassScopePtr> classes;
   getClassesFlattened(classes);
   ms.add("classes", classes);
 
-  FunctionScopePtrVec funcs;
+  std::vector<FunctionScopePtr> funcs;
   getFunctionsFlattened(m_redeclaredFunctions, funcs, true);
   ms.add("functions", funcs);
 

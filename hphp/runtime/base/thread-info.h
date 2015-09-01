@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -73,6 +73,13 @@ struct ThreadInfo {
   ThreadInfo();
   ~ThreadInfo();
 
+  template<class F> void scan(F& mark) const {
+    //if (m_profiler) m_profiler->scan(mark);
+
+    // m_pendingException, if present, will register itself as a root, so no
+    // need to scan it here.
+  }
+
   ////////////////////////////////////////////////////////////////////
 
   RequestInjectionData m_reqInjectionData;
@@ -139,8 +146,8 @@ inline void check_recursion_throw() {
   throw Exception("Maximum stack size reached");
 }
 
-ssize_t check_request_surprise();
-ssize_t check_request_surprise_unlikely();
+size_t check_request_surprise();
+void check_request_surprise_unlikely();
 
 //////////////////////////////////////////////////////////////////////
 

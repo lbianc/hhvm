@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,11 +15,13 @@
 */
 #include "hphp/runtime/vm/jit/relocation.h"
 
-#include "hphp/runtime/vm/jit/state-vector.h"
-#include "hphp/runtime/vm/jit/ir-opcode.h"
-#include "hphp/runtime/vm/jit/back-end-x64.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/align-x64.h"
 #include "hphp/runtime/vm/jit/asm-info.h"
+#include "hphp/runtime/vm/jit/back-end-x64.h"
+#include "hphp/runtime/vm/jit/ir-opcode.h"
+#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/smashable-instr.h"
+#include "hphp/runtime/vm/jit/state-vector.h"
 
 namespace HPHP { namespace jit { namespace x64 {
 
@@ -28,6 +30,8 @@ namespace {
 TRACE_SET_MOD(hhir);
 
 //////////////////////////////////////////////////////////////////////
+
+constexpr int kJmpLen = 5;
 
 using WideJmpSet = hphp_hash_set<void*>;
 struct JmpOutOfRange : std::exception {};
@@ -81,14 +85,19 @@ size_t relocateImpl(RelocationInfo& rel,
       int destRange = 0;
       auto af = fixups.m_alignFixups.equal_range(src);
       while (af.first != af.second) {
-        auto low = src + af.first->second.second;
-        auto hi = src + af.first->second.first;
+        auto const alignPair = af.first->second;
+        auto const alignInfo = alignment_info(alignPair.first);
+
+        auto const low = src + alignInfo.offset;
+        auto const hi = src + alignInfo.nbytes;
         assertx(low < hi);
+
         if (!keepNopLow || keepNopLow > low) keepNopLow = low;
         if (!keepNopHigh || keepNopHigh < hi) keepNopHigh = hi;
+
         TCA tmp = destBlock.frontier();
-        prepareForSmashImpl(destBlock,
-                            af.first->second.first, af.first->second.second);
+        align(destBlock, alignPair.first, alignPair.second);
+
         if (destBlock.frontier() != tmp) {
           destRange += destBlock.frontier() - tmp;
           internalRefsNeedUpdating = true;
@@ -120,6 +129,8 @@ size_t relocateImpl(RelocationInfo& rel,
               if (d2.size() < kJmpLen) {
                 d2.widenBranch();
                 internalRefsNeedUpdating = true;
+                // widening a branch makes the dest instruction bigger
+                destBlock.setFrontier(dest + d2.size());
               }
             } else if (d2.shrinkBranch()) {
               internalRefsNeedUpdating = true;
@@ -183,7 +194,7 @@ size_t relocateImpl(RelocationInfo& rel,
       if (keepNopHigh && src >= keepNopHigh) {
         keepNopLow = keepNopHigh = nullptr;
       }
-    }
+    } // while (src != end)
 
     if (exitAddr) {
       *exitAddr = jmpDest;

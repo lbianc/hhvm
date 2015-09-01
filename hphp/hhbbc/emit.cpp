@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -283,10 +283,9 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 
     auto emit_srcloc = [&] {
       if (!inst.srcLoc.isValid()) return;
-      Location loc;
-      loc.first(inst.srcLoc.start.line, inst.srcLoc.start.col);
-      loc.last(inst.srcLoc.past.line, inst.srcLoc.past.col);
-      ue.recordSourceLocation(&loc, startOffset);
+      Location::Range loc(inst.srcLoc.start.line, inst.srcLoc.start.col,
+                          inst.srcLoc.past.line, inst.srcLoc.past.col);
+      ue.recordSourceLocation(loc, startOffset);
     };
 
     auto pop = [&] (int32_t n) {
@@ -338,7 +337,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #define IMM_SA(n)      ue.emitInt32(ue.mergeLitstr(data.str##n));
 #define IMM_RATA(n)    encodeRAT(ue, data.rat);
 #define IMM_AA(n)      ue.emitInt32(ue.mergeArray(data.arr##n));
-#define IMM_OA_IMPL(n) ue.emitByte(static_cast<uint8_t>(data.subop));
+#define IMM_OA_IMPL(n) ue.emitByte(static_cast<uint8_t>(data.subop##n));
 #define IMM_OA(type)   IMM_OA_IMPL
 #define IMM_BA(n)      emit_branch(*data.target);
 #define IMM_VSA(n)     emit_vsa(data.keys);
@@ -358,6 +357,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #define POP_C_MMANY    pop(1); pop(count_stack_elems(data.mvec));
 #define POP_R_MMANY    pop(1); pop(count_stack_elems(data.mvec));
 #define POP_V_MMANY    pop(1); pop(count_stack_elems(data.mvec));
+#define POP_MFINAL     not_implemented();
 #define POP_CMANY      pop(data.arg##1);
 #define POP_SMANY      pop(data.keys.size());
 #define POP_FMANY      pop(data.arg##1);
@@ -430,6 +430,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #undef POP_C_MMANY
 #undef POP_R_MMANY
 #undef POP_V_MMANY
+#undef POP_MFINAL
 
 #undef PUSH_NOV
 #undef PUSH_ONE
@@ -870,6 +871,8 @@ void emit_class(EmitUnitState& state,
   for (auto& x : cls.traitAliasRules)    pce->addTraitAliasRule(x);
   pce->setNumDeclMethods(cls.numDeclMethods);
 
+  pce->setIfaceVtableSlot(state.index.lookup_iface_vtable_slot(&cls));
+
   for (auto& m : cls.methods) {
     FTRACE(2, "    method: {}\n", m->name->data());
     auto const fe = ue.newMethodEmitter(m->name, pce);
@@ -945,6 +948,11 @@ void emit_class(EmitUnitState& state,
   pce->setEnumBaseTy(cls.enumBaseTy);
 }
 
+void emit_typealias(UnitEmitter& ue, const php::TypeAlias& alias) {
+  auto const id = ue.addTypeAlias(alias);
+  ue.pushMergeableTypeAlias(HPHP::Unit::MergeKind::TypeAlias, id);
+}
+
 //////////////////////////////////////////////////////////////////////
 
 }
@@ -990,7 +998,7 @@ std::unique_ptr<UnitEmitter> emit_unit(const Index& index,
   emit_pseudomain(state, *ue, unit);
   for (auto& c : unit.classes)     emit_class(state, *ue, *c);
   for (auto& f : unit.funcs)       emit_func(state, *ue, *f);
-  for (auto& t : unit.typeAliases) ue->addTypeAlias(*t);
+  for (auto& t : unit.typeAliases) emit_typealias(*ue, *t);
 
   for (size_t id = 0; id < unit.classes.size(); ++id) {
     // We may not have a DefCls PC if we're a closure, or a

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -32,27 +32,36 @@ class c_ExternalThreadEventWaitHandle;
  * This value is in principle a constexp, but the integer-to-pointer cast would
  * require a reinterpret cast, which is not allowed in a constexpr
  */
-#define K_CONSUMER_WAITING (static_cast<c_ExternalThreadEventWaitHandle*>((void*)1L))
+#define K_CONSUMER_WAITING \
+  (static_cast<c_ExternalThreadEventWaitHandle*>((void*)1L))
 
-class AsioExternalThreadEventQueue final {
-  public:
-    AsioExternalThreadEventQueue();
+struct AsioExternalThreadEventQueue final {
+  AsioExternalThreadEventQueue();
 
-    bool hasReceived() { return m_received; }
-    void processAllReceived();
-    bool abandonAllReceived(c_ExternalThreadEventWaitHandle* wait_handle);
+  bool hasReceived() { return m_received; }
+  void processAllReceived();
+  bool abandonAllReceived(c_ExternalThreadEventWaitHandle* wait_handle);
 
-    bool tryReceiveSome();
-    bool receiveSomeUntil(
-        std::chrono::time_point<std::chrono::steady_clock> waketime);
-    void receiveSome();
-    void send(c_ExternalThreadEventWaitHandle* wait_handle);
+  bool tryReceiveSome();
+  bool receiveSomeUntil(
+      std::chrono::time_point<std::chrono::steady_clock> waketime);
+  void receiveSome();
+  void send(c_ExternalThreadEventWaitHandle* wait_handle);
 
-  private:
-    c_ExternalThreadEventWaitHandle* m_received;
-    std::atomic<c_ExternalThreadEventWaitHandle*> m_queue;
-    std::mutex m_queueMutex;
-    std::condition_variable m_queueCondition;
+  template<class F> void scan(F& mark) const {
+    mark(m_received);
+    // TODO: t7930461 if other threads have ptrs to our heap stashed in their
+    // thread-local or stack, we need to also scan them, or track them
+    // as roots somewhere. and if they're allowed to mutate our heap
+    // asyncronously, we need to rethink the single-threaded-gc
+    mark(m_queue.load());
+  }
+
+private:
+  c_ExternalThreadEventWaitHandle* m_received;
+  std::atomic<c_ExternalThreadEventWaitHandle*> m_queue;
+  std::mutex m_queueMutex;
+  std::condition_variable m_queueCondition;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -115,8 +115,8 @@ template<> struct BranchImpl<SSATmp*> {
 /*
  * cond() generates if-then-else blocks within a trace.  The caller supplies
  * lambdas to create the branch, next-body, and taken-body.  The next and
- * taken lambdas must return one SSATmp* value; cond() returns the SSATmp for
- * the merged value.
+ * taken lambdas must return one SSATmp* value, or they must both return
+ * nullptr; cond() returns the SSATmp for the merged value, or nullptr.
  *
  * If branch returns void, next must take zero arguments. If branch returns
  * SSATmp*, next must take one SSATmp* argument. This allows branch to return
@@ -131,17 +131,29 @@ SSATmp* cond(IRGS& env, Branch branch, Next next, Taken taken) {
 
   using T = decltype(branch(taken_block));
   auto const v1 = BranchImpl<T>::go(branch, taken_block, next);
-  gen(env, Jmp, done_block, v1);
+  if (v1) {
+    gen(env, Jmp, done_block, v1);
+  } else {
+    gen(env, Jmp, done_block);
+  }
   env.irb->appendBlock(taken_block);
   auto const v2 = taken();
-  gen(env, Jmp, done_block, v2);
+  assertx(!v1 == !v2);
+  if (v2) {
+    gen(env, Jmp, done_block, v2);
+  } else {
+    gen(env, Jmp, done_block);
+  }
 
   env.irb->appendBlock(done_block);
-  auto const label = env.unit.defLabel(1, env.irb->curMarker());
-  done_block->push_back(label);
-  auto const result = label->dst(0);
-  result->setType(v1->type() | v2->type());
-  return result;
+  if (v1) {
+    auto const label = env.unit.defLabel(1, env.irb->curMarker());
+    done_block->push_back(label);
+    auto const result = label->dst(0);
+    result->setType(v1->type() | v2->type());
+    return result;
+  }
+  return nullptr;
 }
 
 /*
@@ -388,16 +400,12 @@ inline SSATmp* topR(IRGS& env, BCSPOffset i = BCSPOffset{0}) {
 inline void spillStack(IRGS& env) {
   auto const toSpill = env.irb->evalStack();
   for (auto idx = toSpill.size(); idx-- > 0;) {
-    gen(env,
-        StStk,
-        IRSPOffsetData { offsetFromIRSP(env, BCSPOffset{idx}) },
-        sp(env),
-        toSpill.top(idx));
-    gen(env,
-        PredictStk,
-        toSpill.topPredictedType(idx),
-        IRSPOffsetData { offsetFromIRSP(env, BCSPOffset{idx}) },
-        sp(env));
+    auto const irSPOff = offsetFromIRSP(env, BCSPOffset{idx});
+    auto const tmp = toSpill.top(idx);
+
+    gen(env, StStk, IRSPOffsetData{irSPOff}, sp(env), tmp);
+    env.irb->fs().refineStackPredictedType(
+      irSPOff, env.irb->fs().predictedTmpType(tmp));
   }
   env.irb->syncEvalStack();
 }
@@ -687,7 +695,7 @@ inline SSATmp* stLoc(IRGS& env,
                      Block* ldPMExit,
                      SSATmp* newVal) {
   constexpr bool decRefOld = true;
-  constexpr bool incRefNew = false;
+  constexpr bool incRefNew = true;
   return stLocImpl(env, id, ldrefExit, ldPMExit, newVal, decRefOld, incRefNew);
 }
 

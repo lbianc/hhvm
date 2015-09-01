@@ -332,8 +332,8 @@
       - klein/tests/Klein/Tests/KleinTest.php
   kohana:
     url: https://github.com/kohana/kohana.git
-    branch: v3.3.3.1
-    commit: ffc48d1d55da6aa4a0ced7f973f6043e547c9048
+    branch: v3.3.4
+    commit: 363c59ee298e1f5abe797e5efdf1c44431800a78
     install_root: kohana
     test_root: kohana
     test_find_mode: token
@@ -348,6 +348,8 @@
       # (eg :00.999 => :01.000), these tests fail.
       - laravel/tests/Database/DatabaseEloquentRelationTest.php
       - laravel/tests/Database/DatabaseEloquentModelTest.php
+      # Depends on google.com
+      - laravel/tests/Validation/ValidationValidatorTest.php
   lessphp:
     url: https://github.com/leafo/lessphp.git
     branch: v0.4.0
@@ -609,6 +611,15 @@
     commit: 340e658aec0b51df58cab4605578acf4c90c479c
     install_root: slim
     test_root: slim
+  smarty:
+    url: https://github.com/smarty-php/smarty-dev
+    branch: master
+    commit: 03da4843d0fce83bcd192e02fc1ed55a19c4ec70
+    install_root: smarty
+    test_root: smarty/smarty-phpunit
+    # overridden explicitly in class_overrides
+    config_file: smarty/smarty-phpunit/phpunit.xml.dist
+    test_find_mode: token
   stash:
     url: https://github.com/tedious/Stash.git
     branch: master

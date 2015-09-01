@@ -8,10 +8,11 @@
  *
  *)
 
-
+open Core
 open Utils
 
 module Reason = Typing_reason
+module SN = Naming_special_names
 
 type visibility =
   | Vpublic
@@ -37,6 +38,21 @@ and _ ty_ =
 
   (* Either an object type or a type alias, ty list are the arguments *)
   | Tapply : Nast.sid * decl ty list -> decl ty_
+
+  (* The type of a generic inside a function using that generic, with an
+   * optional "as" or "super" constraint. For example:
+   *
+   * function f<T as int>(T $x) {
+   *   // ...
+   * }
+   *
+   * The type of $x inside f() is
+   * Tgeneric("T", Some(Constraint_as, Tprim Tint))
+   *)
+  | Tgeneric : string * (Ast.constraint_kind * decl ty) option -> decl ty_
+
+  (* Name of class, name of type const, remaining names of type consts *)
+  | Taccess : taccess_type -> decl ty_
 
   (*========== Following Types Exist in Both Phases ==========*)
   (* "Any" is the type of a variable with a missing annotation, and "mixed" is
@@ -72,18 +88,6 @@ and _ ty_ =
    *)
   | Tarray : 'phase ty option * 'phase ty option -> 'phase ty_
 
-  (* The type of a generic inside a function using that generic, with an
-   * optional "as" or "super" constraint. For example:
-   *
-   * function f<T as int>(T $x) {
-   *   // ...
-   * }
-   *
-   * The type of $x inside f() is
-   * Tgeneric("T", Some(Constraint_as, Tprim Tint))
-   *)
-  | Tgeneric : string * (Ast.constraint_kind * 'phase ty) option -> 'phase ty_
-
   (* Nullable, called "option" in the ML parlance. *)
   | Toption : 'phase ty -> 'phase ty_
 
@@ -99,11 +103,10 @@ and _ ty_ =
   (* Tuple, with ordered list of the types of the elements of the tuple. *)
   | Ttuple : 'phase ty list -> 'phase ty_
 
-  (* Name of class, name of type const, remaining names of type consts *)
-  | Taccess : 'phase taccess_type -> 'phase ty_
-
-  (* Shape and types of each of the arms. *)
-  | Tshape : 'phase ty Nast.ShapeMap.t -> 'phase ty_
+  (* Whether all fields of this shape are known, types of each of the
+   * known arms.
+   *)
+  | Tshape : shape_fields_known * ('phase ty Nast.ShapeMap.t) -> 'phase ty_
 
   (*========== Below Are Types That Cannot Be Declared In User Code ==========*)
 
@@ -114,20 +117,32 @@ and _ ty_ =
    *)
   | Tvar : Ident.t -> locl ty_
 
-  (* The type of an opaque type alias ("newtype"), outside of the file where it
-   * was defined. They are "opaque", which means that they only unify with
+  (* The type of an opaque type (e.g. a "newtype" outside of the file where it
+   * was defined). They are "opaque", which means that they only unify with
    * themselves. However, it is possible to have a constraint that allows us to
    * relax this. For example:
    *
-   * newtype my_type as int = ...
+   *   newtype my_type as int = ...
    *
    * Outside of the file where the type was defined, this translates to:
    *
-   * Tabstract ((pos, "my_type"), [], Some (Tprim Tint))
+   *   Tabstract (AKnewtype (pos, "my_type", []), Some (Tprim Tint))
    *
    * Which means that my_type is abstract, but is subtype of int as well.
+   *
+   * We also create abstract types for generic parameters of a function, i.e.
+   *
+   *   function foo<T>(T $x): void {
+   *     // Body
+   *   }
+   *
+   * The type 'T' will be represented as an abstract type when type checking
+   * the body of 'foo'.
+   *
+   * Finally abstract types are also derived from the 'this' type and
+   * accessing type constants on it, resulting in a dependent type.
    *)
-  | Tabstract : Nast.sid * locl ty list * locl ty option -> locl ty_
+  | Tabstract : abstract_kind * locl ty option -> locl ty_
 
   (* An anonymous function, including the fun arity, and the identifier to
    * type the body of the function. (The actual closure is stored in
@@ -196,7 +211,90 @@ and _ ty_ =
   (* An instance of a class or interface, ty list are the arguments *)
   | Tclass : Nast.sid * locl ty list -> locl ty_
 
-and 'phase taccess_type = 'phase ty * Nast.sid list
+(* An abstract type derived from either a newtype, a type parameter, or some
+ * dependent type
+ *)
+and abstract_kind =
+    (* newtype foo<T1, T2> ... *)
+  | AKnewtype of string * locl ty list
+    (* enum foo ... *)
+  | AKenum of string
+    (* <T super C> ; None if 'as' constrained *)
+  | AKgeneric of string * locl ty option
+    (* see dependent_type *)
+  | AKdependent of dependent_type
+
+(* A dependent type consists of a base kind which indicates what the type is
+ * dependent on. It is either dependent on:
+ *  - The type 'this'
+ *  - The class context (what 'static' is resolved to in a class)
+ *  - A class
+ *  - An expression
+ *
+ * Dependent types also have a path component (derived from accessing a type
+ * constant). Thus the dependent type (`expr 0, ['A', 'B', 'C']) roughly means
+ * "The type resulting from accessing the type constant A then the type constant
+ * B and then the type constant C on the expression reference by 0"
+ *)
+and dependent_type =
+  (* Type that is the subtype of the late bound type within a class. *)
+  [ `this
+  (* The late bound type within a class. It is the type of 'new static()' and
+   * '$this'. This is different from the 'this' type. The 'this' type isn't
+   * quite strong enough in some cases. It means you are a subtype of the late
+   * bound class, but there are instances where you need the exact type.
+   * We may not need both since the only way to make something of type 'this'
+   * that is not 'static' is with 'instanceof static'.
+   *)
+  | `static
+  (* A class name, new type, or generic, i.e.
+   *
+   * abstract class C { abstract const type T }
+   *
+   * The type C::T is (`cls '\C', ['T'])
+   *)
+  | `cls of string
+  (* A reference to some expression. For example:
+   *
+   *  $x->foo()
+   *
+   *  The expression $x would have a reference Ident.t
+   *  The expression $x->foo() would have a different one
+   *)
+  | `expr of Ident.t
+  ] * string list
+
+and taccess_type = decl ty * Nast.sid list
+
+(* Local shape constructed using "shape" keyword has all the fields
+ * known:
+ *
+ *   $s = shape('x' => 4, 'y' => 4);
+ *
+ * It has fields 'x' and 'y' and definitely no other fields. On the other
+ * hand, shape types that come from typehints may (due to structural
+ * subtyping of shapes) have some other, unlisted fields:
+ *
+ *   type s = shape('x' => int);
+ *
+ *   function f(s $s) {
+ *   }
+ *
+ *   f(shape('x' => 4, 'y' => 5));
+ *
+ * The call to f is valid because of structural subtyping - shapes are
+ * permitted to "forget" fields. But the 'y' field still exists at runtime,
+ * and we cannot say inside the body of $f that we know that 'x' is the only
+ * field. This is relevant when deciding if it's safe to omit optional fields
+ * - if shape fields are not fully known, even optional fields have to be
+ * explicitly set/unset.
+ *
+ * We also track in additional map of FieldsPartiallyKnown names of fields
+ * that are known to not exist (because they were explicitly unset).
+ *)
+and shape_fields_known =
+  | FieldsFullyKnown
+  | FieldsPartiallyKnown of Pos.t Nast.ShapeMap.t
 
 (* The type of a function AND a method.
  * A function has a min and max arity because of optional arguments *)
@@ -265,9 +363,6 @@ and class_type = {
   (* This includes all the classes, interfaces and traits this class is
    * using. *)
   tc_ancestors           : decl ty SMap.t ;
-  (* Ancestors that have to be checked when the class becomes
-   * concrete. *)
-  tc_ancestors_checked_when_concrete  : decl ty SMap.t;
   tc_req_ancestors       : decl ty SMap.t;
   tc_req_ancestors_extends : SSet.t; (* the extends of req_ancestors *)
   tc_extends             : SSet.t;
@@ -295,18 +390,53 @@ type phase_ty =
 
 (* Tracks information about how a type was expanded *)
 type expand_env = {
-  typedef_expansions : (Pos.t * string) list;
+  (* A list of the type defs and type access we have expanded thus far. Used
+   * to prevent entering into a cycle when expanding these types
+   *)
+  type_expansions : (Pos.t * string) list;
   substs : locl ty SMap.t;
   this_ty : locl ty;
+  (* The class that the type is extracted from. Used for creating expression
+   * dependent types for type constants.
+   *)
+  from_class : Nast.class_id option;
 }
 
 type ety = expand_env * locl ty
+
+let has_expanded {type_expansions; _} x =
+  List.exists type_expansions begin function
+    | (_, x') when x = x' -> true
+    | _ -> false
+  end
 
 (* The identifier for this *)
 let this = Ident.make "$this"
 
 let arity_min ft_arity : int = match ft_arity with
   | Fstandard (min, _) | Fvariadic (min, _) | Fellipsis min -> min
+
+module AbstractKind = struct
+  let to_string = function
+    | AKnewtype (name, _) -> name
+    | AKgeneric (name, _) -> name
+    | AKenum name -> "enum "^(Utils.strip_ns name)
+    | AKdependent (dt, ids) ->
+       let dt =
+         match dt with
+         | `this -> SN.Typehints.this
+         | `static -> "<"^SN.Classes.cStatic^">"
+         | `cls c -> c
+         | `expr i ->
+             let display_id = Reason.get_expr_display_id i in
+             "<expr#"^string_of_int display_id^">" in
+       String.concat "::" (dt::ids)
+  let is_classname = function
+    | AKnewtype (name, _) -> (name = Naming_special_names.Classes.cClassname)
+    | AKenum _ -> false
+    | AKgeneric _ -> false
+    | AKdependent _ -> false
+end
 
 (*****************************************************************************)
 (* Accumulate method calls mode *)

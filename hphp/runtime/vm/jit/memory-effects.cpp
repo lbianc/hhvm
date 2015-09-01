@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -247,11 +247,15 @@ GeneralEffects may_load_store_move(AliasClass loads,
 GeneralEffects iter_effects(const IRInstruction& inst,
                             SSATmp* fp,
                             AliasClass locals) {
+  auto const iterID = inst.extra<IterData>()->iterId;
+  AliasClass const iterPos = AIterPos { fp, iterID };
+  AliasClass const iterBase = AIterBase { fp, iterID };
+  auto const iterMem = iterPos | iterBase;
   return may_reenter(
     inst,
     may_load_store_kill(
-      locals | AHeapAny,
-      locals | AHeapAny,
+      locals | AHeapAny | iterMem,
+      locals | AHeapAny | iterMem,
       AMIStateAny
     )
   );
@@ -501,6 +505,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   // Resumable suspension takes everything from the frame and moves it into the
   // heap.
   case CreateAFWH:
+  case CreateAFWHNoVV:
   case CreateCont:
     return may_load_store_move(AFrameAny, AHeapAny, AFrameAny);
 
@@ -510,6 +515,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   case CheckStackOverflow:
   case CheckSurpriseFlagsEnter:
+  case CheckSurpriseAndStack:
     return may_raise(inst, may_load_store(AEmpty, AEmpty));
 
   case InitExtraArgs:
@@ -817,7 +823,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
           // ActRec, but AliasClass needs an offset to the highest cell it will
           // store.
           spOffset.offset + int32_t{kNumActRecCells} - 1,
-          kNumActRecCells
+          int32_t{kNumActRecCells}
         },
         AStack {
           inst.src(0),
@@ -853,6 +859,16 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
       return may_raise(inst, may_load_store(stk, stk));
     }
 
+  case CastMem:
+  case CoerceMem:
+    {
+      auto aInst = inst.src(0)->inst();
+      if (aInst->is(LdLocAddr)) {
+        return may_raise(inst, may_load_store(AFrameAny, AFrameAny));
+      }
+      return may_raise(inst, may_load_store(AUnknown, AUnknown));
+    }
+
   case LdARFuncPtr:
     // This instruction is essentially a PureLoad, but we don't handle non-TV's
     // in PureLoad so we have to treat it as may_load_store.  We also treat it
@@ -882,9 +898,12 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case DefFP:
   case DefSP:
   case EndGuards:
+  case EqBool:
   case EqDbl:
   case EqInt:
+  case GteBool:
   case GteInt:
+  case GtBool:
   case GtInt:
   case HintLocInner:
   case Jmp:
@@ -893,8 +912,10 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LdPropAddr:
   case LdStkAddr:
   case LdPackedArrayElemAddr:
+  case LteBool:
   case LteDbl:
   case LteInt:
+  case LtBool:
   case LtInt:
   case GtDbl:
   case GteDbl:
@@ -903,8 +924,13 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case MulDbl:
   case MulInt:
   case MulIntO:
+  case NeqBool:
   case NeqDbl:
   case NeqInt:
+  case SameObj:
+  case NSameObj:
+  case EqRes:
+  case NeqRes:
   case SubDbl:
   case SubInt:
   case SubIntO:
@@ -947,11 +973,16 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CastCtxThis:
   case LdARNumParams:
   case LdRDSAddr:
-  case PredictLoc:
-  case PredictStk:
   case ExitPlaceholder:
   case CheckRange:
   case ProfileObjClass:
+  case LdIfaceMethod:
+  case InstanceOfIfaceVtable:
+  case CheckARMagicFlag:
+  case LdARNumArgsAndFlags:
+  case StARNumArgsAndFlags:
+  case LdARInvName:
+  case StARInvName:
     return IrrelevantEffects {};
 
   //////////////////////////////////////////////////////////////////////
@@ -965,12 +996,14 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case AFWHBlockOn:
   case IncRef:
   case IncRefCtx:
-  case StClosureArg:
+  case LdClosureCtx:
   case StClosureCtx:
+  case StClosureArg:
   case StContArKey:
   case StContArValue:
   case StRetVal:
   case ConvStrToInt:
+  case ConvResToInt:
   case OrdStr:
   case CreateSSWH:
   case NewLikeArray:
@@ -981,7 +1014,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CheckType:
   case FreeActRec:
   case RegisterLiveObj:
-  case StClosureFunc:
   case StContArResume:
   case StContArState:
   case ZeroErrorLevel:
@@ -1018,15 +1050,29 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case InterfaceSupportsInt:
   case InterfaceSupportsStr:
   case IsWaitHandle:
+  case IsCol:
+  case HasToString:
   case DbgAssertRefCount:
-  case NSame:
-  case Same:
-  case Gt:
-  case Gte:
-  case Eq:
-  case Lt:
-  case Lte:
-  case Neq:
+  case GtStr:
+  case GteStr:
+  case LtStr:
+  case LteStr:
+  case EqStr:
+  case NeqStr:
+  case SameStr:
+  case NSameStr:
+  case GtStrInt:
+  case GteStrInt:
+  case LtStrInt:
+  case LteStrInt:
+  case EqStrInt:
+  case NeqStrInt:
+  case SameArr:
+  case NSameArr:
+  case GtRes:
+  case GteRes:
+  case LtRes:
+  case LteRes:
   case IncTransCounter:
   case LdBindAddr:
   case LdAsyncArParentChain:
@@ -1038,13 +1084,15 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ConvStrToArr:   // decrefs src, but src is a string
   case ConvStrToBool:
   case ConvStrToDbl:
+  case ConvResToDbl:
   case DerefClsRDSHandle:
   case EagerSyncVMRegs:
   case ExtendsClass:
   case LdUnwinderValue:
   case GetCtxFwdCall:
-  case LdCctx:
   case LdCtx:
+  case LdCctx:
+  case LdClosure:
   case LdClsName:
   case LdAFWHActRec:
   case LdClsCtx:
@@ -1080,6 +1128,8 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LookupClsRDSHandle:
   case GetCtxFwdCallDyn:
   case DbgTraceCall:
+  case InitCtx:
+  case PackMagicArgs:
     return may_load_store(AEmpty, AEmpty);
 
   // Some that touch memory we might care about later, but currently don't:
@@ -1162,12 +1212,18 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CIterFree:  // decrefs context object in iter
   case MIterFree:
   case IterFree:
-  case EqX:
-  case GteX:
-  case GtX:
-  case LteX:
-  case LtX:
-  case NeqX:
+  case GtObj:
+  case GteObj:
+  case LtObj:
+  case LteObj:
+  case EqObj:
+  case NeqObj:
+  case GtArr:
+  case GteArr:
+  case LtArr:
+  case LteArr:
+  case EqArr:
+  case NeqArr:
   case DecodeCufIter:
   case ConvCellToArr:  // decrefs src, may read obj props
   case ConvCellToObj:  // decrefs src
@@ -1188,8 +1244,8 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LookupCns:
   case LookupCnsE:
   case LookupCnsU:
-  case StringGet:   // raise_warning
-  case ArrayAdd:    // decrefs source
+  case StringGet:      // raise_warning
+  case ArrayAdd:       // decrefs source
   case AddElemIntKey:  // decrefs value
   case AddElemStrKey:  // decrefs value
   case AddNewElem:     // decrefs value
@@ -1197,7 +1253,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ArrayIsset:     // kVPackedKind warnings
   case ArraySet:       // kVPackedKind warnings
   case ArraySetRef:    // kVPackedKind warnings
-  case GetMemoKey:  // re-enters to call getInstanceKey() in some cases
+  case GetMemoKey:     // re-enters to call getInstanceKey() in some cases
   case LdClsCtor:
   case ConcatStrStr:
   case PrintStr:
@@ -1221,6 +1277,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ConcatStr4:
   case ConvCellToDbl:
   case ThrowOutOfBounds:
+  case ThrowInvalidOperation:
     return may_raise(inst, may_load_store(AHeapAny, AHeapAny));
 
   case ReleaseVVAndSkip:  // can decref ExtraArgs or VarEnv and Locals
@@ -1236,13 +1293,34 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     return may_reenter(inst, may_load_store(AEmpty, AEmpty));
 
   //////////////////////////////////////////////////////////////////////
-  // The following instructions are used for debugging memory optimizations, so
-  // this analyzer should pretend they don't exist.
+  // The following instructions are used for debugging memory optimizations.
+  // We can't ignore them, because they can prevent future optimizations;
+  // eg t1 = LdStk<N>; DbgTrashStk<N>; StStk<N> t1
+  // If we ignore the DbgTrashStk it looks like the StStk is redundant
 
   case DbgTrashStk:
+    return GeneralEffects {
+      AEmpty, AEmpty, AEmpty,
+      AStack { inst.src(0), inst.extra<DbgTrashStk>()->offset.offset, 1 }
+    };
   case DbgTrashFrame:
+    return GeneralEffects {
+      AEmpty, AEmpty, AEmpty,
+      AStack {
+        inst.src(0),
+        // SpillFrame's spOffset is to the bottom of where it will store the
+        // ActRec, but AliasClass needs an offset to the highest cell it will
+        // store.
+        inst.extra<DbgTrashFrame>()->offset.offset +
+          int32_t{kNumActRecCells} - 1,
+        int32_t{kNumActRecCells}
+      }
+    };
   case DbgTrashMem:
-    return IrrelevantEffects {};
+    return GeneralEffects {
+      AEmpty, AEmpty, AEmpty,
+      pointee(inst.src(0))
+    };
 
   //////////////////////////////////////////////////////////////////////
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -39,7 +39,6 @@
 #include "hphp/util/mutex.h"
 #include "hphp/util/functional.h"
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/attr.h"
 #include "hphp/runtime/base/autoload-handler.h"
 #include "hphp/runtime/base/execution-context.h"
@@ -521,7 +520,7 @@ void Unit::loadFunc(const Func *func) {
     Debug::DebugInfo::recordDataMap(
       (char*)(intptr_t)ne->m_cachedFunc.handle(),
       (char*)(intptr_t)ne->m_cachedFunc.handle() + sizeof(void*),
-      folly::format("rds+Func-{}", func->name()->data()).str());
+      folly::format("rds+Func-{}", func->name()).str());
   }
 }
 
@@ -674,31 +673,20 @@ Class* Unit::defClass(const PreClass* preClass,
     newClass->setClassHandle(nameList->m_cachedClass);
     newClass.get()->incAtomicCount();
 
-    if (InstanceBits::initFlag.load(std::memory_order_acquire)) {
-      // If the instance bitmap has already been set up, we can just
-      // initialize our new class's bits and add ourselves to the class
-      // list normally.
-      newClass->setInstanceBits();
-      nameList->pushClass(newClass.get());
-    } else {
-      // Otherwise, we have to grab the read lock. If the map has been
-      // initialized since we checked, initialize the bits normally. If not,
-      // we must add the new class to the class list before dropping the lock
-      // to ensure its bits are initialized when the time comes.
-      ReadLock l(InstanceBits::lock);
-      if (InstanceBits::initFlag.load(std::memory_order_acquire)) {
-        newClass->setInstanceBits();
-      }
-      nameList->pushClass(newClass.get());
-    }
+    InstanceBits::ifInitElse(
+      [&] { newClass->setInstanceBits();
+            nameList->pushClass(newClass.get()); },
+      [&] { nameList->pushClass(newClass.get()); }
+    );
+
     if (RuntimeOption::EvalPerfDataMap) {
       Debug::DebugInfo::recordDataMap(
         newClass.get(), newClass.get() + 1,
-        folly::format("Class-{}", preClass->name()->data()).str());
+        folly::format("Class-{}", preClass->name()).str());
       Debug::DebugInfo::recordDataMap(
         (char*)(intptr_t)nameList->m_cachedClass.handle(),
         (char*)(intptr_t)nameList->m_cachedClass.handle() + sizeof(void*),
-        folly::format("rds+Class-{}", preClass->name()->data()).str());
+        folly::format("rds+Class-{}", preClass->name()).str());
     }
     /*
      * call setCached after adding to the class list, otherwise the
@@ -893,6 +881,7 @@ TypeAliasReq typeAliasFromClass(const TypeAlias* thisType, Class *klass) {
     req.type = AnnotType::Object;
     req.klass = klass;
   }
+  req.typeStructure = Array(thisType->typeStructure);
   return req;
 }
 
@@ -954,6 +943,22 @@ TypeAliasReq resolveTypeAlias(const TypeAlias* thisType) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+}
+
+const TypeAliasReq* Unit::loadTypeAlias(const StringData* name) {
+  auto ne = NamedEntity::get(name);
+  if (auto target = ne->getCachedTypeAlias()) {
+    return target;
+  }
+  if (AutoloadHandler::s_instance->autoloadClassOrType(
+        StrNR(const_cast<StringData*>(name))
+      )) {
+    if (auto target = ne->getCachedTypeAlias()) {
+      return target;
+    }
+  }
+
+  return nullptr;
 }
 
 void Unit::defTypeAlias(Id id) {
@@ -1038,7 +1043,7 @@ void Unit::initialMerge() {
 
   if (RuntimeOption::EvalPerfDataMap) {
     Debug::DebugInfo::recordDataMap(
-      this, this + 1, folly::format("Unit-{}", m_filepath->data()).str());
+      this, this + 1, folly::format("Unit-{}", m_filepath.get()).str());
   }
   int state = 0;
   bool needsCompact = false;
@@ -1118,6 +1123,14 @@ void Unit::initialMerge() {
           case MergeKind::UniqueDefinedClass:
           case MergeKind::Done:
             not_reached();
+          case MergeKind::TypeAlias: {
+            auto const aliasId = static_cast<Id>(intptr_t(obj)) >> 3;
+            if (m_typeAliases[aliasId].attrs & AttrPersistent) {
+              defTypeAlias(aliasId);
+              needsCompact = true;
+            }
+            break;
+          }
           case MergeKind::Class:
             if (static_cast<PreClass*>(obj)->attrs() & AttrUnique) {
               needsCompact = true;
@@ -1195,7 +1208,8 @@ void* Unit::replaceUnit() const {
   return const_cast<Unit*>(this);
 }
 
-static size_t compactMergeInfo(Unit::MergeInfo* in, Unit::MergeInfo* out) {
+static size_t compactMergeInfo(Unit::MergeInfo* in, Unit::MergeInfo* out,
+                               const FixedVector<TypeAlias>& aliasInfo) {
   using MergeKind = Unit::MergeKind;
 
   Func** it = in->funcHoistableBegin();
@@ -1263,6 +1277,15 @@ static size_t compactMergeInfo(Unit::MergeInfo* in, Unit::MergeInfo* out) {
             out->mergeableObj(oix++) = (void*)
               (uintptr_t(cls) | uintptr_t(MergeKind::UniqueDefinedClass));
           }
+        } else if (out) {
+          out->mergeableObj(oix++) = obj;
+        }
+        break;
+      }
+      case MergeKind::TypeAlias: {
+        auto const aliasId = static_cast<Id>(intptr_t(obj)) >> 3;
+        if (aliasInfo[aliasId].attrs & AttrPersistent) {
+          delta++;
         } else if (out) {
           out->mergeableObj(oix++) = obj;
         }
@@ -1529,6 +1552,16 @@ void Unit::mergeImpl(void* tcbase, MergeInfo* mi) {
           k = MergeKind(uintptr_t(obj) & 7);
         } while (k == MergeKind::ReqDoc);
         continue;
+      case MergeKind::TypeAlias:
+        do {
+          Stats::inc(Stats::UnitMerge_mergeable);
+          Stats::inc(Stats::UnitMerge_mergeable_typealias);
+          auto const aliasId = static_cast<Id>(intptr_t(obj)) >> 3;
+          defTypeAlias(aliasId);
+          obj = mi->mergeableObj(++ix);
+          k = MergeKind(uintptr_t(obj) & 7);
+        } while (k == MergeKind::TypeAlias);
+        continue;
       case MergeKind::Done:
         Stats::inc(Stats::UnitMerge_mergeable, -1);
         assert((unsigned)ix == mi->m_mergeablesSize);
@@ -1546,7 +1579,7 @@ void Unit::mergeImpl(void* tcbase, MergeInfo* mi) {
              * We can also remove any Persistent Class/Func*'s,
              * and any requires of modules that are (now) empty
              */
-            size_t delta = compactMergeInfo(mi, nullptr);
+            size_t delta = compactMergeInfo(mi, nullptr, m_typeAliases);
             MergeInfo* newMi = mi;
             if (delta) {
               newMi = MergeInfo::alloc(mi->m_mergeablesSize - delta);
@@ -1558,7 +1591,7 @@ void Unit::mergeImpl(void* tcbase, MergeInfo* mi) {
              * readers. But thats ok, because it doesnt matter
              * whether they see the old contents or the new.
              */
-            compactMergeInfo(mi, newMi);
+            compactMergeInfo(mi, newMi, m_typeAliases);
             if (newMi != mi) {
               this->m_mergeInfo = newMi;
               Treadmill::deferredFree(mi);
@@ -1750,50 +1783,6 @@ bool Unit::parseFatal(const StringData*& msg, int& line) const {
 
   auto kind_char = *pc;
   return kind_char == static_cast<uint8_t>(FatalOp::Parse);
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-
-AllClasses::AllClasses()
-  : m_next(NamedEntity::table()->begin())
-  , m_end(NamedEntity::table()->end())
-  , m_current(m_next != m_end ? m_next->second.clsList() : nullptr) {
-  if (!empty()) skip();
-}
-
-void AllClasses::skip() {
-  if (!m_current) {
-    assert(!empty());
-    ++m_next;
-    while (!empty()) {
-      m_current = m_next->second.clsList();
-      if (m_current) break;
-      ++m_next;
-    }
-  }
-  assert(empty() || front());
-}
-
-void AllClasses::next() {
-  m_current = m_current->m_nextClass;
-  skip();
-}
-
-bool AllClasses::empty() const {
-  return m_next == m_end;
-}
-
-Class* AllClasses::front() const {
-  assert(!empty());
-  assert(m_current);
-  return m_current;
-}
-
-Class* AllClasses::popFront() {
-  Class* cls = front();
-  next();
-  return cls;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

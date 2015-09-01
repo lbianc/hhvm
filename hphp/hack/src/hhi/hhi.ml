@@ -8,8 +8,6 @@
  *
  *)
 
-open Utils
-
 external get_embedded_hhi_data : string -> string option =
   "get_embedded_hhi_data"
 
@@ -29,7 +27,7 @@ let touch () =
  * handling in general, really). Running the server as root is likely to be a
  * security risk. Be careful. *)
 let extract data =
-  let tmpdir = Path.make (Tmp.temp_dir "hhi") in
+  let tmpdir = Path.make (Tmp.temp_dir GlobalConfig.tmp_dir "hhi") in
   let oc = Unix.open_process_out ("tar xzC " ^ (Path.to_string tmpdir)) in
   output_string oc data;
   flush oc;
@@ -38,7 +36,7 @@ let extract data =
   tmpdir
 
 let extract_embedded () =
-  opt_map extract (get_embedded_hhi_data Sys.executable_name)
+  Option.map (get_embedded_hhi_data Sys.executable_name) extract
 
 (* Look for the hhi.tar.gz in the place where it normally resides, so that we
  * support debugging binaries that don't have the section embedded, such as

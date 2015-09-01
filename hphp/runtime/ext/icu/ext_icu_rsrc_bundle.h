@@ -36,7 +36,7 @@ public:
       c_ResourceBundle = Unit::lookupClass(s_ResourceBundle.get());
       assert(c_ResourceBundle);
     }
-    auto obj = ObjectData::newInstance(c_ResourceBundle);
+    Object obj{c_ResourceBundle};
     auto data = Native::data<ResourceBundle>(obj);
     data->setResource(bundle);
     return obj;

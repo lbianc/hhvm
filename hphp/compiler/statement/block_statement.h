@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -32,11 +32,11 @@ public:
   DECLARE_STATEMENT_VIRTUAL_FUNCTIONS;
 
   StatementListPtr getStmts() const { return m_stmts; }
-  virtual bool hasDecl() const;
-  virtual bool hasImpl() const;
-  virtual bool hasBody() const;
-  virtual bool hasRetExp() const;
-  virtual int getRecursiveCount() const;
+  bool hasDecl() const override;
+  bool hasImpl() const override;
+  bool hasBody() const override;
+  bool hasRetExp() const override;
+  int getRecursiveCount() const override;
 private:
   StatementListPtr m_stmts;
 };

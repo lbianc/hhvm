@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -21,6 +21,7 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <algorithm>
+#include <cassert>
 #include <unordered_set>
 #include <vector>
 
@@ -28,7 +29,6 @@
 #include <folly/ScopeGuard.h>
 #include <folly/String.h>
 
-#include "hphp/util/db-mysql.h"
 #include "hphp/util/network.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/timer.h"
@@ -38,6 +38,7 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/extended-logger.h"
+#include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/socket.h"
@@ -61,6 +62,39 @@ public:
   }
 };
 static MySQLStaticInitializer s_mysql_initializer;
+
+///////////////////////////////////////////////////////////////////////////////
+
+int MySQLUtil::set_mysql_timeout(MYSQL *mysql,
+                                 MySQLUtil::TimeoutType type,
+                                 int ms) {
+#ifdef __APPLE__
+  // Work around a bug in webscalesql where setting a read or write timeout
+  // causes most mysql connections to fail (depending on the exact timing of
+  // packets). See https://github.com/webscalesql/webscalesql-5.6/issues/23
+  return 0;
+#endif
+
+  mysql_option opt = MYSQL_OPT_CONNECT_TIMEOUT;
+#ifdef MYSQL_MILLISECOND_TIMEOUT
+  switch (type) {
+   case MySQLUtil::ConnectTimeout: opt = MYSQL_OPT_CONNECT_TIMEOUT_MS; break;
+   case MySQLUtil::ReadTimeout: opt =  MYSQL_OPT_READ_TIMEOUT_MS; break;
+   case MySQLUtil::WriteTimeout: opt =  MYSQL_OPT_WRITE_TIMEOUT_MS; break;
+   default: assert(false); break;
+  }
+#else
+  switch (type) {
+    case MySQLUtil::ConnectTimeout: opt = MYSQL_OPT_CONNECT_TIMEOUT; break;
+    case MySQLUtil::ReadTimeout: opt =  MYSQL_OPT_READ_TIMEOUT; break;
+    case MySQLUtil::WriteTimeout: opt =  MYSQL_OPT_WRITE_TIMEOUT; break;
+    default: assert(false); break;
+  }
+  ms = (ms + 999) / 1000;
+#endif
+
+  return mysql_options(mysql, opt, (const char*)&ms);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -192,7 +226,7 @@ std::shared_ptr<MySQL> MySQL::GetDefaultConn() {
 }
 
 void MySQL::SetDefaultConn(std::shared_ptr<MySQL> conn) {
-  s_mysql_data->defaultConn = makeSmartPtr<MySQLResource>(std::move(conn));
+  s_mysql_data->defaultConn = req::make<MySQLResource>(std::move(conn));
 }
 
 int MySQL::GetDefaultReadTimeout() {
@@ -373,7 +407,7 @@ IMPLEMENT_RESOURCE_ALLOCATION(MySQLResource)
 namespace {
 
 template <typename T>
-SmartPtr<MySQLResult> php_mysql_extract_result_helper(const T& result) {
+req::ptr<MySQLResult> php_mysql_extract_result_helper(const T& result) {
   auto const res = dyn_cast_or_null<MySQLResult>(result);
   if (res == nullptr || res->isInvalid()) {
     raise_warning("supplied argument is not a valid MySQL result resource");
@@ -384,11 +418,11 @@ SmartPtr<MySQLResult> php_mysql_extract_result_helper(const T& result) {
 
 }
 
-SmartPtr<MySQLResult> php_mysql_extract_result(const Resource& result) {
+req::ptr<MySQLResult> php_mysql_extract_result(const Resource& result) {
   return php_mysql_extract_result_helper(result);
 }
 
-SmartPtr<MySQLResult> php_mysql_extract_result(const Variant& result) {
+req::ptr<MySQLResult> php_mysql_extract_result(const Variant& result) {
   return php_mysql_extract_result_helper(result);
 }
 
@@ -647,7 +681,7 @@ Variant php_mysql_do_connect_on_link(std::shared_ptr<MySQL> mySQL,
     MySQL::SetCurrentNumPersistent(MySQL::GetCurrentNumPersistent() + 1);
   }
   MySQL::SetDefaultConn(mySQL);
-  return Variant(makeSmartPtr<MySQLResource>(mySQL));
+  return Variant(req::make<MySQLResource>(mySQL));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -662,7 +696,7 @@ MySQLResult::MySQLResult(MYSQL_RES *res, bool localized /* = false */)
 {
   if (localized) {
     m_res = nullptr; // ensure that localized results don't have another result
-    m_rows = smart::list<smart::vector<Variant>>(1); // sentinel
+    m_rows = req::list<req::vector<Variant>>(1); // sentinel
     m_current_row = m_rows->begin();
     m_row_ready = false;
     m_row_count = 0;
@@ -685,7 +719,7 @@ void MySQLResult::sweep() {
 
 void MySQLResult::addRow() {
   m_row_count++;
-  m_rows->push_back(smart::vector<Variant>());
+  m_rows->push_back(req::vector<Variant>());
   m_rows->back().reserve(getFieldCount());
 }
 
@@ -754,7 +788,7 @@ int64_t MySQLResult::getRowCount() const {
 bool MySQLResult::seekRow(int64_t row) {
   if (row < 0 || row >= getRowCount()) {
     raise_warning("Unable to jump to row %" PRId64 " on MySQL result index %d",
-                    row, o_getId());
+                    row, getId());
     return false;
   }
 
@@ -782,7 +816,7 @@ bool MySQLResult::fetchRow() {
 bool MySQLResult::seekField(int64_t field) {
   if (field < 0 || field >= getFieldCount()) {
     raise_warning("Field %" PRId64 " is invalid for MySQL result index %d",
-                    field, o_getId());
+                    field, getId());
     return false;
   }
 
@@ -814,9 +848,9 @@ MySQLFieldInfo *MySQLResult::fetchFieldInfo() {
 
 MySQLStmtVariables::MySQLStmtVariables(const Array& arr): m_arr(arr) {
   int count = m_arr.size();
-  m_vars   = (MYSQL_BIND*)smart_calloc(count, sizeof(MYSQL_BIND));
-  m_null   = (my_bool*)smart_calloc(count, sizeof(my_bool));
-  m_length = (unsigned long*)smart_calloc(count, sizeof(unsigned long));
+  m_vars   = (MYSQL_BIND*)req::calloc(count, sizeof(MYSQL_BIND));
+  m_null   = (my_bool*)req::calloc(count, sizeof(my_bool));
+  m_length = (unsigned long*)req::calloc(count, sizeof(unsigned long));
 
   for (int i = 0; i < count; i++) {
     m_null[i] = false;
@@ -835,13 +869,13 @@ MySQLStmtVariables::~MySQLStmtVariables() {
   for (int i = 0; i < m_arr.size(); i++) {
     auto buf = &m_vars[i];
     if (buf->buffer_length > 0) {
-      smart_free(buf->buffer);
+      req::free(buf->buffer);
     }
   }
 
-  smart_free(m_vars);
-  smart_free(m_null);
-  smart_free(m_length);
+  req::free(m_vars);
+  req::free(m_null);
+  req::free(m_length);
 }
 
 bool MySQLStmtVariables::bind_result(MYSQL_STMT *stmt) {
@@ -903,7 +937,7 @@ bool MySQLStmtVariables::bind_result(MYSQL_STMT *stmt) {
     }
 
     if (b->buffer_length > 0) {
-      b->buffer = smart_calloc(1, b->buffer_length);
+      b->buffer = req::calloc(1, b->buffer_length);
     }
   }
   mysql_free_result(res);
@@ -1075,14 +1109,14 @@ Variant MySQLStmt::attr_set(int64_t attr, int64_t value) {
 Variant MySQLStmt::bind_param(const String& types, const Array& vars) {
   VALIDATE_PREPARED
 
-  m_param_vars = smart::make_unique<MySQLStmtVariables>(vars);
+  m_param_vars = req::make_unique<MySQLStmtVariables>(vars);
   return m_param_vars->init_params(m_stmt, types);
 }
 
 Variant MySQLStmt::bind_result(const Array& vars) {
   VALIDATE_PREPARED
 
-  m_result_vars = smart::make_unique<MySQLStmtVariables>(vars);
+  m_result_vars = req::make_unique<MySQLStmtVariables>(vars);
   return m_result_vars->bind_result(m_stmt);
 }
 
@@ -1194,10 +1228,10 @@ Variant MySQLStmt::result_metadata() {
   }
 
   Array args;
-  args.append(Variant(makeSmartPtr<MySQLResult>(mysql_result)));
+  args.append(Variant(req::make<MySQLResult>(mysql_result)));
 
   auto cls = Unit::lookupClass(s_mysqli_result.get());
-  Object obj = ObjectData::newInstance(cls);
+  Object obj{cls};
 
   TypedValue ret;
   g_context->invokeFunc(&ret, cls->getCtor(), args, obj.get());
@@ -1321,7 +1355,7 @@ static Variant php_mysql_localize_result(MYSQL *mysql) {
     return true;
   }
   mysql->status = MYSQL_STATUS_READY;
-  Variant result(makeSmartPtr<MySQLResult>(nullptr, true));
+  Variant result(req::make<MySQLResult>(nullptr, true));
   if (!php_mysql_read_rows(mysql, result)) {
     return false;
   }
@@ -1340,7 +1374,7 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
                                     bool async_mode) {
   SYNC_VM_REGS_SCOPED();
   if (mysqlExtension::ReadOnly &&
-      same(HHVM_FN(preg_match)("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/i", query),
+      same(preg_match("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/i", query),
            0)) {
     raise_notice("runtime/ext_mysql: write query not executed [%s]",
                     query.data());
@@ -1356,21 +1390,22 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
 
     // removing comments, which can be wrong actually if some string field's
     // value has /* or */ in it.
-    String q =
-          HHVM_FN(preg_replace)("/\\/\\*.*?\\*\\//", " ", query).toString();
+    Variant result;
+    String q = preg_replace(result, "/\\/\\*.*?\\*\\//", " ", query) ?
+      result.toString() : query;
 
     Variant matches;
-    HHVM_FN(preg_match)("/^(?:\\(|\\s)*(?:"
-                        "(insert).*?\\s+(?:into\\s+)?([^\\s\\(,]+)|"
-                        "(update|set|show)\\s+([^\\s\\(,]+)|"
-                        "(replace).*?\\s+into\\s+([^\\s\\(,]+)|"
-                        "(delete).*?\\s+from\\s+([^\\s\\(,]+)|"
-                        "(select).*?[\\s`]+from\\s+([^\\s\\(,]+)|"
-                        "(create|alter|drop).*?\\s+table\\s+([^\\s\\(,]+))/is",
-                        q, ref(matches));
-    int size = matches.toArray().size();
+    preg_match("/^(?:\\(|\\s)*(?:"
+               "(insert).*?\\s+(?:into\\s+)?([^\\s\\(,]+)|"
+               "(update|set|show)\\s+([^\\s\\(,]+)|"
+               "(replace).*?\\s+into\\s+([^\\s\\(,]+)|"
+               "(delete).*?\\s+from\\s+([^\\s\\(,]+)|"
+               "(select).*?[\\s`]+from\\s+([^\\s\\(,]+)|"
+               "(create|alter|drop).*?\\s+table\\s+([^\\s\\(,]+))/is",
+               q, &matches);
+    auto marray = matches.toArray();
+    int size = marray.size();
     if (size > 2) {
-      auto marray = matches.toArray();
       std::string verb = toLower(marray[size - 2].toString().toCppString());
       std::string table = toLower(marray[size - 1].toString().toCppString());
       if (!table.empty() && table[0] == '`') {
@@ -1380,10 +1415,11 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
       if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLTableStats) {
         MySqlStats::Record(verb, rconn->m_xaction_count, table);
         if (verb == "update") {
-          HHVM_FN(preg_match)("([^\\s,]+)\\s*=\\s*([^\\s,]+)[\\+\\-]",
-                              q, ref(matches));
-          size = matches.toArray().size();
-          if (size > 2 && same(matches.toArray()[1], matches.toArray()[2])) {
+          preg_match("([^\\s,]+)\\s*=\\s*([^\\s,]+)[\\+\\-]",
+                     q, &matches);
+          marray = matches.toArray();
+          size = marray.size();
+          if (size > 2 && same(marray[1], marray[2])) {
             MySqlStats::Record("incdec", rconn->m_xaction_count, table);
           }
         }
@@ -1393,11 +1429,11 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
         }
       }
     } else {
-      HHVM_FN(preg_match)("/^(?:(?:\\/\\*.*?\\*\\/)|\\(|\\s)*"
-                          "(begin|commit|rollback|select)/is",
-                          query, ref(matches));
-      size = matches.toArray().size();
+      preg_match("/^(?:(?:\\/\\*.*?\\*\\/)|\\(|\\s)*"
+                 "(begin|commit|rollback|select)/is",
+                 query, &matches);
       auto marray = matches.toArray();
+      size = marray.size();
       if (size == 2) {
         std::string verb = toLower(marray[1].toString().data());
         rconn->m_xaction_count = ((verb == "begin") ? 1 : 0);
@@ -1454,7 +1490,7 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
       if (errcode == 2058 /* CR_NET_READ_INTERRUPTED */ ||
           errcode == 2059 /* CR_NET_WRITE_INTERRUPTED */) {
         Variant ret =
-          HHVM_FN(preg_match)("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/is", query);
+          preg_match("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/is", query);
         if (!same(ret, false)) {
           MYSQL *new_conn = create_new_conn();
           IOStatusHelper io("mysql::kill", rconn->m_host.c_str(),
@@ -1514,7 +1550,7 @@ Variant php_mysql_get_result(const Variant& link_id, bool use_store) {
     return true;
   }
 
-  auto r = makeSmartPtr<MySQLResult>(mysql_result);
+  auto r = req::make<MySQLResult>(mysql_result);
 
   if (RuntimeOption::MaxSQLRowCount > 0 &&
       (s_mysql_data->totalRowCount += r->getRowCount())

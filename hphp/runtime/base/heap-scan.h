@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -35,6 +35,16 @@
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/ext/extension-registry.h"
 #include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/runtime/server/server-note.h"
+#include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
+#include "hphp/runtime/ext/asio/asio-external-thread-event-queue.h"
+#include "hphp/runtime/ext/asio/ext_reschedule-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
+
+#ifdef ENABLE_ZEND_COMPAT
+#include "hphp/runtime/ext_zend_compat/php-src/TSRM/TSRM.h"
+#endif
 
 namespace HPHP {
 
@@ -66,18 +76,19 @@ template<class F> void scanHeader(const Header* h, F& mark) {
     case HeaderKind::ImmSet:
       return h->obj_.scan(mark);
     case HeaderKind::Resource:
-      return h->res_.scan(mark);
+      return h->res_.data()->scan(mark);
     case HeaderKind::Ref:
       return h->ref_.scan(mark);
-    case HeaderKind::String:
     case HeaderKind::SmallMalloc:
+      return mark((&h->small_)+1, h->small_.padbytes);
     case HeaderKind::BigMalloc:
+      return mark((&h->big_)+1, h->big_.nbytes);
+    case HeaderKind::String:
     case HeaderKind::BigObj:
     case HeaderKind::Free:
     case HeaderKind::ResumableFrame:
     case HeaderKind::NativeData:
     case HeaderKind::Hole:
-    case HeaderKind::Debug:
       always_assert(false && "unexpected header in worklist");
       break;
   }
@@ -89,10 +100,20 @@ template<class F> void ObjectData::scan(F& mark) const {
   if (getAttribute(HasNativeData)) {
     // [NativeNode][NativeData][ObjectData][props]
     // TODO t6169196 indirect NativeDataInfo call for exact marking
-    auto ndi = m_cls->getNativeDataInfo();
-    auto size = alignTypedValue(ndi->sz);
-    mark((char*)this - size, ndi->sz);
-  } else if (getAttribute(IsCppBuiltin)) {
+    auto h = reinterpret_cast<const Header*>(
+      Native::getNativeNode(this, m_cls->getNativeDataInfo())
+    );
+    assert(h->kind() == HeaderKind::NativeData);
+    mark(h, h->size() - sizeof(ObjectData));
+  } else if (m_hdr.kind == HeaderKind::ResumableObj) {
+    // scan the frame locals, iterators, and Resumable
+    auto r = Resumable::FromObj(this);
+    auto frame = reinterpret_cast<const TypedValue*>(r) -
+                 r->actRec()->func()->numSlotsInFrame();
+    mark(frame, uintptr_t(this) - uintptr_t(frame));
+  }
+
+  if (getAttribute(IsCppBuiltin)) {
     // [ObjectData][C++ fields][props]
     // TODO t6169228 virtual call for exact marking
     mark(this + 1, uintptr_t(props) - uintptr_t(this + 1));
@@ -110,8 +131,31 @@ template<class F> void ObjectData::scan(F& mark) const {
 template<class F> struct ExtMarker final: IMarker {
   explicit ExtMarker(F& mark) : mark_(mark) {}
   void operator()(const Array& p) override { mark_(p); }
+  void operator()(const Object& p) override { mark_(p); }
+  void operator()(const Resource& p) override { mark_(p); }
   void operator()(const String& p) override { mark_(p); }
   void operator()(const Variant& p) override { mark_(p); }
+  void operator()(const ArrayIter& p) override { mark_(p); }
+  void operator()(const MArrayIter& p) override { mark_(p); }
+  void operator()(const StringBuffer& p) override { mark_(p); }
+  void operator()(const ActRec& p) override { mark_(p); }
+  void operator()(const Stack& p) override { mark_(p); }
+  void operator()(const VarEnv& p) override { mark_(p); }
+  void operator()(const RequestEventHandler& p) override { mark_(p); }
+  void operator()(const Extension& p) override { mark_(p); }
+  void operator()(const AsioContext& p) override { mark_(p); }
+
+  void operator()(const StringData* p) override { mark_(p); }
+  void operator()(const ArrayData* p) override { mark_(p); }
+  void operator()(const ObjectData* p) override { mark_(p); }
+  void operator()(const ResourceData* p) override { mark_(p); }
+  void operator()(const RefData* p) override { mark_(p); }
+  void operator()(const Func* p) override { mark_(p); }
+  void operator()(const Class* p) override { mark_(p); }
+  void operator()(const TypedValue* p) override { mark_(*p); }
+  void operator()(const NameValueTable* p) override { mark_(*p); }
+  void operator()(const Unit* p) override { mark_(p); }
+
   void operator()(const void* start, size_t len) override {
     mark_(start, len);
   }
@@ -125,6 +169,18 @@ template<class F> void ResourceData::scan(F& mark) const {
 }
 
 template<class F> void RequestEventHandler::scan(F& mark) const {
+  ExtMarker<F> bridge(mark);
+  vscan(bridge);
+}
+
+template<class F> void scan_ezc_resources(F& mark) {
+#ifdef ENABLE_ZEND_COMPAT
+  ExtMarker<F> bridge(mark);
+  ts_scan_resources(bridge);
+#endif
+}
+
+template<class F> void ExtendedException::scan(F& mark) const {
   ExtMarker<F> bridge(mark);
   vscan(bridge);
 }
@@ -182,10 +238,46 @@ template<class F> void scanRds(F& mark, rds::Header* rds) {
   mark(sp, (stack_end - sp) * sizeof(*sp));
 }
 
+template<class F>
+void MemoryManager::scanSweepLists(F& mark) const {
+  for (auto s = m_sweepables.next(); s != &m_sweepables; s = s->next()) {
+    if (auto h = static_cast<Header*>(s->owner())) {
+      assert(h->kind() == HeaderKind::Resource || isObjectKind(h->kind()));
+      if (isObjectKind(h->kind())) {
+        mark(&h->obj_);
+      } else {
+        mark(&h->res_);
+      }
+    }
+  }
+  for (auto node: m_natives) {
+    mark(Native::obj(node));
+  }
+}
+
+template <typename F>
+void MemoryManager::scanRootMaps(F& m) const {
+  if (m_objectRoots) {
+    for(const auto& root : *m_objectRoots) {
+      scan(root.second, m);
+    }
+  }
+  if (m_resourceRoots) {
+    for(const auto& root : *m_resourceRoots) {
+      scan(root.second, m);
+    }
+  }
+  for (const auto& root : m_exceptionRoots) {
+    root->scan(m);
+  }
+}
+
 // Scan request-local roots
 template<class F> void scanRoots(F& mark) {
   // ExecutionContext
   if (!g_context.isNull()) g_context->scan(mark);
+  // ThreadInfo
+  TI().scan(mark);
   // rds, including php stack
   if (auto rds = rds::header()) scanRds(mark, rds);
   // C++ stack
@@ -196,10 +288,19 @@ template<class F> void scanRoots(F& mark) {
   ExtensionRegistry::scanExtensions(xm);
   // Root maps
   MM().scanRootMaps(mark);
+  // treat sweep lists as roots until we are ready to test what happens
+  // when we start calling various sweep() functions early.
+  MM().scanSweepLists(mark);
+  // these have rogue thread_local stuff
+  if (auto asio = AsioSession::Get()) {
+    asio->scan(mark);
+  }
+  get_server_note()->scan(mark);
+  scan_ezc_resources(mark);
 }
 
 template <typename T, typename F>
-void scan(const SmartPtr<T>& ptr, F& mark) {
+void scan(const req::ptr<T>& ptr, F& mark) {
   ptr->scan(mark);
 }
 

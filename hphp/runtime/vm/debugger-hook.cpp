@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,8 +18,9 @@
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/debugger/break_point.h"
 #include "hphp/runtime/debugger/debugger.h"
+#include "hphp/runtime/debugger/debugger_hook_handler.h"
 #include "hphp/runtime/base/unit-cache.h"
-#include "hphp/runtime/ext/ext_generator.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/vm/unit.h"
 #include "hphp/runtime/vm/pc-filter.h"
 #include "hphp/util/logger.h"
@@ -35,6 +36,10 @@ using StepOutState = RequestInjectionData::StepOutState;
 
 //////////////////////////////////////////////////////////////////////////
 // DebugHookHandler implementation
+
+bool isHphpd(const DebugHookHandler* handler) {
+  return dynamic_cast<const Eval::DebuggerHookHandler*>(handler) != nullptr;
+}
 
 void DebugHookHandler::detach(ThreadInfo* ti /* = nullptr */) {
   // legacy hphpd code expects no failure if no hook handler is attached

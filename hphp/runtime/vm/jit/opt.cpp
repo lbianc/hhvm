@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -66,18 +66,10 @@ void optimize(IRUnit& unit, IRBuilder& irBuilder, TransKind kind) {
   assertx(checkEverything(unit));
 
   auto const hasLoop = RuntimeOption::EvalJitLoops && cfgHasLoop(unit);
-  auto const func = unit.entry()->front().marker().func();
-  auto const regionMode = pgoRegionMode(*func);
-  auto const traceMode = kind != TransKind::Optimize ||
-                         regionMode == PGORegionMode::Hottrace;
 
-  // TODO (#5792564): Guard relaxation doesn't work with loops.
-  // TODO (#6599498): Guard relaxation is broken in wholecfg mode.
-  if (shouldHHIRRelaxGuards() && !hasLoop && traceMode) {
+  if (shouldHHIRRelaxGuards() && !hasLoop) {
     Timer _t(Timer::optimize_relaxGuards);
-    const bool simple = kind == TransKind::Profile &&
-                        (RuntimeOption::EvalJitRegionSelector == "tracelet" ||
-                         RuntimeOption::EvalJitRegionSelector == "method");
+    const bool simple = kind == TransKind::Profile;
     RelaxGuardsFlags flags = (RelaxGuardsFlags)
       (RelaxReflow | (simple ? RelaxSimple : RelaxNormal));
     auto changed = relaxGuards(unit, *irBuilder.guards(), flags);
@@ -99,7 +91,6 @@ void optimize(IRUnit& unit, IRBuilder& irBuilder, TransKind kind) {
   if (RuntimeOption::EvalHHIRTypeCheckHoisting) {
     doPass(unit, hoistTypeChecks, DCE::Minimal);
   }
-  doPass(unit, removeExitPlaceholders, DCE::Minimal);
 
   if (RuntimeOption::EvalHHIRPredictionOpts) {
     doPass(unit, optimizePredictions, DCE::None);
@@ -133,8 +124,9 @@ void optimize(IRUnit& unit, IRBuilder& irBuilder, TransKind kind) {
       doPass(unit, cleanCfg, DCE::None);
       doPass(unit, optimizeLoopInvariantCode, DCE::Minimal);
     }
-    doPass(unit, removeExitPlaceholders, DCE::Full);
   }
+
+  doPass(unit, removeExitPlaceholders, DCE::Full);
 
   if (RuntimeOption::EvalHHIRGenerateAsserts) {
     doPass(unit, insertAsserts, DCE::None);

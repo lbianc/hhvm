@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -27,6 +27,8 @@
 
 namespace HPHP { namespace jit {
 ///////////////////////////////////////////////////////////////////////////////
+
+struct TransLoc;
 
 enum class SyncOptions {
   kNoSyncPoint,
@@ -66,7 +68,7 @@ struct CodegenState {
   // callsite so it can fix rsp before executing the catch block.
   StateVector<Block,Offset> catch_offsets;
 
-  // Catch blocks that are targets of php calls (bindcall, contenter, callstub)
+  // Catch blocks that are targets of php calls (bindcall, contenter, callarray)
   // are handled specially. This StateVector is used to propagate information
   // from the cg* function that detects this situation to cgBeginCatch, which
   // encodes the information in the landingpad{} instruction.

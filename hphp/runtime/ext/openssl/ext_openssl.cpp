@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -229,7 +229,7 @@ public:
    *   passphrase - NULL causes a passphrase prompt to be emitted in
    *   the Apache error log!
    */
-  static SmartPtr<Key> Get(const Variant& var, bool public_key,
+  static req::ptr<Key> Get(const Variant& var, bool public_key,
                            const char *passphrase = nullptr) {
     if (var.is(KindOfArray)) {
       Array arr = var.toArray();
@@ -245,9 +245,9 @@ public:
     return GetHelper(var, public_key, passphrase);
   }
 
-  static SmartPtr<Key> GetHelper(const Variant& var, bool public_key,
+  static req::ptr<Key> GetHelper(const Variant& var, bool public_key,
                                  const char *passphrase) {
-    SmartPtr<Certificate> ocert;
+    req::ptr<Certificate> ocert;
     EVP_PKEY *key = NULL;
 
     if (var.isResource()) {
@@ -295,7 +295,7 @@ public:
     }
 
     if (key) {
-      return makeSmartPtr<Key>(key);
+      return req::make<Key>(key);
     }
 
     return nullptr;
@@ -328,7 +328,7 @@ public:
 
   DECLARE_RESOURCE_ALLOCATION(CSRequest)
 
-  static SmartPtr<CSRequest> Get(const Variant& var) {
+  static req::ptr<CSRequest> Get(const Variant& var) {
     auto csr = cast_or_null<CSRequest>(GetRequest(var));
     if (!csr || !csr->m_csr) {
       raise_warning("cannot get CSR");
@@ -338,7 +338,7 @@ public:
   }
 
 private:
-  static SmartPtr<CSRequest> GetRequest(const Variant& var) {
+  static req::ptr<CSRequest> GetRequest(const Variant& var) {
     if (var.isResource()) {
       return dyn_cast_or_null<CSRequest>(var);
     }
@@ -349,7 +349,7 @@ private:
       X509_REQ *csr = PEM_read_bio_X509_REQ(in, NULL,NULL,NULL);
       BIO_free(in);
       if (csr) {
-        return makeSmartPtr<CSRequest>(csr);
+        return req::make<CSRequest>(csr);
       }
     }
     return nullptr;
@@ -982,7 +982,7 @@ bool HHVM_FUNCTION(openssl_csr_export, const Variant& csr, VRefParam out,
   if (PEM_write_bio_X509_REQ(bio_out, pcsr->csr())) {
     BUF_MEM *bio_buf;
     BIO_get_mem_ptr(bio_out, &bio_buf);
-    out = String((char*)bio_buf->data, bio_buf->length, CopyString);
+    out.assignIfRef(String((char*)bio_buf->data, bio_buf->length, CopyString));
     BIO_free(bio_out);
     return true;
   }
@@ -995,7 +995,7 @@ Variant HHVM_FUNCTION(openssl_csr_get_public_key, const Variant& csr) {
   auto pcsr = CSRequest::Get(csr);
   if (!pcsr) return false;
 
-  return Variant(makeSmartPtr<Key>(X509_REQ_get_pubkey(pcsr->csr())));
+  return Variant(req::make<Key>(X509_REQ_get_pubkey(pcsr->csr())));
 }
 
 Variant HHVM_FUNCTION(openssl_csr_get_subject, const Variant& csr,
@@ -1017,7 +1017,7 @@ Variant HHVM_FUNCTION(openssl_csr_new,
   struct php_x509_request req;
   memset(&req, 0, sizeof(req));
 
-  SmartPtr<Key> okey;
+  req::ptr<Key> okey;
   X509_REQ *csr = NULL;
   std::vector<String> strings;
   if (php_openssl_parse_config(&req, configargs.toArray(), strings)) {
@@ -1031,7 +1031,7 @@ Variant HHVM_FUNCTION(openssl_csr_new,
     if (req.priv_key == NULL) {
       req.generatePrivateKey();
       if (req.priv_key) {
-        okey = makeSmartPtr<Key>(req.priv_key);
+        okey = req::make<Key>(req.priv_key);
       }
     }
     if (req.priv_key == NULL) {
@@ -1047,19 +1047,20 @@ Variant HHVM_FUNCTION(openssl_csr_new,
         /* Add extensions */
         if (req.request_extensions_section &&
             !X509V3_EXT_REQ_add_conf(req.req_config, &ext_ctx,
-                                     (char*)req.request_extensions_section, csr)) {
+                                     (char*)req.request_extensions_section,
+                                     csr)) {
           raise_warning("Error loading extension section %s",
                           req.request_extensions_section);
         } else {
           ret = true;
           if (X509_REQ_sign(csr, req.priv_key, req.digest)) {
-            ret = makeSmartPtr<CSRequest>(csr);
+            ret = req::make<CSRequest>(csr);
             csr = NULL;
           } else {
             raise_warning("Error signing request");
           }
 
-          privkey = okey;
+          privkey.assignIfRef(Variant(okey));
         }
       }
     }
@@ -1079,7 +1080,7 @@ Variant HHVM_FUNCTION(openssl_csr_sign, const Variant& csr,
   auto pcsr = CSRequest::Get(csr);
   if (!pcsr) return false;
 
-  SmartPtr<Certificate> ocert;
+  req::ptr<Certificate> ocert;
   if (!cacert.isNull()) {
     ocert = Certificate::Get(cacert);
     if (!ocert) {
@@ -1102,7 +1103,7 @@ Variant HHVM_FUNCTION(openssl_csr_sign, const Variant& csr,
     return false;
   }
 
-  SmartPtr<Certificate> onewcert;
+  req::ptr<Certificate> onewcert;
   struct php_x509_request req;
   memset(&req, 0, sizeof(req));
   Variant ret = false;
@@ -1136,7 +1137,7 @@ Variant HHVM_FUNCTION(openssl_csr_sign, const Variant& csr,
     raise_warning("No memory");
     goto cleanup;
   }
-  onewcert = makeSmartPtr<Certificate>(new_cert);
+  onewcert = req::make<Certificate>(new_cert);
   /* Version 3 cert */
   if (!X509_set_version(new_cert, 2)) {
     goto cleanup;
@@ -1226,7 +1227,7 @@ bool HHVM_FUNCTION(openssl_open, const String& sealed_data, VRefParam open_data,
       len1 + len2 == 0) {
     return false;
   }
-  open_data = s.setSize(len1 + len2);
+  open_data.assignIfRef(s.setSize(len1 + len2));
   return true;
 }
 
@@ -1320,7 +1321,7 @@ bool HHVM_FUNCTION(openssl_pkcs12_export, const Variant& x509, VRefParam out,
   if (ret) {
     BUF_MEM *bio_buf;
     BIO_get_mem_ptr(bio_out, &bio_buf);
-    out = String((char*)bio_buf->data, bio_buf->length, CopyString);
+    out.assignIfRef(String((char*)bio_buf->data, bio_buf->length, CopyString));
   }
   BIO_free(bio_out);
   return ret;
@@ -1332,7 +1333,6 @@ const StaticString
 
 bool HHVM_FUNCTION(openssl_pkcs12_read, const String& pkcs12, VRefParam certs,
                                         const String& pass) {
-  Variant &vcerts = certs;
   bool ret = false;
   PKCS12 *p12 = NULL;
 
@@ -1346,8 +1346,10 @@ bool HHVM_FUNCTION(openssl_pkcs12_read, const String& pkcs12, VRefParam certs,
     X509 *cert = NULL;
     STACK_OF(X509) *ca = NULL;
     if (PKCS12_parse(p12, pass.data(), &pkey, &cert, &ca)) {
-      vcerts = Array::Create();
-
+      Variant vcerts = Array::Create();
+      SCOPE_EXIT {
+        certs.assignIfRef(vcerts);
+      };
       BIO *bio_out = BIO_new(BIO_s_mem());
       if (PEM_write_bio_X509(bio_out, cert)) {
         BUF_MEM *bio_buf;
@@ -1402,7 +1404,7 @@ bool HHVM_FUNCTION(openssl_pkcs7_decrypt, const String& infilename,
   bool ret = false;
   BIO *in = NULL, *out = NULL, *datain = NULL;
   PKCS7 *p7 = NULL;
-  SmartPtr<Key> okey;
+  req::ptr<Key> okey;
 
   auto ocert = Certificate::Get(recipcert);
   if (!ocert) {
@@ -1533,8 +1535,8 @@ bool HHVM_FUNCTION(openssl_pkcs7_sign, const String& infilename,
   STACK_OF(X509) *others = NULL;
   BIO *infile = NULL, *outfile = NULL;
   PKCS7 *p7 = NULL;
-  SmartPtr<Key> okey;
-  SmartPtr<Certificate> ocert;
+  req::ptr<Key> okey;
+  req::ptr<Certificate> ocert;
 
   if (!extracerts.empty()) {
     others = load_all_certs_from_file(extracerts.data());
@@ -1769,7 +1771,7 @@ bool HHVM_FUNCTION(openssl_pkey_export, const Variant& key, VRefParam out,
   if (ret) {
     char *bio_mem_ptr;
     long bio_mem_len = BIO_get_mem_data(bio_out, &bio_mem_ptr);
-    out = String(bio_mem_ptr, bio_mem_len, CopyString);
+    out.assignIfRef(String(bio_mem_ptr, bio_mem_len, CopyString));
   }
   BIO_free(bio_out);
   return ret;
@@ -1812,10 +1814,10 @@ static void add_bignum_as_string(Array &arr,
     return;
   }
   int num_bytes = BN_num_bytes(bn);
-  unsigned char *out = (unsigned char *)smart_malloc(num_bytes);
+  unsigned char *out = (unsigned char *)req::malloc(num_bytes);
   BN_bn2bin(bn, out);
   arr.set(key, String((const char *)out, num_bytes, CopyString));
-  smart_free(out);
+  req::free(out);
 }
 
 Array HHVM_FUNCTION(openssl_pkey_get_details, const Resource& key) {
@@ -1898,7 +1900,7 @@ Resource HHVM_FUNCTION(openssl_pkey_new,
   std::vector<String> strings;
   if (php_openssl_parse_config(&req, configargs.toArray(), strings) &&
       req.generatePrivateKey()) {
-    ret = Resource(makeSmartPtr<Key>(req.priv_key));
+    ret = Resource(req::make<Key>(req.priv_key));
   }
 
   php_openssl_dispose_config(&req);
@@ -1938,7 +1940,7 @@ bool HHVM_FUNCTION(openssl_private_decrypt, const String& data,
   }
 
   if (successful) {
-    decrypted = s.setSize(cryptedlen);
+    decrypted.assignIfRef(s.setSize(cryptedlen));
     return true;
   }
 
@@ -1974,7 +1976,7 @@ bool HHVM_FUNCTION(openssl_private_encrypt, const String& data,
   }
 
   if (successful) {
-    crypted = s.setSize(cryptedlen);
+    crypted.assignIfRef(s.setSize(cryptedlen));
     return true;
   }
 
@@ -2014,7 +2016,7 @@ bool HHVM_FUNCTION(openssl_public_decrypt, const String& data,
   }
 
   if (successful) {
-    decrypted = s.setSize(cryptedlen);
+    decrypted.assignIfRef(s.setSize(cryptedlen));
     return true;
   }
 
@@ -2050,7 +2052,7 @@ bool HHVM_FUNCTION(openssl_public_encrypt, const String& data,
   }
 
   if (successful) {
-    crypted = s.setSize(cryptedlen);
+    crypted.assignIfRef(s.setSize(cryptedlen));
     return true;
   }
 
@@ -2087,7 +2089,7 @@ Variant HHVM_FUNCTION(openssl_seal, const String& data, VRefParam sealed_data,
   // holder is needed to make sure none of the Keys get deleted prematurely.
   // The pkeys array points to elements inside of Keys returned from Key::Get()
   // which may be newly allocated and have no other owners.
-  std::vector<SmartPtr<Key>> holder;
+  std::vector<req::ptr<Key>> holder;
 
   /* get the public keys we are using to seal this data */
   bool ret = true;
@@ -2131,7 +2133,7 @@ Variant HHVM_FUNCTION(openssl_seal, const String& data, VRefParam sealed_data,
 
   EVP_SealFinal(&ctx, buf + len1, &len2);
   if (len1 + len2 > 0) {
-    sealed_data = s.setSize(len1 + len2);
+    sealed_data.assignIfRef(s.setSize(len1 + len2));
 
     Array ekeys;
     for (int i = 0; i < nkeys; i++) {
@@ -2139,7 +2141,7 @@ Variant HHVM_FUNCTION(openssl_seal, const String& data, VRefParam sealed_data,
       ekeys.append(String((char*)eks[i], eksl[i], AttachString));
       eks[i] = NULL;
     }
-    env_keys = ekeys;
+    env_keys.assignIfRef(ekeys);
   }
 
  clean_exit:
@@ -2204,7 +2206,7 @@ bool HHVM_FUNCTION(openssl_sign, const String& data, VRefParam signature,
   EVP_SignInit(&md_ctx, mdtype);
   EVP_SignUpdate(&md_ctx, (unsigned char *)data.data(), data.size());
   if (EVP_SignFinal(&md_ctx, sigbuf, (unsigned int *)&siglen, pkey)) {
-    signature = s.setSize(siglen);
+    signature.assignIfRef(s.setSize(siglen));
 #if OPENSSL_VERSION_NUMBER >= 0x0090700fL
     EVP_MD_CTX_cleanup(&md_ctx);
 #endif
@@ -2289,7 +2291,7 @@ Variant HHVM_FUNCTION(openssl_x509_checkpurpose, const Variant& x509cert,
   int ret = -1;
   STACK_OF(X509) *untrustedchain = NULL;
   X509_STORE *pcainfo = NULL;
-  SmartPtr<Certificate> ocert;
+  req::ptr<Certificate> ocert;
 
   if (!untrustedfile.empty()) {
     untrustedchain = load_all_certs_from_file(untrustedfile.data());
@@ -2361,7 +2363,7 @@ bool HHVM_FUNCTION(openssl_x509_export, const Variant& x509, VRefParam output,
   if (ret) {
     BUF_MEM *bio_buf;
     BIO_get_mem_ptr(bio_out, &bio_buf);
-    output = String(bio_buf->data, bio_buf->length, CopyString);
+    output.assignIfRef(String(bio_buf->data, bio_buf->length, CopyString));
   }
   BIO_free(bio_out);
   return ret;
@@ -2415,6 +2417,10 @@ static time_t asn1_time_to_time_t(ASN1_UTCTIME *timestr) {
   long gmadjust = 0;
 #if HAVE_TM_GMTOFF
   gmadjust = thetime.tm_gmtoff;
+#elif defined(_MSC_VER)
+  TIME_ZONE_INFORMATION inf;
+  GetTimeZoneInformation(&inf);
+  gmadjust = thetime.tm_isdst ? inf.DaylightBias : inf.StandardBias;
 #else
   /**
    * If correcting for daylight savings time, we set the adjustment to
@@ -2614,7 +2620,7 @@ Variant HHVM_FUNCTION(openssl_x509_read, const Variant& x509certdata) {
 }
 
 Variant HHVM_FUNCTION(openssl_random_pseudo_bytes, int length,
-                                        VRefParam crypto_strong /* = false */) {
+                      VRefParam crypto_strong /* = false */) {
   if (length <= 0) {
     return false;
   }
@@ -2624,15 +2630,13 @@ Variant HHVM_FUNCTION(openssl_random_pseudo_bytes, int length,
   String s = String(length, ReserveString);
   buffer = (unsigned char *)s.mutableData();
 
-  crypto_strong = false;
-
   int crypto_strength = 0;
 
   if ((crypto_strength = RAND_pseudo_bytes(buffer, length)) < 0) {
-    crypto_strong = false;
+    crypto_strong.assignIfRef(false);
     return false;
   } else {
-    crypto_strong = (bool)crypto_strength;
+    crypto_strong.assignIfRef((bool)crypto_strength);
     s.setSize(length);
     return s;
   }

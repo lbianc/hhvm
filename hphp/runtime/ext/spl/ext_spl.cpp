@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -59,7 +59,7 @@ void throw_spl_exception(const char *fmt, ...) {
   string_vsnprintf(msg, fmt, ap);
   va_end(ap);
 
-  throw Object(SystemLib::AllocExceptionObject(Variant(msg)));
+  SystemLib::throwExceptionObject(Variant(msg));
 }
 
 static bool s_inited = false;
@@ -94,7 +94,7 @@ int64_t HHVM_FUNCTION(hphp_object_pointer, const Object& obj) {
 }
 
 Variant HHVM_FUNCTION(hphp_get_this) {
-  return g_context->getThis();
+  return Variant{g_context->getThis()};
 }
 
 Variant HHVM_FUNCTION(class_implements, const Variant& obj,
@@ -307,6 +307,9 @@ struct ExtensionList final : RequestEventHandler {
   void requestShutdown() override {
     extensions.reset();
   }
+  void vscan(IMarker& mark) const override {
+    mark(extensions);
+  }
 
   Array extensions;
 };
@@ -327,7 +330,7 @@ String HHVM_FUNCTION(spl_autoload_extensions,
 ///////////////////////////////////////////////////////////////////////////////
 
 template <class T>
-static SmartPtr<T> getDir(const Object& dir_iter) {
+static req::ptr<T> getDir(const Object& dir_iter) {
   static_assert(std::is_base_of<Directory, T>::value,
                 "Only cast to directories");
   return cast<T>(*dir_iter->o_realProp("dir", 0, s_directory_iterator));

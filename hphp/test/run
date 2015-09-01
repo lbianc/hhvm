@@ -91,6 +91,11 @@ Examples:
   % $argv[0] -b ~/code/hhvm/hphp/hhvm/hhvm
   % $argv[0] --hhvm-binary-path ~/code/hhvm/hphp/hhvm/hhvm
 
+  # Use relocation to run tests in the same thread. e.g, 6 times in the same thread,
+  # where the 3 specifies a random relocation for the 3rd request and the test is
+  # run 3 * 2 times.
+  % $argv[0] --relocate 3 test/quick/silencer.php
+
 EOT;
   return usage().$help;
 }
@@ -266,6 +271,7 @@ function get_options($argv) {
     'help' => 'h',
     'verbose' => 'v',
     'fbmake' => '',
+    'testpilot' => '',
     'threads:' => '',
     'args:' => 'a:',
     'log' => 'l',
@@ -426,27 +432,34 @@ function find_tests($files, array $options = null) {
 }
 
 function list_tests($files, $options) {
+  $args = array();
   $mode = idx($options, 'mode', '');
   switch ($mode) {
     case '':
     case 'jit':
-      $mode = '-m jit';
+      $args[] = '-m jit';
       break;
     case 'interp';
-      $mode = '-m interp';
+      $args[] = '-m interp';
       break;
     default:
       throw new Exception("Unsupported mode for listing tests: ".$mode);
   }
 
   if (isset($options['repo'])) {
-    $repo = '-r';
-  } else {
-    $repo = '';
+    $args[] = '-r';
   }
 
-  foreach (find_tests($files) as $test) {
-    print implode(' ', array_filter(array($mode, $repo, $test)))."\n";
+  if (isset($options['relocate'])) {
+    $args[] = '--relocate';
+    $args[] = $options['relocate'];
+  }
+
+  foreach (find_tests($files, $options) as $test) {
+    print Status::jsonEncode(array(
+      'args' => implode(' ', $args),
+      'name' => $test,
+    ))."\n";
   }
 }
 
@@ -575,17 +588,26 @@ function hhvm_cmd($options, $test, $test_run = null) {
     escapeshellarg($test_run)
   );
 
+  // Special support for tests that require a path to the current
+  // test directory for things like prepend_file and append_file
+  // testing
   if (file_exists($test.'.ini')) {
-    file_put_contents($test_ini = tempnam('/tmp', $test).'.ini',
-                      str_replace('{PWD}', dirname($test),
-                                  file_get_contents($test.'.ini')));
-    $cmd .= " -c $test_ini";
+    $contents = file_get_contents($test.'.ini');
+    if (strpos($contents, '{PWD}') !== false) {
+      $test_ini = tempnam('/tmp', $test).'.ini';
+      file_put_contents($test_ini,
+                        str_replace('{PWD}', dirname($test), $contents));
+      $cmd .= " -c $test_ini";
+    }
   }
   if ($hdf !== "") {
-    file_put_contents($test_hdf = tempnam('/tmp', $test).$hdf_suffix,
-                      str_replace('{PWD}', dirname($test),
-                                  file_get_contents($test.$hdf_suffix)));
-    $cmd .= " -c $test_hdf";
+    $contents = file_get_contents($test.$hdf_suffix);
+    if (strpos($contents, '{PWD}') !== false) {
+      $test_hdf = tempnam('/tmp', $test).$hdf_suffix;
+      file_put_contents($test_hdf,
+                        str_replace('{PWD}', dirname($test), $contents));
+      $cmd .= " -c $test_hdf";
+    }
   }
 
   if (isset($options['repo'])) {
@@ -649,6 +671,7 @@ class Status {
   const MODE_NORMAL = 0;
   const MODE_VERBOSE = 1;
   const MODE_FBMAKE = 2;
+  const MODE_TESTPILOT = 3;
 
   const MSG_STARTED = 7;
   const MSG_FINISHED = 1;
@@ -747,7 +770,17 @@ class Status {
   }
 
   public static function skip($test, $reason, $time, $stime, $etime) {
-    if (self::getMode() !== self::MODE_FBMAKE) {
+    if (self::getMode() === self::MODE_FBMAKE) {
+      /* Intentionally supress skips */
+    } elseif (self::getMode() === self::MODE_TESTPILOT) {
+      /* testpilot needs a positive response for every test run, report
+       * that this test isn't relevant so it can silently drop */
+      array_push(self::$results, array('name' => $test,
+                                       'status' => 'not_relevant',
+                                       'start_time' => $stime,
+                                       'end_time' => $etime,
+                                       'time' => $time));
+    } else {
       array_push(self::$results, array('name' => $test,
                                        'status' => 'skipped',
                                        'start_time' => $stime,
@@ -1540,6 +1573,9 @@ function msg_loop($num_tests, $queue) {
 
           case Status::MODE_FBMAKE:
             break;
+
+          case Status::MODE_TESTPILOT:
+            break;
         }
 
       case Status::MSG_TEST_PASS:
@@ -1565,6 +1601,10 @@ function msg_loop($num_tests, $queue) {
           case Status::MODE_FBMAKE:
             Status::sayFBMake($test, 'passed', $stime, $etime);
             break;
+
+          case Status::MODE_TESTPILOT:
+            Status::sayFBMake($test, 'passed', $stime, $etime);
+            break;
         }
         break;
 
@@ -1586,6 +1626,14 @@ function msg_loop($num_tests, $queue) {
               Status::sayColor(" - $reason");
             }
             Status::sayColor(sprintf(" (%.2fs)\n", $time));
+            break;
+
+          case Status::MODE_FBMAKE:
+            /* Intentionally discard result */
+            break;
+
+          case Status::MODE_TESTPILOT:
+            Status::sayFBMake($test, 'not_relevant', $stime, $etime);
             break;
         }
         break;
@@ -1609,6 +1657,10 @@ function msg_loop($num_tests, $queue) {
             break;
 
           case Status::MODE_FBMAKE:
+            Status::sayFBMake($test, 'failed', $stime, $etime);
+            break;
+
+          case Status::MODE_TESTPILOT:
             Status::sayFBMake($test, 'failed', $stime, $etime);
             break;
         }
@@ -2013,7 +2065,7 @@ function main($argv) {
     $options['threads'] = count($test_buckets);
   }
 
-  if (!isset($options['fbmake'])) {
+  if (!isset($options['fbmake']) && !isset($options['testpilot'])) {
     print "Running ".count($tests)." tests in ".
       $options['threads']." threads (" . $actual_serial_count_for_this_run .
       " in serial)\n";
@@ -2024,6 +2076,9 @@ function main($argv) {
   }
   if (isset($options['fbmake'])) {
     Status::setMode(Status::MODE_FBMAKE);
+  }
+  if (isset($options['testpilot'])) {
+    Status::setMode(Status::MODE_TESTPILOT);
   }
   Status::setUseColor(isset($options['color']) ? true : posix_isatty(STDOUT));
 
@@ -2121,7 +2176,7 @@ function main($argv) {
     unlink($bad_test_file);
   }
 
-  if (isset($options['fbmake'])) {
+  if (isset($options['fbmake']) || isset($options['testpilot'])) {
     Status::say(array('op' => 'all_done', 'results' => $results));
   } else if (!$return_value) {
     print_success($tests, $results, $options);

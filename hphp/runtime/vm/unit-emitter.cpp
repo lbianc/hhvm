@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,7 +20,6 @@
 #include "hphp/parser/location.h"
 #include "hphp/system/systemlib.h"
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/attr.h"
 #include "hphp/runtime/base/file-util.h"
@@ -224,9 +223,8 @@ void UnitEmitter::recordFunction(FuncEmitter* fe) {
 
 Func* UnitEmitter::newFunc(const FuncEmitter* fe, Unit& unit,
                            const StringData* name, Attr attrs,
-                           int numParams, bool needsNextClonedClosure) {
-  Func* f = new (Func::allocFuncMem(numParams, needsNextClonedClosure))
-    Func(unit, name, attrs);
+                           int numParams) {
+  auto f = new (Func::allocFuncMem(numParams)) Func(unit, name, attrs);
   m_fMap[fe] = f;
   return f;
 }
@@ -235,19 +233,14 @@ Func* UnitEmitter::newFunc(const FuncEmitter* fe, Unit& unit,
 ///////////////////////////////////////////////////////////////////////////////
 // PreClassEmitters.
 
-PreClassEmitter* UnitEmitter::newPreClassEmitter(
-  const StringData* name,
-  PreClass::Hoistable hoistable
-) {
-  if (hoistable && m_hoistablePreClassSet.count(name)) {
-    hoistable = PreClass::Mergeable;
+void UnitEmitter::addPreClassEmitter(PreClassEmitter* pce) {
+  if (pce->hoistability() && m_hoistablePreClassSet.count(pce->name())) {
+    pce->setHoistable(PreClass::Mergeable);
   }
-
-  PreClassEmitter* pce = new PreClassEmitter(*this, m_pceVec.size(),
-                                             name, hoistable);
+  auto hoistable = pce->hoistability();
 
   if (hoistable >= PreClass::MaybeHoistable) {
-    m_hoistablePreClassSet.insert(name);
+    m_hoistablePreClassSet.insert(pce->name());
     if (hoistable == PreClass::ClosureHoistable) {
       // Closures should appear at the VERY top of the file, so if any class in
       // the same file tries to use them, they are already defined. We had a
@@ -270,7 +263,23 @@ PreClassEmitter* UnitEmitter::newPreClassEmitter(
       pushMergeableClass(pce);
     }
   }
+}
+
+PreClassEmitter* UnitEmitter::newBarePreClassEmitter(
+  const StringData* name,
+  PreClass::Hoistable hoistable
+) {
+  auto pce = new PreClassEmitter(*this, m_pceVec.size(), name, hoistable);
   m_pceVec.push_back(pce);
+  return pce;
+}
+
+PreClassEmitter* UnitEmitter::newPreClassEmitter(
+  const StringData* name,
+  PreClass::Hoistable hoistable
+) {
+  PreClassEmitter* pce = newBarePreClassEmitter(name, hoistable);
+  addPreClassEmitter(pce);
   return pce;
 }
 
@@ -317,13 +326,13 @@ LineTable createLineTable(SrcLoc& srcLoc, Offset bclen) {
 
 }
 
-void UnitEmitter::recordSourceLocation(const Location* sLoc, Offset start) {
+void UnitEmitter::recordSourceLocation(const Location::Range& sLoc,
+                                       Offset start) {
   // Some byte codes, such as for the implicit "return 0" at the end of a
   // a source file do not have valid source locations. This check makes
   // sure we don't record a (dummy) source location in this case.
-  if (start > 0 && sLoc->line0 == 1 && sLoc->char0 == 1 &&
-    sLoc->line1 == 1 && sLoc->char1 == 1 && strlen(sLoc->file) == 0) return;
-  SourceLoc newLoc(*sLoc);
+  if (start > 0 && sLoc.line0 == -1) return;
+  SourceLoc newLoc(sLoc);
   if (!m_sourceLocTab.empty()) {
     if (m_sourceLocTab.back().second == newLoc) {
       // Combine into the interval already at the back of the vector.
@@ -379,6 +388,18 @@ void UnitEmitter::insertMergeableDef(int ix, Unit::MergeKind kind,
   m_allClassesHoistable = false;
 }
 
+void UnitEmitter::pushMergeableTypeAlias(Unit::MergeKind kind, const Id id) {
+  m_mergeableStmts.push_back(std::make_pair(kind, id));
+  m_allClassesHoistable = false;
+}
+
+void UnitEmitter::insertMergeableTypeAlias(int ix, Unit::MergeKind kind,
+                                           const Id id) {
+  assert(size_t(ix) <= m_mergeableStmts.size());
+  m_mergeableStmts.insert(m_mergeableStmts.begin() + ix,
+                          std::make_pair(kind, id));
+  m_allClassesHoistable = false;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Initialization and execution.
@@ -424,7 +445,9 @@ bool UnitEmitter::insert(UnitOrigin unitOrigin, RepoTxn& txn) {
     for (unsigned i = 0; i < m_arrays.size(); ++i) {
       VariableSerializer vs(VariableSerializer::Type::Serialize);
       urp.insertUnitArray[repoId].insert(
-        txn, usn, i, vs.serialize(VarNR(m_arrays[i]), true).toCppString());
+        txn, usn, i,
+        vs.serializeValue(VarNR(m_arrays[i]), false /* limit */).toCppString()
+      );
     }
     for (auto& fe : m_fes) {
       fe->commit(txn);
@@ -439,6 +462,7 @@ bool UnitEmitter::insert(UnitOrigin unitOrigin, RepoTxn& txn) {
         case MergeKind::UniqueDefinedClass:
           not_reached();
         case MergeKind::Class: break;
+        case MergeKind::TypeAlias:
         case MergeKind::ReqDoc: {
           urp.insertUnitMergeable[repoId].insert(
             txn, usn, i,
@@ -580,6 +604,10 @@ std::unique_ptr<Unit> UnitEmitter::create() {
       switch (mergeable.first) {
         case MergeKind::Class:
           mi->mergeableObj(ix++) = u->m_preClasses[mergeable.second].get();
+          break;
+        case MergeKind::TypeAlias:
+          mi->mergeableObj(ix++) =
+            (void*)((intptr_t(mergeable.second) << 3) + (int)mergeable.first);
           break;
         case MergeKind::ReqDoc: {
           assert(RuntimeOption::RepoAuthoritative);
@@ -964,7 +992,7 @@ void UnitRepoProxy::InsertUnitMergeableStmt
            kind == MergeKind::Global);
     query.bindTypedValue("@mergeableValue", *value);
   } else {
-    assert(kind == MergeKind::ReqDoc);
+    assert(kind == MergeKind::ReqDoc || kind == MergeKind::TypeAlias);
     query.bindNull("@mergeableValue");
   }
   query.exec();
@@ -999,13 +1027,18 @@ void UnitRepoProxy::GetUnitMergeablesStmt
          * (this is dodgy to start with). We're not going to
          * deal with requires at merge time, so drop them
          * here, and clear the mergeOnly flag for the unit.
-         * The one exception is persistent constants are allowed in systemlib.
+         * The two exceptions are persistent constants and
+         * TypeAliases which are allowed in systemlib.
          */
-        if (k != MergeKind::PersistentDefine || SystemLib::s_inited) {
+        if ((k != MergeKind::PersistentDefine && k != MergeKind::TypeAlias)
+            || SystemLib::s_inited) {
           ue.m_mergeOnly = false;
         }
       }
       switch (k) {
+        case MergeKind::TypeAlias:
+          ue.insertMergeableTypeAlias(mergeableIx, k, mergeableId);
+          break;
         case MergeKind::ReqDoc:
           ue.insertMergeableInclude(mergeableIx, k, mergeableId);
           break;

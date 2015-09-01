@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -41,7 +41,7 @@ bool isBlockEnd(const Vinstr& inst) {
     case Vinstr::bindjcc1st:
     case Vinstr::bindjmp:
     case Vinstr::fallback:
-    case Vinstr::svcreq:
+    case Vinstr::retransopt:
     // control flow
     case Vinstr::jcc:
     case Vinstr::jcci:
@@ -54,10 +54,9 @@ bool isBlockEnd(const Vinstr& inst) {
     // terminal
     case Vinstr::ud2:
     case Vinstr::unwind:
-    case Vinstr::vcallstub:
+    case Vinstr::vcallarray:
     case Vinstr::vinvoke:
     case Vinstr::ret:
-    case Vinstr::vretm:
     case Vinstr::vret:
     case Vinstr::leavetc:
     case Vinstr::fallthru:

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -32,11 +32,12 @@ public:
                        int type, ExpressionListPtr expList);
 
   DECLARE_EXPRESSION_VIRTUAL_FUNCTIONS;
-  ExpressionPtr preOptimize(AnalysisResultConstPtr ar);
+  ExpressionPtr preOptimize(AnalysisResultConstPtr ar) override;
 
-  virtual int getLocalEffects() const { return m_type == '`' ? UnknownEffect : NoEffect; }
-  virtual bool canonCompare(ExpressionPtr e) const;
-  int getType() { return m_type;}
+  int getLocalEffects() const override {
+    return m_type == '`' ? UnknownEffect : NoEffect;
+  }
+   int getType() { return m_type;}
   ExpressionListPtr getExpressions() { return m_exps; }
   void stripConcat();
 private:

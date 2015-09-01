@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -51,14 +51,14 @@ ExpressionPtr DynamicFunctionCall::clone() {
 void DynamicFunctionCall::analyzeProgram(AnalysisResultPtr ar) {
   FunctionCall::analyzeProgram(ar);
   if (ar->getPhase() >= AnalysisResult::AnalyzeAll) {
-    if (!m_className.empty()) {
+    if (hasStaticClass()) {
       resolveClass();
     }
     if (m_params) {
       m_params->markParams();
     }
 
-    if (!m_class && m_className.empty()) {
+    if (!m_class && !hasStaticClass()) {
       FunctionScopePtr fs = getFunctionScope();
       VariableTablePtr vt = fs->getVariables();
       vt->setAttribute(VariableTable::ContainsDynamicFunctionCall);
@@ -74,7 +74,7 @@ ExpressionPtr DynamicFunctionCall::preOptimize(AnalysisResultConstPtr ar) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void DynamicFunctionCall::outputCodeModel(CodeGenerator &cg) {
-  if (m_class || !m_className.empty()) {
+  if (m_class || hasStaticClass()) {
     cg.printObjectHeader("ClassMethodCallExpression", 4);
     StaticClassName::outputCodeModel(cg);
     cg.printPropertyHeader("methodExpression");
@@ -86,14 +86,14 @@ void DynamicFunctionCall::outputCodeModel(CodeGenerator &cg) {
   cg.printPropertyHeader("arguments");
   cg.printExpressionVector(m_params);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(m_nameExp->getLocation());
+  cg.printLocation(m_nameExp);
   cg.printObjectFooter();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // code generation functions
 void DynamicFunctionCall::outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) {
-  if (m_class || !m_className.empty()) {
+  if (m_class || hasStaticClass()) {
     StaticClassName::outputPHP(cg, ar);
     cg_printf("::");
     m_nameExp->outputPHP(cg, ar);

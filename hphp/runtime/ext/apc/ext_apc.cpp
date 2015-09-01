@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -18,7 +18,9 @@
 
 #include <fstream>
 
+#ifndef _MSC_VER
 #include <dlfcn.h>
+#endif
 #include <sys/time.h> // gettimeofday
 #include <limits>
 #include <memory>
@@ -30,7 +32,7 @@
 #include "hphp/util/alloc.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/async-job.h"
-#include "hphp/util/timer.h"
+#include "hphp/util/boot_timer.h"
 
 #include "hphp/runtime/ext/fb/ext_fb.h"
 #include "hphp/runtime/base/array-init.h"
@@ -140,9 +142,9 @@ void apcExtension::moduleLoad(const IniSetting::Map& ini, Hdf config) {
   FileStorageChunkSize = Config::GetInt64(ini, config,
                                           "Server.APC.FileStorage.ChunkSize",
                                           1LL << 29);
-  FileStorageMaxSize = Config::GetInt64(ini, config,
-                                        "Server.APC.FileStorage.MaxSize",
-                                        1LL << 32);
+  // TODO(markdrayton): remove FileStorageMaxSize once FileStorage.MaxSize has
+  // been removed from config.hdf (see D2360365)
+  Config::GetInt64(ini, config, "Server.APC.FileStorage.MaxSize", 1LL << 32);
   Config::Bind(FileStoragePrefix, ini, config, "Server.APC.FileStorage.Prefix",
                "/tmp/apc_store");
   Config::Bind(FileStorageFlagKey, ini, config,
@@ -172,9 +174,7 @@ void apcExtension::moduleLoad(const IniSetting::Map& ini, Hdf config) {
 
 void apcExtension::moduleInit() {
   if (UseFileStorage) {
-    s_apc_file_storage.enable(FileStoragePrefix,
-                              FileStorageChunkSize,
-                              FileStorageMaxSize);
+    s_apc_file_storage.enable(FileStoragePrefix, FileStorageChunkSize);
   }
 
   REGISTER_CONSTANT(APC_ITER_TYPE);
@@ -238,7 +238,6 @@ bool apcExtension::AllowObj = false;
 int apcExtension::TTLLimit = -1;
 bool apcExtension::UseFileStorage = false;
 int64_t apcExtension::FileStorageChunkSize = int64_t(1LL << 29);
-int64_t apcExtension::FileStorageMaxSize = int64_t(1LL << 32);
 std::string apcExtension::FileStoragePrefix = "/tmp/apc_store";
 int apcExtension::FileStorageAdviseOutPeriod = 1800;
 std::string apcExtension::FileStorageFlagKey = "_madvise_out";
@@ -317,7 +316,7 @@ Variant HHVM_FUNCTION(apc_add,
         errors.add(key, -1);
       }
     }
-    return errors.create();
+    return errors.toVariant();
   }
 
   if (!key_or_array.isString()) {
@@ -351,14 +350,14 @@ Variant HHVM_FUNCTION(apc_fetch,
         init.set(strKey, v);
       }
     }
-    success = tmp;
-    return init.create();
+    success.assignIfRef(tmp);
+    return init.toVariant();
   }
 
   if (apc_store().get(key.toString(), v)) {
-    success = true;
+    success.assignIfRef(true);
   } else {
-    success = false;
+    success.assignIfRef(false);
     v = false;
   }
   return v;
@@ -376,11 +375,11 @@ Variant HHVM_FUNCTION(apc_delete,
       if (!k.isString()) {
         raise_warning("apc key is not a string");
         init.append(k);
-      } else if (!apc_store().erase(k.toString())) {
+      } else if (!apc_store().eraseKey(k.toCStrRef())) {
         init.append(k);
       }
     }
-    return init.create();
+    return init.toVariant();
   } else if(key.is(KindOfObject)) {
     if (!key.getObjectData()->getVMClass()->
          classof(SystemLib::s_APCIteratorClass)) {
@@ -398,7 +397,7 @@ Variant HHVM_FUNCTION(apc_delete,
     return tvAsVariant(&tvResult);
   }
 
-  return apc_store().erase(key.toString());
+  return apc_store().eraseKey(key.toString());
 }
 
 bool HHVM_FUNCTION(apc_clear_cache,
@@ -415,7 +414,7 @@ Variant HHVM_FUNCTION(apc_inc,
 
   bool found = false;
   int64_t newValue = apc_store().inc(key, step, found);
-  success = found;
+  success.assignIfRef(found);
   if (!found) return false;
   return newValue;
 }
@@ -428,7 +427,7 @@ Variant HHVM_FUNCTION(apc_dec,
 
   bool found = false;
   int64_t newValue = apc_store().inc(key, -step, found);
-  success = found;
+  success.assignIfRef(found);
   if (!found) return false;
   return newValue;
 }
@@ -459,7 +458,7 @@ Variant HHVM_FUNCTION(apc_exists,
         init.append(strKey);
       }
     }
-    return init.create();
+    return init.toVariant();
   }
 
   return apc_store().exists(key.toString());
@@ -536,6 +535,9 @@ struct cache_info {
 
 static Mutex dl_mutex;
 static PFUNC_APC_LOAD apc_load_func(void *handle, const char *name) {
+#ifdef _MSC_VER
+  throw Exception("apc_load_func is not currently supported under MSVC!");
+#else
   Lock lock(dl_mutex);
   dlerror(); // clear errors
   PFUNC_APC_LOAD p = (PFUNC_APC_LOAD)dlsym(handle, name);
@@ -546,6 +548,7 @@ static PFUNC_APC_LOAD apc_load_func(void *handle, const char *name) {
                     error ? error : "(unknown error)");
   }
   return p;
+#endif
 }
 
 class ApcLoadJob {
@@ -570,6 +573,7 @@ static size_t s_const_map_size = 0;
 
 EXTERNALLY_VISIBLE
 void apc_load(int thread) {
+#ifndef _MSC_VER
   static void *handle = nullptr;
   if (handle ||
       apcExtension::PrimeLibrary.empty() ||
@@ -604,7 +608,7 @@ void apc_load(int thread) {
     return;
   }
 
-  Timer timer(Timer::WallTime, "loading APC data");
+  BootTimer::Block timer("loading APC data");
   handle = dlopen(apcExtension::PrimeLibrary.c_str(), RTLD_LAZY);
   if (!handle) {
     throw Exception("Unable to open apc prime library %s: %s",
@@ -656,6 +660,7 @@ void apc_load(int thread) {
 
   // We've copied all the data out, so close it out.
   dlclose(handle);
+#endif
 }
 
 size_t get_const_map_size() {
@@ -1299,7 +1304,7 @@ int apc_rfc1867_progress(apc_rfc1867_data *rfc1867ApcData,
       track.set(s_name, rfc1867ApcData->name);
       track.set(s_done, 0);
       track.set(s_start_time, rfc1867ApcData->start_time);
-      HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.create(), 3600);
+      HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.toVariant(), 3600);
     }
     break;
 
@@ -1321,7 +1326,7 @@ int apc_rfc1867_progress(apc_rfc1867_data *rfc1867ApcData,
             track.set(s_name, rfc1867ApcData->name);
             track.set(s_done, 0);
             track.set(s_start_time, rfc1867ApcData->start_time);
-            HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.create(),
+            HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.toVariant(),
                                3600);
           }
           rfc1867ApcData->prev_bytes_processed =
@@ -1347,7 +1352,7 @@ int apc_rfc1867_progress(apc_rfc1867_data *rfc1867ApcData,
       track.set(s_cancel_upload, rfc1867ApcData->cancel_upload);
       track.set(s_done, 0);
       track.set(s_start_time, rfc1867ApcData->start_time);
-      HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.create(), 3600);
+      HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.toVariant(), 3600);
     }
     break;
 
@@ -1371,7 +1376,8 @@ int apc_rfc1867_progress(apc_rfc1867_data *rfc1867ApcData,
         track.set(s_cancel_upload, rfc1867ApcData->cancel_upload);
         track.set(s_done, 1);
         track.set(s_start_time, rfc1867ApcData->start_time);
-        HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.create(), 3600);
+        HHVM_FN(apc_store)(rfc1867ApcData->tracking_key, track.toVariant(),
+                           3600);
       }
     }
     break;
@@ -1399,151 +1405,6 @@ Variant apc_unserialize(const char* data, int len) {
   return unserialize_ex(data, len, sType);
 }
 
-void reserialize(VariableUnserializer *uns, StringBuffer &buf) {
-
-  char type = uns->readChar();
-  char sep = uns->readChar();
-
-  if (type == 'N') {
-    buf.append(type);
-    buf.append(sep);
-    return;
-  }
-
-  switch (type) {
-  case 'r':
-  case 'R':
-  case 'b':
-  case 'i':
-  case 'd':
-    {
-      buf.append(type);
-      buf.append(sep);
-      while (uns->peek() != ';') {
-        char ch;
-        ch = uns->readChar();
-        buf.append(ch);
-      }
-    }
-    break;
-  case 'S':
-  case 'A':
-    {
-      // shouldn't happen, but keep the code here anyway.
-      buf.append(type);
-      buf.append(sep);
-      char pointer[8];
-      uns->read(pointer, 8);
-      buf.append(pointer, 8);
-    }
-    break;
-  case 's':
-    {
-      String v;
-      v.unserialize(uns);
-      assert(!v.isNull());
-      if (v.get()->isStatic()) {
-        union {
-          char pointer[8];
-          StringData *sd;
-        } u;
-        u.sd = v.get();
-        buf.append("S:");
-        buf.append(u.pointer, 8);
-        buf.append(';');
-      } else {
-        buf.append("s:");
-        buf.append(v.size());
-        buf.append(":\"");
-        buf.append(v.data(), v.size());
-        buf.append("\";");
-      }
-      sep = uns->readChar();
-      return;
-    }
-    break;
-  case 'a':
-    {
-      buf.append("a:");
-      int64_t size = uns->readInt();
-      char sep2 = uns->readChar();
-      buf.append(size);
-      buf.append(sep2);
-      sep2 = uns->readChar();
-      buf.append(sep2);
-      for (int64_t i = 0; i < size; i++) {
-        reserialize(uns, buf); // key
-        reserialize(uns, buf); // value
-      }
-      sep2 = uns->readChar(); // '}'
-      buf.append(sep2);
-      return;
-    }
-    break;
-  case 'o':
-  case 'O':
-  case 'V':
-  case 'K':
-    {
-      buf.append(type);
-      buf.append(sep);
-
-      String clsName;
-      clsName.unserialize(uns);
-      buf.append(clsName.size());
-      buf.append(":\"");
-      buf.append(clsName.data(), clsName.size());
-      buf.append("\":");
-
-      uns->readChar();
-      int64_t size = uns->readInt();
-      char sep2 = uns->readChar();
-
-      buf.append(size);
-      buf.append(sep2);
-      sep2 = uns->readChar(); // '{'
-      buf.append(sep2);
-      // 'V' type is a series with values only, while all other
-      // types are series with keys and values
-      int64_t i = type == 'V' ? size : size * 2;
-      while (i--) {
-        reserialize(uns, buf);
-      }
-      sep2 = uns->readChar(); // '}'
-      buf.append(sep2);
-      return;
-    }
-    break;
-  case 'C':
-    {
-      buf.append(type);
-      buf.append(sep);
-
-      String clsName;
-      clsName.unserialize(uns);
-      buf.append(clsName.size());
-      buf.append(":\"");
-      buf.append(clsName.data(), clsName.size());
-      buf.append("\":");
-
-      sep = uns->readChar(); // ':'
-      String serialized;
-      serialized.unserialize(uns, '{', '}');
-      buf.append(serialized.size());
-      buf.append(":{");
-      buf.append(serialized.data(), serialized.size());
-      buf.append('}');
-      return;
-    }
-    break;
-  default:
-    throw Exception("Unknown type '%c'", type);
-  }
-
-  sep = uns->readChar(); // the last ';'
-  buf.append(sep);
-}
-
 String apc_reserialize(const String& str) {
   if (str.empty() ||
       !apcExtension::EnableApcSerialize) return str;
@@ -1559,8 +1420,7 @@ String apc_reserialize(const String& str) {
 ///////////////////////////////////////////////////////////////////////////////
 // debugging support
 
-bool apc_dump(const char *filename, bool keyOnly, bool metaDump,
-              int waitSeconds) {
+bool apc_dump(const char *filename, bool keyOnly, bool metaDump) {
   DumpMode mode;
   std::ofstream out(filename);
 

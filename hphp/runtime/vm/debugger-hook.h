@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,7 +20,6 @@
 #include <functional>
 
 #include "hphp/runtime/base/thread-info.h"
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/surprise-flags.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/runtime/vm/hhbc.h"
@@ -34,7 +33,10 @@
 
 namespace HPHP {
 
+namespace Eval { struct DebuggerHookHandler; }
+
 struct Class;
+struct DebugHookHandler;
 struct Func;
 struct ObjectData;
 
@@ -43,6 +45,9 @@ inline bool isDebuggerAttached(ThreadInfo* ti = nullptr) {
   ti = (ti != nullptr) ? ti : &TI();
   return ti->m_reqInjectionData.getDebuggerAttached();
 }
+
+/* Hacky way of checking if a DebugHookHandler is a DebuggerHookHandler. */
+bool isHphpd(const DebugHookHandler*);
 
 // Executes the passed code only if there is a debugger attached to the current
 // thread.
@@ -73,8 +78,18 @@ struct DebugHookHandler {
   template<class HandlerClass>
   static bool attach(ThreadInfo* ti = nullptr) {
     ti = (ti != nullptr) ? ti : &TI();
+
+    // The only time one hook handler can override another is when hphpd tries
+    // to override xdebug.
     if (isDebuggerAttached(ti)) {
-      return false;
+      using HPHPD = HPHP::Eval::DebuggerHookHandler;
+      if (!std::is_same<HandlerClass, HPHPD>::value) {
+        return false;
+      }
+      if (isHphpd(ti->m_debugHookHandler)) {
+        return false;
+      }
+      detach();
     }
 
     // Attach to the thread

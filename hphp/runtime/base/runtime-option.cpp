@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -76,13 +76,13 @@ bool RuntimeOption::EnableShortTags = true;
 bool RuntimeOption::EnableAspTags = false;
 bool RuntimeOption::EnableXHP = false;
 bool RuntimeOption::EnableObjDestructCall = true;
-bool RuntimeOption::EnableEmitSwitch = true;
 bool RuntimeOption::EnableEmitterStats = true;
 bool RuntimeOption::EnableIntrinsicsExtension = false;
 bool RuntimeOption::CheckSymLink = true;
 bool RuntimeOption::EnableArgsInBacktraces = true;
 bool RuntimeOption::EnableZendCompat = false;
 bool RuntimeOption::EnableZendSorting = false;
+bool RuntimeOption::EnableZendIniCompat = true;
 bool RuntimeOption::TimeoutsUseWallTime = true;
 bool RuntimeOption::CheckFlushOnUserClose = true;
 bool RuntimeOption::EvalAuthoritativeMode = false;
@@ -127,10 +127,9 @@ std::string RuntimeOption::AdminLogSymLink;
 
 std::map<std::string, AccessLogFileData> RuntimeOption::RPCLogs;
 
-std::string RuntimeOption::Tier;
 std::string RuntimeOption::Host;
 std::string RuntimeOption::DefaultServerNameSuffix;
-std::string RuntimeOption::ServerType = "libevent";
+std::string RuntimeOption::ServerType = "proxygen";
 std::string RuntimeOption::ServerIP;
 std::string RuntimeOption::ServerFileSocket;
 int RuntimeOption::ServerPort = 80;
@@ -336,9 +335,9 @@ bool RuntimeOption::WarnOnCollectionToArray = false;
 bool RuntimeOption::UseDirectCopy = false;
 
 #ifdef FOLLY_SANITIZE_ADDRESS
-bool RuntimeOption::DisableSmartAllocator = true;
+bool RuntimeOption::DisableSmallAllocator = true;
 #else
-bool RuntimeOption::DisableSmartAllocator = false;
+bool RuntimeOption::DisableSmallAllocator = false;
 #endif
 
 std::map<std::string, std::string> RuntimeOption::ServerVariables;
@@ -390,6 +389,14 @@ const std::string& RuntimeOption::GetServerPrimaryIPv6() {
    return serverPrimaryIPv6;
 }
 
+static inline bool newMInstrsDefault() {
+#ifdef HHVM_NEW_MINSTRS
+  return true;
+#else
+  return false;
+#endif
+}
+
 static inline std::string regionSelectorDefault() {
   return "tracelet";
 }
@@ -415,12 +422,11 @@ static inline std::string pgoRegionSelectorDefault() {
 #endif
 }
 
-static inline bool loopsDefault() {
-#ifdef HHVM_JIT_LOOPS_BY_DEFAULT
+static inline bool hhirConstrictGuardsDefault() {
+#ifdef HHVM_CONSTRICT_GUARDS_BY_DEFAULT
   return true;
 #else
-  return (RuntimeOption::EvalJitPGORegionSelector == "wholecfg" ||
-          RuntimeOption::EvalJitPGORegionSelector == "hotcfg");
+  return false;
 #endif
 }
 
@@ -429,7 +435,7 @@ static inline bool hhirRelaxGuardsDefault() {
 }
 
 static inline bool evalJitDefault() {
-#if defined(__APPLE__) || defined(__CYGWIN__)// || defined(__powerpc64__)
+#if defined(__CYGWIN__) || defined(__powerpc64__)
   return false;
 #else
   return true;
@@ -465,6 +471,10 @@ static inline uint32_t jitLLVMDefault() {
 static inline bool jitLLVMSLPVectorizeDefault() {
   return RuntimeOption::EvalJitLLVMOptLevel > 1 &&
          RuntimeOption::EvalJitLLVMSizeLevel < 2;
+}
+
+static inline bool reuseTCDefault() {
+  return hhvm_reuse_tc && !RuntimeOption::RepoAuthoritative;
 }
 
 static inline bool hugePagesSoundNice() {
@@ -547,8 +557,6 @@ int RuntimeOption::DebuggerDefaultRpcTimeout = 30;
 std::string RuntimeOption::DebuggerDefaultSandboxPath;
 std::string RuntimeOption::DebuggerStartupDocument;
 int RuntimeOption::DebuggerSignalTimeout = 1;
-
-bool RuntimeOption::XDebugChrome = false;
 
 std::string RuntimeOption::SendmailPath = "sendmail -t -i";
 std::string RuntimeOption::MailForceExtraParameters;
@@ -651,7 +659,8 @@ static bool matchHdfPattern(const std::string &value,
 // various settings, even if they are set in the same
 // hdf file. However, CLI overrides still win the day over
 // everything.
-static void getTierOverwrites(IniSetting::Map& ini, Hdf& config) {
+static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
+                                                  Hdf& config) {
 
   // Machine metrics
   string hostname, tier, cpu;
@@ -669,26 +678,56 @@ static void getTierOverwrites(IniSetting::Map& ini, Hdf& config) {
     }
   }
 
+  std::vector<std::string> messages;
   // Tier overwrites
   {
     for (Hdf hdf = config["Tiers"].firstChild(); hdf.exists();
          hdf = hdf.next()) {
+      if (messages.empty()) {
+        messages.emplace_back(folly::sformat(
+                                "Matching tiers using: "
+                                "machine='{}', tier='{}', cpu = '{}'",
+                                hostname, tier, cpu));
+      }
       if (matchHdfPattern(hostname, ini, hdf, "machine") &&
           matchHdfPattern(tier, ini, hdf, "tier") &&
           matchHdfPattern(cpu, ini, hdf, "cpu")) {
-        RuntimeOption::Tier = hdf.getName();
+        messages.emplace_back(folly::sformat(
+                                "Matched tier: {}", hdf.getName()));
         config.copy(hdf["overwrite"]);
         // no break here, so we can continue to match more overwrites
       }
       hdf["overwrite"].setVisited(); // avoid lint complaining
     }
   }
+  return messages;
 }
 
+void RuntimeOption::ReadSatelliteInfo(
+    const IniSettingMap& ini,
+    const Hdf& hdf,
+    std::vector<std::shared_ptr<SatelliteServerInfo>>& infos,
+    std::string& xboxPassword,
+    std::set<std::string>& xboxPasswords) {
+  auto ss_callback = [&] (const IniSettingMap &ini_ss, const Hdf &hdf_ss,
+                         const std::string &ini_ss_key) {
+    auto satellite = std::make_shared<SatelliteServerInfo>(ini_ss, hdf_ss,
+                                                           ini_ss_key);
+    infos.push_back(satellite);
+    if (satellite->getType() == SatelliteServer::Type::KindOfRPCServer) {
+      xboxPassword = satellite->getPassword();
+      xboxPasswords = satellite->getPasswords();
+    }
+  };
+  Config::Iterate(ss_callback, ini, hdf, "Satellites");
+}
 
-void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
+extern void initialize_apc();
+void RuntimeOption::Load(
+  IniSetting::Map& ini, Hdf& config,
   const std::vector<std::string>& iniClis /* = std::vector<std::string>() */,
-  const std::vector<std::string>& hdfClis /* = std::vector<std::string>() */) {
+  const std::vector<std::string>& hdfClis /* = std::vector<std::string>() */,
+  std::vector<std::string>* messages /* = nullptr */) {
 
   // Intialize the memory manager here because various settings and
   // initializations that we do here need it
@@ -706,7 +745,9 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
     Config::ParseHdfString(hstr, config);
   }
   // See if there are any Tier-based overrides
-  getTierOverwrites(ini, config);
+  auto m = getTierOverwrites(ini, config);
+  if (messages) *messages = std::move(m);
+
   // Then get the ini and hdf cli strings again, in case the tier overwrites
   // overrode any non-tier based command line option we set. The tier-based
   // command line overwrites will already have been set in the call above.
@@ -725,36 +766,30 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
 
   {
     // Logging
-    if (config["Log"]["Level"] == "None") {
-      Logger::LogLevel = Logger::LogNone;
-    } else if (config["Log"]["Level"] == "Error") {
-      Logger::LogLevel = Logger::LogError;
-    } else if (config["Log"]["Level"] == "Warning") {
-      Logger::LogLevel = Logger::LogWarning;
-    } else if (config["Log"]["Level"] == "Info") {
-      Logger::LogLevel = Logger::LogInfo;
-    } else if (config["Log"]["Level"] == "Verbose") {
-      Logger::LogLevel = Logger::LogVerbose;
+    auto setLogLevel = [](const std::string& value) {
+      // ini parsing treats "None" as ""
+      if (value == "None" || value == "") {
+        Logger::LogLevel = Logger::LogNone;
+      } else if (value == "Error") {
+        Logger::LogLevel = Logger::LogError;
+      } else if (value == "Warning") {
+        Logger::LogLevel = Logger::LogWarning;
+      } else if (value == "Info") {
+        Logger::LogLevel = Logger::LogInfo;
+      } else if (value == "Verbose") {
+        Logger::LogLevel = Logger::LogVerbose;
+      } else {
+        return false;
+      }
+      return true;
+    };
+    auto str = Config::GetString(ini, config, "Log.Level");
+    if (!str.empty()) {
+      setLogLevel(str);
     }
     IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_SYSTEM,
                      "hhvm.log.level", IniSetting::SetAndGet<std::string>(
-      [](const std::string& value) {
-        // ini parsing treats "None" as ""
-        if (value == "None" || value == "") {
-          Logger::LogLevel = Logger::LogNone;
-        } else if (value == "Error") {
-          Logger::LogLevel = Logger::LogError;
-        } else if (value == "Warning") {
-          Logger::LogLevel = Logger::LogWarning;
-        } else if (value == "Info") {
-          Logger::LogLevel = Logger::LogInfo;
-        } else if (value == "Verbose") {
-          Logger::LogLevel = Logger::LogVerbose;
-        } else {
-          return false;
-        }
-        return true;
-      },
+      setLogLevel,
       []() {
         switch (Logger::LogLevel) {
           case Logger::LogNone:
@@ -806,27 +841,34 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
                  RuntimeOption::EnableHipHopSyntax);
     Config::Bind(NoSilencer, ini, config, "Log.NoSilencer");
     Config::Bind(RuntimeErrorReportingLevel, ini,
-                config, "Log.RuntimeErrorReportingLevel",
-                static_cast<int>(ErrorMode::HPHP_ALL));
+                 config, "Log.RuntimeErrorReportingLevel",
+                 static_cast<int>(ErrorMode::HPHP_ALL));
     Config::Bind(ForceErrorReportingLevel, ini,
                  config, "Log.ForceErrorReportingLevel", 0);
     Config::Bind(AccessLogDefaultFormat, ini, config,
                  "Log.AccessLogDefaultFormat", "%h %l %u %t \"%r\" %>s %b");
 
-    auto parseLogs = [](Hdf root, IniSetting::Map& ini, const char* name,
-                        std::map<std::string, AccessLogFileData>& logs) {
-      for (Hdf hdf = root[name].firstChild(); hdf.exists(); hdf = hdf.next()) {
-        string logName = hdf.getName();
-        string fname = Config::GetString(ini, hdf, "File", "", false);
-        if (fname.empty()) {
-          continue;
-        }
-        string symLink = Config::GetString(ini, hdf, "SymLink", "", false);
-        string format = Config::GetString(ini, hdf, "Format",
-          AccessLogDefaultFormat, false);
+    auto parseLogs = [] (const Hdf &config, const IniSetting::Map& ini,
+                         const std::string &name,
+                         std::map<std::string, AccessLogFileData> &logs) {
+      auto parse_logs_callback = [&] (const IniSetting::Map &ini_pl,
+                                      const Hdf &hdf_pl,
+                                      const std::string &ini_pl_key) {
+        string logName = hdf_pl.exists() && !hdf_pl.isEmpty()
+                       ? hdf_pl.getName()
+                       : ini_pl_key;
+        string fname = Config::GetString(ini_pl, hdf_pl, "File", "", false);
+        if (!fname.empty()) {
+          string symlink = Config::GetString(ini_pl, hdf_pl, "SymLink", "",
+                                             false);
+          string format = Config::GetString(ini_pl, hdf_pl, "Format",
+                                            AccessLogDefaultFormat, false);
+          logs[logName] = AccessLogFileData(fname, symlink, format);
 
-        logs[logName] = AccessLogFileData(fname, symLink, format);
-      }
+
+        }
+      };
+      Config::Iterate(parse_logs_callback, ini, config, name);
     };
 
     parseLogs(config, ini, "Log.Access", AccessLogs);
@@ -867,7 +909,6 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
                  "ErrorHandling.WarningFrequency", 1);
   }
   {
-    Hdf rlimit = config["ResourceLimit"];
     if (Config::GetInt64(ini, config, "ResourceLimit.CoreFileSizeOverride")) {
       setResourceLimit(RLIMIT_CORE, ini,  config,
                        "ResourceLimit.CoreFileSizeOverride");
@@ -1006,7 +1047,6 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
                                      EvalProfileHWEvents.size()).toCppString(),
                           EvalRecordSubprocessTimes);
 
-    Config::Bind(EnableEmitSwitch, ini, config, "Eval.EnableEmitSwitch", true);
     Config::Bind(EnableEmitterStats, ini, config, "Eval.EnableEmitterStats",
                  EnableEmitterStats);
     Config::Bind(EnableIntrinsicsExtension, ini,
@@ -1017,9 +1057,9 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
       throw std::runtime_error("Code coverage is not supported with "
         "Eval.Jit=true");
     }
-    Config::Bind(DisableSmartAllocator, ini, config,
-                 "Eval.DisableSmartAllocator", DisableSmartAllocator);
-    SetArenaSlabAllocBypass(DisableSmartAllocator);
+    Config::Bind(DisableSmallAllocator, ini, config,
+                 "Eval.DisableSmallAllocator", DisableSmallAllocator);
+    SetArenaSlabAllocBypass(DisableSmallAllocator);
 
     if (RecordCodeCoverage) CheckSymLink = true;
     Config::Bind(CodeCoverageOutputFile, ini, config,
@@ -1060,8 +1100,6 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
                    "Eval.Debugger.RPC.HostDomain");
       Config::Bind(DebuggerDefaultRpcTimeout, ini, config,
                    "Eval.Debugger.RPC.DefaultTimeout", 30);
-      Config::Bind(XDebugChrome, ini, config, "Eval.Debugger.XDebugChrome",
-                   false);
     }
   }
   {
@@ -1076,6 +1114,7 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
                  "Hack.Lang.IconvIgnoreCorrect");
     Config::Bind(MinMaxAllowDegenerate, ini, config,
                  "Hack.Lang.MinMaxAllowDegenerate");
+
 #ifdef FACEBOOK
     // Force off for Facebook unless you explicitly turn on; folks here both
     // disproportionately know what they are doing, and are doing work on HHVM
@@ -1086,10 +1125,16 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
     // assumed to know what you're doing.
     const bool aggroHackChecksDefault = !EnableHipHopSyntax;
 #endif
+
     Config::Bind(LookForTypechecker, ini, config,
                  "Hack.Lang.LookForTypechecker", aggroHackChecksDefault);
+
+    // If you turn off LookForTypechecker, you probably want to turn this off
+    // too -- basically, make the two look like the same option to external
+    // users, unless you really explicitly want to set them differently for
+    // some reason.
     Config::Bind(AutoTypecheck, ini, config, "Hack.Lang.AutoTypecheck",
-                 aggroHackChecksDefault);
+                 LookForTypechecker);
   }
   {
     // Server
@@ -1235,7 +1280,8 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
     IncludeSearchPaths.insert(IncludeSearchPaths.begin(), ".");
 
     Config::Bind(FileCache, ini, config, "Server.FileCache");
-    Config::Bind(DefaultDocument, ini, config, "Server.DefaultDocument");
+    Config::Bind(DefaultDocument, ini, config, "Server.DefaultDocument",
+                 "index.php");
     Config::Bind(ErrorDocument404, ini, config, "Server.ErrorDocument404");
     normalizePath(ErrorDocument404);
     Config::Bind(ForbiddenAs404, ini, config, "Server.ForbiddenAs404");
@@ -1329,41 +1375,31 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
 
   VirtualHost::SortAllowedDirectories(AllowedDirectories);
   {
-    if (config["VirtualHost"].exists()) {
-      for (Hdf hdf = config["VirtualHost"].firstChild(); hdf.exists();
-           hdf = hdf.next()) {
-        if (hdf.getName() == "default") {
-          VirtualHost::GetDefault().init(ini, hdf);
-          VirtualHost::GetDefault().addAllowedDirectories(AllowedDirectories);
-        } else {
-          auto host = std::make_shared<VirtualHost>(ini, hdf);
-          host->addAllowedDirectories(AllowedDirectories);
-          VirtualHosts.push_back(host);
-        }
+    auto vh_callback = [] (const IniSettingMap &ini_vh, const Hdf &hdf_vh,
+                           const std::string &ini_vh_key) {
+      if (VirtualHost::IsDefault(ini_vh, hdf_vh, ini_vh_key)) {
+        VirtualHost::GetDefault().init(ini_vh, hdf_vh, ini_vh_key);
+        VirtualHost::GetDefault().addAllowedDirectories(AllowedDirectories);
+      } else {
+        auto host = std::make_shared<VirtualHost>(ini_vh, hdf_vh, ini_vh_key);
+        host->addAllowedDirectories(AllowedDirectories);
+        VirtualHosts.push_back(host);
       }
-      for (unsigned int i = 0; i < VirtualHosts.size(); i++) {
-        if (!VirtualHosts[i]->valid()) {
-          throw std::runtime_error("virtual host missing prefix or pattern");
-        }
-      }
-    }
+    };
+    // Virtual Hosts have to be iterated in order. Because only the first
+    // one that matches in the VirtualHosts vector gets applied and used.
+    // Hdf's and ini (via Variant arrays) internal storage handles ordering
+    // naturally (as specified top to bottom in the file and left to right on
+    // the command line.
+    Config::Iterate(vh_callback, ini, config, "VirtualHost");
   }
   {
     // IpBlocks
-    IpBlocks = std::make_shared<IpBlockMap>(ini, config["IpBlockMap"]);
+    IpBlocks = std::make_shared<IpBlockMap>(ini, config);
   }
   {
-    if (config["Satellites"].exists()) {
-      for (Hdf hdf = config["Satellites"].firstChild(); hdf.exists();
-           hdf = hdf.next()) {
-        auto satellite = std::make_shared<SatelliteServerInfo>(ini, hdf);
-        SatelliteServerInfos.push_back(satellite);
-        if (satellite->getType() == SatelliteServer::Type::KindOfRPCServer) {
-          XboxPassword = satellite->getPassword();
-          XboxPasswords = satellite->getPasswords();
-        }
-      }
-    }
+    ReadSatelliteInfo(ini, config, SatelliteServerInfos,
+                      XboxPassword, XboxPasswords);
   }
   {
     // Xbox
@@ -1409,7 +1445,22 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
   }
   {
     // Static File
-    Config::Bind(StaticFileExtensions, ini, config, "StaticFile.Extensions");
+
+    hphp_string_imap<std::string> staticFileDefault;
+    staticFileDefault["css"] = "text/css";
+    staticFileDefault["gif"] = "image/gif";
+    staticFileDefault["html"] = "text/html";
+    staticFileDefault["jpeg"] = "image/jpeg";
+    staticFileDefault["jpg"] = "image/jpeg";
+    staticFileDefault["mp3"] = "audio/mpeg";
+    staticFileDefault["png"] = "image/png";
+    staticFileDefault["tif"] = "image/tiff";
+    staticFileDefault["tiff"] = "image/tiff";
+    staticFileDefault["txt"] = "text/plain";
+    staticFileDefault["zip"] = "application/zip";
+
+    Config::Bind(StaticFileExtensions, ini, config, "StaticFile.Extensions",
+                 staticFileDefault);
     Config::Bind(StaticFileGenerators, ini, config, "StaticFile.Generators");
 
     auto matches_callback = [] (const IniSettingMap &ini_m, const Hdf &hdf_m,
@@ -1468,7 +1519,7 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
     }
 
     auto core_dump_report_dir =
-      Config::Get(ini, config, "Debug.CoreDumpReportDirectory",
+      Config::GetString(ini, config, "Debug.CoreDumpReportDirectory",
 #if defined(HPHP_OSS)
   "/tmp"
 #else
@@ -1600,6 +1651,13 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
 
   refineStaticStringTableSize();
 
+  // Enables the hotfixing of a bug that occurred with D1797805 where
+  // per request user settings (like upload_max_filesize) were not able to be
+  // accessed on a server request any longer. The longer term fix is in review
+  // D2099778, but we want that to simmer in Master for a while and we need
+  // a hotfix for our current 3.6 LTS (Github Issue #4993)
+  Config::Bind(EnableZendIniCompat, ini, config, "Eval.EnableZendIniCompat",
+               true);
   // Language and Misc Configuration Options
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_ONLY, "expose_php",
                    &RuntimeOption::ExposeHPHP);
@@ -1707,7 +1765,6 @@ void RuntimeOption::Load(IniSetting::Map& ini, Hdf& config,
 
 
   ExtensionRegistry::moduleLoad(ini, config);
-  extern void initialize_apc();
   initialize_apc();
 }
 

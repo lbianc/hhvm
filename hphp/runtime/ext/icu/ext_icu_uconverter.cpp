@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -183,7 +183,7 @@ static bool setCallback(const Object& this_, UConverter *cnv) {
   ucnv_setToUCallBack(cnv, (UConverterToUCallback)ucnvToUCallback,
                            this_.get(), nullptr, nullptr, &error);
   if (U_FAILURE(error)) {
-    Native::data<IntlUConverter>(this_.get())->
+    Native::data<IntlUConverter>(this_)->
       failure(error, "ucnv_setToUCallback");
     return false;
   }
@@ -191,7 +191,7 @@ static bool setCallback(const Object& this_, UConverter *cnv) {
   ucnv_setFromUCallBack(cnv, (UConverterFromUCallback)ucnvFromUCallback,
                              this_.get(), nullptr, nullptr, &error);
   if (U_FAILURE(error)) {
-    Native::data<IntlUConverter>(this_.get())->
+    Native::data<IntlUConverter>(this_)->
       failure(error, "ucnv_setFromUCallback");
     return false;
   }
@@ -265,8 +265,8 @@ static void HHVM_METHOD(UConverter, __construct, const String& toEncoding,
   data->setDest(doSetEncoding(data, toEncoding));
   data->setSrc(doSetEncoding(data, fromEncoding));
   if (this_->getVMClass() != getClass()) {
-    setCallback(this_, data->dest());
-    setCallback(this_, data->src());
+    setCallback(Object{this_}, data->dest());
+    setCallback(Object{this_}, data->src());
   }
 }
 

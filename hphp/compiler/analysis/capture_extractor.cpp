@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -105,9 +105,8 @@ SimpleVariablePtr CaptureExtractor::newQueryParamRef(ExpressionPtr ae) {
   char count = '0' + m_capturedExpressions.size();
   std::string pname = "@query_param_";
   pname.push_back(count);
-  SimpleVariablePtr param(
-    new SimpleVariable(ae->getScope(), ae->getLocation(), pname)
-  );
+  auto param =
+    std::make_shared<SimpleVariable>(ae->getScope(), ae->getRange(), pname);
   m_capturedExpressions.push_back(ae);
   return param;
 }
@@ -122,8 +121,7 @@ SimpleVariablePtr CaptureExtractor::newQueryParamRef(ExpressionPtr ae) {
  */
 ExpressionPtr CaptureExtractor::rewriteCall(SimpleFunctionCallPtr sfc) {
   assert(sfc != nullptr);
-  if (sfc->hadBackslash() ||
-    (sfc->getClass() != nullptr && !sfc->getClassName().empty())) {
+  if (sfc->hadBackslash() || sfc->getClass() || sfc->hasStaticClass()) {
     return newQueryParamRef(sfc);
   }
   auto args = sfc->getParams();
@@ -135,9 +133,8 @@ ExpressionPtr CaptureExtractor::rewriteCall(SimpleFunctionCallPtr sfc) {
     isQueryCall |= this->dependsOnQueryOnlyState(arg);
   }
   if (!isQueryCall) return newQueryParamRef(sfc);
-  ExpressionListPtr newArgs(
-    new ExpressionList(args->getScope(), args->getLocation())
-  );
+  auto newArgs =
+    std::make_shared<ExpressionList>(args->getScope(), args->getRange());
   bool noRewrites = true;
   for (int i = 0; i < pc; i++) {
     auto arg = (*args)[i];
@@ -146,11 +143,9 @@ ExpressionPtr CaptureExtractor::rewriteCall(SimpleFunctionCallPtr sfc) {
     newArgs->addElement(newArg);
   }
   if (noRewrites) return sfc;
-  SimpleFunctionCallPtr result(
-    new SimpleFunctionCall(sfc->getScope(), sfc->getLocation(),
-      sfc->getName(), false, newArgs, ExpressionPtr())
-  );
-  return result;
+  return std::make_shared<SimpleFunctionCall>(
+    sfc->getScope(), sfc->getRange(),
+    sfc->getOriginalName(), false, newArgs, ExpressionPtr());
 }
 
 /**
@@ -202,9 +197,9 @@ QueryExpressionPtr CaptureExtractor::rewriteQuery(QueryExpressionPtr qe) {
   auto clauses = qe->getClauses();
   auto newClauses = rewriteExpressionList(clauses);
   if (clauses == newClauses) return qe;
-  QueryExpressionPtr result(
-    new QueryExpression(qe->getScope(), qe->getLocation(), newClauses)
-  );
+  auto result =
+    std::make_shared<QueryExpression>(qe->getScope(), qe->getRange(),
+                                      newClauses);
   return result;
 }
 
@@ -215,9 +210,8 @@ QueryExpressionPtr CaptureExtractor::rewriteQuery(QueryExpressionPtr qe) {
 ExpressionListPtr CaptureExtractor::rewriteExpressionList(ExpressionListPtr l) {
   int np = 0;
   int nc = l->getCount();
-  ExpressionListPtr newList(
-    new ExpressionList(l->getScope(), l->getLocation())
-  );
+  auto newList =
+    std::make_shared<ExpressionList>(l->getScope(), l->getRange());
   bool noRewrites = true;
   for (int i = 0; i < nc; i++) {
     auto e = (*l)[i];
@@ -226,13 +220,13 @@ ExpressionListPtr CaptureExtractor::rewriteExpressionList(ExpressionListPtr l) {
     switch (kind) {
       case Expression::KindOfIntoClause: {
         // The into expression is in the scope of the into clause
-        SimpleQueryClausePtr qcp(static_pointer_cast<SimpleQueryClause>(e));
+        auto qcp = static_pointer_cast<SimpleQueryClause>(e);
         m_boundVars.push_back(qcp->getIdentifier());
         np++;
         break;
       }
       case Expression::KindOfJoinClause: {
-        JoinClausePtr jcp(static_pointer_cast<JoinClause>(e));
+        auto jcp = static_pointer_cast<JoinClause>(e);
         m_boundVars.push_back(jcp->getVar());
         np++;
         break;
@@ -247,13 +241,13 @@ ExpressionListPtr CaptureExtractor::rewriteExpressionList(ExpressionListPtr l) {
     switch (kind) {
       case Expression::KindOfFromClause:
       case Expression::KindOfLetClause: {
-        SimpleQueryClausePtr qcp(static_pointer_cast<SimpleQueryClause>(e));
+        auto qcp = static_pointer_cast<SimpleQueryClause>(e);
         m_boundVars.push_back(qcp->getIdentifier());
         np++;
         break;
       }
       case Expression::KindOfJoinClause: {
-        JoinClausePtr jcp(static_pointer_cast<JoinClause>(e));
+        auto jcp = static_pointer_cast<JoinClause>(e);
         auto groupId = jcp->getGroup();
         if (!groupId.empty()) {
           m_boundVars.push_back(groupId);
@@ -300,7 +294,7 @@ ExpressionPtr CaptureExtractor::rewriteObjectProperty(
     auto prop = ope->getProperty();
     if (prop->getKindOf() == Expression::KindOfScalarExpression) {
       auto scalar = static_pointer_cast<ScalarExpression>(prop);
-      const string &propName = scalar->getLiteralString();
+      auto const& propName = scalar->getLiteralString();
       if (!propName.empty()) {
         return ope;
       }
@@ -332,11 +326,8 @@ ExpressionPtr CaptureExtractor::rewriteUnary(UnaryOpExpressionPtr ue) {
   auto expr = ue->getExpression();
   auto newExpr = rewrite(expr);
   if (expr == newExpr) return ue;
-  UnaryOpExpressionPtr result(
-    new UnaryOpExpression(ue->getScope(), ue->getLocation(),
-                          newExpr, ue->getOp(), true)
-  );
-  return result;
+  return std::make_shared<UnaryOpExpression>(
+    ue->getScope(), ue->getRange(), newExpr, ue->getOp(), true);
 }
 
 /**
@@ -381,11 +372,9 @@ ExpressionPtr CaptureExtractor::rewriteBinary(BinaryOpExpressionPtr be) {
   auto newExpr1 = rewrite(expr1);
   auto newExpr2 = rewrite(expr2);
   if (expr1 == newExpr1 && expr2 == newExpr2) return be;
-  BinaryOpExpressionPtr result(
-    new BinaryOpExpression(be->getScope(), be->getLocation(),
-                          newExpr1, newExpr2, be->getOp())
-  );
-  return result;
+  return
+    std::make_shared<BinaryOpExpression>(
+      be->getScope(), be->getRange(), newExpr1, newExpr2, be->getOp());
 }
 
 }

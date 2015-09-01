@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,14 +19,19 @@
 #include <stdarg.h>
 #include <string>
 
-#include "hphp/util/trace.h"
-#include "hphp/runtime/vm/jit/back-end-x64.h"
-#include "hphp/runtime/vm/jit/service-requests-x64.h"
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
-#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
+//#include "hphp/runtime/vm/jit/back-end-ppc64.h"
+//#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
+#include "hphp/runtime/vm/treadmill.h"
+
 #include "hphp/runtime/vm/jit/mc-generator.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/recycle-tc.h"
 #include "hphp/runtime/vm/jit/relocation.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr.h"
+
+#include "hphp/util/trace.h"
+
+#include <folly/MoveWrapper.h>
 
 namespace HPHP { namespace jit {
 
@@ -52,17 +57,15 @@ void IncomingBranch::relocate(RelocationInfo& rel) {
 
 void IncomingBranch::patch(TCA dest) {
   switch (type()) {
-    case Tag::JMP: {
-      mcg->backEnd().smashJmp(toSmash(), dest);
+    case Tag::JMP:
+      smashJmp(toSmash(), dest);
       mcg->getDebugInfo()->recordRelocMap(toSmash(), dest, "Arc-2");
       break;
-    }
 
-    case Tag::JCC: {
-      mcg->backEnd().smashJcc(toSmash(), dest);
+    case Tag::JCC:
+      smashJcc(toSmash(), dest);
       mcg->getDebugInfo()->recordRelocMap(toSmash(), dest, "Arc-1");
       break;
-    }
 
     case Tag::ADDR: {
       // Note that this effectively ignores a
@@ -77,15 +80,40 @@ void IncomingBranch::patch(TCA dest) {
 TCA IncomingBranch::target() const {
   switch (type()) {
     case Tag::JMP:
-      return mcg->backEnd().jmpTarget(toSmash());
+      return smashableJmpTarget(toSmash());
 
     case Tag::JCC:
-      return mcg->backEnd().jccTarget(toSmash());
+      return smashableJccTarget(toSmash());
 
     case Tag::ADDR:
       return *reinterpret_cast<TCA*>(toSmash());
   }
   always_assert(false);
+}
+
+TCA TransLoc::mainStart()   const { return mcg->code.base() + m_mainOff; }
+TCA TransLoc::coldStart()   const { return mcg->code.base() + m_coldOff; }
+TCA TransLoc::frozenStart() const { return mcg->code.base() + m_frozenOff; }
+
+void TransLoc::setMainStart(TCA newStart) {
+  assert(mcg->code.base() <= newStart &&
+         newStart - mcg->code.base() < std::numeric_limits<uint32_t>::max());
+
+  m_mainOff = newStart - mcg->code.base();
+}
+
+void TransLoc::setColdStart(TCA newStart) {
+  assert(mcg->code.base() <= newStart &&
+         newStart - mcg->code.base() < std::numeric_limits<uint32_t>::max());
+
+  m_coldOff = newStart - mcg->code.base();
+}
+
+void TransLoc::setFrozenStart(TCA newStart) {
+  assert(mcg->code.base() <= newStart &&
+         newStart - mcg->code.base() < std::numeric_limits<uint32_t>::max());
+
+  m_frozenOff = newStart - mcg->code.base();
 }
 
 void SrcRec::setFuncInfo(const Func* f) {
@@ -108,7 +136,7 @@ TCA SrcRec::getFallbackTranslation() const {
 }
 
 FPInvOffset SrcRec::nonResumedSPOff() const {
-  return serviceReqSPOff(getFallbackTranslation());
+  return svcreq::extract_spoff(getFallbackTranslation());
 }
 
 void SrcRec::chainFrom(IncomingBranch br) {
@@ -121,19 +149,10 @@ void SrcRec::chainFrom(IncomingBranch br) {
         br.toSmash(), destAddr, static_cast<int>(br.type()),
         m_incomingBranches.size());
   br.patch(destAddr);
-}
 
-void SrcRec::emitFallbackJump(CodeBlock& cb, ConditionCode cc /* = -1 */) {
-  // This is a spurious platform dependency. TODO(2990497)
-  mcg->backEnd().prepareForSmash(
-    cb,
-    cc == CC_None ? x64::kJmpLen : x64::kJmpccLen
-  );
-
-  auto from = cb.frontier();
-  TCA destAddr = getFallbackTranslation();
-  mcg->backEnd().emitSmashableJump(cb, destAddr, cc);
-  registerFallbackJump(from, cc);
+  if (RuntimeOption::EvalEnableReusableTC) {
+    recordJump(br.toSmash(), this);
+  }
 }
 
 void SrcRec::registerFallbackJump(TCA from, ConditionCode cc /* = -1 */) {
@@ -145,30 +164,18 @@ void SrcRec::registerFallbackJump(TCA from, ConditionCode cc /* = -1 */) {
   mcg->cgFixups().m_inProgressTailJumps.push_back(incoming);
 }
 
-void SrcRec::emitFallbackJumpCustom(CodeBlock& cb,
-                                    CodeBlock& frozen,
-                                    SrcKey sk,
-                                    TransFlags trflags,
-                                    ConditionCode cc) {
-  // Another platform dependency (the same one as above). TODO(2990497)
-  auto optSPOff = folly::Optional<FPInvOffset>{};
-  if (!sk.resumed()) optSPOff = nonResumedSPOff();
-  auto toSmash = x64::emitRetranslate(cb, frozen, cc, sk, optSPOff, trflags);
-  registerFallbackJump(toSmash, cc);
-}
-
-void SrcRec::newTranslation(TCA newStart,
+void SrcRec::newTranslation(TransLoc loc,
                             GrowableVector<IncomingBranch>& tailBranches) {
   // When translation punts due to hitting limit, will generate one
   // more translation that will call the interpreter.
   assertx(m_translations.size() <= RuntimeOption::EvalJitMaxTranslations);
 
-  TRACE(1, "SrcRec(%p)::newTranslation @%p, ", this, newStart);
+  TRACE(1, "SrcRec(%p)::newTranslation @%p, ", this, loc.mainStart());
 
-  m_translations.push_back(newStart);
+  m_translations.push_back(loc);
   if (!m_topTranslation.load(std::memory_order_acquire)) {
-    m_topTranslation.store(newStart, std::memory_order_release);
-    patchIncomingBranches(newStart);
+    m_topTranslation.store(loc.mainStart(), std::memory_order_release);
+    patchIncomingBranches(loc.mainStart());
   }
 
   /*
@@ -186,7 +193,7 @@ void SrcRec::newTranslation(TCA newStart,
    * translation possibly for this same situation.)
    */
   for (auto& br : m_tailFallbackJumps) {
-    br.patch(newStart);
+    br.patch(loc.mainStart());
   }
 
   // This is the new tail translation, so store the fallback jump list
@@ -204,8 +211,16 @@ void SrcRec::relocate(RelocationInfo& rel) {
   }
 
   for (auto &t : m_translations) {
-    if (TCA adjusted = rel.adjustedAddressAfter(t)) {
-      t = adjusted;
+    if (TCA adjusted = rel.adjustedAddressAfter(t.mainStart())) {
+      t.setMainStart(adjusted);
+    }
+
+    if (TCA adjusted = rel.adjustedAddressAfter(t.coldStart())) {
+      t.setColdStart(adjusted);
+    }
+
+    if (TCA adjusted = rel.adjustedAddressAfter(t.frozenStart())) {
+      t.setFrozenStart(adjusted);
     }
   }
 
@@ -238,7 +253,7 @@ void SrcRec::patchIncomingBranches(TCA newStart) {
     // We have a debugger guard, so all jumps to us funnel through
     // this.  Just smash m_dbgBranchGuardSrc.
     TRACE(1, "smashing m_dbgBranchGuardSrc @%p\n", m_dbgBranchGuardSrc);
-    mcg->backEnd().smashJmp(m_dbgBranchGuardSrc, newStart);
+    smashJmp(m_dbgBranchGuardSrc, newStart);
     return;
   }
 
@@ -251,10 +266,20 @@ void SrcRec::patchIncomingBranches(TCA newStart) {
   }
 }
 
+void SrcRec::removeIncomingBranch(TCA toSmash) {
+  auto end = std::remove_if(
+    m_incomingBranches.begin(),
+    m_incomingBranches.end(),
+    [toSmash] (const IncomingBranch& ib) { return ib.toSmash() == toSmash; }
+  );
+  assertx(end != m_incomingBranches.end());
+  m_incomingBranches.setEnd(end);
+}
+
 void SrcRec::replaceOldTranslations() {
   // Everyone needs to give up on old translations; send them to the anchor,
   // which is a REQ_RETRANSLATE.
-  m_translations.clear();
+  auto translations = std::move(m_translations);
   m_tailFallbackJumps.clear();
   m_topTranslation.store(nullptr, std::memory_order_release);
 
@@ -278,6 +303,22 @@ void SrcRec::replaceOldTranslations() {
    */
   assertx(!RuntimeOption::RepoAuthoritative || RuntimeOption::EvalJitPGO);
   patchIncomingBranches(m_anchorTranslation);
+
+  // Now that we've smashed all the IBs for these translations they should be
+  // unreachable-- to prevent a race we treadmill here and then reclaim their
+  // associated TC space
+  if (RuntimeOption::EvalEnableReusableTC) {
+    auto trans = folly::makeMoveWrapper(std::move(translations));
+    Treadmill::enqueue([trans]() mutable {
+      for (auto& loc : *trans) {
+        reclaimTranslation(loc);
+      }
+      trans->clear();
+    });
+    return;
+  }
+
+  translations.clear();
 }
 
 } } // HPHP::jit

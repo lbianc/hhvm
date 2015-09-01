@@ -285,7 +285,7 @@ let float =
   (digit+ ('e'|'E') ('+'?|'-') digit+)
 let unsafe = "//" ws* "UNSAFE" [^'\n']*
 let unsafeexpr_start = "/*" ws* "UNSAFE_EXPR"
-let fixme_start = "/*" ws* "HH_FIXME"
+let fixme_start = "/*" ws* ("HH_FIXME" | "HH_IGNORE_ERROR")
 let fallthrough = "//" ws* "FALLTHROUGH" [^'\n']*
 
 rule token file = parse
@@ -411,7 +411,9 @@ and xhptoken file = parse
   | '/'                { Tslash      }
   | '\"'               { Tdquote     }
   | word               { Tword       }
-  | "<!--"             { xhp_comment file lexbuf; xhptoken file lexbuf }
+  (* Signal when we've hit a comment so that literal text regions
+   * get broken up by them. *)
+  | "<!--"             { Topen_xhp_comment }
   | _                  { xhptoken file lexbuf }
 
 and xhpattr file = parse
@@ -468,7 +470,7 @@ and fixme_state0 file = parse
                        }
   | ws+                { fixme_state0 file lexbuf
                        }
-  | '\n'               { Lexing.new_line lexbuf;                        
+  | '\n'               { Lexing.new_line lexbuf;
                          fixme_state0 file lexbuf
                        }
   | '['                { fixme_state1 file lexbuf }
@@ -559,8 +561,9 @@ and string_backslash file = parse
 
 and string2 file = parse
   | eof                { Teof }
-  | '\n'               { Lexing.new_line lexbuf; string2 file lexbuf }
-  | '\\'               { string_backslash file lexbuf; string2 file lexbuf }
+  | '\n'               { Lexing.new_line lexbuf; Tany }
+  | "\\\n"             { Lexing.new_line lexbuf; Tany }
+  | '\\' _             { Tany }
   | '\"'               { Tdquote }
   | '{'                { Tlcb }
   | '}'                { Trcb }

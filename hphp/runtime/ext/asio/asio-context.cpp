@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -21,12 +21,12 @@
 #include "hphp/runtime/base/request-injection-data.h"
 #include "hphp/runtime/ext/asio/asio-external-thread-event-queue.h"
 #include "hphp/runtime/ext/asio/asio-session.h"
-#include "hphp/runtime/ext/asio/external-thread-event-wait-handle.h"
-#include "hphp/runtime/ext/asio/sleep-wait-handle.h"
-#include "hphp/runtime/ext/asio/reschedule-wait-handle.h"
-#include "hphp/runtime/ext/asio/resumable-wait-handle.h"
-#include "hphp/runtime/ext/asio/resumable-wait-handle-defs.h"
-#include "hphp/runtime/ext/asio/waitable-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_reschedule-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_resumable-wait-handle-defs.h"
+#include "hphp/runtime/ext/asio/ext_waitable-wait-handle.h"
 #include "hphp/runtime/ext/intervaltimer/ext_intervaltimer.h"
 #include "hphp/runtime/ext/xenon/ext_xenon.h"
 #include "hphp/runtime/vm/event-hook.h"
@@ -39,7 +39,7 @@ namespace HPHP {
 namespace {
   template<bool decRef, class TWaitHandle>
   void exitContextQueue(context_idx_t ctx_idx,
-                        smart::deque<TWaitHandle*>& queue) {
+                        req::deque<TWaitHandle*>& queue) {
     while (!queue.empty()) {
       auto wait_handle = queue.front();
       queue.pop_front();
@@ -50,7 +50,7 @@ namespace {
 
   template<class TWaitHandle>
   void exitContextVector(context_idx_t ctx_idx,
-                         smart::vector<TWaitHandle*> &vector) {
+                         req::vector<TWaitHandle*> &vector) {
     while (!vector.empty()) {
       auto wait_handle = vector.back();
       vector.pop_back();
@@ -70,7 +70,7 @@ namespace {
     // the time currently remaining in the request (see
     // AsioSession::getLatestWakeTime).
     if (UNLIKELY(checkSurpriseFlags())) {
-      auto const flags = EventHook::CheckSurprise();
+      auto const flags = check_request_surprise();
       if (flags & XenonSignalFlag) {
         Xenon::getInstance().log(Xenon::IOWaitSample);
       }

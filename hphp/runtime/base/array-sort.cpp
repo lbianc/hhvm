@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -123,7 +123,7 @@ ArrayData* MixedArray::EscalateForSort(ArrayData* ad, SortFunction sf) {
   // }
   if (UNLIKELY(hasUserDefinedCmp(sf) || a->hasMultipleRefs())) {
     auto ret = a->copyMixed();
-    assert(ret->getCount() == 0);
+    assert(ret->hasExactlyOneRef());
     return ret;
   } else {
     return a;
@@ -140,7 +140,7 @@ ArrayData* PackedArray::EscalateForSort(ArrayData* ad, SortFunction sf) {
   if (isSortFamily(sf)) {               // sort/rsort/usort
     if (UNLIKELY(ad->hasMultipleRefs())) {
       auto ret = PackedArray::Copy(ad);
-      assert(ret->getCount() == 0);
+      assert(ret->hasExactlyOneRef());
       return ret;
     } else {
       return ad;
@@ -148,7 +148,7 @@ ArrayData* PackedArray::EscalateForSort(ArrayData* ad, SortFunction sf) {
   }
   assert(checkInvariants(ad));
   auto ret = ToMixedCopy(ad);
-  assert(ret->getCount() == 0);
+  assert(ret->hasExactlyOneRef());
   return ret;
 }
 

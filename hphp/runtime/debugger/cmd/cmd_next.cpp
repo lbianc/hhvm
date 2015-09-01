@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,8 +17,8 @@
 #include "hphp/runtime/debugger/cmd/cmd_next.h"
 
 #include "hphp/runtime/debugger/debugger_client.h"
-#include "hphp/runtime/ext/asio/async-function-wait-handle.h"
-#include "hphp/runtime/ext/ext_generator.h"
+#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/vm/debugger-hook.h"
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/vm-regs.h"
@@ -136,6 +136,10 @@ void CmdNext::onBeginInterrupt(DebuggerProxy& proxy, CmdInterrupt& interrupt) {
       // These just help propagate exceptions so ignore those.
       if (fp->m_func->line1() == 0) {
         TRACE(2, "CmdNext: exception handler, ignoring func with no source\n");
+        return;
+      }
+      if (fp->m_func->isBuiltin()) {
+        TRACE(2, "CmdNext: exception handler, ignoring builtin functions\n");
         return;
       }
       TRACE(2, "CmdNext: exception handler altering expected flow\n");

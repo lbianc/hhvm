@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,19 +15,21 @@
 */
 #include "hphp/runtime/vm/instance-bits.h"
 
-#include <vector>
 #include <algorithm>
 #include <atomic>
 #include <tbb/concurrent_hash_map.h>
+#include <vector>
 
-#include <folly/ScopeGuard.h>
 #include <folly/MapUtil.h>
+#include <folly/ScopeGuard.h>
 
 #include "hphp/util/lock.h"
 #include "hphp/util/trace.h"
+
 #include "hphp/runtime/vm/class.h"
-#include "hphp/runtime/vm/unit.h"
+#include "hphp/runtime/vm/iterators.h"
 #include "hphp/runtime/vm/jit/translator.h"
+#include "hphp/runtime/vm/unit.h"
 
 namespace HPHP { namespace InstanceBits {
 
@@ -35,10 +37,13 @@ namespace HPHP { namespace InstanceBits {
 
 namespace {
 
-typedef tbb::concurrent_hash_map<
-  const StringData*, uint64_t, StringDataHashICompare> InstanceCounts;
-typedef hphp_hash_map<const StringData*, unsigned,
-                      string_data_hash, string_data_isame> InstanceBitsMap;
+using InstanceCounts = tbb::concurrent_hash_map<const StringData*,
+                                                uint64_t,
+                                                StringDataHashICompare>;
+using InstanceBitsMap = hphp_hash_map<const StringData*,
+                                      unsigned,
+                                      string_data_hash,
+                                      string_data_isame>;
 
 InstanceCounts s_instanceCounts;
 ReadWriteMutex s_instanceCountsLock(RankInstanceCounts);
@@ -148,9 +153,9 @@ void init() {
   // into their class lists, but in practice most Classes will already be
   // created by now and this process takes at most 10ms.
   WriteLock l(InstanceBits::lock);
-  for (AllClasses ac; !ac.empty(); ) {
-    Class* c = ac.popFront();
-    c->setInstanceBitsAndParents();
+  for (auto it = all_classes().begin();
+       it != all_classes().end(); ++it) {
+    it->setInstanceBitsAndParents();
   }
 
   initFlag.store(true, std::memory_order_release);

@@ -103,8 +103,8 @@ static void replace_special_chars(StringData* str) {
 
 // Helper used to create an absolute filename using the passed
 // directory and xdebug-specific format string
-static String format_filename(StringSlice dir,
-                              StringSlice formatFile,
+static String format_filename(folly::StringPiece dir,
+                              folly::StringPiece formatFile,
                               bool addSuffix) {
   // Create a string buffer and append the directory name
   auto const formatlen = formatFile.size();
@@ -137,7 +137,7 @@ static String format_filename(StringSlice dir,
         break;
       // Random number
       case 'r':
-        buf.printf("%lx", (uint64_t)HHVM_FN(rand)());
+        buf.printf("%lx", (long)HHVM_FN(rand)());
         break;
       // Script name
       case 's': {
@@ -161,7 +161,7 @@ static String format_filename(StringSlice dir,
       case 'u': {
         struct timeval tv;
         if (gettimeofday(&tv, 0) != -1) {
-          buf.printf("%ld_%ld", int64_t(tv.tv_sec), tv.tv_usec);
+          buf.printf("%ld_%ld", long(tv.tv_sec), long(tv.tv_usec));
         }
         break;
       }
@@ -241,7 +241,7 @@ static inline XDebugProfiler* xdebug_profiler() {
 
 // Starts tracing using the given profiler
 static void start_tracing(XDebugProfiler* profiler,
-                          StringSlice filename = StringSlice(nullptr, 0),
+                          folly::StringPiece filename = folly::StringPiece(),
                           int64_t options = 0) {
   // Add ini settings
   if (XDEBUG_GLOBAL(TraceOptions)) {
@@ -255,15 +255,15 @@ static void start_tracing(XDebugProfiler* profiler,
   }
 
   // If no filename is passed, php5 xdebug stores in the default output
-  // directory with the default file name
-  StringSlice dirname(nullptr, 0);
+  // directory with the default file name.
+  folly::StringPiece dirname;
 
   if (filename.empty()) {
     auto& default_dirname = XDEBUG_GLOBAL(TraceOutputDir);
     auto& default_filename = XDEBUG_GLOBAL(TraceOutputName);
 
-    dirname = StringSlice(default_dirname.data(), default_dirname.size());
-    filename = StringSlice(default_filename.data(), default_filename.size());
+    dirname = folly::StringPiece(default_dirname);
+    filename = folly::StringPiece(default_filename);
   }
 
   auto const suffix = !(options & k_XDEBUG_TRACE_NAKED_FILENAME);
@@ -282,8 +282,8 @@ static void start_profiling(XDebugProfiler* profiler) {
   // Create the filename then enable
   auto& dirname = XDEBUG_GLOBAL(ProfilerOutputDir);
   auto& filename = XDEBUG_GLOBAL(ProfilerOutputName);
-  auto dirname_slice = StringSlice(dirname.data(), dirname.size());
-  auto filename_slice = StringSlice(filename.data(), filename.size());
+  auto dirname_slice = folly::StringPiece{dirname};
+  auto filename_slice = folly::StringPiece{filename};
 
   auto abs_filename = format_filename(dirname_slice, filename_slice, false);
 
@@ -380,7 +380,7 @@ static Variant HHVM_FUNCTION(xdebug_call_class) {
   // PHP5 xdebug returns "" for no class
   auto cls = fp->m_func->cls();
   if (!cls) {
-    return staticEmptyString();
+    return Variant{staticEmptyString()};
   }
   return String(const_cast<StringData*>(cls->name()));
 }
@@ -615,8 +615,10 @@ static Variant HHVM_FUNCTION(xdebug_start_trace,
                              const Variant& traceFileVar,
                              int64_t options /* = 0 */) {
   // Allowed to pass null.
-  StringSlice trace_file(nullptr, 0);
+  folly::StringPiece trace_file;
   if (traceFileVar.isString()) {
+    // We're not constructing a new String, we're just using the one in
+    // traceFileVar, so this is safe.
     trace_file = traceFileVar.toString().slice();
   }
 
@@ -739,10 +741,10 @@ template <typename T>
 static inline T xdebug_init_opt(const char* name, T defVal,
                                 std::map<std::string, std::string>& envCfg) {
   // First try to load the ini setting
-  folly::dynamic ini_val = folly::dynamic::object();
-  if (IniSetting::Get(XDEBUG_INI(name), ini_val)) {
+  IniSettingMap ini_val;
+  if (IniSetting::Get(XDEBUG_INI(name), ini_val.toVariant())) {
     T val;
-    ini_on_update(ini_val, val);
+    ini_on_update(ini_val.toVariant(), val);
     return val;
   }
 
@@ -847,16 +849,21 @@ void XDebugExtension::moduleLoad(const IniSetting::Map& ini, Hdf xdebug_hdf) {
 
   // XDebug is disabled by default.
   Config::Bind(Enable, ini, xdebug_hdf, "Eval.Debugger.XDebugEnable", false);
+
+  // Stacktrace logging is controlled by xdebug.default_enable.
+  if (Enable) {
+    constexpr auto key = "Eval.Debugger.XDebugDefaultEnable";
+    if (Config::GetBool(ini, xdebug_hdf, key, true)) {
+      Logger::SetTheLogger(new ExtendedLogger());
+      ExtendedLogger::EnabledByDefault = true;
+    }
+  }
 }
 
 void XDebugExtension::moduleInit() {
   if (!Enable) {
     return;
   }
-
-  // Stacktraces are always on when XDebug is enabled
-  Logger::SetTheLogger(new ExtendedLogger());
-  ExtendedLogger::EnabledByDefault = true;
 
   Native::registerConstant<KindOfInt64>(
     s_XDEBUG_CC_UNUSED.get(), k_XDEBUG_CC_UNUSED

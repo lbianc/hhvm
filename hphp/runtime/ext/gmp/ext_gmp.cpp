@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -32,11 +32,11 @@ static String mpzToString(mpz_t gmpData, const int64_t base) {
     ++charLength;
   }
 
-  char *charStr = (char*)smart_malloc(charLength);
+  char *charStr = (char*)req::malloc(charLength);
   mpz_get_str(charStr, base, gmpData);
 
   String returnValue(charStr);
-  smart_free(charStr);
+  req::free(charStr);
 
   return returnValue;
 }
@@ -45,7 +45,7 @@ static String mpzToString(mpz_t gmpData, const int64_t base) {
 static Object mpzToGMPObject(mpz_t gmpData) {
   Object ret(GMP::allocObject());
 
-  auto data = Native::data<GMPData>(ret.get());
+  auto data = Native::data<GMPData>(ret);
   data->setGMPMpz(gmpData);
 
   return ret;
@@ -121,7 +121,7 @@ static bool variantToGMPData(const char* const fnCaller,
       return false;
     }
 
-    auto gmpObjectData = Native::data<GMPData>(gmpObject.get());
+    auto gmpObjectData = Native::data<GMPData>(gmpObject);
     if (!gmpObjectData) {
       raise_warning(cs_GMP_INVALID_OBJECT, fnCaller);
       return false;
@@ -255,7 +255,7 @@ static void HHVM_FUNCTION(gmp_clrbit,
     return;
   }
 
-  auto gmpData = Native::data<GMPData>(gmpObject.get());
+  auto gmpData = Native::data<GMPData>(gmpObject);
   if (!gmpData) {
     raise_warning(cs_GMP_INVALID_OBJECT, cs_GMP_FUNC_NAME_GMP_CLRBIT);
     return;
@@ -1147,7 +1147,7 @@ static void HHVM_FUNCTION(gmp_setbit,
     return;
   }
 
-  auto gmpData = Native::data<GMPData>(gmpObject.get());
+  auto gmpData = Native::data<GMPData>(gmpObject);
   if (!gmpData) {
     raise_warning(cs_GMP_INVALID_OBJECT, cs_GMP_FUNC_NAME_GMP_SETBIT);
     return;

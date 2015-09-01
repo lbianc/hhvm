@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -101,6 +101,11 @@ inline void UnitEmitter::emitDouble(double n, int64_t pos) {
   emitImpl(n, pos);
 }
 
+template<>
+inline void UnitEmitter::emitIVA(bool n) {
+  emitByte(n << 1);
+}
+
 template<typename T>
 void UnitEmitter::emitIVA(T n) {
   if (LIKELY((n & 0x7f) == n)) {
@@ -124,7 +129,7 @@ void UnitEmitter::emitImpl(T n, int64_t pos) {
     m_bclen += sizeof(T);
   } else {
     assert(pos + sizeof(T) <= m_bclen);
-    for (uint i = 0; i < sizeof(T); ++i) {
+    for (uint32_t i = 0; i < sizeof(T); ++i) {
       m_bc[pos + i] = c[i];
     }
   }

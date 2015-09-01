@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,7 +26,7 @@ namespace HPHP {
 StaticString s_call("__call");
 
 UserFSNode::UserFSNode(Class* cls,
-                       const SmartPtr<StreamContext>& context /*= nullptr */) {
+                       const req::ptr<StreamContext>& context /*= nullptr */) {
   VMRegAnchor _;
   const Func* ctor;
   m_cls = cls;
@@ -35,7 +35,7 @@ UserFSNode::UserFSNode(Class* cls,
     raise_error("Unable to call %s'n constructor", m_cls->name()->data());
   }
 
-  m_obj = ObjectData::newInstance(m_cls);
+  m_obj = Object{m_cls};
   m_obj.o_set("context", Variant(context));
   Variant ret;
   g_context->invokeFuncFew(ret.asTypedValue(), ctor, m_obj.get());

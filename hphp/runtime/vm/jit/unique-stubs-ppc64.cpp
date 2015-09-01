@@ -29,7 +29,6 @@
 #include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator-internal.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/runtime.h"
 
@@ -43,6 +42,10 @@ TRACE_SET_MOD(ustubs);
 
 namespace {
 
+void moveToAlign(CodeBlock& cb) {
+  align(cb, Alignment::JmpTarget, AlignContext::Dead);
+}
+
 //////////////////////////////////////////////////////////////////////
 
 extern "C" void enterTCExit();
@@ -50,45 +53,23 @@ extern "C" void enterTCExit();
 
 //////////////////////////////////////////////////////////////////////
 
-//TODO PPC64 start here
-void emitFuncBodyHelperThunk(UniqueStubs& uniqueStubs) {
-  TCA (*helper)(ActRec*) = &funcBodyHelper;
-  Asm a { mcg->code.main() };
-
-  moveToAlign(mcg->code.main());
-  uniqueStubs.funcBodyHelperThunk = a.frontier();
-
-  a.    mflr(ppc64_asm::reg::r0);
-  // LR on parent call frame
-  a.    std(ppc64_asm::reg::r0, ppc64_asm::reg::r1, 16);
-  // minimum call stack
-  a.    stdu(ppc64_asm::reg::r1, ppc64_asm::reg::r1, -32);
-
-  // This helper is called via a direct jump from the TC (from
-  // fcallArrayHelper). So the stack parity is already correct.
-  emitCall(a, CppCall::direct(helper), argSet(1));
-
-  // minimum call stack
-  a.    addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, 32);
-  // LR on parent call frame
-  a.    ld(ppc64_asm::reg::r0, ppc64_asm::reg::r1, 16);
-  a.    mtlr(ppc64_asm::reg::r0);
-  a.    blr();
-  a.    trap();
-
-  uniqueStubs.add("funcBodyHelperThunk", uniqueStubs.funcBodyHelperThunk);
-}
-
 } // end of anonymous namespace
 
 //////////////////////////////////////////////////////////////////////
 
 UniqueStubs emitUniqueStubs() {
   UniqueStubs us;
-  auto functions = {
-    emitFuncBodyHelperThunk,
+/*  auto functions = {
+      emitCallToExit,
+      emitThrowSwitchMode,
+      emitCatchHelper,
+      emitFreeLocalsHelpers,
+      emitDecRefHelper,
+      emitFCallArrayHelper,
+      emitFunctionEnterHelper,
+      emitFunctionSurprisedOrStackOverflow,
   };
-  for (auto& f : functions) f(us);
+  for (auto& f : functions) f(us);*/
   return us;
 }
 

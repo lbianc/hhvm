@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,7 +19,7 @@
 
 #include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/resource-data.h"
-#include "hphp/runtime/base/smart-ptr.h"
+#include "hphp/runtime/base/req-ptr.h"
 #include "hphp/runtime/base/sweepable.h"
 
 #include <algorithm>
@@ -27,33 +27,56 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-#define null_resource Resource::s_nullResource
-
 /**
  * Object type wrapping around ObjectData to implement reference count.
  */
 class Resource {
-  SmartPtr<ResourceData> m_res;
+  using Ptr = req::ptr<ResourceHdr>;
+  using NoIncRef = Ptr::NoIncRef;
+
+  Ptr m_res;
 
 public:
   Resource() {}
 
-  static const Resource s_nullResource;
+  void reset(ResourceData* res = nullptr) {
+    m_res.reset(res ? res->hdr() : nullptr);
+  }
+  void reset(ResourceHdr* res = nullptr) {
+    m_res.reset(res);
+  }
 
-  ResourceData* get() const { return m_res.get(); }
-  void reset() { m_res.reset(); }
+  ResourceData* operator->() const {
+    return m_res ? m_res.get()->data() : nullptr;
+  }
 
-  ResourceData* operator->() const { return get(); }
+  ResourceHdr* hdr() const {
+    return m_res.get();
+  }
+
+  ResourceHdr* detachHdr() {
+    return m_res.detach();
+  }
 
   /**
    * Constructors
    */
-  /* implicit */ Resource(ResourceData *data) : m_res(data) { }
+  explicit Resource(ResourceData *data)
+    : m_res(data ? data->hdr() : nullptr) {}
+  explicit Resource(ResourceHdr *hdr)
+    : m_res(hdr) {}
+
   /* implicit */ Resource(const Resource& src) : m_res(src.m_res) { }
-  template <typename T>
-  explicit Resource(SmartPtr<T>&& src) : m_res(std::move(src)) { }
-  template <typename T>
-  explicit Resource(const SmartPtr<T>& src) : m_res(src) { }
+
+  template <typename T> // T must extend ResourceData
+  explicit Resource(req::ptr<T>&& src)
+  : m_res(src.detach()->ResourceData::hdr(), NoIncRef{})
+  {}
+
+  template <typename T> // T must extend resourceData
+  explicit Resource(const req::ptr<T>& src)
+  : m_res(src.get()->ResourceData::hdr()) // causes incref
+  {}
 
   // Move ctor
   Resource(Resource&& src) noexcept : m_res(std::move(src.m_res)) { }
@@ -64,7 +87,7 @@ public:
     return *this;
   }
   template <typename T>
-  Resource& operator=(const SmartPtr<T>& src) {
+  Resource& operator=(const req::ptr<T>& src) {
     m_res = src;
     return *this;
   }
@@ -74,7 +97,7 @@ public:
     return *this;
   }
   template <typename T>
-  Resource& operator=(SmartPtr<T>&& src) {
+  Resource& operator=(req::ptr<T>&& src) {
     m_res = std::move(src);
     return *this;
   }
@@ -87,11 +110,11 @@ public:
   explicit operator bool() const { return (bool)m_res; }
 
   bool isNull() const {
-    return m_res == nullptr;
+    return !m_res;
   }
 
   bool isInvalid() const {
-    return m_res == nullptr || m_res->isInvalid();
+    return !m_res || m_res->data()->isInvalid();
   }
 
   /**
@@ -106,73 +129,78 @@ public:
    */
   template<typename T>
   [[deprecated("Please use one of the cast family of functions instead.")]]
-  SmartPtr<T> getTyped(bool nullOkay = false, bool badTypeOkay = false) const {
+  req::ptr<T> getTyped(bool nullOkay = false, bool badTypeOkay = false) const {
     static_assert(std::is_base_of<ResourceData, T>::value, "");
-
-    ResourceData *cur = get();
-    if (!cur) {
-      if (!nullOkay) {
-        throw_null_pointer_exception();
-      }
-      return nullptr;
+    if (nullOkay) {
+      return badTypeOkay ? dyn_cast_or_null<T>(m_res) : cast_or_null<T>(m_res);
     }
-    T *px = dynamic_cast<T*>(cur);
-    if (!px) {
-      if (!badTypeOkay) {
-        throw_invalid_object_type(classname_cstr());
-      }
-      return nullptr;
-    }
-
-    // Assert that casting does not adjust the 'this' pointer
-    assert((void*)px == (void*)cur);
-    return SmartPtr<T>(px);
+    return badTypeOkay ? dyn_cast<T>(m_res) : cast<T>(m_res);
   }
 
   template<typename T>
-  bool is() const {
-    return dynamic_cast<T*>(get()) != nullptr;
-  }
+  bool is() const { return isa<T>(m_res->data()); }
 
   /**
    * Type conversions
    */
-  bool   toBoolean() const { return m_res ? m_res->o_toBoolean() : false;}
-  char   toByte   () const { return m_res ? m_res->o_toInt64() : 0;}
-  short  toInt16  () const { return m_res ? m_res->o_toInt64() : 0;}
-  int    toInt32  () const { return m_res ? m_res->o_toInt64() : 0;}
-  int64_t toInt64 () const { return m_res ? m_res->o_toInt64() : 0;}
-  double toDouble () const { return m_res ? m_res->o_toDouble() : 0;}
-  String toString () const;
-  Array  toArray  () const;
+  bool toBoolean() const {
+    return m_res ? m_res->data()->o_toBoolean() : false;
+  }
+  char toByte() const {
+    return m_res ? m_res->data()->o_toInt64() : 0;
+  }
+  short toInt16() const {
+    return m_res ? m_res->data()->o_toInt64() : 0;
+  }
+  int toInt32() const {
+    return m_res ? m_res->data()->o_toInt64() : 0;
+  }
+  int64_t toInt64() const {
+    return m_res ? m_res->data()->o_toInt64() : 0;
+  }
+  double toDouble() const {
+    return m_res ? m_res->data()->o_toDouble() : 0;
+  }
+  String toString() const;
+  Array toArray() const;
 
   /**
    * Comparisons
    */
-  bool same (const Resource& v2) const { return m_res == v2.get();}
-  bool equal(const Resource& v2) const { return m_res == v2.get();}
-  bool less (const Resource& v2) const { return toInt64() < v2.toInt64();}
-  bool more (const Resource& v2) const { return toInt64() > v2.toInt64();}
+  bool same (const Resource& v2) const { return m_res == v2.m_res; }
+  bool equal(const Resource& v2) const { return m_res == v2.m_res; }
+  bool less(const Resource& v2) const { return toInt64() < v2.toInt64(); }
+  bool more(const Resource& v2) const { return toInt64() > v2.toInt64(); }
 
-  // Transfer ownership of our reference to this resource.
-  ResourceData *detach() { return m_res.detach(); }
 private:
+  //
+  // The deref and detach functions are only for use by the heap tracer,
+  // cast functions and Variant.  They should not be used anywhere else.
+  //
   template <typename T>
   friend typename std::enable_if<
     std::is_base_of<ResourceData,T>::value,
     ResourceData*
-  >::type deref(const Resource& r) { return r.get(); }
+  >::type deref(const Resource& r) {
+    auto hdr = r.m_res.get();
+    return hdr ? hdr->data() : nullptr;
+  }
 
   template <typename T>
   friend typename std::enable_if<
     std::is_base_of<ResourceData,T>::value,
     ResourceData*
-  >::type detach(Resource&& r) { return r.detach(); }
+  >::type detach(Resource&& r) {
+    auto hdr = r.m_res.detach();
+    return hdr ? hdr->data() : nullptr;
+  }
 
   static void compileTimeAssertions();
 
   const char* classname_cstr() const;
 };
+
+extern const Resource null_resource;
 
 ///////////////////////////////////////////////////////////////////////////////
 }

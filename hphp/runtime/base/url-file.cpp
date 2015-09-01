@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -79,6 +79,10 @@ bool UrlFile::open(const String& input_url, const String& mode) {
     return false;
   }
   HttpClient http(m_timeout, m_maxRedirect);
+  auto ctx = this->getStreamContext();
+  if (ctx) {
+    http.setStreamContextOptions(ctx->getOptions());
+  }
   m_response.clear();
 
   if (!m_proxyHost.empty()) {
@@ -135,17 +139,21 @@ bool UrlFile::open(const String& input_url, const String& mode) {
       tvTo = tvTo->m_data.pref->tv();
     }
     tvDup(*tvFrom, *tvTo);
-  } else if (fp->hasVarEnv()) {
+  } else if ((fp->func()->attrs() & AttrMayUseVV) && fp->hasVarEnv()) {
     fp->getVarEnv()->set(s_http_response_header.get(),
                          Variant(m_responseHeaders).asTypedValue());
   }
 
   /*
    * If code == 0, Curl failed to connect; per PHP5, ignore_errors just means
-   * to not worry if we get an http resonse code that isn't 200, but we
-   * shouldn't ignore other errors.
+   * to not worry if we get an http resonse code that isn't between 200 and 400,
+   * but we shouldn't ignore other errors.
+   * all status codes in the 2xx range are defined by the specification as
+   * successful;
+   * all status codes in the 3xx range are for redirection, and so also should
+   * never fail.
    */
-  if (code == 200 || (m_ignoreErrors && code != 0)) {
+  if ((code >= 200 && code < 400) || (m_ignoreErrors && code != 0)) {
     setName(url.toCppString());
     m_data = const_cast<char*>(m_response.data());
     m_len = m_response.size();

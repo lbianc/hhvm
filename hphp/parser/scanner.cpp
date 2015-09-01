@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -91,12 +91,27 @@ Scanner::Scanner(const std::string& filename, int type, bool md5 /* = false */)
       m_state(Start), m_type(type), m_yyscanner(nullptr), m_token(nullptr),
       m_loc(nullptr), m_lastToken(-1), m_isHHFile(0), m_lookaheadLtDepth(0),
       m_listener(nullptr) {
+#ifdef _MSC_VER
+  // I really don't know why this doesn't work properly with MSVC,
+  // but I know this fixes the problem, so use it instead.
+  std::ifstream ifs =
+    std::ifstream(m_filename, std::ifstream::in | std::ifstream::binary);
+  if (ifs.fail()) {
+    throw FileOpenException(m_filename);
+  }
+
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  m_stream = new std::istringstream(ss.str());
+  m_streamOwner = true;
+#else
   m_stream = new std::ifstream(m_filename);
   m_streamOwner = true;
   if (m_stream->fail()) {
     delete m_stream; m_stream = nullptr;
     throw FileOpenException(m_filename);
   }
+#endif
   if (md5) computeMd5();
   init();
 }
@@ -132,11 +147,11 @@ Scanner::Scanner(const char *source, int len, int type,
 }
 
 void Scanner::computeMd5() {
-  auto startpos = m_stream->tellg();
+  size_t startpos = m_stream->tellg();
   always_assert(startpos != -1 &&
                 startpos <= std::numeric_limits<int32_t>::max());
   m_stream->seekg(0, std::ios::end);
-  auto length = m_stream->tellg();
+  size_t length = m_stream->tellg();
   always_assert(length != -1 &&
                 length <= std::numeric_limits<int32_t>::max());
   m_stream->seekg(0, std::ios::beg);
@@ -645,7 +660,7 @@ void Scanner::warn(const char* fmt, ...) {
   va_end(ap);
 
   Logger::Warning("%s: %s (Line: %d, Char %d)", msg.c_str(),
-                  m_filename.c_str(), m_loc->line0, m_loc->char0);
+                  m_filename.c_str(), m_loc->r.line0, m_loc->r.char0);
 }
 
 void Scanner::incLoc(const char *rawText, int rawLeng, int type) {
@@ -661,12 +676,12 @@ void Scanner::incLoc(const char *rawText, int rawLeng, int type) {
     case Start:
       break; // scanner set to (1, 1, 1, 1) already
     case NoLineFeed:
-      m_loc->line0 = m_loc->line1;
-      m_loc->char0 = m_loc->char1 + 1;
+      m_loc->r.line0 = m_loc->r.line1;
+      m_loc->r.char0 = m_loc->r.char1 + 1;
       break;
     case HadLineFeed:
-      m_loc->line0 = m_loc->line1 + 1;
-      m_loc->char0 = 1;
+      m_loc->r.line0 = m_loc->r.line1 + 1;
+      m_loc->r.char0 = 1;
       break;
   }
   const char *p = rawText;
@@ -675,11 +690,11 @@ void Scanner::incLoc(const char *rawText, int rawLeng, int type) {
       case Start:
         break; // scanner set to (1, 1, 1, 1) already
       case NoLineFeed:
-        m_loc->char1++;
+        m_loc->r.char1++;
         break;
       case HadLineFeed:
-        m_loc->line1++;
-        m_loc->char1 = 1;
+        m_loc->r.line1++;
+        m_loc->r.char1 = 1;
         break;
     }
     m_state = (*p++ == '\n' ? HadLineFeed : NoLineFeed);
@@ -776,7 +791,7 @@ std::string Scanner::escape(const char *str, int len, char quote_type) const {
                 auto loc = getLocation();
                 return ParseTimeFatalException(
                   loc->file,
-                  loc->line0,
+                  loc->r.line0,
                   "%s", msg);
               };
               if (!valid) {

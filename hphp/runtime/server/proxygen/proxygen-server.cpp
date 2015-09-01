@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -25,7 +25,7 @@
 #include "hphp/runtime/server/server-stats.h"
 #include "hphp/runtime/base/crash-reporter.h"
 #include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/thread-init-fini.h"
+#include "hphp/runtime/base/program-functions.h"
 #include "hphp/runtime/base/url.h"
 #include "hphp/runtime/debugger/debugger.h"
 #include "hphp/util/compatibility.h"
@@ -37,7 +37,7 @@ using folly::SocketAddress;
 using apache::thrift::async::TAsyncTimeout;
 using apache::thrift::transport::TTransportException;
 using folly::AsyncServerSocket;
-using folly::Acceptor;
+using wangle::Acceptor;
 using proxygen::SPDYCodec;
 using std::shared_ptr;
 using std::string;
@@ -109,11 +109,11 @@ ProxygenTransportTraits::~ProxygenTransportTraits() {
 
 void HPHPWorkerThread::setup() {
   WorkerThread::setup();
-  init_thread_locals();
+  hphp_thread_init();
 }
 
 void HPHPWorkerThread::cleanup() {
-  finish_thread_locals();
+  hphp_thread_exit();
   WorkerThread::cleanup();
 }
 
@@ -662,6 +662,9 @@ void ProxygenServer::onRequestError(Transport* transport) {
   }
 
   try {
+    timespec start;
+    Timer::GetMonotonicTime(start);
+    transport->onRequestStart(start);
     m_handler->logToAccessLog(transport);
   } catch (...) {}
 }

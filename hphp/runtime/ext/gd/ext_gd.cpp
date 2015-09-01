@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -108,7 +108,6 @@ void Image::reset() {
 Image::~Image() { reset(); }
 
 struct ImageMemoryAlloc final : RequestEventHandler {
-public:
   ImageMemoryAlloc() : m_mallocSize(0) {}
 
   void requestInit() override {
@@ -278,6 +277,8 @@ public:
   }
 #endif
 
+  void vscan(IMarker&) const override {}
+
 private:
   size_t m_mallocSize;
 #ifdef IM_MEMORY_CHECK
@@ -336,7 +337,7 @@ do { \
 } while (0)
 
 // original Zend name is _estrndup
-static char *php_strndup_impl(const char* s, uint length
+static char *php_strndup_impl(const char* s, uint32_t length
 #ifdef IM_MEMORY_CHECK
 , int ln
 #endif
@@ -437,7 +438,7 @@ static const char php_sig_iff[4] = {'F','O','R','M'};
 static const char php_sig_ico[4] = {(char)0x00, (char)0x00, (char)0x01,
                                     (char)0x00};
 
-static struct gfxinfo *php_handle_gif(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_gif(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
 
@@ -454,7 +455,7 @@ static struct gfxinfo *php_handle_gif(const SmartPtr<File>& stream) {
   return result;
 }
 
-static struct gfxinfo *php_handle_psd(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_psd(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
 
@@ -476,7 +477,7 @@ static struct gfxinfo *php_handle_psd(const SmartPtr<File>& stream) {
   return result;
 }
 
-static struct gfxinfo *php_handle_bmp(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_bmp(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
   int size;
@@ -534,7 +535,7 @@ static unsigned long int php_swf_get_bits(unsigned char* buffer,
 }
 
 #if HAVE_ZLIB && !defined(COMPILE_DL_ZLIB)
-static struct gfxinfo *php_handle_swc(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_swc(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
 
   long bits;
@@ -614,7 +615,7 @@ static struct gfxinfo *php_handle_swc(const SmartPtr<File>& stream) {
 }
 #endif
 
-static struct gfxinfo *php_handle_swf(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_swf(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   long bits;
   unsigned char *a;
@@ -636,7 +637,7 @@ static struct gfxinfo *php_handle_swf(const SmartPtr<File>& stream) {
   return result;
 }
 
-static struct gfxinfo *php_handle_png(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_png(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
   /* Width:              4 bytes
@@ -709,7 +710,7 @@ static struct gfxinfo *php_handle_png(const SmartPtr<File>& stream) {
 
 #define M_EXIF  0xE1      /* Exif Attribute Information               */
 
-static unsigned short php_read2(const SmartPtr<File>& stream) {
+static unsigned short php_read2(const req::ptr<File>& stream) {
   unsigned char *a;
   String str = stream->read(2);
   /* just return 0 if we hit the end-of-file */
@@ -718,7 +719,7 @@ static unsigned short php_read2(const SmartPtr<File>& stream) {
   return (((unsigned short)a[0]) << 8) + ((unsigned short)a[1]);
 }
 
-static unsigned int php_next_marker(const SmartPtr<File>& file,
+static unsigned int php_next_marker(const req::ptr<File>& file,
                                     int last_marker,
                                     int comment_correction,
                                     int ff_read) {
@@ -765,7 +766,7 @@ static unsigned int php_next_marker(const SmartPtr<File>& file,
   return (unsigned int)marker;
 }
 
-static int php_skip_variable(const SmartPtr<File>& stream) {
+static int php_skip_variable(const req::ptr<File>& stream) {
   off_t length = (unsigned int)php_read2(stream);
 
   if (length < 2) {
@@ -776,7 +777,7 @@ static int php_skip_variable(const SmartPtr<File>& stream) {
   return 1;
 }
 
-static int php_read_APP(const SmartPtr<File>& stream,
+static int php_read_APP(const req::ptr<File>& stream,
                         unsigned int marker,
                         Array& info) {
   unsigned short length;
@@ -804,7 +805,7 @@ static int php_read_APP(const SmartPtr<File>& stream,
 }
 
 static
-struct gfxinfo *php_handle_jpeg(const SmartPtr<File>& file, Array& info) {
+struct gfxinfo *php_handle_jpeg(const req::ptr<File>& file, Array& info) {
   struct gfxinfo *result = nullptr;
   unsigned int marker = M_PSEUDO;
   unsigned short length, ff_read=1;
@@ -895,7 +896,7 @@ struct gfxinfo *php_handle_jpeg(const SmartPtr<File>& file, Array& info) {
   return result; /* perhaps image broken -> no info but size */
 }
 
-static unsigned short php_read4(const SmartPtr<File>& stream) {
+static unsigned short php_read4(const req::ptr<File>& stream) {
   unsigned char *a;
   String str = stream->read(4);
   /* just return 0 if we hit the end-of-file */
@@ -931,7 +932,7 @@ static unsigned short php_read4(const SmartPtr<File>& stream) {
 #define JPEG2000_MARKER_COM 0x64 /* Comment */
 
 /* Main loop to parse JPEG2000 raw codestream structure */
-static struct gfxinfo *php_handle_jpc(const SmartPtr<File>& file) {
+static struct gfxinfo *php_handle_jpc(const req::ptr<File>& file) {
   struct gfxinfo *result = nullptr;
   int highest_bit_depth, bit_depth;
   unsigned char first_marker_id;
@@ -1001,7 +1002,7 @@ static struct gfxinfo *php_handle_jpc(const SmartPtr<File>& file) {
 }
 
 /* main loop to parse JPEG 2000 JP2 wrapper format structure */
-static struct gfxinfo *php_handle_jp2(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_jp2(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   unsigned int box_length;
   unsigned int box_type;
@@ -1164,7 +1165,7 @@ static unsigned php_ifd_get32u(void *Long, int motorola_intel) {
 }
 
 /* main loop to parse TIFF structure */
-static struct gfxinfo *php_handle_tiff(const SmartPtr<File>& stream,
+static struct gfxinfo *php_handle_tiff(const req::ptr<File>& stream,
                                        int motorola_intel) {
   struct gfxinfo *result = nullptr;
   int i, num_entries;
@@ -1234,7 +1235,7 @@ static struct gfxinfo *php_handle_tiff(const SmartPtr<File>& stream,
   return nullptr;
 }
 
-static struct gfxinfo *php_handle_iff(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_iff(const req::ptr<File>& stream) {
   struct gfxinfo * result;
   char *a;
   int chunkId;
@@ -1292,7 +1293,7 @@ static struct gfxinfo *php_handle_iff(const SmartPtr<File>& stream) {
  * int Number of rows
  */
 static
-int php_get_wbmp(const SmartPtr<File>& file,
+int php_get_wbmp(const req::ptr<File>& file,
                  struct gfxinfo **result,
                  int check) {
   int i, width = 0, height = 0;
@@ -1346,7 +1347,7 @@ int php_get_wbmp(const SmartPtr<File>& file,
   return IMAGE_FILETYPE_WBMP;
 }
 
-static struct gfxinfo *php_handle_wbmp(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_wbmp(const req::ptr<File>& stream) {
   struct gfxinfo *result =
    (struct gfxinfo *)IM_CALLOC(1, sizeof(struct gfxinfo));
   CHECK_ALLOC_R(result, (sizeof(struct gfxinfo)), nullptr);
@@ -1359,7 +1360,7 @@ static struct gfxinfo *php_handle_wbmp(const SmartPtr<File>& stream) {
   return result;
 }
 
-static int php_get_xbm(const SmartPtr<File>& stream, struct gfxinfo **result) {
+static int php_get_xbm(const req::ptr<File>& stream, struct gfxinfo **result) {
   String fline;
   char *iname;
   char *type;
@@ -1413,13 +1414,13 @@ static int php_get_xbm(const SmartPtr<File>& stream, struct gfxinfo **result) {
   return 0;
 }
 
-static struct gfxinfo *php_handle_xbm(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_xbm(const req::ptr<File>& stream) {
   struct gfxinfo *result;
   php_get_xbm(stream, &result);
   return result;
 }
 
-static struct gfxinfo *php_handle_ico(const SmartPtr<File>& stream) {
+static struct gfxinfo *php_handle_ico(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
   int num_icons = 0;
@@ -1496,7 +1497,7 @@ static char *php_image_type_to_mime_type(int image_type) {
 }
 
 /* detect filetype from first bytes */
-static int php_getimagetype(const SmartPtr<File>& file) {
+static int php_getimagetype(const req::ptr<File>& file) {
   String fileType = file->read(3);
   if (fileType.length() != 3) {
     raise_notice("Read error!");
@@ -1654,11 +1655,12 @@ const StaticString
   s_mime("mime"),
   s_linespacing("linespacing");
 
-Variant getImageSize(const SmartPtr<File>& stream, VRefParam imageinfo) {
+Variant getImageSize(const req::ptr<File>& stream, VRefParam imageinfo) {
   int itype = 0;
   struct gfxinfo *result = nullptr;
-  if (imageinfo.isReferenced()) {
-    imageinfo = Array::Create();
+  auto imageInfoPtr = imageinfo.getVariantOrNull();
+  if (imageInfoPtr) {
+    *imageInfoPtr = Array::Create();
   }
 
   itype = php_getimagetype(stream);
@@ -1669,12 +1671,12 @@ Variant getImageSize(const SmartPtr<File>& stream, VRefParam imageinfo) {
   case IMAGE_FILETYPE_JPEG:
     {
       Array infoArr;
-      if (imageinfo.isReferenced()) {
+      if (imageInfoPtr) {
         infoArr = Array::Create();
       }
       result = php_handle_jpeg(stream, infoArr);
-      if (!infoArr.empty()) {
-        imageinfo = infoArr;
+      if (imageInfoPtr) {
+        *imageInfoPtr = infoArr;
       }
     }
     break;
@@ -1752,7 +1754,7 @@ Variant getImageSize(const SmartPtr<File>& stream, VRefParam imageinfo) {
 }
 
 Variant HHVM_FUNCTION(getimagesize, const String& filename,
-                                    VRefParam imageinfo /*=null */) {
+                      VRefParam imageinfo /*=null */) {
   if (auto stream = File::Open(filename, "rb")) {
     return getImageSize(stream, imageinfo);
   }
@@ -1760,7 +1762,7 @@ Variant HHVM_FUNCTION(getimagesize, const String& filename,
 }
 
 Variant HHVM_FUNCTION(getimagesizefromstring, const String& imagedata,
-                                              VRefParam imageinfo /*=null */) {
+                      VRefParam imageinfo /*=null */) {
   String data = "data://text/plain;base64,";
   data += StringUtil::Base64Encode(imagedata);
   if (auto stream = File::Open(data, "r")) {
@@ -1815,7 +1817,7 @@ Variant HHVM_FUNCTION(getimagesizefromstring, const String& imagedata,
 #define M_PI 3.14159265358979323846
 #endif
 
-static SmartPtr<File>
+static req::ptr<File>
 php_open_plain_file(const String& filename, const char *mode, FILE **fpp) {
   auto file = File::Open(filename, mode);
   auto plain_file = dyn_cast_or_null<PlainFile>(file);
@@ -1828,7 +1830,7 @@ php_open_plain_file(const String& filename, const char *mode, FILE **fpp) {
   return nullptr;
 }
 
-static int php_write(void *buf, uint size) {
+static int php_write(void *buf, uint32_t size) {
   g_context->write((const char *)buf, size);
   return size;
 }
@@ -1859,7 +1861,7 @@ static bool _php_image_output_ctx(const Resource& image,
                                   void (*func_p)()) {
   gdImagePtr im = cast<Image>(image)->get();
   if (!im) return false;
-  SmartPtr<File> file;
+  req::ptr<File> file;
   FILE *fp = nullptr;
   int q = quality, i;
   int f = basefilter;
@@ -2018,7 +2020,7 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
                                int dest_height, int dest_width,
                                int threshold, int image_type) {
   gdImagePtr im_org, im_dest, im_tmp;
-  SmartPtr<File> org_file, dest_file;
+  req::ptr<File> org_file, dest_file;
   FILE *org, *dest;
   int org_height, org_width;
   int white, black;
@@ -2196,7 +2198,7 @@ static bool _php_image_output(const Resource& image, const String& filename,
                               void (*func_p)()) {
   gdImagePtr im = cast<Image>(image)->get();
   if (!im) return false;
-  SmartPtr<File> file;
+  req::ptr<File> file;
   FILE *fp;
   int q = quality, i, t = type;
 
@@ -3173,7 +3175,7 @@ Variant HHVM_FUNCTION(imagecreatetruecolor, int64_t width, int64_t height) {
   if (!im) {
     return false;
   }
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 
 bool f_imageistruecolor(const Resource& image) {
@@ -3326,7 +3328,7 @@ Variant HHVM_FUNCTION(imagerotate, const Resource& source_image,
   gdImagePtr im_dst = gdImageRotate(im_src, angle, bgd_color,
                                     ignore_transparent);
   if (!im_dst) return false;
-  return Variant(makeSmartPtr<Image>(im_dst));
+  return Variant(req::make<Image>(im_dst));
 }
 
 #if HAVE_GD_IMAGESETTILE
@@ -3368,7 +3370,7 @@ Variant HHVM_FUNCTION(imagecreate, int64_t width, int64_t height) {
   if (!im) {
     return false;
   }
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 
 int64_t HHVM_FUNCTION(imagetypes) {
@@ -3473,7 +3475,7 @@ Variant HHVM_FUNCTION(imagecreatefromstring, const String& data) {
     raise_warning("Couldn't create GD Image Stream out of Data");
     return false;
   }
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3484,7 +3486,7 @@ Variant HHVM_FUNCTION(imagecreatefromgif, const String& filename) {
                            PHP_GDIMG_TYPE_GIF, "GIF",
                            (gdImagePtr(*)())gdImageCreateFromGif,
                            (gdImagePtr(*)())gdImageCreateFromGifCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3495,7 +3497,7 @@ Variant HHVM_FUNCTION(imagecreatefromjpeg, const String& filename) {
                            PHP_GDIMG_TYPE_JPG, "JPEG",
                            (gdImagePtr(*)())gdImageCreateFromJpeg,
                            (gdImagePtr(*)())gdImageCreateFromJpegCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3506,7 +3508,7 @@ Variant HHVM_FUNCTION(imagecreatefrompng, const String& filename) {
                            PHP_GDIMG_TYPE_PNG, "PNG",
                            (gdImagePtr(*)())gdImageCreateFromPng,
                            (gdImagePtr(*)())gdImageCreateFromPngCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3517,7 +3519,7 @@ Variant HHVM_FUNCTION(imagecreatefromwebp, const String& filename) {
                            PHP_GDIMG_TYPE_WEBP, "WEBP",
                            (gdImagePtr(*)())gdImageCreateFromWebp,
                            (gdImagePtr(*)())gdImageCreateFromWebpCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3528,7 +3530,7 @@ Variant HHVM_FUNCTION(imagecreatefromxbm, const String& filename) {
                            PHP_GDIMG_TYPE_XBM, "XBM",
                            (gdImagePtr(*)())gdImageCreateFromXbm,
                            (gdImagePtr(*)())nullptr);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3539,7 +3541,7 @@ Variant HHVM_FUNCTION(imagecreatefromxpm, const String& filename) {
                            PHP_GDIMG_TYPE_XPM, "XPM",
                            (gdImagePtr(*)())gdImageCreateFromXpm,
                            (gdImagePtr(*)())nullptr);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3550,7 +3552,7 @@ Variant HHVM_FUNCTION(imagecreatefromwbmp, const String& filename) {
                            PHP_GDIMG_TYPE_WBM, "WBMP",
                            (gdImagePtr(*)())gdImageCreateFromWBMP,
                            (gdImagePtr(*)())gdImageCreateFromWBMPCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 #endif
 
@@ -3560,7 +3562,7 @@ Variant HHVM_FUNCTION(imagecreatefromgd, const String& filename) {
                            PHP_GDIMG_TYPE_GD, "GD",
                            (gdImagePtr(*)())gdImageCreateFromGd,
                            (gdImagePtr(*)())gdImageCreateFromGdCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 
 Variant HHVM_FUNCTION(imagecreatefromgd2, const String& filename) {
@@ -3569,7 +3571,7 @@ Variant HHVM_FUNCTION(imagecreatefromgd2, const String& filename) {
                            PHP_GDIMG_TYPE_GD2, "GD2",
                            (gdImagePtr(*)())gdImageCreateFromGd2,
                            (gdImagePtr(*)())gdImageCreateFromGd2Ctx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 
 Variant HHVM_FUNCTION(imagecreatefromgd2part,
@@ -3580,7 +3582,7 @@ Variant HHVM_FUNCTION(imagecreatefromgd2part,
                            PHP_GDIMG_TYPE_GD2PART, "GD2",
                            (gdImagePtr(*)())gdImageCreateFromGd2Part,
                            (gdImagePtr(*)())gdImageCreateFromGd2PartCtx);
-  return Variant(makeSmartPtr<Image>(im));
+  return Variant(req::make<Image>(im));
 }
 
 bool HHVM_FUNCTION(imagegif, const Resource& image,
@@ -4306,10 +4308,36 @@ bool HHVM_FUNCTION(imageantialias, const Resource& image, bool on) {
   return true;
 }
 
+Variant HHVM_FUNCTION(imagescale, const Resource& image, int64_t newwidth,
+  int64_t newheight /* =-1 */, int64_t method /*=GD_BILINEAR_FIXED*/) {
+  gdImagePtr im = cast<Image>(image)->get();
+  gdImagePtr imscaled = nullptr;
+  if (!im) return false;
+  if (method == -1) method = GD_BILINEAR_FIXED;
+
+  if (newheight < 0) {
+    /* preserve ratio */
+    long src_x, src_y;
+    src_x = gdImageSX(im);
+    src_y = gdImageSY(im);
+    if (src_x) {
+      newheight = newwidth * src_y / src_x;
+    }
+  }
+  if (gdImageSetInterpolationMethod(im, (gdInterpolationMethod) method)) {
+    imscaled = gdImageScale(im, newwidth, newheight);
+  }
+  if (imscaled == nullptr) {
+    return false;
+  }
+  return Variant(req::make<Image>(imscaled));
+}
+
+
 namespace {
 
 // PHP extension STANDARD: iptc.c
-inline int php_iptc_put1(SmartPtr<File> file,
+inline int php_iptc_put1(req::ptr<File> file,
                          int spool,
                          unsigned char c,
                          unsigned char **spoolbuf) {
@@ -4322,7 +4350,7 @@ inline int php_iptc_put1(SmartPtr<File> file,
   return c;
 }
 
-inline int php_iptc_get1(const SmartPtr<File>& file,
+inline int php_iptc_get1(const req::ptr<File>& file,
                          int spool,
                          unsigned char **spoolbuf) {
   int c;
@@ -4342,7 +4370,7 @@ inline int php_iptc_get1(const SmartPtr<File>& file,
   return c;
 }
 
-inline int php_iptc_read_remaining(const SmartPtr<File>& file,
+inline int php_iptc_read_remaining(const req::ptr<File>& file,
                                    int spool,
                                    unsigned char **spoolbuf) {
   while (php_iptc_get1(file, spool, spoolbuf) != EOF) continue;
@@ -4350,7 +4378,7 @@ inline int php_iptc_read_remaining(const SmartPtr<File>& file,
   return M_EOI;
 }
 
-int php_iptc_skip_variable(const SmartPtr<File>& file,
+int php_iptc_skip_variable(const req::ptr<File>& file,
                            int spool,
                            unsigned char **spoolbuf) {
   unsigned int length;
@@ -4370,7 +4398,7 @@ int php_iptc_skip_variable(const SmartPtr<File>& file,
   return 0;
 }
 
-int php_iptc_next_marker(const SmartPtr<File>& file,
+int php_iptc_next_marker(const req::ptr<File>& file,
                          int spool,
                          unsigned char **spoolbuf) {
   int c;
@@ -5471,7 +5499,7 @@ typedef struct {
 
 /* This structure is used to store a section of a Jpeg file. */
 typedef struct {
-  SmartPtr<File> infile;
+  req::ptr<File> infile;
   String FileName;
   time_t FileDateTime;
   size_t FileSize;
@@ -8038,9 +8066,9 @@ Variant HHVM_FUNCTION(exif_thumbnail, const String& filename,
   if (!ImageInfo.Thumbnail.width || !ImageInfo.Thumbnail.height) {
     exif_scan_thumbnail(&ImageInfo);
   }
-  width = (int64_t)ImageInfo.Thumbnail.width;
-  height = (int64_t)ImageInfo.Thumbnail.height;
-  imagetype = ImageInfo.Thumbnail.filetype;
+  width.assignIfRef((int64_t)ImageInfo.Thumbnail.width);
+  height.assignIfRef((int64_t)ImageInfo.Thumbnail.height);
+  imagetype.assignIfRef(ImageInfo.Thumbnail.filetype);
   String str(ImageInfo.Thumbnail.data, ImageInfo.Thumbnail.size, CopyString);
   exif_discard_imageinfo(&ImageInfo);
   return str;
@@ -8201,6 +8229,7 @@ class GdExtension final : public Extension {
     HHVM_FE(imagerectangle);
     HHVM_FE(imagerotate);
     HHVM_FE(imagesavealpha);
+    HHVM_FE(imagescale);
     HHVM_FE(imagesetbrush);
     HHVM_FE(imagesetinterpolation);
     HHVM_FE(imagesetpixel);

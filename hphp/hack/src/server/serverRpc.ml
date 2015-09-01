@@ -23,13 +23,16 @@ type _ t =
   | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
   | FIND_REFS : ServerFindRefs.action -> ServerFindRefs.result t
   | REFACTOR : ServerRefactor.action -> ServerRefactor.patch list t
-  | DUMP_SYMBOL_INFO : string list -> SymbolInfoService.result list t
+  | DUMP_SYMBOL_INFO : string list -> SymbolInfoService.result t
   | ARGUMENT_INFO : string * int * int -> ServerArgumentInfo.result t
-  | PROLOG : string t
   | SEARCH : string * string -> ServerSearch.result t
   | COVERAGE_COUNTS : string -> ServerCoverageMetric.result t
   | LINT : string list -> ServerLint.result t
   | LINT_ALL : int -> ServerLint.result t
+  | CREATE_CHECKPOINT : string -> unit t
+  | RETRIEVE_CHECKPOINT : string -> string list option t
+  | DELETE_CHECKPOINT : string -> bool t
+  | STATS : Stats.t t
   | KILL : unit t
 
 let handle : type a. genv -> env -> a t -> a =
@@ -37,7 +40,7 @@ let handle : type a. genv -> env -> a t -> a =
     | STATUS ->
         (* Logging can be pretty slow, so do it asynchronously and respond to
          * the client first *)
-        ServerEnv.async begin fun () ->
+        ServerIdle.async begin fun () ->
           HackEventLogger.check_response env.errorl;
         end;
         let el = ServerError.sort_errorl env.errorl in
@@ -57,12 +60,15 @@ let handle : type a. genv -> env -> a t -> a =
         ServerFindRefs.go find_refs_action genv env
     | REFACTOR refactor_action -> ServerRefactor.go refactor_action genv env
     | DUMP_SYMBOL_INFO file_list ->
-        SymbolInfoService.find_fun_calls genv.workers file_list env
+        SymbolInfoService.go genv.workers file_list env
     | ARGUMENT_INFO (contents, line, col) ->
         ServerArgumentInfo.go genv env contents line col
-    | PROLOG -> PrologMain.go genv env
     | SEARCH (query, type_) -> ServerSearch.go query type_
     | COVERAGE_COUNTS path -> ServerCoverageMetric.go path genv env
     | LINT fnl -> ServerLint.go genv fnl
     | LINT_ALL code -> ServerLint.lint_all genv code
-    | KILL -> ServerEnv.async (fun () -> ServerUtils.die_nicely genv)
+    | CREATE_CHECKPOINT x -> ServerCheckpoint.create_checkpoint x
+    | RETRIEVE_CHECKPOINT x -> ServerCheckpoint.retrieve_checkpoint x
+    | DELETE_CHECKPOINT x -> ServerCheckpoint.delete_checkpoint x
+    | STATS -> Stats.get_stats ()
+    | KILL -> ()

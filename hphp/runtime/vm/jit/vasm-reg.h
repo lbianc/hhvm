@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -182,16 +182,16 @@ using Vreg8   = Vr<Reg8>;
 using VregSF  = Vr<RegSF>;
 
 struct VregDbl : Vr<RegXMM> {
-  explicit VregDbl(size_t rn) : Vr<RegXMM>{rn} {}
+  explicit VregDbl(size_t rn) : Vr<RegXMM>(rn) {}
   template<class... Args> /* implicit */ VregDbl(Args&&... args)
-    : Vr<RegXMM>{std::forward<Args>(args)...} {}
+    : Vr<RegXMM>(std::forward<Args>(args)...) {}
   static bool allowable(Vreg r) { return r.isVirt() || r.isSIMD(); }
 };
 
 struct Vreg128 : Vr<RegXMM> {
-  explicit Vreg128(size_t rn) : Vr<RegXMM>{rn} {}
+  explicit Vreg128(size_t rn) : Vr<RegXMM>(rn) {}
   template<class... Args> /* implicit */ Vreg128(Args&&... args)
-    : Vr<RegXMM>{std::forward<Args>(args)...}
+    : Vr<RegXMM>(std::forward<Args>(args)...)
   {}
 };
 
@@ -217,7 +217,7 @@ VscaledDisp operator+(Vscaled, int32_t);
  *    - index is optional
  */
 struct Vptr {
-  enum Segment : uint8_t { DS, FS };
+  enum Segment : uint8_t { DS, FS, GS };
 
   Vptr()
     : base(Vreg{})
@@ -250,11 +250,11 @@ struct Vptr {
   bool operator==(const Vptr&) const;
   bool operator!=(const Vptr&) const;
 
-public:
+
   Vreg64 base;      // optional, for baseless mode
   Vreg64 index;     // optional
   uint8_t scale;    // 1,2,4,8
-  Segment seg{DS};  // DS or FS
+  Segment seg{DS};  // DS, FS or GS
   int32_t disp;
 };
 

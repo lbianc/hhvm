@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -23,15 +23,15 @@
 #include <folly/String.h>
 
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/ext/asio/async-function-wait-handle.h"
-#include "hphp/runtime/ext/asio/await-all-wait-handle.h"
-#include "hphp/runtime/ext/asio/condition-wait-handle.h"
-#include "hphp/runtime/ext/asio/external-thread-event-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-array-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-map-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-vector-wait-handle.h"
-#include "hphp/runtime/ext/asio/sleep-wait-handle.h"
-#include "hphp/runtime/ext/asio/wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_condition-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-array-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-map-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-vector-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_wait-handle.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/system/systemlib.h"
@@ -45,7 +45,7 @@ namespace {
   const context_idx_t MAX_CONTEXT_DEPTH =
     std::numeric_limits<context_idx_t>::max();
 
-  ObjectData* checkCallback(const Variant& callback, char* name) {
+  Object checkCallback(const Variant& callback, char* name) {
     if (!callback.isNull() &&
         (!callback.isObject() ||
          !callback.getObjectData()->instanceof(c_Closure::classof()))) {
@@ -53,10 +53,9 @@ namespace {
         "Unable to set {}: callback not a closure",
         name
       ).str();
-      Object e(SystemLib::AllocInvalidArgumentExceptionObject(msg));
-      throw e;
+      SystemLib::throwInvalidArgumentExceptionObject(msg);
     }
-    return callback.getObjectDataOrNull();
+    return Object{callback.getObjectDataOrNull()};
   }
 
   void runCallback(const Object& function, const Array& params, char* name) {
@@ -84,9 +83,8 @@ AsioSession::AsioSession()
 
 void AsioSession::enterContext(ActRec* savedFP) {
   if (UNLIKELY(getCurrentContextIdx() >= MAX_CONTEXT_DEPTH)) {
-    Object e(SystemLib::AllocInvalidOperationExceptionObject(
-      "Unable to enter asio context: too many contexts open"));
-    throw e;
+    SystemLib::throwInvalidOperationExceptionObject(
+      "Unable to enter asio context: too many contexts open");
   }
 
   m_contexts.push_back(new AsioContext(savedFP));
@@ -105,8 +103,10 @@ void AsioSession::exitContext() {
 
 void AsioSession::initAbruptInterruptException() {
   assert(!hasAbruptInterruptException());
-  m_abruptInterruptException = SystemLib::AllocInvalidOperationExceptionObject(
-    "The request was abruptly interrupted.");
+  m_abruptInterruptException =
+    SystemLib::AllocInvalidOperationExceptionObject(
+      "The request was abruptly interrupted."
+    );
 }
 
 void AsioSession::setOnIOWaitEnter(const Variant& callback) {

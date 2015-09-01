@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -131,7 +131,7 @@ inline Array toArray(int64_t v) { return Array::Create(v);}
 inline Array toArray(double  v) { return Array::Create(v);}
 inline Array toArray(const char* v) = delete;
 inline Array toArray(StringData *v) {
-  return v ? Array::Create(v) : Array::Create();
+  return v ? Array::Create(Variant{v}) : Array::Create();
 }
 inline Array toArray(const String& v) { return toArray(v.get());}
 inline Array toArray(ArrayData *v) { return v ? Array(v) : Array::Create();}

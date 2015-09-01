@@ -1827,17 +1827,6 @@ class ReflectionClass implements Reflector {
       : $props_map->toMap()->setAll($dynamic_props);
   }
 
-  private function makeReflectionProperty(
-    string $name,
-    array $prop_info,
-  ): ReflectionProperty {
-    $ret = hphp_create_object_without_constructor(ReflectionProperty::class);
-    $ret->name  = $name;
-    $ret->info  = $prop_info;
-    $ret->class = $this->getName();
-    return $ret;
-  }
-
   /**
    * ( excerpt from http://docs.hhvm.com/manual/en/reflectionclass.getproperty.php
    * )
@@ -1849,12 +1838,15 @@ class ReflectionClass implements Reflector {
    * @return     mixed   A ReflectionProperty.
    */
   public function getProperty($name) {
-    $prop_info = $this->getOrderedPropertyInfos()->get($name);
-    if (!$prop_info) {
-      $class = $this->getName();
+    $class = $this->name;
+    if (!$this->hasProperty($name)) {
       throw new ReflectionException("Property $class::$name does not exist");
     }
-    return $this->makeReflectionProperty($name, $prop_info);
+    if ($this->obj) {
+      return new ReflectionProperty($this->obj, $name);
+    } else {
+      return new ReflectionProperty($this->name, $name);
+    }
   }
 
   /**
@@ -1885,7 +1877,11 @@ class ReflectionClass implements Reflector {
   public function getProperties($filter = 0xFFFF): array<ReflectionProperty> {
     $ret = array();
     foreach ($this->getOrderedPropertyInfos() as $name => $prop_info) {
-      $p = $this->makeReflectionProperty($name, $prop_info);
+      if ($this->obj) {
+        $p = new ReflectionProperty($this->obj, $name);
+      } else {
+        $p = new ReflectionProperty($this->name, $name);
+      }
       if (($filter & ReflectionProperty::IS_PUBLIC)    && $p->isPublic()    ||
           ($filter & ReflectionProperty::IS_PROTECTED) && $p->isProtected() ||
           ($filter & ReflectionProperty::IS_PRIVATE)   && $p->isPrivate()   ||
@@ -2261,13 +2257,24 @@ class ReflectionTypeConstant implements Reflector {
   }
 
   /**
-   * Gets the declaring class for the reflected type constant.
+   * Gets the declaring class for the reflected type constant. This is
+   * the most derived class in which the type constant is declared.
    *
    * @return ReflectionClass   A ReflectionClass object of the class that the
    *                           reflected type constant is part of.
    */
   public function getDeclaringClass() {
     return new ReflectionClass($this->getDeclaringClassname());
+  }
+
+  /**
+   * Gets the class for the reflected type constant.
+   *
+   * @return ReflectionClass   A ReflectionClass object of the class that the
+   *                           reflected type constant is part of.
+   */
+  public function getClass() {
+    return new ReflectionClass($this->getClassname());
   }
 
   public function __toString() {
@@ -2302,4 +2309,104 @@ class ReflectionTypeConstant implements Reflector {
 
   <<__Native>>
   private function getDeclaringClassname(): string;
+
+  <<__Native>>
+  private function getClassname(): string;
+
+  /* returns the shape containing the full type information for this
+   * type constant. The structure of this shape is specified in
+   * reflection.hhi. */
+  public function getTypeStructure() {
+    return type_structure(
+      $this->getDeclaringClassname(),
+      $this->getName()
+    );
+  }
+
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// type aliases
+
+/** The ReflectionTypeAlias class reports information about a type
+ * alias.
+ */
+<<__NativeData('ReflectionTypeAliasHandle')>>
+class ReflectionTypeAlias implements Reflector {
+
+  private string $name = '';
+
+  /**
+   * Constructs a new ReflectionTypeAlias.
+   *
+   * @name      string  Name of the type alias.
+   */
+  final public function __construct(string $name) {
+    if (!$this->__init($name)) {
+      throw new ReflectionException(
+        "type alias {$name} does not exist");
+    }
+    $this->name = $name;
+  }
+
+  // helper for ctor
+  <<__Native>>
+  private function __init(string $name): bool;
+
+  /**
+   * Get the TypeStructure that contains the full type information of
+   * the assigned type.
+   *
+   * @return    array  The type structure of the type alias.
+   */
+  <<__Native>>
+  public function getTypeStructure(): array;
+
+  /**
+   * Get the TypeStructure with type information resolved. Call at
+   * your own peril as non-hoisted classes might cause fatal.
+   *
+   * @return    array  The resolved type structure of the type alias.
+   */
+  public function getResolvedTypeStructure() {
+    $ts = $this->__getResolvedTypeStructure();
+    if (empty($ts)) {
+      throw new ReflectionException(
+        "resolving type alias {$this->name} failed. Have you declared all ".
+        "classes appeared in the type alias?");
+    }
+    return $ts;
+  }
+
+  <<__Native>>
+  private function __getResolvedTypeStructure(): array;
+
+  /**
+   * Get the assigned type as a string.
+   *
+   * @return    string The assigned type.
+   */
+  <<__Native>>
+  public function getAssignedTypeText(): string;
+
+  /**
+   * Get the name of the type alias.
+   *
+   * @return    string  The name of the type alias
+   */
+  public function getName() {
+    return $name;
+  }
+
+  // Prevent cloning
+  final public function __clone() {
+    throw new BadMethodCallException(
+      'Trying to clone an uncloneable object of class ReflectionTypeAlias'
+    );
+  }
+
+  public function __toString() {
+    return "TypeAlias [ {$this->name} : {$this->getAssignedTypeText()} ]\n";
+  }
+
 }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,28 +17,30 @@
 #ifndef incl_HPHP_FILE_SCOPE_H_
 #define incl_HPHP_FILE_SCOPE_H_
 
-#include <string>
 #include <map>
+#include <set>
+#include <string>
+#include <vector>
+
 #include <boost/algorithm/string.hpp>
 
 #include "hphp/compiler/analysis/block_scope.h"
-#include "hphp/compiler/analysis/function_container.h"
 #include "hphp/compiler/analysis/code_error.h"
-#include "hphp/compiler/code_generator.h"
-#include <set>
-#include <vector>
+#include "hphp/compiler/analysis/function_container.h"
+#include "hphp/compiler/hphp.h"
 #include "hphp/compiler/json.h"
+
+#include "hphp/util/deprecated/declare-boost-types.h"
 #include "hphp/util/md5.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class CodeGenerator;
-DECLARE_BOOST_TYPES(StatementList);
-DECLARE_BOOST_TYPES(ClassScope);
-DECLARE_BOOST_TYPES(Location);
+DECLARE_EXTENDED_BOOST_TYPES(ClassScope);
+DECLARE_BOOST_TYPES(Expression)
 DECLARE_BOOST_TYPES(FileScope);
 DECLARE_BOOST_TYPES(FunctionScope);
+DECLARE_BOOST_TYPES(StatementList);
 
 /**
  * A FileScope stores what's parsed from one single source file. It's up to
@@ -84,12 +86,11 @@ public:
   const StringToClassScopePtrVecMap &getClasses() const {
     return m_classes;
   }
-  void getClassesFlattened(ClassScopePtrVec &classes) const;
+  void getClassesFlattened(std::vector<ClassScopePtr>& classes) const;
   ClassScopePtr getClass(const char *name);
   void getScopesSet(BlockScopeRawPtrQueue &v);
 
   int getFunctionCount() const;
-  void countReturnTypes(std::map<std::string, int> &counts);
   int getClassCount() const { return m_classes.size();}
 
   void pushAttribute();
@@ -128,11 +129,10 @@ public:
    * save the symbols for our iface.
    * This stuff only happens in the filechanged state.
    */
-  void addConstant(const std::string &name, TypePtr type, ExpressionPtr value,
+  void addConstant(const std::string &name, ExpressionPtr value,
                    AnalysisResultPtr ar, ConstructPtr con);
   void declareConstant(AnalysisResultPtr ar, const std::string &name);
   void getConstantNames(std::vector<std::string> &names);
-  TypePtr getConstantType(const std::string &name);
 
   void addClassAlias(const std::string& target, const std::string& alias) {
     m_classAliasMap.insert(

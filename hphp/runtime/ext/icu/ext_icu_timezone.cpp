@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -54,7 +54,7 @@ icu::TimeZone* IntlTimeZone::ParseArg(const Variant& arg,
       return IntlTimeZone::Get(objarg.get())->timezone()->clone();
     }
     if (objarg.instanceof(DateTimeZoneData::getClass())) {
-      auto* dtz = Native::data<DateTimeZoneData>(objarg.get());
+      auto* dtz = Native::data<DateTimeZoneData>(objarg);
       tzstr = dtz->getName();
     } else {
       tzstr = arg.toString();
@@ -169,7 +169,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getCanonicalID,
     return false;
   }
 
-  isSystemID = (bool)system;
+  isSystemID.assignIfRef((bool)system);
   error = U_ZERO_ERROR;
   String ret(u8(result, error));
   if (U_FAILURE(error)) {
@@ -268,8 +268,8 @@ static bool HHVM_METHOD(IntlTimeZone, getOffset,
     data->setError(error, "intltz_get_offset: error obtaining offset");
     return false;
   }
-  rawOffset = rawOff;
-  dstOffset = dstOff;
+  rawOffset.assignIfRef(rawOff);
+  dstOffset.assignIfRef(dstOff);
   return true;
 }
 

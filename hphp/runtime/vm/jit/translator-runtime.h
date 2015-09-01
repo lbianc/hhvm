@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -99,15 +99,17 @@ TypedValue incDecElem(TypedValue* base, TypedValue key,
  * complicated to inline
  */
 ArrayData* convCellToArrHelper(TypedValue tv);
+int64_t convObjToDblHelper(const ObjectData* o);
 int64_t convArrToDblHelper(ArrayData* a);
 int64_t convStrToDblHelper(const StringData* s);
+int64_t convResToDblHelper(const ResourceHdr* r);
 int64_t convCellToDblHelper(TypedValue tv);
 int64_t convArrToIntHelper(ArrayData* a);
 ObjectData* convCellToObjHelper(TypedValue tv);
 StringData* convDblToStrHelper(int64_t i);
 StringData* convIntToStrHelper(int64_t i);
 StringData* convObjToStrHelper(ObjectData* o);
-StringData* convResToStrHelper(ResourceData* o);
+StringData* convResToStrHelper(ResourceHdr* o);
 StringData* convCellToStrHelper(TypedValue tv);
 
 
@@ -222,14 +224,9 @@ rds::Handle lookupClsRDSHandle(const StringData* name);
 void registerLiveObj(ObjectData* obj);
 
 /*
- * Set tl_regState to CLEAN and call _Unwind_Resume.
- */
-void unwindResumeHelper();
-
-/*
  * Throw a VMSwitchMode exception.
  */
-void throwSwitchMode() ATTRIBUTE_NORETURN;
+ATTRIBUTE_NORETURN void throwSwitchMode();
 
 namespace MInstrHelpers {
 StringData* stringGetI(StringData*, uint64_t);

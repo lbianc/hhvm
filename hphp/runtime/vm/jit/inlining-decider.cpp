@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,14 +18,14 @@
 
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/ext/ext_generator.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/hhbc.h"
-#include "hphp/runtime/vm/srckey.h"
+#include "hphp/runtime/vm/jit/irgen.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 #include "hphp/runtime/vm/jit/region-selection.h"
-#include "hphp/runtime/vm/jit/irgen.h"
+#include "hphp/runtime/vm/srckey.h"
 
 #include "hphp/util/trace.h"
 
@@ -108,7 +108,7 @@ bool isCalleeInlinable(SrcKey callSK, const Func* callee) {
   if (callee->maxStackCells() >= kStackCheckLeafPadding) {
     return refuse("function stack depth too deep");
   }
-  if (callee->isMethod() && callee->cls() == c_Generator::classof()) {
+  if (callee->isMethod() && callee->cls() == Generator::getClass()) {
     return refuse("generator member function");
   }
   return true;
@@ -145,81 +145,6 @@ bool checkNumArgs(SrcKey callSK, const Func* callee) {
   return true;
 }
 
-/*
- * Check that the FPI region is suitable for inlining.
- *
- * We refuse to inline if the corresponding FPush is not found in the same
- * region as the FCall, or if other calls are made between the two.
- */
-bool checkFPIRegion(SrcKey callSK, const Func* callee,
-                    const RegionDesc& region) {
-  assertx(callee);
-
-  auto refuse = [&] (const char* why) {
-    return traceRefusal(callSK.func(), callee, why);
-  };
-
-  // Check that the FPush instruction is in the same region, and that our FCall
-  // is reachable from it.
-  //
-  // TODO(#4603302) Fix this once SrcKeys can appear multiple times in a region.
-  auto fpi = callSK.func()->findFPI(callSK.offset());
-  const SrcKey pushSK { callSK.func(),
-                        fpi->m_fpushOff,
-                        callSK.resumed() };
-  int pushBlock = -1;
-
-  auto const& blocks = region.blocks();
-  for (unsigned i = 0; i < blocks.size(); ++i) {
-    if (blocks[i]->contains(pushSK)) {
-      pushBlock = i;
-      break;
-    }
-  }
-  if (pushBlock == -1) {
-    return refuse("FPush* is not in the current region");
-  }
-
-  // Check that we have an acceptable FPush.
-  switch (pushSK.op()) {
-    case OpFPushClsMethodD:
-      if (callee->mayHaveThis()) {
-        return refuse("callee may have $this pointer");
-      }
-      // fallthrough
-    case OpFPushFuncD:
-    case OpFPushObjMethodD:
-    case OpFPushCtorD:
-    case OpFPushCtor:
-      break;
-
-    default:
-      return refuse(folly::format("unsupported push op {}",
-                                  opcodeToName(pushSK.op())).str().c_str());
-  }
-
-  // Calls invalidate all live SSATmps, so don't allow any in the FPI region.
-  for (unsigned i = pushBlock; i < blocks.size(); ++i) {
-    auto const& block = *blocks[i];
-
-    auto iterSK = (i == pushBlock ? pushSK.advanced()
-                                  : block.start());
-    while (iterSK <= block.last()) {
-      // We're all set once we've hit the to-be-inlined FCall.
-      if (iterSK == callSK) return true;
-
-      auto op = iterSK.op();
-
-      if (isFCallStar(op) || op == Op::FCallBuiltin) {
-        return refuse("FPI region contains another call");
-      }
-      iterSK.advance();
-    }
-  }
-
-  not_reached();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 }
 
@@ -229,11 +154,30 @@ void InliningDecider::forbidInliningOf(const Func* callee) {
   forbiddenInlinees.insert(callee->fullName());
 }
 
-bool InliningDecider::canInlineAt(SrcKey callSK, const Func* callee,
-                                  const RegionDesc& region) const {
-  if (!RuntimeOption::RepoAuthoritative ||
-      !RuntimeOption::EvalHHIREnableGenTimeInlining) {
+bool InliningDecider::canInlineAt(SrcKey callSK, const Func* callee) const {
+  if (!callee || !RuntimeOption::EvalHHIREnableGenTimeInlining) {
     return false;
+  }
+
+  assert(!RuntimeOption::EvalJitEnableRenameFunction);
+  if (callee->cls()) {
+    if (!rds::isPersistentHandle(callee->cls()->classHandle())) {
+      // if the callee's class is not persistent, its still ok
+      // to use it if we're jitting into a method of a subclass
+      auto ctx = callSK.func()->cls();
+      if (!ctx || !ctx->classof(callee->cls())) {
+        return false;
+      }
+    }
+  } else {
+    if (!rds::isPersistentHandle(callee->funcHandle())) {
+      // if the callee isn't persistent, its still ok to
+      // use it if its defined at the top level in the same
+      // unit as the caller
+      if (callee->unit() != callSK.unit() || !callee->top()) {
+        return false;
+      }
+    }
   }
 
   // If inlining was disabled... don't inline.
@@ -257,9 +201,7 @@ bool InliningDecider::canInlineAt(SrcKey callSK, const Func* callee,
   // TODO(#4238160): Inlining into pseudomain callsites is still buggy.
   if (callSK.func()->isPseudoMain()) return false;
 
-  if (!isCalleeInlinable(callSK, callee) ||
-      !checkNumArgs(callSK, callee) ||
-      !checkFPIRegion(callSK, callee, region)) {
+  if (!isCalleeInlinable(callSK, callee) || !checkNumArgs(callSK, callee)) {
     return false;
   }
 
@@ -434,7 +376,7 @@ bool InliningDecider::shouldInline(const Func* callee,
       }
 
       // Count the returns.
-      if (isRet(op) || op == Op::NativeImpl) {
+      if (isReturnish(op)) {
         if (++numRets > 1) {
           return refuse("region has too many returns");
         }
@@ -481,6 +423,43 @@ void InliningDecider::registerEndInlining(const Func* callee) {
   m_cost -= cost;
   m_callDepth -= 1;
   m_stackDepth -= callee->maxStackCells();
+}
+
+RegionDescPtr selectCalleeRegion(const SrcKey& sk,
+                                 const Func* callee,
+                                 const IRGS& irgs) {
+  auto const op = reinterpret_cast<const Op*>(sk.pc());
+
+  auto const numArgs = getImm(op, 0).u_IVA;
+  auto const numParams = callee->numParams();
+
+  // Set up the RegionContext for the tracelet selector.
+  RegionContext ctx;
+  ctx.func = callee;
+  ctx.bcOffset = callee->getEntryForNumArgs(numArgs);
+  ctx.spOffset = FPInvOffset{safe_cast<int32_t>(callee->numSlotsInFrame())};
+  ctx.resumed = false;
+
+  for (int i = 0; i < numArgs; ++i) {
+    // DataTypeGeneric is used because we're just passing the locals into the
+    // callee.  It's up to the callee to constrain further if needed.
+    auto type = irgen::publicTopType(irgs, BCSPOffset{i});
+
+    // If we don't have sufficient type information to inline the region
+    // return early
+    if (!(type <= TGen) && !(type <= TCls)) return nullptr;
+    uint32_t paramIdx = numArgs - 1 - i;
+    ctx.liveTypes.push_back({RegionDesc::Location::Local{paramIdx}, type});
+  }
+
+  for (unsigned i = numArgs; i < numParams; ++i) {
+    // These locals will be populated by DV init funclets but they'll start out
+    // as Uninit.
+    ctx.liveTypes.push_back({RegionDesc::Location::Local{i}, TUninit});
+  }
+
+  // Produce a tracelet for the callee.
+  return selectTracelet(ctx, false /* profiling */, true /* inlining */);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

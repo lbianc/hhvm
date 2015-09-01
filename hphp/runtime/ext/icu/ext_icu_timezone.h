@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -43,7 +43,7 @@ class IntlTimeZone : public IntlError {
       c_IntlTimeZone = Unit::lookupClass(s_IntlTimeZone.get());
       assert(c_IntlTimeZone);
     }
-    auto obj = ObjectData::newInstance(c_IntlTimeZone);
+    Object obj{c_IntlTimeZone};
     if (tz) {
       Native::data<IntlTimeZone>(obj)->setTimeZone(tz, owned);
     }

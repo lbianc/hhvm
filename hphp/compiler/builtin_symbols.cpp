@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,7 +17,6 @@
 #include "hphp/compiler/builtin_symbols.h"
 #include "hphp/compiler/analysis/analysis_result.h"
 #include "hphp/compiler/statement/statement_list.h"
-#include "hphp/compiler/analysis/type.h"
 #include "hphp/compiler/analysis/function_scope.h"
 #include "hphp/compiler/analysis/class_scope.h"
 #include "hphp/compiler/expression/modifier_expression.h"
@@ -32,10 +31,8 @@
 #include "hphp/runtime/base/program-functions.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/base/thread-init-fini.h"
 #include "hphp/runtime/vm/native.h"
 #include "hphp/util/logger.h"
-#include <dlfcn.h>
 #include <vector>
 
 using namespace HPHP;
@@ -85,7 +82,7 @@ const char *BuiltinSymbols::SystemClasses[] = {
   nullptr
 };
 
-StringToTypePtrMap BuiltinSymbols::s_superGlobals;
+hphp_string_set BuiltinSymbols::s_superGlobals;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -99,18 +96,18 @@ const StaticString
   s_fb_call_user_func_safe_return("fb_call_user_func_safe_return"),
   s_fb_call_user_func_array_safe("fb_call_user_func_array_safe");
 
-FunctionScopePtr BuiltinSymbols::ImportFunctionScopePtr(AnalysisResultPtr ar,
-                 ClassInfo *cls, ClassInfo::MethodInfo *method) {
+FunctionScopePtr BuiltinSymbols::ImportFunctionScopePtr(
+  AnalysisResultPtr ar,
+  const ClassInfo* cls,
+  const ClassInfo::MethodInfo* method
+) {
   int attrs = method->attribute;
   bool isMethod = cls != ClassInfo::GetSystem();
-  FunctionScopePtr f(new FunctionScope(isMethod,
-                                       method->name.data(),
-                                       attrs & ClassInfo::IsReference));
+  auto f = std::make_shared<FunctionScope>(isMethod, method->name.data(),
+                                           attrs & ClassInfo::IsReference);
 
   int reqCount = 0, totalCount = 0;
-  for(auto it = method->parameters.begin();
-      it != method->parameters.end(); ++it) {
-    const ClassInfo::ParameterInfo *pinfo = *it;
+  for (const auto pinfo : method->parameters) {
     if (!pinfo->value || !pinfo->value[0]) {
       ++reqCount;
     }
@@ -119,19 +116,11 @@ FunctionScopePtr BuiltinSymbols::ImportFunctionScopePtr(AnalysisResultPtr ar,
   f->setParamCounts(ar, reqCount, totalCount);
 
   int idx = 0;
-  for(auto it = method->parameters.begin();
-      it != method->parameters.end(); ++it, ++idx) {
-    const ClassInfo::ParameterInfo *pinfo = *it;
+  for (const auto pinfo : method->parameters) {
     f->setParamName(idx, pinfo->name);
     if (pinfo->attribute & ClassInfo::IsReference) {
       f->setRefParam(idx);
     }
-    f->setParamType(ar, idx, Type::FromDataType(pinfo->argType, Type::Any));
-  }
-
-  if (method->returnType != KindOfNull) {
-    f->setReturnType(ar, Type::FromDataType(method->returnType,
-                                            Type::Variant));
   }
 
   f->setClassInfoAttribute(attrs);
@@ -176,38 +165,34 @@ FunctionScopePtr BuiltinSymbols::ImportFunctionScopePtr(AnalysisResultPtr ar,
     f->setAllowOverride();
   }
 
-  FunctionScope::RecordFunctionInfo(f->getName(), f);
+  FunctionScope::RecordFunctionInfo(f->getScopeName(), f);
   return f;
 }
 
 void BuiltinSymbols::ImportExtFunctions(AnalysisResultPtr ar,
-                                        ClassInfo *cls) {
-  const ClassInfo::MethodVec &methods = cls->getMethodsVec();
-  for (auto it = methods.begin(); it != methods.end(); ++it) {
-    FunctionScopePtr f = ImportFunctionScopePtr(ar, cls, *it);
+                                        const ClassInfo *cls) {
+  for (const auto method : cls->getMethodsVec()) {
+    auto f = ImportFunctionScopePtr(ar, cls, method);
     ar->addSystemFunction(f);
   }
 }
 
 void BuiltinSymbols::ImportExtMethods(AnalysisResultPtr ar,
-                                      FunctionScopePtrVec &vec,
-                                      ClassInfo *cls) {
-  const ClassInfo::MethodVec &methods = cls->getMethodsVec();
-  for (auto it = methods.begin(); it != methods.end(); ++it) {
-    FunctionScopePtr f = ImportFunctionScopePtr(ar, cls, *it);
+                                      std::vector<FunctionScopePtr>& vec,
+                                      const ClassInfo* cls) {
+  for (const auto method : cls->getMethodsVec()) {
+    auto f = ImportFunctionScopePtr(ar, cls, method);
     vec.push_back(f);
   }
 }
 
 void BuiltinSymbols::ImportExtProperties(AnalysisResultPtr ar,
                                          VariableTablePtr dest,
-                                         ClassInfo *cls) {
-  ClassInfo::PropertyVec src = cls->getPropertiesVec();
-  for (auto it = src.begin(); it != src.end(); ++it) {
-    ClassInfo::PropertyInfo *pinfo = *it;
+                                         const ClassInfo* cls) {
+  for (auto pinfo : cls->getPropertiesVec()) {
     int attrs = pinfo->attribute;
-    ModifierExpressionPtr modifiers(
-      new ModifierExpression(BlockScopePtr(), LocationPtr()));
+    auto modifiers =
+      std::make_shared<ModifierExpression>(BlockScopePtr(), Location::Range());
     if (attrs & ClassInfo::IsPrivate) {
       modifiers->add(T_PRIVATE);
     } else if (attrs & ClassInfo::IsProtected) {
@@ -217,45 +202,39 @@ void BuiltinSymbols::ImportExtProperties(AnalysisResultPtr ar,
       modifiers->add(T_STATIC);
     }
 
-    dest->add(pinfo->name.data(),
-              Type::FromDataType(pinfo->type, Type::Variant),
-              false, ar, ExpressionPtr(), modifiers);
+    dest->add(pinfo->name.data(), false, ar, ExpressionPtr(), modifiers);
   }
 }
 
 void BuiltinSymbols::ImportNativeConstants(AnalysisResultPtr ar,
                                            ConstantTablePtr dest) {
-  LocationPtr loc(new Location);
   for (auto cnsPair : Native::getConstants()) {
     ExpressionPtr e(Expression::MakeScalarExpression(
-                      ar, ar, loc, tvAsVariant(&cnsPair.second)));
+                      ar, ar, Location::Range(), tvAsVariant(&cnsPair.second)));
 
-    dest->add(cnsPair.first->data(),
-              Type::FromDataType(cnsPair.second.m_type, Type::Variant),
-              e, ar, e);
+    dest->add(cnsPair.first->data(), e, ar, e);
 
     if ((cnsPair.second.m_type == KindOfUninit) &&
          cnsPair.second.m_data.pref) {
       // Callback based constant
-      dest->setDynamic(ar, cnsPair.first->data(), true);
+      dest->setDynamic(ar, cnsPair.first->data());
     }
   }
 }
 
 void BuiltinSymbols::ImportExtConstants(AnalysisResultPtr ar,
                                         ConstantTablePtr dest,
-                                        ClassInfo *cls) {
-  LocationPtr loc(new Location);
+                                        const ClassInfo *cls) {
   for (auto cinfo : cls->getConstantsVec()) {
-    auto t = Type::FromDataType(cinfo->getValue().getType(), Type::Variant);
-    auto e = Expression::MakeScalarExpression(ar, ar, loc, cinfo->getValue());
-    dest->add(cinfo->name.data(), t, e, ar, e);
+    auto e = Expression::MakeScalarExpression(ar, ar, Location::Range(),
+                                              cinfo->getValue());
+    dest->add(cinfo->name.data(), e, ar, e);
   }
 }
 
 ClassScopePtr BuiltinSymbols::ImportClassScopePtr(AnalysisResultPtr ar,
                                                   ClassInfo *cls) {
-  FunctionScopePtrVec methods;
+  std::vector<FunctionScopePtr> methods;
   ImportExtMethods(ar, methods, cls);
 
   ClassInfo::InterfaceVec ifaces = cls->getInterfacesVec();
@@ -268,9 +247,11 @@ ClassScopePtr BuiltinSymbols::ImportClassScopePtr(AnalysisResultPtr ar,
     stdIfaces.push_back(it->data());
   }
 
-  ClassScopePtr cl(new ClassScope(ar, cls->getName().data(), parent.data(),
-                                  stdIfaces, methods));
-  for (uint i = 0; i < methods.size(); ++i) {
+  auto cl = std::make_shared<ClassScope>(
+    ar, cls->getName().toCppString(), parent.toCppString(),
+    stdIfaces, methods);
+
+  for (uint32_t i = 0; i < methods.size(); ++i) {
     methods[i]->setOuterScope(cl);
   }
 
@@ -295,7 +276,7 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
   if (Loaded) return true;
   Loaded = true;
 
-  if (g_context.isNull()) init_thread_locals();
+  if (g_context.isNull()) hphp_thread_init();
   ClassInfo::Load();
 
   // load extension functions first, so system/php may call them
@@ -308,7 +289,6 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
   ImportExtClasses(ar);
 
   Array constants = ClassInfo::GetSystemConstants();
-  LocationPtr loc(new Location);
   for (ArrayIter it = constants.begin(); it; ++it) {
     const Variant& key = it.first();
     if (!key.isString()) continue;
@@ -317,20 +297,20 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
     if (name == "true" || name == "false" || name == "null") continue;
     const Variant& value = it.secondRef();
     if (!value.isInitialized() || value.isObject()) continue;
-    ExpressionPtr e = Expression::MakeScalarExpression(ar, ar, loc, value);
-    TypePtr t = Type::FromDataType(value.getType(), Type::Variant);
-    cns->add(key.toCStrRef().data(), t, e, ar, e);
+    ExpressionPtr e = Expression::MakeScalarExpression(
+      ar, ar, Location::Range(), value);
+    cns->add(key.toCStrRef().data(), e, ar, e);
   }
   for (int i = 0, n = NumGlobalNames(); i < n; ++i) {
-    ar->getVariables()->add(GlobalNames[i], Type::Variant, false, ar,
+    ar->getVariables()->add(GlobalNames[i], false, ar,
                             ConstructPtr(), ModifierExpressionPtr());
   }
 
-  cns->setDynamic(ar, "PHP_BINARY", true);
-  cns->setDynamic(ar, "PHP_BINDIR", true);
-  cns->setDynamic(ar, "PHP_OS", true);
-  cns->setDynamic(ar, "PHP_SAPI", true);
-  cns->setDynamic(ar, "SID", true);
+  cns->setDynamic(ar, "PHP_BINARY");
+  cns->setDynamic(ar, "PHP_BINDIR");
+  cns->setDynamic(ar, "PHP_OS");
+  cns->setDynamic(ar, "PHP_SAPI");
+  cns->setDynamic(ar, "SID");
 
   for (auto sym : cns->getSymbols()) {
     sym->setSystem();
@@ -338,7 +318,7 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
 
   // Systemlib files were all parsed by hphp_process_init
 
-  const StringToFileScopePtrMap &files = ar->getAllFiles();
+  const auto& files = ar->getAllFiles();
   for (const auto& file : files) {
     file.second->setSystem();
 
@@ -347,14 +327,12 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
       assert(clsVec.second.size() == 1);
       auto cls = clsVec.second[0];
       if (auto nativeConsts = Native::getClassConstants(
-            String(cls->getName()).get())) {
+            String(cls->getScopeName()).get())) {
         for (auto cnsMap : *nativeConsts) {
           auto tv = cnsMap.second;
-          auto e = Expression::MakeScalarExpression(ar, ar, loc,
+          auto e = Expression::MakeScalarExpression(ar, ar, Location::Range(),
                                                     tvAsVariant(&tv));
-          cls->getConstants()->add(cnsMap.first->data(),
-                                   Type::FromDataType(tv.m_type, Type::Variant),
-                                   e, ar, e);
+          cls->getConstants()->add(cnsMap.first->data(), e, ar, e);
         }
       }
       cls->setSystem();
@@ -377,25 +355,17 @@ bool BuiltinSymbols::Load(AnalysisResultPtr ar) {
 
 void BuiltinSymbols::LoadSuperGlobals() {
   if (s_superGlobals.empty()) {
-    s_superGlobals["_SERVER"] = Type::Variant;
-    s_superGlobals["_GET"] = Type::Variant;
-    s_superGlobals["_POST"] = Type::Variant;
-    s_superGlobals["_COOKIE"] = Type::Variant;
-    s_superGlobals["_FILES"] = Type::Variant;
-    s_superGlobals["_ENV"] = Type::Variant;
-    s_superGlobals["_REQUEST"] = Type::Variant;
-    s_superGlobals["_SESSION"] = Type::Variant;
+    s_superGlobals.insert("_SERVER");
+    s_superGlobals.insert("_GET");
+    s_superGlobals.insert("_POST");
+    s_superGlobals.insert("_COOKIE");
+    s_superGlobals.insert("_FILES");
+    s_superGlobals.insert("_ENV");
+    s_superGlobals.insert("_REQUEST");
+    s_superGlobals.insert("_SESSION");
   }
 }
 
 bool BuiltinSymbols::IsSuperGlobal(const std::string &name) {
-  return s_superGlobals.find(name) != s_superGlobals.end();
-}
-
-TypePtr BuiltinSymbols::GetSuperGlobalType(const std::string &name) {
-  StringToTypePtrMap::const_iterator iter = s_superGlobals.find(name);
-  if (iter != s_superGlobals.end()) {
-    return iter->second;
-  }
-  return TypePtr();
+  return s_superGlobals.count(name);
 }

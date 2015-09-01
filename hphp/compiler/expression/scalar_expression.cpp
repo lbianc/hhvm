@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -36,6 +36,7 @@
 #include <folly/Conv.h>
 
 #include <sstream>
+#include <cctype>
 #include <cmath>
 #include <limits.h>
 
@@ -67,7 +68,7 @@ ScalarExpression::ScalarExpression
       m_quoted(quoted) {
   if (!value.isNull()) {
     String serialized = HHVM_FN(serialize)(value);
-    m_serializedValue = string(serialized.data(), serialized.size());
+    m_serializedValue = std::string(serialized.data(), serialized.size());
     if (value.isDouble()) {
       m_dval = value.toDouble();
     }
@@ -101,7 +102,8 @@ ScalarExpression::ScalarExpression
   }();
   const String& s = value.toString();
   m_value = s.toCppString();
-  if (m_type == T_DNUMBER && m_value.find_first_of(".eE", 0) == string::npos) {
+  if (m_type == T_DNUMBER &&
+      m_value.find_first_of(".eE", 0) == std::string::npos) {
     m_value += ".";
   }
   m_originalValue = m_value;
@@ -140,15 +142,11 @@ bool ScalarExpression::needsTranslation() const {
 
 void ScalarExpression::analyzeProgram(AnalysisResultPtr ar) {
   if (ar->getPhase() == AnalysisResult::AnalyzeAll) {
-    string id = HPHP::toLower(getIdentifier());
+    auto const id = HPHP::toLower(getIdentifier());
 
     switch (m_type) {
       case T_LINE:
-        if (getLocation()) {
-          m_translated = folly::to<string>(getLocation()->line1);
-        } else {
-          m_translated = "0";
-        }
+        m_translated = folly::to<std::string>(line1());
         break;
       case T_NS_C:
         m_translated = m_value;
@@ -164,7 +162,7 @@ void ScalarExpression::analyzeProgram(AnalysisResultPtr ar) {
         }
         m_translated.clear();
         if (b && b->is(BlockScope::ClassScope)) {
-          ClassScopePtr clsScope = dynamic_pointer_cast<ClassScope>(b);
+          auto clsScope = dynamic_pointer_cast<ClassScope>(b);
           if (!clsScope->isTrait()) {
             m_translated = clsScope->getOriginalName();
           }
@@ -196,67 +194,6 @@ void ScalarExpression::analyzeProgram(AnalysisResultPtr ar) {
         break;
     }
   }
-}
-
-unsigned ScalarExpression::getCanonHash() const {
-  int64_t val = getHash();
-  if (val == -1) {
-    val = hash_string_unsafe(m_value.c_str(), m_value.size());
-  }
-  return unsigned(val) ^ unsigned(val >> 32);
-}
-
-bool ScalarExpression::canonCompare(ExpressionPtr e) const {
-  if (!Expression::canonCompare(e)) return false;
-  ScalarExpressionPtr s =
-    static_pointer_cast<ScalarExpression>(e);
-
-  return
-    m_value == s->m_value &&
-    m_type == s->m_type &&
-    m_quoted == s->m_quoted;
-}
-
-TypePtr ScalarExpression::inferenceImpl(AnalysisResultConstPtr ar,
-                                        TypePtr type, bool coerce) {
-  TypePtr actualType;
-  switch (m_type) {
-  case T_STRING:
-    actualType = Type::String;
-    break;
-  case T_NUM_STRING:
-  case T_LNUMBER:
-    actualType = Type::Int64;
-    break;
-  case T_DNUMBER:
-    actualType = Type::Double;
-    break;
-  case T_ONUMBER:
-    actualType =
-      RuntimeOption::IntsOverflowToInts ? Type::Int64 : Type::Double;
-    break;
-
-  case T_LINE:
-  case T_COMPILER_HALT_OFFSET:
-    actualType = Type::Int64;
-    break;
-
-  case T_CONSTANT_ENCAPSED_STRING:
-  case T_ENCAPSED_AND_WHITESPACE:
-  case T_TRAIT_C:
-  case T_CLASS_C:
-  case T_NS_C:
-  case T_METHOD_C:
-  case T_FUNC_C:
-    actualType = Type::String;
-    break;
-
-  default:
-    assert(false);
-    break;
-  }
-
-  return checkTypesImpl(ar, type, actualType);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -325,7 +262,7 @@ std::string ScalarExpression::getOriginalLiteralString() const {
 }
 
 std::string ScalarExpression::getLiteralStringImpl(bool original) const {
-  string output;
+  std::string output;
   if (!isLiteralString() && m_type != T_STRING) {
     return output;
   }
@@ -387,7 +324,7 @@ void ScalarExpression::outputCodeModel(CodeGenerator &cg) {
         cg.printPropertyHeader("constantName");
         cg.printValue(constName);
         cg.printPropertyHeader("sourceLocation");
-        cg.printLocation(this->getLocation());
+        cg.printLocation(this);
         cg.printObjectFooter();
       }
       return;
@@ -430,7 +367,7 @@ void ScalarExpression::outputCodeModel(CodeGenerator &cg) {
       break;
   }
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 
@@ -443,7 +380,7 @@ void ScalarExpression::outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) {
     assert(m_quoted); // fall through
   case T_STRING:
     if (m_quoted) {
-      string output = escapeStringForPHP(m_originalValue);
+      auto const output = escapeStringForPHP(m_originalValue);
       cg_printf("%s", output.c_str());
     } else {
       cg_printf("%s", m_originalValue.c_str());
@@ -484,7 +421,7 @@ int64_t ScalarExpression::getHash() const {
   if (isLiteralInteger()) {
     hash = hash_int64(getLiteralInteger());
   } else if (isLiteralString()) {
-    string scs = getLiteralString();
+    auto const scs = getLiteralString();
     int64_t res;
     if (is_strictly_integer(scs.c_str(), scs.size(), res)) {
       hash = hash_int64(res);
@@ -571,7 +508,7 @@ bool ScalarExpression::getInt(int64_t& i) const {
     i = getIntValue();
     return true;
   } else if (m_type == T_LINE) {
-    i = getLocation() ? getLocation()->line1 : 0;
+    i = line1();
     return true;
   }
   return false;

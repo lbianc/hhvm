@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -44,7 +44,7 @@ namespace HPHP {
 
 AccessLog::~AccessLog() {
   signal(SIGCHLD, SIG_DFL);
-  for (uint i = 0; i < m_output.size(); ++i) {
+  for (uint32_t i = 0; i < m_output.size(); ++i) {
     if (m_output[i].log) {
       if (m_files[i].file[0] == '|') {
         pclose(m_output[i].log);
@@ -138,7 +138,7 @@ void AccessLog::log(Transport *transport, const VirtualHost *vhost) {
     threadData->flusher.recordWriteAndMaybeDropCaches(threadLog, bytes);
   }
   if (Logger::UseCronolog) {
-    for (uint i = 0; i < m_cronOutput.size(); ++i) {
+    for (uint32_t i = 0; i < m_cronOutput.size(); ++i) {
       Cronolog &cronOutput = *m_cronOutput[i];
       FILE *outFile = cronOutput.getOutputFile();
       if (!outFile) continue;
@@ -147,7 +147,7 @@ void AccessLog::log(Transport *transport, const VirtualHost *vhost) {
       cronOutput.flusher.recordWriteAndMaybeDropCaches(outFile, bytes);
     }
   } else {
-    for (uint i = 0; i < m_output.size(); ++i) {
+    for (uint32_t i = 0; i < m_output.size(); ++i) {
       LogFileData& output = m_output[i];
       FILE *outFile = output.log;
       if (!outFile) continue;

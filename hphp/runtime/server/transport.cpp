@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -544,13 +544,22 @@ String Transport::getMimeType() {
 
 namespace {
 
-// Make sure a component (name, path, value) of a cookie does not
+// Make sure cookie names do not contain any illegal characters.
+// Throw a fatal exception if one does.
+void validateCookieNameString(const String& str) {
+  if (!str.empty() && strpbrk(str.data(), "=,; \t\r\n\013\014")) {
+    raise_error("Cookie names can not contain any of the following "
+                "'=,; \\t\\r\\n\\013\\014'");
+  }
+}
+
+// Make sure a component (path, value, domain) of a cookie does not
 // contain any illegal characters.  Throw a fatal exception if it
 // does.
 void validateCookieString(const String& str, const char* component) {
-  if(!str.empty() && strpbrk(str.data(), "=,; \t\r\n\013\014")) {
+  if (!str.empty() && strpbrk(str.data(), ",; \t\r\n\013\014")) {
     raise_error("Cookie %s can not contain any of the following "
-                "'=,; \\t\\r\\n\\013\\014'", component);
+                "',; \\t\\r\\n\\013\\014'", component);
   }
 }
 
@@ -561,13 +570,15 @@ bool Transport::setCookie(const String& name, const String& value, int64_t expir
                           bool secure /* = false */,
                           bool httponly /* = false */,
                           bool encode_url /* = true */) {
-  validateCookieString(name, "names");
+  validateCookieNameString(name);
 
   if (!encode_url) {
     validateCookieString(value, "values");
   }
 
   validateCookieString(path, "paths");
+
+  validateCookieString(domain, "domains");
 
   String encoded_value;
   int len = 0;
@@ -587,7 +598,7 @@ bool Transport::setCookie(const String& name, const String& value, int64_t expir
      * so in order to force cookies to be deleted, even on MSIE, we
      * pick an expiry date in the past
      */
-    String sdt = makeSmartPtr<DateTime>(1, true)->
+    String sdt = req::make<DateTime>(1, true)->
       toString(DateTime::DateFormat::Cookie);
     cookie += name.data();
     cookie += "=deleted; expires=";
@@ -603,7 +614,7 @@ bool Transport::setCookie(const String& name, const String& value, int64_t expir
         return false;
       }
       cookie += "; expires=";
-      String sdt = makeSmartPtr<DateTime>(expire, true)->
+      String sdt = req::make<DateTime>(expire, true)->
         toString(DateTime::DateFormat::Cookie);
       cookie += sdt.data();
       cookie += "; Max-Age=";

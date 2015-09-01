@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -44,22 +44,26 @@ public:
                   const std::string &name, ExpressionListPtr params,
                   TypeAnnotationPtr retTypeAnnotation, StatementListPtr stmt,
                   int attr, const std::string &docComment,
-                  ExpressionListPtr attrList, bool method = true);
+                  ExpressionListPtr attrList, bool method = true) :
+      MethodStatement(STATEMENT_CONSTRUCTOR_PARAMETER_VALUES(MethodStatement),
+                      modifiers, ref, name, params, retTypeAnnotation, stmt,
+                      attr, docComment, attrList, method) {}
 
   DECLARE_STATEMENT_VIRTUAL_FUNCTIONS;
-  virtual bool hasDecl() const { return true; }
-  virtual bool hasImpl() const { return false; }
-  virtual int getRecursiveCount() const;
+  bool hasDecl() const override { return true; }
+  bool hasImpl() const override { return false; }
+  int getRecursiveCount() const override;
   // implementing IParseHandler
-  virtual void onParseRecur(AnalysisResultConstPtr ar, ClassScopePtr scope);
+  void onParseRecur(AnalysisResultConstPtr ar, FileScopeRawPtr fs,
+                    ClassScopePtr scope) override;
 
   void fixupSelfAndParentTypehints(ClassScopePtr scope);
 
+  bool isNamed(const char* name) const;
+  bool isNamed(const std::string& name) const { return isNamed(name.c_str()); }
   const std::string &getOriginalName() const { return m_originalName;}
-  std::string getName() const { return m_name;}
-  void setName(const std::string name) { m_name = name; }
+  std::string getName() const override { return m_originalName; }
   void setOriginalName(const std::string name) { m_originalName = name; }
-  std::string getFullName() const;
   std::string getOriginalFullName() const;
   std::string getOriginalFilename() const { return m_originalFilename; }
   ExpressionListPtr getParams() { return m_params;}
@@ -73,7 +77,7 @@ public:
   bool isRef(int index = -1) const;
   bool isSystem() const;
 
-  int getLocalEffects() const;
+  int getLocalEffects() const override;
 
   ModifierExpressionPtr getModifiers() {
     return m_modifiers;
@@ -105,11 +109,6 @@ public:
     return m_containingClosure;
   }
 
-  void setClassName(const std::string &name) { m_className = name; }
-  void setOriginalClassName(const std::string &name) {
-    m_originalClassName = name;
-  }
-
   // for flattened traits
   void setOriginalFilename(const std::string &name) {
     assert(m_method);
@@ -125,9 +124,6 @@ public:
   void setMayCallSetFrameMetadata(bool f) { m_mayCallSetFrameMetadata = f; }
   bool mayCallSetFrameMetadata() const { return m_mayCallSetFrameMetadata; }
 
-private:
-  void checkParameters();
-
 protected:
   bool m_method;
   bool m_ref;
@@ -137,10 +133,7 @@ protected:
   int m_cppLength;
   int m_autoPropCount;
   ModifierExpressionPtr m_modifiers;
-  std::string m_name;
   std::string m_originalName;
-  std::string m_className;
-  std::string m_originalClassName;
   std::string m_originalFilename;
   ExpressionListPtr m_params;
   TypeAnnotationPtr m_retTypeAnnotation;
@@ -149,7 +142,8 @@ protected:
   ClosureExpressionRawPtr m_containingClosure;
   ExpressionListPtr m_attrList;
 
-  void setSpecialMethod(ClassScopePtr classScope);
+  void setSpecialMethod(FileScopeRawPtr fileScope, ClassScopePtr classScope);
+  void checkParameters(FileScopeRawPtr scope);
 };
 
 ///////////////////////////////////////////////////////////////////////////////

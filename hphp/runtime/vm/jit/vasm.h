@@ -114,11 +114,12 @@ void allocateRegisters(Vunit&, const Abi&);
 void fuseBranches(Vunit&);
 void optimizeExits(Vunit&);
 void optimizeJmps(Vunit&);
-void hoistFallbackccs(Vunit&);
 void optimizeCopies(Vunit&, const Abi&);
+void optimizePhis(Vunit&);
 void removeDeadCode(Vunit&);
 void removeTrivialNops(Vunit&);
 template<typename Folder> void foldImms(Vunit&);
+void simplify(Vunit&);
 
 ///////////////////////////////////////////////////////////////////////////////
 

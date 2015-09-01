@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,7 +22,6 @@
 #include <unordered_map>
 
 #include "hphp/util/hash-map-typedefs.h"
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/srckey.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -79,6 +78,8 @@ class PrologueCallersRec : private boost::noncopyable {
   void                      addMainCaller(TCA caller);
   void                      addGuardCaller(TCA caller);
   void                      clearAllCallers();
+  void                      removeMainCaller(TCA caller);
+  void                      removeGuardCaller(TCA caller);
 
  private:
   PrologueCallersVec m_mainCallers;

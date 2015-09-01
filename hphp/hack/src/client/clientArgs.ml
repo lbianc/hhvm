@@ -8,13 +8,13 @@
  *
  *)
 
+open Core
 open ClientCommand
 open ClientEnv
 open Utils
 
 let rec guess_root config start recursion_limit : Path.t option =
-  let fs_root = Path.make "/" in
-  if start = fs_root then None
+  if start = Path.parent start then None (* Reach fs root, nothing to do. *)
   else if Wwwroot.is_www_directory ~config start then Some start
   else if recursion_limit <= 0 then None
   else guess_root config (Path.parent start) (recursion_limit - 1)
@@ -28,7 +28,6 @@ let parse_command () =
   | "stop" -> CKStop
   | "restart" -> CKRestart
   | "build" -> CKBuild
-  | "prolog" -> CKProlog
   | _ -> CKNone
 
 let parse_without_command options usage command =
@@ -56,8 +55,8 @@ let get_root ?(config=".hhconfig") path_opt =
  * there, but keep what's there up to date please. *)
 let parse_check_args cmd =
   (* arg parse output refs *)
-  let mode = ref MODE_UNSPECIFIED in
-  let retries = ref 3 in
+  let mode = ref None in
+  let retries = ref 800 in
   let output_json = ref false in
   let retry_if_init = ref true in
   let no_load = ref false in
@@ -69,9 +68,9 @@ let parse_check_args cmd =
   (* custom behaviors *)
   let set_from x () = from := x in
   let set_mode x () =
-    if !mode <> MODE_UNSPECIFIED
+    if !mode <> None
     then raise (Arg.Bad "only a single mode should be specified")
-    else mode := x
+    else mode := Some x
   in
 
   (* parse args *)
@@ -170,8 +169,8 @@ let parse_check_args cmd =
       " (mode) show human-readable type info for the given name; output is not meant for machine parsing";
     "--lint", Arg.Rest begin fun fn ->
         mode := match !mode with
-          | MODE_UNSPECIFIED -> MODE_LINT [fn]
-          | MODE_LINT fnl -> MODE_LINT (fn :: fnl)
+          | None -> Some (MODE_LINT [fn])
+          | Some (MODE_LINT fnl) -> Some (MODE_LINT (fn :: fnl))
           | _ -> raise (Arg.Bad "only a single mode should be specified")
       end,
       " (mode) lint the given list of files";
@@ -179,12 +178,29 @@ let parse_check_args cmd =
       " (mode) find all occurrences of lint with the given error code";
     "--version", Arg.Set version,
       " (mode) show version and exit\n";
+    (* Create a checkpoint which can be used to retrieve changed files later *)
+    "--create-checkpoint", Arg.String (fun x -> set_mode (MODE_CREATE_CHECKPOINT x) ()),
+      "";
+    (* Retrieve changed files since input checkpoint.
+     * Output is separated by newline.
+     * Exit code will be non-zero if no checkpoint is found *)
+    "--retrieve-checkpoint",
+      Arg.String (fun x -> set_mode (MODE_RETRIEVE_CHECKPOINT x) ()),
+      "";
+    (* Delete an existing checkpoint.
+     * Exitcode will be non-zero if no checkpoint is found *)
+    "--delete-checkpoint",
+      Arg.String (fun x -> set_mode (MODE_DELETE_CHECKPOINT x) ()),
+      "";
+    "--stats",
+      Arg.Unit (set_mode MODE_STATS),
+      " display some server statistics";
 
     (* flags *)
     "--json", Arg.Set output_json,
       " output json for machine consumption. (default: false)";
     "--retries", Arg.Set_int retries,
-      " set the number of retries. (default: 3)";
+      spf " set the number of retries. (default: %d)" !retries;
     "--retry-if-init", Arg.Bool (fun x -> retry_if_init := x),
       " retry if the server is initializing (default: true)";
     "--no-load", Arg.Set no_load,
@@ -216,7 +232,6 @@ let parse_check_args cmd =
   end;
 
   (* fixups *)
-  if !mode == MODE_UNSPECIFIED then mode := MODE_STATUS;
   let root =
     match args with
     | [] -> get_root None
@@ -229,7 +244,7 @@ let parse_check_args cmd =
       Printf.fprintf stdout "-*- mode: compilation -*-\n%!"
   in
   CCheck {
-    mode = !mode;
+    mode = Option.value !mode ~default:MODE_STATUS;
     root = root;
     from = !from;
     output_json = !output_json;
@@ -372,21 +387,6 @@ let parse_build_args () =
     }
   }
 
-let parse_prolog_args () =
-  let usage =
-    Printf.sprintf
-      "Usage: %s prolog [WWW-ROOT]\n\
-      run prolog interpreter on code database\n"
-      Sys.argv.(0) in
-  let options = [] in
-  let args = parse_without_command options usage "prolog" in
-  let root =
-    match args with
-    | [x] -> get_root (Some x)
-    | _ -> Printf.printf "%s\n" usage; exit 2
-  in
-  CProlog { ClientProlog.root = root; }
-
 let parse_args () =
   match parse_command () with
     | CKNone
@@ -395,4 +395,3 @@ let parse_args () =
     | CKStop -> parse_stop_args ()
     | CKRestart -> parse_restart_args ()
     | CKBuild -> parse_build_args ()
-    | CKProlog -> parse_prolog_args ()

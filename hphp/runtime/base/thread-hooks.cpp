@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,13 +15,16 @@
 */
 #include "hphp/runtime/base/thread-hooks.h"
 #include <stdio.h>
-#include <dlfcn.h>
 #include <string.h>
+#ifndef _MSC_VER
 #include <execinfo.h>
+#include <dlfcn.h>
+#endif
 #include <unistd.h>
 
 #include "hphp/runtime/base/extended-logger.h"
 #include "hphp/util/assertions.h"
+#include "hphp/util/compatibility.h"
 #include "hphp/util/mutex.h"
 
 namespace HPHP {

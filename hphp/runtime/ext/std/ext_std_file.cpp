@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -35,10 +35,9 @@
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/thread-info.h"
-#include "hphp/runtime/base/thread-init-fini.h"
 #include "hphp/runtime/base/user-stream-wrapper.h"
 #include "hphp/runtime/base/zend-scanf.h"
-#include "hphp/runtime/ext/ext_hash.h"
+#include "hphp/runtime/ext/hash/ext_hash.h"
 #include "hphp/runtime/ext/std/ext_std_options.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/runtime/server/static-content-cache.h"
@@ -189,8 +188,7 @@ static int statSyscall(
   auto canUseFileCache = useFileCache && isFileStream;
   if (isRelative && !pathIndex) {
     auto fullpath = g_context->getCwd() + String::FromChar('/') + path;
-    if (!ThreadInfo::s_threadInfo->m_reqInjectionData.hasSafeFileAccess() &&
-        !canUseFileCache) {
+    if (!RID().hasSafeFileAccess() && !canUseFileCache) {
       if (strlen(fullpath.data()) != fullpath.size()) return ENOENT;
       return ::stat(fullpath.data(), buf);
     }
@@ -300,7 +298,7 @@ Variant HHVM_FUNCTION(popen,
                       const String& command,
                       const String& mode) {
   CHECK_PATH_FALSE(command, 1);
-  auto file = makeSmartPtr<Pipe>();
+  auto file = req::make<Pipe>();
   bool ret = CHECK_ERROR(file->open(File::TranslateCommand(command), mode));
   if (!ret) {
     raise_warning("popen(%s,%s): Invalid argument",
@@ -423,18 +421,18 @@ Variant fscanfImpl(const Resource& handle,
 }
 
 TypedValue* HHVM_FN(fscanf)(ActRec* ar) {
-  Resource handle = getArg<KindOfResource>(ar, 0);
+  Resource handle{getArg<KindOfResource>(ar, 0)};
   if (ar->numArgs() < 1) {
     return arReturn(ar, init_null());
   }
-  String format = getArg<KindOfString>(ar, 1);
+  String format{getArg<KindOfString>(ar, 1)};
   if (ar->numArgs() < 2) {
     return arReturn(ar, false);
   }
 
   std::vector<Variant*> args;
   for (int i = 2; i < ar->numArgs(); ++i) {
-    args.push_back(&getArg<KindOfRef>(ar, i));
+    args.push_back(getArg<KindOfRef>(ar, i));
   }
   return arReturn(ar, fscanfImpl(handle, format, args));
 }
@@ -521,7 +519,7 @@ bool HHVM_FUNCTION(flock,
   }
   act = flock_values[act - 1] | (operation & 4 ? LOCK_NB : 0);
   bool ret = f->lock(act, block);
-  wouldblock = block;
+  wouldblock.assignIfRef(block);
   return ret;
 }
 
@@ -590,9 +588,21 @@ Variant HHVM_FUNCTION(file_put_contents,
                       int flags /* = 0 */,
                       const Variant& context /* = null */) {
   CHECK_PATH(filename, 1);
+
+  char mode[3] = "wb";
+  if (flags & PHP_FILE_APPEND) {
+    mode[0] = 'a';
+  } else if (flags & LOCK_EX) {
+    // Open in "create" mode (writing only, create if needed, no truncate)
+    // so that the file is not modified before we attempt to aquire the
+    // requested lock.
+    mode[0] = 'c';
+  }
+  mode[2] = '\0';
+
   auto file = File::Open(
     filename,
-    (flags & PHP_FILE_APPEND) ? "ab" : "wb",
+    mode,
     flags,
     dyn_cast_or_null<StreamContext>(context)
   );
@@ -613,6 +623,10 @@ Variant HHVM_FUNCTION(file_put_contents,
     if (!file->lock(LOCK_EX)) {
       return false;
     }
+  }
+
+  if (mode[0] == 'c') {
+    file->truncate(0);
   }
 
   int numbytes = 0;
@@ -1720,7 +1734,7 @@ Variant HHVM_FUNCTION(glob,
   }
 
   if (!globbuf.gl_pathc || !globbuf.gl_pathv) {
-    if (ThreadInfo::s_threadInfo->m_reqInjectionData.hasSafeFileAccess()) {
+    if (RID().hasSafeFileAccess()) {
       if (!HHVM_FN(is_dir)(work_pattern)) {
         globfree(&globbuf);
         return false;
@@ -1763,7 +1777,7 @@ Variant HHVM_FUNCTION(glob,
     return false;
   }
   // php's glob always produces an array, but Variant::Variant(CArrRef)
-  // will produce KindOfNull if given a SmartPtr wrapped around null.
+  // will produce KindOfNull if given a req::ptr wrapped around null.
   if (ret.isNull()) {
     return empty_array();
   }
@@ -1801,7 +1815,7 @@ Variant HHVM_FUNCTION(tempnam,
 Variant HHVM_FUNCTION(tmpfile) {
   FILE *f = tmpfile();
   if (f) {
-    return Variant(makeSmartPtr<PlainFile>(f));
+    return Variant(req::make<PlainFile>(f));
   }
   return false;
 }
@@ -1847,7 +1861,7 @@ bool HHVM_FUNCTION(chdir,
                    const String& directory) {
   CHECK_PATH_FALSE(directory, 1);
   if (HHVM_FN(is_dir)(directory)) {
-    g_context->setCwd(HHVM_FN(realpath)(directory));
+    g_context->setCwd(HHVM_FN(realpath)(directory).toString());
     return true;
   }
   raise_warning("No such file or directory (errno 2)");
@@ -1876,7 +1890,10 @@ struct DirectoryData final : RequestEventHandler {
   void requestShutdown() override {
     defaultDirectory = nullptr;
   }
-  SmartPtr<Directory> defaultDirectory;
+  void vscan(IMarker& mark) const override {
+    mark(defaultDirectory);
+  }
+  req::ptr<Directory> defaultDirectory;
 };
 
 IMPLEMENT_STATIC_REQUEST_LOCAL(DirectoryData, s_directory_data);
@@ -1885,7 +1902,7 @@ const StaticString
   s_handle("handle"),
   s_path("path");
 
-SmartPtr<Directory> get_dir(const Resource& dir_handle) {
+req::ptr<Directory> get_dir(const Resource& dir_handle) {
   if (dir_handle.isNull()) {
     auto defaultDir = s_directory_data->defaultDirectory;
     if (!defaultDir) {
@@ -1919,7 +1936,7 @@ Variant HHVM_FUNCTION(dir,
   if (same(dir, false)) {
     return false;
   }
-  ObjectData* d = SystemLib::AllocDirectoryObject();
+  auto d = SystemLib::AllocDirectoryObject();
   *(d->o_realProp(s_path, 0)) = directory;
   *(d->o_realProp(s_handle, 0)) = dir;
   return d;

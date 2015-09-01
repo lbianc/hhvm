@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -137,18 +137,18 @@ public:
 
 namespace {
 
-SmartPtr<LdapLink> getLdapLinkFromToken(void* userData) {
+req::ptr<LdapLink> getLdapLinkFromToken(void* userData) {
   auto token = reinterpret_cast<MemoryManager::RootId>(userData);
   return MM().lookupRoot<LdapLink>(token);
 }
 
-void* getLdapLinkToken(const SmartPtr<LdapLink>& link) {
+void* getLdapLinkToken(const req::ptr<LdapLink>& link) {
   return reinterpret_cast<void*>(MM().addRoot(link));
 }
 
 // Note: a raw pointer is ok here since clearLdapLink is being
 // called from ~LdapLink which might be getting invoked from
-// sweep and we can't create any new SmartPtrs at the point.
+// sweep and we can't create any new req::ptrs at the point.
 void clearLdapLink(const LdapLink* link) {
   MM().removeRoot(link);
 }
@@ -195,7 +195,7 @@ class LdapResultEntry : public SweepableResourceData {
 public:
   DECLARE_RESOURCE_ALLOCATION(LdapResultEntry)
 
-  LdapResultEntry(LDAPMessage *entry, SmartPtr<LdapResult> res)
+  LdapResultEntry(LDAPMessage *entry, req::ptr<LdapResult> res)
     : data(entry), ber(nullptr), result(std::move(res)) {}
   ~LdapResultEntry() { close();}
 
@@ -213,7 +213,7 @@ public:
 
   LDAPMessage *data;
   BerElement *ber;
-  SmartPtr<LdapResult> result;
+  req::ptr<LdapResult> result;
 };
 
 void LdapResultEntry::sweep() {
@@ -387,7 +387,7 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
 
   char *ldap_base_dn = NULL;
   char *ldap_filter = NULL;
-  SmartPtr<LdapLink> ld;
+  req::ptr<LdapLink> ld;
 
   for (int i = 0; i < num_attribs; i++) {
     if (!arr_attributes.exists(i)) {
@@ -445,10 +445,10 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
       ldap_filter = (char*)sfilter.data();
     }
 
-    smart::vector<SmartPtr<LdapLink>> lds;
+    req::vector<req::ptr<LdapLink>> lds;
     lds.resize(nlinks);
 
-    smart::vector<int> rcs;
+    req::vector<int> rcs;
     rcs.resize(nlinks);
 
     ArrayIter iter(link.toArray());
@@ -497,7 +497,7 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
                              NULL, &ldap_res);
       }
       if (rcs[i] != -1) {
-        ret.append(Variant(makeSmartPtr<LdapResult>(ldap_res)));
+        ret.append(Variant(req::make<LdapResult>(ldap_res)));
       } else {
         ret.append(false);
       }
@@ -546,7 +546,7 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
       }
 #endif
       parallel_search = 0;
-      ret.append(Variant(makeSmartPtr<LdapResult>(ldap_res)));
+      ret.append(Variant(req::make<LdapResult>(ldap_res)));
     }
   }
 cleanup:
@@ -639,7 +639,7 @@ Variant HHVM_FUNCTION(ldap_connect,
     return false;
   }
 
-  auto ld = makeSmartPtr<LdapLink>();
+  auto ld = req::make<LdapLink>();
 
   LDAP *ldap = NULL;
   if (!str_hostname.empty() && str_hostname.find('/') >= 0) {
@@ -785,7 +785,7 @@ bool HHVM_FUNCTION(ldap_set_rebind_proc,
   }
 
   /* callable? */
-  if (!HHVM_FN(is_callable)(callback)) {
+  if (!is_callable(callback)) {
     raise_warning("Callback argument is not a valid callback");
     return false;
   }
@@ -859,7 +859,7 @@ bool HHVM_FUNCTION(ldap_get_option,
       if (ldap_get_option(ld->link, option, &val)) {
         return false;
       }
-      retval = (int64_t)val;
+      retval.assignIfRef((int64_t)val);
     } break;
 #ifdef LDAP_OPT_NETWORK_TIMEOUT
   case LDAP_OPT_NETWORK_TIMEOUT:
@@ -872,7 +872,7 @@ bool HHVM_FUNCTION(ldap_get_option,
         }
         return false;
       }
-      retval = (int64_t)timeout->tv_sec;
+      retval.assignIfRef((int64_t)timeout->tv_sec);
       ldap_memfree(timeout);
     } break;
 #elif defined(LDAP_X_OPT_CONNECT_TIMEOUT)
@@ -882,7 +882,7 @@ bool HHVM_FUNCTION(ldap_get_option,
       if (ldap_get_option(ld->link, LDAP_X_OPT_CONNECT_TIMEOUT, &timeout)) {
         return false;
       }
-      retval = (int64_t)(timeout / 1000);
+      retval.assignIfRef((int64_t)(timeout / 1000));
     } break;
 #endif
   /* options with string value */
@@ -908,7 +908,7 @@ bool HHVM_FUNCTION(ldap_get_option,
         }
         return false;
       }
-      retval = String(val, CopyString);
+      retval.assignIfRef(String(val, CopyString));
       ldap_memfree(val);
     } break;
 /* options not implemented
@@ -1246,7 +1246,7 @@ Variant HHVM_FUNCTION(ldap_first_entry,
     return false;
   }
 
-  return Variant(makeSmartPtr<LdapResultEntry>(entry, res));
+  return Variant(req::make<LdapResultEntry>(entry, res));
 }
 
 Variant HHVM_FUNCTION(ldap_next_entry,
@@ -1260,7 +1260,7 @@ Variant HHVM_FUNCTION(ldap_next_entry,
     return false;
   }
 
-  return Variant(makeSmartPtr<LdapResultEntry>(msg, entry->result));
+  return Variant(req::make<LdapResultEntry>(msg, entry->result));
 }
 
 Array HHVM_FUNCTION(ldap_get_attributes,
@@ -1326,7 +1326,7 @@ Variant HHVM_FUNCTION(ldap_first_reference,
     return false;
   }
 
-  return Variant(makeSmartPtr<LdapResultEntry>(entry, res));
+  return Variant(req::make<LdapResultEntry>(entry, res));
 }
 
 Variant HHVM_FUNCTION(ldap_next_reference,
@@ -1340,7 +1340,7 @@ Variant HHVM_FUNCTION(ldap_next_reference,
     return false;
   }
 
-  return Variant(makeSmartPtr<LdapResultEntry>(entry_next, entry->result));
+  return Variant(req::make<LdapResultEntry>(entry_next, entry->result));
 }
 
 bool HHVM_FUNCTION(ldap_parse_reference,
@@ -1365,7 +1365,7 @@ bool HHVM_FUNCTION(ldap_parse_reference,
     }
     ldap_value_free(lreferrals);
   }
-  referrals = arr;
+  referrals.assignIfRef(arr);
   return true;
 }
 
@@ -1390,7 +1390,7 @@ bool HHVM_FUNCTION(ldap_parse_result,
     return false;
   }
 
-  errcode = lerrcode;
+  errcode.assignIfRef(lerrcode);
 
   /* Reverse -> fall through */
   Array arr = Array::Create();
@@ -1402,19 +1402,19 @@ bool HHVM_FUNCTION(ldap_parse_result,
     }
     ldap_value_free(lreferrals);
   }
-  referrals = arr;
+  referrals.assignIfRef(arr);
 
   if (lerrmsg == NULL) {
-    errmsg = empty_string_variant();
+    errmsg.assignIfRef(empty_string_variant());
   } else {
-    errmsg = String(lerrmsg, CopyString);
+    errmsg.assignIfRef(String(lerrmsg, CopyString));
     ldap_memfree(lerrmsg);
   }
 
   if (lmatcheddn == NULL) {
-    matcheddn = empty_string_variant();
+    matcheddn.assignIfRef(empty_string_variant());
   } else {
-    matcheddn = String(lmatcheddn, CopyString);
+    matcheddn.assignIfRef(String(lmatcheddn, CopyString));
     ldap_memfree(lmatcheddn);
   }
   return true;
@@ -1571,8 +1571,8 @@ bool HHVM_FUNCTION(ldap_control_paged_result_response,
     return false;
   }
 
-  cookie = String(lcookie.bv_val, lcookie.bv_len, CopyString);
-  estimated = lestimated;
+  cookie.assignIfRef(String(lcookie.bv_val, lcookie.bv_len, CopyString));
+  estimated.assignIfRef(lestimated);
 
   ber_memfree(lcookie.bv_val);
   return true;

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -2140,7 +2140,7 @@ void rc_analyze_inst(Env& env,
    * If the instruction produces a reference, we can assume the SSATmp it
    * defines corresponds to a new increment on the lower_bound.
    */
-  if (inst.producesReference(0)) {
+  if (inst.producesReference()) {
     for_aset(env, state, inst.dst(), [&] (ASetID asetID) {
       auto& aset = state.asets[asetID];
       ++aset.lower_bound;
@@ -2431,10 +2431,10 @@ std::string show(const Node* node) {
       switch (node->type) {
       case NT::Empty:   return "empty";
       case NT::Halt:    return "halt";
-      case NT::Sig:     return "\u03c3";
+      case NT::Sig:     return u8"\u03c3";
       case NT::Dec:     return sformat("dec({})", to_dec(node)->inst->id());
       case NT::Phi:
-        return sformat("\u03c6({},{})", to_phi(node)->pred_list_sz,
+        return sformat(u8"\u03c6({},{})", to_phi(node)->pred_list_sz,
           to_phi(node)->back_edge_preds);
       case NT::Inc:
         return sformat("inc({})", to_inc(node)->inst->id());
