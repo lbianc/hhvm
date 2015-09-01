@@ -233,7 +233,8 @@ struct Vgen {
     jmps.push_back({a->frontier(), i.target});
 
     // offset to be determined by a->patchBc
-    a->b(0);
+    BranchParams bp(BranchConditions::Always);
+    a->bc(bp.bo(), bp.bi(), 0);
   }
   void emit(const jmpr& i) {
     a->mtctr(i.target);
