@@ -320,10 +320,10 @@ struct Vgen {
   void emit(const testbim& i) { not_implemented(); }
   void emit(const testwim& i) { not_implemented(); }
   //TODO(IBM) Depends on CR registers
-  void emit(const testl& i) { /*a->and_(i.s0, i.s1, false);*/ }
-  void emit(const testli& i) { /*a->addi(i.d, i.s1, i.s0);*/ }
+  void emit(const testl& i) { a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(const testli& i) { a->andi(ppc64::rvasmtmp(), Reg64(i.s1), i.s0); }
   void emit(const testlim& i) { not_implemented(); }
-  void emit(const testq& i) { /*a->and_(i.s0, i.s1, false);*/ }
+  void emit(const testq& i) { a->and_(ppc64::rvasmtmp(), i.s0, i.s1, true); }
   void emit(const testqm& i) { not_implemented(); }
   void emit(const testqim& i) { not_implemented(); }
   void emit(const ucomisd& i) { not_implemented(); }
