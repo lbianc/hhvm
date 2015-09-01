@@ -226,7 +226,19 @@ struct Vgen {
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
   void emit(const incwm& i) { a->addi(i.m.base, i.m.index, i.m.disp); }
-  void emit(const jcc& i) { not_implemented(); }
+  void emit(const jcc& i) {
+    if (i.targets[1] != i.targets[0]) {
+      if (next == i.targets[1]) {
+        return emit(jcc{ccNegate(i.cc), i.sf, {i.targets[1], i.targets[0]}});
+      }
+      auto taken = i.targets[1];
+      jccs.push_back({a->frontier(), taken});
+
+      // offset to be determined by a->patchBc
+      a->bc(i.cc, 0);
+    }
+    emit(jmp{i.targets[0]});
+  }
   void emit(const jcci& i) { not_implemented(); }
   void emit(const jmp& i) {
     if (next == i.target) return;
@@ -386,7 +398,15 @@ void Vgen::emit(const load& i) {
 }
 
 void Vgen::patch(Venv& env) {
-  not_implemented();
+  for (auto& p : env.jmps) {
+    assertx(env.addrs[p.target]);
+    X64Assembler::patchJmp(p.instr, env.addrs[p.target]);
+  }
+  for (auto& p : env.jccs) {
+    assertx(env.addrs[p.target]);
+    X64Assembler::patchJcc(p.instr, env.addrs[p.target]);
+  }
+  assertx(env.bccs.empty());
 }
 
 void Vgen::pad(CodeBlock& cb) {
