@@ -43,7 +43,9 @@ using HPHP::CodeAddress;
   CR##cr##_GreaterThan,      \
   CR##cr##_GreaterThanEqual, \
   CR##cr##_Equal,            \
-  CR##cr##_NotEqual
+  CR##cr##_NotEqual,         \
+  CR##cr##_Overflow,         \
+  CR##cr##_NoOverflow
 
 enum class BranchConditions {
   BRANCHES(0),
@@ -62,7 +64,9 @@ enum class BranchConditions {
   GreaterThan       = CR0_GreaterThan,
   GreaterThanEqual  = CR0_GreaterThanEqual,
   Equal             = CR0_Equal,
-  NotEqual          = CR0_NotEqual
+  NotEqual          = CR0_NotEqual,
+  Overflow          = CR0_Overflow,
+  NoOverflow        = CR0_NoOverflow
 };
 
 #undef BRANCHES
@@ -104,22 +108,25 @@ class BranchParams {
       NoBranchPrediction    = 3
     };
 
-#define SWITCHES(cr)                                              \
-  case BranchConditions::CR##cr##_LessThan:                       \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;    break;  \
-  case BranchConditions::CR##cr##_LessThanEqual:                  \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan; break;  \
-  case BranchConditions::CR##cr##_GreaterThan:                    \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan; break;  \
-  case BranchConditions::CR##cr##_GreaterThanEqual:               \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;    break;  \
-  case BranchConditions::CR##cr##_Equal:                          \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;       break;  \
-  case BranchConditions::CR##cr##_NotEqual:                       \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;       break
+#define SWITCHES(cr)                                                    \
+  case BranchConditions::CR##cr##_LessThan:                             \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;          break;  \
+  case BranchConditions::CR##cr##_LessThanEqual:                        \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan;       break;  \
+  case BranchConditions::CR##cr##_GreaterThan:                          \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan;       break;  \
+  case BranchConditions::CR##cr##_GreaterThanEqual:                     \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;          break;  \
+  case BranchConditions::CR##cr##_Equal:                                \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;             break;  \
+  case BranchConditions::CR##cr##_NotEqual:                             \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;             break;  \
+  case BranchConditions::CR##cr##_Overflow:                             \
+    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_SummaryOverflow;   break;  \
+  case BranchConditions::CR##cr##_NoOverflow:                           \
+    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_SummaryOverflow;   break
 
     BranchParams(BranchConditions bc) {
-      /* TODO(gut): implement other CRs */
       switch (bc) {
         SWITCHES(0);
         SWITCHES(1);
@@ -131,6 +138,8 @@ class BranchParams {
         SWITCHES(7);
         case BranchConditions::Always:
           m_bo = BO::Always; m_bi = BI(0); break;
+        default:
+          not_implemented();
       }
     }
 
