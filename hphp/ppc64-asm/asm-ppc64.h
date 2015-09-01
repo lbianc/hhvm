@@ -149,6 +149,52 @@ class BranchParams {
 
     BranchParams(BranchConditions bc) { defineBoBi(bc); }
 
+    BranchParams(HPHP::jit::ConditionCode cc) {
+      switch (cc) {
+        case HPHP::jit::CC_O:
+          defineBoBi(BranchConditions::Overflow);         break;
+        case HPHP::jit::CC_NO:
+          defineBoBi(BranchConditions::NoOverflow);       break;
+        case HPHP::jit::CC_B:
+          defineBoBi(BranchConditions::LessThan);         break;
+        case HPHP::jit::CC_AE:
+          defineBoBi(BranchConditions::GreaterThanEqual); break;
+        case HPHP::jit::CC_E:
+          defineBoBi(BranchConditions::Equal);            break;
+        case HPHP::jit::CC_NE:
+          defineBoBi(BranchConditions::NotEqual);         break;
+        case HPHP::jit::CC_BE:
+          defineBoBi(BranchConditions::LessThanEqual);    break;
+        case HPHP::jit::CC_A:
+          defineBoBi(BranchConditions::GreaterThan);      break;
+        case HPHP::jit::CC_S:
+          defineBoBi(BranchConditions::LessThan);         break;
+        case HPHP::jit::CC_NS:
+          defineBoBi(BranchConditions::GreaterThan);      break;
+
+        /*
+         * TODO(Gustavo): Parity on ppc64 is not that easy:
+         * http://stackoverflow.com/q/32319673/5013070
+         */
+        case HPHP::jit::CC_P:
+          not_implemented(); /*defineBoBi();*/            break;
+        case HPHP::jit::CC_NP:
+          not_implemented(); /*defineBoBi();*/            break;
+
+        case HPHP::jit::CC_L:
+          defineBoBi(BranchConditions::LessThan);         break;
+        case HPHP::jit::CC_NL:
+          defineBoBi(BranchConditions::GreaterThanEqual); break;
+        case HPHP::jit::CC_NG:
+          defineBoBi(BranchConditions::LessThanEqual);    break;
+        case HPHP::jit::CC_G:
+          defineBoBi(BranchConditions::GreaterThan);      break;
+
+        default:
+          not_implemented();                              break;
+      }
+    }
+
     ~BranchParams() {}
 
     uint8_t bo() { return (uint8_t)m_bo; }
@@ -1732,6 +1778,13 @@ public:
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch);
 
+  // ConditionCode variants
+  void bc(HPHP::jit::ConditionCode cc, int16_t address) {
+    BranchParams bp(cc);
+    bc(bp.bo(), bp.bi(), address);
+  }
+
+  // Auxiliary for loading a complete 64bits immediate into a register
   void li64 (const Reg64& rt, uint64_t imm64);
 
   //Can be used to generate or force a unimplemented opcode exception
