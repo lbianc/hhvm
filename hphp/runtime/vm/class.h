@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,7 +20,6 @@
 #include "hphp/runtime/base/attr.h"
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/base/rds.h"
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/type-string.h"
@@ -39,6 +38,8 @@
 
 #include <list>
 #include <memory>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -110,7 +111,7 @@ struct Class : AtomicCountable {
     LowStringPtr m_mangledName;
     LowStringPtr m_originalMangledName;
     // First parent class that declares this property.
-    LowClassPtr m_class;
+    LowPtr<Class> m_class;
     Attr m_attrs;
     LowStringPtr m_typeConstraint;
     // When built in RepoAuthoritative mode, this is a control-flow
@@ -130,7 +131,7 @@ struct Class : AtomicCountable {
     LowStringPtr m_typeConstraint;
     LowStringPtr m_docComment;
     // Most derived class that declared this property.
-    LowClassPtr m_class;
+    LowPtr<Class> m_class;
     int m_idx;
     // Used if (m_class == this).
     TypedValue m_val;
@@ -142,7 +143,7 @@ struct Class : AtomicCountable {
    */
   struct Const {
     // Most derived class that declared this constant.
-    LowClassPtr m_class;
+    LowPtr<Class> m_class;
     LowStringPtr m_name;
     TypedValueAux m_val;
 
@@ -175,9 +176,9 @@ struct Class : AtomicCountable {
     void push_back(const TypedValue& v);
 
     /*
-     * Make a smart-allocated copy of `src'.
+     * Make a request-allocated copy of `src'.
      */
-    static PropInitVec* allocWithSmartAllocator(const PropInitVec& src);
+    static PropInitVec* allocWithReqAllocator(const PropInitVec& src);
 
     static constexpr size_t dataOff() {
       return offsetof(PropInitVec, m_data);
@@ -188,7 +189,17 @@ struct Class : AtomicCountable {
 
     TypedValueAux* m_data;
     unsigned m_size;
-    bool m_smart;
+    bool m_req_allocated;
+  };
+
+  /*
+   * A slot in a Class vtable vector, pointing to the vtable for an interface
+   * and the interface itself. Used for efficient interface method dispatch and
+   * instance checks.
+   */
+  struct VtableVecSlot {
+    LowPtr<LowPtr<Func>> vtable;
+    LowPtr<Class> iface;
   };
 
   /*
@@ -196,11 +207,20 @@ struct Class : AtomicCountable {
    */
   using MethodMap         = FixedStringMap<Slot, false, Slot>;
   using MethodMapBuilder  = FixedStringMapBuilder<Func*, Slot, false, Slot>;
-  using InterfaceMap      = IndexedStringMap<LowClassPtr, true, int>;
+  using InterfaceMap      = IndexedStringMap<LowPtr<Class>, true, int>;
   using RequirementMap    = IndexedStringMap<
                               const PreClass::ClassRequirement*, true, int>;
 
   using TraitAliasVec = std::vector<PreClass::TraitAliasRule::NamePair>;
+  using ScopedClonesMap = hphp_hash_map<uintptr_t,ClassPtr>;
+
+  /*
+   * We store the length of vectors of methods, parent classes and interfaces.
+   *
+   * In lowptr builds, we limit all of these quantities to 2^16-1 to save
+   * memory.
+   */
+  using veclen_t = std::conditional<use_lowptr, uint16_t, uint32_t>::type;
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -213,6 +233,42 @@ struct Class : AtomicCountable {
    * phase changes before that (see destroy()).
    */
   static Class* newClass(PreClass* preClass, Class* parent);
+
+  /*
+   * Make a clone of this Closure subclass, with `ctx' as the closure scope.
+   *
+   * Passing a value of `attrs' that is not AttrNone indicates that the scoping
+   * is dynamic---i.e., via Closure::bind(), as opposed to a CreateCl opcode.
+   * If the specified `attrs' do not match those of the __invoke method, we
+   * update them in the clone along with the scope.  All closure __invoke
+   * methods have AttrPublic, so using AttrNone as a sentinel here is
+   * unambiguous.
+   *
+   * If the scoping already exists in m_extra->m_scopedClones, or if this class
+   * is already scoped correctly, just return it.  Otherwise, we scope our own
+   * m_invoke if it's not already scoped, or clone ourselves and scope the
+   * clone's m_invoke, then add the mapping to m_scopedClones.  It is required
+   * for correctness that all clones be added to the cache, because the cache
+   * participates in synchronization with instance bits initialization.
+   *
+   * Note that all scoping events via CreateCl opcodes clone from the
+   * "template" Closure subclass that is generated by the emitter, whereas
+   * scoping events via Closure::bind() clone from another scoped clone (which
+   * may or may not be the first clone, which aliases the template class).
+   * Thus, when rescoping dynamically, we need to find the template class
+   * first, since it owns the clone cache.
+   *
+   * Additionally, for dynamic rescopings, we always produce a clone.  Many
+   * situations may arise in Closure::bind() that never do in CreateCl---e.g.,
+   * a closure object whose class is Closure rather than an emitter-generated
+   * subclass of Closure, a closure scoped to its own class, etc.  Requiring a
+   * clone in the dynamic case keeps us from mucking up the template __invoke's
+   * attrs, and gives us the invariant that the template class is being used as
+   * a scoped clone iff its __invoke has a different cls().
+   *
+   * @requires: parent() == SystemLib::s_ClosureClass
+   */
+  Class* rescope(Class* ctx, Attr attrs = AttrNone);
 
   /*
    * Called when a Class becomes unreachable.
@@ -283,31 +339,39 @@ public:
   // Pre- and post-allocations.                                         [const]
 
   /*
-   * The start of malloc'd memory for `this' (i.e., including the method
-   * table).
+   * Pointer to this Class's FuncVec, which is allocated before this.
    */
-  LowFuncPtr* mallocPtrFromThis() const;
+  LowPtr<Func>* funcVec() const;
+
+  /*
+   * The start of malloc'd memory for `this' (i.e., including anything
+   * allocated before the object itself.).
+   */
+  void* mallocPtr() const;
 
   /*
    * Pointer to the array of Class pointers, allocated immediately after
    * `this', which contain this class's inheritance hierarchy (including `this'
    * as the last element).
    */
-  const LowClassPtr* classVec() const;
+  const LowPtr<Class>* classVec() const;
 
   /*
    * The size of the classVec.
    */
-  unsigned classVecLen() const;
+  veclen_t classVecLen() const;
 
 
   /////////////////////////////////////////////////////////////////////////////
   // Ancestry.                                                          [const]
 
   /*
-   * Determine if this represents a non-strict subtype of `cls'.
+   * Determine if this represents a non-strict subtype of `cls'.  The nonIFace
+   * variant is faster, but has the additional precondition that `cls' is not
+   * an interface.
    */
-  bool classof(const Class* cls) const;
+  bool classof(const Class*) const;
+  bool classofNonIFace(const Class*) const;
 
   /*
    * Whether this class implements an interface called `name'.
@@ -375,6 +439,12 @@ public:
   const Func* getDeclaredCtor() const;
   const Func* getDtor() const;
   const Func* getToString() const;
+
+  /*
+   * Look up a class' cached __invoke function.  We only cache __invoke methods
+   * if they are instance methods or if the class is a static closure.
+   */
+  const Func* getCachedInvoke() const;
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -448,13 +518,17 @@ public:
    */
   Func* lookupMethod(const StringData* methName) const;
 
-  static void getMethodNames(const Class* cls, const Class* ctx, Array& result);
-
   /*
-   * Look up a class' cached __invoke function. We only cache __invoke methods
-   * if they are instance methods or if the class is a static closure.
+   * Return an Array (via `out') of all the methods of `cls' visible in the
+   * context of `ctx' (which may be nullptr).
+   *
+   * The Array has the form [lowercase name => declared name], ordered with
+   * methods implemented by `cls' first, followed by its parents' methods, and
+   * so on, in declaration order for each Class in the hierarchy.  Any
+   * unimplemented interface methods come last.
    */
-  LowFuncPtr getCachedInvoke() const;
+  static void getMethodNames(const Class* cls, const Class* ctx, Array& out);
+
 
   /////////////////////////////////////////////////////////////////////////////
   // Property metadata.                                                 [const]
@@ -656,7 +730,8 @@ public:
   /*
    * Whether this class has a type constant named `typeCnsName'.
    */
-  bool hasTypeConstant(const StringData* typeCnsName) const;
+  bool hasTypeConstant(const StringData* typeCnsName,
+                       bool includeAbs = false) const;
 
   /*
    * Look up the actual value of a class constant.  Perform dynamic
@@ -667,7 +742,8 @@ public:
    * The returned Cell is guaranteed not to hold a reference counted object (it
    * may, however, be KindOfString for a static string).
    */
-  Cell clsCnsGet(const StringData* clsCnsName) const;
+  Cell clsCnsGet(const StringData* clsCnsName,
+                 bool includeTypeCns = false) const;
 
   /*
    * Look up a class constant's TypedValue if it doesn't require dynamic
@@ -675,11 +751,15 @@ public:
    *
    * Return nullptr if this class has no constant of the given name.
    *
+   * Return nullptr if the constant is abstract.
+   *
    * The TypedValue represents the constant's value iff it is a scalar,
    * otherwise it has m_type set to KindOfUninit.  Non-scalar class constants
    * need to run 86cinit code to determine their value at runtime.
    */
-  const Cell* cnsNameToTV(const StringData* clsCnsName, Slot& clsCnsInd) const;
+  const Cell* cnsNameToTV(const StringData* clsCnsName,
+                          Slot& clsCnsInd,
+                          bool includeTypeCns = false) const;
 
   /*
    * Provide the current runtime type of this class constant.
@@ -732,6 +812,7 @@ public:
    */
   const RequirementMap& allRequirements() const;
 
+
   /////////////////////////////////////////////////////////////////////////////
   // Objects.                                                           [const]
 
@@ -749,15 +830,7 @@ public:
 
 
   /////////////////////////////////////////////////////////////////////////////
-  // Other methods.
-  //
-  // Avoiding adding methods to this section.
-
-  /*
-   * Whether this class can be made persistent---i.e., if AttrPersistent is set
-   * and all parents, interfaces, and traits for this class are persistent.
-   */
-  bool verifyPersistent() const;
+  // JIT data.
 
   /*
    * Get and set the RDS handle for the class with this class's name.
@@ -774,16 +847,9 @@ public:
   Class* getCached() const;
   void setCached();
 
-  /*
-   * Set the instance bits on this class.
-   *
-   * The instance bits are a bitfield cache for instanceof checks.  During
-   * warmup, we profile the classes and interfaces most commonly checked
-   * against in instanceof checks.  Then we cache whether or not this Class
-   * satisifes the check in the corresponding bit.
-   */
-  void setInstanceBits();
-  void setInstanceBitsAndParents();
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Native data.
 
   /*
    * NativeData type declared in <<__NativeData("Type")>>.
@@ -796,11 +862,54 @@ public:
   bool hasNativePropHandler() const;
 
   /*
-   * Returns actual native handler of magic props.
+   * Return the actual native handler of magic props.
    *
    * @requires hasNativePropHandler()
    */
   const Native::NativePropHandler* getNativePropHandler() const;
+
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Closure subclasses.
+
+  /*
+   * Is this a scoped subclass of Closure?
+   */
+  bool isScopedClosure() const;
+
+  /*
+   * Return all the scoped clones of this closure class, or an empty map when
+   * this is not a closure class.
+   *
+   * NOTE: Accessing this table is only permitted when synchronized with
+   * instance bits initialization.
+   *
+   * @see: ExtraData::m_scopedClones
+   */
+  const ScopedClonesMap& scopedClones() const;
+
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Other methods.
+  //
+  // Avoiding adding methods to this section.
+
+  /*
+   * Whether this class can be made persistent---i.e., if AttrPersistent is set
+   * and all parents, interfaces, and traits for this class are persistent.
+   */
+  bool verifyPersistent() const;
+
+  /*
+   * Set the instance bits on this class.
+   *
+   * The instance bits are a bitfield cache for instanceof checks.  During
+   * warmup, we profile the classes and interfaces most commonly checked
+   * against in instanceof checks.  Then we cache whether or not this Class
+   * satisifes the check in the corresponding bit.
+   */
+  void setInstanceBits();
+  void setInstanceBitsAndParents();
 
   /*
    * Get the underlying enum base type if this is an enum.
@@ -810,6 +919,7 @@ public:
   MaybeDataType enumBaseTy() const;
 
 
+  bool needsInitSProps() const;
   /////////////////////////////////////////////////////////////////////////////
   // Offset accessors.                                                 [static]
 
@@ -823,6 +933,8 @@ public:
   OFF(invoke)
   OFF(preClass)
   OFF(propDataCache)
+  OFF(vtableVecLen)
+  OFF(vtableVec)
 #undef OFF
 
 
@@ -859,6 +971,18 @@ private:
     BuiltinDtorFunction m_instanceDtor{nullptr};
     const ClassInfo* m_clsInfo{nullptr};
     uint32_t m_builtinODTailSize{0};
+
+    /*
+     * Cache for Closure subclass scopings.
+     *
+     * Only meaningful when `this' is an unscoped subclass of Closure.  When we
+     * need to create a closure in the scope of a Class C (and with attrs A),
+     * we clone `this', rescope its __invoke() appropriately, and then cache
+     * the (C,A) => clone binding here.
+     *
+     * @see: rescope()
+     */
+    ScopedClonesMap m_scopedClones;
 
     /*
      * Objects with the <<__NativeData("T")>> UA are allocated with extra space
@@ -974,8 +1098,6 @@ private:
         unsigned funcVecLen);
   ~Class();
 
-  bool needsInitSProps() const;
-
   /*
    * Trait method import routines.
    */
@@ -1013,6 +1135,7 @@ private:
   void setProperties();
   void setInitializers();
   void setInterfaces();
+  void setInterfaceVtables();
   void setClassVec();
   void setFuncVec(MethodMapBuilder& builder);
   void setRequirements();
@@ -1053,7 +1176,7 @@ public:
   // hot, and must be the last member.
 
 public:
-  LowClassPtr m_nextClass{nullptr}; // used by NamedEntity
+  LowPtr<Class> m_nextClass{nullptr}; // used by NamedEntity
 
 private:
   default_ptr<ExtraData> m_extra;
@@ -1063,77 +1186,102 @@ private:
   uint32_t m_numDeclInterfaces{0};
   mutable rds::Link<Array> m_nonScalarConstantCache{rds::kInvalidHandle};
 
-  LowFuncPtr m_toString;
-  LowFuncPtr m_invoke; // __invoke, iff non-static (or closure)
+  LowPtr<Func> m_toString;
+  LowPtr<Func> m_invoke; // __invoke, iff non-static (or closure)
 
   ConstMap m_constants;
+
   ClassPtr m_parent;
   int32_t m_declPropNumAccessible;
   mutable rds::Link<Class*> m_cachedClass{rds::kInvalidHandle};
 
-  // Vector of 86pinit() methods that need to be called to complete instance
-  // property initialization, and a pointer to a 86sinit() method that needs to
-  // be called to complete static property initialization (or NULL).  Such
-  // initialization is triggered only once, the first time one of the following
-  // happens:
-  //    - An instance of this class is created.
-  //    - A static property of this class is accessed.
+  /*
+   * Whether this is a subclass of Closure whose m_invoke->m_cls has been set
+   * to the closure's context class.
+   */
+  std::atomic<bool> m_scoped{false};
+
+  // NB: 24 bytes available here (in USE_LOWPTR builds).
+
+  /*
+   * Vector of 86pinit() methods that need to be called to complete instance
+   * property initialization, and a pointer to a 86sinit() method that needs to
+   * be called to complete static property initialization (or NULL).  Such
+   * initialization is triggered only once, the first time one of the following
+   * happens:
+   *    - An instance of this class is created.
+   *    - A static property of this class is accessed.
+   */
   FixedVector<const Func*> m_sinitVec;
-  LowFuncPtr m_ctor;
-  LowFuncPtr m_dtor;
+  LowPtr<Func> m_ctor;
+  LowPtr<Func> m_dtor;
   PropInitVec m_declPropInit;
   FixedVector<const Func*> m_pinitVec;
   SPropMap m_staticProperties;
   PreClassPtr m_preClass;
   InterfaceMap m_interfaces;
-  // Bitmap of parent classes and implemented interfaces.  Each bit corresponds
-  // to a commonly used class name, determined during the profiling warmup
-  // requests.
+
+  /*
+   * Bitmap of parent classes and implemented interfaces.  Each bit corresponds
+   * to a commonly used class name, determined during the profiling warmup
+   * requests.
+   */
   InstanceBits::BitSet m_instanceBits;
   MethodMap m_methods;
 
-  // Static properties are stored in RDS.  There are three phases of sprop
-  // initialization:
-  // 1. The array of links is itself allocated on Class creation.
-  // 2. The links are bound either when codegen needs the handle value, or when
-  //    initSProps() is called in any request.  Afterwards, m_sPropCacheInit is
-  //    bound, defaulting to false.
-  // 3. The RDS value at m_sPropCacheInit is set to true when initSProps() is
-  //    called, and the values are actually initialized.
+  /*
+   * Static properties are stored in RDS.  There are three phases of sprop
+   * initialization:
+   * 1. The array of links is itself allocated on Class creation.
+   * 2. The links are bound either when codegen needs the handle value, or when
+   *    initSProps() is called in any request.  Afterwards, m_sPropCacheInit is
+   *    bound, defaulting to false.
+   * 3. The RDS value at m_sPropCacheInit is set to true when initSProps() is
+   *    called, and the values are actually initialized.
+   */
   mutable rds::Link<TypedValue>* m_sPropCache{nullptr};
   mutable rds::Link<bool> m_sPropCacheInit{rds::kInvalidHandle};
 
-  unsigned m_classVecLen;
-  unsigned m_funcVecLen;
+  veclen_t m_classVecLen;
+  veclen_t m_funcVecLen;
+  veclen_t m_vtableVecLen{0};
+  LowPtr<VtableVecSlot> m_vtableVec{nullptr};
 
-  // Each ObjectData is created with enough trailing space to directly store
-  // the vector of declared properties. To look up a property by name and
-  // determine whether it is declared, use m_declPropMap. If the declared
-  // property index is already known (as may be the case when executing via the
-  // TC), property metadata in m_declPropInfo can be directly accessed.
-  //
-  // m_declPropInit is indexed by the Slot values from m_declProperties, and
-  // contains initialization information.
+  /*
+   * Each ObjectData is created with enough trailing space to directly store
+   * the vector of declared properties. To look up a property by name and
+   * determine whether it is declared, use m_declPropMap. If the declared
+   * property index is already known (as may be the case when executing via the
+   * TC), property metadata in m_declPropInfo can be directly accessed.
+   *
+   * m_declPropInit is indexed by the Slot values from m_declProperties, and
+   * contains initialization information.
+   */
   PropMap m_declProperties;
 
   MaybeDataType m_enumBaseTy;
   uint16_t m_ODAttrs;
   mutable rds::Link<PropInitVec*> m_propDataCache{rds::kInvalidHandle};
 
-  unsigned m_needInitialization : 1;      // requires initialization,
-                                          // due to [ps]init or simply
-                                          // having static members
-  unsigned m_completelyUnused : 1;        // keep things in the same place
-  unsigned m_callsCustomInstanceInit : 1; // should we always call __init__
-                                          // on new instances?
-  unsigned m_hasDeepInitProps : 1;
-  unsigned m_attrCopy : 28;               // cache of m_preClass->attrs().
+  /*
+   * Whether the Class requires initialization, because it has either
+   * {p,s}init() methods or static members.
+   */
+  bool m_needInitialization : 1;
+
+  bool m_callsCustomInstanceInit : 1;
+  bool m_hasDeepInitProps : 1;
+
+  /*
+   * Cache of m_preClass->attrs().
+   */
+  unsigned m_attrCopy : 28;
 
   /*
    * Vector of Class pointers that encodes the inheritance hierarchy, including
    * this Class as the last element.
    */
-  LowClassPtr m_classVec[]; // Dynamically sized; must come last.
+  LowPtr<Class> m_classVec[1]; // Dynamically sized; must come last.
 };
 
 ///////////////////////////////////////////////////////////////////////////////

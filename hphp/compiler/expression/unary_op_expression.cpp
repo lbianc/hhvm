@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -110,18 +110,6 @@ ExpressionPtr UnaryOpExpression::clone() {
   return exp;
 }
 
-bool UnaryOpExpression::isTemporary() const {
-  switch (m_op) {
-  case '!':
-  case '+':
-  case '-':
-  case '~':
-  case T_ARRAY:
-    return true;
-  }
-  return false;
-}
-
 bool UnaryOpExpression::isScalar() const {
   switch (m_op) {
   case '!':
@@ -150,19 +138,6 @@ bool UnaryOpExpression::isCast() const {
   default: break;
   }
   return false;
-}
-
-TypePtr UnaryOpExpression::getCastType() const {
-  switch (m_op) {
-  case T_INT_CAST:    return Type::Int64;
-  case T_DOUBLE_CAST: return Type::Double;
-  case T_STRING_CAST: return Type::String;
-  case T_ARRAY_CAST:  return Type::Array;
-  case T_OBJECT_CAST: return Type::Object;
-  case T_BOOL_CAST:   return Type::Boolean;
-  default: break;
-  }
-  return TypePtr();
 }
 
 bool UnaryOpExpression::isRefable(bool checkError /*= false */) const {
@@ -303,15 +278,6 @@ void UnaryOpExpression::setNthKid(int n, ConstructPtr cp) {
   }
 }
 
-bool UnaryOpExpression::canonCompare(ExpressionPtr e) const {
-  if (!Expression::canonCompare(e)) return false;
-  UnaryOpExpressionPtr u =
-    static_pointer_cast<UnaryOpExpression>(e);
-
-  return m_op == u->m_op &&
-    m_front == u->m_front;
-}
-
 ExpressionPtr UnaryOpExpression::preOptimize(AnalysisResultConstPtr ar) {
   Variant value;
   Variant result;
@@ -331,7 +297,7 @@ ExpressionPtr UnaryOpExpression::preOptimize(AnalysisResultConstPtr ar) {
   if (m_op == T_ISSET && m_exp->is(KindOfExpressionList) &&
       static_pointer_cast<ExpressionList>(m_exp)->getListKind() ==
       ExpressionList::ListKindParam) {
-    ExpressionListPtr el(static_pointer_cast<ExpressionList>(m_exp));
+    auto el = static_pointer_cast<ExpressionList>(m_exp);
     result = true;
     int i = 0, n = el->getCount();
     for (; i < n; i++) {
@@ -394,7 +360,7 @@ ExpressionPtr UnaryOpExpression::preOptimize(AnalysisResultConstPtr ar) {
 void UnaryOpExpression::setExistContext() {
   if (m_exp) {
     if (m_exp->is(Expression::KindOfExpressionList)) {
-      ExpressionListPtr exps = dynamic_pointer_cast<ExpressionList>(m_exp);
+      auto exps = dynamic_pointer_cast<ExpressionList>(m_exp);
       if (exps->getListKind() == ExpressionList::ListKindParam) {
         for (int i = 0; i < exps->getCount(); i++) {
           (*exps)[i]->setContext(Expression::ExistContext);
@@ -449,7 +415,7 @@ void UnaryOpExpression::outputCodeModel(CodeGenerator &cg) {
         cg.printExpressionVector(m_exp);
       }
       cg.printPropertyHeader("sourceLocation");
-      cg.printLocation(this->getLocation());
+      cg.printLocation(this);
       cg.printObjectFooter();
       return;
     }
@@ -476,7 +442,7 @@ void UnaryOpExpression::outputCodeModel(CodeGenerator &cg) {
       cg.printPropertyHeader("constantName");
       cg.printValue(varName);
       cg.printPropertyHeader("sourceLocation");
-      cg.printLocation(this->getLocation());
+      cg.printLocation(this);
       cg.printObjectFooter();
       return;
     }
@@ -521,7 +487,7 @@ void UnaryOpExpression::outputCodeModel(CodeGenerator &cg) {
   }
   cg.printValue(op);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 

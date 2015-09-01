@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -39,20 +39,16 @@ public:
   void toLower(bool funcCall = false);
 
   DECLARE_BASE_EXPRESSION_VIRTUAL_FUNCTIONS;
-  virtual int getLocalEffects() const { return NoEffect; }
-  virtual bool isScalar() const { return true;}
-  virtual bool isLiteralString() const;
-  virtual std::string getLiteralString() const;
+  int getLocalEffects() const override { return NoEffect; }
+  bool isScalar() const override { return true;}
+  bool isLiteralString() const override;
+  std::string getLiteralString() const override;
   std::string getOriginalLiteralString() const;
   std::string getLiteralStringImpl(bool original) const;
   bool needsTranslation() const;
-  TypePtr inferenceImpl(AnalysisResultConstPtr ar, TypePtr type,
-                        bool coerce);
-  virtual bool getScalarValue(Variant &value) {
+  bool getScalarValue(Variant &value) override {
     value = getVariant(); return true;
   }
-  virtual unsigned getCanonHash() const;
-  virtual bool canonCompare(ExpressionPtr e) const;
   bool isQuoted() const { return m_quoted; }
 
   int getType() const { return m_type;}
@@ -66,8 +62,8 @@ public:
   Variant getVariant() const;
   int64_t getHash() const;
 
-  void setComment(const std::string &comment) { m_comment = comment;}
-  std::string getComment() { return m_comment;}
+  void setComment(const std::string &comment) override { m_comment = comment;}
+  std::string getComment() override { return m_comment;}
 
   bool getString(const std::string *&s) const;
   bool getInt(int64_t &i) const;

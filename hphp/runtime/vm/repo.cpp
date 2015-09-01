@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -547,6 +547,7 @@ void Repo::initCentral() {
     }
   }
 
+#ifndef _MSC_VER
   // Try the equivalent of "$HOME/.hhvm.hhbc", but look up the home directory
   // in the password database.
   {
@@ -565,6 +566,22 @@ void Repo::initCentral() {
       }
     }
   }
+#endif
+
+#ifdef _WIN32
+  // Try "$HOMEDRIVE$HOMEPATH/.hhvm.hhbc"
+  char* HOMEDRIVE = getenv("HOMEDRIVE");
+  if (HOMEDRIVE != nullptr) {
+    char* HOMEPATH = getenv("HOMEPATH");
+    if (HOMEPATH != nullptr) {
+      std::string centralPath = HOMEDRIVE;
+      centralPath += HOMEPATH;
+      centralPath += "\\.hhvm.hhbc";
+      if (tryPath(centralPath.c_str()))
+        return;
+    }
+  }
+#endif
 
   error = "Failed to initialize central HHBC repository:\n" + error;
   // Database initialization failed; this is an unrecoverable state.

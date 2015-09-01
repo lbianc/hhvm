@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -30,7 +30,8 @@
 #include "hphp/runtime/server/server-stats.h"
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/base/file-await.h"
-#include "hphp/runtime/base/smart-ptr.h"
+#include "hphp/runtime/base/req-ptr.h"
+#include "hphp/runtime/base/ssl-socket.h"
 #include "hphp/runtime/base/stream-wrapper.h"
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/base/user-stream-wrapper.h"
@@ -57,7 +58,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 static
-SmartPtr<StreamContext> get_stream_context(const Variant& stream_or_context);
+req::ptr<StreamContext> get_stream_context(const Variant& stream_or_context);
 
 #define REGISTER_CONSTANT(name, value)                                         \
   Native::registerConstant<KindOfInt64>(makeStaticString(#name), value)        \
@@ -194,6 +195,7 @@ public:
     HHVM_FE(stream_socket_accept);
     HHVM_FE(stream_socket_server);
     HHVM_FE(stream_socket_client);
+    HHVM_FE(stream_socket_enable_crypto);
     HHVM_FE(stream_socket_get_name);
     HHVM_FE(stream_socket_pair);
     HHVM_FE(stream_socket_recvfrom);
@@ -216,9 +218,9 @@ Variant HHVM_FUNCTION(stream_context_create,
     raise_warning("options should have the form "
                   "[\"wrappername\"][\"optionname\"] = $value");
     return Variant(
-      makeSmartPtr<StreamContext>(HPHP::null_array, HPHP::null_array));
+      req::make<StreamContext>(HPHP::null_array, HPHP::null_array));
   }
-  return Variant(makeSmartPtr<StreamContext>(arrOptions, arrParams));
+  return Variant(req::make<StreamContext>(arrOptions, arrParams));
 }
 
 Variant HHVM_FUNCTION(stream_context_get_options,
@@ -231,7 +233,7 @@ Variant HHVM_FUNCTION(stream_context_get_options,
   return context->getOptions();
 }
 
-static bool stream_context_set_option0(const SmartPtr<StreamContext>& context,
+static bool stream_context_set_option0(const req::ptr<StreamContext>& context,
                                        const Array& options) {
   if (!StreamContext::validateOptions(options)) {
     raise_warning("options should have the form "
@@ -242,7 +244,7 @@ static bool stream_context_set_option0(const SmartPtr<StreamContext>& context,
   return true;
 }
 
-static bool stream_context_set_option1(const SmartPtr<StreamContext>& context,
+static bool stream_context_set_option1(const req::ptr<StreamContext>& context,
                                        const String& wrapper,
                                        const String& option,
                                        const Variant& value) {
@@ -281,7 +283,7 @@ Variant HHVM_FUNCTION(stream_context_get_default,
   const Array& arrOptions = options.isNull() ? null_array : options.toArray();
   auto context = g_context->getStreamContext();
   if (!context) {
-    context = makeSmartPtr<StreamContext>(Array::Create(), Array::Create());
+    context = req::make<StreamContext>(Array::Create(), Array::Create());
     g_context->setStreamContext(context);
   }
   if (!arrOptions.isNull() &&
@@ -563,13 +565,13 @@ bool HHVM_FUNCTION(stream_wrapper_unregister,
 ///////////////////////////////////////////////////////////////////////////////
 // stream socket functions
 
-static SmartPtr<Socket> socket_accept_impl(
+static req::ptr<Socket> socket_accept_impl(
   const Resource& socket,
   struct sockaddr *addr,
   socklen_t *addrlen
 ) {
   auto sock = cast<Socket>(socket);
-  auto new_sock = makeSmartPtr<Socket>(
+  auto new_sock = req::make<Socket>(
     accept(sock->fd(), addr, addrlen), sock->getType());
   if (!new_sock->valid()) {
     SOCKET_ERROR(new_sock, "unable to accept incoming connection", errno);
@@ -605,6 +607,9 @@ static String get_sockaddr_name(struct sockaddr *sa, socklen_t sl) {
 
    case AF_UNIX:
      {
+#ifdef _MSC_VER
+       always_assert(false);
+#else
        struct sockaddr_un *ua = (struct sockaddr_un*)sa;
 
        if (sl == sizeof(sa_family_t)) {
@@ -621,6 +626,7 @@ static String get_sockaddr_name(struct sockaddr *sa, socklen_t sl) {
          textaddr = strndup(ua->sun_path, textaddrlen);
        }
        break;
+#endif
     }
 
   default:
@@ -654,7 +660,9 @@ Variant HHVM_FUNCTION(stream_socket_accept,
     struct sockaddr sa;
     socklen_t salen = sizeof(sa);
     auto new_sock = socket_accept_impl(server_socket, &sa, &salen);
-    peername = get_sockaddr_name(&sa, salen);
+    if (auto ref = peername.getVariantOrNull()) {
+      *ref = get_sockaddr_name(&sa, salen);
+    }
     if (new_sock) return Resource(new_sock);
   } else if (n < 0) {
     sock->setError(errno);
@@ -682,7 +690,68 @@ Variant HHVM_FUNCTION(stream_socket_client,
                       int flags /* = 0 */,
                       const Variant& context /* = null_variant */) {
   HostURL hosturl(static_cast<const std::string>(remote_socket));
-  return sockopen_impl(hosturl, errnum, errstr, timeout, false);
+  return sockopen_impl(hosturl, errnum, errstr, timeout, false, context);
+}
+
+bool HHVM_FUNCTION(stream_socket_enable_crypto,
+                   const Resource& socket,
+                   bool enable,
+                   int cryptotype,
+                   const Variant& sessionstream) {
+  auto sock = cast<SSLSocket>(socket);
+  if (!enable) {
+    return sock->disableCrypto();
+  }
+
+  if (!sessionstream.isNull()) {
+    raise_warning("stream_socket_enable_crypto(): HHVM does not yet support "
+                  "the session_stream parameter");
+    return false;
+  }
+
+  if (!cryptotype) {
+    raise_warning("stream_socket_enable_crypto(): When enabling encryption you "
+                  "must specify the crypto type");
+    return false;
+  }
+
+  SSLSocket::CryptoMethod crypto;
+  switch (cryptotype) {
+    case k_STREAM_CRYPTO_METHOD_SSLv2_CLIENT:
+      crypto = SSLSocket::CryptoMethod::ClientSSLv2;
+      break;
+    case k_STREAM_CRYPTO_METHOD_SSLv3_CLIENT:
+      crypto = SSLSocket::CryptoMethod::ClientSSLv3;
+      break;
+    case k_STREAM_CRYPTO_METHOD_SSLv23_CLIENT:
+      crypto = SSLSocket::CryptoMethod::ClientSSLv23;
+      break;
+    case k_STREAM_CRYPTO_METHOD_TLS_CLIENT:
+      crypto = SSLSocket::CryptoMethod::ClientTLS;
+      break;
+    case k_STREAM_CRYPTO_METHOD_SSLv2_SERVER:
+    case k_STREAM_CRYPTO_METHOD_SSLv3_SERVER:
+    case k_STREAM_CRYPTO_METHOD_SSLv23_SERVER:
+    case k_STREAM_CRYPTO_METHOD_TLS_SERVER:
+      raise_warning(
+        "HHVM does not yet support SSL/TLS servers implemented in PHP");
+      return false;
+    default:
+     return false;
+  }
+
+  if (
+    cryptotype != k_STREAM_CRYPTO_METHOD_TLS_CLIENT
+    && cryptotype != k_STREAM_CRYPTO_METHOD_TLS_SERVER
+  ) {
+    // Not done by PHP5/7, but using SSL nowadays is a very bad idea.
+    raise_warning(
+      "stream_socket_enable_crypto(): SSL is flawed and vulnerable; "
+      "Migrate to TLS as soon as possible."
+    );
+  }
+
+  return sock->enableCrypto(crypto);
 }
 
 Variant HHVM_FUNCTION(stream_socket_get_name,
@@ -721,11 +790,13 @@ Variant HHVM_FUNCTION(stream_socket_recvfrom,
   Variant retval = HHVM_FN(socket_recvfrom)(socket, ref(ret), length, flags,
                                             ref(host), ref(port));
   if (!same(retval, false) && retval.toInt64() >= 0) {
-    auto sock = cast<Socket>(socket);
-    if (sock->getType() == AF_INET6) {
-      address = "[" + host.toString() + "]:" + port.toInt32();
-    } else {
-      address = host.toString() + ":" + port.toInt32();
+    if (auto ref = address.getVariantOrNull()) {
+      auto sock = cast<Socket>(socket);
+      if (sock->getType() == AF_INET6) {
+        *ref = "[" + host.toString() + "]:" + port.toInt32();
+      } else {
+        *ref = host.toString() + ":" + port.toInt32();
+      }
     }
     return ret.toString(); // watch out, "ret", not "retval"
   }
@@ -762,7 +833,7 @@ bool HHVM_FUNCTION(stream_socket_shutdown,
 }
 
 static
-SmartPtr<StreamContext> get_stream_context(const Variant& stream_or_context) {
+req::ptr<StreamContext> get_stream_context(const Variant& stream_or_context) {
   if (!stream_or_context.isResource()) {
     return nullptr;
   }
@@ -773,7 +844,7 @@ SmartPtr<StreamContext> get_stream_context(const Variant& stream_or_context) {
   if (file != nullptr) {
     auto context = file->getStreamContext();
     if (!file->getStreamContext()) {
-      context = makeSmartPtr<StreamContext>(Array::Create(), Array::Create());
+      context = req::make<StreamContext>(Array::Create(), Array::Create());
       file->setStreamContext(context);
     }
     return context;

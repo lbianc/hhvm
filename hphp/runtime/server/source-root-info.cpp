@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -34,6 +34,8 @@ namespace HPHP {
 IMPLEMENT_THREAD_LOCAL_NO_CHECK(std::string, SourceRootInfo::s_path);
 IMPLEMENT_THREAD_LOCAL_NO_CHECK(std::string, SourceRootInfo::s_phproot);
 
+const StaticString s_default("default");
+const StaticString s___builtin("__builtin");
 SourceRootInfo::SourceRootInfo(Transport* transport)
     : m_sandboxCond(RuntimeOption::SandboxMode ? SandboxCondition::On :
                                                  SandboxCondition::Off) {
@@ -42,8 +44,8 @@ SourceRootInfo::SourceRootInfo(Transport* transport)
 
   auto documentRoot = transport->getDocumentRoot();
   if (!documentRoot.empty()) {
-    m_user = "__builtin";
-    m_sandbox = "default";
+    m_user = s___builtin;
+    m_sandbox = s_default;
     // The transport take precedence over the config file
     m_path = documentRoot;
     *s_path.getCheck() = documentRoot;
@@ -55,7 +57,7 @@ SourceRootInfo::SourceRootInfo(Transport* transport)
   Variant matches;
   Variant r = preg_match(String(RuntimeOption::SandboxPattern.c_str(),
                                 RuntimeOption::SandboxPattern.size(),
-                                CopyString), host, matches);
+                                CopyString), host, &matches);
   if (!same(r, 1)) {
     m_sandboxCond = SandboxCondition::Off;
     return;
@@ -65,11 +67,11 @@ SourceRootInfo::SourceRootInfo(Transport* transport)
     createFromCommonRoot(sandboxName);
   } else {
     Array pair = StringUtil::Explode(
-      matches.toArray().rvalAt(1), "-", 2).toArray();
+      matches.toArray().rvalAt(1).toString(), "-", 2).toArray();
     m_user = pair.rvalAt(0).toString();
     bool defaultSb = pair.size() == 1;
     if (defaultSb) {
-      m_sandbox = "default";
+      m_sandbox = s_default;
     } else {
       m_sandbox = pair.rvalAt(1).toString();
     }
@@ -103,7 +105,7 @@ void SourceRootInfo::createFromCommonRoot(const String &sandboxName) {
   }
   String logPath = logsRoot + "/" + sandboxName + "_error.log";
   String accessLogPath = logsRoot + "/" + sandboxName + "_access.log";
-  if (!Logger::SetThreadLog(logPath.c_str())) {
+  if (!Logger::SetThreadLog(logPath.c_str(), false)) {
     Logger::Warning("Sandbox error log %s could not be opened",
                     logPath.c_str());
   }
@@ -112,8 +114,6 @@ void SourceRootInfo::createFromCommonRoot(const String &sandboxName) {
                     accessLogPath.c_str());
   }
 }
-
-const StaticString s_default("default");
 
 void SourceRootInfo::createFromUserConfig() {
   String homePath = String(RuntimeOption::SandboxHome) + "/" + m_user + "/";
@@ -145,13 +145,16 @@ void SourceRootInfo::createFromUserConfig() {
     Logger::Error("%s ignored: %s", confFileName.c_str(),
                   e.getMessage().c_str());
   }
-  if (config[(m_sandbox + ".ServerVars").c_str()]. exists()) {
-    for (Hdf hdf = config[(m_sandbox + ".ServerVars").c_str()].firstChild();
-                   hdf.exists(); hdf = hdf.next()) {
-      m_serverVars.set(String(hdf.getName()),
-                       String(Config::GetString(ini, hdf)));
-    }
-  }
+  auto sandbox_servervars_callback = [&] (const IniSetting::Map &ini_ss,
+                                          const Hdf &hdf_ss,
+                                          const std::string &ini_ss_key) {
+    std::string name = hdf_ss.exists() && !hdf_ss.isEmpty()
+                     ? hdf_ss.getName()
+                     : ini_ss_key;
+    m_serverVars.set(String(name), String(Config::GetString(ini_ss, hdf_ss)));
+  };
+  Config::Iterate(sandbox_servervars_callback, ini, config,
+                  (m_sandbox + ".ServerVars").c_str());
   if (!userOverride.empty()) {
     m_user = std::move(userOverride);
   }
@@ -176,7 +179,7 @@ void SourceRootInfo::createFromUserConfig() {
     if (lp.charAt(0) != '/') {
       lp = homePath + lp;
     }
-    if (!Logger::SetThreadLog(lp.c_str())) {
+    if (!Logger::SetThreadLog(lp.c_str(), false)) {
       Logger::Warning("Sandbox error log %s could not be opened",
                       lp.c_str());
     }
@@ -233,7 +236,7 @@ std::string
 SourceRootInfo::parseSandboxServerVariable(const std::string &format) const {
   std::ostringstream res;
   bool control = false;
-  for (uint i = 0; i < format.size(); i++) {
+  for (uint32_t i = 0; i < format.size(); i++) {
     char c = format[i];
     if (control) {
       switch (c) {

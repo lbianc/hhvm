@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,7 +18,7 @@
 #define incl_HPHP_VM_CLASS_EMIT_H_
 
 #include "hphp/runtime/base/repo-auth-type.h"
-#include "hphp/runtime/base/types.h"
+#include "hphp/runtime/base/array-data.h"
 
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/func.h"
@@ -165,7 +165,9 @@ class PreClassEmitter {
   Id id() const { return m_id; }
   int32_t numDeclMethods() const { return m_numDeclMethods; }
   void setNumDeclMethods(uint32_t n) { m_numDeclMethods = n; }
+  void setIfaceVtableSlot(Slot s) { m_ifaceVtableSlot = s; }
   const MethodVec& methods() const { return m_methods; }
+  FuncEmitter* findMethod(const StringData* name) { return m_methodMap[name]; }
   const PropMap::Builder& propMap() const { return m_propMap; }
   const ConstMap::Builder& constMap() const { return m_constMap; }
   const StringData* docComment() const { return m_docComment; }
@@ -186,10 +188,11 @@ class PreClassEmitter {
   const Prop& lookupProp(const StringData* propName) const;
   bool addConstant(const StringData* n, const StringData* typeConstraint,
                    const TypedValue* val, const StringData* phpCode,
-                   const bool typeConst);
+                   const bool typeConst = false,
+                   const Array typeStructure = Array::Create());
   bool addAbstractConstant(const StringData* n,
                            const StringData* typeConstraint,
-                           const bool typeConst);
+                           const bool typeConst = false);
   void addUsedTrait(const StringData* traitName);
   void addClassRequirement(const PreClass::ClassRequirement req) {
     m_requirements.push_back(req);
@@ -256,6 +259,7 @@ class PreClassEmitter {
   uint32_t m_builtinObjSize{0};
   int32_t m_builtinODOffset{0};
   int32_t m_numDeclMethods{-1};
+  Slot m_ifaceVtableSlot{kInvalidSlot};
   int m_memoizeInstanceSerial{0};
 
   std::vector<LowStringPtr> m_interfaces;

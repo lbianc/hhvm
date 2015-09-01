@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -25,6 +25,7 @@
 #include <folly/String.h>
 
 #include <memory>
+#include <set>
 
 #include <sys/types.h>
 #include <sys/ipc.h>
@@ -32,27 +33,22 @@
 #include <sys/sem.h>
 #include <sys/shm.h>
 
-/* these are missing from cygwin ipc headers */
 #ifdef __CYGWIN__
-struct msgbuf {
-    long mtype;
-    char mtext[1];
-};
+/* These is missing from cygwin ipc headers. */
 #define MSG_EXCEPT 02000
 #endif
 
-#if defined(__APPLE__) || defined(__FreeBSD__)
-# include <sys/msgbuf.h>
-#include <set>
-# define MSGBUF_MTYPE(b) (b)->msg_magic
-# ifdef __APPLE__
-#  define MSGBUF_MTEXT(b) (b)->msg_bufc
-# else
-#  define MSGBUF_MTEXT(b) (b)->msg_ptr
-# endif
+#if defined(__APPLE__) || defined(__CYGWIN__)
+/* OS X defines msgbuf, but it is defined with extra fields and some weird
+ * types. It turns out that the actual msgsnd() and msgrcv() calls work fine
+ * with the same structure that other OSes use. This is weird, but this is also
+ * what PHP does, so *shrug*. */
+typedef struct {
+    long mtype;
+    char mtext[1];
+} hhvm_msgbuf;
 #else
-# define MSGBUF_MTYPE(b) (b)->mtype
-# define MSGBUF_MTEXT(b) (b)->mtext
+typedef msgbuf hhvm_msgbuf;
 #endif
 
 using HPHP::ScopedMem;
@@ -133,8 +129,9 @@ public:
   int id;
 
   CLASSNAME_IS("MessageQueue");
-  // overriding ResourceData
-  virtual const String& o_getClassNameHook() const { return classnameof(); }
+  const String& o_getClassNameHook() const override {
+    return classnameof();
+  }
 };
 
 Variant HHVM_FUNCTION(msg_get_queue,
@@ -149,7 +146,7 @@ Variant HHVM_FUNCTION(msg_get_queue,
       return false;
     }
   }
-  auto q = makeSmartPtr<MessageQueue>();
+  auto q = req::make<MessageQueue>();
   q->key = key;
   q->id = id;
   return Variant(std::move(q));
@@ -250,7 +247,7 @@ bool HHVM_FUNCTION(msg_send,
     return false;
   }
 
-  struct msgbuf *buffer = NULL;
+  hhvm_msgbuf *buffer = nullptr;
   String data;
   if (serialize) {
     data = HHVM_FN(serialize)(message);
@@ -258,17 +255,17 @@ bool HHVM_FUNCTION(msg_send,
     data = message.toString();
   }
   int len = data.length();
-  buffer = (struct msgbuf *)calloc(len + sizeof(struct msgbuf), 1);
+  buffer = (hhvm_msgbuf *)calloc(len + sizeof(hhvm_msgbuf), 1);
   ScopedMem deleter(buffer);
-  MSGBUF_MTYPE(buffer) = msgtype;
-  memcpy(MSGBUF_MTEXT(buffer), data.c_str(), len + 1);
+  buffer->mtype = msgtype;
+  memcpy(buffer->mtext, data.c_str(), len + 1);
 
   int result = msgsnd(q->id, buffer, len, blocking ? 0 : IPC_NOWAIT);
   if (result < 0) {
     int err = errno;
     raise_warning("Unable to send message: %s",
                     folly::errnoStr(err).c_str());
-    errorcode = err;
+    errorcode.assignIfRef(err);
     return false;
   }
   return true;
@@ -302,24 +299,23 @@ bool HHVM_FUNCTION(msg_receive,
     if (flags & k_MSG_IPC_NOWAIT) realflags |= IPC_NOWAIT;
   }
 
-  struct msgbuf *buffer =
-    (struct msgbuf *)calloc(maxsize + sizeof(struct msgbuf), 1);
+  hhvm_msgbuf *buffer = (hhvm_msgbuf *)calloc(maxsize + sizeof(hhvm_msgbuf), 1);
   ScopedMem deleter(buffer);
 
   int result = msgrcv(q->id, buffer, maxsize, desiredmsgtype, realflags);
   if (result < 0) {
-    errorcode = errno;
+    errorcode.assignIfRef(errno);
     return false;
   }
 
-  msgtype = (int)MSGBUF_MTYPE(buffer);
+  msgtype.assignIfRef((int)buffer->mtype);
   if (unserialize) {
-    const char *bufText = (const char *)MSGBUF_MTEXT(buffer);
-    uint bufLen = strlen(bufText);
+    const char *bufText = (const char *)buffer->mtext;
+    uint32_t bufLen = strlen(bufText);
     VariableUnserializer vu(bufText, bufLen,
                             VariableUnserializer::Type::Serialize);
     try {
-      message = vu.unserialize();
+      message.assignIfRef(vu.unserialize());
     } catch (ResourceExceededException&) {
       throw;
     } catch (Exception&) {
@@ -327,7 +323,7 @@ bool HHVM_FUNCTION(msg_receive,
       return false;
     }
   } else {
-    message = String((const char *)MSGBUF_MTEXT(buffer));
+    message.assignIfRef(String((const char *)buffer->mtext));
   }
 
   return true;
@@ -377,7 +373,7 @@ struct Semaphore : SweepableResourceData {
 
     if (!acquire && count == 0) {
       raise_warning("SysV semaphore %d (key 0x%x) is not currently acquired",
-                      o_getId(), key);
+                    getId(), key);
       return false;
     }
 
@@ -523,7 +519,7 @@ Variant HHVM_FUNCTION(sem_get,
     }
   }
 
-  auto sem_ptr = makeSmartPtr<Semaphore>();
+  auto sem_ptr = req::make<Semaphore>();
   sem_ptr->key   = key;
   sem_ptr->semid = semid;
   sem_ptr->count = 0;
@@ -544,13 +540,13 @@ bool HHVM_FUNCTION(sem_remove,
   un.buf = &buf;
   if (semctl(sem_ptr->semid, 0, IPC_STAT, un) < 0) {
     raise_warning("SysV semaphore %d does not (any longer) exist",
-                    sem_identifier->o_getId());
+                    sem_identifier->getId());
     return false;
   }
 
   if (semctl(sem_ptr->semid, 0, IPC_RMID, un) < 0) {
     raise_warning("failed for SysV sempphore %d: %s",
-                    sem_identifier->o_getId(),
+                    sem_identifier->getId(),
                     folly::errnoStr(errno).c_str());
     return false;
   }

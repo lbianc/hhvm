@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -39,6 +39,7 @@
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 # define htolell(x) (x)
 # define letohll(x) (x)
+# ifndef htonll
 # if defined(__FreeBSD__)
 #  define htonll(x) bswap64(x)
 #  define ntohll(x) bswap64(x)
@@ -48,6 +49,7 @@
 # else
 #  define htonll(x) bswap_64(x)
 #  define ntohll(x) bswap_64(x)
+# endif
 # endif
 #else
 # if defined(__FreeBSD__)
@@ -60,8 +62,10 @@
 #  define htolell(x) bswap_64(x)
 #  define letohll(x) bswap_64(x)
 # endif
+# ifndef htonll
 # define htonll(x) (x)
 # define ntohll(x) (x)
+# endif
 #endif
 
 namespace HPHP { namespace thrift {

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,9 +17,8 @@
 #ifndef incl_HPHP_VARIABLE_UNSERIALIZER_H_
 #define incl_HPHP_VARIABLE_UNSERIALIZER_H_
 
-#include "hphp/runtime/base/smart-containers.h"
+#include "hphp/runtime/base/req-containers.h"
 #include "hphp/runtime/base/type-variant.h"
-#include "hphp/runtime/base/types.h"
 
 namespace HPHP {
 
@@ -73,7 +72,6 @@ struct VariableUnserializer {
    * Read a character and throw if it differs from expected.
    */
   void expectChar(char expected);
-  void throwUnexpected(char expected, char got);
 
   /*
    * Accessors.
@@ -137,18 +135,13 @@ private:
   Type m_type;
   const char* m_buf;
   const char* m_end;
-  smart::vector<RefInfo> m_refs;
+  req::vector<RefInfo> m_refs;
   bool m_unknownSerializable;
   const Array& m_classWhiteList;    // classes allowed to be unserialized
 };
 
-///////////////////////////////////////////////////////////////////////////////
-
-void unserializeVariant(Variant&, VariableUnserializer *unserializer,
-                        UnserializeMode mode = UnserializeMode::Value);
+void reserialize(VariableUnserializer *uns, StringBuffer &buf);
 
 }
-
-#include "hphp/runtime/base/variable-unserializer-inl.h"
 
 #endif // incl_HPHP_VARIABLE_UNSERIALIZER_H_

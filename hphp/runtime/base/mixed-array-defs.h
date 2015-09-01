@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -47,12 +47,10 @@ ALWAYS_INLINE int32_t* mixedHash(MixedArray::Elm* data, uint32_t scale) {
 }
 
 template<class F> void MixedArray::scan(F& mark) const {
+  if (isZombie()) return;
   auto data = this->data();
   for (unsigned i = 0, n = m_used; i < n; i++) {
-    auto& e = data[i];
-    if (MixedArray::isTombstone(e.data.m_type)) continue;
-    if (e.hasStrKey()) mark(e.skey);
-    mark(e.data);
+    data[i].scan(mark);
   }
 }
 
@@ -91,6 +89,7 @@ bool MixedArray::isFull() const {
 ALWAYS_INLINE
 void MixedArray::InitSmall(MixedArray* a, RefCount count, uint32_t size,
                            int64_t nextIntKey) {
+  assert(count != 0);
   // Intentionally initialize hash table before header.
 #ifdef __x86_64__
   static_assert(MixedArray::Empty == -1, "");
@@ -100,7 +99,7 @@ void MixedArray::InitSmall(MixedArray* a, RefCount count, uint32_t size,
   __asm__ __volatile__(
     "pcmpeqd    %%xmm0, %%xmm0\n"          // xmm0 <- 11111....
     "movdqu     %%xmm0, 104(%0)\n"
-      : : "r"(a)
+    : : "r"(a) : "xmm0"
   );
 #endif
 
@@ -124,28 +123,40 @@ inline void MixedArray::initHash(int32_t* hash, uint32_t scale) {
   static_assert(Empty == -1, "The following fills with all 1's.");
   assertx(HashSize(scale) == scale * 4);
 
-  uint64_t offset = static_cast<uint32_t>(scale) * 16;
+  uint64_t offset = scale * 16;
   __asm__ __volatile__(
     "pcmpeqd    %%xmm0, %%xmm0\n"          // xmm0 <- 11111....
     ".l%=:\n"
     "sub        $0x10, %0\n"
     "movdqu     %%xmm0, (%1, %0)\n"
     "ja         .l%=\n"
-      : "+r"(offset) : "r"(hash) : "%xmm0"
+    : "+r"(offset) : "r"(hash) : "xmm0"
   );
 #else
   wordfill(hash, Empty, HashSize(scale));
 #endif
 }
 
-inline int32_t*
-MixedArray::copyHash(int32_t* to, const int32_t* from, size_t count) {
-  return wordcpy(to, from, count);
+inline void
+MixedArray::copyHash(int32_t* to, const int32_t* from, uint32_t scale) {
+  assertx(HashSize(scale) == scale * 4);
+  uint64_t nBytes = scale * 16;
+  memcpy16_inline(to, from, nBytes);
 }
 
-inline MixedArray::Elm*
-MixedArray::copyElms(Elm* to, const Elm* from, size_t count) {
-  return wordcpy(to, from, count);
+inline void
+MixedArray::copyElmsNextUnsafe(MixedArray* to, const MixedArray* from,
+                               uint32_t nElems) {
+  static_assert(offsetof(MixedArray, m_nextKI) + 8 == sizeof(MixedArray),
+                "Revisit this if MixedArray layout changes");
+  static_assert(sizeof(Elm) == 24, "");
+  // Copy `m_nextKI' (8 bytes), data (oldUsed * 24), and optionally 24 more
+  // bytes to make sure we can use bcopy32(), which rounds the length down to
+  // 32-byte chunks. The additional bytes are guaranteed not to exceed the
+  // space allocated for the array, because the hash table has at least 16
+  // bytes, and when it is only 16 bytes (capacity = 3), we overrun the buffer
+  // by only 16 bytes instead of 24.
+  bcopy32_inline(&(to->m_nextKI), &(from->m_nextKI), sizeof(Elm) * nElems + 32);
 }
 
 extern int32_t* warnUnbalanced(size_t n, int32_t* ei);
@@ -435,13 +446,13 @@ uint32_t computeScaleFromSize(uint32_t n) {
 }
 
 ALWAYS_INLINE
-MixedArray* smartAllocArray(uint32_t scale) {
+MixedArray* reqAllocArray(uint32_t scale) {
   auto const allocBytes = computeAllocBytes(scale);
   return static_cast<MixedArray*>(MM().objMalloc(allocBytes));
 }
 
 ALWAYS_INLINE
-MixedArray* mallocArray(uint32_t scale) {
+MixedArray* staticAllocArray(uint32_t scale) {
   auto const allocBytes = computeAllocBytes(scale);
   return static_cast<MixedArray*>(std::malloc(allocBytes));
 }

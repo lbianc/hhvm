@@ -14,6 +14,7 @@ if (OCAMLC_FOUND)
     list(APPEND extra_cc_flags -DHAVE_ELF_GETSHDRSTRNDX)
   endif()
 
+  list(APPEND extra_cc_flags -DOSS_SMALL_HH_TABLE_POWS)
   list(APPEND extra_cc_flags -pthread)
 
   foreach(lib ${LIBELF_LIBRARIES})
@@ -72,5 +73,17 @@ if (OCAMLC_FOUND)
 
   install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/bin/hh_server
     DESTINATION bin
+    COMPONENT dev)
+
+  install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/bin/hh_format
+    DESTINATION bin
+    COMPONENT dev)
+
+  install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/bin/h2tp
+    DESTINATION bin
+    COMPONENT dev)
+
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/h2tp/resources/
+    DESTINATION share/hhvm/hack/hacklib
     COMPONENT dev)
 endif()

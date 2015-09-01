@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,6 +17,7 @@
 
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
+#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/irgen.h"
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-inlining.h"
@@ -31,7 +32,7 @@ namespace {
 
 const StaticString s_returnHook("SurpriseReturnHook");
 
-void retSurpriseCheck(IRGS& env, SSATmp* frame, SSATmp* retVal) {
+void retSurpriseCheck(IRGS& env, SSATmp* retVal) {
   /*
    * This is a weird situation for throwing: we've partially torn down the
    * ActRec (decref'd all the frame's locals), and we've popped the return
@@ -45,12 +46,13 @@ void retSurpriseCheck(IRGS& env, SSATmp* frame, SSATmp* retVal) {
   ifThen(
     env,
     [&] (Block* taken) {
-      gen(env, CheckSurpriseFlags, taken);
+      auto const ptr = resumed(env) ? sp(env) : fp(env);
+      gen(env, CheckSurpriseFlags, taken, ptr);
     },
     [&] {
       hint(env, Block::Hint::Unlikely);
       ringbufferMsg(env, Trace::RBTypeMsg, s_returnHook.get());
-      gen(env, ReturnHook, frame, retVal);
+      gen(env, ReturnHook, fp(env), retVal);
     }
   );
   ringbufferMsg(env, Trace::RBTypeFuncExit, curFunc(env)->fullName());
@@ -175,7 +177,7 @@ void implRet(IRGS& env) {
     freeLocalsAndThis(env);
   }
 
-  retSurpriseCheck(env, fp(env), retval);
+  retSurpriseCheck(env, retval);
 
   if (func->isAsyncFunction()) {
     return asyncFunctionReturn(env, retval);

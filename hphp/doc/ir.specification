@@ -135,17 +135,10 @@ ConsumesRC
   The instruction consumes a reference to one or more of its sources, either by
   decreasing its refcount or storing the reference to memory.
 
-KillsSource
-
-  The instruction calls decref on one or more of its sources. Unless a source
-  is known to have a refcount > 1 before the instruction executes, it cannot
-  safely be used after the instruction has executed.
-
 ProducesRC
 
-  The instruction produces an incref'd value.
-
-  This flag is currently unused.
+  The instruction produces a value with an unconsumed reference that must be
+  consumed, either by DecRefing it or storing it somewhere in memory.
 
 MayRaiseError
 
@@ -257,6 +250,10 @@ loaded, using a separate CheckRefInner instruction.
 
   Cast the stack element at `offset' (in cells) from S0 to type T.
 
+| CastMem<T>, ND, S(PtrToGen), Er
+
+  Cast the TypedValue at S0 to type T.
+
 The following instructions deal with parameter coercion (the standard type
 conversion for arguments to HNI functions). If parameter coercion fails these
 functions will throw a TVCoercion exception. They may throw other types of
@@ -267,6 +264,13 @@ exceptions depending on how coercion is implemented.
   Converts the stack slot at offset (in cells) to type T, with the semantics
   needed for calling a builtin function. May throw a TVCoercionException in the
   case of failed parameter coercion. The callee is f, and the position of the
+  argument being coerced is argNum.
+
+| CoerceMem<T,fn,argNum>, ND, S(PtrToGen), Er
+
+  Coerces the TypedValue at S0 to type T, with the semantics
+  needed for calling a builtin function. May throw a TVCoercionException in the
+  case of failed parameter coercion. The callee is fn, and the position of the
   argument being coerced is argNum.
 
 | CoerceCellToBool<fn,argNum>, D(Bool), S(Cell), Er
@@ -414,11 +418,11 @@ To array conversions:
 
 | ConvIntToArr,                 D(Arr), S(Int),                          PRc
 
-| ConvObjToArr,                 D(Arr), S(Obj),                 Er|PRc|CRc|K
+| ConvObjToArr,                 D(Arr), S(Obj),                   Er|PRc|CRc
 
 | ConvStrToArr,                 D(Arr), S(Str),                      PRc|CRc
 
-| ConvCellToArr,                D(Arr), S(Cell),                Er|PRc|CRc|K
+| ConvCellToArr,                D(Arr), S(Cell),                  Er|PRc|CRc
 
 
 To bool conversions:
@@ -448,6 +452,8 @@ To double conversions:
 
 | ConvStrToDbl,                 D(Dbl), S(Str),                           NF
 
+| ConvResToDbl,                 D(Dbl), S(Res),                           NF
+
 | ConvCellToDbl,                D(Dbl), S(Cell),                          Er
 
 
@@ -463,12 +469,14 @@ To int conversions:
 
 | ConvStrToInt,                 D(Int), S(Str),                           NF
 
+| ConvResToInt,                 D(Int), S(Res),                           NF
+
 | ConvCellToInt,                D(Int), S(Cell),                          Er
 
 
 To object conversions:
 
-| ConvCellToObj, D(Obj), S(Cell), Er|CRc|PRc|K
+| ConvCellToObj, D(Obj), S(Cell), Er|CRc|PRc
 
 
 To string conversions:
@@ -501,40 +509,6 @@ To string conversions:
 
 4. Boolean predicates
 
-| Gt,                          D(Bool), S(Gen) S(Gen), NF
-
-| GtX,                         D(Bool), S(Gen) S(Gen), Er
-
-| Gte,                         D(Bool), S(Gen) S(Gen), NF
-
-| GteX,                        D(Bool), S(Gen) S(Gen), Er
-
-| Lt,                          D(Bool), S(Gen) S(Gen), NF
-
-| LtX,                         D(Bool), S(Gen) S(Gen), Er
-
-| Lte,                         D(Bool), S(Gen) S(Gen), NF
-
-| LteX,                        D(Bool), S(Gen) S(Gen), Er
-
-| Eq,                          D(Bool), S(Gen) S(Gen), NF
-
-| EqX,                         D(Bool), S(Gen) S(Gen), Er
-
-| Neq,                         D(Bool), S(Gen) S(Gen), NF
-
-| NeqX,                        D(Bool), S(Gen) S(Gen), Er
-
-| Same,                        D(Bool), S(Gen) S(Gen), NF
-
-| NSame,                       D(Bool), S(Gen) S(Gen), NF
-
-  Perform comparisons with PHP semantics on S0 and S1, and put the result in D.
-  The -X versions may re-enter the VM when comparing an Object with a string,
-  and therefore may throw exceptions. The non-X versions must not be passed
-  (Object,String) pairs, and do not throw. Note that Same and NSame never
-  re-enter or throw, for any types.
-
 | GtInt,                       D(Bool), S(Int) S(Int),                    NF
 
 | GteInt,                      D(Bool), S(Int) S(Int),                    NF
@@ -565,6 +539,107 @@ To string conversions:
   Perform comparisons of doubles. Comparisons that are unordered according to
   IEEE 754 (such as when at least one operand is NaN) result in false.
 
+| GtStr,                       D(Bool), S(Str) S(Str),                    NF
+
+| GteStr,                      D(Bool), S(Str) S(Str),                    NF
+
+| LtStr,                       D(Bool), S(Str) S(Str),                    NF
+
+| LteStr,                      D(Bool), S(Str) S(Str),                    NF
+
+| EqStr,                       D(Bool), S(Str) S(Str),                    NF
+
+| NeqStr,                      D(Bool), S(Str) S(Str),                    NF
+
+| SameStr,                     D(Bool), S(Str) S(Str),                    NF
+
+| NSameStr,                    D(Bool), S(Str) S(Str),                    NF
+
+  Performs comparison of strings using PHP semantics.
+
+| GtStrInt,                    D(Bool), S(Str) S(Int),                    NF
+
+| GteStrInt,                   D(Bool), S(Str) S(Int),                    NF
+
+| LtStrInt,                    D(Bool), S(Str) S(Int),                    NF
+
+| LteStrInt,                   D(Bool), S(Str) S(Int),                    NF
+
+| EqStrInt,                    D(Bool), S(Str) S(Int),                    NF
+
+| NeqStrInt,                   D(Bool), S(Str) S(Int),                    NF
+
+  Performs comparison of strings with integers using PHP semantics.
+
+| GtBool,                      D(Bool), S(Bool) S(Bool),                  NF
+
+| GteBool,                     D(Bool), S(Bool) S(Bool),                  NF
+
+| LtBool,                      D(Bool), S(Bool) S(Bool),                  NF
+
+| LteBool,                     D(Bool), S(Bool) S(Bool),                  NF
+
+| EqBool,                      D(Bool), S(Bool) S(Bool),                  NF
+
+| NeqBool,                     D(Bool), S(Bool) S(Bool),                  NF
+
+  Performs comparison of booleans.
+
+| GtObj,                       D(Bool), S(Obj) S(Obj),                    Er
+
+| GteObj,                      D(Bool), S(Obj) S(Obj),                    Er
+
+| LtObj,                       D(Bool), S(Obj) S(Obj),                    Er
+
+| LteObj,                      D(Bool), S(Obj) S(Obj),                    Er
+
+| EqObj,                       D(Bool), S(Obj) S(Obj),                    Er
+
+| NeqObj,                      D(Bool), S(Obj) S(Obj),                    Er
+
+| SameObj,                     D(Bool), S(Obj) S(Obj),                    NF
+
+| NSameObj,                    D(Bool), S(Obj) S(Obj),                    NF
+
+  Perform comparison of objects using PHP semantics. All versions except for
+  SameObj and NSameObj may re-enter the VM and therefore may throw
+  exceptions. SameObj and NSameObj never re-enter or throw.
+
+| GtArr,                       D(Bool), S(Arr) S(Arr),                    Er
+
+| GteArr,                      D(Bool), S(Arr) S(Arr),                    Er
+
+| LtArr,                       D(Bool), S(Arr) S(Arr),                    Er
+
+| LteArr,                      D(Bool), S(Arr) S(Arr),                    Er
+
+| EqArr,                       D(Bool), S(Arr) S(Arr),                    Er
+
+| NeqArr,                      D(Bool), S(Arr) S(Arr),                    Er
+
+| SameArr,                     D(Bool), S(Arr) S(Arr),                    NF
+
+| NSameArr,                    D(Bool), S(Arr) S(Arr),                    NF
+
+  Perform comparison of arrays using PHP semantics. All versions except for
+  SameArr and NSameArr may re-enter the VM and therefore may throw
+  exceptions. SameArr and NSameArr never re-enter or throw.
+
+| GtRes,                       D(Bool), S(Res) S(Res),                    NF
+
+| GteRes,                      D(Bool), S(Res) S(Res),                    NF
+
+| LtRes,                       D(Bool), S(Res) S(Res),                    NF
+
+| LteRes,                      D(Bool), S(Res) S(Res),                    NF
+
+| EqRes,                       D(Bool), S(Res) S(Res),                    NF
+
+| NeqRes,                      D(Bool), S(Res) S(Res),                    NF
+
+  Perform comparison of resources using PHP semantics. Resource comparisons
+  never re-enter or throw.
+
 | InstanceOf, D(Bool), S(Cls) S(Cls|Nullptr), NF
 
   Sets D based on whether S0 is a descendant of the class, interface, or trait
@@ -576,6 +651,11 @@ To string conversions:
   Fast path for interface checks. Sets D based on whether S0 implements S1, but
   S1 must be a unique interface. This should only be used in repo-authoritative
   mode.
+
+| InstanceOfIfaceVtable<iface>, D(Bool), S(Cls), NF
+
+  Faster path for interface checks. Sets D based on whether S0 implements
+  iface, which must be a unique interface with an assigned vtable slot.
 
 | ExtendsClass, D(Bool), S(Cls) C(Cls), NF
 
@@ -600,6 +680,10 @@ To string conversions:
 | InterfaceSupportsDbl,        D(Bool), S(Str), NF
 
   Returns whether t instanceof S0 returns true when t is of the given type.
+
+| HasToString, D(Bool), S(Obj), NF
+
+  Returns whether the object S0 has a toString method.
 
 | IsType<T>, D(Bool), S(Cell), NF
 
@@ -628,6 +712,10 @@ To string conversions:
 
   Sets D to true iff S0 is a subclass of WaitHandle.
 
+| IsCol, D(Bool), S(Obj), NF
+
+  Sets D to true iff S0 is a collection.
+
 
 5. Branches
 
@@ -652,10 +740,12 @@ To string conversions:
 
   Profile a switch statement target.
 
-| CheckSurpriseFlags, ND, NA, B
+| CheckSurpriseFlags, ND, S(FramePtr,StkPtr), B
 
   Tests the implementation-specific surprise flags. If they're true, branches
-  to block B.
+  to block B. This is done by comparing an evaluation stack pointer to the RDS
+  stackLimitAndSurprise word. Note that in a resumed, the frame pointer is not
+  pointing into the eval stack, so S0 should be a StkPtr in that case.
 
 | ReturnHook, ND, S(FramePtr) S(Gen), Er
 
@@ -793,8 +883,21 @@ To string conversions:
 | LdCtx, DCtx, S(FramePtr), NF
 
   Loads into D the value of the m_this/m_cls field out of the frame pointer S0,
-  which must be a frame for the function in the LdCtx's Marker. The result
+  which must be a frame for the function in the LdCtx's marker. The result
   could be either an object representing the this pointer or a class context.
+
+| LdCctx, D(Cctx), S(FramePtr), NF
+
+  Loads into D the value of the m_cls field out of the frame pointer S0. The
+  compiler should generate this only if it can prove that the frame does not
+  contain a nullptr or $this pointer.
+
+| LdClosure<T>, DParam, S(FramePtr), NF
+
+  Loads into D the value of the m_this/m_cls field out of the frame pointer S0.
+  The compiler should generate this only if it can prove that the frame context
+  is a closure object of type T.  Unlike LdCtx and LdCctx, there are no special
+  rules about the relative positions of LdClosure and InitCtx instructions.
 
 | CheckCtxThis, ND, S(Ctx), B
 
@@ -805,12 +908,6 @@ To string conversions:
 
   Convert a Ctx known to contain a $this pointer to a specific object type,
   based on the marker func for this instruction.
-
-| LdCctx, D(Cctx), S(FramePtr), NF
-
-  Loads into D the value of the m_cls field out of the frame pointer S0. The
-  compiler should generate this only if it can prove that the frame does not
-  contain a nullptr or $this pointer.
 
 | LdClsCtx, D(Cls), S(Ctx), NF
 
@@ -942,6 +1039,10 @@ To string conversions:
   required lookup paths, indicating that a more complete lookup path should be
   taken. May throw if the method does not exist.
 
+| LdIfaceMethod<vtableIdx,methodIdx>, D(Func), S(Cls), NF
+
+  Load the Func* at methodIdx from the vtable at vtableIdx in S0.
+
 | LdClsMethod, D(Func), S(Cls) C(Int), NF
 
   Load a Func* off of the class method table for S0, at offset S1 (in method
@@ -1060,7 +1161,7 @@ To string conversions:
 
   Load the length of the string in S0.
 
-| LdStaticLocCached<func,staticLocalName>, D(BoxedCell), NA, NF
+| LdStaticLocCached<func,staticLocalName>, D(BoxedInitCell), NA, NF
 
   Load the address of the static local RefData from the targetcache for
   function `func' with the static local variable named `staticLocalName'.
@@ -1068,7 +1169,7 @@ To string conversions:
 
 8. Allocation
 
-| AllocObj, DAllocObj, S(Cls), Er
+| AllocObj, DAllocObj, S(Cls), PRc|Er
 
   Allocates a new object of class S1.
 
@@ -1095,7 +1196,7 @@ To string conversions:
   Calls the static property initializer function (86sinit) for class. May
   throw.
 
-| NewInstanceRaw<class>, DAllocObj, NA, NF
+| NewInstanceRaw<class>, DAllocObj, NA, PRc
 
   Allocates an instance of class.
 
@@ -1390,7 +1491,7 @@ To string conversions:
 
   If the Ctx in S0 is a $this pointer, IncRef it.
 
-| DecRef, ND, S(Gen), K|CRc
+| DecRef, ND, S(Gen), CRc
 
   Decrease the reference count of S0 by one, and call a destructor for types
   that require it if it goes to zero.
@@ -1457,16 +1558,6 @@ To string conversions:
   allows later passes to test conditions and create new exits from the region
   at this point in the program.
 
-| PredictLoc<T, localId>, ND, S(FramePtr), NF
-
-  Does nothing. Serves as an indicator that the predicted type of the given
-  localId on the frame S0 is T.
-
-| PredictStk<T, offset>, ND, S(StkPtr), NF
-
-  Does nothing. Serves as an indicator that the predicted type of the cell on
-  the eval stack pointed to by S0 at offset is T.
-
 14. Runtime helpers
 
 | VerifyParamCls, ND, S(Cls) S(Cls|Nullptr) C(Int) C(Int), Er
@@ -1531,7 +1622,7 @@ To string conversions:
 
   Raises a notice that S0 is an undefined key for an array.
 
-| ClosureStaticLocInit, D(BoxedCell), CStr S(FramePtr) S(Cell), NF
+| ClosureStaticLocInit, D(BoxedInitCell), CStr S(FramePtr) S(Cell), NF
 
   Get boxed value to initialize static local named S0 in frame S1, where S1
   must be either a closure or generatorFromClosure function. If the static
@@ -1673,16 +1764,15 @@ To string conversions:
 
 15. Generators & Closures
 
-| StClosureCtx, ND, S(Obj) S(Ctx,Nullptr), CRc
+| LdClosureCtx, D(Ctx), S(Obj), NF
+
+  Load the context from the closure object S0 into D.
+
+| StClosureCtx, ND, S(Obj) S(Ctx), CRc
 
   Store the context represented by S1 into the closure object S0. S1 may be a
   Nullptr when there is no context (i.e. the closure is being used in a
   non-method).
-
-| StClosureFunc<func>, ND, S(Obj), NF
-
-  Store the Func* clone that should be used for calling this closure into the
-  closure object S0.
 
 | StClosureArg<offsetBytes>, ND, S(Obj) S(Gen), CRc
 
@@ -1695,7 +1785,7 @@ To string conversions:
   embedded ActRec, allocating S1 slots for locals/iterators. Set the native
   resume address to S2 and resume offset to S3.
 
-| CreateAFWH, D(Obj),
+| CreateAFWH, DAllocObj,
 |             S(FramePtr) C(Int) S(TCA,Nullptr) C(Int) S(Obj),
 |             CRc|PRc
 
@@ -1704,7 +1794,17 @@ To string conversions:
   the native resume address to S2, resume offset to S3, and mark it blocked on
   non-finished child S4.
 
-| CreateSSWH, D(Obj), S(Cell), CRc|PRc
+| CreateAFWHNoVV, DAllocObj,
+|                 S(FramePtr) C(Int) S(TCA,Nullptr) C(Int) S(Obj),
+|                 CRc|PRc
+
+  Create an AsyncFunctionWaitHandle object and suspend the ActRec provided by
+  S0 into its embedded ActRec, allocating S1 slots for locals/iterators.  Set
+  the native resume address to S2, resume offset to S3, and mark it blocked on
+  non-finished child S4.  This version of the instruction guarantees that the
+  VarEnv is unused.
+
+| CreateSSWH, DAllocObj, S(Cell), CRc|PRc
 
   Call c_StaticWaitHandle::CreateSucceeded.
 
@@ -2074,15 +2174,15 @@ fields of that struct for holding intermediate values.
   Like PropX, but used for intermediate element lookups that may modify the
   base.
 
-| CGetProp, D(Cell), S(Obj,PtrToGen) S(Cell) S(PtrToMISGen), PRc|Er
+| CGetProp, D(Cell), S(Obj,PtrToGen) S(Cell), PRc|Er
 
   Get property with key S1 from S0.
 
-| CGetPropQ, D(Cell), S(Obj,PtrToGen) S(StaticStr) S(PtrToMISGen), PRc|Er
+| CGetPropQ, D(Cell), S(Obj,PtrToGen) S(StaticStr), PRc|Er
 
   A nullsafe version of CGetProp, returns null if the base S0 is null.
 
-| VGetProp, D(BoxedCell),
+| VGetProp, D(BoxedInitCell),
 |           S(Obj,PtrToGen) S(Cell) S(PtrToMISGen),
 |           MProp|PRc|Er
 
@@ -2150,17 +2250,19 @@ fields of that struct for holding intermediate values.
 
 | StringGet, D(StaticStr), S(Str) S(Int), PRc|Er
 
-  Get string representing character at position S1 from base string S0.
+  Get string representing character at position S1 from base string S0.  Raises
+  a warning if the position is out of bounds, or a notice if the position is
+  not an integer.
 
 | MapGet, D(Cell), S(Obj) S(Int,Str), PRc|Er
 
   Get element with key S1 from base S0.
 
-| CGetElem, D(Cell), S(PtrToGen) S(Cell) S(PtrToMISGen), PRc|Er
+| CGetElem, D(Cell), S(PtrToGen) S(Cell), PRc|Er
 
   Get element with key S1 from S0.
 
-| VGetElem, D(BoxedCell), S(PtrToGen) S(Cell) S(PtrToMISGen), MElem|PRc|Er
+| VGetElem, D(BoxedInitCell), S(PtrToGen) S(Cell) S(PtrToMISGen), MElem|PRc|Er
 
   Get element with key S1 from base S0 as a reference.
 
@@ -2168,12 +2270,12 @@ fields of that struct for holding intermediate values.
 
   Bind element with key S1 in base S0 to the reference S2.
 
-| ArraySet, D(Arr), S(Arr) S(Int,Str) S(Cell), PRc|CRc|K|Er
+| ArraySet, D(Arr), S(Arr) S(Int,Str) S(Cell), PRc|CRc|Er
 
   Set element with key S1 in S0 to S2. The dest will be a new Array that should
   replace S0.
 
-| ArraySetRef, ND, S(Arr) S(Int,Str) S(Cell) S(BoxedCell), CRc|K|Er
+| ArraySetRef, ND, S(Arr) S(Int,Str) S(Cell) S(BoxedCell), CRc|Er
 
   Like ArraySet, but for binding operations on the array. The parameter in S3
   must point to a RefData with an array type when this instruction is executed,
@@ -2256,11 +2358,11 @@ fields of that struct for holding intermediate values.
 
   Returns true iff the element at key S1 in the base S0 is set.
 
-| IssetElem, D(Bool), S(PtrToGen) S(Cell) S(PtrToMISGen), Er
+| IssetElem, D(Bool), S(PtrToGen) S(Cell), Er
 
   Returns true iff the element at key S1 in S0 is set.
 
-| EmptyElem, D(Bool), S(PtrToGen) S(Cell) S(PtrToMISGen), Er
+| EmptyElem, D(Bool), S(PtrToGen) S(Cell), Er
 
   Returns true iff the element at key S1 in S0 is set and not equal (as defined
   by the hhbc Eq instruction) to false.
@@ -2271,7 +2373,11 @@ fields of that struct for holding intermediate values.
 
 | ThrowOutOfBounds, ND, S(Int), Er|T
 
-  Throws and OutOfBoundsException with a message indicating S0.
+  Throws an OutOfBoundsException with a message indicating S0.
+
+| ThrowInvalidOperation, ND, S(Str), Er|T
+
+  Throws an InvalidOperationException with a message indicating S0.
 
 | ProfilePackedArray, ND, S(Arr), NF
 
@@ -2376,11 +2482,52 @@ fields of that struct for holding intermediate values.
   and need to be discarded, they will be decref'd and may re-enter to run
   destructors.
 
+| InitCtx, ND, S(FramePtr) S(Ctx), CRc
+
+  Store S1 to the m_this/m_cls field in the frame pointer S0.
+
+  If InitCtx appears in an IR unit, it must dominate all occurrences of LdCtx
+  and LdCctx.
+
 | CheckSurpriseFlagsEnter<func,argc>, ND, S(FramePtr), Er
 
   Test the implementation-specific surprise flags.  If they're nonzero, call
   the function enter helper.
 
+| CheckSurpriseAndStack<func,args>, ND, S(FramePtr), Er
+
+  Test surprise flags and stack overflow at the same time.
+
+| CheckARMagicFlag, ND, S(FramePtr), B
+
+  If the MagicDispatch flags on the ActRec pointed to by the frame pointer S0
+  are not set, branch to block B.
+
+| LdARNumArgsAndFlags, D(Int), S(FramePtr), NF
+
+  Load the value of m_numArgsAndFlags on the ActRec pointed to by the frame
+  pointer S0.
+
+| StARNumArgsAndFlags, ND, S(FramePtr) S(Int), CRc
+
+  Store S1 to m_numArgsAndFlags on the ActRec pointed to by the frame pointer
+  S0.
+
+| LdARInvName, D(Str), S(FramePtr), NF
+
+  Load the value of m_invName off the ActRec pointed to by the frame pointer S0.
+  The compiler should generate this only if it knows that m_invName is a
+  StringData* (rather than, e.g., a VarEnv*).
+
+| StARInvName, ND, S(FramePtr) S(Str,Nullptr), CRc
+
+  Store S1 to m_invName on the ActRec pointed to by the frame pointer S0.
+
+| PackMagicArgs, D(Arr), S(FramePtr), PRc
+
+  Call MixedArray::MakePacked() with the value of numArgs() on the ActRec
+  pointed to by the frame pointer S0 as the first argument, and the pointer to
+  the first parameter in the frame as the second argument.
 
 /* Local Variables: */
 /* fill-column: 79 */

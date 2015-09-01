@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -55,22 +55,20 @@ struct Vunit;
  *    Un,Dn    no uses, defs
  */
 #define VASM_OPCODES\
-  /* service requests, PHP-level function calls */\
-  O(bindaddr, I(dest) I(sk) I(spOff), Un, Dn)\
+  /* service requests */\
   O(bindcall, I(stub), U(args), Dn)\
-  O(bindjcc1st, I(cc) I(targets[0]) I(targets[1]) I(spOff), U(sf) U(args), Dn)\
-  O(bindjcc, I(cc) I(target) I(spOff) I(trflags), U(sf) U(args), Dn)\
   O(bindjmp, I(target) I(spOff) I(trflags), U(args), Dn)\
-  O(callstub, I(target), U(args), Dn)\
-  O(contenter, Inone, U(fp) U(target) U(args), Dn)\
-  O(fallback, I(dest), U(args), Dn)\
-  O(fallbackcc, I(cc) I(dest), U(sf) U(args), Dn)\
-  O(svcreq, I(req) I(stub_block), U(args) U(extraArgs), Dn)\
+  O(bindjcc, I(cc) I(target) I(spOff) I(trflags), U(sf) U(args), Dn)\
+  O(bindjcc1st, I(cc) I(targets[0]) I(targets[1]) I(spOff), U(sf) U(args), Dn)\
+  O(bindaddr, I(addr) I(target) I(spOff), Un, Dn)\
+  O(fallback, I(target) I(spOff) I(trflags), U(args), Dn)\
+  O(fallbackcc, I(cc) I(target) I(spOff) I(trflags), U(sf) U(args), Dn)\
+  O(retransopt, I(transID) I(target) I(spOff), U(args), Dn)\
   /* vasm intrinsics */\
-  O(callfaststub, I(fix), U(args), Dn)\
   O(copy, Inone, UH(s,d), DH(d,s))\
   O(copy2, Inone, UH(s0,d0) UH(s1,d1), DH(d0,s0) DH(d1,s1))\
   O(copyargs, Inone, UH(s,d), DH(d,s))\
+  O(countbytecode, Inone, U(base), D(sf))\
   O(debugtrap, Inone, Un, Dn)\
   O(fallthru, Inone, Un, Dn)\
   O(ldimmb, I(s), Un, D(d))\
@@ -78,38 +76,40 @@ struct Vunit;
   O(ldimmq, I(s), Un, D(d))\
   O(ldimmqs, I(s), Un, D(d))\
   O(load, Inone, U(s), D(d))\
-  O(mccall, I(target), U(args), Dn)\
-  O(mcprep, Inone, Un, D(d))\
-  O(nothrow, Inone, Un, Dn)\
   O(phidef, Inone, Un, D(defs))\
-  O(phijmp, Inone, U(uses), Dn)\
   O(phijcc, I(cc), U(uses) U(sf), Dn)\
+  O(phijmp, Inone, U(uses), Dn)\
   O(store, Inone, U(s) U(d), Dn)\
-  O(syncpoint, I(fix), Un, Dn)\
-  O(unwind, Inone, Un, Dn)\
+  /* call and return intrinsics */\
+  O(callarray, I(target), U(args), Dn)\
+  O(vcallarray, I(target), U(args) U(extraArgs), Dn)\
+  O(callfaststub, I(fix), U(args), Dn)\
+  O(contenter, Inone, U(fp) U(target) U(args), Dn)\
+  O(leavetc, Inone, U(args), Dn)\
+  O(mcprep, Inone, Un, D(d))\
+  O(mccall, I(target), U(args), Dn)\
   O(vcall, I(call) I(destType) I(fixup), U(args), D(d))\
   O(vinvoke, I(call) I(destType) I(fixup), U(args), D(d))\
-  O(vcallstub, I(target), U(args) U(extraArgs), Dn)\
-  O(landingpad, I(fromPHPCall), Un, Dn)\
-  O(countbytecode, Inone, U(base), D(sf))\
+  O(vret, Inone, U(retAddr) U(prevFP) U(args), D(d))\
+  /* boundary intrinsics */\
   O(defvmsp, Inone, Un, D(d))\
   O(syncvmsp, Inone, U(s), Dn)\
-  O(srem, Inone, U(s0) U(s1), D(d))\
+  O(landingpad, I(fromPHPCall), Un, Dn)\
+  O(nothrow, Inone, Un, Dn)\
+  O(syncpoint, I(fix), Un, Dn)\
+  O(unwind, Inone, Un, Dn)\
+  /* arithmetic intrinsics */\
+  O(absdbl, Inone, U(s), D(d))\
   O(sar, Inone, U(s0) U(s1), D(d) D(sf))\
   O(shl, Inone, U(s0) U(s1), D(d) D(sf))\
-  O(vretm, Inone, U(retAddr) U(prevFp) U(args), D(d))\
-  O(vret, Inone, U(retAddr) U(args), Dn)\
-  O(leavetc, Inone, U(args), Dn)\
-  O(absdbl, Inone, U(s), D(d))\
+  O(srem, Inone, U(s0) U(s1), D(d))\
   /* arm instructions */\
-  O(asrv, Inone, U(sl) U(sr), D(d))\
   O(brk, I(code), Un, Dn)\
   O(cbcc, I(cc), U(s), Dn)\
   O(hcsync, I(fix) I(call), Un, Dn)\
   O(hcnocatch, I(call), Un, Dn)\
   O(hcunwind, I(call), Un, Dn)\
   O(hostcall, I(argc) I(syncpoint), U(args), Dn)\
-  O(lslv, Inone, U(sl) U(sr), D(d))\
   O(tbcc, I(cc) I(bit), U(s), Dn)\
   /* x64 instructions */\
   O(addli, I(s0), UH(s1,d), DH(d,s1) D(sf)) \
@@ -133,6 +133,7 @@ struct Vunit;
   O(cmpb, Inone, U(s0) U(s1), D(sf))\
   O(cmpbi, I(s0), U(s1), D(sf))\
   O(cmpbim, I(s0), U(s1), D(sf))\
+  O(cmpwim, I(s0), U(s1), D(sf))\
   O(cmpl, Inone, U(s0) U(s1), D(sf))\
   O(cmpli, I(s0), U(s1), D(sf))\
   O(cmplim, I(s0), U(s1), D(sf))\
@@ -140,7 +141,6 @@ struct Vunit;
   O(cmpq, Inone, U(s0) U(s1), D(sf))\
   O(cmpqi, I(s0), U(s1), D(sf))\
   O(cmpqim, I(s0), U(s1), D(sf))\
-  O(cmpqims, I(s0), U(s1), D(sf))\
   O(cmpqm, Inone, U(s0) U(s1), D(sf))\
   O(cmpsd, I(pred), UA(s0) U(s1), D(d))\
   O(cqo, Inone, Un, Dn)\
@@ -170,6 +170,7 @@ struct Vunit;
   O(leap, I(s), Un, D(d))\
   O(loadups, Inone, U(s), D(d))\
   O(loadtqb, Inone, U(s), D(d))\
+  O(loadb, Inone, U(s), D(d))\
   O(loadl, Inone, U(s), D(d))\
   O(loadqp, I(s), Un, D(d))\
   O(loadsd, Inone, U(s), D(d))\
@@ -183,7 +184,6 @@ struct Vunit;
   O(movtqb, Inone, UH(s,d), DH(d,s))\
   O(movtql, Inone, UH(s,d), DH(d,s))\
   O(mulsd, Inone, U(s0) U(s1), D(d))\
-  O(mul, Inone, U(s0) U(s1), D(d))\
   O(neg, Inone, UH(s,d), DH(d,s) D(sf))\
   O(nop, Inone, Un, Dn)\
   O(not, Inone, UH(s,d), DH(d,s))\
@@ -197,6 +197,7 @@ struct Vunit;
   O(psllq, I(s0), UH(s1,d), DH(d,s1))\
   O(psrlq, I(s0), UH(s1,d), DH(d,s1))\
   O(push, Inone, U(s), Dn)\
+  O(pushm, Inone, U(s), Dn)\
   O(ret, Inone, U(args), Dn)\
   O(roundsd, I(dir), U(s), D(d))\
   O(sarq, Inone, UH(s,d), DH(d,s) D(sf))\
@@ -231,6 +232,7 @@ struct Vunit;
   O(testli, I(s0), U(s1), D(sf))\
   O(testlim, I(s0), U(s1), D(sf))\
   O(testq, Inone, U(s0) U(s1), D(sf))\
+  O(testqi, I(s0), U(s1), D(sf))\
   O(testqm, Inone, U(s0) U(s1), D(sf))\
   O(testqim, I(s0), U(s1), D(sf))\
   O(ucomisd, Inone, U(s0) U(s1), D(sf))\
@@ -242,6 +244,25 @@ struct Vunit;
   O(xorq, Inone, U(s0) U(s1), D(d) D(sf))\
   O(xorqi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
   /* */
+
+/*
+ * ATT style operand order.  For binary ops:
+ *    op   s0 s1 d:  d = s1 op s0    =>   d=s1; d op= s0
+ *    op   imm s1 d: d = s1 op imm   =>   d=s1; d op= imm
+ *    cmp  s0 s1:    s1 cmp s0
+ */
+
+/*
+ * Suffix conventions:
+ *    b   8-bit
+ *    w   16-bit
+ *    l   32-bit
+ *    q   64-bit
+ *    i   immediate
+ *    m   Vptr
+ *    p   RIPRelativeRef
+ *    s   smashable
+ */
 
 ///////////////////////////////////////////////////////////////////////////////
 // Service requests.
@@ -265,80 +286,20 @@ struct bindcall {
   Vlabel targets[2];
 };
 
-/*
- * PHP function call: Non-smashable call with same ABI as bindcall.
- */
-struct callstub { TCA target; RegSet args; };
-
-struct contenter { Vreg64 fp, target; RegSet args; Vlabel targets[2]; };
-struct svcreq { ServiceRequest req; RegSet args; Vtuple extraArgs;
-                TCA stub_block; };
-
-struct fallbackcc {
-  explicit fallbackcc(ConditionCode cc,
-                      VregSF sf,
-                      SrcKey dest,
-                      TransFlags trflags,
-                      RegSet args)
-    : cc{cc}
-    , sf{sf}
-    , dest{dest}
+struct bindjmp {
+  explicit bindjmp(SrcKey target,
+                   FPInvOffset spOff,
+                   TransFlags trflags,
+                   RegSet args)
+    : target{target}
+    , spOff(spOff)
     , trflags{trflags}
     , args{args}
   {}
 
-  ConditionCode cc;
-  VregSF sf;
-  SrcKey dest;
-  TransFlags trflags;
-  RegSet args;
-};
-
-struct fallback {
-  explicit fallback(SrcKey dest,
-                    TransFlags trflags,
-                    RegSet args)
-    : dest{dest}
-    , trflags{trflags}
-    , args{args}
-  {}
-
-  SrcKey dest;
-  TransFlags trflags;
-  RegSet args;
-};
-
-struct bindaddr {
-  explicit bindaddr(TCA* dest, SrcKey sk, FPInvOffset spOff)
-    : dest(dest)
-    , sk(sk)
-    , spOff(spOff)
-  {}
-
-  TCA* dest;
-  SrcKey sk;
+  SrcKey target;
   FPInvOffset spOff;
-};
-
-struct bindjcc1st {
-  explicit bindjcc1st(ConditionCode cc,
-                      VregSF sf,
-                      std::array<SrcKey,2> targets,
-                      FPInvOffset spOff,
-                      RegSet args)
-    : cc{cc}
-    , sf{sf}
-    , spOff(spOff)
-    , args{args}
-  {
-    this->targets[0] = targets[0];
-    this->targets[1] = targets[1];
-  }
-
-  ConditionCode cc;
-  VregSF sf;
-  SrcKey targets[2];
-  FPInvOffset spOff;
+  TransFlags trflags;
   RegSet args;
 };
 
@@ -365,11 +326,45 @@ struct bindjcc {
   RegSet args;
 };
 
-struct bindjmp {
-  explicit bindjmp(SrcKey target,
-                   FPInvOffset spOff,
-                   TransFlags trflags,
-                   RegSet args)
+struct bindjcc1st {
+  explicit bindjcc1st(ConditionCode cc,
+                      VregSF sf,
+                      std::array<SrcKey,2> targets,
+                      FPInvOffset spOff,
+                      RegSet args)
+    : cc{cc}
+    , sf{sf}
+    , spOff(spOff)
+    , args{args}
+  {
+    this->targets[0] = targets[0];
+    this->targets[1] = targets[1];
+  }
+
+  ConditionCode cc;
+  VregSF sf;
+  SrcKey targets[2];
+  FPInvOffset spOff;
+  RegSet args;
+};
+
+struct bindaddr {
+  explicit bindaddr(TCA* addr, SrcKey target, FPInvOffset spOff)
+    : addr(addr)
+    , target(target)
+    , spOff(spOff)
+  {}
+
+  TCA* addr;
+  SrcKey target;
+  FPInvOffset spOff;
+};
+
+struct fallback {
+  explicit fallback(SrcKey target,
+                    FPInvOffset spOff,
+                    TransFlags trflags,
+                    RegSet args)
     : target{target}
     , spOff(spOff)
     , trflags{trflags}
@@ -382,60 +377,153 @@ struct bindjmp {
   RegSet args;
 };
 
+struct fallbackcc {
+  explicit fallbackcc(ConditionCode cc,
+                      VregSF sf,
+                      SrcKey target,
+                      FPInvOffset spOff,
+                      TransFlags trflags,
+                      RegSet args)
+    : cc{cc}
+    , sf{sf}
+    , target{target}
+    , spOff(spOff)
+    , trflags{trflags}
+    , args{args}
+  {}
+
+  ConditionCode cc;
+  VregSF sf;
+  SrcKey target;
+  FPInvOffset spOff;
+  TransFlags trflags;
+  RegSet args;
+};
+
+struct retransopt {
+  explicit retransopt(TransID transID,
+                      SrcKey target,
+                      FPInvOffset spOff,
+                      RegSet args)
+    : transID{transID}
+    , target{target}
+    , spOff(spOff)
+    , args{args}
+  {}
+
+  TransID transID;
+  SrcKey target;
+  FPInvOffset spOff;
+  RegSet args;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 // VASM intrinsics.
 
 /*
- * Call a "fast" stub, which is a stub that preserves more registers than a
- * normal call. It may still call C++ functions on a slow path (which is why
- * there's a Fixup operand) but it will save any required registers before
- * doing so.
- */
-struct callfaststub { TCA target; Fixup fix; RegSet args; };
-
-/*
- * Copies of different arities. All copies happen in parallel, meaning operand
- * order doesn't matter when a PhysReg appears as both a src and dst.
+ * Copies of different arities.
+ *
+ * All copies happen in parallel, meaning operand order doesn't matter when a
+ * PhysReg appears as both a src and dst.
  */
 struct copy { Vreg s, d; };
 struct copy2 { Vreg64 s0, s1, d0, d1; };
 struct copyargs { Vtuple s, d; };
 
 /*
- * Causes any attached debugger to trap. Process may abort if no debugger is
- * attached.
+ * Increment the bytecode counter at `base', which should be rvmtl().
+ */
+struct countbytecode { Vreg base; VregSF sf; };
+
+/*
+ * Cause any attached debugger to trap.
+ *
+ * Process may abort if no debugger is attached.
  */
 struct debugtrap {};
 
 /*
- * No-op, used for marking the end of a block that is intentionally going to
- * fall-through.  Only for use with Vauto.
+ * No-op.
+ *
+ * Used for marking the end of a block that is intentionally going to fall
+ * through.  Only for use with Vauto.
  */
 struct fallthru {};
 
 /*
- * load an immedate value without mutating status flags.
+ * Load an immedate value without mutating status flags.
  */
 struct ldimmb { Immed s; Vreg d; };
 struct ldimml { Immed s; Vreg d; };
 struct ldimmq { Immed64 s; Vreg d; };
-struct ldimmqs { Immed64 s; Vreg d; }; // smashable version of ldimmq
+struct ldimmqs { Immed64 s; Vreg d; };
 
+/*
+ * Memory operand load and store.
+ */
 struct load { Vptr s; Vreg d; };
-struct mccall { CodeAddress target; RegSet args; };
-struct mcprep { Vreg64 d; };
-struct nothrow {};
+struct store { Vreg s; Vptr d; };
+
+/*
+ * Phis.
+ *
+ * @see: doWhile(), for an example usage.
+ */
 struct phidef { Vtuple defs; };
 struct phijmp { Vlabel target; Vtuple uses; };
 struct phijcc { ConditionCode cc; VregSF sf; Vlabel targets[2]; Vtuple uses; };
-struct store { Vreg s; Vptr d; };
-struct syncpoint { Fixup fix; };
-struct unwind { Vlabel targets[2]; };
+
+///////////////////////////////////////////////////////////////////////////////
+// Call, return, resumable, and exception intrinsics.
 
 /*
- * Function call, without or with exception edges, respectively. Contains
- * information about a C++ helper call needed for lowering to different target
- * architectures.
+ * Non-smashable PHP function call with (almost) the same ABI as bindcall.
+ *
+ * NB: The only difference is that callarray preserves vmfp.  Currently only
+ * used by the CallArray instruction.
+ */
+struct callarray { TCA target; RegSet args; };
+
+/*
+ * Non-smashable PHP function call with exception edges and additional integer
+ * arguments.
+ */
+struct vcallarray { TCA target; RegSet args; Vtuple extraArgs;
+                    Vlabel targets[2]; };
+
+/*
+ * Call a "fast" stub, a stub that preserves more registers than a normal call.
+ *
+ * It may still call C++ functions on a slow path (which is why there's a Fixup
+ * operand) but it will save any required registers before doing so.
+ */
+struct callfaststub { TCA target; Fixup fix; RegSet args; };
+
+/*
+ * Enter a continuation.
+ */
+struct contenter { Vreg64 fp, target; RegSet args; Vlabel targets[2]; };
+
+/*
+ * Execute a ret instruction directly, returning to enterTCHelper().
+ *
+ * Used to relinquish control to the async scheduler from an async function.
+ */
+struct leavetc { RegSet args; };
+
+/*
+ * Method cache smashable prime data and smashable call.
+ *
+ * @see: cgLdObjMethod()
+ */
+struct mcprep { Vreg64 d; };
+struct mccall { CodeAddress target; RegSet args; };
+
+/*
+ * Native function call, without or with exception edges, respectively.
+ *
+ * Contains information about a C++ helper call needed for lowering to
+ * different target architectures.
  */
 struct vcall { CppCall call; VcallArgsId args; Vtuple d;
                Fixup fixup; DestType destType; bool nothrow; };
@@ -443,17 +531,15 @@ struct vinvoke { CppCall call; VcallArgsId args; Vtuple d; Vlabel targets[2];
                  Fixup fixup; DestType destType; bool smashable; };
 
 /*
- * Non-smashable PHP function call with exception edges and additional
- * integer arguments.
+ * Load `prevFP' into `d' and return to `retAddr'.
  */
-struct vcallstub { TCA target; RegSet args; Vtuple extraArgs;
-                   Vlabel targets[2]; };
+struct vret { Vptr retAddr; Vptr prevFP; Vreg d; RegSet args; };
 
-struct landingpad { bool fromPHPCall; };
-struct countbytecode { Vreg base; VregSF sf; };
+///////////////////////////////////////////////////////////////////////////////
+// Boundary intrinsics.
 
 /*
- * Copy rVmSp into d.
+ * Copy rvmsp() into `d'.
  *
  * Used when reentering translated code after an ABI boundary, such as the
  * beginning of a tracelet or right after a bindcall.
@@ -461,32 +547,57 @@ struct countbytecode { Vreg base; VregSF sf; };
 struct defvmsp { Vreg d; };
 
 /*
- * Copy s into rVmSp.
+ * Copy `s' into rvmsp().
  *
  * Used right before leaving translated code for an ABI boundary, such as
  * bindjmp or fallbackcc.
  */
 struct syncvmsp { Vreg s; };
 
-struct srem { Vreg s0, s1, d; };
-struct sar { Vreg s0, s1, d; VregSF sf; };
-struct shl { Vreg s0, s1, d; VregSF sf; };
+/*
+ * Header for catch blocks.
+ */
+struct landingpad { bool fromPHPCall; };
+
+/*
+ * Register a null catch trace at this position.
+ *
+ * This tells the unwinder that the function call returning to here isn't
+ * allowed to throw.
+ */
+struct nothrow {};
+
+/*
+ * Register a fixup at this position.
+ *
+ * These are used by the unwinder to reconstruct the state of the VM registers.
+ */
+struct syncpoint { Fixup fix; };
+
+/*
+ * Terminate a block after a call that can throw, with edges to a catch block
+ * and a fallthrough block.
+ */
+struct unwind { Vlabel targets[2]; };
+
+///////////////////////////////////////////////////////////////////////////////
+// Arithmetic intrinsics.
+
+/*
+ * Absolute value for a double-precision value.
+ */
 struct absdbl { Vreg s, d; };
 
 /*
- * Pushes retAddr, loads prevFp into d, and executes a ret instruction.
+ * Arithmetic left and right shifts.
  */
-struct vretm { Vptr retAddr; Vptr prevFp; Vreg d; RegSet args; };
+struct sar { Vreg64 s0, s1, d; VregSF sf; };
+struct shl { Vreg64 s0, s1, d; VregSF sf; };
 
 /*
- * Pushes retAddr and executes a ret instruction.
+ * Modulus of two integers.
  */
-struct vret { Vreg retAddr; RegSet args; };
-
-/*
- * Execute a ret instruction directly, returning to enterTCHelper.
- */
-struct leavetc { RegSet args; };
+struct srem { Vreg s0, s1, d; };
 
 ///////////////////////////////////////////////////////////////////////////////
 // ARM.
@@ -505,31 +616,9 @@ struct brk { uint16_t code; };
 struct hostcall { RegSet args; uint8_t argc; Vpoint syncpoint; };
 struct cbcc { vixl::Condition cc; Vreg64 s; Vlabel targets[2]; };
 struct tbcc { vixl::Condition cc; unsigned bit; Vreg64 s; Vlabel targets[2]; };
-struct lslv { Vreg64 sl, sr, d; };
-struct asrv { Vreg64 sl, sr, d; };
-struct mul { Vreg64 s0, s1, d; };
 
 ///////////////////////////////////////////////////////////////////////////////
 // x64.
-
-/*
- * ATT style operand order. for binary ops:
- *    op   s0 s1 d:  d = s1 op s0    =>   d=s1; d op= s0
- *    op   imm s1 d: d = s1 op imm   =>   d=s1; d op= imm
- *    cmp  s0 s1:    s1 cmp s0
- */
-
-/*
- * Suffix conventions:
- *    b   8-bit
- *    w   16-bit
- *    l   32-bit
- *    q   64-bit
- *    i   immediate
- *    m   Vptr
- *    p   RIPRelativeRef
- *    s   smashable
- */
 
 struct addli { Immed s0; Vreg32 s1, d; VregSF sf; };
 struct addlm { Vreg32 s0; Vptr m; VregSF sf; };
@@ -567,6 +656,7 @@ struct cmovq { ConditionCode cc; VregSF sf; Vreg64 f, t, d; };
 struct cmpb  { Vreg8  s0; Vreg8  s1; VregSF sf; };
 struct cmpbi { Immed  s0; Vreg8  s1; VregSF sf; };
 struct cmpbim { Immed s0; Vptr s1; VregSF sf; };
+struct cmpwim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpl  { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmpli { Immed  s0; Vreg32 s1; VregSF sf; };
 struct cmplim { Immed s0; Vptr s1; VregSF sf; };
@@ -574,7 +664,6 @@ struct cmplm { Vreg32 s0; Vptr s1; VregSF sf; };
 struct cmpq  { Vreg64 s0; Vreg64 s1; VregSF sf; };
 struct cmpqi { Immed  s0; Vreg64 s1; VregSF sf; };
 struct cmpqim { Immed s0; Vptr s1; VregSF sf; };
-struct cmpqims { Immed s0; Vptr s1; VregSF sf; };
 struct cmpqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct cmpsd { ComparisonPred pred; VregDbl s0, s1, d; };
 struct cqo {};
@@ -604,6 +693,7 @@ struct lea { Vptr s; Vreg64 d; };
 struct leap { RIPRelativeRef s; Vreg64 d; };
 struct loadups { Vptr s; Vreg128 d; };
 struct loadtqb { Vptr s; Vreg8 d; };
+struct loadb { Vptr s; Vreg8 d; };
 struct loadl { Vptr s; Vreg32 d; };
 struct loadqp { RIPRelativeRef s; Vreg64 d; };
 struct loadsd { Vptr s; VregDbl d; };
@@ -633,6 +723,7 @@ struct orqim { Immed s0; Vptr m; VregSF sf; };
 struct pop { Vreg64 d; };
 struct popm { Vptr d; };
 struct push { Vreg64 s; };
+struct pushm { Vptr s; };
 struct ret { RegSet args; };
 struct roundsd { RoundDirection dir; VregDbl s, d; };
 struct setcc { ConditionCode cc; VregSF sf; Vreg8 d; };
@@ -671,6 +762,7 @@ struct testl { Vreg32 s0, s1; VregSF sf; };
 struct testli { Immed s0; Vreg32 s1; VregSF sf; };
 struct testlim { Immed s0; Vptr s1; VregSF sf; };
 struct testq { Vreg64 s0, s1; VregSF sf; };
+struct testqi { Immed s0; Vreg64 s1; VregSF sf; };
 struct testqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct testqim { Immed s0; Vptr s1; VregSF sf; };
 // compare is att-style: s1-s0 => sf

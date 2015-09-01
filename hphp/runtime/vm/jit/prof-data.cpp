@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -63,6 +63,16 @@ const PrologueCallersVec& PrologueCallersRec::mainCallers() const {
 
 const PrologueCallersVec& PrologueCallersRec::guardCallers() const {
   return m_guardCallers;
+}
+
+void PrologueCallersRec::removeMainCaller(TCA caller) {
+  auto pos = std::find(m_mainCallers.begin(), m_mainCallers.end(), caller);
+  if (pos != m_mainCallers.end()) m_mainCallers.erase(pos);
+}
+
+void PrologueCallersRec::removeGuardCaller(TCA caller) {
+  auto pos = std::find(m_guardCallers.begin(), m_guardCallers.end(), caller);
+  if (pos != m_mainCallers.end()) m_guardCallers.erase(pos);
 }
 
 void PrologueCallersRec::addMainCaller(TCA caller) {
@@ -345,10 +355,10 @@ TransID ProfData::addTransProfile(const RegionDescPtr&  region,
 
   assertx(region);
   DEBUG_ONLY size_t nBlocks = region->blocks().size();
-  assertx(nBlocks == 1 || (nBlocks > 1 && region->entry()->inlinedCallee()));
+  assertx(nBlocks == 1);
   region->renumberBlock(region->entry()->id(), transId);
   for (auto& b : region->blocks()) b->setProfTransID(transId);
-  region->blocks().back()->setPostConditions(pconds);
+  region->blocks().back()->setPostConds(pconds);
   auto const startSk = region->start();
   m_transRecs.emplace_back(new ProfTransRec(transId,
                                             TransKind::Profile,

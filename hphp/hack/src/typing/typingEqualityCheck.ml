@@ -35,14 +35,12 @@ let trivial_comparison_error p bop (r1, ty1) (r2, ty2) trail1 trail2 =
 let rec assert_nontrivial p bop env ty1 ty2 =
   let ety_env = Phase.env_with_self env in
   let _, ty1 = Env.expand_type env ty1 in
-  let _, ty1, trail1 =
-    TDef.force_expand_typedef ~phase:Phase.locl ~ety_env env ty1 in
+  let _, ty1, trail1 = TDef.force_expand_typedef ~ety_env env ty1 in
   let _, ty2 = Env.expand_type env ty2 in
-  let _, ty2, trail2 =
-    TDef.force_expand_typedef ~phase:Phase.locl ~ety_env env ty2 in
+  let _, ty2, trail2 = TDef.force_expand_typedef ~ety_env env ty2 in
   match ty1, ty2 with
   | (_, Tprim N.Tnum),               (_, Tprim (N.Tint | N.Tfloat))
-  | (_, Tprim (N.Tint | N.Tfloat)),  (_, Tprim N.Tnum)
+  | (_, Tprim (N.Tint | N.Tfloat)),  (_, Tprim N.Tnum) -> ()
   | (_, Tprim N.Tarraykey),          (_, Tprim (N.Tint | N.Tstring))
   | (_, Tprim (N.Tint | N.Tstring)), (_, Tprim N.Tarraykey) -> ()
   | (r, Tprim N.Tnoreturn), _
@@ -57,13 +55,7 @@ let rec assert_nontrivial p bop env ty1 ty2 =
   | (_, Toption ty1), (_, Tprim _ as ty2)
   | (_, Tprim _ as ty1), (_, Toption ty2) ->
       assert_nontrivial p bop env ty1 ty2
-  | (_, Taccess _), _ ->
-      let _, ty1 = TAccess.expand env, ty1 in
-      assert_nontrivial p bop env ty1 ty2
-  | _, (_, Taccess _) ->
-      let _, ty2 = TAccess.expand env, ty2 in
-      assert_nontrivial p bop env ty1 ty2
-  | (_, (Tany | Tmixed | Tarray (_, _) | Tprim _ | Tgeneric (_, _) | Toption _
-    | Tvar _ | Tfun _ | Tabstract (_, _, _) | Tclass (_, _) | Ttuple _
+  | (_, (Tany | Tmixed | Tarray (_, _) | Tprim _ | Toption _
+    | Tvar _ | Tfun _ | Tabstract (_, _) | Tclass (_, _) | Ttuple _
     | Tanon (_, _) | Tunresolved _ | Tobject | Tshape _)
     ), _ -> ()

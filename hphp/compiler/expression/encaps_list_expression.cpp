@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -89,24 +89,18 @@ ExpressionPtr EncapsListExpression::preOptimize(AnalysisResultConstPtr ar) {
     if (count > 1) {
       ExpressionPtr exp =
         BinaryOpExpressionPtr(new BinaryOpExpression(
-                                getScope(), getLocation(),
+                                getScope(), getRange(),
                                 (*m_exps)[0], (*m_exps)[1], '.'));
       for (int i = 2; i < count; i++) {
         exp =
           BinaryOpExpressionPtr(new BinaryOpExpression(
-                                  getScope(), getLocation(),
+                                  getScope(), getRange(),
                                   exp, (*m_exps)[i], '.'));
       }
       return exp;
     }
   }
   return ExpressionPtr();
-}
-
-bool EncapsListExpression::canonCompare(ExpressionPtr e) const {
-  if (!Expression::canonCompare(e)) return false;
-  EncapsListExpressionPtr el = static_pointer_cast<EncapsListExpression>(e);
-  return m_type == el->m_type;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -119,7 +113,7 @@ void EncapsListExpression::outputCodeModel(CodeGenerator &cg) {
   cg.printPropertyHeader("expressions");
   cg.printExpressionVector(m_exps);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   cg.printObjectFooter();
 }
 

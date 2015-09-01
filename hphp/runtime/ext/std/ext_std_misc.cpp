@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -37,7 +37,9 @@
 #include "hphp/runtime/vm/type-profile.h"
 #include "hphp/system/constants.h"
 #include "hphp/util/logger.h"
+#ifndef _MSC_VER
 #include <sys/param.h> // MAXPATHLEN is here
+#endif
 #include "hphp/runtime/base/comparisons.h"
 
 namespace HPHP {
@@ -161,6 +163,7 @@ void StandardExtension::initMisc() {
     HHVM_FE(token_name);
     HHVM_FE(hphp_to_string);
     HHVM_FALIAS(__SystemLib\\max2, SystemLib_max2);
+    HHVM_FALIAS(__SystemLib\\min2, SystemLib_min2);
     Native::registerConstant<KindOfDouble>(makeStaticString("INF"), k_INF);
     Native::registerConstant<KindOfDouble>(makeStaticString("NAN"), k_NAN);
     Native::registerConstant<KindOfInt64>(
@@ -250,12 +253,12 @@ Variant HHVM_FUNCTION(constant, const String& name) {
         return cellAsCVarRef(cns);
       }
     }
-    raise_warning("Couldn't find constant %s", data);
   } else {
     auto const cns = Unit::loadCns(name.get());
     if (cns) return tvAsCVarRef(cns);
   }
 
+  raise_warning("constant(): Couldn't find constant %s", data);
   return init_null();
 }
 
@@ -703,20 +706,20 @@ static String token_get_all_fix_elseif(Array& res,
   res.append(make_packed_array(
     UserTokenId_T_ELSE,
     String(tokCStr, strlen("else"), CopyString),
-    loc.line0
+    loc.r.line0
   ));
 
   res.append(make_packed_array(
     UserTokenId_T_WHITESPACE,
     String(tokCStr + strlen("else"), tokText.size() - strlen("elseif"),
            CopyString),
-    loc.line0
+    loc.r.line0
   ));
 
   tokVal = UserTokenId_T_IF;
 
   // To account for newlines in the T_WHITESPACE
-  loc.line0 = loc.line1;
+  loc.r.line0 = loc.r.line1;
 
   return String(tokCEnd - strlen("if"), CopyString);
 }
@@ -754,7 +757,7 @@ loop_start: // For after seeing a T_INLINE_HTML, see below
           // Consecutive T_INLINE_HTML tokens should be merged together to
           // match Zend behaviour.
           value = String(tok.text());
-          int line = loc.line0;
+          int line = loc.r.line0;
           tokid = scanner.getNextToken(tok, loc);
           while (tokid == T_INLINE_HTML) {
             value += String(tok.text());
@@ -787,7 +790,7 @@ loop_start: // For after seeing a T_INLINE_HTML, see below
       Array p = make_packed_array(
         tokVal,
         value,
-        loc.line0
+        loc.r.line0
       );
       res.append(p);
     }
@@ -829,6 +832,12 @@ String HHVM_FUNCTION(hphp_to_string, const Variant& v) {
 Variant HHVM_FUNCTION(SystemLib_max2, const Variant& value1,
                       const Variant& value2) {
   return less(value1, value2) ? value2 : value1;
+}
+
+// Adds an optimized FCallBuiltin for min with 2 operands to SystemLib
+Variant HHVM_FUNCTION(SystemLib_min2, const Variant& value1,
+                      const Variant& value2) {
+  return more(value1, value2) ? value2 : value1;
 }
 
 #undef YYTOKENTYPE

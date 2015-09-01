@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,8 +26,8 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // SourceLoc.
 
-inline SourceLoc::SourceLoc(const Location& l) {
-  setLoc(&l);
+inline SourceLoc::SourceLoc(const Location::Range& r) {
+  setLoc(&r);
 }
 
 inline void SourceLoc::reset() {
@@ -38,7 +38,7 @@ inline bool SourceLoc::valid() const {
   return line0 != 1 || char0 != 1 || line1 != 1 || char1 != 1;
 }
 
-inline void SourceLoc::setLoc(const Location* l) {
+inline void SourceLoc::setLoc(const Location::Range* l) {
   line0 = l->line0;
   char0 = l->char0;
   line1 = l->line1;
@@ -247,6 +247,12 @@ inline Unit::PreClassRange Unit::preclasses() const {
 
 inline Func* Unit::firstHoistable() const {
   return *m_mergeInfo->funcHoistableBegin();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Type aliases
+inline Unit::TypeAliasRange Unit::typeAliases() const {
+  return TypeAliasRange(m_typeAliases);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

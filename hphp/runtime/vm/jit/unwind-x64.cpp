@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -291,7 +291,7 @@ TCUnwindInfo tc_unwind_resume(ActRec* fp) {
     // handler frame), we need to make sure that if we later return from this
     // VM frame in translated code, we don't resume after the bindcall that may
     // be expecting things to still live in its spill space. If the return
-    // address is in functionEnterHelper or callToExit, rVmFp won't contain a
+    // address is in functionEnterHelper or callToExit, rvmfp() won't contain a
     // real VM frame, so we skip those.
     auto savedRip = reinterpret_cast<TCA>(fp->m_savedRip);
     if (savedRip == mcg->tx().uniqueStubs.callToExit) {
@@ -398,7 +398,7 @@ register_unwind_region(unsigned char* startAddr, size_t size) {
      * Leave rsp unchanged.
      *
      * Note that some things in the translator do actually change rsp,
-     * but we assume they cannot throw so this is ok.  If rVmSp ever
+     * but we assume they cannot throw so this is ok.  If rvmsp() ever
      * changes to use rsp this code must change.
      */
     append_vec<uint8_t>(buffer, DW_CFA_same_value);

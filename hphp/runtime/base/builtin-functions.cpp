@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,9 +26,9 @@
 #include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/debugger/debugger.h"
-#include "hphp/runtime/ext/process/ext_process.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/ext_collections.h"
+#include "hphp/runtime/ext/ext_closure.h"
+#include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
@@ -47,6 +47,7 @@
 #include "hphp/runtime/base/request-injection-data.h"
 #include "hphp/runtime/base/backtrace.h"
 
+#include <boost/format.hpp>
 #include <limits>
 #include <algorithm>
 
@@ -66,6 +67,11 @@ const StaticString
   s_parent("parent"),
   s_static("static");
 
+const StaticString s_cmpWithCollection(
+  "Cannot use relational comparison operators (<, <=, >, >=) to compare "
+  "a collection with an integer, double, string, array, or object"
+);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 bool array_is_valid_callback(const Array& arr) {
@@ -81,6 +87,85 @@ bool array_is_valid_callback(const Array& arr) {
     return false;
   }
   return true;
+}
+
+const StaticString
+  s__invoke("__invoke"),
+  s_Closure__invoke("Closure::__invoke"),
+  s_colon2("::");
+
+bool is_callable(const Variant& v) {
+  CallerFrame cf;
+  ObjectData* obj = nullptr;
+  HPHP::Class* cls = nullptr;
+  StringData* invName = nullptr;
+  const HPHP::Func* f = vm_decode_function(v, cf(), false, obj, cls,
+                                           invName, false);
+  if (invName != nullptr) {
+    decRefStr(invName);
+  }
+  return f != nullptr && !f->isAbstract();
+}
+
+bool is_callable(const Variant& v, bool syntax_only, RefData* name) {
+  bool ret = true;
+  if (LIKELY(!syntax_only)) {
+    ret = is_callable(v);
+    if (LIKELY(!name)) return ret;
+  }
+
+  auto const tv_func = v.asCell();
+  if (isStringType(tv_func->m_type)) {
+    if (name) *name->var() = v;
+    return ret;
+  }
+
+  if (tv_func->m_type == KindOfArray) {
+    const Array& arr = Array(tv_func->m_data.parr);
+    const Variant& clsname = arr.rvalAtRef(int64_t(0));
+    const Variant& mthname = arr.rvalAtRef(int64_t(1));
+    if (arr.size() != 2 ||
+        &clsname == &null_variant ||
+        !mthname.isString()) {
+      if (name) *name->var() = array_string;
+      return false;
+    }
+
+    auto const tv_meth = mthname.asCell();
+    auto const tv_cls = clsname.asCell();
+    StringData* clsString = nullptr;
+    if (tv_cls->m_type == KindOfObject) {
+      clsString = tv_cls->m_data.pobj->getClassName().get();
+    } else if (isStringType(tv_cls->m_type)) {
+      clsString = tv_cls->m_data.pstr;
+    } else {
+      if (name) *name->var() = array_string;
+      return false;
+    }
+
+    if (name) {
+      *name->var() = concat3(String{clsString},
+                             s_colon2,
+                             String{tv_meth->m_data.pstr});
+    }
+    return ret;
+  }
+
+  if (tv_func->m_type == KindOfObject) {
+    ObjectData *d = tv_func->m_data.pobj;
+    const Func* invoke = d->getVMClass()->lookupMethod(s__invoke.get());
+    if (name) {
+      if (d->instanceof(c_Closure::classof())) {
+        // Hack to stop the mangled name from showing up
+        *name->var() = s_Closure__invoke;
+      } else {
+        *name->var() = d->getClassName().asString() + "::__invoke";
+      }
+    }
+    return invoke != nullptr;
+  }
+
+  return false;
 }
 
 const HPHP::Func*
@@ -453,35 +538,31 @@ void throw_instance_method_fatal(const char *name) {
 }
 
 void throw_iterator_not_valid() {
-  Object e(SystemLib::AllocInvalidOperationExceptionObject(
-    "Iterator is not valid"));
-  throw e;
+  SystemLib::throwInvalidOperationExceptionObject(
+    "Iterator is not valid");
 }
 
 void throw_collection_modified() {
-  Object e(SystemLib::AllocInvalidOperationExceptionObject(
-    "Collection was modified during iteration"));
-  throw e;
+  SystemLib::throwInvalidOperationExceptionObject(
+    "Collection was modified during iteration");
 }
 
 void throw_collection_property_exception() {
-  Object e(SystemLib::AllocInvalidOperationExceptionObject(
-    "Cannot access a property on a collection"));
-  throw e;
+  SystemLib::throwInvalidOperationExceptionObject(
+    "Cannot access a property on a collection");
+}
+
+void throw_invalid_operation_exception(StringData* str) {
+  SystemLib::throwInvalidOperationExceptionObject(Variant{str});
 }
 
 void throw_collection_compare_exception() {
-  static const string msg(
-    "Cannot use relational comparison operators (<, <=, >, >=) to compare "
-    "a collection with an integer, double, string, array, or object");
-  Object e(SystemLib::AllocInvalidOperationExceptionObject(msg));
-  throw e;
+  SystemLib::throwInvalidOperationExceptionObject(s_cmpWithCollection);
 }
 
 void throw_param_is_not_container() {
   static const string msg("Parameter must be an array or collection");
-  Object e(SystemLib::AllocInvalidArgumentExceptionObject(msg));
-  throw e;
+  SystemLib::throwInvalidArgumentExceptionObject(msg);
 }
 
 void throw_cannot_modify_immutable_object(const char* className) {
@@ -489,15 +570,14 @@ void throw_cannot_modify_immutable_object(const char* className) {
     "Cannot modify immutable object of type {}",
     className
   ).str();
-  Object e(SystemLib::AllocInvalidOperationExceptionObject(msg));
-  throw e;
+  SystemLib::throwInvalidOperationExceptionObject(msg);
 }
 
-void check_collection_compare(ObjectData* obj) {
+void check_collection_compare(const ObjectData* obj) {
   if (obj && obj->isCollection()) throw_collection_compare_exception();
 }
 
-void check_collection_compare(ObjectData* obj1, ObjectData* obj2) {
+void check_collection_compare(const ObjectData* obj1, const ObjectData* obj2) {
   if (obj1 && obj2 && (obj1->isCollection() || obj2->isCollection())) {
     throw_collection_compare_exception();
   }
@@ -513,15 +593,15 @@ void check_collection_cast_to_array() {
 }
 
 Object create_object_only(const String& s) {
-  return g_context->createObjectOnly(s.get());
+  return Object::attach(g_context->createObjectOnly(s.get()));
 }
 
 Object init_object(const String& s, const Array& params, ObjectData* o) {
-  return g_context->initObject(s.get(), params, o);
+  return Object{g_context->initObject(s.get(), params, o)};
 }
 
 Object create_object(const String& s, const Array& params, bool init /* = true */) {
-  return g_context->createObject(s.get(), params, init);
+  return Object::attach(g_context->createObject(s.get(), params, init));
 }
 
 /*
@@ -533,6 +613,21 @@ void pause_forever() {
   for (;;) sleep(300);
 }
 
+bool is_constructor_name(const char* fn) {
+  auto len = strlen(fn);
+  const char construct[] = "__construct";
+  auto clen = sizeof(construct) - 1;
+
+  if (len >= clen && !strcasecmp(fn + len - clen, construct)) {
+    if (len == clen || (len > clen + 2 &&
+                        fn[len - clen - 1] == ':' &&
+                        fn[len - clen - 2] == ':')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void throw_wrong_argument_count_nr(const char *fn, int expected, int got,
                                    const char *expectDesc,
                                    int level /* = 0 */,
@@ -541,18 +636,22 @@ void throw_wrong_argument_count_nr(const char *fn, int expected, int got,
     rv->m_data.num = 0LL;
     rv->m_type = KindOfNull;
   }
-  if (level == 2) {
-    if (expected == 1) {
-      raise_error(Strings::MISSING_ARGUMENT, fn, expectDesc, got);
-    } else {
-      raise_error(Strings::MISSING_ARGUMENTS, fn, expectDesc, expected, got);
-    }
+  std::string msg;
+  if (expected == 1) {
+    msg = (boost::format(Strings::MISSING_ARGUMENT) %
+           fn % expectDesc % got).str();
   } else {
-    if (expected == 1) {
-      raise_warning(Strings::MISSING_ARGUMENT, fn, expectDesc, got);
-    } else {
-      raise_warning(Strings::MISSING_ARGUMENTS, fn, expectDesc, expected, got);
+    msg = (boost::format(Strings::MISSING_ARGUMENTS) %
+           fn % expectDesc % expected % got).str();
+  }
+
+  if (level == 2) {
+    raise_error(msg);
+  } else {
+    if (is_constructor_name(fn)) {
+      SystemLib::throwExceptionObject(msg);
     }
+    raise_warning(msg);
   }
 }
 
@@ -654,7 +753,7 @@ Variant unserialize_ex(const char* str, int len,
   } catch (FatalErrorException &e) {
     throw;
   } catch (Exception &e) {
-    raise_notice("Unable to unserialize: [%s]. %s.", str,
+    raise_notice("Unable to unserialize: [%.1000s]. %s.", str,
                  e.getMessage().c_str());
     return false;
   }
@@ -668,32 +767,32 @@ Variant unserialize_ex(const String& str,
 }
 
 String concat3(const String& s1, const String& s2, const String& s3) {
-  StringSlice r1 = s1.slice();
-  StringSlice r2 = s2.slice();
-  StringSlice r3 = s3.slice();
-  int len = r1.len + r2.len + r3.len;
+  auto r1 = s1.slice();
+  auto r2 = s2.slice();
+  auto r3 = s3.slice();
+  auto len = r1.size() + r2.size() + r3.size();
   auto str = String::attach(StringData::Make(len));
   auto const r = str.mutableData();
-  memcpy(r,                   r1.ptr, r1.len);
-  memcpy(r + r1.len,          r2.ptr, r2.len);
-  memcpy(r + r1.len + r2.len, r3.ptr, r3.len);
+  memcpy(r,                         r1.data(), r1.size());
+  memcpy(r + r1.size(),             r2.data(), r2.size());
+  memcpy(r + r1.size() + r2.size(), r3.data(), r3.size());
   str.setSize(len);
   return str;
 }
 
 String concat4(const String& s1, const String& s2, const String& s3,
                const String& s4) {
-  StringSlice r1 = s1.slice();
-  StringSlice r2 = s2.slice();
-  StringSlice r3 = s3.slice();
-  StringSlice r4 = s4.slice();
-  int len = r1.len + r2.len + r3.len + r4.len;
+  auto r1 = s1.slice();
+  auto r2 = s2.slice();
+  auto r3 = s3.slice();
+  auto r4 = s4.slice();
+  auto len = r1.size() + r2.size() + r3.size() + r4.size();
   auto str = String::attach(StringData::Make(len));
   auto const r = str.mutableData();
-  memcpy(r,                            r1.ptr, r1.len);
-  memcpy(r + r1.len,                   r2.ptr, r2.len);
-  memcpy(r + r1.len + r2.len,          r3.ptr, r3.len);
-  memcpy(r + r1.len + r2.len + r3.len, r4.ptr, r4.len);
+  memcpy(r,                                     r1.data(), r1.size());
+  memcpy(r + r1.size(),                         r2.data(), r2.size());
+  memcpy(r + r1.size() + r2.size(),             r3.data(), r3.size());
+  memcpy(r + r1.size() + r2.size() + r3.size(), r4.data(), r4.size());
   str.setSize(len);
   return str;
 }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -114,6 +114,11 @@ struct ExtraArgs : private boost::noncopyable {
    */
   TypedValue* getExtraArg(unsigned argInd) const;
 
+  template<class F> void scan(F& mark, unsigned int nargs) const {
+    for (unsigned i = 0; i < nargs; ++i) {
+      mark(*(m_extraArgs + i));
+    }
+  }
 private:
   ExtraArgs();
   ~ExtraArgs();
@@ -150,11 +155,7 @@ class VarEnv {
   const bool m_global;
 
  public:
-  template<class F> void scan(F& mark) const {
-    mark(m_nvTable);
-    // TODO #6511877 scan ExtraArgs. requires calculating numExtra
-    //mark(m_extraArgs);
-  }
+  template<class F> void scan(F& mark) const;
 
  public:
   explicit VarEnv();
@@ -611,11 +612,6 @@ constexpr int kInvalidRaiseLevel = -1;
 constexpr int kInvalidNesting = -1;
 
 struct Fault {
-  enum class Type : int16_t {
-    UserException,
-    CppException
-  };
-
   explicit Fault()
     : m_raiseNesting(kInvalidNesting),
       m_raiseFrame(nullptr),
@@ -623,15 +619,10 @@ struct Fault {
       m_handledCount(0) {}
 
   template<class F> void scan(F& mark) const {
-    if (m_faultType == Type::UserException) mark(m_userException);
-    else mark(m_cppException);
+    mark(m_userException);
   }
 
-  union {
-    ObjectData* m_userException;
-    Exception* m_cppException;
-  };
-  Type m_faultType;
+  ObjectData* m_userException;
 
   // The VM nesting at the moment where the exception was thrown.
   int m_raiseNesting;
@@ -708,7 +699,7 @@ public:
   ALWAYS_INLINE
   void popX() {
     assert(m_top != m_base);
-    assert(!IS_REFCOUNTED_TYPE(m_top->m_type));
+    assert(!isRefcountedType(m_top->m_type));
     tvDebugTrash(m_top);
     m_top++;
   }
@@ -1132,6 +1123,17 @@ void pushLocalsAndIterators(const Func* func, int nparams = 0);
 Array getDefinedVariables(const ActRec*);
 
 ///////////////////////////////////////////////////////////////////////////////
+
+template<class F> void VarEnv::scan(F& mark) const {
+  mark(m_nvTable);
+  if (m_extraArgs) {
+    if (const auto ar = m_nvTable.getFP()) {
+      const int numExtra =
+        ar->numArgs() - ar->m_func->numNonVariadicParams();
+      m_extraArgs->scan(mark, numExtra);
+    }
+  }
+}
 
 }
 

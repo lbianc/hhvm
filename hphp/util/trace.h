@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -92,12 +92,14 @@ namespace Trace {
       TM(atomicvector)  \
       TM(bcinterp)      \
       TM(bisector)      \
+      TM(class_load)     \
       TM(datablock)     \
       TM(decreftype)    \
       TM(debugger)      \
       TM(debuggerflow)  \
       TM(debuginfo)     \
       TM(dispatchBB)    \
+      TM(emitter)       \
       TM(fixup)         \
       TM(fr)            \
       TM(gc)            \
@@ -109,9 +111,11 @@ namespace Trace {
       TM(hhbbc_emit)    \
       TM(hhbbc_index)   \
       TM(hhbbc_time)    \
+      TM(hhbbc_iface)   \
       TM(hhbc)          \
       TM(vasm)          \
       TM(vasm_copy)     \
+      TM(vasm_phi)      \
       TM(hhir)          \
       TM(hhirTracelets) \
       TM(hhir_cfg)      \
@@ -143,11 +147,12 @@ namespace Trace {
       TM(refcount)      \
       TM(regalloc)      \
       TM(region)        \
+      TM(reusetc)       \
       TM(ringbuffer)    \
       TM(runtime)       \
       TM(servicereq)    \
       TM(simplify)      \
-      TM(smartalloc)    \
+      TM(mm)            \
       TM(heaptrace)     \
       TM(stat)          \
       TM(statgroups)    \
@@ -380,6 +385,7 @@ void dumpRingbuffer();
   DEBUG_ONLY static const HPHP::Trace::Module TRACEMOD = HPHP::Trace::name;
 
 #define ITRACE(...)     do { } while (0)
+#define ITRACE_MOD(...) do { } while (0)
 struct Indent {
   Indent() {
     always_assert(true && "If this struct is completely empty we get unused "
@@ -440,7 +446,11 @@ namespace folly {
 template<typename Val>
 struct FormatValue<Val,
                    typename std::enable_if<
-                     HPHP::has_toString<Val, std::string() const>::value,
+                     HPHP::has_toString<Val, std::string() const>::value &&
+                     // This is here because MSVC decides that StringPiece matches
+                     // both this overload as well as the FormatValue overload for
+                     // string-y types in folly itself.
+                     !std::is_same<Val, StringPiece>::value,
                      void
                    >::type> {
   explicit FormatValue(const Val& val) : m_val(val) {}

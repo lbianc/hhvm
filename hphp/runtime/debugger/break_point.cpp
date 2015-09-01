@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -29,7 +29,7 @@
 #include "hphp/runtime/base/stat-cache.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/ext/ext_generator.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 
 namespace HPHP { namespace Eval {
 ///////////////////////////////////////////////////////////////////////////////
@@ -123,7 +123,7 @@ InterruptSite::InterruptSite(ActRec *fp, Offset offset, const Variant& error)
     m_file((StringData*)nullptr),
     m_line0(0), m_char0(0), m_line1(0), m_char1(0),
     m_offset(offset), m_unit(nullptr), m_valid(false),
-    m_funcEntry(false) {
+    m_funcEntry(false), m_builtin(false) {
   TRACE(2, "InterruptSite::InterruptSite(fp)\n");
   this->Initialize(fp);
 }
@@ -150,6 +150,7 @@ void InterruptSite::Initialize(ActRec *fp) {
   } else {
     m_class = "";
   }
+  m_builtin = fp->m_func->isBuiltin();
 #undef bail_on
   m_valid = true;
 }
@@ -996,7 +997,7 @@ bool BreakPointInfo::Match(const char *haystack, int haystack_len,
   Variant r = preg_match(String(needle.c_str(), needle.size(),
                                 CopyString),
                          String(haystack, haystack_len, CopyString),
-                         matches);
+                         &matches);
   return HPHP::same(r, 1);
 }
 

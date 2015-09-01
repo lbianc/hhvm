@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,13 +16,12 @@
 #ifndef incl_HPHP_SRCDB_H_
 #define incl_HPHP_SRCDB_H_
 
-#include <boost/noncopyable.hpp>
 #include <algorithm>
 #include <atomic>
 
 #include "hphp/util/asm-x64.h"
+#include "hphp/util/growable-vector.h"
 #include "hphp/util/trace.h"
-#include "hphp/util/mutex.h"
 
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -30,82 +29,10 @@
 #include "hphp/runtime/vm/tread-hash-map.h"
 
 namespace HPHP { namespace jit {
+////////////////////////////////////////////////////////////////////////////////
 
 struct CodeGenFixups;
 struct RelocationInfo;
-
-template<typename T>
-struct GrowableVector {
-  GrowableVector() {}
-  GrowableVector(GrowableVector&& other) noexcept : m_vec(other.m_vec) {
-    other.m_vec = nullptr;
-  }
-  GrowableVector& operator=(GrowableVector&& other) {
-    m_vec = other.m_vec;
-    other.m_vec = nullptr;
-    return *this;
-  }
-  GrowableVector(const GrowableVector&) = delete;
-  GrowableVector& operator=(const GrowableVector&) = delete;
-
-  size_t size() const {
-    return m_vec ? m_vec->m_size : 0;
-  }
-  T& operator[](const size_t idx) {
-    assertx(idx < size());
-    return m_vec->m_data[idx];
-  }
-  const T& operator[](const size_t idx) const {
-    assertx(idx < size());
-    return m_vec->m_data[idx];
-  }
-  void push_back(const T& datum) {
-    if (!m_vec) {
-      m_vec = Impl::make();
-    }
-    m_vec = m_vec->push_back(datum);
-  }
-  void swap(GrowableVector<T>& other) {
-    std::swap(m_vec, other.m_vec);
-  }
-  void clear() {
-    free(m_vec);
-    m_vec = nullptr;
-  }
-  bool empty() const {
-    return !m_vec;
-  }
-  T* begin() const { return m_vec ? m_vec->m_data : (T*)this; }
-  T* end() const { return m_vec ? &m_vec->m_data[m_vec->m_size] : (T*)this; }
-private:
-  struct Impl {
-    uint32_t m_size;
-    T m_data[1]; // Actually variable length
-    Impl() : m_size(0) { }
-    static Impl* make() {
-      static_assert(std::is_trivially_destructible<T>::value,
-                    "GrowableVector can only hold trivially "
-                    "destructible types");
-      auto mem = malloc(sizeof(Impl));
-      return new (mem) Impl;
-    }
-    Impl* push_back(const T& datum) {
-      Impl* gv;
-      // m_data always has room for at least one element due to the m_data[1]
-      // declaration, so the realloc() code first has to kick in when a second
-      // element is about to be pushed.
-      if (folly::isPowTwo(m_size)) {
-        gv = (Impl*)realloc(this,
-                            offsetof(Impl, m_data) + 2 * m_size * sizeof(T));
-      } else {
-        gv = this;
-      }
-      gv->m_data[gv->m_size++] = datum;
-      return gv;
-    }
-  };
-  Impl* m_vec{nullptr};
-};
 
 /*
  * Incoming branches between different translations are tracked using
@@ -165,6 +92,58 @@ private:
 };
 
 /*
+ * TransLoc: the location of a translation in the TC
+ *
+ * All offsets are stored relative to the start of the TC, and the sizes of the
+ * cold and frozen regions are encoded in the first four bytes of their
+ * respective regions.
+ */
+struct TransLoc {
+  void setMainStart(TCA newStart);
+  void setColdStart(TCA newStart);
+  void setFrozenStart(TCA newFrozen);
+
+  void setMainSize(size_t size) {
+    assert(size < std::numeric_limits<uint32_t>::max());
+    m_mainLen = (uint32_t)size;
+  }
+
+  bool contains(TCA loc) {
+    return (mainStart() <= loc && loc < mainEnd()) ||
+      (coldStart() <= loc && loc < coldEnd()) ||
+      (frozenStart() <= loc && loc < frozenEnd());
+  }
+
+  TCA mainStart() const;
+  TCA coldStart() const;
+  TCA frozenStart() const;
+
+  TCA coldCodeStart()   const { return coldStart()   + sizeof(uint32_t); }
+  TCA frozenCodeStart() const { return frozenStart() + sizeof(uint32_t); }
+
+  uint32_t coldCodeSize()   const { return coldSize()   - sizeof(uint32_t); }
+  uint32_t frozenCodeSize() const { return frozenSize() - sizeof(uint32_t); }
+
+  TCA mainEnd()   const { return mainStart() + m_mainLen; }
+  TCA coldEnd()   const { return coldStart() + coldSize(); }
+  TCA frozenEnd() const { return frozenStart() + frozenSize(); }
+
+  uint32_t mainSize()   const { return m_mainLen; }
+  uint32_t coldSize()   const { return *(uint32_t*)coldStart(); }
+  uint32_t frozenSize() const { return *(uint32_t*)frozenStart(); }
+
+private:
+  uint32_t m_mainOff {std::numeric_limits<uint32_t>::max()};
+  uint32_t m_mainLen {0};
+
+  uint32_t m_coldOff   {std::numeric_limits<uint32_t>::max()};
+  uint32_t m_frozenOff {std::numeric_limits<uint32_t>::max()};
+};
+
+// Prevent unintentional growth of the SrcDB
+static_assert(sizeof(TransLoc) == 16, "Don't add fields to TransLoc");
+
+/*
  * SrcRec: record of translator output for a given source location.
  */
 struct SrcRec {
@@ -194,22 +173,16 @@ struct SrcRec {
    */
   void setFuncInfo(const Func* f);
   void chainFrom(IncomingBranch br);
-  void emitFallbackJump(CodeBlock& cb, ConditionCode cc = CC_None);
   void registerFallbackJump(TCA from, ConditionCode cc = CC_None);
-  void emitFallbackJumpCustom(CodeBlock& cb,
-                              CodeBlock& frozen,
-                              SrcKey sk,
-                              TransFlags trflags,
-                              ConditionCode cc = CC_None);
   TCA getFallbackTranslation() const;
-  void newTranslation(TCA newStart,
+  void newTranslation(TransLoc newStart,
                       GrowableVector<IncomingBranch>& inProgressTailBranches);
   void replaceOldTranslations();
   void addDebuggerGuard(TCA dbgGuard, TCA m_dbgBranchGuardSrc);
   bool hasDebuggerGuard() const { return m_dbgBranchGuardSrc != nullptr; }
   const MD5& unitMd5() const { return m_unitMd5; }
 
-  const GrowableVector<TCA>& translations() const {
+  const GrowableVector<TransLoc>& translations() const {
     return m_translations;
   }
 
@@ -241,6 +214,8 @@ struct SrcRec {
   }
 
   void relocate(RelocationInfo& rel);
+
+  void removeIncomingBranch(TCA toSmash);
 
   /*
    * There is an unlikely race in retranslate, where two threads
@@ -280,7 +255,7 @@ private:
   TCA m_anchorTranslation;
   GrowableVector<IncomingBranch> m_tailFallbackJumps;
 
-  GrowableVector<TCA> m_translations;
+  GrowableVector<TransLoc> m_translations;
   GrowableVector<IncomingBranch> m_incomingBranches;
   MD5 m_unitMd5;
   // The branch src for the debug guard, if this has one.
@@ -288,25 +263,32 @@ private:
   std::atomic<uint32_t> m_guard;
 };
 
-class SrcDB : boost::noncopyable {
-  // Although it seems tempting, in an experiment, trying to stash the
-  // top TCA in place in the hashtable did worse than dereferencing a
-  // SrcRec* to get it.  Maybe could be possible with a better hash
-  // function or lower max load factor.  (See D450383.)
-  typedef TreadHashMap<SrcKey::AtomicInt,SrcRec*,int64_hash> THM;
-  THM m_map;
-public:
-  explicit SrcDB()
-    : m_map(1024)
-  {}
+struct SrcDB {
+  /*
+   * Although it seems tempting, in an experiment, trying to stash the top TCA
+   * in place in the hashtable did worse than dereferencing a SrcRec* to get it.
+   * Maybe could be possible with a better hash function or lower max load
+   * factor.  (See D450383.)
+   */
+  using THM            = TreadHashMap<SrcKey::AtomicInt, SrcRec*, int64_hash>;
+  using iterator       = THM::iterator;
+  using const_iterator = THM::const_iterator;
 
-  typedef THM::iterator iterator;
-  typedef THM::const_iterator const_iterator;
+  //////////////////////////////////////////////////////////////////////////////
+
+  explicit SrcDB() {}
+
+  SrcDB(const SrcDB&) = delete;
+  SrcDB& operator=(const SrcDB&) = delete;
+
+  //////////////////////////////////////////////////////////////////////////////
 
   iterator begin()             { return m_map.begin(); }
   iterator end()               { return m_map.end(); }
   const_iterator begin() const { return m_map.begin(); }
   const_iterator end()   const { return m_map.end(); }
+
+  //////////////////////////////////////////////////////////////////////////////
 
   SrcRec* find(SrcKey sk) const {
     SrcRec* const* p = m_map.find(sk.toAtomicInt());
@@ -317,8 +299,11 @@ public:
     return *m_map.insert(sk.toAtomicInt(), new SrcRec);
   }
 
+private:
+  THM m_map{1024};
 };
 
-} }
+////////////////////////////////////////////////////////////////////////////////
+}}
 
 #endif

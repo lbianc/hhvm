@@ -50,14 +50,16 @@ static bool HHVM_METHOD(Collator, asort, VRefParam arr, int64_t flag) {
     return false;
   }
   data->clearError();
-  bool ret = collator_asort(arr, flag, true, data->collator(), data);
+  Variant ref(arr, Variant::WithRefBind{});
+  bool ret = collator_asort(ref, flag, true, data->collator(), data);
   if (U_FAILURE(data->getErrorCode())) {
     return false;
   }
   return ret;
 }
 
-static Variant HHVM_METHOD(Collator, compare, const Variant& str1, const Variant& str2) {
+static Variant HHVM_METHOD(Collator, compare,
+                           const Variant& str1, const Variant& str2) {
   FETCH_COL(data, this_, false);
   data->clearError();
   UErrorCode error = U_ZERO_ERROR;
@@ -201,21 +203,21 @@ static bool HHVM_METHOD(Collator, sortWithSortKeys, VRefParam arr) {
   // Preallocate sort keys buffer
   size_t sortKeysOffset = 0;
   size_t sortKeysLength = DEF_SORT_KEYS_BUF_SIZE;
-  char*  sortKeys = (char*)smart_malloc(sortKeysLength);
+  char*  sortKeys = (char*)req::malloc(sortKeysLength);
   if (!sortKeys) {
     throw Exception("Out of memory");
   }
-  SCOPE_EXIT{ smart_free(sortKeys); };
+  SCOPE_EXIT{ req::free(sortKeys); };
 
   // Preallocate index buffer
   size_t sortIndexPos = 0;
   size_t sortIndexLength = DEF_SORT_KEYS_INDX_BUF_SIZE;
-  auto   sortIndex = (collator_sort_key_index_t*)smart_malloc(
+  auto   sortIndex = (collator_sort_key_index_t*)req::malloc(
                   sortIndexLength * sizeof(collator_sort_key_index_t));
   if (!sortIndex) {
     throw Exception("Out of memory");
   }
-  SCOPE_EXIT{ smart_free(sortIndex); };
+  SCOPE_EXIT{ req::free(sortIndex); };
 
   // Translate input hash to sortable index
   auto pos_limit = hash->iter_end();
@@ -245,7 +247,7 @@ static bool HHVM_METHOD(Collator, sortWithSortKeys, VRefParam arr) {
       int32_t inc = (sortkey_len > DEF_SORT_KEYS_BUF_INCREMENT)
                   ?  sortkey_len : DEF_SORT_KEYS_BUF_INCREMENT;
       sortKeysLength += inc;
-      sortKeys = (char*)smart_realloc(sortKeys, sortKeysLength);
+      sortKeys = (char*)req::realloc(sortKeys, sortKeysLength);
       if (!sortKeys) {
         throw Exception("Out of memory");
       }
@@ -260,7 +262,7 @@ static bool HHVM_METHOD(Collator, sortWithSortKeys, VRefParam arr) {
     // Check for index buffer overflow
     if ((sortIndexPos + 1) > sortIndexLength) {
       sortIndexLength += DEF_SORT_KEYS_INDX_BUF_INCREMENT;
-      sortIndex = (collator_sort_key_index_t*)smart_realloc(sortIndex,
+      sortIndex = (collator_sort_key_index_t*)req::realloc(sortIndex,
                       sortIndexLength * sizeof(collator_sort_key_index_t));
       if (!sortIndex) {
         throw Exception("Out of memory");
@@ -288,7 +290,7 @@ static bool HHVM_METHOD(Collator, sortWithSortKeys, VRefParam arr) {
   for (int i = 0; i < sortIndexPos; ++i) {
     ret.append(hash->getValue(sortIndex[i].valPos));
   }
-  arr = ret;
+  arr.assignIfRef(ret);
   return true;
 }
 
@@ -300,7 +302,8 @@ static bool HHVM_METHOD(Collator, sort, VRefParam arr,
     return false;
   }
   data->clearError();
-  bool ret = collator_sort(arr, sort_flag, true, data->collator(), data);
+  Variant ref(arr, Variant::WithRefBind{});
+  bool ret = collator_sort(ref, sort_flag, true, data->collator(), data);
   if (U_FAILURE(data->getErrorCode())) {
     return false;
   }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -45,13 +45,13 @@ void SelectRewriter::rewriteExpressionList(ExpressionListPtr l) {
     switch (kind) {
       case Expression::KindOfIntoClause: {
         // The into expression is in the scope of the into clause
-        SimpleQueryClausePtr qcp(static_pointer_cast<SimpleQueryClause>(e));
+        auto qcp = static_pointer_cast<SimpleQueryClause>(e);
         m_boundVars.push_back(qcp->getIdentifier());
         np++;
         break;
       }
       case Expression::KindOfJoinClause: {
-        JoinClausePtr jcp(static_pointer_cast<JoinClause>(e));
+        auto jcp = static_pointer_cast<JoinClause>(e);
         m_boundVars.push_back(jcp->getVar());
         np++;
         break;
@@ -64,13 +64,13 @@ void SelectRewriter::rewriteExpressionList(ExpressionListPtr l) {
     switch (kind) {
       case Expression::KindOfFromClause:
       case Expression::KindOfLetClause: {
-        SimpleQueryClausePtr qcp(static_pointer_cast<SimpleQueryClause>(e));
+        auto qcp = static_pointer_cast<SimpleQueryClause>(e);
         m_boundVars.push_back(qcp->getIdentifier());
         np++;
         break;
       }
       case Expression::KindOfJoinClause: {
-        JoinClausePtr jcp(static_pointer_cast<JoinClause>(e));
+        auto jcp = static_pointer_cast<JoinClause>(e);
         auto groupId = jcp->getGroup();
         if (!groupId.empty()) {
           m_boundVars.push_back(groupId);
@@ -138,12 +138,12 @@ void SelectRewriter::rewriteSelect(SelectClausePtr sc) {
   // properties into a single tuple.
   auto selectExpr = sc->getExpression();
   ExpressionListPtr newList(
-    new ExpressionList(selectExpr->getScope(), selectExpr->getLocation())
+    new ExpressionList(selectExpr->getScope(), selectExpr->getRange())
   );
   m_selectedColumns = newList;
   this->collectSelectedColumns(sc);
   SimpleFunctionCallPtr callTuple(
-    new SimpleFunctionCall(selectExpr->getScope(), selectExpr->getLocation(),
+    new SimpleFunctionCall(selectExpr->getScope(), selectExpr->getRange(),
       "tuple", false, newList, nullptr)
   );
   sc->setExpression(callTuple);
@@ -158,15 +158,15 @@ ObjectPropertyExpressionPtr getResultColumn(
   ExpressionPtr expr, std::string columnName) {
   SimpleVariablePtr obj(
     new SimpleVariable(expr->getScope(),
-        expr->getLocation(), "__query_result_row__")
+        expr->getRange(), "__query_result_row__")
   );
   ScalarExpressionPtr propName(
     new ScalarExpression(expr->getScope(),
-    expr->getLocation(), columnName)
+    expr->getRange(), columnName)
   );
   ObjectPropertyExpressionPtr result(
     new ObjectPropertyExpression(expr->getScope(),
-        expr->getLocation(), obj, propName, PropAccessType::Normal)
+        expr->getRange(), obj, propName, PropAccessType::Normal)
   );
   return result;
 }

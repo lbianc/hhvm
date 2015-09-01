@@ -79,7 +79,8 @@ class EncodingMatch : public IntlError {
   EncodingMatch() {}
   EncodingMatch(const EncodingMatch&) = delete;
   EncodingMatch& operator=(const EncodingMatch& src) {
-    *this = src;
+    IntlError::operator =(src);
+    m_match = src.m_match;
     return *this;
   }
   ~EncodingMatch() {}
@@ -89,8 +90,7 @@ class EncodingMatch : public IntlError {
       c_EncodingMatch = Unit::lookupClass(s_EncodingMatch.get());
       assert(c_EncodingMatch);
     }
-    auto ret = ObjectData::newInstance(c_EncodingMatch);
-    assert(ret);
+    Object ret{c_EncodingMatch};
     Native::data<EncodingMatch>(ret)->m_match =
       const_cast<UCharsetMatch*>(match);
     return ret;

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -43,8 +43,7 @@ const StaticString s_default_filters_register_func(
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class StreamFilterRepository {
-public:
+struct StreamFilterRepository {
   void add(const String& key, const Variant& v) {
     m_filters.add(key, v);
   }
@@ -84,6 +83,10 @@ public:
     return m_filters.isNull();
   }
 
+  template<class F> void scan(F& mark) const {
+    mark(m_filters);
+  }
+
 private:
   Array m_filters;
 };
@@ -92,7 +95,6 @@ private:
 
 struct StreamUserFilters final : RequestEventHandler {
   virtual ~StreamUserFilters() {}
-  StreamFilterRepository m_registeredFilters;
 
   bool registerFilter(const String& name, const String& class_name) {
     if (m_registeredFilters.exists(name)) {
@@ -130,10 +132,6 @@ struct StreamUserFilters final : RequestEventHandler {
 
   void requestShutdown() override {
     m_registeredFilters.detach();
-  }
-
-  void vscan(IMarker& mark) const override {
-    mark(m_registeredFilters.filtersAsArray());
   }
 
 private:
@@ -174,7 +172,7 @@ private:
 
     // If it's ALL we create two resources, but only return one - this
     // matches Zend, and is the documented behavior.
-    SmartPtr<StreamFilter> ret;
+    req::ptr<StreamFilter> ret;
     if (mode & k_STREAM_FILTER_READ) {
       auto resource = createInstance(func_name,
                                      file,
@@ -208,8 +206,8 @@ private:
     return Variant(std::move(ret));
   }
 
-  SmartPtr<StreamFilter> createInstance(const char* php_func,
-                                        SmartPtr<File> stream,
+  req::ptr<StreamFilter> createInstance(const char* php_func,
+                                        req::ptr<File> stream,
                                         const String& filter,
                                         const Variant& params) {
     auto class_name = m_registeredFilters.rvalAt(filter).asCStrRef();
@@ -221,7 +219,9 @@ private:
       ctor_args.append(Variant(stream));
       ctor_args.append(filter);
       ctor_args.append(params);
-      obj = g_context->createObject(class_name.get(), ctor_args.toArray());
+      obj = Object::attach(
+        g_context->createObject(class_name.get(), ctor_args.toArray())
+      );
       auto created = obj->o_invoke(s_onCreate, Array::Create());
       /* - true: documented value for success
        * - null: undocumented default successful value
@@ -246,16 +246,24 @@ private:
       return nullptr;
     }
 
-    return makeSmartPtr<StreamFilter>(obj, stream);
+    return req::make<StreamFilter>(obj, stream);
   }
+
+public:
+  void vscan(IMarker& mark) const override {
+    m_registeredFilters.scan(mark);
+  }
+
+public:
+  StreamFilterRepository m_registeredFilters;
 };
 IMPLEMENT_STATIC_REQUEST_LOCAL(StreamUserFilters, s_stream_user_filters);
 
 ///////////////////////////////////////////////////////////////////////////////
 // StreamFilter
 
-int64_t StreamFilter::invokeFilter(const SmartPtr<BucketBrigade>& in,
-                                   const SmartPtr<BucketBrigade>& out,
+int64_t StreamFilter::invokeFilter(const req::ptr<BucketBrigade>& in,
+                                   const req::ptr<BucketBrigade>& out,
                                    bool closing) {
   auto consumedTV = make_tv<KindOfInt64>(0);
   auto consumedRef = RefData::Make(consumedTV);
@@ -263,7 +271,7 @@ int64_t StreamFilter::invokeFilter(const SmartPtr<BucketBrigade>& in,
   PackedArrayInit params(4);
   params.append(Variant(in));
   params.append(Variant(out));
-  params.append(consumedRef);
+  params.append(Variant{consumedRef});
   params.append(closing);
   return m_filter->o_invoke(s_filter, params.toArray()).toInt64();
 }
@@ -276,7 +284,7 @@ bool StreamFilter::remove() {
   if (!m_stream) {
     return false;
   }
-  auto ret = m_stream->removeFilter(SmartPtr<StreamFilter>(this));
+  auto ret = m_stream->removeFilter(req::ptr<StreamFilter>(this));
   m_stream.reset();
   return ret;
 }
@@ -289,7 +297,7 @@ BucketBrigade::BucketBrigade(const String& data) {
   ai.append(data);
   ai.append(data.length());
   auto bucket = g_context->createObject(s_bucket_class.get(), ai.toArray());
-  appendBucket(bucket);
+  appendBucket(Object::attach(bucket));
 }
 
 void BucketBrigade::appendBucket(const Object& bucket) {

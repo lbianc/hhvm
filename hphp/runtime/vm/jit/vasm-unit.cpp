@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -55,20 +55,15 @@ VcallArgsId Vunit::makeVcallArgs(VcallArgs&& args) {
   return i;
 }
 
-// helper for making constants, where T maps to the correct overloaded
-// Vconst constructor.
-template<class T> Vreg make_const(Vunit& unit, T c) {
-  auto it = unit.constants.find(c);
-  if (it != unit.constants.end()) return it->second;
-  return unit.constants[c] = unit.makeReg();
-}
+Vreg Vunit::makeConst(Vconst vconst) {
+  auto it = constToReg.find(vconst);
+  if (it != constToReg.end()) return it->second;
 
-Vreg Vunit::makeConst(bool v)     { return make_const(*this, v); }
-Vreg Vunit::makeConst(uint32_t v) { return make_const(*this, v); }
-Vreg Vunit::makeConst(uint64_t v) { return make_const(*this, v); }
-Vreg Vunit::makeConst(Vptr v)     { return make_const(*this, v); }
-Vreg Vunit::makeConst(double v)   { return make_const(*this, v); }
-Vreg Vunit::makeConst(Vconst::Kind k) { return make_const(*this, k); }
+  auto const reg = makeReg();
+  constToReg.emplace(vconst, reg);
+  regToConst.emplace(reg, vconst);
+  return reg;
+}
 
 bool Vunit::needsRegAlloc() const {
   if (next_vr > Vreg::V0) return true;

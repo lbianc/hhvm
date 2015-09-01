@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -154,7 +154,7 @@ bool HHVM_METHOD(XMLReader, open,
   if (!valid_file.empty()) {
     // Manually create the IO context to support custom stream wrappers.
     data->m_stream = File::Open(valid_file, "rb");
-    if (!data->m_stream->isInvalid()) {
+    if (data->m_stream != nullptr && !data->m_stream->isInvalid()) {
       // The XML context is owned by the native data attached to 'this_'.
       // The File is also owned by the native data so it does not need
       // to be cleaned up by an XML callback.  The libxml_streams_IO_nop_close
@@ -681,12 +681,12 @@ Variant HHVM_METHOD(XMLReader, __get,
 Variant HHVM_METHOD(XMLReader, expand,
                     const Variant& basenode /* = null */) {
   auto* data = Native::data<XMLReader>(this_);
-  SmartPtr<XMLDocumentData> doc;
+  req::ptr<XMLDocumentData> doc;
   xmlDocPtr docp = nullptr;
   SYNC_VM_REGS_SCOPED();
 
   if (!basenode.isNull()) {
-    auto dombasenode = Native::data<DOMNode>(basenode.toObject().get());
+    auto dombasenode = Native::data<DOMNode>(basenode.toObject());
     doc = dombasenode->doc();
     docp = doc->docp();
     if (docp == nullptr) {

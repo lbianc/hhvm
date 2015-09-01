@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -30,6 +30,9 @@
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/debug/debug.h"
+#include "hphp/runtime/vm/vm-regs.h"
+
+#include "hphp/runtime/vm/jit/alignment.h"
 #include "hphp/runtime/vm/jit/back-end.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/containers.h"
@@ -60,6 +63,7 @@ constexpr int kTestImmRegLen = 5;  // only for rax -- special encoding
 // mutations don't "tear" on remote cpus.
 constexpr size_t kX64CacheLineSize = 64;
 constexpr size_t kX64CacheLineMask = kX64CacheLineSize - 1;
+const TCA kInvalidCatchTrace   = (TCA)(-1);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -93,7 +97,7 @@ struct CodeGenFixups {
   std::set<TCA> m_addressImmediates;
   std::set<TCA*> m_codePointers;
   std::vector<TransBCMapping> m_bcMap;
-  std::multimap<TCA,std::pair<int,int>> m_alignFixups;
+  std::multimap<TCA,std::pair<Alignment,AlignContext>> m_alignFixups;
   GrowableVector<IncomingBranch> m_inProgressTailJumps;
   LiteralMap m_literals;
 
@@ -177,8 +181,9 @@ public:
    */
   TCA getFuncPrologue(Func* func, int nPassed, ActRec* ar = nullptr,
                       bool forRegeneratePrologue = false);
-  TCA getCallArrayPrologue(Func* func);
   void smashPrologueGuards(TCA* prologues, int numPrologues, const Func* func);
+
+  TCA getFuncBody(Func* func);
 
   inline void sync() {
     if (tl_regState == VMRegState::CLEAN) return;
@@ -291,8 +296,15 @@ public:
    * The forced symbol name is so we can call this from
    * translator-asm-helpers.S without hardcoding a fragile mangled name.
    */
-  TCA handleServiceRequest(ServiceReqInfo& info) noexcept
+  TCA handleServiceRequest(svcreq::ReqInfo& info) noexcept
+#ifdef _MSC_VER
+    // For MSVC, we've had to hard-code the mangled name,
+    // because we can't explicitly set it like we can with
+    // GCC/Clang :(
+    ;
+#else
     asm("MCGenerator_handleServiceRequest");
+#endif
 
   /*
    * Smash the PHP call at address toSmash to point to the appropriate prologue
@@ -319,10 +331,10 @@ private:
    */
   TCA bindJmp(TCA toSmash, SrcKey dest, ServiceRequest req,
               TransFlags trflags, bool& smashed);
-  TCA bindJmpccFirst(TCA toSmash,
-                     SrcKey skTrue, SrcKey skFalse,
-                     bool toTake,
-                     bool& smashed);
+  TCA bindJccFirst(TCA toSmash,
+                   SrcKey skTrue, SrcKey skFalse,
+                   bool toTake,
+                   bool& smashed);
 
   bool shouldTranslate(const Func*) const;
   bool shouldTranslateNoSizeLimit(const Func*) const;
@@ -391,18 +403,9 @@ private:
   bool               m_useLLVM;
 };
 
-TCA fcallHelper(ActRec*, bool isClonedClosure);
+TCA fcallHelper(ActRec*);
 TCA funcBodyHelper(ActRec*);
 int64_t decodeCufIterHelper(Iter* it, TypedValue func);
-
-// Both emitIncStat()s push/pop flags but don't clobber any registers.
-void emitIncStat(CodeBlock& cb, uint64_t* tl_table, uint32_t index,
-                 int n = 1, bool force = false);
-
-inline void emitIncStat(CodeBlock& cb, Stats::StatCounter stat, int n = 1,
-                        bool force = false) {
-  emitIncStat(cb, &Stats::tl_counters[0], stat, n, force);
-}
 
 /*
  * Look up the catch block associated with the return address in ar and save it
@@ -419,9 +422,6 @@ TCA popDebuggerCatch(const ActRec* ar);
 
 void emitIncStat(Vout& v, Stats::StatCounter stat, int n = 1,
                  bool force = false);
-
-void emitServiceReq(Vout& v, TCA stub_block, ServiceRequest req,
-                    const ServiceReqArgVec& argv);
 
 bool shouldPGOFunc(const Func& func);
 
@@ -450,6 +450,11 @@ extern __thread int64_t s_perfCounters[];
  * Handle a VM stack overflow condition by throwing an appropriate exception.
  */
 void handleStackOverflow(ActRec* calleeAR);
+
+/*
+ * Determine whether something is a stack overflow, and if so, handle it.
+ */
+void handlePossibleStackOverflow(ActRec* calleeAR);
 
 }}
 

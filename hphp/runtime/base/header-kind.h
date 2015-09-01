@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,14 +28,14 @@ enum class HeaderKind : uint8_t {
   Vector, Map, Set, Pair, ImmVector, ImmMap, ImmSet,
   ResumableFrame, // ResumableNode followed by Frame, Resumable, ObjectData
   NativeData, // a NativeData header preceding an HNI ObjectData
-  SmallMalloc, // small smart_malloc'd block
-  BigMalloc, // big smart_malloc'd block
+  SmallMalloc, // small req::malloc'd block
+  BigMalloc, // big req::malloc'd block
   BigObj, // big size-tracked object (valid header follows BigNode)
   Free, // small block in a FreeList
   Hole, // wasted space not in any freelist
-  Debug // a DebugHeader
 };
-const unsigned NumHeaderKinds = unsigned(HeaderKind::Debug) + 1;
+const unsigned NumHeaderKinds = unsigned(HeaderKind::Hole) + 1;
+extern const char* header_names[];
 
 /*
  * RefCount type for m_count field in refcounted objects

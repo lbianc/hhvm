@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -86,7 +86,7 @@ namespace HPHP { namespace jit {
  *        +------------------------------+  <call to C++>
  *        |    RetIP to the dtor stub    |
  *        |--                          --|
- *        |         saved rVmFp          |  push %rbp; mov %rsp, %rbp
+ *        |         saved rvmfp()        |  push %rbp; mov %rsp, %rbp
  *    +-->|--                          --|
  *    |   |    < C++ local variables>    |
  *    |   +------------------------------+
@@ -149,7 +149,12 @@ struct FixupMap {
   void recordFixup(CTCA tca, const Fixup& fixup) {
     TRACE(3, "FixupMapImpl::recordFixup: tca %p -> (pcOff %d, spOff %d)\n",
           tca, fixup.pcOffset, fixup.spOffset);
-    m_fixups.insert(tca, FixupEntry(fixup));
+
+    if (auto pos = m_fixups.find(tca)) {
+      *pos = FixupEntry(fixup);
+    } else {
+      m_fixups.insert(tca, FixupEntry(fixup));
+    }
   }
 
   const Fixup* findFixup(CTCA tca) const {
@@ -158,8 +163,7 @@ struct FixupMap {
     return &ent->fixup;
   }
 
-  bool getFrameRegs(const ActRec* ar, const ActRec* prevAr,
-                    VMRegs* outVMRegs) const;
+  bool getFrameRegs(const ActRec* ar, VMRegs* outVMRegs) const;
 
   void fixup(ExecutionContext* ec) const;
   void fixupWork(ExecutionContext* ec, ActRec* rbp) const;

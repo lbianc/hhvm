@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,7 +19,6 @@
 
 #include "hphp/parser/location.h"
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/hhbc.h"
@@ -73,7 +72,7 @@ struct SourceLoc {
    * Constructors.
    */
   SourceLoc() {}
-  explicit SourceLoc(const Location& l);
+  explicit SourceLoc(const Location::Range& l);
 
   /*
    * Reset to, or check for, the invalid state.
@@ -84,7 +83,7 @@ struct SourceLoc {
   /*
    * Set to a parser Location.
    */
-  void setLoc(const Location* l);
+  void setLoc(const Location::Range* l);
 
   /*
    * Equality.
@@ -287,7 +286,7 @@ public:
     Define              = 2,  // Toplevel scalar define.
     PersistentDefine    = 3,  // Cross-request persistent toplevel defines.
     Global              = 4,  // Global variable declarations.
-    // Unused           = 5,
+    TypeAlias           = 5,
     ReqDoc              = 6,
     Done                = 7,
     // We cannot add more kinds here; this has to fit in 3 bits.
@@ -299,6 +298,7 @@ public:
   typedef MergeInfo::FuncRange FuncRange;
   typedef MergeInfo::MutableFuncRange MutableFuncRange;
   typedef Range<std::vector<PreClassPtr>> PreClassRange;
+  typedef Range<FixedVector<TypeAlias>> TypeAliasRange;
 
   /*
    * Cache for pseudomains for this unit, keyed by Class context.
@@ -634,6 +634,9 @@ public:
   /////////////////////////////////////////////////////////////////////////////
   // Type aliases.
 
+  TypeAliasRange typeAliases() const;
+  static const TypeAliasReq* loadTypeAlias(const StringData* name);
+
   /*
    * Define the type alias given by `id', binding it to the appropriate
    * NamedEntity for this request.
@@ -824,44 +827,31 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// TODO(#4717225): Rewrite these in iterators.h.
 
-struct ConstPreClassMethodRanger {
-  typedef Func* const* Iter;
-  typedef const Func* Value;
-  static Iter get(PreClassPtr pc) {
-    return pc->methods();
-  }
-};
-
-struct MutablePreClassMethodRanger {
-  typedef Func** Iter;
-  typedef Func* Value;
-  static Func** get(PreClassPtr pc) {
-    return pc->mutableMethods();
-  }
-};
-
-template<typename FuncRange,
-         typename GetMethods>
-struct AllFuncsImpl {
-  explicit AllFuncsImpl(const Unit* unit)
+struct AllFuncs {
+  explicit AllFuncs(const Unit* unit)
     : fr(unit->funcs())
     , mr(0, 0)
     , cr(unit->preclasses())
   {
     if (fr.empty()) skip();
   }
-  bool empty() const { return fr.empty() && mr.empty() && cr.empty(); }
-  typedef typename GetMethods::Value FuncPtr;
-  FuncPtr front() const {
+
+  bool empty() const {
+    return fr.empty() && mr.empty() && cr.empty();
+  }
+
+  const Func* front() const {
     assert(!empty());
     if (!fr.empty()) return fr.front();
     assert(!mr.empty());
     return mr.front();
   }
-  FuncPtr popFront() {
-    FuncPtr f = !fr.empty() ? fr.popFront() :
-      !mr.empty() ? mr.popFront() : 0;
+
+  const Func* popFront() {
+    auto f = !fr.empty() ? fr.popFront() :
+             !mr.empty() ? mr.popFront() : 0;
     assert(f);
     if (fr.empty() && mr.empty()) skip();
     return f;
@@ -871,9 +861,9 @@ private:
   void skip() {
     assert(fr.empty());
     while (!cr.empty() && mr.empty()) {
-      PreClassPtr c = cr.popFront();
-      mr = Unit::FuncRange(GetMethods::get(c),
-                           GetMethods::get(c) + c->numMethods());
+      auto c = cr.popFront();
+      mr = Unit::FuncRange(c->methods(),
+                           c->methods() + c->numMethods());
     }
   }
 
@@ -881,27 +871,6 @@ private:
   Unit::FuncRange mr;
   Unit::PreClassRange cr;
 };
-
-typedef AllFuncsImpl<Unit::FuncRange,ConstPreClassMethodRanger> AllFuncs;
-typedef AllFuncsImpl<Unit::MutableFuncRange,MutablePreClassMethodRanger>
-  MutableAllFuncs;
-
-/*
- * Range over all defined classes.
- */
-class AllClasses {
-  NamedEntity::Map::iterator m_next, m_end;
-  Class* m_current;
-  void next();
-  void skip();
-
-public:
-  AllClasses();
-  bool empty() const;
-  Class* front() const;
-  Class* popFront();
-};
-
 
 class AllCachedClasses {
   NamedEntity::Map::iterator m_next, m_end;

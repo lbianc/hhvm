@@ -12,4 +12,4 @@ val make_next_files:
   (string -> bool) -> ?others: Path.t list -> Path.t ->
   (unit -> string list)
 
-val find_with_name : Path.t list -> string -> string list
+val find_with_name: Path.t list -> string -> string list

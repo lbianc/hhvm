@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -25,18 +25,17 @@
 #include "hphp/runtime/vm/jit/native-calls.h"
 #include "hphp/runtime/vm/jit/punt.h"
 #include "hphp/runtime/vm/jit/reg-algorithms.h"
-#include "hphp/runtime/vm/jit/service-requests-arm.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/stack-offsets-defs.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/vasm.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
-#include "hphp/runtime/ext/ext_collections.h"
-#include "hphp/runtime/ext/ext_generator.h"
+#include "hphp/runtime/ext/collections/ext_collections-idl.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 
 #include <folly/Optional.h>
 
@@ -60,8 +59,6 @@ NOOP_OPCODE(EndGuards)
 NOOP_OPCODE(HintLocInner)
 NOOP_OPCODE(HintStkInner)
 NOOP_OPCODE(DbgTraceCall)
-NOOP_OPCODE(PredictLoc);
-NOOP_OPCODE(PredictStk);
 
 // When implemented this shouldn't be a nop, but there's no reason to make us
 // punt on everything until then.
@@ -103,11 +100,13 @@ CALL_OPCODE(ConvCellToBool);
 CALL_OPCODE(ConvArrToDbl);
 CALL_OPCODE(ConvObjToDbl);
 CALL_OPCODE(ConvStrToDbl);
+CALL_OPCODE(ConvResToDbl);
 CALL_OPCODE(ConvCellToDbl);
 
 CALL_OPCODE(ConvArrToInt);
 CALL_OPCODE(ConvObjToInt);
 CALL_OPCODE(ConvStrToInt);
+CALL_OPCODE(ConvResToInt);
 CALL_OPCODE(ConvCellToInt);
 
 CALL_OPCODE(ConvCellToObj);
@@ -124,8 +123,12 @@ CALL_OPCODE(ConcatIntStr);
 CALL_OPCODE(ConcatStr3);
 CALL_OPCODE(ConcatStr4);
 
+CALL_OPCODE(ThrowInvalidOperation);
+CALL_OPCODE(HasToString);
+
 CALL_OPCODE(CreateCont)
 CALL_OPCODE(CreateAFWH)
+CALL_OPCODE(CreateAFWHNoVV)
 CALL_OPCODE(CreateSSWH)
 CALL_OPCODE(AFWHPrepareChild)
 CALL_OPCODE(ABCUnblock)
@@ -227,9 +230,13 @@ DELEGATE_OPCODE(AddInt)
 DELEGATE_OPCODE(SubInt)
 DELEGATE_OPCODE(AddIntO)
 DELEGATE_OPCODE(SubIntO)
+DELEGATE_OPCODE(MulInt)
 DELEGATE_OPCODE(AndInt)
 DELEGATE_OPCODE(OrInt)
 DELEGATE_OPCODE(XorInt)
+
+DELEGATE_OPCODE(Shl)
+DELEGATE_OPCODE(Shr)
 
 DELEGATE_OPCODE(LtInt)
 DELEGATE_OPCODE(GtInt)
@@ -288,7 +295,9 @@ PUNT_OPCODE(ProfileObjClass)
 PUNT_OPCODE(CheckTypeMem)
 PUNT_OPCODE(CheckLoc)
 PUNT_OPCODE(CastStk)
+PUNT_OPCODE(CastMem)
 PUNT_OPCODE(CoerceStk)
+PUNT_OPCODE(CoerceMem)
 PUNT_OPCODE(UnwindCheckSideExit)
 PUNT_OPCODE(LdUnwinderValue)
 PUNT_OPCODE(AddDbl)
@@ -305,26 +314,54 @@ PUNT_OPCODE(IsWaitHandle)
 PUNT_OPCODE(InstanceOf)
 PUNT_OPCODE(IsTypeMem)
 PUNT_OPCODE(IsNTypeMem)
-PUNT_OPCODE(Gt)
-PUNT_OPCODE(Gte)
-PUNT_OPCODE(Lt)
-PUNT_OPCODE(Lte)
-PUNT_OPCODE(Eq)
-PUNT_OPCODE(Neq)
 PUNT_OPCODE(GtDbl)
 PUNT_OPCODE(GteDbl)
 PUNT_OPCODE(LtDbl)
 PUNT_OPCODE(LteDbl)
 PUNT_OPCODE(EqDbl)
 PUNT_OPCODE(NeqDbl)
-PUNT_OPCODE(LtX)
-PUNT_OPCODE(GtX)
-PUNT_OPCODE(GteX)
-PUNT_OPCODE(LteX)
-PUNT_OPCODE(EqX)
-PUNT_OPCODE(NeqX)
-PUNT_OPCODE(Same)
-PUNT_OPCODE(NSame)
+PUNT_OPCODE(GtStr)
+PUNT_OPCODE(GteStr)
+PUNT_OPCODE(LtStr)
+PUNT_OPCODE(LteStr)
+PUNT_OPCODE(EqStr)
+PUNT_OPCODE(NeqStr)
+PUNT_OPCODE(SameStr)
+PUNT_OPCODE(NSameStr)
+PUNT_OPCODE(GtStrInt)
+PUNT_OPCODE(GteStrInt)
+PUNT_OPCODE(LtStrInt)
+PUNT_OPCODE(LteStrInt)
+PUNT_OPCODE(EqStrInt)
+PUNT_OPCODE(NeqStrInt)
+PUNT_OPCODE(GtBool)
+PUNT_OPCODE(GteBool)
+PUNT_OPCODE(LtBool)
+PUNT_OPCODE(LteBool)
+PUNT_OPCODE(EqBool)
+PUNT_OPCODE(NeqBool)
+PUNT_OPCODE(GtObj)
+PUNT_OPCODE(GteObj)
+PUNT_OPCODE(LtObj)
+PUNT_OPCODE(LteObj)
+PUNT_OPCODE(EqObj)
+PUNT_OPCODE(NeqObj)
+PUNT_OPCODE(SameObj)
+PUNT_OPCODE(NSameObj)
+PUNT_OPCODE(GtArr)
+PUNT_OPCODE(GteArr)
+PUNT_OPCODE(LtArr)
+PUNT_OPCODE(LteArr)
+PUNT_OPCODE(EqArr)
+PUNT_OPCODE(NeqArr)
+PUNT_OPCODE(SameArr)
+PUNT_OPCODE(NSameArr)
+PUNT_OPCODE(GtRes)
+PUNT_OPCODE(GteRes)
+PUNT_OPCODE(LtRes)
+PUNT_OPCODE(LteRes)
+PUNT_OPCODE(EqRes)
+PUNT_OPCODE(NeqRes)
 PUNT_OPCODE(Floor)
 PUNT_OPCODE(Ceil)
 PUNT_OPCODE(InstanceOfBitmask)
@@ -363,6 +400,7 @@ PUNT_OPCODE(CheckCtxThis)
 PUNT_OPCODE(CastCtxThis)
 PUNT_OPCODE(LdCtx)
 PUNT_OPCODE(LdCctx)
+PUNT_OPCODE(LdClosure)
 PUNT_OPCODE(LdCls)
 PUNT_OPCODE(LdClsCached)
 PUNT_OPCODE(LdClsCachedSafe)
@@ -384,6 +422,8 @@ PUNT_OPCODE(LookupClsMethodFCache)
 PUNT_OPCODE(GetCtxFwdCallDyn);
 PUNT_OPCODE(GetCtxFwdCall)
 PUNT_OPCODE(LdClsMethod)
+PUNT_OPCODE(LdIfaceMethod)
+PUNT_OPCODE(InstanceOfIfaceVtable)
 PUNT_OPCODE(LdPropAddr)
 PUNT_OPCODE(LdObjMethod)
 PUNT_OPCODE(LdObjInvoke)
@@ -401,9 +441,9 @@ PUNT_OPCODE(CheckInitProps)
 PUNT_OPCODE(CheckInitSProps)
 PUNT_OPCODE(NewInstanceRaw)
 PUNT_OPCODE(InitObjProps)
-PUNT_OPCODE(StClosureFunc)
-PUNT_OPCODE(StClosureArg)
+PUNT_OPCODE(LdClosureCtx)
 PUNT_OPCODE(StClosureCtx)
+PUNT_OPCODE(StClosureArg)
 PUNT_OPCODE(NewStructArray)
 PUNT_OPCODE(FreeActRec)
 PUNT_OPCODE(CallArray)
@@ -523,8 +563,17 @@ PUNT_OPCODE(OrdStr)
 PUNT_OPCODE(EnterFrame)
 PUNT_OPCODE(CheckStackOverflow)
 PUNT_OPCODE(InitExtraArgs)
+PUNT_OPCODE(InitCtx)
 PUNT_OPCODE(CheckSurpriseFlagsEnter)
+PUNT_OPCODE(CheckARMagicFlag)
+PUNT_OPCODE(LdARNumArgsAndFlags)
+PUNT_OPCODE(StARNumArgsAndFlags)
+PUNT_OPCODE(LdARInvName)
+PUNT_OPCODE(StARInvName)
+PUNT_OPCODE(PackMagicArgs)
 PUNT_OPCODE(ProfileSwitchDest)
+PUNT_OPCODE(CheckSurpriseAndStack)
+PUNT_OPCODE(IsCol)
 
 #undef PUNT_OPCODE
 
@@ -628,45 +677,13 @@ void CodeGenerator::cgIncRef(IRInstruction* inst) {
 
   auto& v = vmain();
   if (type.isKnownDataType()) {
-    assertx(IS_REFCOUNTED_TYPE(type.toDataType()));
+    assertx(isRefcountedType(type.toDataType()));
     increfMaybeStatic(v);
   } else {
     auto const sf = v.makeReg();
     v << cmpli{KindOfRefCountThreshold, loc.reg(1), sf};
     ifThen(v, CC_G, sf, [&](Vout& v) { increfMaybeStatic(v); });
   }
-}
-
-//////////////////////////////////////////////////////////////////////
-// Arithmetic Instructions
-
-void CodeGenerator::cgMulInt(IRInstruction* inst) {
-  auto dstReg  = dstLoc(0).reg();
-  auto srcRegL = srcLoc(0).reg();
-  auto srcRegR = srcLoc(1).reg();
-  auto& v = vmain();
-  v << mul{srcRegR, srcRegL, dstReg};
-}
-
-//////////////////////////////////////////////////////////////////////
-// Bitwise Operators
-
-void CodeGenerator::cgShl(IRInstruction* inst) {
-  auto dstReg  = dstLoc(0).reg();
-  auto srcRegL = srcLoc(0).reg();
-  auto srcRegR = srcLoc(1).reg();
-
-  // TODO: t3870154 add shift-by-immediate support to vixl
-  vmain() << lslv{srcRegL, srcRegR, dstReg};
-}
-
-void CodeGenerator::cgShr(IRInstruction* inst) {
-  auto dstReg  = dstLoc(0).reg();
-  auto srcRegL = srcLoc(0).reg();
-  auto srcRegR = srcLoc(1).reg();
-
-  // TODO: t3870154 add shift-by-immediate support to vixl
-  vmain() << asrv{srcRegL, srcRegR, dstReg};
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -678,9 +695,7 @@ static void shuffleArgs(Vout& v, ArgGroup& args, CppCall& call) {
   for (size_t i = 0; i < args.numGpArgs(); i++) {
     auto& arg = args.gpArg(i);
     auto kind = arg.kind();
-    if (!(kind == ArgDesc::Kind::Reg  ||
-          kind == ArgDesc::Kind::Addr ||
-          kind == ArgDesc::Kind::TypeReg)) {
+    if (kind != ArgDesc::Kind::Reg && kind != ArgDesc::Kind::Addr) {
       continue;
     }
     auto srcReg = arg.srcReg();
@@ -711,9 +726,7 @@ static void shuffleArgs(Vout& v, ArgGroup& args, CppCall& call) {
               v << copy{src, dst};
             }
           }
-          if (kind != ArgDesc::Kind::TypeReg) {
-            argDesc->markDone();
-          }
+          argDesc->markDone();
         } else {
           v << copy{src, dst};
         }
@@ -742,11 +755,6 @@ static void shuffleArgs(Vout& v, ArgGroup& args, CppCall& call) {
         if (src.isVirt()) {
           v << copy{src, dst};
         }
-      }
-    } else if (kind == ArgDesc::Kind::TypeReg) {
-      static_assert(offsetof(TypedValue, m_type) % 8 == 0, "");
-      if (src.isVirt()) {
-        v << copy{src, dst};
       }
     } else if (kind == ArgDesc::Kind::Addr) {
       if (src.isVirt()) {
@@ -794,7 +802,7 @@ void CodeGenerator::cgCallHelper(Vout& v,
 
   RegSet argRegs;
   for (size_t i = 0; i < args.numGpArgs(); i++) {
-    PhysReg r(argReg(i));
+    auto const r = rarg(i);
     args.gpArg(i).setDstReg(r);
     argRegs.add(r);
   }
@@ -1007,18 +1015,18 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
 
   if (FixupMap::eagerRecord(func)) {
     // Save VM registers
-    PhysReg vmfp(rVmFp), vmsp(rVmSp), rds(rVmTl);
+    PhysReg vmfp(rvmfp()), vmsp(rvmsp()), rds(rvmtl());
     auto const* pc = curFunc()->unit()->entry() + m_curInst->marker().bcOff();
     v << store{vmfp, rds[rds::kVmfpOff]};
     v << store{vmsp, rds[rds::kVmspOff]};
     v << store{v.cns(pc), rds[rds::kVmpcOff]};
   }
 
-  PhysReg mis(rVmTl);
+  PhysReg mis(rvmtl());
 
   auto callArgs = argGroup();
   if (isBuiltinByRef(funcReturnType)) {
-    if (isSmartPtrRef(funcReturnType)) {
+    if (isReqPtrRef(funcReturnType)) {
       // first arg is pointer to storage for the return value
       returnOffset += TVOFF(m_data);
     }
@@ -1032,7 +1040,7 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
   }
   for (auto i = uint32_t{0}; i < numArgs; ++i, ++srcNum) {
     auto const& pi = func->params()[i];
-    if (TVOFF(m_data) && isSmartPtrRef(pi.builtinType)) {
+    if (TVOFF(m_data) && isReqPtrRef(pi.builtinType)) {
       callArgs.addr(srcLoc(srcNum).reg(), TVOFF(m_data));
     } else {
       callArgs.ssa(srcNum);
@@ -1058,7 +1066,7 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
 
   if (returnType.isReferenceType()) {
     // this should use some kind of cmov
-    assertx(isBuiltinByRef(funcReturnType) && isSmartPtrRef(funcReturnType));
+    assertx(isBuiltinByRef(funcReturnType) && isReqPtrRef(funcReturnType));
     v << load{mis[returnOffset + TVOFF(m_data)], dst};
     if (dstType.isValid()) {
       condZero(v, dst, dstType, [&](Vout& v) {
@@ -1073,7 +1081,7 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
   if (returnType <= TCell || returnType <= TBoxedCell) {
     // this should use some kind of cmov
     static_assert(KindOfUninit == 0, "KindOfUninit must be 0 for test");
-    assertx(isBuiltinByRef(funcReturnType) && !isSmartPtrRef(funcReturnType));
+    assertx(isBuiltinByRef(funcReturnType) && !isReqPtrRef(funcReturnType));
     auto tmp_dst_type = v.makeReg();
     v << load{mis[returnOffset + TVOFF(m_data)], dst};
     if (dstType.isValid()) {
@@ -1223,7 +1231,7 @@ void CodeGenerator::cgLdFuncCached(IRInstruction* inst) {
   auto dst = dstLoc(0).reg();
   auto const name = inst->extra<LdFuncCachedData>()->name;
   auto const ch = NamedEntity::get(name)->getFuncHandle();
-  PhysReg rds(rVmTl);
+  PhysReg rds(rvmtl());
   auto& v = vmain();
 
   auto dst1 = v.makeReg();
@@ -1274,7 +1282,7 @@ void CodeGenerator::cgInterpOne(IRInstruction* inst) {
 void CodeGenerator::cgInterpOneCF(IRInstruction* inst) {
   cgInterpOneCommon(inst);
   auto& v = vmain();
-  PhysReg rds(rVmTl), fp(rVmFp), sp(rVmSp);
+  PhysReg rds(rvmtl()), fp(rvmfp()), sp(rvmsp());
   v << load{rds[rds::kVmfpOff], fp};
   v << load{rds[rds::kVmspOff], sp};
   v << jmpi{mcg->tx().uniqueStubs.resumeHelper};

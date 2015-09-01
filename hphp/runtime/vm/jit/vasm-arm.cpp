@@ -17,17 +17,17 @@
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 
 #include "hphp/runtime/vm/jit/abi-arm.h"
-#include "hphp/runtime/vm/jit/back-end-arm.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-arm.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/reg-algorithms.h"
-#include "hphp/runtime/vm/jit/service-requests-arm.h"
-#include "hphp/runtime/vm/jit/service-requests-inline.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr-arm.h"
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
+#include "hphp/runtime/vm/jit/vasm-internal.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
@@ -46,6 +46,8 @@ namespace arm { struct ImmFolder; }
 
 namespace {
 ///////////////////////////////////////////////////////////////////////////////
+
+const TCA kEndOfTargetChain = reinterpret_cast<TCA>(0xf00ffeeffaaff11f);
 
 vixl::Register W(Vreg32 r) {
   PhysReg pr(r.asReg());
@@ -76,18 +78,28 @@ vixl::Condition C(ConditionCode cc) {
   return arm::convertCC(cc);
 }
 
-struct Vgen {
-  Vgen(Vunit& u, jit::vector<Vasm::Area>& areas, AsmInfo* asmInfo)
-    : unit(u)
-    , backend(mcg->backEnd())
-    , areas(areas)
-    , m_asmInfo(asmInfo) {
-    addrs.resize(u.blocks.size());
-    points.resize(u.next_point);
-  }
-  void emit(jit::vector<Vlabel>&);
+///////////////////////////////////////////////////////////////////////////////
 
-private:
+struct Vgen {
+  explicit Vgen(Venv& env)
+    : text(env.text)
+    , codeBlock(env.cb)
+    , assem(*codeBlock)
+    , a(&assem)
+    , current(env.current)
+    , next(env.next)
+    , points(env.points)
+    , jmps(env.jmps)
+    , jccs(env.jccs)
+    , bccs(env.bccs)
+    , catches(env.catches)
+  {}
+
+  static void patch(Venv& env);
+  static void pad(CodeBlock& cb) {}
+
+  /////////////////////////////////////////////////////////////////////////////
+
   template<class Inst> void emit(Inst& i) {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
@@ -95,13 +107,9 @@ private:
 
   // intrinsics
   void emit(bindcall& i);
-  void emit(bindjcc& i);
-  void emit(bindjmp& i);
   void emit(copy& i);
   void emit(copy2& i);
   void emit(debugtrap& i) { a->Brk(0); }
-  void emit(fallbackcc i);
-  void emit(fallback& i);
   void emit(hcsync& i);
   void emit(hcnocatch& i);
   void emit(hcunwind& i);
@@ -120,7 +128,7 @@ private:
   void emit(addqi& i) { a->Add(X(i.d), X(i.s1), i.s0.l(), vixl::SetFlags); }
   void emit(andq& i) { a->And(X(i.d), X(i.s1), X(i.s0) /* xxx flags */); }
   void emit(andqi& i) { a->And(X(i.d), X(i.s1), i.s0.l() /* xxx flags */); }
-  void emit(asrv& i) { a->asrv(X(i.d), X(i.sl), X(i.sr)); }
+  void emit(sar& i) { a->asrv(X(i.d), X(i.s0), X(i.s1)); }
   void emit(brk& i) { a->Brk(i.code); }
   void emit(cbcc& i);
   void emit(callr& i) { a->Blr(X(i.target)); }
@@ -128,18 +136,17 @@ private:
   void emit(cmpli& i) { a->Cmp(W(i.s1), i.s0.l()); }
   void emit(cmpq& i) { a->Cmp(X(i.s1), X(i.s0)); }
   void emit(cmpqi& i) { a->Cmp(X(i.s1), i.s0.l()); }
-  void emit(cmpqims& i) { not_implemented(); }
   void emit(decq& i) { a->Sub(X(i.d), X(i.s), 1LL, vixl::SetFlags); }
   void emit(incq& i) { a->Add(X(i.d), X(i.s), 1LL, vixl::SetFlags); }
   void emit(jcc& i);
   void emit(jmp i);
-  void emit(lea& i) { a->Add(X(i.d), X(i.s.base), i.s.disp); }
+  void emit(lea& i);
   void emit(loadl& i) { a->Ldr(W(i.d), M(i.s)); /* assume 0-extends */ }
   void emit(loadzbl& i) { a->Ldrb(W(i.d), M(i.s)); }
-  void emit(lslv& i) { a->lslv(X(i.d), X(i.sl), X(i.sr)); }
+  void emit(shl& i) { a->lslv(X(i.d), X(i.s0), X(i.s1)); }
   void emit(movzbl& i) { a->Uxtb(W(i.d), W(i.s)); }
   void emit(movzbq& i) { a->Uxtb(W(Vreg32(size_t(i.d))), W(i.s)); }
-  void emit(mul& i) { a->Mul(X(i.d), X(i.s0), X(i.s1)); }
+  void emit(imul& i) { a->Mul(X(i.d), X(i.s0), X(i.s1)); }
   void emit(neg& i) { a->Neg(X(i.d), X(i.s), vixl::SetFlags); }
   void emit(not& i) { a->Mvn(X(i.d), X(i.s)); }
   void emit(orq& i) { a->Orr(X(i.d), X(i.s1), X(i.s0) /* xxx flags? */); }
@@ -158,193 +165,46 @@ private:
   void emit(xorq& i) { a->Eor(X(i.d), X(i.s1), X(i.s0) /* xxx flags */); }
   void emit(xorqi& i) { a->Eor(X(i.d), X(i.s1), i.s0.l() /* xxx flags */); }
 
-  CodeAddress start(Vlabel b) {
-    auto area = unit.blocks[b].area;
-    return areas[(int)area].start;
-  }
-  CodeBlock& main() { return area(AreaIndex::Main).code; }
-  CodeBlock& cold() { return area(AreaIndex::Cold).code; }
-  CodeBlock& frozen() { return area(AreaIndex::Frozen).code; }
+private:
+  CodeBlock& frozen() { return text.frozen().code; }
 
 private:
-  Vasm::Area& area(AreaIndex i) {
-    assertx((unsigned)i < areas.size());
-    return areas[(unsigned)i];
-  }
-
-private:
-  struct LabelPatch { CodeAddress instr; Vlabel target; };
-  struct PointPatch { CodeAddress instr; Vpoint pos; Vreg d; };
-  Vunit& unit;
-  BackEnd& backend;
-  jit::vector<Vasm::Area>& areas;
-  AsmInfo* m_asmInfo;
-  vixl::MacroAssembler* a;
+  Vtext& text;
   CodeBlock* codeBlock;
-  Vlabel current{0}, next{0}; // in linear order
-  jit::vector<CodeAddress> addrs, points;
-  jit::vector<LabelPatch> jccs, jmps, bccs, catches;
-  jit::vector<PointPatch> ldpoints;
+  vixl::MacroAssembler assem;
+  vixl::MacroAssembler* a;
+
+  const Vlabel current;
+  const Vlabel next;
+  jit::vector<CodeAddress>& points;
+  jit::vector<Venv::LabelPatch>& jmps;
+  jit::vector<Venv::LabelPatch>& jccs;
+  jit::vector<Venv::LabelPatch>& bccs;
+  jit::vector<Venv::LabelPatch>& catches;
 };
 
-// overall emitter
-void Vgen::emit(jit::vector<Vlabel>& labels) {
-  // Some structures here track where we put things just for debug printing.
-  struct Snippet {
-    const IRInstruction* origin;
-    TcaRange range;
-  };
-  struct BlockInfo {
-    jit::vector<Snippet> snippets;
-  };
+///////////////////////////////////////////////////////////////////////////////
 
-  // This is under the printir tracemod because it mostly shows you IR and
-  // machine code, not vasm and machine code (not implemented).
-  bool shouldUpdateAsmInfo = !!m_asmInfo
-    && Trace::moduleEnabledRelease(HPHP::Trace::printir, kCodeGenLevel);
-
-  std::vector<TransBCMapping>* bcmap = nullptr;
-  if (mcg->tx().isTransDBEnabled() || RuntimeOption::EvalJitUseVtuneAPI) {
-    bcmap = &mcg->cgFixups().m_bcMap;
+void Vgen::patch(Venv& env) {
+  for (auto& p : env.jmps) {
+    assertx(env.addrs[p.target]);
+    smashJmp(p.instr, env.addrs[p.target]);
   }
-
-  jit::vector<jit::vector<BlockInfo>> areaToBlockInfos;
-  if (shouldUpdateAsmInfo) {
-    areaToBlockInfos.resize(areas.size());
-    for (auto& r : areaToBlockInfos) {
-      r.resize(unit.blocks.size());
-    }
+  for (auto& p : env.jccs) {
+    assertx(env.addrs[p.target]);
+    smashJcc(p.instr, env.addrs[p.target]);
   }
-
-  for (int i = 0, n = labels.size(); i < n; ++i) {
-    assertx(checkBlockEnd(unit, labels[i]));
-
-    auto b = labels[i];
-    auto& block = unit.blocks[b];
-    codeBlock = &area(block.area).code;
-    vixl::MacroAssembler as { *codeBlock };
-    a = &as;
-    auto blockStart = a->frontier();
-    addrs[b] = blockStart;
-
-    {
-      // Compute the next block we will emit into the current area.
-      auto cur_start = start(labels[i]);
-      auto j = i + 1;
-      while (j < labels.size() && cur_start != start(labels[j])) {
-        j++;
-      }
-      next = j < labels.size() ? labels[j] : Vlabel(unit.blocks.size());
-    }
-
-    const IRInstruction* currentOrigin = nullptr;
-    auto blockInfo = shouldUpdateAsmInfo
-      ? &areaToBlockInfos[unsigned(block.area)][b]
-      : nullptr;
-    auto start_snippet = [&](Vinstr& inst) {
-      if (!shouldUpdateAsmInfo) return;
-
-      blockInfo->snippets.push_back(
-        Snippet { inst.origin, TcaRange { codeBlock->frontier(), nullptr } }
-      );
-    };
-    auto finish_snippet = [&] {
-      if (!shouldUpdateAsmInfo) return;
-
-      if (!blockInfo->snippets.empty()) {
-        auto& snip = blockInfo->snippets.back();
-        snip.range = TcaRange { snip.range.start(), codeBlock->frontier() };
-      }
-    };
-
-    for (auto& inst : block.code) {
-      if (currentOrigin != inst.origin) {
-        finish_snippet();
-        start_snippet(inst);
-        currentOrigin = inst.origin;
-      }
-
-      if (bcmap && inst.origin) {
-        auto sk = inst.origin->marker().sk();
-        if (bcmap->empty() ||
-            bcmap->back().md5 != sk.unit()->md5() ||
-            bcmap->back().bcStart != sk.offset()) {
-          bcmap->push_back(TransBCMapping{sk.unit()->md5(), sk.offset(),
-                                          main().frontier(), cold().frontier(),
-                                          frozen().frontier()});
-        }
-      }
-
-      switch (inst.op) {
-#define O(name, imms, uses, defs) \
-        case Vinstr::name: emit(inst.name##_); break;
-        VASM_OPCODES
-#undef O
-      }
-    }
-
-    finish_snippet();
-  }
-
-  for (auto& p : jccs) {
-    assertx(addrs[p.target]);
-    backend.smashJcc(p.instr, addrs[p.target]);
-  }
-  for (auto& p : bccs) {
-    assertx(addrs[p.target]);
+  for (auto& p : env.bccs) {
+    assertx(env.addrs[p.target]);
     auto link = (Instruction*) p.instr;
-    link->SetImmPCOffsetTarget(Instruction::Cast(addrs[p.target]));
-  }
-  for (auto& p : jmps) {
-    assertx(addrs[p.target]);
-    backend.smashJmp(p.instr, addrs[p.target]);
-  }
-  for (auto& p : catches) {
-    mcg->registerCatchBlock(p.instr, addrs[p.target]);
-  }
-  for (auto& p : ldpoints) {
-    CodeCursor cc(main(), p.instr);
-    MacroAssembler a{main()};
-    a.Mov(X(p.d), points[p.pos]);
-  }
-
-  if (!shouldUpdateAsmInfo) {
-    return;
-  }
-
-  for (auto i = 0; i < areas.size(); ++i) {
-    const IRInstruction* currentOrigin = nullptr;
-    auto& blockInfos = areaToBlockInfos[i];
-    for (auto const blockID : labels) {
-      auto const& blockInfo = blockInfos[static_cast<size_t>(blockID)];
-      if (blockInfo.snippets.empty()) continue;
-
-      for (auto const& snip : blockInfo.snippets) {
-        if (currentOrigin != snip.origin && snip.origin) {
-          currentOrigin = snip.origin;
-        }
-
-        m_asmInfo->updateForInstruction(
-          currentOrigin,
-          static_cast<AreaIndex>(i),
-          snip.range.start(),
-          snip.range.end());
-      }
-    }
+    link->SetImmPCOffsetTarget(Instruction::Cast(env.addrs[p.target]));
   }
 }
+
+///////////////////////////////////////////////////////////////////////////////
 
 void Vgen::emit(bindcall& i) {
-  mcg->backEnd().emitSmashableCall(*codeBlock, i.stub);
-}
-
-void Vgen::emit(bindjcc& i) {
-  emitBindJ(*codeBlock, frozen(), i.cc, i.target);
-}
-
-void Vgen::emit(bindjmp& i) {
-  // XXX what about trflags
-  emitBindJ(*codeBlock, frozen(), CC_None, i.target);
+  emitSmashableCall(*codeBlock, i.stub);
 }
 
 void Vgen::emit(copy& i) {
@@ -373,19 +233,6 @@ void Vgen::emit(copy2& i) {
       emitXorSwap(*a, X(how.m_dst), X(how.m_src));
     }
   }
-}
-
-void Vgen::emit(fallbackcc i) {
-  auto const destSR = mcg->tx().getSrcRec(i.dest);
-  if (!i.trflags.packed) {
-    destSR->emitFallbackJump(*codeBlock, i.cc);
-  } else {
-    destSR->emitFallbackJumpCustom(*codeBlock, frozen(), i.dest, i.trflags);
-  }
-}
-
-void Vgen::emit(fallback& i) {
-  emit(fallbackcc{CC_None, InvalidReg, i.dest, i.trflags, i.args});
 }
 
 void Vgen::emit(hcsync& i) {
@@ -480,11 +327,13 @@ void Vgen::emit(syncpoint& i) {
   mcg->recordSyncPoint(a->frontier(), i.fix);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 void Vgen::emit(jmp i) {
   if (next == i.target) return;
   jmps.push_back({a->frontier(), i.target});
   // B range is +/- 128MB but this uses BR
-  backend.emitSmashableJump(*codeBlock, kEndOfTargetChain, CC_None);
+  emitSmashableJmp(*codeBlock, kEndOfTargetChain);
 }
 
 void Vgen::emit(jcc& i) {
@@ -496,9 +345,15 @@ void Vgen::emit(jcc& i) {
     }
     jccs.push_back({a->frontier(), i.targets[1]});
     // B.cond range is +/- 1MB but this uses BR
-    backend.emitSmashableJump(*codeBlock, kEndOfTargetChain, i.cc);
+    emitSmashableJcc(*codeBlock, kEndOfTargetChain, i.cc);
   }
   emit(jmp{i.targets[0]});
+}
+
+void Vgen::emit(lea& i) {
+  assertx(!i.s.index.isValid());
+  assertx(i.s.scale == 1);
+  a->Add(X(i.d), X(i.s.base), i.s.disp);
 }
 
 void Vgen::emit(cbcc& i) {
@@ -539,64 +394,21 @@ void Vgen::emit(tbcc& i) {
   emit(jmp{i.targets[0]});
 }
 
-// Lower svcreq{} by making copies to abi registers explicit, saving
-// vm regs, and returning to the VM. svcreq{} is guaranteed to be
-// at the end of a block, so we can just keep appending to the same block.
-void lower_svcreq(Vunit& unit, Vlabel b, Vinstr& inst) {
-  auto svcreq = inst.svcreq_; // copy it
-  auto origin = inst.origin;
-  auto& argv = unit.tuples[svcreq.extraArgs];
-  unit.blocks[b].code.pop_back(); // delete the svcreq instruction
-  Vout v(unit, b, origin);
+///////////////////////////////////////////////////////////////////////////////
 
-  RegSet arg_regs;
-  VregList arg_dests;
-  for (int i = 0, n = argv.size(); i < n; ++i) {
-    PhysReg d{serviceReqArgReg(i)};
-    arg_dests.push_back(d);
-    arg_regs |= d;
-  }
-  v << copyargs{svcreq.extraArgs, v.makeTuple(arg_dests)};
-  // Save VM regs
-  PhysReg vmfp{rVmFp}, vmsp{rVmSp}, sp{vixl::sp}, rdsp{rVmTl};
-  v << store{vmfp, rdsp[rds::kVmfpOff]};
-  v << store{vmsp, rdsp[rds::kVmspOff]};
-  if (svcreq.stub_block) {
-    always_assert(false && "use rip-rel addr to get ephemeral stub addr");
-  } else {
-    v << ldimmq{0, PhysReg{arm::rAsm}}; // because persist flag
-  }
-  v << ldimmq{svcreq.req, PhysReg{argReg(0)}};
-  arg_regs |= arm::rAsm | argReg(0);
-
-  // Weird hand-shaking with enterTC: reverse-call a service routine.
-  // In the case of some special stubs (m_callToExit, m_retHelper), we
-  // have already unbalanced the return stack by doing a ret to
-  // something other than enterTCHelper.  In that case
-  // SRJmpInsteadOfRet indicates to fake the return.
-  v << load{sp[0], PhysReg{rLinkReg}};
-  v << lea{sp[16], sp}; // fake postindexing
-  arg_regs |= rLinkReg; // arm ret{} implicitly uses LR
-  v << ret{arg_regs};
-}
-
-// Lower svcreq
 void lower(Vunit& unit) {
   Timer _t(Timer::vasm_lower);
   for (size_t b = 0; b < unit.blocks.size(); ++b) {
     auto& code = unit.blocks[b].code;
     if (code.empty()) continue;
-    if (code.back().op == Vinstr::svcreq) {
-      lower_svcreq(unit, Vlabel{b}, code.back());
-    }
     for (size_t i = 0; i < unit.blocks[b].code.size(); ++i) {
       auto& inst = unit.blocks[b].code[i];
       switch (inst.op) {
         case Vinstr::defvmsp:
-          inst = copy{PhysReg{arm::rVmSp}, inst.defvmsp_.d};
+          inst = copy{PhysReg{arm::rvmsp()}, inst.defvmsp_.d};
           break;
         case Vinstr::syncvmsp:
-          inst = copy{inst.syncvmsp_.s, PhysReg{arm::rVmSp}};
+          inst = copy{inst.syncvmsp_.s, PhysReg{arm::rvmsp()}};
           break;
         default:
           break;
@@ -671,11 +483,11 @@ void lowerForARM(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-void finishARM(Vunit& unit, Vasm::AreaList& areas,
-               const Abi& abi, AsmInfo* asmInfo) {
+void finishARM(Vunit& unit, Vtext& text, const Abi& abi, AsmInfo* asmInfo) {
   optimizeExits(unit);
   lower(unit);
-  if (!unit.constants.empty()) {
+  simplify(unit);
+  if (!unit.constToReg.empty()) {
     foldImms<arm::ImmFolder>(unit);
   }
   lowerForARM(unit);
@@ -690,8 +502,7 @@ void finishARM(Vunit& unit, Vasm::AreaList& areas,
   }
 
   Timer _t(Timer::vasm_gen);
-  auto blocks = layoutBlocks(unit);
-  Vgen(unit, areas, asmInfo).emit(blocks);
+  vasm_emit<Vgen>(unit, text, asmInfo);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

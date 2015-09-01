@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,10 +20,13 @@
 
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/base/zend-string.h"
-#include "hphp/runtime/vm/treadmill.h"
 #include "hphp/runtime/vm/blob-helper.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/treadmill.h"
+
+#include "hphp/runtime/vm/jit/align.h"
 #include "hphp/runtime/vm/jit/back-end-x64.h"
+#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
 
 #include "hphp/tools/hfsort/jitsort.h"
 
@@ -118,7 +121,7 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
       auto it = deadStubs.lower_bound(tri.coldStart);
       while (it != deadStubs.end() && *it < tri.coldEnd) {
         x64::adjustForRelocation(rel, coldStart, *it);
-        coldStart = *it + mcg->backEnd().reusableStubSize();
+        coldStart = *it + svcreq::stub_size();
         ++it;
       }
     }
@@ -179,7 +182,7 @@ struct TransRelocInfoHelper {
   std::vector<IncomingBranch::Opaque> incomingBranches;
   std::vector<uint32_t> addressImmediates;
   std::vector<uint64_t> codePointers;
-  std::vector<std::pair<uint32_t, std::pair<int,int>>> alignFixups;
+  std::vector<std::pair<uint32_t,std::pair<Alignment,AlignContext>>> alignFixups;
 
   template<class SerDe> void serde(SerDe& sd) {
     sd
@@ -210,12 +213,38 @@ struct TransRelocInfoHelper {
       tri.fixups.m_codePointers.insert((TCA*)cp);
     }
     for (auto v : alignFixups) {
-      tri.fixups.m_alignFixups.emplace(v.first + code.base(),
-                                         v.second);
+      tri.fixups.m_alignFixups.emplace(v.first + code.base(), v.second);
     }
     return tri;
   }
 };
+
+void relocateStubs(TransLoc& loc, TCA frozenStart, TCA frozenEnd,
+                   RelocationInfo& rel, CodeCache& cache,
+                   CodeGenFixups& fixups) {
+  auto const stubSize = svcreq::stub_size();
+
+  for (auto addr : fixups.m_reusedStubs) {
+    if (!loc.contains(addr)) continue;
+    always_assert(frozenStart <= addr);
+
+    CodeBlock dest;
+    dest.init(cache.frozen().frontier(), stubSize, "New Stub");
+    x64::relocate(rel, dest, addr, addr + stubSize, fixups, nullptr);
+    cache.frozen().skip(stubSize);
+    if (addr != frozenStart) {
+      rel.recordRange(frozenStart, addr, frozenStart, addr);
+    }
+    frozenStart = addr + stubSize;
+  }
+  if (frozenStart != frozenEnd) {
+    rel.recordRange(frozenStart, frozenEnd, frozenStart, frozenEnd);
+  }
+
+  x64::adjustForRelocation(rel);
+  x64::adjustMetaDataForRelocation(rel, nullptr, fixups);
+  x64::adjustCodeForRelocation(rel, fixups);
+}
 
 }
 
@@ -605,6 +634,139 @@ void readRelocations(
       callback(std::move(tri), data);
     }
   }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
+                            TCA* adjust /* = nullptr */) {
+  auto& mainCode = cache.main();
+  auto& coldCode = cache.cold();
+  auto& frozenCode = cache.frozen();
+
+  CodeBlock dest;
+  RelocationInfo rel;
+  size_t asm_count{0};
+
+  TCA mainStartRel, coldStartRel, frozenStartRel;
+
+  TCA mainStart   = loc.mainStart();
+  TCA coldStart   = loc.coldCodeStart();
+  TCA frozenStart = loc.frozenCodeStart();
+
+  size_t mainSize   = loc.mainSize();
+  size_t coldSize   = loc.coldSize();
+  size_t frozenSize = loc.frozenSize();
+  auto const pad = RuntimeOption::EvalReusableTCPadding;
+
+  TCA mainEndRel   = loc.mainEnd();
+  TCA coldEndRel   = loc.coldEnd();
+  TCA frozenEndRel = loc.frozenEnd();
+
+  if ((mainStartRel = (TCA)mainCode.allocInner(mainSize + pad))) {
+    mainSize += pad;
+
+    dest.init(mainStartRel, mainSize, "New Main");
+    asm_count += x64::relocate(rel, dest, mainStart, loc.mainEnd(),
+                               mcg->cgFixups(), nullptr);
+    mainEndRel = dest.frontier();
+
+    mainCode.setFrontier(loc.mainStart());
+  } else {
+    mainStartRel = loc.mainStart();
+    rel.recordRange(mainStart, loc.mainEnd(), mainStart, loc.mainEnd());
+  }
+
+  if ((frozenStartRel = (TCA)frozenCode.allocInner(frozenSize + pad))) {
+    frozenSize += pad;
+
+    dest.init(frozenStartRel + sizeof(uint32_t), frozenSize, "New Frozen");
+    asm_count += x64::relocate(rel, dest, frozenStart, loc.frozenEnd(),
+                               mcg->cgFixups(), nullptr);
+    frozenEndRel = dest.frontier();
+
+    frozenCode.setFrontier(loc.frozenStart());
+  } else {
+    frozenStartRel = loc.frozenStart();
+    rel.recordRange(frozenStart, loc.frozenEnd(), frozenStart, loc.frozenEnd());
+  }
+
+  if (&coldCode != &frozenCode) {
+    if ((coldStartRel = (TCA)coldCode.allocInner(coldSize + pad))) {
+      coldSize += pad;
+
+      dest.init(coldStartRel + sizeof(uint32_t), coldSize, "New Cold");
+      asm_count += x64::relocate(rel, dest, coldStart, loc.coldEnd(),
+                                 mcg->cgFixups(), nullptr);
+      coldEndRel = dest.frontier();
+
+      coldCode.setFrontier(loc.coldStart());
+    } else {
+      coldStartRel = loc.coldStart();
+      rel.recordRange(coldStart, loc.coldEnd(), coldStart, loc.coldEnd());
+    }
+  } else {
+    coldStartRel = frozenStartRel;
+    coldEndRel = frozenEndRel;
+    coldSize = frozenSize;
+  }
+
+  if (adjust) {
+    if (auto newaddr = rel.adjustedAddressAfter(*adjust)) {
+      *adjust = newaddr;
+    }
+  }
+
+  if (asm_count) {
+    x64::adjustForRelocation(rel);
+    x64::adjustMetaDataForRelocation(rel, nullptr, mcg->cgFixups());
+    x64::adjustCodeForRelocation(rel, mcg->cgFixups());
+  }
+
+  if (debug) {
+    auto clearRange = [](TCA start, TCA end) {
+      CodeBlock cb;
+      cb.init(start, end - start, "Dead code");
+      Asm a {cb};
+      while (cb.available() >= 2) a.ud2();
+      if (cb.available() > 0) a.int3();
+      always_assert(!cb.available());
+    };
+
+    if (mainStartRel != loc.mainStart()) {
+      clearRange(loc.mainStart(), loc.mainEnd());
+    }
+    if (coldStartRel != loc.coldStart()) {
+      clearRange(loc.coldStart(), loc.coldEnd());
+    }
+    if (frozenStartRel != loc.frozenStart()) {
+      clearRange(loc.frozenStart(), loc.frozenEnd());
+    }
+  }
+
+  uint32_t* coldSizePtr   = reinterpret_cast<uint32_t*>(coldStartRel);
+  uint32_t* frozenSizePtr = reinterpret_cast<uint32_t*>(frozenStartRel);
+
+  *coldSizePtr   = coldSize;
+  *frozenSizePtr = frozenSize;
+
+  loc.setMainStart(mainStartRel);
+  loc.setColdStart(coldStartRel);
+  loc.setFrozenStart(frozenStartRel);
+
+  loc.setMainSize(mainSize);
+
+  RelocationInfo relStubs;
+  auto record = [&](TCA s, TCA e) { relStubs.recordRange(s, e, s, e); };
+
+  record(mainStartRel, mainEndRel);
+  if (coldStartRel != frozenStartRel) {
+    record(coldStartRel + sizeof(uint32_t), coldEndRel);
+  }
+
+  relocateStubs(loc, frozenStartRel + sizeof(uint32_t), frozenEndRel, relStubs,
+                cache, mcg->cgFixups());
+  return asm_count != 0;
 }
 
 //////////////////////////////////////////////////////////////////////

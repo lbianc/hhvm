@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -53,6 +53,8 @@ namespace {
 //////////////////////////////////////////////////////////////////////
 
 const StaticString s_Closure("Closure");
+const StaticString s_toString("__toString");
+const StaticString s_Stringish("Stringish");
 
 //////////////////////////////////////////////////////////////////////
 
@@ -357,6 +359,10 @@ template<class T> T decode(PC& pc) {
   return ret;
 }
 
+template<class T> void decode(PC& pc, T& val) {
+  val = decode<T>(pc);
+}
+
 template<class FindBlock>
 void populate_block(ParseUnitState& puState,
                     const FuncEmitter& fe,
@@ -487,8 +493,8 @@ void populate_block(ParseUnitState& puState,
 #define IMM_BA(n)      assert(next == past); \
                        auto target = findBlock(  \
                          opPC + decode<Offset>(pc) - ue.bc());
-#define IMM_OA_IMPL(n) decode<uint8_t>(pc);
-#define IMM_OA(type)   auto subop = (type)IMM_OA_IMPL
+#define IMM_OA_IMPL(n) subop##n; decode(pc, subop##n);
+#define IMM_OA(type)   type IMM_OA_IMPL
 #define IMM_VSA(n)     auto keys = decode_stringvec();
 
 #define IMM_NA
@@ -785,6 +791,26 @@ void parse_methods(ParseUnitState& puState,
   }
 }
 
+void add_stringish(borrowed_ptr<php::Class> cls) {
+  // The runtime adds Stringish to any class providing a __toString() function,
+  // so we mirror that here to make sure analysis of interfaces is correct.
+  if (cls->attrs & AttrInterface && cls->name->isame(s_Stringish.get())) {
+    return;
+  }
+
+  for (auto& iface : cls->interfaceNames) {
+    if (iface->isame(s_Stringish.get())) return;
+  }
+
+  for (auto& func : cls->methods) {
+    if (func->name->isame(s_toString.get())) {
+      FTRACE(2, "Adding Stringish to {}\n", cls->name->data());
+      cls->interfaceNames.push_back(s_Stringish.get());
+      return;
+    }
+  }
+}
+
 std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
                                         borrowed_ptr<php::Unit> unit,
                                         const PreClassEmitter& pce) {
@@ -813,6 +839,7 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
   ret->numDeclMethods    = pce.numDeclMethods();
 
   parse_methods(puState, borrow(ret), unit, pce);
+  add_stringish(borrow(ret));
 
   auto& propMap = pce.propMap();
   for (size_t idx = 0; idx < propMap.size(); ++idx) {

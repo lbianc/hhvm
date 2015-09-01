@@ -3,7 +3,7 @@
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
    | Copyright (c) 2010 Hyves (http://www.hyves.nl)                       |
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -19,7 +19,7 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/vm/native-data.h"
-#include "hphp/runtime/ext/libmemcached_portability.h"
+#include "hphp/runtime/ext/memcached/libmemcached_portability.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/ext/json/ext_json.h"
 #include <map>
@@ -233,7 +233,7 @@ public:
 static memcached_return_t memcached_dump_callback(const memcached_st*,
                                                   const char* key,
                                                   size_t len, void* context) {
-  ((Array*)context)->append(makeStaticString(key, len));
+  ((Array*)context)->append(Variant{makeStaticString(key, len)});
   return MEMCACHED_SUCCESS;
 }
 
@@ -257,6 +257,8 @@ class MemcachedData {
     bool compression;
     int serializer;
     int rescode;
+    bool is_persistent;
+    bool is_pristine;
   };
   MemcachedData() {}
   ~MemcachedData() {}
@@ -591,12 +593,20 @@ void HHVM_METHOD(Memcached, __construct,
   auto data = Native::data<MemcachedData>(this_);
   if (persistent_id.isNull()) {
     data->m_impl.reset(new MemcachedData::Impl);
+    data->m_impl->is_persistent = false;
+    data->m_impl->is_pristine = true;
   } else {
+    bool is_pristine = false;
     MemcachedData::ImplPtr &impl = (*data->s_persistentMap)[
       persistent_id.toString().toCppString()
     ];
-    if (!impl) impl.reset(new MemcachedData::Impl);
+    if (!impl) {
+      impl.reset(new MemcachedData::Impl);
+      is_pristine = true;
+    }
     data->m_impl = impl;
+    data->m_impl->is_persistent = true;
+    data->m_impl->is_pristine = is_pristine;
   }
 }
 
@@ -654,7 +664,7 @@ Variant HHVM_METHOD(Memcached, getbykey, const String& server_key,
     if (status == MEMCACHED_NOTFOUND && !cache_cb.isNull()) {
       status = data->doCacheCallback(cache_cb, this_, key, returnValue);
       if (!data->handleError(status)) return false;
-      if (cas_token.isReferenced()) cas_token = 0.0;
+      cas_token.assignIfRef(0.0);
       return returnValue;
     }
     data->handleError(status);
@@ -665,9 +675,7 @@ Variant HHVM_METHOD(Memcached, getbykey, const String& server_key,
     data->m_impl->rescode = q_Memcached$$RES_PAYLOAD_FAILURE;
     return false;
   }
-  if (cas_token.isReferenced()) {
-    cas_token = (double) memcached_result_cas(&result.value);
-  }
+  cas_token.assignIfRef((double) memcached_result_cas(&result.value));
   return returnValue;
 }
 
@@ -686,7 +694,7 @@ Variant HHVM_METHOD(Memcached, getmultibykey, const String& server_key,
   }
 
   Array cas_tokens_arr;
-  SCOPE_EXIT { if (cas_tokens.isReferenced()) cas_tokens = cas_tokens_arr; };
+  SCOPE_EXIT { cas_tokens.assignIfRef(cas_tokens_arr); };
 
   MemcachedResultWrapper result(&data->m_impl->memcached);
   memcached_return status;
@@ -1219,6 +1227,16 @@ String HHVM_METHOD(Memcached, getresultmessage) {
   }
 }
 
+bool HHVM_METHOD(Memcached, ispersistent) {
+  auto data = Native::data<MemcachedData>(this_);
+  return data->m_impl->is_persistent;
+}
+
+bool HHVM_METHOD(Memcached, ispristine) {
+  auto data = Native::data<MemcachedData>(this_);
+  return data->m_impl->is_pristine;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 IMPLEMENT_THREAD_LOCAL(MemcachedData::ImplMap, MemcachedData::s_persistentMap);
@@ -1348,6 +1366,8 @@ class MemcachedExtension final : public Extension {
     HHVM_ME(Memcached, setoption);
     HHVM_ME(Memcached, getresultcode);
     HHVM_ME(Memcached, getresultmessage);
+    HHVM_ME(Memcached, ispersistent);
+    HHVM_ME(Memcached, ispristine);
 
     Native::registerNativeDataInfo<MemcachedData>(s_MemcachedData.get());
 

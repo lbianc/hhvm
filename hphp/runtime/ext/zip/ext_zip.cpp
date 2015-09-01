@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -17,10 +17,11 @@
 #include <zip.h>
 
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/ext/extension.h"
+#include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/stream-wrapper-registry.h"
-#include "hphp/runtime/ext/std/ext_std_file.h"
+#include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/pcre/ext_pcre.h"
+#include "hphp/runtime/ext/std/ext_std_file.h"
 
 namespace HPHP {
 
@@ -97,10 +98,10 @@ void ZipStream::sweep() {
 
 class ZipStreamWrapper : public Stream::Wrapper {
  public:
-  virtual SmartPtr<File> open(const String& filename,
+  virtual req::ptr<File> open(const String& filename,
                               const String& mode,
                               int options,
-                              const SmartPtr<StreamContext>& context) {
+                              const req::ptr<StreamContext>& context) {
     std::string url(filename.c_str());
     auto pound = url.find('#');
     if (pound == std::string::npos) {
@@ -121,7 +122,7 @@ class ZipStreamWrapper : public Stream::Wrapper {
       return nullptr;
     }
 
-    return makeSmartPtr<ZipStream>(z, file);
+    return req::make<ZipStream>(z, file);
   }
 };
 
@@ -248,7 +249,7 @@ class ZipDirectory: public SweepableResourceData {
       return false;
     }
 
-    auto zipEntry = makeSmartPtr<ZipEntry>(m_zip, m_curIndex);
+    auto zipEntry = req::make<ZipEntry>(m_zip, m_curIndex);
 
     if (!zipEntry->isValid()) {
       return false;
@@ -384,7 +385,7 @@ const int64_t k_CM_PPMD = 98;
 
 template<class T>
 ALWAYS_INLINE
-static SmartPtr<T> getResource(ObjectData* obj, const char* varName) {
+static req::ptr<T> getResource(ObjectData* obj, const char* varName) {
   auto var = obj->o_get(varName, true, s_ZipArchive);
   if (var.getType() == KindOfNull) {
     return nullptr;
@@ -429,14 +430,14 @@ static Variant setVariable(const Object& obj, const char* varName, const Variant
 #define FAIL_IF_INVALID_ZIPDIRECTORY(func, res)                         \
   if (!res->isValid()) {                                                \
     raise_warning(#func "(): %d is not a valid "                        \
-                  "Zip Directory resource", res->o_getId());            \
+                  "Zip Directory resource", res->getId());              \
     return false;                                                       \
   }
 
 #define FAIL_IF_INVALID_ZIPENTRY(func, res)                             \
   if (!res->isValid()) {                                                \
     raise_warning(#func "(): %d is not a valid Zip Entry resource",     \
-                  res->o_getId());                                      \
+                  res->getId());                                        \
     return false;                                                       \
   }
 
@@ -657,7 +658,7 @@ static bool addPattern(zip* zipStruct, const String& pattern, const Array& optio
     }
 
     if (!glob) {
-      auto var = HHVM_FN(preg_match)(pattern, source);
+      auto var = preg_match(pattern, source);
       if (var.isInteger()) {
         if (var.asInt64Val() == 0) {
           continue;
@@ -725,7 +726,7 @@ static bool HHVM_METHOD(ZipArchive, close) {
 
   bool ret = zipDir->close();
 
-  setVariable(this_, "zipDir", null_resource);
+  setVariable(Object{this_}, "zipDir", null_resource);
 
   return ret;
 }
@@ -1026,7 +1027,7 @@ static Variant HHVM_METHOD(ZipArchive, getStream, const String& name) {
   FAIL_IF_INVALID_ZIPARCHIVE(getStream, zipDir);
   FAIL_IF_EMPTY_STRING_ZIPARCHIVE(getStream, name);
 
-  auto zipStream = makeSmartPtr<ZipStream>(zipDir->getZip(), name);
+  auto zipStream = req::make<ZipStream>(zipDir->getZip(), name);
   if (zipStream->eof()) {
     return false;
   }
@@ -1056,10 +1057,10 @@ static Variant HHVM_METHOD(ZipArchive, open, const String& filename,
     return err;
   }
 
-  auto zipDir = makeSmartPtr<ZipDirectory>(z);
+  auto zipDir = req::make<ZipDirectory>(z);
 
-  setVariable(this_, "zipDir", Variant(zipDir));
-  setVariable(this_, "filename", filename);
+  setVariable(Object{this_}, "zipDir", Variant(zipDir));
+  setVariable(Object{this_}, "filename", filename);
 
   zip_error_clear(zipDir->getZip());
   return true;
@@ -1351,7 +1352,7 @@ static Variant HHVM_FUNCTION(zip_open, const String& filename) {
     return err;
   }
 
-  return Variant(makeSmartPtr<ZipDirectory>(z));
+  return Variant(req::make<ZipDirectory>(z));
 }
 
 static Variant HHVM_FUNCTION(zip_read, const Resource& zip) {

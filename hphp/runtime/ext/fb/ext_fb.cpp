@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -44,10 +44,8 @@
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/thread-info.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/FBSerialize.h"
-#include "hphp/runtime/ext/mysql/ext_mysql.h"
-#include "hphp/runtime/ext/mysql/mysql_common.h"
-#include "hphp/runtime/ext/VariantController.h"
+#include "hphp/runtime/ext/fb/FBSerialize.h"
+#include "hphp/runtime/ext/fb/VariantController.h"
 #include "hphp/runtime/vm/unwind.h"
 
 #include "hphp/parser/parser.h"
@@ -78,6 +76,7 @@ const StaticString
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#if defined __BYTE_ORDER && defined __BIG_ENDIAN
 /* Linux and other systems don't currently support a ntohx or htonx
    set of functions for 64-bit values.  We've implemented our own here
    which is based off of GNU Net's implementation with some slight
@@ -92,6 +91,7 @@ const StaticString
 #define htonll(n)                                                       \
   ( (((uint64_t)htonl(n)) << 32)                                        \
     | ((uint64_t)htonl((n) >> 32) & 0x00000000ffffffff) )
+#endif
 #endif
 
 /* enum of thrift types */
@@ -143,14 +143,13 @@ Variant HHVM_FUNCTION(fb_unserialize, const Variant& thing, VRefParam success) {
 
     if (sthing.size() && (sthing.data()[0] & 0x80)) {
       return fb_compact_unserialize(sthing.data(), sthing.size(),
-                                    ref(success));
+                                    success);
     } else {
-      return fb_unserialize(sthing.data(), sthing.size(),
-                            ref(success));
+      return fb_unserialize(sthing.data(), sthing.size(), success);
     }
   }
 
-  success = false;
+  success.assignIfRef(false);
   return false;
 }
 
@@ -158,10 +157,10 @@ Variant fb_unserialize(const char* str, int len, VRefParam success) {
   try {
     auto res = HPHP::serialize::FBUnserializer<VariantController>::unserialize(
       folly::StringPiece(str, len));
-    success = true;
+    success.assignIfRef(true);
     return res;
   } catch (const HPHP::serialize::UnserializeError&) {
-    success = false;
+    success.assignIfRef(false);
     return false;
   }
 }
@@ -406,9 +405,8 @@ static int fb_compact_serialize_variant(StringBuffer& sb,
                                         FBCompactSerializeBehavior behavior) {
   if (depth > 256) {
     if (behavior == FBCompactSerializeBehavior::MemoizeParam) {
-      Object e(SystemLib::AllocInvalidArgumentExceptionObject(
-        "Array depth exceeded"));
-      throw e;
+      SystemLib::throwInvalidArgumentExceptionObject(
+        "Array depth exceeded");
     }
 
     return 1;
@@ -469,10 +467,9 @@ static int fb_compact_serialize_variant(StringBuffer& sb,
           auto msg = folly::format(
             "Cannot serialize object of type {} because it does not implement "
             "HH\\IMemoizeParam",
-            obj->getClassName().data()).str();
+            obj->getClassName().asString()).str();
 
-          Object e(SystemLib::AllocInvalidArgumentExceptionObject(msg));
-          throw e;
+          SystemLib::throwInvalidArgumentExceptionObject(msg);
         }
 
         // Marker that shows that this was an obj so it doesn't collide with
@@ -499,8 +496,7 @@ static int fb_compact_serialize_variant(StringBuffer& sb,
   if (behavior == FBCompactSerializeBehavior::MemoizeParam) {
     auto msg = folly::format(
       "Cannot Serialize unexpected type {}", tname(var.getType()).c_str());
-    Object e(SystemLib::AllocInvalidArgumentExceptionObject(msg.str()));
-    throw e;
+    SystemLib::throwInvalidArgumentExceptionObject(msg.str());
   }
   return 1;
 }
@@ -748,12 +744,12 @@ Variant fb_compact_unserialize(const char* str, int len,
   int p = 0;
   int err = fb_compact_unserialize_from_buffer(ret, str, len, p);
   if (err) {
-    success = false;
-    errcode = err;
+    success.assignIfRef(false);
+    errcode.assignIfRef(err);
     return false;
   }
-  success = true;
-  errcode = uninit_null();
+  success.assignIfRef(true);
+  errcode.assignIfRef(init_null());
   return ret;
 }
 
@@ -761,8 +757,8 @@ Variant HHVM_FUNCTION(fb_compact_unserialize,
                       const Variant& thing, VRefParam success,
                       VRefParam errcode /* = null_variant */) {
   if (!thing.isString()) {
-    success = false;
-    errcode = FB_UNSERIALIZE_NONSTRING_VALUE;
+    success.assignIfRef(false);
+    errcode.assignIfRef(FB_UNSERIALIZE_NONSTRING_VALUE);
     return false;
   }
 
@@ -846,7 +842,7 @@ bool HHVM_FUNCTION(fb_utf8ize, VRefParam input) {
     U8_APPEND_UNSAFE(dstBuf, dstPosBytes, curCodePoint);
   }
   assert(dstPosBytes <= dstMaxLenBytes);
-  input = dstStr.shrink(dstPosBytes);
+  input.assignIfRef(dstStr.shrink(dstPosBytes));
   return true;
 }
 
@@ -1065,14 +1061,14 @@ Array f_fb_call_user_func_safe(int _argc, const Variant& function,
 Variant f_fb_call_user_func_safe_return(int _argc, const Variant& function,
                                         const Variant& def,
                                         const Array& _argv /* = null_array */) {
-  if (HHVM_FN(is_callable)(function)) {
+  if (is_callable(function)) {
     return vm_call_user_func(function, _argv);
   }
   return def;
 }
 
 Array f_fb_call_user_func_array_safe(const Variant& function, const Array& params) {
-  if (HHVM_FN(is_callable)(function)) {
+  if (is_callable(function)) {
     return make_packed_array(true, vm_call_user_func(function, params));
   }
   return make_packed_array(false, uninit_null());

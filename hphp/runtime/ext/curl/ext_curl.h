@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -217,6 +217,7 @@ extern const int64_t k_CURLOPT_RANGE;
 extern const int64_t k_CURLOPT_READDATA;
 extern const int64_t k_CURLOPT_READFUNCTION;
 extern const int64_t k_CURLOPT_REFERER;
+extern const int64_t k_CURLOPT_RESOLVE;
 extern const int64_t k_CURLOPT_RESUME_FROM;
 extern const int64_t k_CURLOPT_RETURNTRANSFER;
 #ifdef FACEBOOK
@@ -269,6 +270,8 @@ extern const int64_t k_CURL_VERSION_LIBZ;
 extern const int64_t k_CURL_VERSION_SSL;
 
 Variant HHVM_FUNCTION(curl_init, const Variant& url = null_string);
+Variant HHVM_FUNCTION(curl_init_pooled, const String& poolName,
+                              const Variant& url = null_string);
 Variant HHVM_FUNCTION(curl_copy_handle, const Resource& ch);
 Variant HHVM_FUNCTION(curl_version, int uversion = k_CURLVERSION_NOW);
 bool HHVM_FUNCTION(curl_setopt, const Resource& ch, int option, const Variant& value);

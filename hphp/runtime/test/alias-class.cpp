@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -35,8 +35,6 @@ std::vector<AliasClass> generic_classes() {
     AFrameAny,
     APropAny,
     AHeapAny,
-    ANonFrame,
-    ANonStack,
     AStackAny,
     AElemIAny,
     AElemSAny,
@@ -71,6 +69,85 @@ std::vector<AliasClass> specialized_classes(IRUnit& unit) {
   };
 }
 
+}
+
+//////////////////////////////////////////////////////////////////////
+
+TEST(AliasClass, AliasIdSet) {
+  constexpr auto Max = AliasIdSet::Max;
+  constexpr auto BitsetMax = AliasIdSet::BitsetMax;
+
+  EXPECT_TRUE(BitsetMax < 64);
+
+  AliasIdSet big = BitsetMax + 100;
+  EXPECT_EQ(big.size(), 1);
+  EXPECT_TRUE(big.isBigInteger());
+  EXPECT_FALSE(big.empty());
+
+  big.unset(BitsetMax);
+  EXPECT_EQ(big.size(), 1);
+  EXPECT_TRUE(big.isBigInteger());
+  EXPECT_FALSE(big.empty());
+
+  big.set(BitsetMax + 100);
+  EXPECT_EQ(big.size(), 1);
+  EXPECT_TRUE(big.isBigInteger());
+  EXPECT_FALSE(big.empty());
+  EXPECT_TRUE(big.hasSingleValue());
+
+  big.unset(BitsetMax + 100);
+  EXPECT_EQ(big.size(), 0);
+  EXPECT_TRUE(big.isBitset());
+  EXPECT_TRUE(big.empty());
+  EXPECT_FALSE(big.hasSingleValue());
+
+  AliasIdSet ids { 0u, 3u, IdRange { 6, 9 }, IdRange { 15, 12 }, BitsetMax };
+
+  EXPECT_EQ(ids.size(), 6);
+  EXPECT_TRUE(ids.isBitset());
+  EXPECT_FALSE(ids.empty());
+  EXPECT_FALSE(ids.isBigInteger());
+  EXPECT_FALSE(ids.hasUpperRange());
+
+  EXPECT_TRUE(ids.test(0));
+  EXPECT_TRUE(ids.test(3));
+  EXPECT_FALSE(ids.test(5));
+  EXPECT_TRUE(ids.test(6));
+  EXPECT_TRUE(ids.test(8));
+  EXPECT_FALSE(ids.test(9));
+  EXPECT_FALSE(ids.test(12));
+  EXPECT_FALSE(ids.test(14));
+  EXPECT_FALSE(ids.test(15));
+  EXPECT_TRUE(ids.test(BitsetMax));
+  EXPECT_FALSE(ids.test(BitsetMax + 1));
+  EXPECT_FALSE(ids.test(63));
+
+  EXPECT_TRUE(ids == (ids | AliasIdSet{}));
+  EXPECT_TRUE(ids == (ids | 6));
+  EXPECT_TRUE(ids == (ids | BitsetMax));
+  EXPECT_TRUE((1000 | ids).test(1000));
+
+  AliasIdSet unbounded = IdRange { 4 };
+
+  EXPECT_EQ(unbounded.size(), Max);
+  EXPECT_TRUE(unbounded.isBitset());
+  EXPECT_FALSE(unbounded.empty());
+  EXPECT_FALSE(unbounded.isBigInteger());
+  EXPECT_TRUE(unbounded.hasUpperRange());
+
+  EXPECT_TRUE(unbounded.test(4));
+  EXPECT_TRUE(unbounded.test(12));
+  EXPECT_TRUE(unbounded.test(61));
+  EXPECT_TRUE(unbounded.test(62));
+  EXPECT_TRUE(unbounded.test(BitsetMax));
+  EXPECT_TRUE(unbounded.test(BitsetMax + 1));
+  EXPECT_TRUE(unbounded.test(64));
+  EXPECT_TRUE(unbounded.test(100));
+
+  EXPECT_TRUE(ids.maybe(IdRange { 5, 7 }));
+  EXPECT_TRUE(ids.maybe(unbounded));
+
+  EXPECT_TRUE((ids | unbounded).hasUpperRange());
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -286,6 +363,88 @@ TEST(AliasClass, StackUnions) {
     AliasClass const deep_stk1 = AStack { FP, -10, imax };
     AliasClass const deep_stk2 = AStack { FP, -14, imax };
     EXPECT_EQ(deep_stk1 | deep_stk2, deep_stk1);
+  }
+}
+
+TEST(AliasClass, IterUnion) {
+  IRUnit unit{test_context};
+  auto const marker = BCMarker::Dummy();
+  auto const FP = unit.gen(DefFP, marker)->dst();
+
+  {
+    AliasClass const iterP0 = AIterPos { FP, 0 };
+    AliasClass const iterP1 = AIterPos { FP, 1 };
+    auto const u1 = iterP0 | iterP1;
+    EXPECT_EQ(u1, AIterPosAny);
+    EXPECT_TRUE(iterP0 <= AIterPosAny);
+    EXPECT_FALSE(iterP0 <= AIterBaseAny);
+  }
+
+  {
+    AliasClass const iterP0 = AIterPos { FP, 0 };
+    AliasClass const iterB0 = AIterBase { FP, 0 };
+    AliasClass const iterP1 = AIterPos { FP, 1 };
+    auto const u1 = iterP0 | iterB0;
+    EXPECT_TRUE(iterP0 <= u1);
+    EXPECT_TRUE(iterB0 <= u1);
+    EXPECT_FALSE(u1 <= AIterPosAny);
+    EXPECT_FALSE(u1 <= AIterBaseAny);
+    EXPECT_TRUE(u1 <= (AIterPosAny | AIterBaseAny));
+    EXPECT_FALSE(iterP1 <= u1);
+    EXPECT_FALSE(iterP1 <= iterP0);
+    EXPECT_FALSE(iterP1 <= iterB0);
+
+    EXPECT_TRUE(!!u1.iterPos());
+    EXPECT_TRUE(!!u1.iterBase());
+    EXPECT_TRUE(!u1.is_iterPos());
+    EXPECT_TRUE(!u1.is_iterBase());
+  }
+
+  {
+    AliasClass const local = AFrame { FP, 0 };
+    AliasClass const iter  = AIterPos { FP, 0 };
+    auto const u1 = local | iter;
+    EXPECT_TRUE(local <= u1);
+    EXPECT_TRUE(iter <= u1);
+    EXPECT_FALSE(!!u1.is_iterPos());
+    EXPECT_FALSE(!!u1.is_frame());
+    EXPECT_TRUE(!!u1.frame());  // locals are preferred in unions to iters
+    EXPECT_FALSE(!!u1.iterPos());
+  }
+
+  {
+    AliasClass const iterP0 = AIterPos { FP, 0 };
+    AliasClass const iterB0 = AIterBase { FP, 0 };
+    AliasClass const iterP1 = AIterPos { FP, 1 };
+    AliasClass const iterB1 = AIterBase { FP, 1 };
+
+    EXPECT_FALSE(iterP0.maybe(iterP1));
+    EXPECT_FALSE(iterB0.maybe(iterB1));
+
+    auto const u1 = iterP0 | iterB0;
+    auto const u2 = iterP1 | iterB1;
+    EXPECT_FALSE(u1 == u2);
+    EXPECT_FALSE(u1.maybe(u2));
+    EXPECT_FALSE(u1 <= u2);
+    EXPECT_FALSE(u2 <= u1);
+
+    EXPECT_TRUE(iterB1 <= u2);
+    EXPECT_TRUE(iterP1 <= u2);
+    EXPECT_FALSE(iterP0 <= u2);
+    EXPECT_FALSE(iterB0 <= u2);
+
+    auto const u3 = u1 | iterP1;
+    EXPECT_FALSE(!!u3.iterPos());
+    EXPECT_FALSE(!!u3.iterBase());
+    EXPECT_TRUE(iterP1 <= u3);
+    EXPECT_TRUE(iterP0 <= u3);
+    EXPECT_TRUE(iterB0 <= u3);
+    EXPECT_TRUE(u1 <= u3);
+    EXPECT_TRUE(u2.maybe(u3));
+
+    // u2 <= u3 isn't 'really' true, but operator| is conservative and makes u3
+    // too big for that right now.
+    EXPECT_TRUE(!u1.precise_union(iterP1));
   }
 }
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -124,7 +124,7 @@ struct ClassInfo;
  *
  * These represent handles to program entities that may have variable
  * amounts of information.  For example, we may know the name of a
- * class in a res::Class, but not know for sure which php::Class
+ * class in a res::Class, but do not know for sure which php::Class
  * struct is actually associated with it.
  */
 namespace res {
@@ -529,6 +529,14 @@ struct Index {
    */
   bool lookup_public_static_immutable(borrowed_ptr<const php::Class>,
                                       SString name) const;
+
+  /*
+   * Returns the computed vtable slot for the given class, if it's an interface
+   * that was given a vtable slot. No two interfaces implemented by the same
+   * class will share the same vtable slot. May return kInvalidSlot, if the
+   * given class isn't an interface or if it wasn't assigned a slot.
+   */
+  Slot lookup_iface_vtable_slot(borrowed_ptr<const php::Class>) const;
 
   /*
    * Refine the return type for a function, based on a round of

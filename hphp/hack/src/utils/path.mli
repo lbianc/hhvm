@@ -12,10 +12,14 @@
 type t = private string
 
 val dummy_path: t
+val null_path: t
+val temp_dir_name: t
+val expanduser: string -> t
 val make: string -> t
 val to_string: t -> string
 val file_exists: t -> bool
 val is_directory: t -> bool
+val compare: t -> t -> int
 val concat: t -> string -> t
 val chdir: t -> unit
 val dirname: t -> t

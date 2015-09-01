@@ -35,7 +35,7 @@ public:
       c_Transliterator = Unit::lookupClass(s_Transliterator.get());
       assert(c_Transliterator);
     }
-    auto obj = ObjectData::newInstance(c_Transliterator);
+    Object obj{c_Transliterator};
     auto data = Native::data<Transliterator>(obj);
     data->setTransliterator(trans);
     return obj;

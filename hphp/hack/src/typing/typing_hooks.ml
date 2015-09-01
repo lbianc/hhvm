@@ -8,6 +8,18 @@
  *
  *)
 
+open Core
+
+let binop_hooks:
+  (
+    Pos.t ->
+    Ast.bop ->
+    Typing_defs.locl Typing_defs.ty ->
+    Typing_defs.locl Typing_defs.ty ->
+    unit
+  ) list ref
+  = ref []
+
 let (id_hooks: (Pos.t * string -> Typing_env.env -> unit) list ref) = ref []
 
 let (smethod_hooks: (Typing_defs.class_type -> Pos.t * string ->
@@ -24,7 +36,8 @@ let (lvar_hooks: (Pos.t * Ident.t -> Typing_env.env ->
 let (fun_call_hooks: ((string option * Typing_defs.locl Typing_defs.ty) list ->
                       Pos.t list -> Typing_env.env -> unit) list ref) = ref []
 
-let (new_id_hooks: (Nast.class_id-> Typing_env.env -> unit) list ref) = ref []
+let (new_id_hooks: (Nast.class_id-> Typing_env.env ->
+                    Pos.t -> unit) list ref) = ref []
 
 let (fun_id_hooks: (Pos.t * string -> unit) list ref) = ref []
 
@@ -56,6 +69,9 @@ let attach_smethod_hook hook =
 
 let attach_cmethod_hook hook =
   cmethod_hooks := hook :: !cmethod_hooks
+
+let attach_binop_hook hook =
+  binop_hooks := hook :: !binop_hooks
 
 let attach_id_hook hook =
   id_hooks := hook :: !id_hooks
@@ -114,57 +130,59 @@ let attach_class_def_hook enter_hook exit_hook =
       exit_class_def_hooks := hook :: !exit_class_def_hooks
   | None -> ()
 
+let dispatch_binop_hook p bop ty1 ty2 =
+  List.iter !binop_hooks begin fun hook -> hook p bop ty1 ty2 end
+
 let dispatch_id_hook id env =
-  List.iter begin fun hook -> hook id env end !id_hooks
+  List.iter !id_hooks begin fun hook -> hook id env end
 
 let dispatch_smethod_hook class_ id env cid ~is_method =
-  List.iter begin fun hook -> hook class_ id env cid ~is_method
-  end !smethod_hooks
+  List.iter !smethod_hooks (fun hook -> hook class_ id env cid ~is_method)
 
 let dispatch_cmethod_hook class_ id env cid ~is_method =
-  List.iter begin fun hook -> hook class_ id env cid ~is_method
-  end !cmethod_hooks
+  List.iter !cmethod_hooks (fun hook -> hook class_ id env cid ~is_method)
 
 let dispatch_lvar_hook id env =
-  List.iter begin fun hook -> hook id env end !lvar_hooks
+  List.iter !lvar_hooks begin fun hook -> hook id env end
 
 let dispatch_fun_call_hooks ft_params posl env =
-  List.iter begin fun hook -> hook ft_params posl env end !fun_call_hooks
+  List.iter !fun_call_hooks begin fun hook -> hook ft_params posl env end
 
-let dispatch_new_id_hook cid env =
-  List.iter begin fun hook -> hook cid env end !new_id_hooks
+let dispatch_new_id_hook cid env p =
+  List.iter !new_id_hooks begin fun hook -> hook cid env p end
 
 let dispatch_fun_id_hook id =
-  List.iter begin fun hook -> hook id end !fun_id_hooks
+  List.iter !fun_id_hooks begin fun hook -> hook id end
 
 let dispatch_constructor_hook c env p =
-  List.iter begin fun hook -> hook c env p end !constructor_hooks
+  List.iter !constructor_hooks begin fun hook -> hook c env p end
 
 let dispatch_class_id_hook c_id m_id_optional =
-  List.iter begin fun hook -> hook c_id m_id_optional end !class_id_hooks
+  List.iter !class_id_hooks begin fun hook -> hook c_id m_id_optional end
 
 let dispatch_infer_ty_hook ty pos env =
-  List.iter begin fun hook -> hook ty pos env end !infer_ty_hooks
+  List.iter !infer_ty_hooks begin fun hook -> hook ty pos env end
 
 let dispatch_enter_method_def_hook method_ =
-  List.iter begin fun hook -> hook method_ end !enter_method_def_hooks
+  List.iter !enter_method_def_hooks begin fun hook -> hook method_ end
 
 let dispatch_exit_method_def_hook method_ =
-  List.iter begin fun hook -> hook method_ end !exit_method_def_hooks
+  List.iter !exit_method_def_hooks begin fun hook -> hook method_ end
 
 let dispatch_enter_fun_def_hook fun_ =
-  List.iter begin fun hook -> hook fun_ end !enter_fun_def_hooks
+  List.iter !enter_fun_def_hooks begin fun hook -> hook fun_ end
 
 let dispatch_exit_fun_def_hook fun_ =
-  List.iter begin fun hook -> hook fun_ end !exit_fun_def_hooks
+  List.iter !exit_fun_def_hooks begin fun hook -> hook fun_ end
 
 let dispatch_enter_class_def_hook cls cls_type =
-  List.iter begin fun hook -> hook cls cls_type end !enter_class_def_hooks
+  List.iter !enter_class_def_hooks begin fun hook -> hook cls cls_type end
 
 let dispatch_exit_class_def_hook cls cls_type =
-  List.iter begin fun hook -> hook cls cls_type end !exit_class_def_hooks
+  List.iter !exit_class_def_hooks begin fun hook -> hook cls cls_type end
 
 let remove_all_hooks () =
+  binop_hooks := [];
   id_hooks := [];
   cmethod_hooks := [];
   smethod_hooks := [];

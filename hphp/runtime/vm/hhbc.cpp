@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -447,6 +447,7 @@ int instrNumPops(const Op* opcode) {
 #define C_MMANY -2
 #define V_MMANY -2
 #define R_MMANY -2
+#define MFINAL -3
 #define FMANY -3
 #define CVMANY -3
 #define CVUMANY -3
@@ -463,6 +464,7 @@ int instrNumPops(const Op* opcode) {
 #undef C_MMANY
 #undef V_MMANY
 #undef R_MMANY
+#undef MFINAL
 #undef FMANY
 #undef CVMANY
 #undef CVUMANY
@@ -474,8 +476,8 @@ int instrNumPops(const Op* opcode) {
   // For most instructions, we know how many values are popped based
   // solely on the opcode
   if (n >= 0) return n;
-  // FCall and NewPackedArray specify how many values are popped in their
-  // first immediate
+  // FCall, NewPackedArray, and final member operations specify how many values
+  // are popped in their first immediate
   if (n == -3) return getImm(opcode, 0).u_IVA;
   // For instructions with vector immediates, we have to scan the
   // contents of the vector immediate to determine how many values
@@ -532,38 +534,28 @@ FlavorDesc minstrFlavor(const Op* op, uint32_t i, FlavorDesc top) {
     if (i == 0) return top;
     --i;
   }
+
+  // First, check for location codes that have a non-Cell stack input.
   auto const location = getMLocation(op);
   switch (location.lcode) {
-    // No stack input for the location
+    // No stack input for the location.
     case LL: case LH: case LGL: case LNL: break;
 
-    // CV on top
-    case LC: case LGC: case LNC:
-      if (i == 0) return CV;
-      --i;
-      break;
+    // CV on top. Handled below.
+    case LC: case LGC: case LNC: break;
 
-    // AV on top
-    case LSL:
+    // AV on top.
+    case LSL: case LSC:
       if (i == 0) return AV;
-      --i;
       break;
 
-    // RV on top
+    // RV on top.
     case LR:
       if (i == 0) return RV;
-      --i;
-      break;
-
-    // AV on top, CV below
-    case LSC:
-      if (i == 0) return AV;
-      if (i == 1) return CV;
-      i -= 2;
       break;
 
     case InvalidLocationCode:
-      not_reached();
+      always_assert(false);
   }
 
   if (i < getImmVector(op).numStackValues()) return CV;
@@ -590,6 +582,7 @@ FlavorDesc instrInputFlavor(const Op* op, uint32_t idx) {
 #define C_MMANY return minstrFlavor(op, idx, CV);
 #define V_MMANY return minstrFlavor(op, idx, VV);
 #define R_MMANY return minstrFlavor(op, idx, RV);
+#define MFINAL return manyFlavor(op, idx, CRV);
 #define FMANY return manyFlavor(op, idx, FV);
 #define CVMANY return manyFlavor(op, idx, CVV);
 #define CVUMANY return manyFlavor(op, idx, CVUV);
@@ -609,6 +602,7 @@ FlavorDesc instrInputFlavor(const Op* op, uint32_t idx) {
 #undef C_MMANY
 #undef V_MMANY
 #undef R_MMANY
+#undef MFINAL
 #undef FMANY
 #undef CVMANY
 #undef CVUMANY
@@ -708,9 +702,9 @@ void staticArrayStreamer(ArrayData* ad, std::ostream& out) {
       Variant key = it.first();
 
       // Key.
-      if (IS_INT_TYPE(key.getType())) {
+      if (isIntType(key.getType())) {
         out << *key.getInt64Data();
-      } else if (IS_STRING_TYPE(key.getType())) {
+      } else if (isStringType(key.getType())) {
         out << "\""
             << escapeStringForCPP(key.getStringData()->data(),
                                   key.getStringData()->size())
@@ -1140,6 +1134,18 @@ static const char* SwitchKind_names[] = {
 #undef KIND
 };
 
+static const char* QueryMOp_names[] = {
+#define OP(x) #x,
+  QUERY_M_OPS
+#undef OP
+};
+
+static const char* PropElemOp_names[] = {
+#define OP(x) #x,
+  PROP_ELEM_OPS
+#undef OP
+};
+
 template<class T, size_t Sz>
 const char* subopToNameImpl(const char* (&arr)[Sz], T opcode) {
   static_assert(
@@ -1190,8 +1196,32 @@ X(SilenceOp)
 X(OODeclExistsOp)
 X(ObjMethodOp)
 X(SwitchKind)
+X(QueryMOp)
+X(PropElemOp)
 
 #undef X
+
+/*
+ * MOpFlags is a bitmask so it doesn't fit into the [0,n) pattern of the other
+ * subops above.
+ */
+const char* subopToName(MOpFlags f) {
+  switch (f) {
+#define FLAG(name, val) case MOpFlags::name: return #name;
+  M_OP_FLAGS
+#undef FLAG
+  }
+  always_assert_flog(false, "Invalid MOpFlags: {}", uint8_t(f));
+}
+
+template<>
+folly::Optional<MOpFlags> nameToSubop<MOpFlags>(const char* str) {
+#define FLAG(name, val) if (!strcmp(str, #name)) return MOpFlags::name;
+  M_OP_FLAGS
+#undef FLAG
+
+  return folly::none;
+}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -1407,6 +1437,15 @@ const MInstrInfo& getMInstrInfo(Op op) {
 #undef MII
   default: not_reached();
   }
+}
+
+MOpFlags getMOpFlags(QueryMOp op) {
+  switch (op) {
+    case QueryMOp::CGet:  return MOpFlags::Warn;
+    case QueryMOp::Isset:
+    case QueryMOp::Empty: return MOpFlags::None;
+  }
+  always_assert(false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

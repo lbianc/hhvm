@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,7 +16,7 @@
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/vasm.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
@@ -100,7 +100,7 @@ TEST(Vasm, FoldImms) {
   //
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "addqi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -109,7 +109,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "addqi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -118,7 +118,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "addqi 1, %64 => %65, %67\n"
     "incq %64 => %66, %68\n"
     "movl %67 => %71\n"
@@ -127,7 +127,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "addqi 1, %64 => %65, %67\n"
     "incq %64 => %66, %68\n"
     "movl %67 => %71\n"
@@ -140,7 +140,7 @@ TEST(Vasm, FoldImms) {
   //
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "subqi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -150,7 +150,7 @@ TEST(Vasm, FoldImms) {
 
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "neg %64 => %65, %67\n"
     "neg %64 => %66, %68\n"
     "movl %67 => %71\n"
@@ -160,7 +160,7 @@ TEST(Vasm, FoldImms) {
 
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "subqi 1, %64 => %65, %67\n"
     "decq %64 => %66, %68\n"
     "movl %67 => %71\n"
@@ -173,7 +173,7 @@ TEST(Vasm, FoldImms) {
   //
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorbi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -182,7 +182,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorbi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -191,7 +191,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorbi -1, %64 => %65, %67\n"
     "notb %64 => %66\n"
     "movl %67 => %71\n"
@@ -200,7 +200,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorbi -1, %64 => %65, %67\n"
     "notb %64 => %66\n"
     "movl %67 => %71\n"
@@ -213,7 +213,7 @@ TEST(Vasm, FoldImms) {
   //
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorqi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -222,7 +222,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorqi 0, %64 => %65, %67\n"
     "copy %64 => %66\n"
     "movl %67 => %71\n"
@@ -231,7 +231,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorqi -1, %64 => %65, %67\n"
     "not %64 => %66\n"
     "movl %67 => %71\n"
@@ -240,7 +240,7 @@ TEST(Vasm, FoldImms) {
   );
   EXPECT_EQ(
     "B0 main\n"
-    "movl %69 => %64\n"
+    "movl %69(42l) => %64\n"
     "xorqi -1, %64 => %65, %67\n"
     "not %64 => %66\n"
     "movl %67 => %71\n"

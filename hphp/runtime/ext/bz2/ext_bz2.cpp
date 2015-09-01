@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -57,13 +57,13 @@ Variant HHVM_FUNCTION(bzopen, const Variant& filename, const String& mode) {
     return false;
   }
 
-  SmartPtr<BZ2File> bz;
+  req::ptr<BZ2File> bz;
   if (filename.isString()) {
     if (filename.asCStrRef().empty()) {
       raise_warning("filename cannot be empty");
       return false;
     }
-    bz = makeSmartPtr<BZ2File>();
+    bz = req::make<BZ2File>();
     bool ret = bz->open(File::TranslatePath(filename.toString()), mode);
     if (!ret) {
       raise_warning("%s", folly::errnoStr(errno).c_str());
@@ -106,7 +106,7 @@ Variant HHVM_FUNCTION(bzopen, const Variant& filename, const String& mode) {
       return false;
     }
 
-    bz = makeSmartPtr<BZ2File>(std::move(f));
+    bz = req::make<BZ2File>(std::move(f));
   }
   return Variant(std::move(bz));
 }
@@ -185,7 +185,7 @@ Variant HHVM_FUNCTION(bzdecompress, const String& source, int small /* = 0 */) {
     bzs.avail_out = source_len;
     size = (bzs.total_out_hi32 * (unsigned int) -1) + bzs.total_out_lo32;
     ret.setSize(size); // needs to be null-terminated before the reserve call
-    bzs.next_out = ret.reserve(size + bzs.avail_out).ptr + size;
+    bzs.next_out = ret.reserve(size + bzs.avail_out).data() + size;
   }
 
   if (error == BZ_STREAM_END || error == BZ_OK) {

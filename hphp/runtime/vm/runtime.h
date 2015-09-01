@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,9 +16,9 @@
 #ifndef incl_HPHP_VM_RUNTIME_H_
 #define incl_HPHP_VM_RUNTIME_H_
 
-#include "hphp/runtime/ext/ext_generator.h"
-#include "hphp/runtime/ext/asio/async-function-wait-handle.h"
-#include "hphp/runtime/ext/asio/async-generator.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
+#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-generator.h"
 #include "hphp/runtime/ext/std/ext_std_errorfunc.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/runtime/vm/func.h"
@@ -82,30 +82,19 @@ frame_afwh(const ActRec* fp) {
   return waitHandle;
 }
 
-inline BaseGenerator*
-frame_base_generator(const ActRec* fp) {
-  assert(fp->func()->isGenerator());
-  auto resumable = frame_resumable(fp);
-  auto obj = (ObjectData*)((char*)resumable - BaseGenerator::resumableOff());
-  assert(obj->getVMClass() == c_AsyncGenerator::classof() ||
-         obj->getVMClass() == c_Generator::classof());
-  return static_cast<BaseGenerator*>(obj);
-}
-
-inline c_Generator*
+inline Generator*
 frame_generator(const ActRec* fp) {
   assert(fp->func()->isNonAsyncGenerator());
-  auto obj = frame_base_generator(fp);
-  assert(obj->getVMClass() == c_Generator::classof());
-  return static_cast<c_Generator*>(obj);
+  auto resumable = frame_resumable(fp);
+  return (Generator*)((char*)resumable - Generator::resumableOff());
 }
 
-inline c_AsyncGenerator*
+inline AsyncGenerator*
 frame_async_generator(const ActRec* fp) {
   assert(fp->func()->isAsyncGenerator());
-  auto obj = frame_base_generator(fp);
-  assert(obj->getVMClass() == c_AsyncGenerator::classof());
-  return static_cast<c_AsyncGenerator*>(obj);
+  auto resumable = frame_resumable(fp);
+  return (AsyncGenerator*)((char*)resumable -
+    AsyncGenerator::resumableOff());
 }
 
 /*
@@ -147,7 +136,7 @@ frame_free_locals_helper_inl(ActRec* fp, int numLocals) {
               fp->m_func->numLocals());
     TypedValue* loc = frame_local(fp, i);
     DataType t = loc->m_type;
-    if (IS_REFCOUNTED_TYPE(t)) {
+    if (isRefcountedType(t)) {
       uint64_t datum = loc->m_data.num;
       if (unwinding) {
         tvWriteUninit(loc);
@@ -186,9 +175,9 @@ frame_free_inl(ActRec* fp, TypedValue* rv) { // For frames with no locals
 }
 
 void ALWAYS_INLINE
-frame_free_locals_unwind(ActRec* fp, int numLocals, const Fault& fault) {
+frame_free_locals_unwind(ActRec* fp, int numLocals, ObjectData* phpException) {
   frame_free_locals_inl_no_hook<true>(fp, numLocals);
-  EventHook::FunctionUnwind(fp, fault);
+  EventHook::FunctionUnwind(fp, phpException);
 }
 
 void ALWAYS_INLINE
@@ -203,7 +192,7 @@ frame_free_args(TypedValue* args, int count) {
   for (int i = 0; i < count; i++) {
     TypedValue* loc = args - i;
     DataType t = loc->m_type;
-    if (IS_REFCOUNTED_TYPE(t)) {
+    if (isRefcountedType(t)) {
       uint64_t datum = loc->m_data.num;
       // We don't have to write KindOfUninit here, because a
       // debug_backtrace wouldn't be able to see these slots (they are
@@ -223,10 +212,13 @@ Unit* build_native_func_unit(const HhbcExtFuncInfo* builtinFuncs,
 Unit* build_native_class_unit(const HhbcExtClassInfo* builtinClasses,
                                   ssize_t numBuiltinClasses);
 
+// Create a new class instance, and register it in the live object table if
+// necessary. The initial ref-count of the instance will be greater than zero.
 inline ObjectData*
 newInstance(Class* cls) {
   assert(cls);
   auto* inst = ObjectData::newInstance(cls);
+  assert(inst->getCount() > 0);
   Stats::inc(cls->getDtor() ? Stats::ObjectData_new_dtor_yes
                             : Stats::ObjectData_new_dtor_no);
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -45,14 +45,13 @@ using namespace HPHP;
 
 ClassStatement::ClassStatement
 (STATEMENT_CONSTRUCTOR_PARAMETERS,
- int type, const string &name, const string &parent,
- ExpressionListPtr base, const string &docComment, StatementListPtr stmt,
+ int type, const std::string &name, const std::string &parent,
+ ExpressionListPtr base, const std::string &docComment, StatementListPtr stmt,
  ExpressionListPtr attrList,
  TypeAnnotationPtr enumBaseTy)
   : InterfaceStatement(STATEMENT_CONSTRUCTOR_PARAMETER_VALUES(ClassStatement),
                        name, base, docComment, stmt, attrList),
     m_type(type), m_ignored(false), m_enumBaseTy(enumBaseTy) {
-  m_parent = toLower(parent);
   m_originalParent = parent;
 }
 
@@ -80,30 +79,31 @@ void ClassStatement::onParse(AnalysisResultConstPtr ar, FileScopePtr fs) {
       assert(false);
   }
 
-  vector<string> bases;
+  std::vector<std::string> bases;
   if (!m_originalParent.empty()) {
     bases.push_back(m_originalParent);
   }
-  if (m_base) m_base->getOriginalStrings(bases);
+  if (m_base) m_base->getStrings(bases);
 
   for (auto &b : bases) {
-    ar->parseOnDemandByClass(toLower(b));
+    ar->parseOnDemandByClass(b);
   }
 
-  vector<UserAttributePtr> attrs;
+  std::vector<UserAttributePtr> attrs;
   if (m_attrList) {
     for (int i = 0; i < m_attrList->getCount(); ++i) {
-      UserAttributePtr a =
-        dynamic_pointer_cast<UserAttribute>((*m_attrList)[i]);
+      auto a = dynamic_pointer_cast<UserAttribute>((*m_attrList)[i]);
       attrs.push_back(a);
     }
   }
 
-  StatementPtr stmt = dynamic_pointer_cast<Statement>(shared_from_this());
-  ClassScopePtr classScope(new ClassScope(kindOf, m_originalName,
-                                          m_originalParent,
-                                          bases, m_docComment,
-                                          stmt, attrs));
+  auto stmt = dynamic_pointer_cast<Statement>(shared_from_this());
+  auto classScope = std::make_shared<ClassScope>(
+    fs, kindOf, m_originalName,
+    m_originalParent,
+    bases, m_docComment,
+    stmt, attrs);
+
   setBlockScope(classScope);
   if (!fs->addClass(ar, classScope)) {
     m_ignored = true;
@@ -119,8 +119,7 @@ void ClassStatement::onParse(AnalysisResultConstPtr ar, FileScopePtr fs) {
 
     // flatten continuation StatementList into MethodStatements
     for (int i = 0; i < m_stmt->getCount(); i++) {
-      StatementListPtr stmts =
-        dynamic_pointer_cast<StatementList>((*m_stmt)[i]);
+      auto stmts = dynamic_pointer_cast<StatementList>((*m_stmt)[i]);
       if (stmts) {
         m_stmt->removeElement(i);
         for (int j = 0; j < stmts->getCount(); j++) {
@@ -130,18 +129,17 @@ void ClassStatement::onParse(AnalysisResultConstPtr ar, FileScopePtr fs) {
     }
 
     for (int i = 0; i < m_stmt->getCount(); i++) {
-      MethodStatementPtr meth =
-        dynamic_pointer_cast<MethodStatement>((*m_stmt)[i]);
+      auto meth = dynamic_pointer_cast<MethodStatement>((*m_stmt)[i]);
       if (meth) {
-        if (meth->getName() == "__construct") {
+        if (meth->isNamed("__construct")) {
           constructor = meth;
           continue;
         }
-        if (meth->getName() == "__destruct") {
+        if (meth->isNamed("__destruct")) {
           destructor = meth;
           continue;
         }
-        if (meth->getName() == "__clone") {
+        if (meth->isNamed("__clone")) {
           clone = meth;
           continue;
         }
@@ -153,48 +151,45 @@ void ClassStatement::onParse(AnalysisResultConstPtr ar, FileScopePtr fs) {
 
     for (int i = 0; i < m_stmt->getCount(); i++) {
       if (!constructor) {
-        MethodStatementPtr meth =
-          dynamic_pointer_cast<MethodStatement>((*m_stmt)[i]);
-        if (meth && meth->getName() == classScope->getName()
-            && !classScope->isTrait()) {
+        auto meth = dynamic_pointer_cast<MethodStatement>((*m_stmt)[i]);
+        if (meth &&
+            meth->isNamed(classScope->getOriginalName()) &&
+            !classScope->isTrait()) {
           // class-name constructor
           constructor = meth;
           classScope->setAttribute(ClassScope::ClassNameConstructor);
         }
       }
-      IParseHandlerPtr ph = dynamic_pointer_cast<IParseHandler>((*m_stmt)[i]);
-      ph->onParseRecur(ar, classScope);
+      auto ph = dynamic_pointer_cast<IParseHandler>((*m_stmt)[i]);
+      ph->onParseRecur(ar, fs, classScope);
     }
     if (constructor && constructor->getModifiers()->isStatic()) {
-      constructor->parseTimeFatal(Compiler::InvalidAttribute,
+      constructor->parseTimeFatal(fs,
+                                  Compiler::InvalidAttribute,
                                   "Constructor %s::%s() cannot be static",
                                   classScope->getOriginalName().c_str(),
                                   constructor->getOriginalName().c_str());
     }
     if (destructor && destructor->getModifiers()->isStatic()) {
-      destructor->parseTimeFatal(Compiler::InvalidAttribute,
-                                  "Destructor %s::%s() cannot be static",
-                                  classScope->getOriginalName().c_str(),
-                                  destructor->getOriginalName().c_str());
+      destructor->parseTimeFatal(fs,
+                                 Compiler::InvalidAttribute,
+                                 "Destructor %s::%s() cannot be static",
+                                 classScope->getOriginalName().c_str(),
+                                 destructor->getOriginalName().c_str());
     }
     if (clone && clone->getModifiers()->isStatic()) {
-      clone->parseTimeFatal(Compiler::InvalidAttribute,
-                                  "Clone method %s::%s() cannot be static",
-                                  classScope->getOriginalName().c_str(),
-                                  clone->getOriginalName().c_str());
+      clone->parseTimeFatal(fs,
+                            Compiler::InvalidAttribute,
+                            "Clone method %s::%s() cannot be static",
+                            classScope->getOriginalName().c_str(),
+                            clone->getOriginalName().c_str());
     }
   }
 }
 
 StatementPtr ClassStatement::addClone(StatementPtr origStmt) {
   assert(m_stmt);
-  StatementPtr newStmt = Clone(origStmt);
-  MethodStatementPtr newMethStmt =
-    dynamic_pointer_cast<MethodStatement>(newStmt);
-  if (newMethStmt) {
-    newMethStmt->setClassName(m_name);
-    newMethStmt->setOriginalClassName(m_originalName);
-  }
+  auto newStmt = Clone(origStmt);
   m_stmt->addElement(newStmt);
   return newStmt;
 }
@@ -202,13 +197,14 @@ StatementPtr ClassStatement::addClone(StatementPtr origStmt) {
 ///////////////////////////////////////////////////////////////////////////////
 // static analysis functions
 
-string ClassStatement::getName() const {
-  return string("Class ") + getScope()->getName();
+std::string ClassStatement::getName() const {
+  return std::string("Class ") + getOriginalName();
 }
 
 void ClassStatement::analyzeProgram(AnalysisResultPtr ar) {
-  vector<string> bases;
-  if (!m_parent.empty()) bases.push_back(m_parent);
+  std::vector<std::string> bases;
+  auto const hasParent = !m_originalParent.empty();
+  if (hasParent) bases.push_back(m_originalParent);
   if (m_base) m_base->getStrings(bases);
 
   checkVolatile(ar);
@@ -222,9 +218,8 @@ void ClassStatement::analyzeProgram(AnalysisResultPtr ar) {
   for (unsigned int i = 0; i < bases.size(); i++) {
     ClassScopePtr cls = ar->findClass(bases[i]);
     if (cls) {
-      if ((!cls->isInterface() && (m_parent.empty() || i > 0 )) ||
-          (cls->isInterface() && (!m_parent.empty() && i == 0 )) ||
-          (cls->isTrait())) {
+      auto const expectClass = hasParent && i == 0;
+      if (expectClass == cls->isInterface() || cls->isTrait()) {
         Compiler::Error(Compiler::InvalidDerivation,
                         shared_from_this(),
                         "You are extending " + cls->getOriginalName() +
@@ -245,7 +240,7 @@ void ClassStatement::outputCodeModel(CodeGenerator &cg) {
   if (m_type == T_ABSTRACT
       || m_type == T_FINAL
       || m_type == T_STATIC) numProps++;
-  if (!m_parent.empty()) numProps++;
+  if (!m_originalParent.empty()) numProps++;
   if (m_base != nullptr) numProps++;
   if (!m_docComment.empty()) numProps++;
 
@@ -275,7 +270,7 @@ void ClassStatement::outputCodeModel(CodeGenerator &cg) {
   cg.printPropertyHeader("name");
   cg.printValue(m_originalName);
   //TODO: type parameters (task 3262469)
-  if (!m_parent.empty()) {
+  if (!m_originalParent.empty()) {
     cg.printPropertyHeader("baseClass");
     cg.printTypeExpression(m_originalParent);
   }
@@ -293,7 +288,7 @@ void ClassStatement::outputCodeModel(CodeGenerator &cg) {
   }
   cg.printAsEnclosedBlock(stmt);
   cg.printPropertyHeader("sourceLocation");
-  cg.printLocation(this->getLocation());
+  cg.printLocation(this);
   if (!m_docComment.empty()) {
     cg.printPropertyHeader("comments");
     cg.printValue(m_docComment);
@@ -321,7 +316,7 @@ void ClassStatement::outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) {
     cg_printf("class %s", m_originalName.c_str());
   }
 
-  if (!m_parent.empty()) {
+  if (!m_originalParent.empty()) {
     cg_printf(" extends %s", m_originalParent.c_str());
   }
 

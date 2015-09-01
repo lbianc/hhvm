@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -22,8 +22,10 @@
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/zend-printf.h"
-#include "hphp/runtime/base/bstring.h"
+#include "hphp/util/bstring.h"
+#ifndef _MSC_VER
 #include <langinfo.h>
+#endif
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -115,10 +117,6 @@ Variant HHVM_FUNCTION(substr_replace,
                       const Variant& replacement,
                       const Variant& start,
                       const Variant& length = 0x7FFFFFFF);
-Variant HHVM_FUNCTION(substr,
-                      const String& str,
-                      int start,
-                      int length = 0x7FFFFFFF);
 String HHVM_FUNCTION(str_pad,
                      const String& input,
                      int pad_length,

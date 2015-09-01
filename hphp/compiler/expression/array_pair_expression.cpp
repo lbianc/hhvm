@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -106,14 +106,6 @@ void ArrayPairExpression::setNthKid(int n, ConstructPtr cp) {
   }
 }
 
-bool ArrayPairExpression::canonCompare(ExpressionPtr e) const {
-  if (!Expression::canonCompare(e)) return false;
-  ArrayPairExpressionPtr a =
-    static_pointer_cast<ArrayPairExpression>(e);
-
-  return m_ref == a->m_ref;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 void ArrayPairExpression::outputCodeModel(CodeGenerator &cg) {
@@ -126,7 +118,7 @@ void ArrayPairExpression::outputCodeModel(CodeGenerator &cg) {
     cg.printPropertyHeader("operation");
     cg.printValue(PHP_ARRAY_PAIR);
     cg.printPropertyHeader("sourceLocation");
-    cg.printLocation(this->getLocation());
+    cg.printLocation(this);
     cg.printObjectFooter();
   } else {
     cg.printExpression(m_value, m_ref);

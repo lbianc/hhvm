@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -97,7 +97,7 @@ folly::Optional<Type> interpOutputType(IRGS& env,
   using namespace jit::InstrFlags;
   auto localType = [&]{
     auto locId = localInputId(inst);
-    static_assert(std::is_unsigned<typeof(locId)>::value,
+    static_assert(std::is_unsigned<decltype(locId)>::value,
                   "locId should be unsigned");
     assertx(locId < curFunc(env)->numLocals());
     return env.irb->localType(locId, DataTypeSpecific);
@@ -161,9 +161,6 @@ folly::Optional<Type> interpOutputType(IRGS& env,
       auto ty = localType().unbox();
       return ty <= TDbl ? ty : TCell;
     }
-    case OutStrlen:
-      return topType(env, BCSPOffset{0}) <= TStr ?
-        TInt : TUncountedInit;
     case OutClassRef:   return TCls;
     case OutFPushCufSafe: return folly::none;
 
@@ -432,13 +429,6 @@ void interpOne(IRGS& env,
   env.irb->exceptionStackBoundary();
   auto const op = unit->getOpcode(bcOff(env));
 
-  auto& iInfo = getInstrInfo(op);
-  if (iInfo.type == jit::InstrFlags::OutFDesc) {
-    env.fpiStack.push(FPIInfo { sp(env), env.irb->spOffset(), nullptr });
-  } else if (isFCallStar(op) && !env.fpiStack.empty()) {
-    env.fpiStack.pop();
-  }
-
   idata.bcOff = bcOff(env);
   idata.cellsPopped = popped;
   idata.cellsPushed = pushed;
@@ -468,8 +458,6 @@ void emitFPushObjMethod(IRGS& env, int32_t, ObjMethodOp) { INTERP }
 
 void emitLowInvalid(IRGS& env)                { std::abort(); }
 void emitCGetL3(IRGS& env, int32_t)           { INTERP }
-void emitBox(IRGS& env)                       { INTERP }
-void emitBoxR(IRGS& env)                      { INTERP }
 void emitAddElemV(IRGS& env)                  { INTERP }
 void emitAddNewElemV(IRGS& env)               { INTERP }
 void emitClsCns(IRGS& env, const StringData*) { INTERP }
@@ -507,6 +495,22 @@ void emitDefCls(IRGS& env, int32_t)           { INTERP }
 void emitDefFunc(IRGS& env, int32_t)          { INTERP }
 void emitCatch(IRGS& env)                     { INTERP }
 void emitHighInvalid(IRGS& env)               { std::abort(); }
+
+void emitBaseL(IRGS& env, int32_t, MOpFlags)                        { INTERP }
+void emitBaseH(IRGS& env)                                           { INTERP }
+void emitDimL(IRGS& env, int32_t, PropElemOp, MOpFlags)             { INTERP }
+void emitDimC(IRGS& env, int32_t, PropElemOp, MOpFlags)             { INTERP }
+void emitDimInt(IRGS& env, int64_t, PropElemOp, MOpFlags)           { INTERP }
+void emitDimStr(IRGS& env, const StringData*, PropElemOp, MOpFlags) { INTERP }
+void emitQueryML(IRGS& env, int32_t, QueryMOp, PropElemOp, int32_t) { INTERP }
+void emitQueryMC(IRGS& env, int32_t, QueryMOp, PropElemOp)          { INTERP }
+void emitQueryMInt(IRGS& env, int32_t, QueryMOp, PropElemOp, int64_t) {
+  INTERP
+}
+void emitQueryMStr(IRGS& env, int32_t, QueryMOp,
+                   PropElemOp, const StringData*) {
+  INTERP
+}
 
 //////////////////////////////////////////////////////////////////////
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,6 +28,8 @@ bool isInlining(const IRGS& env) {
 }
 
 /*
+ * Attempts to begin inlining, and returns whether or not it successed.
+ *
  * When doing gen-time inlining, we set up a series of IR instructions
  * that looks like this:
  *
@@ -48,11 +50,13 @@ bool isInlining(const IRGS& env) {
  * In DCE we attempt to remove the InlineReturn and DefInlineFP instructions if
  * they aren't needed.
  */
-void beginInlining(IRGS& env,
+bool beginInlining(IRGS& env,
                    unsigned numParams,
                    const Func* target,
                    Offset returnBcOffset) {
-  assertx(!env.fpiStack.empty() &&
+  auto const& fpiStack = env.irb->fpiStack();
+
+  assertx(!fpiStack.empty() &&
     "Inlining does not support calls with the FPush* in a different Tracelet");
   assertx(returnBcOffset >= 0 && "returnBcOffset before beginning of caller");
   assertx(curFunc(env)->base() + returnBcOffset < curFunc(env)->past() &&
@@ -65,8 +69,8 @@ void beginInlining(IRGS& env,
     params[numParams - i - 1] = popF(env);
   }
 
-  auto const prevSP    = env.fpiStack.top().returnSP;
-  auto const prevSPOff = env.fpiStack.top().returnSPOff;
+  auto const prevSP    = fpiStack.front().returnSP;
+  auto const prevSPOff = fpiStack.front().returnSPOff;
   spillStack(env);
   auto const calleeSP  = sp(env);
 
@@ -75,20 +79,24 @@ void beginInlining(IRGS& env,
     "FPI stack pointer and callee stack pointer didn't match in beginInlining"
   );
 
-  always_assert_flog(
-    env.fpiStack.top().spillFrame != nullptr,
-    "Couldn't find SpillFrame for inlined call on sp {}."
-    " Was the FPush instruction interpreted?",
-    *calleeSP->inst()
-  );
+  auto const& info = fpiStack.front();
+  always_assert(!isFPushCuf(info.fpushOpc) && !info.interp);
 
-  auto const sframe = env.fpiStack.top().spillFrame;
+  auto ctx = [&] {
+    if (info.ctx || isFPushFunc(info.fpushOpc)) {
+      return info.ctx;
+    }
+
+    constexpr int32_t adjust = offsetof(ActRec, m_r) - offsetof(ActRec, m_this);
+    IRSPOffset ctxOff{invSPOff(env) - info.returnSPOff - adjust};
+    return gen(env, LdStk, TCtx, IRSPOffsetData{ctxOff}, sp(env));
+  }();
 
   DefInlineFPData data;
   data.target        = target;
   data.retBCOff      = returnBcOffset;
-  data.fromFPushCtor = sframe->extra<ActRecInfo>()->fromFPushCtor;
-  data.ctx           = sframe->src(2);
+  data.fromFPushCtor = isFPushCtor(info.fpushOpc);
+  data.ctx           = ctx;
   data.retSPOff      = prevSPOff;
   data.spOffset      = offsetFromIRSP(env, BCSPOffset{0});
 
@@ -122,13 +130,10 @@ void beginInlining(IRGS& env,
     stLocRaw(env, argNum, calleeFP, cns(env, staticEmptyArray()));
   }
 
-  env.fpiActiveStack.push(std::make_pair(env.fpiStack.top().returnSP,
-                                         env.fpiStack.top().returnSPOff));
-  env.fpiStack.pop();
+  return true;
 }
 
 void endInlinedCommon(IRGS& env) {
-  assertx(!env.fpiActiveStack.empty());
   assertx(!curFunc(env)->isPseudoMain());
 
   assertx(!resumed(env));
@@ -143,8 +148,6 @@ void endInlinedCommon(IRGS& env) {
   env.inlineLevel--;
   env.bcStateStack.pop_back();
   always_assert(env.bcStateStack.size() > 0);
-
-  env.fpiActiveStack.pop();
 
   updateMarker(env);
 

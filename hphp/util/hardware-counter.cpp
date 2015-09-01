@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -204,8 +204,7 @@ HardwareCounter::HardwareCounter()
     m_storeCounter.reset(new StoreCounter());
   } else {
     m_countersSet = true;
-    setPerfEvents(StringSlice(s_profileHWEvents.data(),
-                              s_profileHWEvents.size()));
+    setPerfEvents(s_profileHWEvents);
   }
 }
 
@@ -277,15 +276,17 @@ void HardwareCounter::IncStoreCount(int64_t amount) {
 struct PerfTable perfTable[] = {
   /* PERF_TYPE_HARDWARE events */
 #define PC(n)    PERF_TYPE_HARDWARE, PERF_COUNT_HW_ ## n
-  { "cpu-cycles",          PC(CPU_CYCLES)          },
-  { "cycles",              PC(CPU_CYCLES)          },
-  { "instructions",        PC(INSTRUCTIONS)        },
-  { "cache-references",    PC(CACHE_REFERENCES)    },
-  { "cache-misses",        PC(CACHE_MISSES)        },
-  { "branch-instructions", PC(BRANCH_INSTRUCTIONS) },
-  { "branches",            PC(BRANCH_INSTRUCTIONS) },
-  { "branch-misses",       PC(BRANCH_MISSES)       },
-  { "bus-cycles",          PC(BUS_CYCLES)          },
+  { "cpu-cycles",              PC(CPU_CYCLES)              },
+  { "cycles",                  PC(CPU_CYCLES)              },
+  { "instructions",            PC(INSTRUCTIONS)            },
+  { "cache-references",        PC(CACHE_REFERENCES)        },
+  { "cache-misses",            PC(CACHE_MISSES)            },
+  { "branch-instructions",     PC(BRANCH_INSTRUCTIONS)     },
+  { "branches",                PC(BRANCH_INSTRUCTIONS)     },
+  { "branch-misses",           PC(BRANCH_MISSES)           },
+  { "bus-cycles",              PC(BUS_CYCLES)              },
+  { "stalled-cycles-frontend", PC(STALLED_CYCLES_FRONTEND) },
+  { "stalled-cycles-backend",  PC(STALLED_CYCLES_BACKEND)  },
 
   /* PERF_TYPE_HW_CACHE hw_cache_id */
 #define PCC(n)   PERF_TYPE_HW_CACHE, PERF_COUNT_HW_CACHE_ ## n
@@ -373,6 +374,15 @@ bool HardwareCounter::addPerfEvent(const char* event) {
 
   checkLLCHack(event, type, config);
 
+  // Check if we have a raw spec.
+  if (!found && event[0] == 'r' && event[1] != 0) {
+    config = strtoull(event + 1, const_cast<char**>(&ev), 16);
+    if (*ev == 0) {
+      found = true;
+      type = PERF_TYPE_RAW;
+    }
+  }
+
   if (!found || *ev) {
     Logger::Warning("failed to find perf event: %s", event);
     return false;
@@ -404,12 +414,12 @@ bool HardwareCounter::eventExists(const char *event) {
   return false;
 }
 
-bool HardwareCounter::setPerfEvents(const StringSlice& sevents) {
+bool HardwareCounter::setPerfEvents(folly::StringPiece sevents) {
   // Make a copy of the string for use with strtok.
-  auto const sevents_buf = static_cast<char*>(malloc(sevents.len + 1));
+  auto const sevents_buf = static_cast<char*>(malloc(sevents.size() + 1));
   SCOPE_EXIT { free(sevents_buf); };
-  memcpy(sevents_buf, sevents.ptr, sevents.len);
-  sevents_buf[sevents.len] = '\0';
+  memcpy(sevents_buf, sevents.data(), sevents.size());
+  sevents_buf[sevents.size()] = '\0';
 
   char* strtok_buf = nullptr;
   char* s = strtok_r(sevents_buf, ",", &strtok_buf);
@@ -422,7 +432,7 @@ bool HardwareCounter::setPerfEvents(const StringSlice& sevents) {
   return true;
 }
 
-bool HardwareCounter::SetPerfEvents(const StringSlice& events) {
+bool HardwareCounter::SetPerfEvents(folly::StringPiece events) {
   return s_counter->setPerfEvents(events);
 }
 

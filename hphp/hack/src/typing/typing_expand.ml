@@ -17,8 +17,9 @@
  * substitution, which would be way too big).
  *)
 (*****************************************************************************)
-open Utils
+open Core
 open Typing_defs
+open Utils
 
 module Env = Typing_env
 
@@ -34,21 +35,21 @@ let rec fully_expand seen env (r, ty) =
 
 and fully_expand_ seen env = function
   | Tvar _ -> assert false
-  | Tmixed | Tgeneric _ | Tany | Tanon _ | Tprim _ as x -> x
+  | Tmixed | Tany | Tanon _ | Tprim _ as x -> x
   | Tarray (ty1, ty2) ->
       let ty1 = fully_expand_opt seen env ty1 in
       let ty2 = fully_expand_opt seen env ty2 in
       Tarray (ty1, ty2)
   | Ttuple tyl ->
-      Ttuple (List.map (fully_expand seen env) tyl)
+      Ttuple (List.map tyl (fully_expand seen env))
   | Tunresolved tyl ->
-      Tunresolved (List.map (fully_expand seen env) tyl)
+      Tunresolved (List.map tyl (fully_expand seen env))
   | Toption ty ->
       let ty = fully_expand seen env ty in
       Toption ty
   | Tfun ft ->
       let expand_param (name, ty) = name, fully_expand seen env ty in
-      let params = List.map expand_param ft.ft_params in
+      let params = List.map ft.ft_params expand_param in
       let ret  = fully_expand seen env ft.ft_ret in
       let arity = match ft.ft_arity with
         | Fvariadic (min, (p_n, p_ty)) ->
@@ -56,19 +57,25 @@ and fully_expand_ seen env = function
         | x -> x
       in
       Tfun { ft with ft_params = params; ft_arity = arity; ft_ret = ret }
-  | Taccess (_, _) as ty -> ty
-  | Tabstract (x, tyl, cstr) ->
-      let tyl = List.map (fully_expand seen env) tyl in
+  | Tabstract (AKgeneric (x, super), cstr) ->
+      let super = fully_expand_opt seen env super in
       let cstr = fully_expand_opt seen env cstr in
-      Tabstract (x, tyl, cstr)
+      Tabstract (AKgeneric (x, super), cstr)
+  | Tabstract (AKnewtype (x, tyl), cstr) ->
+      let tyl = List.map tyl (fully_expand seen env) in
+      let cstr = fully_expand_opt seen env cstr in
+      Tabstract (AKnewtype (x, tyl), cstr)
+  | Tabstract (ak, cstr) ->
+      let cstr = fully_expand_opt seen env cstr in
+      Tabstract (ak, cstr)
   | Tclass (x, tyl) ->
-     let tyl = List.map (fully_expand seen env) tyl in
+     let tyl = List.map tyl (fully_expand seen env) in
      Tclass (x, tyl)
   | Tobject as x -> x
-  | Tshape fdm ->
-      Tshape (Nast.ShapeMap.map (fully_expand seen env) fdm)
+  | Tshape (fields_known, fdm) ->
+      Tshape (fields_known, (Nast.ShapeMap.map (fully_expand seen env) fdm))
 
-and fully_expand_opt seen env x = opt_map (fully_expand seen env) x
+and fully_expand_opt seen env x = Option.map x (fully_expand seen env)
 
 (*****************************************************************************)
 (* External API *)

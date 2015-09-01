@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -841,8 +841,8 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
     }
   }
 
-  authnsRef = authns;
-  addtlRef = addtl;
+  authnsRef.assignIfRef(authns);
+  addtlRef.assignIfRef(addtl);
   return ret;
 }
 
@@ -859,8 +859,8 @@ bool HHVM_FUNCTION(getmxrr, const String& hostname,
   Array mxhosts;
   Array weights;
   SCOPE_EXIT {
-    mxhostsRef = mxhosts;
-    weightsRef = weights;
+    mxhostsRef.assignIfRef(mxhosts);
+    weightsRef.assignIfRef(weights);
   };
 
   /* Go! */
@@ -1034,8 +1034,8 @@ bool HHVM_FUNCTION(headers_sent, VRefParam file /* = null */,
                                  VRefParam line /* = null */) {
   Transport *transport = g_context->getTransport();
   if (transport) {
-    file = String(transport->getFirstHeaderFile());
-    line = transport->getFirstHeaderLine();
+    file.assignIfRef(String(transport->getFirstHeaderFile()));
+    line.assignIfRef(transport->getFirstHeaderLine());
     return transport->headersSent();
   } else {
     return g_context->getStdoutBytesWritten() > 0;
@@ -1046,7 +1046,7 @@ bool HHVM_FUNCTION(headers_sent, VRefParam file /* = null */,
 Variant HHVM_FUNCTION(header_register_callback, const Variant& callback) {
   Transport *transport = g_context->getTransport();
 
-  if (!HHVM_FN(is_callable)(callback)) {
+  if (!is_callable(callback)) {
     raise_warning("First argument is expected to be a valid callback");
     return init_null();
   }

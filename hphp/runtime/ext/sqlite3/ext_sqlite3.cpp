@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -374,11 +374,11 @@ Variant HHVM_METHOD(SQLite3, prepare,
   auto *data = Native::data<SQLite3>(this_);
   data->validate();
   if (!sql.empty()) {
-    ObjectData *ret = ObjectData::newInstance(SQLite3Stmt::getClass());
+    Object ret{SQLite3Stmt::getClass()};
     SQLite3Stmt *stmt = Native::data<SQLite3Stmt>(ret);
-    HHVM_MN(SQLite3Stmt, __construct)(ret, this_, sql);
+    HHVM_MN(SQLite3Stmt, __construct)(ret.get(), Object{this_}, sql);
     if (stmt->m_raw_stmt) {
-      return Object(ret);
+      return ret;
     }
   }
   return false;
@@ -412,7 +412,7 @@ Variant HHVM_METHOD(SQLite3, querysingle,
       Object obj_stmt = stmt.toObject();
       assert(obj_stmt.instanceof(SQLite3Stmt::getClass()));
       sqlite3_stmt *pstmt =
-        Native::data<SQLite3Stmt>(obj_stmt.get())->m_raw_stmt;
+        Native::data<SQLite3Stmt>(obj_stmt)->m_raw_stmt;
       switch (sqlite3_step(pstmt)) {
       case SQLITE_ROW: /* Valid Row */
         if (entire_row) {
@@ -448,7 +448,7 @@ bool HHVM_METHOD(SQLite3, createfunction,
   if (name.empty()) {
     return false;
   }
-  if (!f_is_callable(callback)) {
+  if (!is_callable(callback)) {
     raise_warning("Not a valid callback function %s",
                   callback.toString().data());
     return false;
@@ -476,12 +476,12 @@ bool HHVM_METHOD(SQLite3, createaggregate,
   if (name.empty()) {
     return false;
   }
-  if (!f_is_callable(step)) {
+  if (!is_callable(step)) {
     raise_warning("Not a valid callback function %s",
                   step.toString().data());
     return false;
   }
-  if (!f_is_callable(final)) {
+  if (!is_callable(final)) {
     raise_warning("Not a valid callback function %s",
                   final.toString().data());
     return false;
@@ -531,7 +531,7 @@ void HHVM_METHOD(SQLite3Stmt, __construct,
   auto *data = Native::data<SQLite3Stmt>(this_);
   if (!statement.empty()) {
     assert(dbobject.instanceof(SQLite3::getClass()));
-    SQLite3 *db = Native::data<SQLite3>(dbobject.get());
+    const SQLite3 *db = Native::data<SQLite3>(dbobject);
     db->validate();
     data->m_db = dbobject;
 
@@ -596,7 +596,7 @@ bool HHVM_METHOD(SQLite3Stmt, bindparam,
   auto *data = Native::data<SQLite3Stmt>(this_);
   auto param = std::make_shared<SQLite3Stmt::BoundParam>();
   param->type = type;
-  param->value.assignRef(parameter);
+  param->value.setWithRef(parameter);
 
   if (name.isString()) {
     String sname = name.toString();
@@ -683,11 +683,11 @@ Variant HHVM_METHOD(SQLite3Stmt, execute) {
   case SQLITE_DONE: /* Valid but no results */
     {
       sqlite3_reset(data->m_raw_stmt);
-      ObjectData *ret = ObjectData::newInstance(SQLite3Result::getClass());
+      Object ret{SQLite3Result::getClass()};
       SQLite3Result *result = Native::data<SQLite3Result>(ret);
       result->m_stmt_obj = Object(this_);
       result->m_stmt = data;
-      return Object(ret);
+      return ret;
     }
   case SQLITE_ERROR:
     sqlite3_reset(data->m_raw_stmt);

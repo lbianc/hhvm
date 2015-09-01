@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -59,7 +59,7 @@ struct CongruenceHasher {
     for (auto& pred : inst->block()->preds()) {
       auto fromBlock = pred.from();
       auto& jmp = fromBlock->back();
-      auto src = jmp.src(idx);
+      auto src = canonical(jmp.src(idx));
       assertx(m_globalTable[src].value);
       values.emplace(m_globalTable[src].value);
     }
@@ -92,7 +92,7 @@ struct CongruenceHasher {
   size_t hashSrcs(KeyType key, size_t result) const {
     auto inst = key.first;
     for (uint32_t i = 0; i < inst->numSrcs(); ++i) {
-      auto src = inst->src(i);
+      auto src = canonical(inst->src(i));
       assertx(m_globalTable[src].value);
       result = folly::hash::hash_128_to_64(
         result,
@@ -146,7 +146,7 @@ struct CongruenceComparator {
       for (auto& pred : inst->block()->preds()) {
         auto fromBlock = pred.from();
         auto& jmp = fromBlock->back();
-        auto src = jmp.src(idx);
+        auto src = canonical(jmp.src(idx));
         assertx(m_globalTable[src].value);
         values.emplace(m_globalTable[src].value);
       }
@@ -161,8 +161,8 @@ struct CongruenceComparator {
     auto instB = keyB.first;
 
     for (uint32_t i = 0; i < instA->numSrcs(); ++i) {
-      auto srcA = instA->src(i);
-      auto srcB = instB->src(i);
+      auto srcA = canonical(instA->src(i));
+      auto srcB = canonical(instB->src(i));
       assertx(m_globalTable[srcA].value);
       assertx(m_globalTable[srcB].value);
       if (m_globalTable[srcA].value != m_globalTable[srcB].value) return false;
@@ -207,7 +207,8 @@ private:
 using NameTable = std::unordered_map<
   std::pair<IRInstruction*, DstIndex>, SSATmp*,
   CongruenceHasher,
-  CongruenceComparator>;
+  CongruenceComparator
+>;
 
 struct GVNState {
   ValueNumberTable* localTable{nullptr};
@@ -250,14 +251,6 @@ bool supportsGVN(const IRInstruction* inst) {
   case ConvDblToInt:
   case ConvBoolToStr:
   case ConvClsToCctx:
-  case Gt:
-  case Gte:
-  case Lt:
-  case Lte:
-  case Eq:
-  case Neq:
-  case Same:
-  case NSame:
   case GtInt:
   case GteInt:
   case LtInt:
@@ -270,8 +263,39 @@ bool supportsGVN(const IRInstruction* inst) {
   case LteDbl:
   case EqDbl:
   case NeqDbl:
+  case GtStr:
+  case GteStr:
+  case LtStr:
+  case LteStr:
+  case EqStr:
+  case NeqStr:
+  case SameStr:
+  case NSameStr:
+  case GtStrInt:
+  case GteStrInt:
+  case LtStrInt:
+  case LteStrInt:
+  case EqStrInt:
+  case NeqStrInt:
+  case GtBool:
+  case GteBool:
+  case LtBool:
+  case LteBool:
+  case EqBool:
+  case NeqBool:
+  case SameObj:
+  case NSameObj:
+  case SameArr:
+  case NSameArr:
+  case GtRes:
+  case GteRes:
+  case LtRes:
+  case LteRes:
+  case EqRes:
+  case NeqRes:
   case InstanceOf:
   case InstanceOfIface:
+  case InstanceOfIfaceVtable:
   case ExtendsClass:
   case InstanceOfBitmask:
   case NInstanceOfBitmask:
@@ -279,17 +303,19 @@ bool supportsGVN(const IRInstruction* inst) {
   case InterfaceSupportsStr:
   case InterfaceSupportsInt:
   case InterfaceSupportsDbl:
+  case HasToString:
   case IsType:
   case IsNType:
   case IsScalarType:
   case IsWaitHandle:
+  case IsCol:
   case ClsNeq:
   case LdStkAddr:
   case LdLocAddr:
   case LdRDSAddr:
   case LdCtx:
-  case CastCtxThis:
   case LdCctx:
+  case CastCtxThis:
   case LdClsCtx:
   case LdClsCctx:
   case LdClsCtor:
@@ -299,6 +325,7 @@ bool supportsGVN(const IRInstruction* inst) {
   case LdClsInitData:
   case LookupClsRDSHandle:
   case LdClsMethod:
+  case LdIfaceMethod:
   case LdPropAddr:
   case LdClsPropAddrOrNull:
   case LdClsPropAddrOrRaise:
@@ -313,7 +340,6 @@ bool supportsGVN(const IRInstruction* inst) {
   case LdMIStateAddr:
   case LdPackedArrayElemAddr:
   case OrdStr:
-  case DefLabel:
   case CheckRange:
   case CountArrayFast:
     return true;
@@ -406,31 +432,21 @@ void runAnalysis(
     // apparently a no-no for unordered_map.
     ValueNumberTable localTable(unit, ValueNumberMetadata{});
     env.localTable = &localTable;
+    SCOPE_EXIT { env.localTable = nullptr; };
     {
       CongruenceHasher hash(*env.globalTable);
       CongruenceComparator pred(*env.globalTable);
       NameTable nameTable(0, hash, pred);
       env.nameTable = &nameTable;
+      SCOPE_EXIT { env.nameTable = nullptr; };
 
       changed = false;
       for (auto block : blocks) {
         changed = visitBlock(env, block) || changed;
       }
-
-      env.nameTable = nullptr;
     }
     applyLocalUpdates(localTable, *env.globalTable);
-    env.localTable = nullptr;
   }
-}
-
-bool canReplaceWith(
-  const IdomVector& idoms,
-  const SSATmp* dst,
-  const SSATmp* other
-) {
-  assertx(other->type() <= dst->type());
-  return is_tmp_usable(idoms, other, dst->inst()->block());
 }
 
 void tryReplaceInstruction(
@@ -442,22 +458,22 @@ void tryReplaceInstruction(
   for (uint32_t i = 0; i < inst->numSrcs(); ++i) {
     auto s = inst->src(i);
     auto valueNumber = table[s].value;
+    auto valueInst = valueNumber->inst();
     if (valueNumber == s) continue;
     if (!valueNumber) continue;
-    if (!canReplaceWith(idoms, s, valueNumber)) continue;
+    if (!is_tmp_usable(idoms, valueNumber, inst->block())) continue;
     FTRACE(1,
       "instruction {}\n"
       "replacing src {} with dst of {}\n",
       *inst,
       i,
-      *valueNumber->inst()
+      *valueInst
     );
     inst->setSrc(i, valueNumber);
-    if (valueNumber->inst()->producesReference(0)) {
-      auto prevInst = valueNumber->inst();
-      auto block = prevInst->block();
-      auto iter = block->iteratorTo(prevInst);
-      block->insert(++iter, unit.gen(IncRef, prevInst->marker(), valueNumber));
+    if (valueInst->producesReference()) {
+      auto block = valueInst->block();
+      auto iter = block->iteratorTo(valueInst);
+      block->insert(++iter, unit.gen(IncRef, valueInst->marker(), valueNumber));
     }
   }
 }

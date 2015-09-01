@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -59,16 +59,13 @@ FunctionCall::FunctionCall
 
   if (m_nameExp &&
       m_nameExp->getKindOf() == Expression::KindOfScalarExpression) {
-    assert(m_name.empty());
-    ScalarExpressionPtr c = dynamic_pointer_cast<ScalarExpression>(m_nameExp);
+    assert(m_origName.empty());
+    auto c = dynamic_pointer_cast<ScalarExpression>(m_nameExp);
     m_origName = c->getOriginalLiteralString();
     c->toLower(true /* func call*/);
-    m_name = c->getLiteralString();
   } else {
     m_origName = name;
-    m_name = toLower(name);
   }
-  this->checkUnpackParams();
 }
 
 void FunctionCall::reset() {
@@ -76,8 +73,8 @@ void FunctionCall::reset() {
   m_variableArgument = false;
 }
 
-bool FunctionCall::isTemporary() const {
-  return m_funcScope && !m_funcScope->isRefReturn();
+bool FunctionCall::isNamed(const char* name) const {
+  return !strcasecmp(m_origName.c_str(), name);
 }
 
 void FunctionCall::deepCopy(FunctionCallPtr exp) {
@@ -107,9 +104,6 @@ int FunctionCall::getKidCount() const {
 }
 
 bool FunctionCall::hasUnpack() const {
-  // NOTE: hasContext(Expression::UnpackParameter) on the last parameter
-  // does not work in RepoAuthoritative mode due to contexts being cleared
-  // and copied as part of whole program optimizations
   return m_params && m_params->containsUnpack();
 }
 
@@ -123,7 +117,6 @@ void FunctionCall::setNthKid(int n, ConstructPtr cp) {
       break;
     case 2:
       m_params = dynamic_pointer_cast<ExpressionList>(cp);
-      this->checkUnpackParams();
       break;
     default:
       assert(false);
@@ -131,25 +124,39 @@ void FunctionCall::setNthKid(int n, ConstructPtr cp) {
   }
 }
 
-void FunctionCall::checkUnpackParams() {
-  if (!m_params) { return; }
+void FunctionCall::onParse(AnalysisResultConstPtr ar, FileScopePtr fs) {
+  StaticClassName::onParse(ar, fs);
+  if (!checkUnpackParams()) {
+    parseTimeFatal(
+      fs,
+      Compiler::NoError,
+      "Only the last parameter in a function call is allowed to use ...");
+  }
+}
+
+bool FunctionCall::checkUnpackParams() {
+  if (!m_params) { return true; }
   ExpressionList &params = *m_params;
   const auto numParams = params.getCount();
+  if (!numParams) return true;
 
   // when supporting multiple unpacks at the end of the param list, this
   // will need to disallow transitions from unpack to non-unpack.
   for (int i = 0; i < (numParams - 1); ++i) {
     ExpressionPtr p = params[i];
-    if (p->hasContext(Expression::UnpackParameter)) {
-      parseTimeFatal(
-        Compiler::NoError,
-        "Only the last parameter in a function call is allowed to use ...");
+    if (p->isUnpack()) {
+      return false;
     }
   }
+
+  // we don't get here if any parameter before the last has isUnpack()
+  // set, so the last one had better match containsUnpack().
+  assert(params.containsUnpack() == params[numParams - 1]->isUnpack());
+  return true;
 }
 
 void FunctionCall::markRefParams(FunctionScopePtr func,
-                                 const std::string &name) {
+                                 const std::string &fooBarName) {
   ExpressionList &params = *m_params;
   if (func) {
     int mpc = func->getMaxParamCount();
@@ -164,9 +171,9 @@ void FunctionCall::markRefParams(FunctionScopePtr func,
         sym->setCallTimeRef();
       }
     }
-  } else if (Option::WholeProgram && !m_name.empty()) {
+  } else if (Option::WholeProgram && !m_origName.empty()) {
     FunctionScope::FunctionInfoPtr info =
-      FunctionScope::GetFunctionInfo(m_name);
+      FunctionScope::GetFunctionInfo(m_origName);
     if (info) {
       for (int i = params.getCount(); i--; ) {
         if (info->isRefParam(i)) {
@@ -187,7 +194,9 @@ void FunctionCall::markRefParams(FunctionScopePtr func,
 void FunctionCall::analyzeProgram(AnalysisResultPtr ar) {
   if (m_class) m_class->analyzeProgram(ar);
   if (m_nameExp) m_nameExp->analyzeProgram(ar);
-  if (m_params) m_params->analyzeProgram(ar);
+  if (m_params) {
+    m_params->analyzeProgram(ar);
+  }
 }
 
 ExpressionPtr FunctionCall::preOptimize(AnalysisResultConstPtr ar) {

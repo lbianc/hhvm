@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -50,17 +50,31 @@
 # undef ATTRIBUTE_PRINTF
 #endif
 
-#define ATTRIBUTE_UNUSED   __attribute__((__unused__))
-#define ATTRIBUTE_NORETURN __attribute__((__noreturn__))
+#ifdef _MSC_VER
+#define ATTRIBUTE_NORETURN __declspec(noreturn)
+#define ATTRIBUTE_PRINTF(a1, a2)
+#ifndef __thread
+# define __thread __declspec(thread)
+#endif
+#define ATTRIBUTE_UNUSED
 
+#define ALWAYS_INLINE __forceinline
+#define EXTERNALLY_VISIBLE
+#define FLATTEN
+#define NEVER_INLINE __declspec(noinline)
+#define UNUSED
+#else
+#define ATTRIBUTE_NORETURN __attribute__((__noreturn__))
 #define ATTRIBUTE_PRINTF(a1, a2) \
   __attribute__((__format__ (__printf__, a1, a2)))
+#define ATTRIBUTE_UNUSED   __attribute__((__unused__))
 
 #define ALWAYS_INLINE      inline __attribute__((__always_inline__))
+#define EXTERNALLY_VISIBLE __attribute__((__externally_visible__))
+#define FLATTEN            __attribute__((__flatten__))
 #define NEVER_INLINE       __attribute__((__noinline__))
 #define UNUSED             __attribute__((__unused__))
-#define FLATTEN            __attribute__((__flatten__))
-#define EXTERNALLY_VISIBLE __attribute__((__externally_visible__))
+#endif
 
 #ifdef DEBUG
 # define DEBUG_ONLY /* nop */
@@ -110,6 +124,14 @@
 # else
 #  define DECLARE_FRAME_POINTER(fp) register ActRec* fp asm("rbp");
 # endif
+
+#elif defined(_M_X64)
+
+// TODO: FIXME! Without this implemented properly, the JIT
+// will fail "pretty spectacularly".
+# define DECLARE_FRAME_POINTER(fp) \
+  always_assert(false);            \
+  register ActRec* fp = nullptr;
 
 #elif defined(__AARCH64EL__)
 

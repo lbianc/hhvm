@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,21 +15,24 @@
 */
 
 #include "hphp/runtime/vm/jit/phys-reg.h"
+
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
-#include "hphp/runtime/vm/jit/vasm-emit.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 
 namespace HPHP { namespace jit {
-using namespace x64;
+
+///////////////////////////////////////////////////////////////////////////////
 
 int PhysReg::getNumGP() {
-  return mcg->backEnd().abi().gp().size();
+  return abi().gp().size();
 }
 
 int PhysReg::getNumSIMD() {
-  return mcg->backEnd().abi().simd().size();
+  return abi().simd().size();
 }
 
 std::string show(RegSet regs) {
@@ -54,7 +57,7 @@ PhysRegSaverParity::PhysRegSaverParity(int parity, Vout& v,
     , m_v(&v)
     , m_regs(regs)
 {
-  auto xmm = regs & x64::kXMMRegs;
+  auto xmm = regs & abi().simd();
   auto gpr = regs - xmm;
   m_adjust = (parity & 0x1) == (gpr.size() & 0x1) ? 8 : 0;
   if (!xmm.empty()) {
@@ -98,7 +101,7 @@ PhysRegSaverParity::~PhysRegSaverParity() {
 }
 
 void PhysRegSaverParity::emitPops(Vout& v, RegSet regs) {
-  auto xmm = regs & x64::kXMMRegs;
+  auto xmm = regs & abi().simd();
   auto gpr = regs - xmm;
   gpr.forEachR([&] (PhysReg pr) {
     v << pop{pr};
@@ -131,4 +134,6 @@ void PhysRegSaverParity::bytesPushed(int bytes) {
   m_adjust += bytes;
 }
 
-} }
+///////////////////////////////////////////////////////////////////////////////
+
+}}

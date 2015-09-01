@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -68,15 +68,6 @@ inline bool Func::ParamInfo::isVariadic() const {
 ///////////////////////////////////////////////////////////////////////////////
 // Func.
 
-inline Func* Func::cloneAndSetClass(Class* cls) const {
-  return cloneAndModify(cls, attrs());
-}
-
-inline void Func::freeClone() const {
-  assert(isPreFunc());
-  m_cloned.flag.clear();
-}
-
 inline void Func::validate() const {
 #ifdef DEBUG
   assert(m_magic == kMagic);
@@ -104,6 +95,10 @@ inline Unit* Func::unit() const {
   return m_unit;
 }
 
+inline Class* Func::cls() const {
+  return m_cls;
+}
+
 inline PreClass* Func::preClass() const {
   return shared()->m_preClass;
 }
@@ -112,8 +107,8 @@ inline Class* Func::baseCls() const {
   return m_baseCls;
 }
 
-inline Class* Func::cls() const {
-  return m_cls;
+inline Class* Func::implCls() const {
+  return isClosureBody() ? baseCls() : cls();
 }
 
 inline const StringData* Func::name() const {
@@ -317,7 +312,7 @@ inline bool Func::isPseudoMain() const {
 }
 
 inline bool Func::isMethod() const {
-  return !isPseudoMain() && (bool)cls();
+  return !isPseudoMain() && (bool)baseCls();
 }
 
 inline bool Func::isTraitMethod() const {
@@ -338,7 +333,7 @@ inline bool Func::isAbstract() const {
 }
 
 inline bool Func::mayHaveThis() const {
-  return isPseudoMain() || (isMethod() && !isStatic());
+  return isPseudoMain() || (cls() && !isStatic());
 }
 
 inline bool Func::isPreFunc() const {
@@ -389,11 +384,6 @@ inline bool Func::isClosureBody() const {
   return shared()->m_isClosureBody;
 }
 
-inline Func*& Func::nextClonedClosure() const {
-  assert(isClosureBody());
-  return ((Func**)this)[-1];
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Resumables.
 
@@ -429,7 +419,7 @@ inline bool Func::isResumable() const {
 // Methods.
 
 inline Slot Func::methodSlot() const {
-  assert(m_cls);
+  assert(isMethod());
   return m_methodSlot;
 }
 
@@ -580,7 +570,7 @@ inline void Func::setHasPrivateAncestor(bool b) {
 }
 
 inline void Func::setMethodSlot(Slot s) {
-  assert(m_cls);
+  assert(isMethod());
   m_methodSlot = s;
 }
 

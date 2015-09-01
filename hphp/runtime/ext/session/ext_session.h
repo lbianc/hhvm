@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -41,14 +41,12 @@ namespace HPHP {
  * gc() should look for an clean up expired sessions
  * close() is called on session_destroy() (or request end)
  */
-class SessionModule {
-public:
+struct SessionModule {
   enum {
     md5,
     sha1,
   };
 
-public:
   explicit SessionModule(const char *name) : m_name(name) {
     RegisteredModules.push_back(this);
   }
@@ -64,7 +62,6 @@ public:
   virtual bool gc(int maxlifetime, int *nrdels) = 0;
   virtual String create_sid();
 
-public:
   static SessionModule *Find(const char *name) {
     for (unsigned int i = 0; i < RegisteredModules.size(); i++) {
       SessionModule *mod = RegisteredModules[i];
@@ -77,7 +74,6 @@ public:
 
 private:
   static std::vector<SessionModule*> RegisteredModules;
-
   const char *m_name;
 };
 
@@ -89,16 +85,19 @@ struct SystemlibSessionInstance final : RequestEventHandler {
 
   const Object& getObject() { return m_obj; }
   void setObject(Object&& obj) { m_obj = std::move(obj); }
-  void destroy() { m_obj = nullptr; }
-  void requestInit() override { m_obj = nullptr; }
-  void requestShutdown() override { m_obj = nullptr; }
+  void destroy() { m_obj.reset(); }
+  void requestInit() override { m_obj.reset(); }
+  void requestShutdown() override { m_obj.reset(); }
+
+  void vscan(IMarker& mark) const override {
+    mark(m_obj);
+  }
 
 private:
   Object m_obj;
 };
 
-class SystemlibSessionModule : public SessionModule {
-public:
+struct SystemlibSessionModule : SessionModule {
   SystemlibSessionModule(const char *mod_name, const char *phpclass_name) :
            SessionModule(mod_name),
            m_classname(phpclass_name) { }
@@ -111,19 +110,20 @@ public:
   virtual bool gc(int maxlifetime, int *nrdels);
 
 private:
+  void lookupClass();
+  Func* lookupFunc(Class *cls, StringData *fname);
+  const Object& getObject();
+
+private:
   const char *m_classname;
-  LowClassPtr m_cls;
-  static LowClassPtr s_SHIClass;
+  LowPtr<Class> m_cls;
+  static LowPtr<Class> s_SHIClass;
   DECLARE_STATIC_REQUEST_LOCAL(SystemlibSessionInstance, s_obj);
 
   const Func *m_ctor;
   const Func *m_open, *m_close;
   const Func *m_read, *m_write;
   const Func *m_destroy, *m_gc;
-
-  void lookupClass();
-  Func* lookupFunc(Class *cls, StringData *fname);
-  const Object& getObject();
 };
 
 ///////////////////////////////////////////////////////////////////////////////

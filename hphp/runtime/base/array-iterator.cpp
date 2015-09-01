@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,7 +28,7 @@
 #include "hphp/runtime/base/shape.h"
 #include "hphp/runtime/base/apc-local-array.h"
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/ext/ext_collections.h"
+#include "hphp/runtime/ext/collections/ext_collections-idl.h"
 
 #include "hphp/runtime/base/mixed-array-defs.h"
 #include "hphp/runtime/base/packed-array-defs.h"
@@ -823,7 +823,7 @@ void MArrayIter::escalateCheck() {
     if (!data) return;
     auto const esc = data->escalate();
     if (data != esc) {
-      cellSet(make_tv<KindOfArray>(esc), *getRef()->tv());
+      cellMove(make_tv<KindOfArray>(esc), *getRef()->tv());
     }
     return;
   }
@@ -832,7 +832,6 @@ void MArrayIter::escalateCheck() {
   auto const data = getAd();
   auto const esc = data->escalate();
   if (data != esc) {
-    esc->incRefCount();
     decRefArr(data);
     setAd(esc);
   }
@@ -844,7 +843,7 @@ ArrayData* MArrayIter::cowCheck() {
     if (!data) return nullptr;
     if (data->hasMultipleRefs() && !data->noCopyOnWrite()) {
       data = data->copyWithStrongIterators();
-      cellSet(make_tv<KindOfArray>(data), *getRef()->tv());
+      cellMove(make_tv<KindOfArray>(data), *getRef()->tv());
     }
     return data;
   }
@@ -853,7 +852,7 @@ ArrayData* MArrayIter::cowCheck() {
   auto const data = getAd();
   if (data->hasMultipleRefs() && !data->noCopyOnWrite()) {
     ArrayData* copied = data->copyWithStrongIterators();
-    copied->incRefCount();
+    assert(data != copied);
     decRefArr(data);
     setAd(copied);
     return copied;
@@ -1179,7 +1178,7 @@ int64_t new_iter_array(Iter* dest, ArrayData* ad, TypedValue* valOut) {
     ad->decRefCount();
     return 0;
   }
-  if (UNLIKELY(IS_REFCOUNTED_TYPE(valOut->m_type))) {
+  if (UNLIKELY(isRefcountedType(valOut->m_type))) {
     return new_iter_array_cold<false>(dest, ad, valOut, nullptr);
   }
 
@@ -1237,10 +1236,10 @@ int64_t new_iter_array_key(Iter*       dest,
     ad->decRefCount();
     return 0;
   }
-  if (UNLIKELY(IS_REFCOUNTED_TYPE(valOut->m_type))) {
+  if (UNLIKELY(isRefcountedType(valOut->m_type))) {
     return new_iter_array_cold<WithRef>(dest, ad, valOut, keyOut);
   }
-  if (UNLIKELY(IS_REFCOUNTED_TYPE(keyOut->m_type))) {
+  if (UNLIKELY(isRefcountedType(keyOut->m_type))) {
     return new_iter_array_cold<WithRef>(dest, ad, valOut, keyOut);
   }
 
@@ -1782,17 +1781,17 @@ int64_t iter_next_mixed_impl(Iter* it,
   } while (UNLIKELY(arr->isTombstone(pos)));
 
 
-  if (IS_REFCOUNTED_TYPE(valOut->m_type)) {
-    if (UNLIKELY(!valOut->m_data.pstr->hasMultipleRefs())) {
+  if (isRefcountedType(valOut->m_type)) {
+    if (UNLIKELY(!TV_GENERIC_DISPATCH(*valOut, hasMultipleRefs))) {
       return iter_next_cold<false>(it, valOut, keyOut);
     }
-    valOut->m_data.pstr->decRefCount();
+    TV_GENERIC_DISPATCH(*valOut, decRefCount);
   }
-  if (HasKey && IS_REFCOUNTED_TYPE(keyOut->m_type)) {
-    if (UNLIKELY(!keyOut->m_data.pstr->hasMultipleRefs())) {
+  if (HasKey && isRefcountedType(keyOut->m_type)) {
+    if (UNLIKELY(!TV_GENERIC_DISPATCH(*keyOut, hasMultipleRefs))) {
       return iter_next_cold_inc_val(it, valOut, keyOut);
     }
-    keyOut->m_data.pstr->decRefCount();
+    TV_GENERIC_DISPATCH(*keyOut, decRefCount);
   }
 
   iter.setPos(pos);
@@ -1817,17 +1816,17 @@ int64_t iter_next_packed_impl(Iter* it,
 
   ssize_t pos = iter.getPos() + 1;
   if (LIKELY(pos < ad->getSize())) {
-    if (IS_REFCOUNTED_TYPE(valOut->m_type)) {
-      if (UNLIKELY(!valOut->m_data.pstr->hasMultipleRefs())) {
+    if (isRefcountedType(valOut->m_type)) {
+      if (UNLIKELY(!TV_GENERIC_DISPATCH(*valOut, hasMultipleRefs))) {
         return iter_next_cold<false>(it, valOut, keyOut);
       }
-      valOut->m_data.pstr->decRefCount();
+      TV_GENERIC_DISPATCH(*valOut, decRefCount);
     }
-    if (HasKey && UNLIKELY(IS_REFCOUNTED_TYPE(keyOut->m_type))) {
-      if (UNLIKELY(!keyOut->m_data.pstr->hasMultipleRefs())) {
+    if (HasKey && UNLIKELY(isRefcountedType(keyOut->m_type))) {
+      if (UNLIKELY(!TV_GENERIC_DISPATCH(*keyOut, hasMultipleRefs))) {
         return iter_next_cold_inc_val(it, valOut, keyOut);
       }
-      keyOut->m_data.pstr->decRefCount();
+      TV_GENERIC_DISPATCH(*keyOut, decRefCount);
     }
     iter.setPos(pos);
     cellDup(*tvToCell(packedData(ad) + pos), *valOut);
@@ -1861,17 +1860,17 @@ int64_t iter_next_struct_impl(Iter* it,
 
   ssize_t pos = iter.getPos() + 1;
   if (LIKELY(pos < ad->getSize())) {
-    if (IS_REFCOUNTED_TYPE(valOut->m_type)) {
-      if (UNLIKELY(!valOut->m_data.pstr->hasMultipleRefs())) {
+    if (isRefcountedType(valOut->m_type)) {
+      if (UNLIKELY(!TV_GENERIC_DISPATCH(*valOut, hasMultipleRefs))) {
         return iter_next_cold<false>(it, valOut, keyOut);
       }
-      valOut->m_data.pstr->decRefCount();
+      TV_GENERIC_DISPATCH(*valOut, decRefCount);
     }
-    if (HasKey && UNLIKELY(IS_REFCOUNTED_TYPE(keyOut->m_type))) {
-      if (UNLIKELY(!keyOut->m_data.pstr->hasMultipleRefs())) {
+    if (HasKey && UNLIKELY(isRefcountedType(keyOut->m_type))) {
+      if (UNLIKELY(!TV_GENERIC_DISPATCH(*keyOut, hasMultipleRefs))) {
         return iter_next_cold_inc_val(it, valOut, keyOut);
       }
-      keyOut->m_data.pstr->decRefCount();
+      TV_GENERIC_DISPATCH(*valOut, decRefCount);
     }
     auto structArray = StructArray::asStructArray(ad);
     iter.setPos(pos);

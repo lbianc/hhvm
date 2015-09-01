@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -29,7 +29,7 @@ TRACE_SET_MOD(pgo);
  * that have been popped given the current SP offset from FP.
  */
 static void discardPoppedTypes(
-  PostConditions& pConds,
+  TypedLocations& pConds,
   FPInvOffset curSpOffset
 ) {
   for (auto it = pConds.begin(); it != pConds.end(); ) {
@@ -42,9 +42,9 @@ static void discardPoppedTypes(
   }
 }
 
-static void mergePostConds(PostConditions& dst,
+static void mergePostConds(TypedLocations& dst,
                            const PostConditions& src) {
-  for (const auto &post : src) {
+  for (const auto &post : src.changed) {
     bool replace = false;
     for (auto it = dst.begin(); it != dst.end(); ++it) {
       if (post.location == it->location) {
@@ -69,12 +69,12 @@ RegionDescPtr selectHotTrace(TransID triggerId,
   selectedSet.clear();
   if (selectedVec) selectedVec->clear();
 
-  PostConditions accumPostConds;
+  TypedLocations accumPostConds;
 
   // Maps from BlockIds to accumulated post conditions for that block.
   // Used to determine if we can add branch-over edges by checking the
   // pre-conditions of the successor block.
-  hphp_hash_map<RegionDesc::BlockId, PostConditions> blockPostConds;
+  hphp_hash_map<RegionDesc::BlockId, TypedLocations> blockPostConds;
 
   uint32_t numBCInstrs = 0;
 
@@ -128,7 +128,6 @@ RegionDescPtr selectHotTrace(TransID triggerId,
                                        region->blocks().back().get()->id() : 0);
     auto const& newFirstBlock = blockRegion->entry();
     auto newFirstBlockId = newFirstBlock->id();
-    auto newLastBlockId  = blockRegion->blocks().back()->id();
 
     // Add blockRegion's blocks and arcs to region.
     region->append(*blockRegion);
@@ -137,28 +136,6 @@ RegionDescPtr selectHotTrace(TransID triggerId,
     if (hasPredBlock) {
       region->addArc(predBlockId, newFirstBlockId);
     }
-
-    // When Eval.JitLoops is set, insert back-edges in the region if
-    // they exist in the TransCFG.
-    if (RuntimeOption::EvalJitLoops) {
-      assertx(hasTransID(newFirstBlockId));
-      auto newTransId = getTransID(newFirstBlockId);
-      // Don't add the arc if the last opcode in the source block ends
-      // the region.
-      if (!breaksRegion(profData->transLastSrcKey(newTransId))) {
-        auto& blocks = region->blocks();
-        for (auto iOther = 0; iOther < blocks.size(); iOther++) {
-          auto other = blocks[iOther];
-          auto otherFirstBlockId = other.get()->id();
-          if (!hasTransID(otherFirstBlockId)) continue;
-          auto otherTransId = getTransID(otherFirstBlockId);
-          if (cfg.hasArc(newTransId, otherTransId)) {
-            region->addArc(newLastBlockId, otherFirstBlockId);
-          }
-        }
-      }
-    }
-
     if (cfg.outArcs(tid).size() > 1) {
       region->setSideExitingBlock(blockRegion->entry()->id());
     }

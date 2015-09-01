@@ -8,7 +8,7 @@
  *
  *)
 
-open Utils
+open Core
 open Typing_defs
 
 module Reason = Typing_reason
@@ -18,7 +18,9 @@ module Inst   = Typing_instantiate
 module TSubst = Typing_subst
 module TUtils = Typing_utils
 module TAccess = Typing_taccess
-module Phase = Typing_phase
+module Phase  = Typing_phase
+module TS     = Typing_structure
+
 
 (*****************************************************************************)
 (* Expanding type definition *)
@@ -26,7 +28,7 @@ module Phase = Typing_phase
 
 let expand_typedef_ ?force_expand:(force_expand=false) ety_env env r x argl =
   let pos = Reason.to_pos r in
-  if List.mem x (List.map snd ety_env.typedef_expansions)
+  if Typing_defs.has_expanded ety_env x
   then begin
       Errors.cyclic_typedef pos;
       env, (ety_env, (r, Tany))
@@ -53,7 +55,7 @@ let expand_typedef_ ?force_expand:(force_expand=false) ety_env env r x argl =
            end;
          let ety_env = {
            ety_env with
-           typedef_expansions = (tdef_pos, x) :: ety_env.typedef_expansions;
+           type_expansions = (tdef_pos, x) :: ety_env.type_expansions;
            substs = TSubst.make tparaml argl;
          } in
          let env, expanded_ty =
@@ -72,11 +74,13 @@ let expand_typedef_ ?force_expand:(force_expand=false) ety_env env r x argl =
                       Phase.localize ~ety_env env tcstr in
                     env, Some tcstr
                in
-               env, (r, Tabstract ((pos, x), argl, tcstr))
+               env, (r, Tabstract (AKnewtype (x, argl), tcstr))
              end
          in
          if Naming_special_names.Classes.is_format_string x
          then env, (ety_env, (r, Tclass ((pos, x), argl)))
+         else if x = SN.FB.cTypeStructure
+         then env, (ety_env, TS.transform_classname_ty (r, snd expanded_ty))
          else env, (ety_env, (r, snd expanded_ty))
     end
 
@@ -84,28 +88,13 @@ let expand_typedef ety_env env r x argl = expand_typedef_ ety_env env r x argl
 
 (* Expand a typedef, smashing abstraction and collecting a trail
  * of where the typedefs come from. *)
-let rec force_expand_typedef:
-  type a. phase:a Phase.t -> ety_env:_ -> _ -> a ty -> _=
-  fun ~phase ~ety_env env t ->
+let rec force_expand_typedef ~ety_env env (t : locl ty) =
   match t with
-  | r, Tapply ((_, x), argl) when Typing_env.is_typedef x ->
-     let env, argl = lfold (Phase.localize ~ety_env) env argl in
+  | r, Tabstract (AKnewtype (x, argl), _) ->
      let env, (ety_env, ty) =
        expand_typedef_ ~force_expand:true ety_env env r x argl in
-     force_expand_typedef ~phase:Phase.locl ~ety_env env ty
-  | r, Tabstract ((_, x), argl, _) when Typing_env.is_typedef x ->
-     let env, (ety_env, ty) =
-       expand_typedef_ ~force_expand:true ety_env env r x argl in
-     force_expand_typedef ~phase ~ety_env env ty
-  | r, Taccess (root, ids) ->
-     let env, root = Phase.localize_phase ~ety_env env (phase root) in
-     let env, (ety_env, ty) =
-       TAccess.expand_with_env ety_env env r (root, ids) in
-     force_expand_typedef ~phase:Phase.locl ~ety_env env ty
-  | ty ->
-     let env, ty =
-       Phase.localize_phase ~ety_env env (phase ty) in
-     env, ty, ety_env.typedef_expansions |> List.map fst |> List.rev
+     force_expand_typedef ~ety_env env ty
+  | ty -> env, ty, List.rev_map ety_env.type_expansions fst
 
 (*****************************************************************************)
 (*****************************************************************************)

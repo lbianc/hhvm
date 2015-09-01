@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -91,6 +91,7 @@ enum FlavorDesc {
   FV,   // Function parameter (cell or var)
   UV,   // Uninit
   CVV,  // Cell or Var argument
+  CRV,  // Cell or Return value argument
   CUV,  // Cell, or Uninit argument
   CVUV, // Cell, Var, or Uninit argument
 };
@@ -505,6 +506,46 @@ enum class SwitchKind : uint8_t {
 #undef KIND
 };
 
+#define M_OP_FLAGS                                 \
+  FLAG(None,             0)                        \
+  FLAG(Warn,       (1 << 0))                       \
+  FLAG(Define,     (1 << 1))                       \
+  FLAG(Unset,      (1 << 2))                       \
+  FLAG(Reffy,      (Define | (1 << 3)))            \
+  FLAG(WarnDefine, (Warn | Define))
+
+enum class MOpFlags : uint8_t {
+#define FLAG(name, val) name = val,
+  M_OP_FLAGS
+#undef FLAG
+};
+
+inline constexpr bool operator&(MOpFlags a, MOpFlags b) {
+  return uint8_t(a) & uint8_t(b);
+}
+
+#define QUERY_M_OPS                               \
+  OP(CGet)                                        \
+  OP(Isset)                                       \
+  OP(Empty)
+
+enum class QueryMOp : uint8_t {
+#define OP(name) name,
+  QUERY_M_OPS
+#undef OP
+};
+
+#define PROP_ELEM_OPS                           \
+  OP(Prop)                                      \
+  OP(PropQ)                                     \
+  OP(Elem)
+
+enum class PropElemOp : uint8_t {
+#define OP(name) name,
+  PROP_ELEM_OPS
+#undef OP
+};
+
 constexpr int32_t kMaxConcatN = 4;
 
 //  name             immediates        inputs           outputs     flags
@@ -756,16 +797,35 @@ constexpr int32_t kMaxConcatN = 4;
   O(ContValid,       NA,               NOV,             ONE(CV),    NF) \
   O(ContKey,         NA,               NOV,             ONE(CV),    NF) \
   O(ContCurrent,     NA,               NOV,             ONE(CV),    NF) \
+  O(WHResult,        NA,               ONE(CV),         ONE(CV),    NF) \
   O(Await,           ONE(IVA),         ONE(CV),         ONE(CV),    CF) \
-  O(Strlen,          NA,               ONE(CV),         ONE(CV),    NF) \
   O(IncStat,         TWO(IVA,IVA),     NOV,             NOV,        NF) \
   O(Idx,             NA,               THREE(CV,CV,CV), ONE(CV),    NF) \
   O(ArrayIdx,        NA,               THREE(CV,CV,CV), ONE(CV),    NF) \
   O(CheckProp,       ONE(SA),          NOV,             ONE(CV),    NF) \
   O(InitProp,        TWO(SA,                                            \
                        OA(InitPropOp)),ONE(CV),         NOV,        NF) \
-  O(Silence,         TWO(LA,OA(SilenceOp)),                          \
+  O(Silence,         TWO(LA,OA(SilenceOp)),                             \
                                        NOV,             NOV,        NF) \
+  O(BaseL,           TWO(LA, OA(MOpFlags)),                             \
+                                       NOV,             NOV,        NF) \
+  O(BaseH,           NA,               NOV,             NOV,        NF) \
+  O(DimL,            THREE(LA, OA(PropElemOp), OA(MOpFlags)),           \
+                                       NOV,             NOV,        NF) \
+  O(DimC,            THREE(IVA, OA(PropElemOp), OA(MOpFlags)),          \
+                                       NOV,             NOV,        NF) \
+  O(DimInt,          THREE(I64A, OA(PropElemOp), OA(MOpFlags)),         \
+                                       NOV,             NOV,        NF) \
+  O(DimStr,          THREE(SA, OA(PropElemOp), OA(MOpFlags)),           \
+                                       NOV,             NOV,        NF) \
+  O(QueryML,         FOUR(IVA, OA(QueryMOp), OA(PropElemOp), LA),       \
+                                       MFINAL,          ONE(CV),    NF) \
+  O(QueryMC,         THREE(IVA, OA(QueryMOp), OA(PropElemOp)),          \
+                                       MFINAL,          ONE(CV),    NF) \
+  O(QueryMInt,       FOUR(IVA, OA(QueryMOp), OA(PropElemOp), I64A),     \
+                                       MFINAL,          ONE(CV),    NF) \
+  O(QueryMStr,       FOUR(IVA, OA(QueryMOp), OA(PropElemOp), SA),       \
+                                       MFINAL,          ONE(CV),    NF) \
   O(HighInvalid,     NA,               NOV,             NOV,        NF)
 
 enum class Op : uint8_t {
@@ -781,6 +841,8 @@ auto constexpr Op_count = uint8_t(Op::HighInvalid) + 1;
   OPCODES
 #undef O
 
+// These are comparable by default under MSVC.
+#ifndef _MSC_VER
 inline constexpr bool operator<(Op a, Op b) { return uint8_t(a) < uint8_t(b); }
 inline constexpr bool operator>(Op a, Op b) { return uint8_t(a) > uint8_t(b); }
 inline constexpr bool operator<=(Op a, Op b) {
@@ -789,12 +851,15 @@ inline constexpr bool operator<=(Op a, Op b) {
 inline constexpr bool operator>=(Op a, Op b) {
   return uint8_t(a) >= uint8_t(b);
 }
+#endif
 
 inline bool isValidOpcode(Op op) {
   return op > OpLowInvalid && op < OpHighInvalid;
 }
 
 const MInstrInfo& getMInstrInfo(Op op);
+
+MOpFlags getMOpFlags(QueryMOp op);
 
 enum AcoldOp {
   OpAcoldStart = Op_count-1,
@@ -998,6 +1063,9 @@ const char* subopToName(SilenceOp);
 const char* subopToName(OODeclExistsOp);
 const char* subopToName(ObjMethodOp);
 const char* subopToName(SwitchKind);
+const char* subopToName(MOpFlags);
+const char* subopToName(QueryMOp);
+const char* subopToName(PropElemOp);
 
 /*
  * Try to parse a string into a subop name of a given type.
@@ -1085,6 +1153,22 @@ constexpr bool isFPush(Op opcode) {
   return opcode >= OpFPushFunc && opcode <= OpFPushCufSafe;
 }
 
+constexpr bool isFPushCuf(Op opcode) {
+  return opcode >= OpFPushCufIter && opcode <= OpFPushCufSafe;
+}
+
+constexpr bool isFPushClsMethod(Op opcode) {
+  return opcode >= OpFPushClsMethod && opcode <= OpFPushClsMethodD;
+}
+
+constexpr bool isFPushCtor(Op opcode) {
+  return opcode == OpFPushCtor || opcode == OpFPushCtorD;
+}
+
+constexpr bool isFPushFunc(Op opcode) {
+  return opcode >= OpFPushFunc && opcode <= OpFPushFuncU;
+}
+
 inline bool isFCallStar(Op opcode) {
   switch (opcode) {
     case Op::FCall:
@@ -1120,12 +1204,53 @@ constexpr bool isRet(Op op) {
   return op == OpRetC || op == OpRetV;
 }
 
+constexpr bool isReturnish(Op op) {
+  return isRet(op) || op == Op::NativeImpl;
+}
+
 constexpr bool isSwitch(Op op) {
   return op == OpSwitch || op == OpSSwitch;
 }
 
 constexpr bool isTypeAssert(Op op) {
   return op == OpAssertRATL || op == OpAssertRATStk;
+}
+
+inline bool isMemberBaseOp(Op op) {
+  switch (op) {
+    case OpBaseL:
+    case OpBaseH:
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+inline bool isMemberDimOp(Op op) {
+  switch (op) {
+    case OpDimL:
+    case OpDimC:
+    case OpDimInt:
+    case OpDimStr:
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+inline bool isMemberFinalOp(Op op) {
+  switch (op) {
+    case OpQueryML:
+    case OpQueryMC:
+    case OpQueryMInt:
+    case OpQueryMStr:
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 template<typename Out, typename In>

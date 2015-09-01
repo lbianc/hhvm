@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -55,8 +55,7 @@ void EnumCache::deleteValues(const Class* klass) {
 }
 
 void EnumCache::failLookup(const Variant& msg) {
-  Object e(SystemLib::AllocExceptionObject(msg));
-  throw e;
+  SystemLib::throwExceptionObject(msg);
 }
 
 EnumCache::~EnumCache() {
@@ -82,7 +81,7 @@ const EnumCache::EnumValues* EnumCache::loadEnumValues(const Class* klass,
       value = klass->clsCnsGet(consts[i].m_name);
     }
     assert(value.m_type != KindOfUninit);
-    if (UNLIKELY(!(IS_INT_TYPE(value.m_type) ||
+    if (UNLIKELY(!(isIntType(value.m_type) ||
         (tvIsString(&value) && value.m_data.pstr->isStatic())))) {
       // only int and string values allowed for enums. Moreover the strings
       // must be static

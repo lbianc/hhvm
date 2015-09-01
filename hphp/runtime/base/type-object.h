@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,30 +18,26 @@
 #define incl_HPHP_OBJECT_H_
 
 #include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/smart-ptr.h"
+#include "hphp/runtime/base/req-ptr.h"
 #include "hphp/runtime/base/typed-value.h"
-#include "hphp/runtime/base/types.h"
 
 #include <algorithm>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-#define null_object Object::s_nullObject
-
 /**
  * Object type wrapping around ObjectData to implement reference count.
  */
 class Object {
-  SmartPtr<ObjectData> m_obj;
+  req::ptr<ObjectData> m_obj;
 
+  using NoIncRef = req::ptr<ObjectData>::NoIncRef;
 public:
   Object() {}
 
-  static const Object s_nullObject;
-
   ObjectData* get() const { return m_obj.get(); }
-  void reset() { m_obj.reset(); }
+  void reset(ObjectData* obj = nullptr) { m_obj.reset(obj); }
 
   ObjectData* operator->() const {
     return m_obj.get();
@@ -50,43 +46,64 @@ public:
   /**
    * Constructors
    */
-  /* implicit */ Object(ObjectData *data) : m_obj(data) { }
-  /* implicit */ Object(const Object& src) : m_obj(src.m_obj) { }
+  explicit Object(ObjectData *data) : m_obj(data) {
+    // The object must have at least two refs here. One pre-existing ref, and
+    // one caused by placing it under m_obj's control.
+    assert(!data || data->hasMultipleRefs());
+  }
+  /* implicit */ Object(const Object& src) : m_obj(src.m_obj) {
+    assert(!m_obj || m_obj->hasMultipleRefs());
+  }
 
   template <typename T>
-  explicit Object(const SmartPtr<T> &ptr) : m_obj(ptr) { }
+  explicit Object(const req::ptr<T> &ptr) : m_obj(ptr) {
+    assert(!m_obj || m_obj->hasMultipleRefs());
+  }
 
   template <typename T>
-  explicit Object(SmartPtr<T>&& ptr) : m_obj(std::move(ptr)) { }
+  explicit Object(req::ptr<T>&& ptr) : m_obj(std::move(ptr)) {
+    assert(!m_obj || m_obj->getCount() > 0);
+  }
+
+  explicit Object(Class* cls)
+    : m_obj(ObjectData::newInstance(cls), NoIncRef{}) {
+    // References to the object can escape inside newInstance, so we only know
+    // that the ref-count is at least 1 here.
+    assert(!m_obj || m_obj->getCount() > 0);
+  }
 
   // Move ctor
-  Object(Object&& src) noexcept : m_obj(std::move(src.m_obj)) { }
+  Object(Object&& src) noexcept : m_obj(std::move(src.m_obj)) {
+    assert(!m_obj || m_obj->getCount() > 0);
+  }
 
   // Regular assign
   Object& operator=(const Object& src) {
     m_obj = src.m_obj;
+    assert(!m_obj || m_obj->hasMultipleRefs());
     return *this;
   }
 
   template <typename T>
-  Object& operator=(const SmartPtr<T>& src) {
+  Object& operator=(const req::ptr<T>& src) {
     m_obj = src;
+    assert(!m_obj || m_obj->hasMultipleRefs());
     return *this;
   }
 
   // Move assign
   Object& operator=(Object&& src) {
     m_obj = std::move(src.m_obj);
+    assert(!m_obj || m_obj->getCount() > 0);
     return *this;
   }
 
   template <typename T>
-  Object& operator=(SmartPtr<T>&& src) {
+  Object& operator=(req::ptr<T>&& src) {
     m_obj = std::move(src);
+    assert(!m_obj || m_obj->getCount() > 0);
     return *this;
   }
-
-  ~Object();
 
   /**
    * Informational
@@ -113,7 +130,7 @@ public:
    */
   template<typename T>
   [[deprecated("Please use one of the cast family of functions instead.")]]
-  SmartPtr<T> getTyped(bool nullOkay = false, bool badTypeOkay = false) const {
+  req::ptr<T> getTyped(bool nullOkay = false, bool badTypeOkay = false) const {
     static_assert(std::is_base_of<ObjectData, T>::value, "");
 
     ObjectData *cur = get();
@@ -130,7 +147,7 @@ public:
       return nullptr;
     }
 
-    return SmartPtr<T>(static_cast<T*>(cur));
+    return req::ptr<T>(static_cast<T*>(cur));
   }
 
   template<typename T>
@@ -157,19 +174,26 @@ public:
    * Comparisons
    */
   bool same(const Object& v2) const { return m_obj == v2.m_obj; }
-  bool equal(const Object& v2) const;
-  bool less(const Object& v2) const;
-  bool more(const Object& v2) const;
+  bool equal(const Object& v2) const {
+    return m_obj ?
+      (v2.m_obj && m_obj->equal(*v2.m_obj.get())) :
+      !v2.m_obj;
+  }
+  bool less(const Object& v2) const {
+    return m_obj ?
+      (v2.m_obj && m_obj->less(*v2.m_obj.get())) :
+      static_cast<bool>(v2.m_obj);
+  }
+  bool lessEqual(const Object& v2) const { return less(v2) || equal(v2); }
+  bool more(const Object& v2) const {
+    return m_obj && (!v2.m_obj || m_obj->more(*v2.m_obj.get()));
+  }
+  bool moreEqual(const Object& v2) const { return more(v2) || equal(v2); }
 
   Variant o_get(const String& propName, bool error = true,
                 const String& context = null_string) const;
   Variant o_set(
     const String& s, const Variant& v, const String& context = null_string);
-
-  /**
-   * Input/Output
-   */
-  void serialize(VariableSerializer *serializer) const;
 
   void setToDefaultObject();
 
@@ -178,7 +202,8 @@ public:
 
   // Take ownership of a reference without touching the ref count
   static Object attach(ObjectData *object) {
-    return Object(SmartPtr<ObjectData>::attach(object));
+    assert(!object || object->getCount() > 0);
+    return Object{req::ptr<ObjectData>::attach(object)};
   }
 
 private:
@@ -198,6 +223,8 @@ private:
 
   const char* classname_cstr() const;
 };
+
+extern const Object null_object;
 
 ///////////////////////////////////////////////////////////////////////////////
 // ObjNR

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,7 +17,6 @@
 #ifndef incl_HPHP_APC_TYPED_VALUE_H_
 #define incl_HPHP_APC_TYPED_VALUE_H_
 
-#include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/apc-handle.h"
 
 namespace HPHP {
@@ -101,7 +100,7 @@ public:
   const Variant& asCVarRef() const {
     // Must be non-refcounted types
     assert(m_handle.m_flags == 0);
-    assert(!IS_REFCOUNTED_TYPE(m_handle.m_type));
+    assert(!isRefcountedType(m_handle.m_type));
     return tvAsCVarRef(reinterpret_cast<const TypedValue*>(this));
   }
 

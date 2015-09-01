@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -22,7 +22,7 @@
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/file.h"
-#include "hphp/runtime/base/smart-ptr.h"
+#include "hphp/runtime/base/req-ptr.h"
 #include <libxml/tree.h>
 #include <libxml/xmlreader.h>
 #include <libxml/uri.h>
@@ -71,7 +71,7 @@ public:
                                  xmlreader_read_one_char_t internal_function);
   bool set_relaxng_schema(String source, int type);
 
-  SmartPtr<File> m_stream; // input stream
+  req::ptr<File> m_stream; // input stream
   xmlTextReaderPtr m_ptr;
   xmlParserInputBufferPtr m_input;
   void* m_schema;

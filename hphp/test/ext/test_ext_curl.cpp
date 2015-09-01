@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,14 +16,16 @@
 
 #include "hphp/test/ext/test_ext_curl.h"
 
-#include <folly/Conv.h>
-
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/ext/curl/ext_curl.h"
 #include "hphp/runtime/ext/std/ext_std_output.h"
 #include "hphp/runtime/ext/zlib/ext_zlib.h"
-#include "hphp/runtime/server/libevent-server.h"
+#include "hphp/runtime/server/proxygen/proxygen-server.h"
+
+#include <folly/Conv.h>
+
+#include <string>
 
 #define PORT_MIN 7100
 #define PORT_MAX 7120
@@ -35,6 +37,7 @@ public:
   explicit TestCurlRequestHandler(int timeout) : RequestHandler(timeout) {}
   // implementing RequestHandler
   virtual void handleRequest(Transport *transport) {
+    g_context.getCheck();
     transport->addHeader("ECHOED", transport->getHeader("ECHO").c_str());
 
     if (transport->getMethod() == Transport::Method::POST) {
@@ -46,6 +49,7 @@ public:
     } else {
       transport->sendString("OK");
     }
+    hphp_memory_cleanup();
   }
   virtual void abortRequest(Transport *transport) {
     transport->sendString("Aborted");
@@ -55,14 +59,15 @@ public:
 static int s_server_port = 0;
 
 static std::string get_request_uri() {
-  return "http://localhost:" + folly::to<string>(s_server_port) + "/request";
+  return "http://localhost:" + folly::to<std::string>(s_server_port) +
+    "/request";
 }
 
 static ServerPtr runServer() {
   for (s_server_port = PORT_MIN; s_server_port <= PORT_MAX; s_server_port++) {
     try {
-      ServerPtr server = folly::make_unique<LibEventServer>(
-          "127.0.0.1", s_server_port, 4);
+      ServerPtr server = folly::make_unique<ProxygenServer>(
+        ServerOptions("127.0.0.1", s_server_port, 4));
       server->setRequestHandlerFactory<TestCurlRequestHandler>(0);
       server->start();
       return std::move(server);

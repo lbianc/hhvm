@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -29,6 +29,8 @@ namespace HPHP {
 extern const StaticString s_self;
 extern const StaticString s_parent;
 extern const StaticString s_static;
+
+extern const StaticString s_cmpWithCollection;
 
 ///////////////////////////////////////////////////////////////////////////////
 // operators
@@ -75,6 +77,15 @@ inline bool is_empty_string(const Variant& v) {
 ///////////////////////////////////////////////////////////////////////////////
 // misc functions
 
+/*
+ * Semantics of is_callable defined here:
+ * http://docs.hhvm.com/manual/en/function.is-callable.php
+ */
+bool is_callable(const Variant& v, bool syntax_only, RefData* name);
+/*
+ * Equivalent to is_callable(v, false, nullptr)
+ */
+bool is_callable(const Variant& v);
 bool array_is_valid_callback(const Array& arr);
 
 const HPHP::Func*
@@ -105,17 +116,19 @@ Variant invoke_static_method(const String& s, const String& method,
 Variant o_invoke_failed(const char *cls, const char *meth,
                         bool fatal = true);
 
+bool is_constructor_name(const char* func);
 void throw_instance_method_fatal(const char *name);
 
-void throw_iterator_not_valid() ATTRIBUTE_NORETURN;
-void throw_collection_modified() ATTRIBUTE_NORETURN;
-void throw_collection_property_exception() ATTRIBUTE_NORETURN;
-void throw_collection_compare_exception() ATTRIBUTE_NORETURN;
-void throw_param_is_not_container() ATTRIBUTE_NORETURN;
-void throw_cannot_modify_immutable_object(const char* className)
-  ATTRIBUTE_NORETURN;
-void check_collection_compare(ObjectData* obj);
-void check_collection_compare(ObjectData* obj1, ObjectData* obj2);
+ATTRIBUTE_NORETURN void throw_invalid_operation_exception(StringData*);
+ATTRIBUTE_NORETURN void throw_iterator_not_valid();
+ATTRIBUTE_NORETURN void throw_collection_modified();
+ATTRIBUTE_NORETURN void throw_collection_property_exception();
+ATTRIBUTE_NORETURN void throw_collection_compare_exception();
+ATTRIBUTE_NORETURN void throw_param_is_not_container();
+ATTRIBUTE_NORETURN
+void throw_cannot_modify_immutable_object(const char* className);
+void check_collection_compare(const ObjectData* obj);
+void check_collection_compare(const ObjectData* obj1, const ObjectData* obj2);
 void check_collection_cast_to_array();
 
 Object create_object_only(const String& s);

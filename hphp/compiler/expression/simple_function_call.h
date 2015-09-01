@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -34,7 +34,7 @@ public:
                      ExpressionListPtr params, ExpressionPtr cls);
 
   DECLARE_BASE_EXPRESSION_VIRTUAL_FUNCTIONS;
-  ExpressionPtr preOptimize(AnalysisResultConstPtr ar);
+  ExpressionPtr preOptimize(AnalysisResultConstPtr ar) override;
   void deepCopy(SimpleFunctionCallPtr exp);
 
   bool isDefineWithoutImpl(AnalysisResultConstPtr ar);
@@ -52,18 +52,16 @@ public:
   // define(<literal-string>, <scalar>);
   bool isSimpleDefine(StringData **name, TypedValue *value) const;
 
-  virtual int getLocalEffects() const;
+  int getLocalEffects() const override;
 
   // implementing IParseHandler
-  virtual void onParse(AnalysisResultConstPtr ar, FileScopePtr fs);
-
-  virtual void beforeCheck(AnalysisResultPtr ar) {}
+  void onParse(AnalysisResultConstPtr ar, FileScopePtr fs) override;
 
   void addLateDependencies(AnalysisResultConstPtr ar);
   void setSafeCall(int flag) { m_safe = flag; }
   void setSafeDefault(ExpressionPtr def) { m_safeDef = def; }
-  virtual ConstructPtr getNthKid(int n) const;
-  virtual void setNthKid(int n, ConstructPtr cp);
+  ConstructPtr getNthKid(int n) const override;
+  void setNthKid(int n, ConstructPtr cp) override;
   static SimpleFunctionCallPtr GetFunctionCallForCallUserFunc(
     AnalysisResultConstPtr ar, SimpleFunctionCallPtr call, int testOnly,
     int firstParam, bool &error);
@@ -75,12 +73,6 @@ public:
   bool isCallToFunction(const char *name) const;
   void resolveNSFallbackFunc(AnalysisResultConstPtr ar, FileScopePtr fs);
 
-  void setOptimizable() {
-    m_optimizable = true;
-  }
-  bool isOptimizable() const {
-    return m_optimizable;
-  }
   void changeToBytecode() {
     m_changedToBytecode = true;
   }
@@ -112,7 +104,7 @@ protected:
     ClassAlias,
   };
 
-  static std::map<std::string,FunType> FunctionTypeMap;
+  static std::map<std::string,FunType,stdltistr> FunctionTypeMap;
   FunType m_type;
   unsigned m_dynamicConstant : 1;
   unsigned m_builtinFunction : 1;
@@ -127,7 +119,6 @@ protected:
 
   ExpressionPtr optimize(AnalysisResultConstPtr ar);
 private:
-  int checkObjCall(AnalysisResultPtr ar);
   FunctionScopePtr
   getFuncScopeFromParams(AnalysisResultPtr ar,
                          BlockScopeRawPtr scope,

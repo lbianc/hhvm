@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -75,6 +75,7 @@ namespace Stats {
   STAT(UnitMerge_mergeable_global) \
   STAT(UnitMerge_mergeable_class) \
   STAT(UnitMerge_mergeable_require) \
+  STAT(UnitMerge_mergeable_typealias) \
   STAT(UnitMerge_redo_hoistable) \
   /* stub reuse stats */ \
   STAT(Astub_New) \
@@ -96,6 +97,11 @@ namespace Stats {
   /* ObjectData construction */ \
   STAT(ObjectData_new_dtor_yes) \
   STAT(ObjectData_new_dtor_no) \
+  STAT(ObjMethod_total) \
+  STAT(ObjMethod_known) \
+  STAT(ObjMethod_methodslot) \
+  STAT(ObjMethod_ifaceslot) \
+  STAT(ObjMethod_cached) \
 
 enum StatCounter {
 #define STAT(name) \

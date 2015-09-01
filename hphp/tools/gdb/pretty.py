@@ -5,6 +5,8 @@ GDB pretty printers for HHVM types.
 # @lint-avoid-pyflakes3
 # @lint-avoid-pyflakes2
 
+from compatibility import *
+
 import gdb
 import re
 from gdbutils import *
@@ -111,6 +113,10 @@ class TypedValuePrinter(object):
 
 class PtrPrinter(object):
     def _string(self):
+        ptr = self._pointer()
+        if ptr == nullptr():
+            return None
+
         inner = self._pointer().dereference()
         inner_type = rawtype(inner.type)
 
@@ -119,14 +125,17 @@ class PtrPrinter(object):
         return nameof(inner)
 
     def to_string(self):
-        s = self._string()
+        try:
+            s = self._string()
+        except gdb.MemoryError:
+            s = None
 
         out = '(%s) %s'  % (str(self._ptype()), str(self._pointer()))
         return '%s "%s"' % (out, s) if s is not None else out
 
 
-class SmartPtrPrinter(PtrPrinter):
-    RECOGNIZE = '^HPHP::(SmartPtr<.*>)$'
+class ReqPtrPrinter(PtrPrinter):
+    RECOGNIZE = '^HPHP::(req::ptr<.*>)$'
 
     def __init__(self, val):
         self.val = val
@@ -137,25 +146,25 @@ class SmartPtrPrinter(PtrPrinter):
     def _pointer(self):
         return self.val['m_px']
 
-class StringPrinter(SmartPtrPrinter):
+class StringPrinter(ReqPtrPrinter):
     RECOGNIZE = '^HPHP::(Static)?String$'
 
     def __init__(self, val):
         super(StringPrinter, self).__init__(val['m_str'])
 
-class ArrayPrinter(SmartPtrPrinter):
+class ArrayPrinter(ReqPtrPrinter):
     RECOGNIZE = '^HPHP::Array$'
 
     def __init__(self, val):
         super(ArrayPrinter, self).__init__(val['m_arr'])
 
-class ObjectPrinter(SmartPtrPrinter):
+class ObjectPrinter(ReqPtrPrinter):
     RECOGNIZE = '^HPHP::Object$'
 
     def __init__(self, val):
         super(ObjectPrinter, self).__init__(val['m_obj'])
 
-class ResourcePrinter(SmartPtrPrinter):
+class ResourcePrinter(ReqPtrPrinter):
     RECOGNIZE = '^HPHP::Resource$'
 
     def __init__(self, val):
@@ -163,7 +172,7 @@ class ResourcePrinter(SmartPtrPrinter):
 
 
 class LowPtrPrinter(PtrPrinter):
-    RECOGNIZE = '^HPHP::(LowPtr<.*>|LowPtrImpl<.*>)$'
+    RECOGNIZE = '^HPHP::(LowPtr<.*>|detail::LowPtrImpl<.*>)$'
 
     def __init__(self, val):
         self.val = val
@@ -173,7 +182,12 @@ class LowPtrPrinter(PtrPrinter):
 
     def _pointer(self):
         inner = self.val.type.template_argument(0)
-        return self.val['m_raw'].cast(inner.pointer())
+        storage = template_type(rawtype(self.val.type.template_argument(1)))
+
+        if storage == 'HPHP::detail::AtomicStorage':
+            return idx.atomic_get(self.val['m_s']).cast(inner.pointer())
+        else:
+            return self.val['m_s'].cast(inner.pointer())
 
 
 #------------------------------------------------------------------------------
@@ -216,7 +230,9 @@ class ArrayDataPrinter(object):
             elt = self.cur
 
             try:
-                if elt['data']['m_aux']['u_hash'] == 0:
+                if elt['data']['m_type'] == -1:
+                    key = '<deleted>'
+                elif elt['data']['m_aux']['u_hash'] < 0:
                     key = '%d' % elt['ikey']
                 else:
                     key = '"%s"' % string_data_val(elt['skey'].dereference())
@@ -256,7 +272,11 @@ class ArrayDataPrinter(object):
 
         kind = str(self.kind)[len('HPHP::ArrayData::'):]
 
-        return "ArrayData[%s]: %d element(s)" % (kind, self.val['m_size'])
+        return "ArrayData[%s]: %d element(s) refcount=%d" % (
+            kind,
+            self.val['m_size'],
+            self.val['m_hdr']['count']
+        )
 
     def children(self):
         data = self.val.address.cast(T('char').pointer()) + \
@@ -264,14 +284,11 @@ class ArrayDataPrinter(object):
 
         if self.kind == self._kind('Packed'):
             pelm = data.cast(T('HPHP::TypedValue').pointer())
-            iter_class = self._packed_iterator
-        elif self.kind == self._kind('Mixed'):
+            return self._packed_iterator(pelm, pelm + self.val['m_size'])
+        if self.kind == self._kind('Mixed'):
             pelm = data.cast(T('HPHP::MixedArray::Elm').pointer())
-            iter_class = self._mixed_iterator
-        else:
-            return self._packed_iterator(0, 0)
-
-        return iter_class(pelm, pelm + self.val['m_size'])
+            return self._mixed_iterator(pelm, pelm + self.val['m_used'])
+        return self._packed_iterator(0, 0)
 
     def _kind(self, kind):
         return K('HPHP::ArrayData::k' + kind + 'Kind')
@@ -343,7 +360,7 @@ class RefDataPrinter(object):
 
 printer_classes = [
     TypedValuePrinter,
-    SmartPtrPrinter,
+    ReqPtrPrinter,
     ArrayPrinter,
     ObjectPrinter,
     StringPrinter,

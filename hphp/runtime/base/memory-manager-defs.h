@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -25,7 +25,7 @@
 #include "hphp/runtime/base/struct-array.h"
 #include "hphp/runtime/vm/globals-array.h"
 #include "hphp/runtime/vm/resumable.h"
-#include "hphp/runtime/ext/asio/await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
 
 namespace HPHP {
 
@@ -49,24 +49,62 @@ struct Header {
     ProxyArray proxy_;
     GlobalsArray globals_;
     ObjectData obj_;
-    ResourceData res_;
+    ResourceHdr res_;
     RefData ref_;
     SmallNode small_;
     BigNode big_;
     FreeNode free_;
     ResumableNode resumable_;
     NativeNode native_;
-    DebugHeader debug_;
     c_AwaitAllWaitHandle awaitall_;
   };
 
-  Resumable* resumable() const {
+  const Resumable* resumable() const {
+    assert(kind() == HeaderKind::ResumableFrame);
+    return reinterpret_cast<const Resumable*>(
+      (char*)this + sizeof(ResumableNode) + resumable_.framesize
+    );
+  }
+  Resumable* resumable() {
+    assert(kind() == HeaderKind::ResumableFrame);
     return reinterpret_cast<Resumable*>(
       (char*)this + sizeof(ResumableNode) + resumable_.framesize
     );
   }
-  ObjectData* resumableObj() const {
-    return reinterpret_cast<ObjectData*>(resumable() + 1);
+  const ObjectData* resumableObj() const {
+    DEBUG_ONLY auto const func = resumable()->actRec()->func();
+    assert(func->isAsyncFunction());
+    auto obj = reinterpret_cast<const ObjectData*>(resumable() + 1);
+    assert(obj->headerKind() == HeaderKind::ResumableObj);
+    return obj;
+  }
+  ObjectData* resumableObj() {
+    DEBUG_ONLY auto const func = resumable()->actRec()->func();
+    assert(func->isAsyncFunction());
+    auto obj = reinterpret_cast<ObjectData*>(resumable() + 1);
+    assert(obj->headerKind() == HeaderKind::ResumableObj);
+    return obj;
+  }
+  const ObjectData* nativeObj() const {
+    assert(kind() == HeaderKind::NativeData);
+    auto obj = Native::obj(&native_);
+    assert(isObjectKind(obj->headerKind()));
+    return obj;
+  }
+  ObjectData* nativeObj() {
+    assert(kind() == HeaderKind::NativeData);
+    auto obj = Native::obj(&native_);
+    assert(isObjectKind(obj->headerKind()));
+    return obj;
+  }
+
+  // if this header is one of the types that contains an ObjectData,
+  // return the (possibly inner ptr) ObjectData*
+  const ObjectData* obj() const {
+    return isObjectKind(kind()) ? &obj_ :
+           kind() == HeaderKind::ResumableFrame ? resumableObj() :
+           kind() == HeaderKind::NativeData ? nativeObj() :
+           nullptr;
   }
 };
 
@@ -103,7 +141,7 @@ inline size_t Header::size() const {
       // [ObjectData][children...]
       return awaitall_.heapSize();
     case HeaderKind::Resource:
-      // [ResourceData][subclass]
+      // [ResourceHdr][ResourceData subclass]
       return res_.heapSize();
     case HeaderKind::Ref:
       return sizeof(RefData);
@@ -113,17 +151,17 @@ inline size_t Header::size() const {
     case HeaderKind::BigObj:    // [BigNode][Header...]
       return big_.nbytes;
     case HeaderKind::ResumableFrame:
-      // [ResumableNode][locals][Resumable][ObjectData<ResumableObj>]
+      // Async functions -
+      // [ResumableNode][locals][Resumable][ObjectData<WaitHandle>]
       return resumable()->size();
     case HeaderKind::NativeData:
       // [NativeNode][NativeData][ObjectData][props] is one allocation.
-      return native_.obj_offset + Native::obj(&native_)->heapSize();
+      // Generators -
+      // [NativeNode][NativeData<locals><Resumable><GeneratorData>][ObjectData]
+      return native_.obj_offset + nativeObj()->heapSize();
     case HeaderKind::Free:
     case HeaderKind::Hole:
       return free_.size();
-    case HeaderKind::Debug:
-      assert(debug_.allocatedMagic == DebugHeader::kAllocatedMagic);
-      return sizeof(DebugHeader);
   }
   return 0;
 }
@@ -148,7 +186,7 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
       // so don't round them.
       auto size = hdr->hdr_.kind == HeaderKind::Hole ||
                   hdr->hdr_.kind == HeaderKind::Free ? hdr->free_.size() :
-                  MemoryManager::smartSizeClass(hdr->size());
+                  MemoryManager::smallSizeClass(hdr->size());
       hdr = (Header*)((char*)hdr + size);
       if (hdr >= slab_end) {
         assert(hdr == slab_end && "hdr > slab_end indicates corruption");
@@ -170,23 +208,17 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
   }
 }
 
-// Raw iterator loop over the headers of everything in the heap.
-// Skips DebugHeader because it's boring, and skips BigObj, because
-// it's just a detail of which sub-heap we used to allocate something
-// based on its size, and it can prefix almost any other header kind.
-// clients can call this directly to avoid unnecessary initFree()s.
+// Raw iterator loop over the headers of everything in the heap.  Skips BigObj
+// because it's just a detail of which sub-heap we used to allocate something
+// based on its size, and it can prefix almost any other header kind.  Clients
+// can call this directly to avoid unnecessary initFree()s.
 template<class Fn> void MemoryManager::iterate(Fn fn) {
   assert(!m_needInitFree);
   m_heap.iterate([&](Header* h) {
     if (h->kind() == HeaderKind::BigObj) {
       // skip BigNode
       h = reinterpret_cast<Header*>((&h->big_)+1);
-      if (h->kind() == HeaderKind::Debug) {
-        // skip DebugHeader
-        h = reinterpret_cast<Header*>((&h->debug_)+1);
-      }
-    }
-    if (h->kind() == HeaderKind::Debug || h->kind() == HeaderKind::Hole) {
+    } else if (h->kind() == HeaderKind::Hole) {
       // no valid pointer can point here.
       return; // continue iterating
     }
@@ -224,7 +256,7 @@ template<class Fn> void MemoryManager::forEachObject(Fn fn) {
         ptrs.push_back(h->resumableObj());
         break;
       case HeaderKind::NativeData:
-        ptrs.push_back(Native::obj(&h->native_));
+        ptrs.push_back(h->nativeObj());
         break;
       case HeaderKind::Packed:
       case HeaderKind::Struct:
@@ -240,7 +272,6 @@ template<class Fn> void MemoryManager::forEachObject(Fn fn) {
       case HeaderKind::BigMalloc:
       case HeaderKind::Free:
         break;
-      case HeaderKind::Debug:
       case HeaderKind::BigObj:
       case HeaderKind::Hole:
         assert(false && "forEachHeader skips these kinds");

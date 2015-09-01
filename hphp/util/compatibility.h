@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -20,11 +20,18 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <folly/Singleton.h>
+
 #include "hphp/util/portability.h"
 
 namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
+
+template <typename T>
+std::shared_ptr<T> getSingleton() {
+  return folly::Singleton<T>::get_weak().lock();
+}
 
 #define PHP_DIR_SEPARATOR '/'
 
@@ -49,7 +56,7 @@ int64_t gettime_diff_us(const timespec &start, const timespec &end);
  */
 int fadvise_dontneed(int fd, off_t len);
 
-#ifdef __CYGWIN__
+#if defined(__CYGWIN__) || defined(_MSC_VER)
 
 typedef struct {
   const char *dli_fname;

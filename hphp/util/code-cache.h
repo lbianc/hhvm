@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,7 +22,7 @@
 
 namespace HPHP {
 
-#if defined(__APPLE__) || defined(__CYGWIN__)
+#if defined(__APPLE__) || defined(__CYGWIN__) || defined(_MSC_VER)
 extern const void* __hot_start;
 extern const void* __hot_end;
 #else
@@ -85,6 +85,9 @@ struct CodeCache {
     return const_cast<CodeCache&>(*this).frozen();
   }
 
+  CodeBlock& realCold()   { return m_cold;   }
+  CodeBlock& realFrozen() { return m_frozen; }
+
   const CodeBlock& realCold()   const { return m_cold;   }
   const CodeBlock& realFrozen() const { return m_frozen; }
 
@@ -121,13 +124,13 @@ private:
    * of m_cold.
    *
    */
-  CodeBlock m_main;        // used for hot code of non-AttrHot functions
-  CodeBlock m_cold;        // used for cold or one time use code
-  CodeBlock m_hot;         // used for hot code of AttrHot functions
-  CodeBlock m_prof;        // used for hot code of profiling translations
-  CodeBlock m_frozen;      // used for code that is (almost) never used
-  DataBlock m_data;        // data to be used by translated code
-  bool      m_lock;        // don't allow access to main() or cold()
+  CodeBlock m_main;   // used for hot code of non-AttrHot functions
+  CodeBlock m_cold;   // used for cold or one time use code
+  CodeBlock m_hot;    // used for hot code of AttrHot functions
+  CodeBlock m_prof;   // used for hot code of profiling translations
+  CodeBlock m_frozen; // used for code that is (almost) never used
+  DataBlock m_data;   // data to be used by translated code
+  bool      m_lock;   // don't allow access to main() or cold()
 };
 
 struct CodeCache::Selector {

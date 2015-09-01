@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -39,6 +39,7 @@
 #include "hphp/runtime/vm/repo-global-data.h"
 
 #include "hphp/hhbbc/misc.h"
+#include "hphp/hhbbc/stats.h"
 #include "hphp/hhbbc/parallel.h"
 
 namespace HPHP { namespace HHBBC {
@@ -75,6 +76,9 @@ void parse_options(int argc, char** argv) {
     ("input",
       po::value(&input_repo)->default_value("hhvm.hhbc"),
       "input hhbc repo path")
+    ("stats-file",
+      po::value(&options.stats_file)->default_value(""),
+      "stats file path")
     ("no-optimizations",
       po::bool_switch(&options.NoOptimizations),
       "turn off all optimizations")
@@ -174,7 +178,7 @@ void parse_options(int argc, char** argv) {
   logging = !no_logging;
 }
 
-void validate_options() {
+UNUSED void validate_options() {
   if (parallel::work_chunk <= 10 || parallel::num_threads < 1) {
     std::cerr << "Invalid parallelism configuration.\n";
     std::exit(1);

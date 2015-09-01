@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -241,8 +241,8 @@ std::string Type::constValString() const {
     if (!m_intVal) {
       return "Cctx(Cls(nullptr))";
     }
-    const Class* cls = m_cctxVal.cls();
-    return folly::format("Cctx(Cls({}))", cls->name()->data()).str();
+    auto const cls = m_cctxVal.cls();
+    return folly::format("Cctx(Cls({}))", cls->name()).str();
   }
   if (*this <= TTCA) {
     auto name = getNativeFunctionName(m_tcaVal);
@@ -478,6 +478,90 @@ Type Type::specialize(TypeSpec spec, bits_t killable /* = kTop */) const {
   if (arr_okay && spec.arrSpec()) return Type(generic, spec.arrSpec());
 
   return *this;
+}
+
+// Return true if the array satisfies requirement on the ArraySpec.
+static bool arrayFitsSpec(const ArrayData* arr, const ArraySpec spec) {
+  if (spec == ArraySpec::Top) return true;
+
+  if (auto const spec_kind = spec.kind()) {
+    if (arr->kind() == spec_kind) return true;
+  }
+
+  if (auto const rat_type = spec.type()) {
+    using A = RepoAuthType::Array;
+    if (arr->empty() && rat_type->emptiness() != A::Empty::No) return true;
+    if (arr->isVectorData()) {
+      switch (rat_type->tag()) {
+        case A::Tag::Packed:
+          if (arr->size() != rat_type->size()) break;
+          // fall through
+        case A::Tag::PackedN: {
+          int64_t k = 0;
+          for ( ; k < arr->size(); ++k) {
+            auto const specElemType =
+              rat_type->tag() == A::Tag::Packed ? rat_type->packedElem(k)
+                                                : rat_type->elemType();
+            if (!tvMatchesRepoAuthType(*(arr->get(k).asTypedValue()),
+                                       specElemType)) {
+              break;
+            }
+          }
+          if (k == arr->size()) return true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (arr->isStruct()) {
+    if (StructArray::asStructArray(arr)->shape() == spec.shape()) return true;
+  }
+
+  return false;
+}
+
+bool Type::operator<=(Type rhs) const {
+  auto const& lhs = *this;
+
+  // Check for any members in lhs.m_bits that aren't in rhs.m_bits.
+  if ((lhs.m_bits & rhs.m_bits) != lhs.m_bits) {
+    return false;
+  }
+
+  // Check for Bottom; all the remaining cases assume `lhs' is not Bottom.
+  if (lhs.m_bits == kBottom) return true;
+
+  // If `rhs' is a constant, we must be the same constant.
+  if (rhs.m_hasConstVal) {
+    assertx(!rhs.isUnion());
+    return lhs.m_hasConstVal && lhs.m_extra == rhs.m_extra;
+  }
+
+  // If `rhs' could be a pointer, we must have a subtype relation in pointer
+  // kinds or we're not a subtype.  (If `lhs' can't be a pointer, we found out
+  // above when we intersected the bits.)  If neither can be a pointer, it's an
+  // invariant that `m_ptrKind' will be Ptr::Unk so this will pass.
+  if (lhs.ptrKind() != rhs.ptrKind() &&
+      !ptr_subtype(lhs.ptrKind(), rhs.ptrKind())) {
+    return false;
+  }
+
+  if (!rhs.isSpecialized()) {
+    return true;
+  }
+
+  if (lhs.hasConstVal(TArr)) {
+    // Arrays can be specialized in different ways, here we check if the
+    // constant array fits the kind()/type() of the specialization of rhs, if
+    // any.
+    auto const lhs_arr = lhs.arrVal();
+    auto const rhs_as = rhs.arrSpec();
+    return arrayFitsSpec(lhs_arr, rhs_as);
+  }
+
+  // Compare specializations only if `rhs' is specialized.
+  return lhs.spec() <= rhs.spec();
 }
 
 Type Type::operator|(Type rhs) const {

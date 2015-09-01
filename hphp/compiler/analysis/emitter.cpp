@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -15,23 +15,30 @@
 */
 #include "hphp/compiler/analysis/emitter.h"
 
-#include <boost/algorithm/string/predicate.hpp>
-#include <memory>
-#include <iostream>
-#include <iomanip>
-#include <vector>
 #include <algorithm>
 #include <deque>
 #include <exception>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
 #include <set>
 #include <utility>
+#include <vector>
+
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <folly/MapUtil.h>
 #include <folly/Memory.h>
 #include <folly/ScopeGuard.h>
+#ifndef _MSC_VER
+#include <folly/Subprocess.h>
+#endif
+#include <folly/String.h>
 
 #include "hphp/compiler/builtin_symbols.h"
 #include "hphp/compiler/analysis/class_scope.h"
+#include "hphp/compiler/analysis/code_error.h"
 #include "hphp/compiler/analysis/file_scope.h"
 #include "hphp/compiler/analysis/function_scope.h"
 #include "hphp/compiler/expression/array_element_expression.h"
@@ -93,6 +100,7 @@
 #include "hphp/compiler/parser/parser.h"
 #include "hphp/hhbbc/hhbbc.h"
 
+#include "hphp/util/trace.h"
 #include "hphp/util/safe-cast.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/job-queue.h"
@@ -126,6 +134,12 @@ namespace HPHP {
 namespace Compiler {
 ///////////////////////////////////////////////////////////////////////////////
 
+TRACE_SET_MOD(emitter);
+
+const StaticString
+  s_trigger_error("trigger_error"),
+  s_is_deprecated("deprecated function");
+
 using uchar = unsigned char;
 
 namespace StackSym {
@@ -154,8 +168,8 @@ namespace StackSym {
   static const char P = 0x50; // Property marker
   static const char S = 0x60; // Static property marker
   static const char M = 0x70; // Non elem/prop/W part of M-vector
-  static const char K = 0x80; // Marker for information about a class base
-  static const char Q = 0x90; // NullSafe Property marker
+  static const char K = (char)0x80; // Marker for information about a class base
+  static const char Q = (char)0x90; // NullSafe Property marker
 
   static const char CN = C | N;
   static const char CG = C | G;
@@ -167,6 +181,23 @@ namespace StackSym {
 
   char GetSymFlavor(char sym) { return (sym & 0x0F); }
   char GetMarker(char sym) { return (sym & 0xF0); }
+
+  /*
+   * Return whether or not sym represents a symbolic stack element, rather than
+   * an actual stack element. Symbolic stack elements do not have corresponding
+   * values on the real eval stack at runtime, and represent things like local
+   * variable ids or literal ints and strings.
+   */
+  bool IsSymbolic(char sym) {
+    auto const flavor = GetSymFlavor(sym);
+    if (flavor == L || flavor == T || flavor == I || flavor == H) return true;
+
+    auto const marker = GetMarker(sym);
+    if (marker == W || marker == K) return true;
+
+    return false;
+  }
+
   std::string ToString(char sym) {
     char symFlavor = StackSym::GetSymFlavor(sym);
     std::string res;
@@ -212,7 +243,7 @@ namespace StackSym {
   Logger::Warning(__VA_ARGS__);                             \
   Logger::Warning("Eval stack at the time of error: %s",    \
                   m_evalStack.pretty().c_str());            \
-  assert(false);                                            \
+  assertx(false);                                            \
 } while (0)
 
 // RAII guard for function creation.
@@ -220,24 +251,26 @@ class FuncFinisher {
   EmitterVisitor* m_ev;
   Emitter&        m_e;
   FuncEmitter*    m_fe;
+  int32_t         m_stackPad;
 
  public:
-  FuncFinisher(EmitterVisitor* ev, Emitter& e, FuncEmitter* fe)
-    : m_ev(ev), m_e(e), m_fe(fe)
+  FuncFinisher(EmitterVisitor* ev, Emitter& e, FuncEmitter* fe,
+               int32_t stackPad = 0)
+    : m_ev(ev), m_e(e), m_fe(fe), m_stackPad(stackPad)
   {}
 
   ~FuncFinisher() {
-    m_ev->finishFunc(m_e, m_fe);
+    m_ev->finishFunc(m_e, m_fe, m_stackPad);
   }
 };
 
 // RAII guard for temporarily overriding an Emitter's location
 class LocationGuard {
   Emitter& m_e;
-  LocationPtr m_loc;
+  OptLocation m_loc;
 
 public:
-  LocationGuard(Emitter& e, LocationPtr newLoc)
+  LocationGuard(Emitter& e, const OptLocation& newLoc)
       : m_e(e), m_loc(e.getTempLocation()) {
     if (newLoc) m_e.setTempLocation(newLoc);
   }
@@ -282,17 +315,33 @@ static int32_t countStackValues(const std::vector<uchar>& immVec) {
 #define O(name, imm, pop, push, flags)                                  \
   void Emitter::name(imm) {                                             \
     auto const opcode = Op::name;                                       \
+    ITRACE(2, "{}\n", #name);                                           \
+    Trace::Indent indent;                                               \
+    ITRACE(3, "before: {}\n", m_ev.getEvalStack().pretty());            \
+    /* Process opcode's effects on the EvalStack and emit it */         \
     Offset curPos UNUSED = getUnitEmitter().bcPos();                    \
-    getEmitterVisitor().prepareEvalStack();                             \
-    POP_##pop;                                                          \
-    const int nIn UNUSED = COUNT_##pop;                                 \
-    POP_LA_##imm;                                                       \
-    PUSH_##push;                                                        \
-    getUnitEmitter().emitOp(Op##name);                                  \
-    IMPL_##imm;                                                         \
-    getUnitEmitter().recordSourceLocation(m_tempLoc ? m_tempLoc.get() : \
-                                          m_node->getLocation().get(), curPos); \
-    if (flags & TF) getEmitterVisitor().restoreJumpTargetEvalStack();   \
+    {                                                                   \
+      Trace::Indent indent;                                             \
+      getEmitterVisitor().prepareEvalStack();                           \
+      POP_##pop;                                                        \
+      const int nIn UNUSED = COUNT_##pop;                               \
+      POP_LA_##imm;                                                     \
+      PUSH_##push;                                                      \
+      getUnitEmitter().emitOp(Op##name);                                \
+      IMPL_##imm;                                                       \
+    }                                                                   \
+    ITRACE(3, "after: {}\n", m_ev.getEvalStack().pretty());             \
+    auto& loc = m_tempLoc ? *m_tempLoc : m_node->getRange();            \
+    auto UNUSED opPtr = reinterpret_cast<const Op*>(m_ue.bc() + curPos);\
+    ITRACE(2, "{}: {}\n", curPos, instrToString(opPtr));                \
+    ITRACE(2, "lines [{},{}] chars [{},{}]\n",                          \
+           loc.line0, loc.line1, loc.char0, loc.char1);                 \
+    /* Update various other metadata */                                 \
+    getUnitEmitter().recordSourceLocation(loc, curPos);                 \
+    if (flags & TF) {                                                   \
+      getEmitterVisitor().restoreJumpTargetEvalStack();                 \
+      ITRACE(3, "   jmp: {}\n", m_ev.getEvalStack().pretty());          \
+    }                                                                   \
     if (opcode == Op::FCall) getEmitterVisitor().recordCall();          \
     getEmitterVisitor().setPrevOpcode(opcode);                          \
   }
@@ -306,6 +355,7 @@ static int32_t countStackValues(const std::vector<uchar>& immVec) {
 #define COUNT_C_MMANY 0
 #define COUNT_R_MMANY 0
 #define COUNT_V_MMANY 0
+#define COUNT_MFINAL 0
 #define COUNT_FMANY 0
 #define COUNT_CVMANY 0
 #define COUNT_CVUMANY 0
@@ -362,6 +412,8 @@ static int32_t countStackValues(const std::vector<uchar>& immVec) {
   getEmitterVisitor().popEvalStackMMany()
 #define POP_R_MMANY \
   getEmitterVisitor().popEvalStack(StackSym::R); \
+  getEmitterVisitor().popEvalStackMMany()
+#define POP_MFINAL \
   getEmitterVisitor().popEvalStackMMany()
 #define POP_FMANY \
   getEmitterVisitor().popEvalStackMany(a1, StackSym::F)
@@ -626,6 +678,7 @@ static int32_t countStackValues(const std::vector<uchar>& immVec) {
 #undef POP_C_MMANY
 #undef POP_V_MMANY
 #undef POP_R_MMANY
+#undef POP_MFINAL
 #undef POP_CV
 #undef POP_VV
 #undef POP_HV
@@ -745,14 +798,14 @@ static int32_t countStackValues(const std::vector<uchar>& immVec) {
 static void checkJmpTargetEvalStack(const SymbolicStack& source,
                                     const SymbolicStack& dest) {
   if (source.size() != dest.size()) {
-    Logger::Warning("Emitter detected a point in the bytecode where the "
-                    "depth of the stack is not the same for all possible "
-                    "control flow paths. source size: %d. dest size: %d",
-                    source.size(),
-                    dest.size());
+    Logger::FWarning("Emitter detected a point in the bytecode where the "
+                     "depth of the stack is not the same for all possible "
+                     "control flow paths. source size: {}. dest size: {}",
+                     source.size(),
+                     dest.size());
     Logger::Warning("src stack : %s", source.pretty().c_str());
     Logger::Warning("dest stack: %s", dest.pretty().c_str());
-    assert(false);
+    assertx(false);
     return;
   }
 
@@ -774,37 +827,46 @@ static void checkJmpTargetEvalStack(const SymbolicStack& source,
   }
 }
 
+std::string SymbolicStack::SymEntry::pretty() const {
+  std::string ret;
+  ret += StackSym::ToString(sym);
+  char flavor = StackSym::GetSymFlavor(sym);
+  if (flavor == StackSym::L || flavor == StackSym::I) {
+    folly::toAppend(':', intval, &ret);
+  } else if (flavor == StackSym::T && name) {
+    folly::toAppend(':', name->data(), &ret);
+  }
+  return ret;
+}
+
 std::string SymbolicStack::pretty() const {
   std::ostringstream out;
-  out << " [" << std::hex;
+  out << "[" << std::hex;
   size_t j = 0;
+  auto sep = "";
   for (size_t i = 0; i < m_symStack.size(); ++i) {
+    out << sep;
+    sep = " ";
     while (j < m_actualStack.size() && m_actualStack[j] < int(i)) {
       ++j;
     }
     if (j < m_actualStack.size() && m_actualStack[j] == int(i)) {
       out << "*";
     }
-    out << StackSym::ToString(m_symStack[i].sym);
-    char flavor = StackSym::GetSymFlavor(m_symStack[i].sym);
-    if (flavor == StackSym::L || flavor == StackSym::I) {
-      out << ":" << m_symStack[i].intval;
-    } else if (flavor == StackSym::T) {
-      out << ":" << m_symStack[i].metaData.name->data();
-    }
-    out << ' ';
+    out << m_symStack[i].pretty();
   }
+  out << ']';
   return out.str();
 }
 
 void SymbolicStack::push(char sym) {
-  if (sym != StackSym::W && sym != StackSym::K && sym != StackSym::L &&
-      sym != StackSym::T && sym != StackSym::I && sym != StackSym::H) {
+  if (!StackSym::IsSymbolic(sym)) {
     m_actualStack.push_back(m_symStack.size());
     *m_actualStackHighWaterPtr = std::max(*m_actualStackHighWaterPtr,
                                           (int)m_actualStack.size());
   }
   m_symStack.push_back(SymEntry(sym));
+  ITRACE(4, "push: {}\n", m_symStack.back().pretty());
 }
 
 void SymbolicStack::pop() {
@@ -818,6 +880,7 @@ void SymbolicStack::pop() {
     assert(!m_actualStack.empty());
     m_actualStack.pop_back();
   }
+  ITRACE(4, "pop: {}\n", m_symStack.back().pretty());
   m_symStack.pop_back();
 }
 
@@ -833,10 +896,7 @@ char SymbolicStack::get(int index) const {
 
 const StringData* SymbolicStack::getName(int index) const {
   assert(index >= 0 && index < (int)m_symStack.size());
-  if (m_symStack[index].metaType == META_LITSTR) {
-    return m_symStack[index].metaData.name;
-  }
-  return nullptr;
+  return m_symStack[index].name;
 }
 
 const StringData* SymbolicStack::getClsName(int index) const {
@@ -852,13 +912,8 @@ bool SymbolicStack::isCls(int index) const {
 void SymbolicStack::setString(const StringData* s) {
   assert(m_symStack.size());
   SymEntry& se = m_symStack.back();
-  if (se.metaType == META_LITSTR) {
-    assert(se.metaData.name == s);
-  } else {
-    assert(se.metaType == META_NONE);
-  }
-  se.metaData.name = s;
-  se.metaType = META_LITSTR;
+  assert(!se.name || se.name == s);
+  se.name = s;
 }
 
 void SymbolicStack::setKnownCls(const StringData* s, bool nonNull) {
@@ -876,7 +931,7 @@ void SymbolicStack::setInt(int64_t v) {
 void SymbolicStack::cleanTopMeta() {
   SymEntry& se = m_symStack.back();
   se.clsBaseType = CLS_INVALID;
-  se.metaType = META_NONE;
+  se.name = nullptr;
 }
 
 void SymbolicStack::setClsBaseType(ClassBaseType type) {
@@ -899,10 +954,15 @@ void SymbolicStack::set(int index, char sym) {
   // XXX Add assert in debug build to make sure W is not getting
   // written or overwritten by something else
   m_symStack[index].sym = sym;
+  ITRACE(4, "   set: {} -> {}\n", index, m_symStack[index].pretty());
 }
 
-unsigned SymbolicStack::size() const {
+size_t SymbolicStack::size() const {
   return m_symStack.size();
+}
+
+size_t SymbolicStack::actualSize() const {
+  return m_actualStack.size();
 }
 
 bool SymbolicStack::empty() const {
@@ -1043,6 +1103,7 @@ void Label::set(Emitter& e) {
       checkJmpTargetEvalStack(m_evalStack, ev.getEvalStack());
     } else {
       // Assume the current eval stack matches that of the forward branch
+      ITRACE(3, "bind: {}\n", m_evalStack.pretty());
       ev.setEvalStack(m_evalStack);
     }
     // Fix up the EmitterVisitor's table of jump targets
@@ -1599,6 +1660,10 @@ void EmitterVisitor::emitFinallyEpilogue(Emitter& e, Region* region) {
     if (p.second.used) emitGotoTrampoline(e, region, cases, p.first);
   }
   for (auto c : cases) {
+    // Some cases might get assigned state numbers but not actually
+    // occur in the try block. We need to set /some/ target for them,
+    // so point them here.
+    if (!c->isSet()) c->set(e);
     delete c;
   }
   after.set(e);
@@ -1960,8 +2025,12 @@ void EmitterVisitor::popEvalStack(char expected, int arg, int pos) {
 }
 
 void EmitterVisitor::popSymbolicLocal(Op op, int arg, int pos) {
-  // Special case for instructions that consume the loc below the
-  // top.
+  // Special case for instructions that consume the loc below the top, or don't
+  // actually consume from the eval stack.
+  if (op == OpBaseL || op == OpDimL || op == OpQueryML) {
+    return;
+  }
+
   int belowTop = -1;
   if (op == OpCGetL3) {
     belowTop = 3;
@@ -1984,6 +2053,10 @@ void EmitterVisitor::popSymbolicLocal(Op op, int arg, int pos) {
 }
 
 void EmitterVisitor::popEvalStackMMany() {
+  ITRACE(3, "popEvalStackMMany()\n");
+  Trace::Indent i;
+
+  ITRACE(3, "popping member codes\n");
   while (!m_evalStack.empty()) {
     char sym = m_evalStack.top();
     char symFlavor = StackSym::GetSymFlavor(sym);
@@ -2027,6 +2100,8 @@ void EmitterVisitor::popEvalStackMMany() {
                        m_ue.bcPos());
     return;
   }
+
+  ITRACE(3, "popping location\n");
   char sym = m_evalStack.top();
   char symFlavor = StackSym::GetSymFlavor(sym);
   m_evalStack.pop();
@@ -2173,11 +2248,11 @@ bool EmitterVisitor::isJumpTarget(Offset target) {
   return (it != m_jumpTargetEvalStacks.end());
 }
 
-class IterFreeThunklet : public Thunklet {
+class IterFreeThunklet final : public Thunklet {
 public:
   IterFreeThunklet(Id iterId, bool itRef)
     : m_id(iterId), m_itRef(itRef) {}
-  virtual void emit(Emitter& e) {
+  void emit(Emitter& e) override {
     if (m_itRef) {
       e.MIterFree(m_id);
     } else {
@@ -2193,11 +2268,11 @@ private:
 /**
  * A thunklet for the fault region protecting a silenced (@) expression.
  */
-class RestoreErrorReportingThunklet : public Thunklet {
+class RestoreErrorReportingThunklet final : public Thunklet {
 public:
   explicit RestoreErrorReportingThunklet(Id loc)
     : m_oldLevelLoc(loc) {}
-  virtual void emit(Emitter& e) {
+  void emit(Emitter& e) override {
     e.getEmitterVisitor().emitRestoreErrorReporting(e, m_oldLevelLoc);
     e.Unwind();
   }
@@ -2205,11 +2280,11 @@ private:
   Id m_oldLevelLoc;
 };
 
-class UnsetUnnamedLocalThunklet : public Thunklet {
+class UnsetUnnamedLocalThunklet final : public Thunklet {
 public:
   explicit UnsetUnnamedLocalThunklet(Id loc)
     : m_loc(loc) {}
-  virtual void emit(Emitter& e) {
+  void emit(Emitter& e) override {
     e.getEmitterVisitor().emitVirtualLocal(m_loc);
     e.getEmitterVisitor().emitUnset(e);
     e.Unwind();
@@ -2218,12 +2293,28 @@ private:
   Id m_loc;
 };
 
-class FinallyThunklet : public Thunklet {
+class UnsetUnnamedLocalsThunklet final : public Thunklet {
+public:
+  explicit UnsetUnnamedLocalsThunklet(std::vector<Id>&& locs)
+    : m_locs(std::move(locs)) {}
+  void emit(Emitter& e) override {
+    auto& visitor = e.getEmitterVisitor();
+    for (auto loc : m_locs) {
+      visitor.emitVirtualLocal(loc);
+      visitor.emitUnset(e);
+    }
+    e.Unwind();
+  }
+private:
+  const std::vector<Id> m_locs;
+};
+
+class FinallyThunklet final : public Thunklet {
 public:
   explicit FinallyThunklet(FinallyStatementPtr finallyStatement,
                            int numLiveIters)
       : m_finallyStatement(finallyStatement), m_numLiveIters(numLiveIters) {}
-  virtual void emit(Emitter& e) {
+  void emit(Emitter& e) override {
     auto& visitor = e.getEmitterVisitor();
     auto region =
       visitor.createRegion(m_finallyStatement, Region::Kind::FaultFunclet);
@@ -2265,8 +2356,8 @@ void EmitterVisitor::listAssignmentVisitLHS(Emitter& e, ExpressionPtr exp,
 
   if (exp->is(Expression::KindOfListAssignment)) {
     // Nested assignment
-    ListAssignmentPtr la = static_pointer_cast<ListAssignment>(exp);
-    ExpressionListPtr lhs = la->getVariables();
+    auto la = static_pointer_cast<ListAssignment>(exp);
+    auto lhs = la->getVariables();
     int n = lhs->getCount();
     for (int i = 0; i < n; ++i) {
       indexChain.push_back(i);
@@ -2323,8 +2414,7 @@ void EmitterVisitor::visitIfCondition(
   ExpressionPtr cond, Emitter& e, Label& tru, Label& fals,
   bool truFallthrough) {
 
-  BinaryOpExpressionPtr binOpNode(
-    dynamic_pointer_cast<BinaryOpExpression>(cond));
+  auto binOpNode = dynamic_pointer_cast<BinaryOpExpression>(cond);
 
   if (binOpNode) {
     int op = binOpNode->getOp();
@@ -2355,7 +2445,7 @@ void EmitterVisitor::visitIfCondition(
     }
   }
 
-  UnaryOpExpressionPtr unOpNode(dynamic_pointer_cast<UnaryOpExpression>(cond));
+  auto unOpNode = dynamic_pointer_cast<UnaryOpExpression>(cond);
   if (unOpNode) {
     int op = unOpNode->getOp();
     // Logical not
@@ -2414,12 +2504,16 @@ void EmitterVisitor::visit(FileScopePtr file) {
   FunctionScopePtr func(file->getPseudoMain());
   if (!func) return;
 
+  SCOPE_ASSERT_DETAIL("visit FileScope") { return m_evalStack.pretty(); };
+  ITRACE(1, "Emitting file {}\n", file->getName());
+  Trace::Indent indent;
+
   m_file = file;
   assignLocalVariableIds(func);
 
   AnalysisResultPtr ar(file->getContainingProgram());
   assert(ar);
-  MethodStatementPtr m(dynamic_pointer_cast<MethodStatement>(func->getStmt()));
+  auto m = dynamic_pointer_cast<MethodStatement>(func->getStmt());
   if (!m) return;
   StatementListPtr stmts(m->getStmts());
   if (!stmts) return;
@@ -2429,7 +2523,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
   int i, nk = stmts->getCount();
   for (i = 0; i < nk; i++) {
     StatementPtr s = (*stmts)[i];
-    if (MethodStatementPtr meth = dynamic_pointer_cast<MethodStatement>(s)) {
+    if (auto meth = dynamic_pointer_cast<MethodStatement>(s)) {
       // Emit afterwards
       postponeMeth(meth, nullptr, true);
     }
@@ -2458,6 +2552,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
 
     for (i = 0; i < nk; i++) {
       StatementPtr s = (*stmts)[i];
+      e.setTempLocation(s->getRange());
       switch (s->getKindOf()) {
         case Statement::KindOfMethodStatement:
         case Statement::KindOfFunctionStatement:
@@ -2473,10 +2568,12 @@ void EmitterVisitor::visit(FileScopePtr file) {
           }
           break;
         }
-        case Statement::KindOfTypedefStatement:
-          emitTypedef(e, static_pointer_cast<TypedefStatement>(s));
-          notMergeOnly = true; // TODO(#2103206): typedefs should be mergable
+        case Statement::KindOfTypedefStatement: {
+          auto const id =
+            emitTypedef(e, static_pointer_cast<TypedefStatement>(s));
+          m_ue.pushMergeableTypeAlias(Unit::MergeKind::TypeAlias, id);
           break;
+        }
         case Statement::KindOfReturnStatement:
           if (mainReturn.m_type != kInvalidDataType) break;
 
@@ -2488,7 +2585,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
           }
 
           {
-            ReturnStatementPtr r(static_pointer_cast<ReturnStatement>(s));
+            auto r = static_pointer_cast<ReturnStatement>(s);
             Variant v((Variant::NullInit()));
             if (r->getRetExp() &&
                 !r->getRetExp()->getScalarValue(v)) {
@@ -2502,7 +2599,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
               v = Array(ArrayData::GetScalarArray(v.asCArrRef().get()));
             } else {
               assert(v.isInitialized());
-              assert(!IS_REFCOUNTED_TYPE(v.getType()));
+              assert(!isRefcountedType(v.getType()));
             }
             mainReturn = *v.asCell();
             m_ue.m_returnSeen = true;
@@ -2510,12 +2607,10 @@ void EmitterVisitor::visit(FileScopePtr file) {
           break;
         case Statement::KindOfExpStatement:
           if (mainReturn.m_type == kInvalidDataType) {
-            ExpressionPtr e =
-              static_pointer_cast<ExpStatement>(s)->getExpression();
+            auto e = static_pointer_cast<ExpStatement>(s)->getExpression();
             switch (e->getKindOf()) {
               case Expression::KindOfSimpleFunctionCall: {
-                SimpleFunctionCallPtr func =
-                  static_pointer_cast<SimpleFunctionCall>(e);
+                auto func = static_pointer_cast<SimpleFunctionCall>(e);
                 StringData *name;
                 TypedValue tv;
                 if (func->isSimpleDefine(&name, &tv)) {
@@ -2532,8 +2627,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
                 break;
               }
               case Expression::KindOfAssignmentExpression: {
-                AssignmentExpressionPtr ae(
-                  static_pointer_cast<AssignmentExpression>(e));
+                auto ae = static_pointer_cast<AssignmentExpression>(e);
                 StringData *name;
                 TypedValue tv;
                 if (ae->isSimpleGlobalAssign(&name, &tv)) {
@@ -2544,8 +2638,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
                 break;
               }
               case Expression::KindOfIncludeExpression: {
-                IncludeExpressionPtr inc =
-                  static_pointer_cast<IncludeExpression>(e);
+                auto inc = static_pointer_cast<IncludeExpression>(e);
                 if (inc->isReqLit()) {
                   if (FileScopeRawPtr f = inc->getIncludedFile(ar)) {
                     if (StatementListPtr sl = f->getStmt()) {
@@ -2590,7 +2683,8 @@ void EmitterVisitor::visit(FileScopePtr file) {
     // current position in the bytecode is reachable, emit code to
     // return 1.
     if (currentPositionIsReachable()) {
-      LocationPtr loc(new Location());
+      Location::Range loc;
+      if (m_ue.bcPos() > 0) loc.line0 = -1;
       e.setTempLocation(loc);
       if (boost::algorithm::ends_with(filename, EVAL_FILENAME_SUFFIX)) {
         e.Null();
@@ -2598,7 +2692,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
         e.Int(1);
       }
       e.RetC();
-      e.setTempLocation(LocationPtr());
+      e.setTempLocation(OptLocation());
     }
   }
 
@@ -2618,14 +2712,10 @@ void EmitterVisitor::visit(FileScopePtr file) {
 static StringData* getClassName(ExpressionPtr e) {
   ClassScopeRawPtr cls;
   if (e->isThis()) {
-    cls = e->getOriginalClass();
-  } else if (TypePtr t = e->getActualType()) {
-    if (t->isSpecificObject()) {
-      cls = t->getClass(e->getScope()->getContainingProgram(), e->getScope());
-    }
+    cls = e->getClassScope();
   }
   if (cls && !cls->isTrait()) {
-    return makeStaticString(cls->getOriginalName());
+    return makeStaticString(cls->getScopeName());
   }
   return nullptr;
 }
@@ -2644,9 +2734,9 @@ void EmitterVisitor::fixReturnType(Emitter& e, FunctionCallPtr fn,
     ref = (builtinFunc->attrs() & AttrReference) != 0;
   } else if (fn->isValid() && fn->getFuncScope()) {
     ref = fn->getFuncScope()->isRefReturn();
-  } else if (!fn->getName().empty()) {
+  } else if (!fn->getOriginalName().empty()) {
     FunctionScope::FunctionInfoPtr fi =
-      FunctionScope::GetFunctionInfo(fn->getName());
+      FunctionScope::GetFunctionInfo(fn->getOriginalName());
     if (!fi || !fi->getMaybeRefReturn()) ref = false;
   }
 
@@ -2759,8 +2849,35 @@ bool isStructInit(ExpressionPtr init_expr, std::vector<std::string>& keys) {
     });
 }
 
+void EmitterVisitor::emitCall(Emitter& e,
+                              FunctionCallPtr func,
+                              ExpressionListPtr params,
+                              Offset fpiStart) {
+  auto const numParams = params ? params->getCount() : 0;
+  auto const unpack = func->hasUnpack();
+  if (!func->checkUnpackParams()) {
+    throw IncludeTimeFatalException(
+      func, "Only the last parameter in a function call is allowed to use ...");
+  }
+  {
+    FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
+    for (int i = 0; i < numParams; i++) {
+      auto param = (*params)[i];
+      emitFuncCallArg(e, param, i, param->isUnpack());
+    }
+  }
+
+  if (unpack) {
+    e.FCallUnpack(numParams);
+  } else {
+    e.FCall(numParams);
+  }
+}
+
 bool EmitterVisitor::visit(ConstructPtr node) {
   if (!node) return false;
+
+  SCOPE_ASSERT_DETAIL("visit Construct") { return node->getText(); };
 
   Emitter e(node, m_ue, *this);
 
@@ -2779,7 +2896,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfContinueStatement:
   case Construct::KindOfBreakStatement: {
     auto s = static_pointer_cast<Statement>(node);
-    BreakStatementPtr bs(static_pointer_cast<BreakStatement>(s));
+    auto bs = static_pointer_cast<BreakStatement>(s);
     uint64_t destLevel = bs->getDepth();
 
     if (destLevel > m_regions.back()->getMaxBreakContinueDepth()) {
@@ -2804,7 +2921,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfDoStatement: {
     auto s = static_pointer_cast<Statement>(node);
     auto region = createRegion(s, Region::Kind::LoopOrSwitch);
-    DoStatementPtr ds(static_pointer_cast<DoStatement>(s));
+    auto ds = static_pointer_cast<DoStatement>(s);
 
     Label top(e);
     Label& condition =
@@ -2834,7 +2951,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
 
   case Construct::KindOfCatchStatement: {
     // Store the current exception object in the appropriate local variable
-    CatchStatementPtr cs(static_pointer_cast<CatchStatement>(node));
+    auto cs = static_pointer_cast<CatchStatement>(node);
     StringData* vName = makeStaticString(cs->getVariable()->getName());
     Id i = m_curFunc->lookupVarId(vName);
     emitVirtualLocal(i);
@@ -2846,8 +2963,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfEchoStatement: {
-    EchoStatementPtr es(static_pointer_cast<EchoStatement>(node));
-    ExpressionListPtr exps = es->getExpressionList();
+    auto es = static_pointer_cast<EchoStatement>(node);
+    auto exps = es->getExpressionList();
     int count = exps->getCount();
     for (int i = 0; i < count; i++) {
       visit((*exps)[i]);
@@ -2860,7 +2977,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
 
   case Construct::KindOfExpStatement: {
     auto s = static_pointer_cast<Statement>(node);
-    ExpStatementPtr es(static_pointer_cast<ExpStatement>(s));
+    auto es = static_pointer_cast<ExpStatement>(s);
     if (visit(es->getExpression())) {
       emitPop(e);
     }
@@ -2870,7 +2987,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfForStatement: {
     auto s = static_pointer_cast<Statement>(node);
     auto region = createRegion(s, Region::Kind::LoopOrSwitch);
-    ForStatementPtr fs(static_pointer_cast<ForStatement>(s));
+    auto fs = static_pointer_cast<ForStatement>(s);
 
     if (visit(fs->getInitExp())) {
       emitPop(e);
@@ -2906,7 +3023,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfForEachStatement: {
-    ForEachStatementPtr fe(static_pointer_cast<ForEachStatement>(node));
+    auto fe = static_pointer_cast<ForEachStatement>(node);
     if (fe->isAwaitAs()) {
       emitForeachAwaitAs(e, fe);
     } else {
@@ -2916,12 +3033,11 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfGlobalStatement: {
-    ExpressionListPtr vars(
-      static_pointer_cast<GlobalStatement>(node)->getVars());
+    auto vars = static_pointer_cast<GlobalStatement>(node)->getVars();
     for (int i = 0, n = vars->getCount(); i < n; i++) {
       ExpressionPtr var((*vars)[i]);
       if (var->is(Construct::KindOfSimpleVariable)) {
-        SimpleVariablePtr sv(static_pointer_cast<SimpleVariable>(var));
+        auto sv = static_pointer_cast<SimpleVariable>(var);
         if (sv->isSuperGlobal()) {
           continue;
         }
@@ -2935,7 +3051,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         e.PopV();
       } else if (var->is(Construct::KindOfDynamicVariable)) {
         // global $<exp> =& $GLOBALS[<exp>]
-        DynamicVariablePtr dv(static_pointer_cast<DynamicVariable>(var));
+        auto dv = static_pointer_cast<DynamicVariable>(var);
         // Get the variable name as a cell, for the LHS
         visit(dv->getSubExpression());
         emitConvertToCell(e);
@@ -2954,13 +3070,12 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfIfStatement: {
-    IfStatementPtr ifp(static_pointer_cast<IfStatement>(node));
+    auto ifp = static_pointer_cast<IfStatement>(node);
     StatementListPtr branches(ifp->getIfBranches());
     int nb = branches->getCount();
     Label done;
     for (int i = 0; i < nb; i++) {
-      IfBranchStatementPtr branch(
-        static_pointer_cast<IfBranchStatement>((*branches)[i]));
+      auto branch = static_pointer_cast<IfBranchStatement>((*branches)[i]);
       Label fals;
       if (branch->getCondition()) {
         Label tru;
@@ -2989,7 +3104,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     not_reached(); // handled by KindOfIfStatement
 
   case Construct::KindOfReturnStatement: {
-    ReturnStatementPtr r(static_pointer_cast<ReturnStatement>(node));
+    auto r = static_pointer_cast<ReturnStatement>(node);
 
     char retSym = StackSym::C;
     if (visit(r->getRetExp())) {
@@ -3010,17 +3125,15 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfStaticStatement: {
-    ExpressionListPtr vars(
-      static_pointer_cast<StaticStatement>(node)->getVars());
+    auto vars = static_pointer_cast<StaticStatement>(node)->getVars();
     for (int i = 0, n = vars->getCount(); i < n; i++) {
       ExpressionPtr se((*vars)[i]);
       assert(se->is(Construct::KindOfAssignmentExpression));
-      AssignmentExpressionPtr ae(
-        static_pointer_cast<AssignmentExpression>(se));
+      auto ae = static_pointer_cast<AssignmentExpression>(se);
       ExpressionPtr var(ae->getVariable());
       ExpressionPtr value(ae->getValue());
       assert(var->is(Construct::KindOfSimpleVariable));
-      SimpleVariablePtr sv(static_pointer_cast<SimpleVariable>(var));
+      auto sv = static_pointer_cast<SimpleVariable>(var);
       StringData* name = makeStaticString(sv->getName());
       Id local = m_curFunc->lookupVarId(name);
 
@@ -3061,15 +3174,15 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfSwitchStatement: {
     auto s = static_pointer_cast<Statement>(node);
     auto region = createRegion(s, Region::Kind::LoopOrSwitch);
-    SwitchStatementPtr sw(static_pointer_cast<SwitchStatement>(node));
+    auto sw = static_pointer_cast<SwitchStatement>(node);
 
-    StatementListPtr cases(sw->getCases());
+    auto cases = sw->getCases();
     if (!cases) {
       visit(sw->getExp());
       emitPop(e);
       return false;
     }
-    uint ncase = cases->getCount();
+    uint32_t ncase = cases->getCount();
     std::vector<Label> caseLabels(ncase);
     Label& brkTarget = registerBreak(sw, region.get(), 1, false)->m_label;
     Label& contTarget =
@@ -3083,15 +3196,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     // false.  In particular, if a case condition modifies the switch
     // subject, things behave differently depending on whether the subject
     // is a simple variable.
-    ExpressionPtr subject = sw->getExp();
+    auto subject = sw->getExp();
     bool simpleSubject = subject->is(Construct::KindOfSimpleVariable)
       && !static_pointer_cast<SimpleVariable>(subject)->getAlwaysStash();
     Id tempLocal = -1;
     Offset start = InvalidAbsoluteOffset;
 
-    bool enabled = RuntimeOption::EnableEmitSwitch;
-    SimpleFunctionCallPtr
-      call(dynamic_pointer_cast<SimpleFunctionCall>(subject));
+    bool enabled = RuntimeOption::EvalEmitSwitch;
+    auto call = dynamic_pointer_cast<SimpleFunctionCall>(subject);
 
     SwitchState state;
     bool didSwitch = false;
@@ -3110,7 +3222,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         } else if (stype == KindOfInt64) {
           emitIntegerSwitch(e, sw, caseLabels, brkTarget, state);
         } else {
-          assert(IS_STRING_TYPE(*stype));
+          assert(isStringType(*stype));
           emitStringSwitch(e, sw, caseLabels, brkTarget, state);
         }
         didSwitch = true;
@@ -3130,8 +3242,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       }
 
       int defI = -1;
-      for (uint i = 0; i < ncase; i++) {
-        CaseStatementPtr c(static_pointer_cast<CaseStatement>((*cases)[i]));
+      for (uint32_t i = 0; i < ncase; i++) {
+        auto c = static_pointer_cast<CaseStatement>((*cases)[i]);
         ExpressionPtr condition = c->getCondition();
         if (condition) {
           if (simpleSubject) {
@@ -3163,9 +3275,9 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         e.Jmp(brkTarget);
       }
     }
-    for (uint i = 0; i < ncase; i++) {
+    for (uint32_t i = 0; i < ncase; i++) {
       caseLabels[i].set(e);
-      CaseStatementPtr c(static_pointer_cast<CaseStatement>((*cases)[i]));
+      auto c = static_pointer_cast<CaseStatement>((*cases)[i]);
       enterRegion(region);
       SCOPE_EXIT { leaveRegion(region); };
       visit(c->getStatement());
@@ -3198,7 +3310,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     enterRegion(region);
     SCOPE_EXIT { leaveRegion(region); };
 
-    FinallyStatementPtr fs = static_pointer_cast<FinallyStatement>(node);
+    auto fs = static_pointer_cast<FinallyStatement>(node);
     visit(fs->getBody());
     return false;
   }
@@ -3212,10 +3324,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         "at the beginning of a try region: %d", m_ue.bcPos());
     }
 
-    TryStatementPtr ts = static_pointer_cast<TryStatement>(node);
-
-    FinallyStatementPtr f(static_pointer_cast<FinallyStatement>
-                          (ts->getFinally()));
+    auto ts = static_pointer_cast<TryStatement>(node);
+    auto f = static_pointer_cast<FinallyStatement>(ts->getFinally());
 
     Offset start = m_ue.bcPos();
     Offset end;
@@ -3253,9 +3363,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
 
         bool firstHandler = true;
         for (int i = 0; i < catch_count; i++) {
-          CatchStatementPtr c(static_pointer_cast<CatchStatement>
-                              ((*catches)[i]));
-          StringData* eName = makeStaticString(c->getClassName());
+          auto c = static_pointer_cast<CatchStatement>((*catches)[i]);
+          StringData* eName = makeStaticString(c->getOriginalClassName());
 
           // If there's already a catch of this class, skip;
           // the first one wins
@@ -3299,8 +3408,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfUnsetStatement: {
-    ExpressionListPtr exps(
-      static_pointer_cast<UnsetStatement>(node)->getExps());
+    auto exps = static_pointer_cast<UnsetStatement>(node)->getExps();
     for (int i = 0, n = exps->getCount(); i < n; i++) {
       emitVisitAndUnset(e, (*exps)[i]);
     }
@@ -3310,7 +3418,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfWhileStatement: {
     auto s = static_pointer_cast<Statement>(node);
     auto region = createRegion(s, Region::Kind::LoopOrSwitch);
-    WhileStatementPtr ws(static_pointer_cast<WhileStatement>(s));
+    auto ws = static_pointer_cast<WhileStatement>(s);
     ExpressionPtr condExp(ws->getCondExp());
     Label& lcontinue = registerContinue(ws, region.get(), 1,
       false)->m_label;
@@ -3346,7 +3454,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     not_reached();
 
   case Construct::KindOfFunctionStatement: {
-    MethodStatementPtr m(static_pointer_cast<MethodStatement>(node));
+    auto m = static_pointer_cast<MethodStatement>(node);
     // Only called for fn defs not on the top level
     assert(!node->getClassScope()); // Handled directly by emitClass().
     StringData* nName = makeStaticString(m->getOriginalName());
@@ -3357,14 +3465,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfGotoStatement: {
-    GotoStatementPtr g(static_pointer_cast<GotoStatement>(node));
+    auto g = static_pointer_cast<GotoStatement>(node);
     StringData* nName = makeStaticString(g->label());
     emitGoto(e, nName, g);
     return false;
   }
 
   case Construct::KindOfLabelStatement: {
-    LabelStatementPtr l(static_pointer_cast<LabelStatement>(node));
+    auto l = static_pointer_cast<LabelStatement>(node);
     StringData* nName = makeStaticString(l->label());
     registerGoto(l, m_regions.back().get(), nName, false)
       ->m_label.set(e);
@@ -3378,16 +3486,15 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     not_implemented();
   }
   case Construct::KindOfUnaryOpExpression: {
-    UnaryOpExpressionPtr u(static_pointer_cast<UnaryOpExpression>(node));
+    auto u = static_pointer_cast<UnaryOpExpression>(node);
     int op = u->getOp();
 
     if (op == T_UNSET) {
       // php doesnt have an unset expression, but hphp's optimizations
       // sometimes introduce them
-      ExpressionPtr exp(u->getExpression());
+      auto exp = u->getExpression();
       if (exp->is(Construct::KindOfExpressionList)) {
-        ExpressionListPtr exps(
-          static_pointer_cast<ExpressionList>(exp));
+        auto exps = static_pointer_cast<ExpressionList>(exp);
         if (exps->getListKind() == ExpressionList::ListKindParam) {
           for (int i = 0, n = exps->getCount(); i < n; i++) {
             emitVisitAndUnset(e, (*exps)[i]);
@@ -3405,8 +3512,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       emitArrayInit(e, el);
       return true;
     } else if (op == T_ISSET) {
-      ExpressionListPtr list =
-        dynamic_pointer_cast<ExpressionList>(u->getExpression());
+      auto list = dynamic_pointer_cast<ExpressionList>(u->getExpression());
       if (list) {
         // isset($a, $b, ...)  ==>  isset($a) && isset($b) && ...
         Label done;
@@ -3523,8 +3629,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfAssignmentExpression: {
-    AssignmentExpressionPtr ae(
-      static_pointer_cast<AssignmentExpression>(node));
+    auto ae = static_pointer_cast<AssignmentExpression>(node);
     ExpressionPtr rhs = ae->getValue();
     Id tempLocal = -1;
     Offset start = InvalidAbsoluteOffset;
@@ -3564,7 +3669,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfBinaryOpExpression: {
-    BinaryOpExpressionPtr b(static_pointer_cast<BinaryOpExpression>(node));
+    auto b = static_pointer_cast<BinaryOpExpression>(node);
     int op = b->getOp();
     if (b->isAssignmentOp()) {
       visit(b->getExp1());
@@ -3596,8 +3701,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       emitConvertToCell(e);
       ExpressionPtr second = b->getExp2();
       if (second->isScalar()) {
-        ScalarExpressionPtr scalar =
-          dynamic_pointer_cast<ScalarExpression>(second);
+        auto scalar = dynamic_pointer_cast<ScalarExpression>(second);
         bool notQuoted = scalar && !scalar->isQuoted();
         std::string s = second->getLiteralString();
         if (s == "static" && notQuoted) {
@@ -3613,7 +3717,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
           e.UnboxR();
           e.InstanceOf();
         } else if (s != "") {
-          ClassScopeRawPtr cls = second->getOriginalClass();
+          ClassScopeRawPtr cls = second->getClassScope();
           bool isTrait = cls && cls->isTrait();
           bool isSelf = s == "self" && notQuoted;
           bool isParent = s == "parent" && notQuoted;
@@ -3631,7 +3735,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
           } else {
             if (cls) {
               if (isSelf) {
-                s = cls->getOriginalName();
+                s = cls->getScopeName();
               } else if (isParent) {
                 s = cls->getOriginalParent();
               }
@@ -3697,8 +3801,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfClassConstantExpression: {
-    ClassConstantExpressionPtr cc(
-      static_pointer_cast<ClassConstantExpression>(node));
+    auto cc = static_pointer_cast<ClassConstantExpression>(node);
     auto const nName = makeStaticString(cc->getConName());
     auto const getOriginalClassName = [&] {
       const std::string& clsName = cc->getOriginalClassName();
@@ -3720,7 +3823,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       std::ostringstream s;
       s << "Cannot access " << nCls->data() << "::" << nName->data() <<
            " when no class scope is active";
-      throw IncludeTimeFatalException(e.getNode(), s.str().c_str());
+      throw IncludeTimeFatalException(cc, s.str().c_str());
     };
 
     if (cc->isStatic()) {
@@ -3733,8 +3836,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       visit(cls);
       emitAGet(e);
       emitClsCns();
-    } else if (cc->getOriginalClass() &&
-               !cc->getOriginalClass()->isTrait()) {
+    } else if (cc->getOriginalClassScope() &&
+               !cc->getOriginalClassScope()->isTrait()) {
       // C::Constant inside a class
       auto nCls = getOriginalClassName();
       if (cc->isColonColonClass()) {
@@ -3773,7 +3876,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfConstantExpression: {
-    ConstantExpressionPtr c(static_pointer_cast<ConstantExpression>(node));
+    auto c = static_pointer_cast<ConstantExpression>(node);
     if (c->isNull()) {
       e.Null();
     } else if (c->isBoolean()) {
@@ -3803,9 +3906,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfEncapsListExpression: {
-    EncapsListExpressionPtr el(
-      static_pointer_cast<EncapsListExpression>(node));
-    ExpressionListPtr args(el->getExpressions());
+    auto el = static_pointer_cast<EncapsListExpression>(node);
+    auto args = el->getExpressions();
     int n = args ? args->getCount() : 0;
     int i = 0;
     FPIRegionRecorder* fpi = nullptr;
@@ -3845,8 +3947,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfArrayElementExpression: {
-    ArrayElementExpressionPtr ae(
-      static_pointer_cast<ArrayElementExpression>(node));
+    auto ae = static_pointer_cast<ArrayElementExpression>(node);
     if (!ae->isSuperGlobal() || !ae->getOffset()) {
       visit(ae->getVariable());
       // XHP syntax allows for expressions like "($a =& $b)[0]". We
@@ -3879,15 +3980,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     }
     if (!ae->hasAnyContext(Expression::AccessContext|
                            Expression::ObjectContext)) {
-      m_tempLoc = ae->getLocation();
+      m_tempLoc = ae->getRange();
     }
     return true;
   }
 
   case Construct::KindOfSimpleFunctionCall: {
-    SimpleFunctionCallPtr call(
-      static_pointer_cast<SimpleFunctionCall>(node));
-    ExpressionListPtr params = call->getParams();
+    auto call = static_pointer_cast<SimpleFunctionCall>(node);
+    auto params = call->getParams();
 
     if (call->isFatalFunction()) {
       if (params && params->getCount() == 1) {
@@ -3916,9 +4016,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       }
     } else if (call->isCallToFunction("hh\\invariant")) {
       if (emitHHInvariant(e, call)) return true;
-    } else if (call->isCallToFunction("idx") &&
-               call->isOptimizable() &&
-               systemlibDefinesIdx &&
+    } else if (call->isCallToFunction("hh\\idx") &&
                !Option::JitEnableRenameFunction) {
       if (params && (params->getCount() == 2 || params->getCount() == 3)) {
         visit((*params)[0]);
@@ -3947,17 +4045,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         e.ArrayIdx();
         return true;
       }
-    } else if (call->isCallToFunction("strlen")) {
-      if (params && params->getCount() == 1) {
-        visit((*params)[0]);
-        emitConvertToCell(e);
-        call->changeToBytecode();
-        e.Strlen();
-        return true;
-      }
     } else if (call->isCallToFunction("max")) {
       if (params && params->getCount() == 2) {
         emitFuncCall(e, call, "__SystemLib\\max2", params);
+        return true;
+      }
+    } else if (call->isCallToFunction("min")) {
+      if (params && params->getCount() == 2) {
+        emitFuncCall(e, call, "__SystemLib\\min2", params);
         return true;
       }
     } else if (call->isCallToFunction("define")) {
@@ -3983,9 +4078,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       Variant v1;
       if (p0->getKindOf() == Construct::KindOfSimpleFunctionCall &&
           p1->getScalarValue(v1) && v1.isInteger()) {
-        SimpleFunctionCallPtr innerCall(
-          static_pointer_cast<SimpleFunctionCall>(p0));
-        ExpressionListPtr innerParams = innerCall->getParams();
+        auto innerCall = static_pointer_cast<SimpleFunctionCall>(p0);
+        auto innerParams = innerCall->getParams();
         if (innerCall->isCallToFunction("func_get_args") &&
             (!innerParams || innerParams->getCount() == 0)) {
           params->removeElement(0);
@@ -4027,7 +4121,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                call->getClassScope() &&
                !call->getClassScope()->isTrait()) {
       StringData* name =
-        makeStaticString(call->getClassScope()->getOriginalName());
+        makeStaticString(call->getClassScope()->getScopeName());
       e.String(name);
       return true;
     }
@@ -4075,7 +4169,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfIncludeExpression: {
-    IncludeExpressionPtr ie(static_pointer_cast<IncludeExpression>(node));
+    auto ie = static_pointer_cast<IncludeExpression>(node);
     if (ie->isReqLit()) {
       StringData* nValue = makeStaticString(ie->includePath());
       e.String(nValue);
@@ -4105,8 +4199,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfListAssignment: {
-    ListAssignmentPtr la(static_pointer_cast<ListAssignment>(node));
-    ExpressionPtr rhs = la->getArray();
+    auto la = static_pointer_cast<ListAssignment>(node);
+    auto rhs = la->getArray();
 
     // listAssignmentVisitLHS should have handled this
     assert(rhs);
@@ -4160,11 +4254,10 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfNewObjectExpression: {
-    NewObjectExpressionPtr ne(
-      static_pointer_cast<NewObjectExpression>(node));
-    ExpressionListPtr params(ne->getParams());
+    auto ne = static_pointer_cast<NewObjectExpression>(node);
+    auto params = ne->getParams();
     int numParams = params ? params->getCount() : 0;
-    ClassScopeRawPtr cls = ne->getOriginalClass();
+    ClassScopeRawPtr cls = ne->getClassScope();
 
     Offset fpiStart;
     if (ne->isStatic()) {
@@ -4198,30 +4291,17 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                    makeStaticString(ne->getOriginalClassName()));
     }
 
-    {
-      FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
-      for (int i = 0; i < numParams; i++) {
-        emitFuncCallArg(e, (*params)[i], i,
-                        ne->hasUnpack() && i + 1 == numParams);
-      }
-    }
-
-    if (ne->hasUnpack()) {
-      e.FCallUnpack(numParams);
-    } else {
-      e.FCall(numParams);
-    }
+    emitCall(e, ne, params, fpiStart);
     e.PopR();
     return true;
   }
 
   case Construct::KindOfObjectMethodExpression: {
-    ObjectMethodExpressionPtr om(
-      static_pointer_cast<ObjectMethodExpression>(node));
+    auto om = static_pointer_cast<ObjectMethodExpression>(node);
     // $obj->name(...)
     // ^^^^
     visit(om->getObject());
-    m_tempLoc = om->getLocation();
+    m_tempLoc = om->getRange();
     emitConvertToCell(e);
     ExpressionListPtr params(om->getParams());
     int numParams = params ? params->getCount() : 0;
@@ -4230,8 +4310,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     ExpressionPtr methName = om->getNameExp();
     bool useDirectForm = false;
     if (methName->is(Construct::KindOfScalarExpression)) {
-      ScalarExpressionPtr sval(
-        static_pointer_cast<ScalarExpression>(methName));
+      auto sval = static_pointer_cast<ScalarExpression>(methName);
       const std::string& methStr = sval->getOriginalLiteralString();
       if (!methStr.empty()) {
         // $obj->name(...)
@@ -4260,26 +4339,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         om->isNullSafe() ? ObjMethodOp::NullSafe : ObjMethodOp::NullThrows
       );
     }
-    {
-      FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
-      // $obj->name(...)
-      //           ^^^^^
-      for (int i = 0; i < numParams; i++) {
-        emitFuncCallArg(e, (*params)[i], i,
-                        om->hasUnpack() && i + 1 == numParams);
-      }
-    }
-    if (om->hasUnpack()) {
-      e.FCallUnpack(numParams);
-    } else {
-      e.FCall(numParams);
-    }
+    // $obj->name(...)
+    //           ^^^^^
+    emitCall(e, om, params, fpiStart);
     return true;
   }
 
   case Construct::KindOfObjectPropertyExpression: {
-    ObjectPropertyExpressionPtr op(
-      static_pointer_cast<ObjectPropertyExpression>(node));
+    auto op = static_pointer_cast<ObjectPropertyExpression>(node);
     if (op->isNullSafe() &&
         op->hasAnyContext(
             Expression::RefValue
@@ -4291,7 +4358,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         Strings::NULLSAFE_PROP_WRITE_ERROR);
     }
     ExpressionPtr obj = op->getObject();
-    SimpleVariablePtr sv = dynamic_pointer_cast<SimpleVariable>(obj);
+    auto sv = dynamic_pointer_cast<SimpleVariable>(obj);
     if (sv && sv->isThis() && sv->hasContext(Expression::ObjectContext)) {
       e.CheckThis();
       m_evalStack.push(StackSym::H);
@@ -4305,7 +4372,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     emitNameString(e, op->getProperty(), true);
     if (!op->hasAnyContext(Expression::AccessContext|
                            Expression::ObjectContext)) {
-      m_tempLoc = op->getLocation();
+      m_tempLoc = op->getRange();
     }
     markProp(
       e,
@@ -4317,7 +4384,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfQOpExpression: {
-    QOpExpressionPtr q(static_pointer_cast<QOpExpression>(node));
+    auto q = static_pointer_cast<QOpExpression>(node);
     if (q->getYes()) {
       // <expr> ? <expr> : <expr>
       Label tru, fals, done;
@@ -4393,7 +4460,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfSimpleVariable: {
-    SimpleVariablePtr sv(static_pointer_cast<SimpleVariable>(node));
+    auto sv = static_pointer_cast<SimpleVariable>(node);
     if (sv->isThis()) {
       if (sv->hasContext(Expression::ObjectContext)) {
         e.This();
@@ -4402,14 +4469,10 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         Id thisId = m_curFunc->lookupVarId(thisStr);
         emitVirtualLocal(thisId);
       } else {
-        if (sv->isGuarded()) {
-          e.This();
-        } else {
-          auto const subop = sv->hasContext(Expression::ExistContext)
-            ? BareThisOp::NoNotice
-            : BareThisOp::Notice;
-          e.BareThis(subop);
-        }
+        auto const subop = sv->hasContext(Expression::ExistContext)
+          ? BareThisOp::NoNotice
+          : BareThisOp::Notice;
+        e.BareThis(subop);
       }
     } else {
       StringData* nLiteral = makeStaticString(sv->getName());
@@ -4433,7 +4496,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfDynamicVariable: {
-    DynamicVariablePtr dv(static_pointer_cast<DynamicVariable>(node));
+    auto dv = static_pointer_cast<DynamicVariable>(node);
     visit(dv->getSubExpression());
     emitConvertToCellOrLoc(e);
     markName(e);
@@ -4441,8 +4504,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfStaticMemberExpression: {
-    StaticMemberExpressionPtr sm(
-      static_pointer_cast<StaticMemberExpression>(node));
+    auto sm = static_pointer_cast<StaticMemberExpression>(node);
     emitVirtualClassBase(e, sm.get());
     emitNameString(e, sm->getExp());
     markSProp(e);
@@ -4450,12 +4512,11 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   }
 
   case Construct::KindOfArrayPairExpression: {
-    ArrayPairExpressionPtr ap(
-      static_pointer_cast<ArrayPairExpression>(node));
+    auto ap = static_pointer_cast<ArrayPairExpression>(node);
 
-    ExpressionPtr key = ap->getName();
+    auto key = ap->getName();
     if (!m_staticArrays.empty()) {
-      ExpressionPtr val = ap->getValue();
+      auto val = ap->getValue();
 
       TypedValue tvVal;
       initScalar(tvVal, val);
@@ -4508,7 +4569,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     return true;
   }
   case Construct::KindOfExpressionList: {
-    ExpressionListPtr el(static_pointer_cast<ExpressionList>(node));
+    auto el = static_pointer_cast<ExpressionList>(node);
     int nelem = el->getCount(), i;
     bool pop = el->getListKind() != ExpressionList::ListKindParam;
     int keep = el->getListKind() == ExpressionList::ListKindLeft ?
@@ -4538,7 +4599,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfClosureExpression: {
     // Closures are implemented by anonymous classes that extend Closure.
     // There is one anonymous class per closure body.
-    ClosureExpressionPtr ce(static_pointer_cast<ClosureExpression>(node));
+    auto ce = static_pointer_cast<ClosureExpression>(node);
 
     // Build a convenient list of use-variables. Each one corresponds to:
     // (a) an instance variable, to store the value until call time
@@ -4546,13 +4607,12 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     // (c) an argument to the constructor at the definition site
     // (d) a line of code in the generated constructor;
     // (e) a line of code in the generated prologue to the closure body
-    ExpressionListPtr useList(ce->getClosureVariables());
+    auto useList = ce->getClosureVariables();
     ClosureUseVarVec useVars;
     int useCount = (useList ? useList->getCount() : 0);
     if (useList) {
       for (int i = 0; i < useCount; ++i) {
-        ParameterExpressionPtr var(
-          static_pointer_cast<ParameterExpression>((*useList)[i]));
+        auto var = static_pointer_cast<ParameterExpression>((*useList)[i]);
         StringData* varName = makeStaticString(var->getName());
         useVars.push_back(ClosureUseVar(varName, var->isRef()));
       }
@@ -4564,7 +4624,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     for (int i = 0; i < useCount; ++i) {
       ce->type() == ClosureType::Short
         ? emitLambdaCaptureArg(e, (*valuesList)[i])
-        : emitBuiltinCallArg(e, (*valuesList)[i], i, useVars[i].second);
+        : (void)emitBuiltinCallArg(e, (*valuesList)[i], i,
+                                   useVars[i].second, false);
     }
 
     // The parser generated a unique name for the function,
@@ -4598,13 +4659,12 @@ bool EmitterVisitor::visit(ConstructPtr node) {
 
     // From here on out, we're creating a new class to hold the closure.
     const static StringData* parentName = makeStaticString("Closure");
-    const Location* sLoc = ce->getLocation().get();
     PreClassEmitter* pce = m_ue.newPreClassEmitter(
       ssClsName, PreClass::ClosureHoistable);
 
     auto const attrs = AttrNoOverride | AttrUnique | AttrPersistent;
 
-    pce->init(sLoc->line0, sLoc->line1, m_ue.bcPos(),
+    pce->init(ce->line0(), ce->line1(), m_ue.bcPos(),
               attrs, parentName, nullptr);
 
     // Instance properties---one for each use var, and one for
@@ -4622,14 +4682,13 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     FuncEmitter* invoke = m_ue.newMethodEmitter(invokeName, pce);
     invoke->isClosureBody = true;
     pce->addMethod(invoke);
-    MethodStatementPtr body(
-      static_pointer_cast<MethodStatement>(ce->getClosureFunction()));
+    auto body = static_pointer_cast<MethodStatement>(ce->getClosureFunction());
     postponeMeth(body, invoke, false, new ClosureUseVarVec(useVars));
 
     return true;
   }
   case Construct::KindOfYieldExpression: {
-    YieldExpressionPtr y(static_pointer_cast<YieldExpression>(node));
+    auto y = static_pointer_cast<YieldExpression>(node);
 
     registerYieldAwait(y);
     assert(m_evalStack.size() == 0);
@@ -4660,25 +4719,18 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     return true;
   }
   case Construct::KindOfAwaitExpression: {
-    AwaitExpressionPtr await(static_pointer_cast<AwaitExpression>(node));
+    auto await = static_pointer_cast<AwaitExpression>(node);
 
     registerYieldAwait(await);
     assert(m_evalStack.size() == 0);
 
-    // If we know statically that it's a subtype of WaitHandle, we
-    // don't need to make a call.
-    bool const isKnownWaitHandle = [&] {
-      auto const expr = await->getExpression();
-      auto const ar = expr->getScope()->getContainingProgram();
-      auto const type = expr->getActualType();
-      return type && Type::SubType(ar, type,
-                       Type::GetType(Type::KindOfObject, "HH\\WaitHandle"));
-    }();
+    auto expression = await->getExpression();
+    if (emitInlineGenva(e, expression)) return true;
 
     Label resume;
 
     // evaluate expression passed to await
-    visit(await->getExpression());
+    visit(expression);
     emitConvertToCell(e);
 
     // if expr is null, just continue
@@ -4686,28 +4738,15 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     emitIsType(e, IsTypeOp::Null);
     e.JmpNZ(resume);
 
-    if (!isKnownWaitHandle) {
-      Label likely;
-      const static StringData* nWaitHandle =
-        makeStaticString("HH\\WaitHandle");
-
-      e.Dup();
-      e.InstanceOfD(nWaitHandle);
-      e.JmpNZ(likely);
-      emitConstMethodCallNoParams(e, "getWaitHandle");
-      likely.set(e);
-    }
     assert(m_evalStack.size() == 1);
 
-    // TODO(#3197024): if isKnownWaitHandle, we should put an
-    // AssertObjStk so the Await type check can be avoided.
     e.Await(m_pendingIters.size());
 
     resume.set(e);
     return true;
   }
   case Construct::KindOfQueryExpression: {
-    QueryExpressionPtr query(static_pointer_cast<QueryExpression>(node));
+    auto query = static_pointer_cast<QueryExpression>(node);
     auto args = *query->getQueryArguments();
     auto numArgs = args.getCount();
     visit(args[0]);
@@ -4754,7 +4793,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   not_reached();
 }
 
-void EmitterVisitor::emitConstMethodCallNoParams(Emitter& e, string name) {
+void EmitterVisitor::emitConstMethodCallNoParams(Emitter& e,
+                                                 const std::string& name) {
   auto const nameLit = makeStaticString(name);
   auto const fpiStart = m_ue.bcPos();
   e.FPushObjMethodD(0, nameLit, ObjMethodOp::NullThrows);
@@ -4765,8 +4805,105 @@ void EmitterVisitor::emitConstMethodCallNoParams(Emitter& e, string name) {
   emitConvertToCell(e);
 }
 
-const StaticString s_hh_invariant_violation("hh\\invariant_violation");
-const StaticString s_invariant_violation("invariant_violation");
+namespace {
+const StaticString
+  s_hh_invariant_violation("hh\\invariant_violation"),
+  s_invariant_violation("invariant_violation"),
+  s_gennull("HH\\Asio\\null"),
+  s_fromArray("fromArray"),
+  s_AwaitAllWaitHandle("HH\\AwaitAllWaitHandle")
+  ;
+}
+
+bool EmitterVisitor::emitInlineGenva(
+  Emitter& e,
+  const ExpressionPtr expression
+) {
+  if (!m_ue.m_isHHFile || !Option::EnableHipHopSyntax ||
+      !expression->is(Expression::KindOfSimpleFunctionCall) ||
+      Option::JitEnableRenameFunction) {
+    return false;
+  }
+  const auto call = static_pointer_cast<SimpleFunctionCall>(expression);
+  assert(call);
+  if (!call->isCallToFunction("genva")) return false;
+  const auto params = call->getParams();
+  if (!params) {
+    e.Array(staticEmptyArray());
+    return true;
+  }
+  if (params->containsUnpack()) {
+    throw IncludeTimeFatalException(params, "do not use ...$args with genva()");
+  }
+  const auto num_params = params->getCount();
+  assertx(num_params > 0);
+
+  for (auto i = int{0}; i < num_params; i++) {
+    Label gwh;
+
+    visit((*params)[i]);
+    emitConvertToCell(e);
+
+    // ($_ !== null ? HH\Asio\null() : $_)->getWaitHandle()
+    e.Dup();
+    emitIsType(e, IsTypeOp::Null);
+    e.JmpZ(gwh);
+    emitPop(e);
+
+    Offset fpiStart = m_ue.bcPos();
+    e.FPushFuncD(0, s_gennull.get());
+    {
+      FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
+    }
+    e.FCall(0);
+    e.UnboxR();
+    gwh.set(e);
+    emitConstMethodCallNoParams(e, "getWaitHandle");
+  }
+
+  std::vector<Id> waithandles(num_params);
+  for (auto i = int{num_params - 1}; i >= 0; --i) {
+    waithandles[i] = emitSetUnnamedL(e);
+  }
+  assertx(waithandles.size() == num_params);
+
+  // AwaitAllWaitHandle::fromArray() always returns a WaitHandle.
+  Offset fpiStart = m_ue.bcPos();
+  e.FPushClsMethodD(1, s_fromArray.get(), s_AwaitAllWaitHandle.get());
+  {
+    FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
+    // create a packed array of the waithandles
+    for (const auto wh : waithandles) {
+      emitVirtualLocal(wh);
+      emitCGet(e);
+    }
+    e.NewPackedArray(num_params);
+    emitFPass(e, 0, PassByRefKind::ErrorOnCell);
+  }
+  e.FCall(1);
+  e.UnboxR();
+
+  e.Await(m_pendingIters.size());
+  // result of AwaitAllWaitHandle does not matter
+  emitPop(e);
+
+  for (const auto wh : waithandles) {
+    emitVirtualLocal(wh);
+    emitPushL(e);
+    e.WHResult();
+  }
+  e.NewPackedArray(num_params);
+
+  for (auto wh : waithandles) {
+    m_curFunc->freeUnnamedLocal(wh);
+  }
+
+  newFaultRegionAndFunclet(
+    fpiStart, m_ue.bcPos(),
+    new UnsetUnnamedLocalsThunklet(std::move(waithandles)));
+
+  return true;
+}
 
 bool EmitterVisitor::emitHHInvariant(Emitter& e, SimpleFunctionCallPtr call) {
   if (!m_ue.m_isHHFile && !RuntimeOption::EnableHipHopSyntax) return false;
@@ -4802,8 +4939,8 @@ bool EmitterVisitor::emitHHInvariant(Emitter& e, SimpleFunctionCallPtr call) {
 }
 
 int EmitterVisitor::scanStackForLocation(int iLast) {
-  assert(iLast >= 0);
-  assert(iLast < (int)m_evalStack.size());
+  assertx(iLast >= 0);
+  assertx(iLast < (int)m_evalStack.size());
   for (int i = iLast; i >= 0; --i) {
     char marker = StackSym::GetMarker(m_evalStack.get(i));
     if (marker != StackSym::E && marker != StackSym::W &&
@@ -4818,6 +4955,105 @@ int EmitterVisitor::scanStackForLocation(int iLast) {
   return 0;
 }
 
+bool EmitterVisitor::emitMOp(int iFirst, int& iLast, bool allowW, Emitter& e,
+                             MOpFlags baseFlags, MOpFlags dimFlags) {
+  // Until we can emit all member operations, we have to do a quick pass over
+  // what would be the member vector to look for unsupported operations.
+  for (auto i = iFirst + 1; i < iLast; ++i) {
+    auto sym = m_evalStack.get(i);
+    UNUSED auto flavor = StackSym::GetSymFlavor(sym);
+    switch (StackSym::GetMarker(sym)) {
+      case StackSym::M:
+        always_assert(flavor == StackSym::A);
+        break;
+      case StackSym::P:
+      case StackSym::Q:
+      case StackSym::E:
+        break;
+      case StackSym::W:
+        return false;
+      case StackSym::S:
+      default:
+        always_assert(false && "Bad intermediate marker");
+    }
+  }
+
+  // Emit the base location operation.
+  auto sym = m_evalStack.get(iFirst);
+  auto flavor = StackSym::GetSymFlavor(sym);
+  switch (StackSym::GetMarker(sym)) {
+    case StackSym::N:
+    case StackSym::G:
+    case StackSym::S:
+      return false;
+
+    case StackSym::None:
+      switch (flavor) {
+        case StackSym::L:
+          e.BaseL(m_evalStack.getLoc(iFirst), baseFlags);
+          break;
+
+        case StackSym::H:
+          e.BaseH();
+          break;
+
+        default:
+          return false;
+      }
+      break;
+
+    default:
+      always_assert(false && "Bad base marker");
+  }
+
+  if (StackSym::GetMarker(m_evalStack.get(iLast)) == StackSym::M) {
+    not_implemented();
+    --iLast;
+  }
+
+  // Emit all intermediate operations, leaving the final operation up to our
+  // caller.
+  for (auto i = iFirst + 1; i < iLast; ++i) {
+    auto sym = m_evalStack.get(i);
+    auto flavor = StackSym::GetSymFlavor(sym);
+
+    auto doDim = [&](PropElemOp op) {
+      if (flavor == StackSym::L) {
+        e.DimL(m_evalStack.getLoc(i), op, dimFlags);
+      } else if (flavor == StackSym::I) {
+        e.DimInt(m_evalStack.getInt(i), op, dimFlags);
+      } else if (flavor == StackSym::T) {
+        e.DimStr(m_evalStack.getName(i), op, dimFlags);
+      } else {
+        auto idx = m_evalStack.actualSize() - 1 - m_evalStack.getActualPos(i);
+        e.DimC(idx, op, dimFlags);
+      }
+    };
+
+    switch (StackSym::GetMarker(sym)) {
+      case StackSym::M:
+        always_assert(false); // should only be final stack element
+        break;
+      case StackSym::P:
+        doDim(PropElemOp::Prop);
+        break;
+      case StackSym::Q:
+        doDim(PropElemOp::PropQ);
+        break;
+      case StackSym::E:
+        doDim(PropElemOp::Elem);
+        break;
+      case StackSym::W:
+        not_implemented();
+      case StackSym::S:
+      default:
+        always_assert(false && "Bad intermediate marker");
+    }
+  }
+
+  return true;
+}
+
 void EmitterVisitor::buildVectorImm(std::vector<uchar>& vectorImm,
                                     int iFirst, int iLast, bool allowW,
                                     Emitter& e) {
@@ -4827,67 +5063,61 @@ void EmitterVisitor::buildVectorImm(std::vector<uchar>& vectorImm,
   vectorImm.clear();
   vectorImm.reserve(iLast - iFirst + 1);
 
-  int metaI = 1;
+  // Because of php's order of evaluation rules, we store the classref for
+  // certain types of S-vectors at the end, instead of the front. See emitCls
+  // for details.
 
-  /*
-   * Because of php's order of evaluation rules, we store the classref
-   * for certain types of S-vectors at the end, instead of the front.
-   * See emitCls for details.
-   */
-
-  {
-    char sym = m_evalStack.get(iFirst);
-    char symFlavor = StackSym::GetSymFlavor(sym);
-    char marker = StackSym::GetMarker(sym);
-    switch (marker) {
-      case StackSym::N: {
-        if (symFlavor == StackSym::C) {
-          vectorImm.push_back(LNC);
-        } else if (symFlavor == StackSym::L) {
-          vectorImm.push_back(LNL);
-        } else {
-          assert(false);
-        }
-      } break;
-      case StackSym::G: {
-        if (symFlavor == StackSym::C) {
-          vectorImm.push_back(LGC);
-        } else if (symFlavor == StackSym::L) {
-          vectorImm.push_back(LGL);
-        } else {
-          assert(false);
-        }
-      } break;
-      case StackSym::S: {
-        if (symFlavor != StackSym::L && symFlavor != StackSym::C) {
-          unexpectedStackSym(sym, "S-vector base, prop name");
-        }
-        if (m_evalStack.get(iLast) != StackSym::AM) {
-          unexpectedStackSym(sym, "S-vector base, class ref");
-        }
-        const bool curIsLoc = symFlavor == StackSym::L;
-        vectorImm.push_back(curIsLoc ? LSL : LSC);
-      } break;
-      case StackSym::None: {
-        if (symFlavor == StackSym::L) {
-          vectorImm.push_back(LL);
-        } else if (symFlavor == StackSym::C) {
-          vectorImm.push_back(LC);
-        } else if (symFlavor == StackSym::R) {
-          vectorImm.push_back(LR);
-        } else if (symFlavor == StackSym::H) {
-          vectorImm.push_back(LH);
-        } else {
-          not_reached();
-        }
-      } break;
-      default: {
+  char sym = m_evalStack.get(iFirst);
+  char symFlavor = StackSym::GetSymFlavor(sym);
+  char marker = StackSym::GetMarker(sym);
+  switch (marker) {
+    case StackSym::N: {
+      if (symFlavor == StackSym::C) {
+        vectorImm.push_back(LNC);
+      } else if (symFlavor == StackSym::L) {
+        vectorImm.push_back(LNL);
+      } else {
+        always_assert(false);
+      }
+    } break;
+    case StackSym::G: {
+      if (symFlavor == StackSym::C) {
+        vectorImm.push_back(LGC);
+      } else if (symFlavor == StackSym::L) {
+        vectorImm.push_back(LGL);
+      } else {
+        always_assert(false);
+      }
+    } break;
+    case StackSym::S: {
+      if (symFlavor != StackSym::L && symFlavor != StackSym::C) {
+        unexpectedStackSym(sym, "S-vector base, prop name");
+      }
+      if (m_evalStack.get(iLast) != StackSym::AM) {
+        unexpectedStackSym(sym, "S-vector base, class ref");
+      }
+      const bool curIsLoc = symFlavor == StackSym::L;
+      vectorImm.push_back(curIsLoc ? LSL : LSC);
+    } break;
+    case StackSym::None: {
+      if (symFlavor == StackSym::L) {
+        vectorImm.push_back(LL);
+      } else if (symFlavor == StackSym::C) {
+        vectorImm.push_back(LC);
+      } else if (symFlavor == StackSym::R) {
+        vectorImm.push_back(LR);
+      } else if (symFlavor == StackSym::H) {
+        vectorImm.push_back(LH);
+      } else {
         not_reached();
       }
+    } break;
+    default: {
+      not_reached();
     }
-    if (symFlavor == StackSym::L) {
-      encodeIvaToVector(vectorImm, m_evalStack.getLoc(iFirst));
-    }
+  }
+  if (symFlavor == StackSym::L) {
+    encodeIvaToVector(vectorImm, m_evalStack.getLoc(iFirst));
   }
 
   int i = iFirst + 1;
@@ -4941,7 +5171,7 @@ void EmitterVisitor::buildVectorImm(std::vector<uchar>& vectorImm,
       case StackSym::S: {
         assert(false);
       }
-      default: assert(false); break;
+      default: always_assert(false); break;
     }
 
     if (symFlavor == StackSym::L) {
@@ -4954,14 +5184,13 @@ void EmitterVisitor::buildVectorImm(std::vector<uchar>& vectorImm,
     }
 
     ++i;
-    if (marker != StackSym::W) ++metaI;
   }
 }
 
 void EmitterVisitor::emitPop(Emitter& e) {
   if (checkIfStackEmpty("Pop*")) return;
   LocationGuard loc(e, m_tempLoc);
-  m_tempLoc.reset();
+  m_tempLoc.clear();
 
   emitClsIfSPropBase(e);
   int iLast = m_evalStack.size()-1;
@@ -5038,7 +5267,7 @@ void EmitterVisitor::emitAGet(Emitter& e) {
 void EmitterVisitor::emitCGet(Emitter& e) {
   if (checkIfStackEmpty("CGet*")) return;
   LocationGuard loc(e, m_tempLoc);
-  m_tempLoc.reset();
+  m_tempLoc.clear();
 
   emitClsIfSPropBase(e);
   int iLast = m_evalStack.size()-1;
@@ -5064,16 +5293,62 @@ void EmitterVisitor::emitCGet(Emitter& e) {
       }
     }
   } else {
+    size_t stackCount = 0;
+    for (size_t idx = i; idx <= iLast; ++idx) {
+      if (!StackSym::IsSymbolic(m_evalStack.get(idx))) ++stackCount;
+    }
+
+    if (!Option::WholeProgram /* no hhbbc support yet */ &&
+        RuntimeOption::EvalEmitNewMInstrs &&
+        emitMOp(i, iLast, false, e, MOpFlags::Warn, MOpFlags::Warn)) {
+      auto sym = m_evalStack.get(iLast);
+      auto flavor = StackSym::GetSymFlavor(sym);
+      auto marker = StackSym::GetMarker(sym);
+      auto op = QueryMOp::CGet;
+
+      auto propElemOp = [&](PropElemOp pe) {
+        if (flavor == StackSym::L) {
+          e.QueryML(stackCount, op, pe, m_evalStack.getLoc(iLast));
+        } else if (flavor == StackSym::I) {
+          e.QueryMInt(stackCount, op, pe, m_evalStack.getInt(iLast));
+        } else if (flavor == StackSym::T) {
+          e.QueryMStr(stackCount, op, pe, m_evalStack.getName(iLast));
+        } else {
+          e.QueryMC(stackCount, op, pe);
+        }
+      };
+
+      switch (marker) {
+        case StackSym::P:
+          propElemOp(PropElemOp::Prop);
+          break;
+        case StackSym::E:
+          propElemOp(PropElemOp::Elem);
+          break;
+        case StackSym::Q:
+          propElemOp(PropElemOp::PropQ);
+          break;
+        case StackSym::W:
+          throw IncludeTimeFatalException(e.getNode(),
+                                          "Cannot use [] for reading");
+        default:
+          always_assert(false);
+      }
+
+      return;
+    }
+
     std::vector<uchar> vectorImm;
     buildVectorImm(vectorImm, i, iLast, false, e);
+    assert(countStackValues(vectorImm) == stackCount);
     e.CGetM(vectorImm);
   }
 }
 
-void EmitterVisitor::emitVGet(Emitter& e) {
-  if (checkIfStackEmpty("VGet*")) return;
+bool EmitterVisitor::emitVGet(Emitter& e, bool skipCells) {
+  if (checkIfStackEmpty("VGet*")) return false;
   LocationGuard loc(e, m_tempLoc);
-  m_tempLoc.reset();
+  m_tempLoc.clear();
 
   emitClsIfSPropBase(e);
   int iLast = m_evalStack.size()-1;
@@ -5084,7 +5359,7 @@ void EmitterVisitor::emitVGet(Emitter& e) {
   if (sz == 0 || (sz == 1 && StackSym::GetMarker(sym) == StackSym::S)) {
     switch (sym) {
       case StackSym::L:  e.VGetL(m_evalStack.getLoc(i)); break;
-      case StackSym::C:  e.Box();   break;
+      case StackSym::C:  if (skipCells) return true; e.Box(); break;
       case StackSym::LN: e.CGetL(m_evalStack.getLoc(i)); // fall through
       case StackSym::CN: e.VGetN(); break;
       case StackSym::LG: e.CGetL(m_evalStack.getLoc(i)); // fall through
@@ -5103,6 +5378,7 @@ void EmitterVisitor::emitVGet(Emitter& e) {
     buildVectorImm(vectorImm, i, iLast, true, e);
     e.VGetM(vectorImm);
   }
+  return false;
 }
 
 Id EmitterVisitor::emitVisitAndSetUnnamedL(Emitter& e, ExpressionPtr exp) {
@@ -5144,15 +5420,13 @@ EmitterVisitor::getPassByRefKind(ExpressionPtr exp) {
   // on the RHS until it encounters an expression other than a list
   // assignment expression.
   while (exp->is(Expression::KindOfListAssignment)) {
-    ListAssignmentPtr la(static_pointer_cast<ListAssignment>(exp));
-    exp = la->getArray();
+    exp = static_pointer_cast<ListAssignment>(exp)->getArray();
     permissiveKind = PassByRefKind::WarnOnCell;
   }
 
   switch (exp->getKindOf()) {
     case Expression::KindOfSimpleFunctionCall: {
-      SimpleFunctionCallPtr sfc(
-        static_pointer_cast<SimpleFunctionCall>(exp));
+      auto sfc = static_pointer_cast<SimpleFunctionCall>(exp);
       // this only happens for calls that have been morphed into bytecode
       // e.g. idx(), abs(), strlen(), etc..
       // It is to allow the following code to work
@@ -5174,12 +5448,12 @@ EmitterVisitor::getPassByRefKind(ExpressionPtr exp) {
       // Assignment (=) and binding assignment (=&)
       return PassByRefKind::WarnOnCell;
     case Expression::KindOfBinaryOpExpression: {
-      BinaryOpExpressionPtr b(static_pointer_cast<BinaryOpExpression>(exp));
+      auto b = static_pointer_cast<BinaryOpExpression>(exp);
       // Assignment op (+=, -=, *=, etc)
       if (b->isAssignmentOp()) return PassByRefKind::WarnOnCell;
     } break;
     case Expression::KindOfUnaryOpExpression: {
-      UnaryOpExpressionPtr u(static_pointer_cast<UnaryOpExpression>(exp));
+      auto u = static_pointer_cast<UnaryOpExpression>(exp);
       int op = u->getOp();
       if (op == T_CLONE) {
         // clone
@@ -5191,7 +5465,7 @@ EmitterVisitor::getPassByRefKind(ExpressionPtr exp) {
       }
     } break;
     case Expression::KindOfExpressionList: {
-      ExpressionListPtr el(static_pointer_cast<ExpressionList>(exp));
+      auto el = static_pointer_cast<ExpressionList>(exp);
       if (el->getListKind() != ExpressionList::ListKindParam) {
         return PassByRefKind::WarnOnCell;
       }
@@ -5203,18 +5477,42 @@ EmitterVisitor::getPassByRefKind(ExpressionPtr exp) {
   return PassByRefKind::ErrorOnCell;
 }
 
-void EmitterVisitor::emitBuiltinCallArg(Emitter& e,
-                                         ExpressionPtr exp,
-                                         int paramId,
-                                         bool byRef) {
+bool EmitterVisitor::emitBuiltinCallArg(Emitter& e,
+                                        ExpressionPtr exp,
+                                        int paramId,
+                                        bool byRef,
+                                        bool mustBeRef) {
   visit(exp);
-  if (checkIfStackEmpty("Builtin arg*")) return;
+  if (checkIfStackEmpty("Builtin arg*")) return true;
   if (byRef) {
-    emitVGet(e);
+    auto wasCell = emitVGet(e, true);
+    if (wasCell && mustBeRef) {
+      auto kind = getPassByRefKind(exp);
+      switch (kind) {
+        case PassByRefKind::AllowCell:
+          // nop
+          break;
+        case PassByRefKind::WarnOnCell:
+          e.String(
+            makeStaticString("Only variables should be passed by reference"));
+          e.Int(k_E_STRICT);
+          e.FCallBuiltin(2, 2, s_trigger_error.get());
+          emitPop(e);
+          break;
+        case PassByRefKind::ErrorOnCell:
+          auto save = m_evalStack;
+          e.String(
+            makeStaticString("Only variables can be passed by reference"));
+          e.Fatal(FatalOp::Runtime);
+          m_evalStackIsUnknown = false;
+          m_evalStack = save;
+          return false;
+      }
+    }
   } else {
     emitCGet(e);
   }
-  return;
+  return true;
 }
 
 static bool isNormalLocalVariable(const ExpressionPtr& expr) {
@@ -5332,7 +5630,7 @@ void EmitterVisitor::emitFPass(Emitter& e, int paramId,
                                PassByRefKind passByRefKind) {
   if (checkIfStackEmpty("FPass*")) return;
   LocationGuard locGuard(e, m_tempLoc);
-  m_tempLoc.reset();
+  m_tempLoc.clear();
 
   emitClsIfSPropBase(e);
   int iLast = m_evalStack.size()-1;
@@ -5816,8 +6114,8 @@ MaybeDataType EmitterVisitor::analyzeSwitch(SwitchStatementPtr sw,
 
   // Bail if the cases aren't homogeneous
   for (int i = 0; i < ncase; ++i) {
-    CaseStatementPtr c(static_pointer_cast<CaseStatement>((*cases)[i]));
-    ExpressionPtr condition = c->getCondition();
+    auto c = static_pointer_cast<CaseStatement>((*cases)[i]);
+    auto condition = c->getCondition();
     if (condition) {
       Variant cval;
       DataType caseType;
@@ -6007,9 +6305,10 @@ void EmitterVisitor::markSProp(Emitter& e) {
 #define MARK_NAME_BODY(index, requiredStackSize)            \
   if (m_evalStack.size() < requiredStackSize) {             \
     InvariantViolation(                                     \
-      "Emitter encountered an evaluation stack with %d "    \
-      "elements inside the %s function (at offset %d)",     \
-      m_evalStack.size(), __FUNCTION__, m_ue.bcPos());      \
+      "Emitter encountered an evaluation stack with %lu"    \
+      " elements inside the %s function (at offset %d)",    \
+      (unsigned long)m_evalStack.size(),                    \
+      __FUNCTION__, m_ue.bcPos());                          \
     return;                                                 \
   }                                                         \
   char sym = m_evalStack.get(index);                        \
@@ -6276,7 +6575,7 @@ determine_type_constraint(const ParameterExpressionPtr& par) {
 }
 
 void EmitterVisitor::emitPostponedMeths() {
-  vector<FuncEmitter*> top_fes;
+  std::vector<FuncEmitter*> top_fes;
   while (!m_postponedMeths.empty()) {
     assert(m_actualStackHighWater == 0);
     assert(m_fdescHighWater == 0);
@@ -6334,7 +6633,8 @@ void EmitterVisitor::emitPostponedMeths() {
       }
     }
 
-    if (funcScope->userAttributes().count("__Memoize")) {
+    if (funcScope->userAttributes().count("__Memoize") &&
+        !funcScope->isAbstract()) {
       auto const originalName = fe->name;
       auto const rewrittenName = makeStaticString(
         folly::sformat("{}$memoize_impl", fe->name->data()));
@@ -6463,28 +6763,28 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
     attributes = attributes | AttrParamCoerceModeNull;
   }
 
-  const Location* sLoc = meth->getLocation().get();
-  fe->setLocation(sLoc->line0, sLoc->line1);
+  fe->setLocation(meth->line0(), meth->line1());
   fe->docComment = makeStaticString(
     Option::GenerateDocComments ? meth->getDocComment().c_str() : ""
   );
   auto retType = meth->retTypeAnnotation();
-  assert(retType || (meth->getName() == "__construct") ||
-                    (meth->getName() == "__destruct"));
+  assert(retType ||
+         meth->isNamed("__construct") ||
+         meth->isNamed("__destruct"));
   fe->returnType = retType ? retType->dataType() : KindOfNull;
   fe->retUserType = makeStaticString(meth->getReturnTypeConstraint());
 
   FunctionScopePtr funcScope = meth->getFunctionScope();
-  const char *funcname  = funcScope->getName().c_str();
+  const char *funcname  = funcScope->getScopeName().c_str();
   const char *classname = pce ? pce->name()->data() : nullptr;
   auto const& info = Native::GetBuiltinFunction(funcname, classname,
                                                 modifiers->isStatic());
   BuiltinFunction nif = info.ptr;
   BuiltinFunction bif;
+  int nativeAttrs = fe->parseNativeAttributes(attributes);
   if (!nif) {
     bif = Native::unimplementedWrapper;
   } else {
-    int nativeAttrs = fe->parseNativeAttributes(attributes);
     if (nativeAttrs & Native::AttrZendCompat) {
       bif = zend_wrap_func;
     } else {
@@ -6513,8 +6813,7 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
 
         // Does this method take doubles as arguments?
         for (int i = 0; i < numParams; ++i) {
-          ParameterExpressionPtr par(
-            static_pointer_cast<ParameterExpression>((*params)[i]));
+          auto par = static_pointer_cast<ParameterExpression>((*params)[i]);
           auto const typeAnnotation = par->annotation();
           if (typeAnnotation && typeAnnotation->dataType() == KindOfDouble) {
             usesDouble = true;
@@ -6536,8 +6835,13 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
 
   fe->setBuiltinFunc(bif, nif, attributes, base);
   fillFuncEmitterParams(fe, meth->getParams(), true);
-  e.NativeImpl();
-  FuncFinisher ff(this, e, fe);
+  int32_t stackPad = 0;
+  if (nativeAttrs & Native::AttrOpCodeImpl) {
+    stackPad = emitNativeOpCodeImpl(meth, funcname, classname, fe);
+  } else {
+    e.NativeImpl();
+  }
+  FuncFinisher ff(this, e, fe, stackPad);
   emitMethodDVInitializers(e, meth, topOfBody);
 }
 
@@ -6551,8 +6855,8 @@ void EmitterVisitor::emitMethodMetadata(MethodStatementPtr meth,
   // assign ids to parameters (all methods)
   int numParam = meth->getParams() ? meth->getParams()->getCount() : 0;
   for (int i = 0; i < numParam; i++) {
-    ParameterExpressionPtr par(
-      static_pointer_cast<ParameterExpression>((*meth->getParams())[i]));
+    auto par =
+      static_pointer_cast<ParameterExpression>((*meth->getParams())[i]);
     fe->allocVarId(makeStaticString(par->getName()));
   }
 
@@ -6611,12 +6915,11 @@ void EmitterVisitor::emitMethodMetadata(MethodStatementPtr meth,
     fe->originalFilename = makeStaticString(originalFilename);
   }
 
-  const Location* sLoc = meth->getLocation().get();
   StringData* methDoc = Option::GenerateDocComments ?
     makeStaticString(meth->getDocComment()) : staticEmptyString();
 
-  fe->init(sLoc->line0,
-           sLoc->line1,
+  fe->init(meth->line0(),
+           meth->line1(),
            m_ue.bcPos(),
            buildMethodAttrs(meth, fe, top, allowOverride),
            top,
@@ -6632,8 +6935,7 @@ void EmitterVisitor::fillFuncEmitterParams(FuncEmitter* fe,
                                            bool coerce_params /*= false */) {
   int numParam = params ? params->getCount() : 0;
   for (int i = 0; i < numParam; i++) {
-    ParameterExpressionPtr par(
-      static_pointer_cast<ParameterExpression>((*params)[i]));
+    auto par = static_pointer_cast<ParameterExpression>((*params)[i]);
     StringData* parName = makeStaticString(par->getName());
 
     FuncEmitter::ParamInfo pi;
@@ -6682,12 +6984,11 @@ void EmitterVisitor::fillFuncEmitterParams(FuncEmitter* fe,
       pi.phpCode = phpCode;
     }
 
-    ExpressionListPtr paramUserAttrs =
+    auto paramUserAttrs =
       dynamic_pointer_cast<ExpressionList>(par->userAttributeList());
     if (paramUserAttrs) {
       for (int j = 0; j < paramUserAttrs->getCount(); ++j) {
-        UserAttributePtr a = dynamic_pointer_cast<UserAttribute>(
-          (*paramUserAttrs)[j]);
+        auto a = dynamic_pointer_cast<UserAttribute>((*paramUserAttrs)[j]);
         StringData* uaName = makeStaticString(a->getName());
         ExpressionPtr uaValue = a->getExp();
         assert(uaValue);
@@ -6717,7 +7018,7 @@ void EmitterVisitor::emitMethodPrologue(Emitter& e, MethodStatementPtr meth) {
   }
 
   if (!m_curFunc->isMemoizeImpl) {
-    for (uint i = 0; i < m_curFunc->params.size(); i++) {
+    for (uint32_t i = 0; i < m_curFunc->params.size(); i++) {
       const TypeConstraint& tc = m_curFunc->params[i].typeConstraint;
       if (!tc.hasConstraint()) continue;
       emitVirtualLocal(i);
@@ -6731,10 +7032,6 @@ void EmitterVisitor::emitMethodPrologue(Emitter& e, MethodStatementPtr meth) {
     emitMakeUnitFatal(e, s.str().c_str(), FatalOp::RuntimeOmitFrame);
   }
 }
-
-const StaticString
-  s_trigger_error("trigger_error"),
-  s_is_deprecated("deprecated function");
 
 void EmitterVisitor::emitDeprecationWarning(Emitter& e,
                                             MethodStatementPtr meth) {
@@ -6750,10 +7047,10 @@ void EmitterVisitor::emitDeprecationWarning(Emitter& e,
     : deprArgs.front();
 
   { // preface the message with the name of the offending function
-    auto funcName = funcScope->getOriginalName();
+    auto funcName = funcScope->getScopeName();
     BlockScopeRawPtr b = funcScope->getOuterScope();
     if (b && b->is(BlockScope::ClassScope)) {
-      ClassScopePtr clsScope = dynamic_pointer_cast<ClassScope>(b);
+      auto clsScope = dynamic_pointer_cast<ClassScope>(b);
       if (clsScope->isTrait()) {
         e.Self();
         e.NameA();
@@ -6761,7 +7058,7 @@ void EmitterVisitor::emitDeprecationWarning(Emitter& e,
         e.Concat();
       } else {
         e.String(makeStaticString(
-                   clsScope->getOriginalName() + "::" + funcName
+                   clsScope->getScopeName() + "::" + funcName
                    + ": " + deprMessage));
       }
     } else {
@@ -6800,16 +7097,16 @@ void EmitterVisitor::emitMethod(MethodStatementPtr meth) {
 
   // if the current position is reachable, emit code to return null
   if (currentPositionIsReachable()) {
-    LocationPtr loc(new Location(*meth->getLocation().get()));
-    loc->line0 = loc->line1;
-    loc->char0 = loc->char1-1;
-    e.setTempLocation(loc);
+    auto r = meth->getRange();
+    r.line0 = r.line1;
+    r.char0 = r.char1 - 1;
+    e.setTempLocation(r);
     e.Null();
     if (shouldEmitVerifyRetType()) {
       e.VerifyRetTypeC();
     }
     e.RetC();
-    e.setTempLocation(LocationPtr());
+    e.setTempLocation(OptLocation());
   }
 
   FuncFinisher ff(this, e, m_curFunc);
@@ -6825,8 +7122,7 @@ void EmitterVisitor::emitMethodDVInitializers(Emitter& e,
   ExpressionListPtr params = meth->getParams();
   int numParam = params ? params->getCount() : 0;
   for (int i = 0; i < numParam; i++) {
-    ParameterExpressionPtr par(
-      static_pointer_cast<ParameterExpression>((*params)[i]));
+    auto par = static_pointer_cast<ParameterExpression>((*params)[i]);
     if (par->isOptional()) {
       hasOptional = true;
       Label entryPoint(e);
@@ -6862,14 +7158,14 @@ void EmitterVisitor::addMemoizeProp(MethodStatementPtr meth) {
     m_curFunc->hasMemoizeSharedProp = true;
     m_curFunc->memoizeSharedPropIndex = pce->getNextMemoizeCacheKey();
   } else {
-    propNameBase = funcScope->getName();
+    propNameBase = toLower(funcScope->getScopeName());
   }
 
   // The prop definition in traits conflicts with the definition in a class
   // so make a different prop for each trait
   std::string traitNamePart;
   if (classScope && classScope->isTrait()) {
-    traitNamePart = classScope->getName();
+    traitNamePart = toLower(classScope->getScopeName());
     // the backslash comes from namespaces. @jan thought that would cause
     // issues, so use $ instead
     for (char &c: traitNamePart) {
@@ -6899,7 +7195,7 @@ void EmitterVisitor::emitMemoizeProp(Emitter& e,
                                      MethodStatementPtr meth,
                                      Id localID,
                                      const std::vector<Id>& paramIDs,
-                                     uint numParams) {
+                                     uint32_t numParams) {
   assert(m_curFunc->isMemoizeWrapper);
 
   if (meth->is(Statement::KindOfFunctionStatement)) {
@@ -6918,7 +7214,7 @@ void EmitterVisitor::emitMemoizeProp(Emitter& e,
   }
 
   assert(numParams <= paramIDs.size());
-  for (uint i = 0; i < numParams; i++) {
+  for (uint32_t i = 0; i < numParams; i++) {
     if (i == 0 && m_curFunc->hasMemoizeSharedProp) {
       e.Int(m_curFunc->memoizeSharedPropIndex);
     } else {
@@ -7077,7 +7373,7 @@ void EmitterVisitor::emitMemoizeMethod(MethodStatementPtr meth,
   }
   {
     FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
-    for (uint i = 0; i < numParams; i++) {
+    for (uint32_t i = 0; i < numParams; i++) {
       emitVirtualLocal(i);
       emitFPass(e, i, PassByRefKind::ErrorOnCell);
     }
@@ -7103,8 +7399,8 @@ void EmitterVisitor::emitPostponedCtors() {
       attrs = attrs | AttrBuiltin;
     }
     StringData* methDoc = staticEmptyString();
-    const Location* sLoc = p.m_is->getLocation().get();
-    p.m_fe->init(sLoc->line0, sLoc->line1, m_ue.bcPos(), attrs, false, methDoc);
+    p.m_fe->init(p.m_is->line0(), p.m_is->line1(),
+                 m_ue.bcPos(), attrs, false, methDoc);
     Emitter e(p.m_is, m_ue, *this);
     FuncFinisher ff(this, e, p.m_fe);
     e.Null();
@@ -7120,8 +7416,8 @@ void EmitterVisitor::emitPostponedPSinit(PostponedNonScalars& p, bool pinit) {
     attrs = attrs | AttrBuiltin;
   }
   StringData* methDoc = staticEmptyString();
-  const Location* sLoc = p.m_is->getLocation().get();
-  p.m_fe->init(sLoc->line0, sLoc->line1, m_ue.bcPos(), attrs, false, methDoc);
+  p.m_fe->init(p.m_is->line0(), p.m_is->line1(),
+               m_ue.bcPos(), attrs, false, methDoc);
 
   Emitter e(p.m_is, m_ue, *this);
   FuncFinisher ff(this, e, p.m_fe);
@@ -7179,8 +7475,8 @@ void EmitterVisitor::emitPostponedCinits() {
       attrs = attrs | AttrBuiltin;
     }
     StringData* methDoc = staticEmptyString();
-    const Location* sLoc = p.m_is->getLocation().get();
-    p.m_fe->init(sLoc->line0, sLoc->line1, m_ue.bcPos(), attrs, false, methDoc);
+    p.m_fe->init(p.m_is->line0(), p.m_is->line1(),
+                 m_ue.bcPos(), attrs, false, methDoc);
     static const StringData* s_constName = makeStaticString("constName");
     p.m_fe->appendParam(s_constName, FuncEmitter::ParamInfo());
 
@@ -7236,7 +7532,7 @@ void EmitterVisitor::emitVirtualClassBase(Emitter& e, Expr* node) {
   prepareEvalStack();
 
   m_evalStack.push(StackSym::K);
-  auto const func = node->getOriginalFunction();
+  auto const func = node->getFunctionScope();
 
   if (node->isStatic()) {
     m_evalStack.setClsBaseType(SymbolicStack::CLS_LATE_BOUND);
@@ -7265,8 +7561,8 @@ void EmitterVisitor::emitVirtualClassBase(Emitter& e, Expr* node) {
       m_evalStack.setUnnamedLocal(clsBaseIdx, unnamedLoc, m_ue.bcPos());
       emitPop(e);
     }
-  } else if (!node->getOriginalClass() ||
-             node->getOriginalClass()->isTrait() ||
+  } else if (!node->getClassScope() ||
+             node->getClassScope()->isTrait() ||
              (func && func->isClosure())) {
     // In a trait, a potentially rebound closure or psuedo-main, we can't
     // resolve self:: or parent:: yet, so we emit special instructions that do
@@ -7281,7 +7577,7 @@ void EmitterVisitor::emitVirtualClassBase(Emitter& e, Expr* node) {
         makeStaticString(node->getOriginalClassName()));
     }
   } else if (node->isParent() &&
-             node->getOriginalClass()->getOriginalParent().empty()) {
+             node->getClassScope()->getOriginalParent().empty()) {
     // parent:: in a class without a parent.  We'll emit a Parent
     // opcode because it can handle this error case.
     m_evalStack.setClsBaseType(SymbolicStack::CLS_PARENT);
@@ -7508,7 +7804,7 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
   Func* fcallBuiltin = nullptr;
   StringData* nLiteral = nullptr;
   Offset fpiStart = 0;
-  if (node->getClass() || !node->getClassName().empty()) {
+  if (node->getClass() || node->hasStaticClass()) {
     bool isSelfOrParent = node->isSelf() || node->isParent();
     if (!node->isStatic() && !isSelfOrParent &&
         !node->getOriginalClassName().empty() && !nameStr.empty()) {
@@ -7603,7 +7899,11 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
       // for builtin calls, since we don't push the ActRec, we
       // must determine the reffiness statically
       bool byRef = fcallBuiltin->byRef(i);
-      emitBuiltinCallArg(e, (*params)[i], i, byRef);
+      bool mustBeRef = fcallBuiltin->mustBeRef(i);
+      if (!emitBuiltinCallArg(e, (*params)[i], i, byRef, mustBeRef)) {
+        while (i--) emitPop(e);
+        return;
+      }
     }
 
     if (fcallBuiltin->methInfo()) {
@@ -7636,17 +7936,7 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
                    std::min<int32_t>(numParams, fcallBuiltin->numParams()),
                    nLiteral);
   } else {
-    {
-      FPIRegionRecorder fpi(this, m_ue, m_evalStack, fpiStart);
-      for (int i = 0; i < numParams; i++) {
-        emitFuncCallArg(e, (*params)[i], i, unpack && i + 1 == numParams);
-      }
-    }
-    if (unpack) {
-      e.FCallUnpack(numParams);
-    } else {
-      e.FCall(numParams);
-    }
+    emitCall(e, node, params, fpiStart);
   }
   if (fcallBuiltin) {
     fixReturnType(e, node, fcallBuiltin);
@@ -7660,7 +7950,7 @@ void EmitterVisitor::emitClassTraitPrecRule(PreClassEmitter* pce,
 
   PreClass::TraitPrecRule rule(traitName, methodName);
 
-  std::unordered_set<std::string> otherTraitNames;
+  hphp_string_iset otherTraitNames;
   stmt->getOtherTraitNames(otherTraitNames);
   for (auto const& name : otherTraitNames) {
     rule.addOtherTraitName(makeStaticString(name));
@@ -7687,23 +7977,21 @@ void EmitterVisitor::emitClassTraitAliasRule(PreClassEmitter* pce,
 
 void EmitterVisitor::emitClassUseTrait(PreClassEmitter* pce,
                                        UseTraitStatementPtr useStmt) {
-  StatementListPtr rules = useStmt->getStmts();
+  auto rules = useStmt->getStmts();
   for (int r = 0; r < rules->getCount(); r++) {
-    StatementPtr rule = (*rules)[r];
-    TraitPrecStatementPtr precStmt =
-      dynamic_pointer_cast<TraitPrecStatement>(rule);
+    auto rule = (*rules)[r];
+    auto precStmt = dynamic_pointer_cast<TraitPrecStatement>(rule);
     if (precStmt) {
       emitClassTraitPrecRule(pce, precStmt);
     } else {
-      TraitAliasStatementPtr aliasStmt =
-        dynamic_pointer_cast<TraitAliasStatement>(rule);
+      auto aliasStmt = dynamic_pointer_cast<TraitAliasStatement>(rule);
       assert(aliasStmt);
       emitClassTraitAliasRule(pce, aliasStmt);
     }
   }
 }
 
-void EmitterVisitor::emitTypedef(Emitter& e, TypedefStatementPtr td) {
+Id EmitterVisitor::emitTypedef(Emitter& e, TypedefStatementPtr td) {
   auto const nullable = td->annot->isNullable();
   auto const annot = td->annot->stripNullable();
   auto const valueStr = annot.vanillaName();
@@ -7727,20 +8015,23 @@ void EmitterVisitor::emitTypedef(Emitter& e, TypedefStatementPtr td) {
     // need to worry about it here).
     if (UNLIKELY(type == AnnotType::Self || type == AnnotType::Parent)) {
       throw IncludeTimeFatalException(
-        e.getNode(),
+        td,
         "Cannot access %s when no class scope is active",
         type == AnnotType::Self ? "self" : "parent");
     }
   }
 
   TypeAlias record;
+  record.typeStructure = Array(td->annot->getScalarArrayRep());
   record.name     = name;
   record.value    = value;
   record.type     = type;
   record.nullable = nullable;
-  record.attrs    = AttrNone;
+  record.attrs    = !SystemLib::s_inited ? AttrPersistent : AttrNone;
   Id id = m_ue.addTypeAlias(record);
   e.DefTypeAlias(id);
+
+  return id;
 }
 
 void EmitterVisitor::emitClass(Emitter& e,
@@ -7754,8 +8045,7 @@ void EmitterVisitor::emitClass(Emitter& e,
     return;
   }
 
-  InterfaceStatementPtr is(
-    static_pointer_cast<InterfaceStatement>(cNode->getStmt()));
+  auto is = static_pointer_cast<InterfaceStatement>(cNode->getStmt());
   StringData* className = makeStaticString(cNode->getOriginalName());
   StringData* parentName = makeStaticString(cNode->getOriginalParent());
   StringData* classDoc = Option::GenerateDocComments ?
@@ -7791,7 +8081,6 @@ void EmitterVisitor::emitClass(Emitter& e,
     attr = attr | AttrBuiltin | AttrUnique | AttrPersistent;
   }
 
-  const Location* sLoc = is->getLocation().get();
   const std::vector<std::string>& bases(cNode->getBases());
   int firstInterface = cNode->getOriginalParent().empty() ? 0 : 1;
   int nInterfaces = bases.size();
@@ -7817,19 +8106,19 @@ void EmitterVisitor::emitClass(Emitter& e,
     }
   }
   PreClassEmitter* pce = m_ue.newPreClassEmitter(className, hoistable);
-  pce->init(sLoc->line0, sLoc->line1, m_ue.bcPos(), attr, parentName,
+  pce->init(is->line0(), is->line1(), m_ue.bcPos(), attr, parentName,
             classDoc);
-  LocationPtr loc(new Location(*sLoc));
-  loc->line1 = loc->line0;
-  loc->char1 = loc->char0;
-  e.setTempLocation(loc);
+  auto r = is->getRange();
+  r.line1 = r.line0;
+  r.char1 = r.char0;
+  e.setTempLocation(r);
   if (hoistable != PreClass::AlwaysHoistable) {
     e.DefCls(pce->id());
   } else {
     // To attach the line number to for error reporting.
     e.DefClsNop(pce->id());
   }
-  e.setTempLocation(LocationPtr());
+  e.setTempLocation(OptLocation());
   for (int i = firstInterface; i < nInterfaces; ++i) {
     pce->addInterface(makeStaticString(bases[i]));
   }
@@ -7866,15 +8155,13 @@ void EmitterVisitor::emitClass(Emitter& e,
   if (StatementListPtr stmts = is->getStmts()) {
     int i, n = stmts->getCount();
     for (i = 0; i < n; i++) {
-      if (MethodStatementPtr meth =
-          dynamic_pointer_cast<MethodStatement>((*stmts)[i])) {
+      if (auto meth = dynamic_pointer_cast<MethodStatement>((*stmts)[i])) {
         StringData* methName = makeStaticString(meth->getOriginalName());
         FuncEmitter* fe = m_ue.newMethodEmitter(methName, pce);
         bool added UNUSED = pce->addMethod(fe);
         assert(added);
         postponeMeth(meth, fe, false);
-      } else if (ClassVariablePtr cv =
-                 dynamic_pointer_cast<ClassVariable>((*stmts)[i])) {
+      } else if (auto cv = dynamic_pointer_cast<ClassVariable>((*stmts)[i])) {
         ModifierExpressionPtr mod(cv->getModifiers());
         ExpressionListPtr el(cv->getVarList());
         Attr declAttrs = buildAttrs(mod);
@@ -7886,8 +8173,7 @@ void EmitterVisitor::emitClass(Emitter& e,
           ExpressionPtr vNode;
           SimpleVariablePtr var;
           if (exp->is(Expression::KindOfAssignmentExpression)) {
-            AssignmentExpressionPtr ae(
-              static_pointer_cast<AssignmentExpression>(exp));
+            auto ae = static_pointer_cast<AssignmentExpression>(exp);
             var = static_pointer_cast<SimpleVariable>(ae->getVariable());
             vNode = ae->getValue();
           } else {
@@ -7932,8 +8218,7 @@ void EmitterVisitor::emitClass(Emitter& e,
                              propDoc, &tvVal, RepoAuthType{});
           assert(added);
         }
-      } else if (ClassConstantPtr cc =
-                 dynamic_pointer_cast<ClassConstant>((*stmts)[i])) {
+      } else if (auto cc = dynamic_pointer_cast<ClassConstant>((*stmts)[i])) {
 
         ExpressionListPtr el(cc->getConList());
         StringData* typeConstraint =
@@ -7942,8 +8227,7 @@ void EmitterVisitor::emitClass(Emitter& e,
 
         if (cc->isAbstract()) {
           for (int ii = 0; ii < nCons; ii++) {
-            ConstantExpressionPtr con(
-              static_pointer_cast<ConstantExpression>((*el)[ii]));
+            auto con = static_pointer_cast<ConstantExpression>((*el)[ii]);
             StringData* constName = makeStaticString(con->getName());
             bool added UNUSED =
               pce->addAbstractConstant(constName, typeConstraint,
@@ -7952,11 +8236,10 @@ void EmitterVisitor::emitClass(Emitter& e,
           }
         } else {
           for (int ii = 0; ii < nCons; ii++) {
-            AssignmentExpressionPtr ae(
-              static_pointer_cast<AssignmentExpression>((*el)[ii]));
-            ConstantExpressionPtr con(
-              static_pointer_cast<ConstantExpression>(ae->getVariable()));
-            ExpressionPtr vNode(ae->getValue());
+            auto ae = static_pointer_cast<AssignmentExpression>((*el)[ii]);
+            auto con =
+              static_pointer_cast<ConstantExpression>(ae->getVariable());
+            auto vNode = ae->getValue();
             StringData* constName = makeStaticString(con->getName());
             assert(vNode);
             TypedValue tvVal;
@@ -7983,11 +8266,12 @@ void EmitterVisitor::emitClass(Emitter& e,
             bool added UNUSED = pce->addConstant(
               constName, typeConstraint, &tvVal,
               makeStaticString(os.str()),
-              cc->isTypeconst());
+              cc->isTypeconst(),
+              cc->getTypeStructure());
             assert(added);
           }
         }
-      } else if (UseTraitStatementPtr useStmt =
+      } else if (auto useStmt =
                  dynamic_pointer_cast<UseTraitStatement>((*stmts)[i])) {
         emitClassUseTrait(pce, useStmt);
       }
@@ -8036,7 +8320,7 @@ void EmitterVisitor::emitClass(Emitter& e,
 
   // If this is an enum, get its type constraint.
   if (cNode->isEnum()) {
-    ClassStatementPtr cs = static_pointer_cast<ClassStatement>(is);
+    auto cs = static_pointer_cast<ClassStatement>(is);
     auto const typeConstraint =
       determine_type_constraint_from_annot(cs->getEnumBaseTy(), true);
     pce->setEnumBaseTy(typeConstraint);
@@ -8098,11 +8382,11 @@ void EmitterVisitor::emitForeach(Emitter& e,
   bool listVal = val->is(Expression::KindOfListAssignment);
 
   if (simpleCase) {
-    SimpleVariablePtr svVal(static_pointer_cast<SimpleVariable>(val));
+    auto svVal = static_pointer_cast<SimpleVariable>(val);
     StringData* name = makeStaticString(svVal->getName());
     valTempLocal = m_curFunc->lookupVarId(name);
     if (key) {
-      SimpleVariablePtr svKey(static_pointer_cast<SimpleVariable>(key));
+      auto svKey = static_pointer_cast<SimpleVariable>(key);
       name = makeStaticString(svKey->getName());
       keyTempLocal = m_curFunc->lookupVarId(name);
       visit(key);
@@ -8505,20 +8789,21 @@ void EmitterVisitor::copyOverFPIRegions(FuncEmitter* fe) {
   m_fpiRegions.clear();
 }
 
-void EmitterVisitor::saveMaxStackCells(FuncEmitter* fe) {
+void EmitterVisitor::saveMaxStackCells(FuncEmitter* fe, int32_t stackPad) {
   fe->maxStackCells = m_actualStackHighWater +
                       fe->numIterators() * kNumIterCells +
                       fe->numLocals() +
-                      m_fdescHighWater;
+                      m_fdescHighWater +
+                      stackPad;
   m_actualStackHighWater = 0;
   m_fdescHighWater = 0;
 }
 
 // Are you sure you mean to be calling this directly? Would FuncFinisher
 // be more appropriate?
-void EmitterVisitor::finishFunc(Emitter& e, FuncEmitter* fe) {
+void EmitterVisitor::finishFunc(Emitter& e, FuncEmitter* fe, int32_t stackPad) {
   emitFunclets(e);
-  saveMaxStackCells(fe);
+  saveMaxStackCells(fe, stackPad);
   copyOverCatchAndFaultRegions(fe);
   copyOverFPIRegions(fe);
   m_staticEmitted.clear();
@@ -8550,7 +8835,7 @@ void EmitterVisitor::initScalar(TypedValue& tvVal, ExpressionPtr val,
   };
   switch (val->getKindOf()) {
     case Expression::KindOfConstantExpression: {
-      ConstantExpressionPtr ce(static_pointer_cast<ConstantExpression>(val));
+      auto ce = static_pointer_cast<ConstantExpression>(val);
       if (ce->isNull()) {
         tvVal.m_data.num = 0;
         tvVal.m_type = KindOfNull;
@@ -8564,7 +8849,7 @@ void EmitterVisitor::initScalar(TypedValue& tvVal, ExpressionPtr val,
       break;
     }
     case Expression::KindOfScalarExpression: {
-      ScalarExpressionPtr sval = static_pointer_cast<ScalarExpression>(val);
+      auto sval = static_pointer_cast<ScalarExpression>(val);
       const std::string* s;
       if (sval->getString(s)) {
         StringData* sd = makeStaticString(*s);
@@ -8590,7 +8875,7 @@ void EmitterVisitor::initScalar(TypedValue& tvVal, ExpressionPtr val,
       break;
     }
     case Expression::KindOfUnaryOpExpression: {
-      UnaryOpExpressionPtr u(static_pointer_cast<UnaryOpExpression>(val));
+      auto u = static_pointer_cast<UnaryOpExpression>(val);
       if (u->getOp() == T_ARRAY) {
         initArray(u->getExpression());
         break;
@@ -8674,8 +8959,7 @@ void EmitterVisitor::emitPairInit(Emitter& e, ExpressionListPtr el) {
   }
   e.NewCol(static_cast<int>(CollectionType::Pair));
   for (int i = 0; i < 2; i++) {
-    ArrayPairExpressionPtr ap(
-      static_pointer_cast<ArrayPairExpression>((*el)[i]));
+    auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
     if (ap->getName() != nullptr) {
       throw IncludeTimeFatalException(ap,
         "Keys may not be specified for Pair initialization");
@@ -8691,8 +8975,7 @@ void EmitterVisitor::emitVectorInit(Emitter&e, CollectionType ct,
   // Do not allow specification of keys even if the resulting array is
   // packed. It doesn't make sense to specify keys for Vectors.
   for (int i = 0; i < el->getCount(); i++) {
-    ArrayPairExpressionPtr ap(
-      static_pointer_cast<ArrayPairExpression>((*el)[i]));
+    auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
     if (ap->getName() != nullptr) {
       throw IncludeTimeFatalException(ap,
         "Keys may not be specified for Vector initialization");
@@ -8719,8 +9002,7 @@ void EmitterVisitor::emitSetInit(Emitter&e, CollectionType ct,
   auto useArray = !!nElms;
   auto hasVectorData = true;
   for (int i = 0; i < nElms; i++) {
-    ArrayPairExpressionPtr ap(
-      static_pointer_cast<ArrayPairExpression>((*el)[i]));
+    auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
     auto key = ap->getName();
     if ((bool)key) {
       throw IncludeTimeFatalException(ap,
@@ -8736,8 +9018,10 @@ void EmitterVisitor::emitSetInit(Emitter&e, CollectionType ct,
         if (v.getStringData()->isStrictlyInteger(intVal)) {
           useArray = false;
         }
-      } else {
+      } else if (v.isInteger()) {
         if (v.asInt64Val() != i) hasVectorData = false;
+      } else {
+        useArray = false;
       }
     } else {
       useArray = false;
@@ -8757,8 +9041,7 @@ void EmitterVisitor::emitSetInit(Emitter&e, CollectionType ct,
     e.NewMixedArray(nElms);
     e.ColFromArray(static_cast<int>(ct));
     for (int i = 0; i < nElms; i++) {
-      ArrayPairExpressionPtr ap(
-        static_pointer_cast<ArrayPairExpression>((*el)[i]));
+      auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
       visit(ap->getValue());
       emitConvertToCell(e);
       e.ColAddNewElemC();
@@ -8778,9 +9061,9 @@ void EmitterVisitor::emitMapInit(Emitter&e, CollectionType ct,
   auto nElms = el->getCount();
   auto useArray = !!nElms;
   auto hasVectorData = true;
+  int64_t max = 0;
   for (int i = 0; i < nElms; i++) {
-    ArrayPairExpressionPtr ap(
-      static_pointer_cast<ArrayPairExpression>((*el)[i]));
+    auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
     auto key = ap->getName();
     if (key == nullptr) {
       throw IncludeTimeFatalException(ap,
@@ -8795,8 +9078,15 @@ void EmitterVisitor::emitMapInit(Emitter&e, CollectionType ct,
         if (vkey.getStringData()->isStrictlyInteger(intKey)) {
           useArray = false;
         }
+      } else if (vkey.isInteger()) {
+        auto val = vkey.asInt64Val();
+        if (val > max || val < 0) {
+          hasVectorData = false;
+        } else if (val == max) {
+          ++max;
+        }
       } else {
-        if (vkey.asInt64Val() != i) hasVectorData = false;
+        useArray = false;
       }
     } else {
       useArray = false;
@@ -8815,8 +9105,7 @@ void EmitterVisitor::emitMapInit(Emitter&e, CollectionType ct,
     e.NewMixedArray(nElms);
     e.ColFromArray(static_cast<int>(ct));
     for (int i = 0; i < nElms; i++) {
-      ArrayPairExpressionPtr ap(
-        static_pointer_cast<ArrayPairExpression>((*el)[i]));
+      auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
       visit(ap->getName());
       emitConvertToCell(e);
       visit(ap->getValue());
@@ -8827,8 +9116,7 @@ void EmitterVisitor::emitMapInit(Emitter&e, CollectionType ct,
 }
 
 void EmitterVisitor::emitCollectionInit(Emitter& e, BinaryOpExpressionPtr b) {
-  ScalarExpressionPtr cls =
-    static_pointer_cast<ScalarExpression>(b->getExp1());
+  auto cls = static_pointer_cast<ScalarExpression>(b->getExp1());
   const std::string* clsName = nullptr;
   cls->getString(clsName);
   auto ct = collections::stringToType(*clsName);
@@ -8875,16 +9163,13 @@ bool EmitterVisitor::requiresDeepInit(ExpressionPtr initExpr) const {
     case Expression::KindOfConstantExpression:
       return !initExpr->isScalar();
     case Expression::KindOfUnaryOpExpression: {
-      UnaryOpExpressionPtr u(
-        static_pointer_cast<UnaryOpExpression>(initExpr));
+      auto u = static_pointer_cast<UnaryOpExpression>(initExpr);
       if (u->getOp() == T_ARRAY) {
-        ExpressionListPtr el =
-          static_pointer_cast<ExpressionList>(u->getExpression());
+        auto el = static_pointer_cast<ExpressionList>(u->getExpression());
         if (el) {
           int n = el->getCount();
           for (int i = 0; i < n; i++) {
-            ArrayPairExpressionPtr ap =
-              static_pointer_cast<ArrayPairExpression>((*el)[i]);
+            auto ap = static_pointer_cast<ArrayPairExpression>((*el)[i]);
             ExpressionPtr key = ap->getName();
             if (requiresDeepInit(ap->getValue()) ||
                 (key && requiresDeepInit(key))) {
@@ -8901,8 +9186,7 @@ bool EmitterVisitor::requiresDeepInit(ExpressionPtr initExpr) const {
       return true;
     }
     case Expression::KindOfBinaryOpExpression: {
-      BinaryOpExpressionPtr b(
-        static_pointer_cast<BinaryOpExpression>(initExpr));
+      auto b = static_pointer_cast<BinaryOpExpression>(initExpr);
       return requiresDeepInit(b->getExp1()) || requiresDeepInit(b->getExp2());
     }
     default:
@@ -8920,7 +9204,7 @@ static ConstructPtr doOptimize(ConstructPtr c, AnalysisResultConstPtr ar) {
       }
     }
   }
-  if (ExpressionPtr e = dynamic_pointer_cast<Expression>(c)) {
+  if (auto e = dynamic_pointer_cast<Expression>(c)) {
     switch (e->getKindOf()) {
       case Expression::KindOfBinaryOpExpression:
       case Expression::KindOfUnaryOpExpression:
@@ -8928,7 +9212,7 @@ static ConstructPtr doOptimize(ConstructPtr c, AnalysisResultConstPtr ar) {
       case Expression::KindOfSimpleFunctionCall:
         return e->preOptimize(ar);
       case Expression::KindOfClosureExpression: {
-        ClosureExpressionPtr cl = static_pointer_cast<ClosureExpression>(e);
+        auto cl = static_pointer_cast<ClosureExpression>(e);
         auto UNUSED exp = doOptimize(cl->getClosureFunction(), ar);
         assert(!exp);
         break;
@@ -8952,19 +9236,18 @@ static UnitEmitter* emitHHBCUnitEmitter(AnalysisResultPtr ar, FileScopePtr fsp,
     }
   }
 
-  MethodStatementPtr msp(dynamic_pointer_cast<MethodStatement>(
-                         fsp->getPseudoMain()->getStmt()));
+  auto msp =
+    dynamic_pointer_cast<MethodStatement>(fsp->getPseudoMain()->getStmt());
   UnitEmitter* ue = new UnitEmitter(md5);
   ue->m_preloadPriority = fsp->preloadPriority();
-  const Location* sLoc = msp->getLocation().get();
-  ue->initMain(sLoc->line0, sLoc->line1);
+  ue->initMain(msp->line0(), msp->line1());
   EmitterVisitor ev(*ue);
   try {
     ev.visit(fsp);
   } catch (EmitterVisitor::IncludeTimeFatalException& ex) {
     // Replace the unit with an empty one, but preserve its file path.
     UnitEmitter* nue = new UnitEmitter(md5);
-    nue->initMain(sLoc->line0, sLoc->line1);
+    nue->initMain(msp->line0(), msp->line1());
     nue->m_filepath = ue->m_filepath;
     delete ue;
     ue = nue;
@@ -9016,7 +9299,7 @@ emitHHBCNativeFuncUnit(const HhbcExtFuncInfo* builtinFuncs,
     StringData* name = makeStaticString(info->m_name);
     BuiltinFunction bif = (BuiltinFunction)info->m_builtinFunc;
     BuiltinFunction nif = (BuiltinFunction)info->m_nativeFunc;
-    const ClassInfo::MethodInfo* mi = ClassInfo::FindFunction(name);
+    const ClassInfo::MethodInfo* mi = ClassInfo::FindFunction(String{name});
     assert(mi &&
       "MethodInfo not found; may be a problem with the .idl.json files");
 
@@ -9053,20 +9336,45 @@ enum GeneratorMethod {
   METH_CURRENT,
   METH_KEY,
 };
+
 typedef hphp_hash_map<const StringData*, GeneratorMethod,
                       string_data_hash, string_data_same> ContMethMap;
+typedef std::map<StaticString, GeneratorMethod> ContMethMapT;
+
+namespace {
+StaticString s_next("next");
+StaticString s_send("send");
+StaticString s_raise("raise");
+StaticString s_valid("valid");
+StaticString s_current("current");
+StaticString s_key("key");
+
+StaticString genCls("Generator");
+StaticString asyncGenCls("HH\\AsyncGenerator");
+
+ContMethMapT s_asyncGenMethods = {
+    {s_next, GeneratorMethod::METH_NEXT},
+    {s_send, GeneratorMethod::METH_SEND},
+    {s_raise, GeneratorMethod::METH_RAISE}
+  };
+ContMethMapT s_genMethods = {
+    {s_next, GeneratorMethod::METH_NEXT},
+    {s_send, GeneratorMethod::METH_SEND},
+    {s_raise, GeneratorMethod::METH_RAISE},
+    {s_valid, GeneratorMethod::METH_VALID},
+    {s_current, GeneratorMethod::METH_CURRENT},
+    {s_key, GeneratorMethod::METH_KEY}
+  };
+}
 
 static int32_t emitGeneratorMethod(UnitEmitter& ue,
                                    FuncEmitter* fe,
                                    GeneratorMethod m) {
-  static const StringData* valStr = makeStaticString("value");
-
   Attr attrs = (Attr)(AttrBuiltin | AttrPublic);
   fe->init(0, 0, ue.bcPos(), attrs, false, staticEmptyString());
   switch (m) {
     case METH_SEND:
     case METH_RAISE:
-      fe->appendParam(valStr, FuncEmitter::ParamInfo());
     case METH_NEXT: {
       // We always want these methods to be cloned with new funcids in
       // subclasses so we can burn Class*s and Func*s into the
@@ -9123,10 +9431,42 @@ static int32_t emitGeneratorMethod(UnitEmitter& ue,
   return 1;  // Above cases push at most one stack cell.
 }
 
+// Emit byte codes to implement methods. Return the maximum stack cell count.
+int32_t EmitterVisitor::emitNativeOpCodeImpl(MethodStatementPtr meth,
+                                             const char* funcName,
+                                             const char* className,
+                                             FuncEmitter* fe) {
+  GeneratorMethod* cmeth;
+  StaticString s_func(funcName);
+  StaticString s_class(className);
+
+  if (genCls.same(s_class) &&
+      (cmeth = folly::get_ptr(s_genMethods, s_func))) {
+    return emitGeneratorMethod(m_ue, fe, *cmeth);
+  } else if (asyncGenCls.same(s_class) &&
+      (cmeth = folly::get_ptr(s_asyncGenMethods, s_func))) {
+    return emitGeneratorMethod(m_ue, fe, *cmeth);
+  }
+
+  throw IncludeTimeFatalException(meth,
+    "OpCodeImpl attribute is not applicable to %s", funcName);
+}
+
 static int32_t emitGetWaitHandleMethod(UnitEmitter& ue, FuncEmitter* fe) {
-  Attr attrs = (Attr)(AttrBuiltin | AttrPublic);
+  Attr attrs = (Attr)(AttrBuiltin | AttrPublic | AttrNoOverride | AttrUnique |
+                      AttrFinal);
   fe->init(0, 0, ue.bcPos(), attrs, false, staticEmptyString());
   ue.emitOp(OpThis);
+  ue.emitOp(OpRetC);
+  return 1;  // we use one stack slot
+}
+
+static int32_t emitWaitHandleResultMethod(UnitEmitter& ue, FuncEmitter* fe) {
+  Attr attrs = (Attr)(AttrBuiltin | AttrPublic | AttrNoOverride | AttrUnique |
+                      AttrFinal);
+  fe->init(0, 0, ue.bcPos(), attrs, false, staticEmptyString());
+  ue.emitOp(OpThis);
+  ue.emitOp(OpWHResult);
   ue.emitOp(OpRetC);
   return 1;  // we use one stack slot
 }
@@ -9138,19 +9478,6 @@ emitHHBCNativeClassUnit(const HhbcExtClassInfo* builtinClasses,
   auto ue = folly::make_unique<UnitEmitter>(s_nativeClassMD5);
   ue->m_filepath = s_systemlibNativeCls.get();
   ue->addTrivialPseudoMain();
-
-  ContMethMap asyncGenMethods;
-  asyncGenMethods[makeStaticString("next")] = METH_NEXT;
-  asyncGenMethods[makeStaticString("send")] = METH_SEND;
-  asyncGenMethods[makeStaticString("raise")] = METH_RAISE;
-
-  ContMethMap genMethods;
-  genMethods[makeStaticString("next")] = METH_NEXT;
-  genMethods[makeStaticString("send")] = METH_SEND;
-  genMethods[makeStaticString("raise")] = METH_RAISE;
-  genMethods[makeStaticString("valid")] = METH_VALID;
-  genMethods[makeStaticString("current")] = METH_CURRENT;
-  genMethods[makeStaticString("key")] = METH_KEY;
 
   // Build up extClassHash, a hashtable that maps class names to structures
   // containing C++ function pointers for the class's methods and constructors
@@ -9177,7 +9504,7 @@ emitHHBCNativeClassUnit(const HhbcExtClassInfo* builtinClasses,
       Entry e;
       e.name = const_cast<StringData*>(it->first);
       e.info = it->second;
-      e.ci = ClassInfo::FindSystemClassInterfaceOrTrait(e.name);
+      e.ci = ClassInfo::FindSystemClassInterfaceOrTrait(String{e.name});
       assert(e.ci);
       StringData* parentName
         = makeStaticString(e.ci->getParentClass().get());
@@ -9230,28 +9557,19 @@ emitHHBCNativeClassUnit(const HhbcExtClassInfo* builtinClasses,
     bool hasCtor = false;
     for (ssize_t j = 0; j < e.info->m_methodCount; ++j) {
       const HhbcExtMethodInfo* methodInfo = &(e.info->m_methods[j]);
-      static const StringData* asyncGenCls =
-        makeStaticString("hh\\asyncgenerator");
-      static const StringData* generatorCls = makeStaticString("generator");
       static const StringData* waitHandleCls =
         makeStaticString("hh\\waithandle");
       static const StringData* gwhMeth = makeStaticString("getwaithandle");
+      static const StringData* resultMeth = makeStaticString("result");
       StringData* methName = makeStaticString(methodInfo->m_name);
-      GeneratorMethod* cmeth;
 
       FuncEmitter* fe = ue->newMethodEmitter(methName, pce);
       pce->addMethod(fe);
       auto stackPad = int32_t{0};
-      if (e.name->isame(asyncGenCls) &&
-          (cmeth = folly::get_ptr(asyncGenMethods, methName))) {
-        auto methCpy = *cmeth;
-        stackPad = emitGeneratorMethod(*ue, fe, methCpy);
-      } else if (e.name->isame(generatorCls) &&
-          (cmeth = folly::get_ptr(genMethods, methName))) {
-        auto methCpy = *cmeth;
-        stackPad = emitGeneratorMethod(*ue, fe, methCpy);
-      } else if (e.name->isame(waitHandleCls) && methName->isame(gwhMeth)) {
+      if (e.name->isame(waitHandleCls) && methName->isame(gwhMeth)) {
         stackPad = emitGetWaitHandleMethod(*ue, fe);
+      } else if (e.name->isame(waitHandleCls) && methName->isame(resultMeth)) {
+        stackPad = emitWaitHandleResultMethod(*ue, fe);
       } else {
         if (e.name->isame(s_construct.get())) {
           hasCtor = true;
@@ -9419,7 +9737,7 @@ class EmitterWorker
   : public JobQueueWorker<FileScopeRawPtr, void*, true, true> {
  public:
   EmitterWorker() : m_ret(true) {}
-  virtual void doJob(JobType job) {
+  void doJob(JobType job) override {
     try {
       AnalysisResultPtr ar = ((AnalysisResult*)m_context)->shared_from_this();
       UnitEmitter* ue = emitHHBCVisitor(ar, job);
@@ -9435,6 +9753,12 @@ class EmitterWorker
       Logger::Error("Fatal: An unexpected exception was thrown");
       m_ret = false;
     }
+  }
+  void onThreadEnter() override {
+    g_context.getCheck();
+  }
+  void onThreadExit() override {
+    hphp_memory_cleanup();
   }
  private:
   bool m_ret;
@@ -9477,6 +9801,8 @@ void emitAllHHBC(AnalysisResultPtr&& ar) {
     /* same for TypeConstraint */
     TypeConstraint tc;
   }
+
+  Compiler::ClearErrors();
 
   JobQueueDispatcher<EmitterWorker>
     dispatcher(threadCount, true, 0, false, ar.get());
@@ -9571,6 +9897,99 @@ void emitAllHHBC(AnalysisResultPtr&& ar) {
   commitGlobalData(std::move(pair.second));
 }
 
+namespace {
+
+bool startsWith(const char* big, const char* small) {
+  return strncmp(big, small, strlen(small)) == 0;
+}
+bool isFileHack(const char* code, int codeLen, bool allowPartial) {
+  if (allowPartial) {
+    return codeLen > strlen("<?hh") && startsWith(code, "<?hh");
+  } else {
+    return codeLen > strlen("<?hh // strict") &&
+      (startsWith(code, "<?hh // strict") || startsWith(code, "<?hh //strict"));
+  }
+}
+
+UnitEmitter* makeFatalUnit(const char* filename, const MD5& md5,
+                           const std::string& msg) {
+  // basically duplicated from as.cpp but is maybe too janky to be
+  // a common routine somewhere...
+
+  // The line numbers we output are bogus, but it's not totally clear
+  // what line numbers to put. It might be worth adding a mechanism for
+  // the external emitter to emit a line number when it fails that we can
+  // use when available.
+  UnitEmitter* ue = new UnitEmitter(md5);
+  ue->m_filepath = makeStaticString(filename);
+  ue->initMain(1, 1);
+  ue->emitOp(OpString);
+  ue->emitInt32(ue->mergeLitstr(makeStaticString(msg)));
+  ue->emitOp(OpFatal);
+  ue->emitByte(static_cast<uint8_t>(FatalOp::Runtime));
+  FuncEmitter* fe = ue->getMain();
+  fe->maxStackCells = 1;
+  fe->finish(ue->bcPos(), false);
+  ue->recordFunction(fe);
+
+  return ue;
+}
+
+UnitEmitter* useExternalEmitter(const char* code, int codeLen,
+                                const char* filename, const MD5& md5) {
+#ifdef _MSC_VER
+  Logger::Error("The external emitter is not supported under MSVC!");
+  return nullptr;
+#else
+  std::string hhas, errorOutput;
+
+  try {
+    std::vector<std::string> cmd({
+        RuntimeOption::EvalUseExternalEmitter, "--stdin", filename});
+    auto options = folly::Subprocess::pipeStdin().pipeStdout().pipeStderr();
+
+    // Run the external emitter, sending the code to its stdin
+    folly::Subprocess proc(cmd, options);
+    std::tie(hhas, errorOutput) = proc.communicate(std::string(code, codeLen));
+    proc.waitChecked();
+
+    // External emitter succeeded; assemble its output
+    // If assembly fails (probably because of malformed emitter
+    // output), the assembler will return a unit that Fatals and we
+    // won't do a fallback to the regular emitter. We may want to
+    // revisit this.
+    return assemble_string(hhas.data(), hhas.length(), filename, md5);
+
+  } catch (const std::exception& e) {
+    std::string errorMsg = e.what();
+    if (!errorOutput.empty()) {
+      // Add the stderr to the output
+      errorMsg += folly::format(". Output: '{}'",
+                                folly::trimWhitespace(errorOutput)).str();
+    }
+
+    // If we aren't going to fall back to the internal emitter, generate a
+    // Fatal'ing unit.
+    if (!RuntimeOption::EvalExternalEmitterFallback) {
+      auto msg =
+        folly::format("Failure running external emitter: {}", errorMsg);
+      return makeFatalUnit(filename, md5, msg.str());
+    }
+
+    // Unless we have fallback at the highest level, print a
+    // diagnostic when we fail
+    if (RuntimeOption::EvalExternalEmitterFallback < 2) {
+      Logger::Warning("Failure running external emitter for %s: %s",
+                      filename,
+                      errorMsg.c_str());
+    }
+    return nullptr;
+  }
+#endif
+}
+
+}
+
 extern "C" {
 
 /**
@@ -9603,13 +10022,14 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
     return nullptr;
   }
 
+  SCOPE_ASSERT_DETAIL("hphp_compiler_parse") { return filename; };
+
   try {
     UnitOrigin unitOrigin = UnitOrigin::File;
     if (!filename) {
       filename = "";
       unitOrigin = UnitOrigin::Eval;
     }
-    SCOPE_EXIT { SymbolTable::Purge(); };
 
     std::unique_ptr<UnitEmitter> ue;
     // Check if this file contains raw hip hop bytecode instead of
@@ -9621,6 +10041,17 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
           ue.reset(assemble_string(code, codeLen, filename, md5));
         }
       }
+    }
+
+    // If we are configured to use an external emitter and we are compiling
+    // a strict mode hack file, try external emitting. Don't externally emit
+    // systemlib because the external emitter can't handle that yet.
+    if (!ue &&
+        !RuntimeOption::EvalUseExternalEmitter.empty() &&
+        isFileHack(code, codeLen,
+                   RuntimeOption::EvalExternalEmitterAllowPartial) &&
+        SystemLib::s_inited) {
+      ue.reset(useExternalEmitter(code, codeLen, filename, md5));
     }
 
     if (!ue) {
@@ -9724,6 +10155,23 @@ Unit* hphp_build_native_class_unit(const HhbcExtClassInfo* builtinClasses,
       staticAnalysisPce->name()->data()
     );
     uePce->setAttrs(staticAnalysisPce->attrs());
+
+    // Set all the method bits.
+    for (auto methID = uint32_t{0};
+         methID < staticAnalysisPce->methods().size();
+         ++methID) {
+      auto const& staticAnalysisMethod = staticAnalysisPce->methods()[methID];
+      auto const pceMethod = uePce->findMethod(staticAnalysisMethod->name);
+      always_assert_flog(
+        pceMethod != nullptr,
+        "Static analysis unit had a PreClass method that we don't have at "
+        "runtime ({}::{}); repo probably was built with a different hhvm "
+        "build.",
+        staticAnalysisPce->name()->data(),
+        staticAnalysisMethod->name->data()
+      );
+      pceMethod->attrs = staticAnalysisMethod->attrs;
+    }
   }
 
   return ue->create().release();

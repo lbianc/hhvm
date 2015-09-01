@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -116,9 +116,11 @@ void checkTypeStack(IRGS& env,
                     bool outerOnly) {
   assertx(type <= TCell || type <= TBoxedInitCell);
 
+  auto exit = env.irb->guardFailBlock();
+  if (exit == nullptr) exit = makeExit(env, dest);
+
   if (type <= TBoxedInitCell) {
     spillStack(env); // don't bother with the case that it's not spilled.
-    auto const exit = makeExit(env, dest);
     auto const soff = RelOffsetData { idx, offsetFromIRSP(env, idx) };
     profiledGuard(env, TBoxedInitCell, ProfGuard::CheckStk,
                   idx.offset, exit);
@@ -135,9 +137,6 @@ void checkTypeStack(IRGS& env,
     }
     return;
   }
-
-  auto exit = env.irb->guardFailBlock();
-  if (exit == nullptr) exit = makeExit(env, dest);
 
   if (idx.offset < env.irb->evalStack().size()) {
     FTRACE(1, "checkTypeStack({}): generating CheckType for {}\n",
@@ -157,24 +156,26 @@ void checkTypeStack(IRGS& env,
 }
 
 void predictTypeStack(IRGS& env, BCSPOffset offset, Type type) {
+  FTRACE(1, "predictTypeStack {}: {}\n", offset.offset, type);
   assert(type <= TGen);
 
-  auto stackOff = IRSPOffsetData { offsetFromIRSP(env, offset) };
+  auto const irSPOff = offsetFromIRSP(env, offset);
   if (offset.offset < env.irb->evalStack().size()) {
     auto const tmp = top(env, offset, DataTypeGeneric);
     assertx(tmp);
-    auto oldType = env.irb->evalStack().topPredictedType(offset.offset);
-    auto newType = refinePredictedType(oldType, type, tmp->type());
-    env.irb->evalStack().replace(offset.offset, tmp, newType);
+    auto const oldType = env.irb->fs().predictedTmpType(tmp);
+    auto const newType = refinePredictedType(oldType, type, tmp->type());
+    env.irb->fs().refinePredictedTmpType(tmp, newType);
     return;
   }
 
-  gen(env, PredictStk, type, stackOff, sp(env));
+  env.irb->fs().refineStackPredictedType(irSPOff, type);
 }
 
 void predictTypeLocal(IRGS& env, uint32_t locId, Type type) {
+  FTRACE(1, "predictTypeLocal: {}: {}\n", locId, type);
   assert(type <= TGen);
-  gen(env, PredictLoc, type, LocalId { locId }, fp(env));
+  env.irb->fs().refineLocalPredictedType(locId, type);
 }
 
 void predictTypeLocation(
@@ -227,7 +228,7 @@ void checkTypeLocation(IRGS& env,
 }
 
 void makeExitPlaceholder(IRGS& env) {
-  gen(env, ExitPlaceholder, makeExit(env));
+  gen(env, ExitPlaceholder, makeGuardExit(env, TransFlags{}));
 }
 
 void checkRefs(IRGS& env,

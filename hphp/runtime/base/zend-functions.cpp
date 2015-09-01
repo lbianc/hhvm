@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1998-2010 Zend Technologies Ltd. (http://www.zend.com) |
    +----------------------------------------------------------------------+
    | This source file is subject to version 2.00 of the Zend license,     |
@@ -30,7 +30,7 @@ static const char long_min_digits[] = "9223372036854775808";
 
 ///////////////////////////////////////////////////////////////////////////////
 
-StringSlice conv_10(int64_t num, char* buf_end) {
+folly::StringPiece conv_10(int64_t num, char* buf_end) {
   auto p = buf_end;
   uint64_t magnitude;
 
@@ -60,7 +60,7 @@ StringSlice conv_10(int64_t num, char* buf_end) {
   } while (magnitude);
 
   if (num < 0) *--p = '-';
-  return StringSlice{p, static_cast<uint32_t>(buf_end - p)};
+  return folly::StringPiece{p, static_cast<size_t>(buf_end - p)};
 }
 
 DataType is_numeric_string(const char *str, int length, int64_t *lval,

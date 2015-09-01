@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,12 +19,26 @@
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
+#include "hphp/runtime/ext/asio/ext_async-generator.h"
 
 namespace HPHP { namespace Native {
 //////////////////////////////////////////////////////////////////////////////
 
 typedef std::unordered_map<const StringData*,NativeDataInfo> NativeDataInfoMap;
 static NativeDataInfoMap s_nativedatainfo;
+
+size_t ndsize(const ObjectData* obj, const NativeDataInfo* ndi) {
+  auto cls = obj->getVMClass();
+  if (cls == Generator::getClass() || cls == AsyncGenerator::getClass()) {
+    return (cls == Generator::getClass())
+      ? Native::data<Generator>(obj)->resumable()->size()
+      - sizeof(ObjectData)
+      : Native::data<AsyncGenerator>(obj)->resumable()->size()
+      - sizeof(ObjectData);
+  }
+  return ndsize(ndi->sz);
+}
 
 void registerNativeDataInfo(const StringData* name,
                             size_t sz,
@@ -70,7 +84,7 @@ NativeDataInfo* getNativeDataInfo(const StringData* name) {
  * NativeNode is a link in the NativeData sweep list for this ND block
  */
 ObjectData* nativeDataInstanceCtor(Class* cls) {
-  Attr attrs = cls->attrs();
+  HPHP::Attr attrs = cls->attrs();
   if (UNLIKELY(attrs &
                (AttrAbstract | AttrInterface | AttrTrait | AttrEnum))) {
     ObjectData::raiseAbstractClassError(cls);
@@ -79,7 +93,7 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
     cls->initialize();
   }
   auto ndi = cls->getNativeDataInfo();
-  size_t nativeDataSize = ndsize(ndi);
+  size_t nativeDataSize = ndsize(ndi->sz);
   size_t nProps = cls->numDeclProperties();
   size_t size = ObjectData::sizeForNProps(nProps) + nativeDataSize;
 
@@ -90,6 +104,7 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
   node->hdr.kind = HeaderKind::NativeData;
   auto obj = new (reinterpret_cast<char*>(node) + nativeDataSize)
              ObjectData(cls);
+  assert(obj->hasExactlyOneRef());
   obj->setAttribute(static_cast<ObjectData::Attribute>(ndi->odattrs));
   if (ndi->init) {
     ndi->init(obj);
@@ -135,11 +150,11 @@ void nativeDataInstanceDtor(ObjectData* obj, const Class* cls) {
     MM().removeNativeObject(node);
   }
 
-  size_t size = ObjectData::sizeForNProps(nProps) + ndsize(ndi);
-  if (LIKELY(size <= kMaxSmartSize)) {
-    return MM().smartFreeSize(node, size);
+  size_t size = ObjectData::sizeForNProps(nProps) + ndsize(obj, ndi);
+  if (LIKELY(size <= kMaxSmallSize)) {
+    return MM().freeSmallSize(node, size);
   }
-  MM().smartFreeSizeBig(node, size);
+  MM().freeBigSize(node, size);
 }
 
 Variant nativeDataSleep(const ObjectData* obj) {

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -109,8 +109,7 @@ struct RegionDesc {
    */
   SrcKey            lastSrcKey() const;
 
-  Block*            addBlock(SrcKey sk, int length, FPInvOffset spOffset,
-                             uint16_t inlineLevel);
+  Block*            addBlock(SrcKey sk, int length, FPInvOffset spOffset);
   void              deleteBlock(BlockId bid);
   void              renumberBlock(BlockId oldId, BlockId newId);
   void              addArc(BlockId src, BlockId dst);
@@ -254,7 +253,31 @@ inline bool operator==(const RegionDesc::TypedLocation& a,
   return a.location == b.location && a.type == b.type;
 }
 
-using PostConditions = std::vector<RegionDesc::TypedLocation>;
+/*
+ * PostConditions are known type information for locals and stack
+ * locations at the end of profiling translation.
+ *
+ * These are kept for blocks that end a profiling translation in order
+ * to enable better region selection.  This information is used to
+ * prevent profiling translations with incompatible types from being
+ * stitched together in a larger, optimizing translation.
+ *
+ * The PostConditions are kept in two distinct sets:
+ *
+ *   - the 'changed' set includes locations that may have been
+ *     modified by the corresponding translation;
+ *
+ *   - the 'refined' set includes locations that are not modified but
+ *     that some information is learned about them during the
+ *     corresponding translation, typically due to type checks or
+ *     asserts.
+ */
+using TypedLocations = std::vector<RegionDesc::TypedLocation>;
+
+struct PostConditions {
+  TypedLocations changed;
+  TypedLocations refined;
+};
 
 /*
  * A prediction for the argument reffiness of the Func for a pre-live ActRec.
@@ -282,13 +305,13 @@ inline bool operator==(const RegionDesc::ReffinessPred& a,
  * at various execution points, including at entry to the block.
  */
 struct RegionDesc::Block {
-  using TypedLocMap = boost::container::flat_multimap<SrcKey, TypedLocation>;
+  using TypedLocVec   = jit::vector<TypedLocation>;
+  using RefPredVec    = jit::vector<ReffinessPred>;
   using ParamByRefMap = boost::container::flat_map<SrcKey,bool>;
-  using RefPredMap = boost::container::flat_multimap<SrcKey,ReffinessPred>;
-  using KnownFuncMap = boost::container::flat_map<SrcKey,const Func*>;
+  using KnownFuncMap  = boost::container::flat_map<SrcKey,const Func*>;
 
   explicit Block(const Func* func, bool resumed, Offset start, int length,
-                 FPInvOffset initSpOff, uint16_t inlineLevel);
+                 FPInvOffset initSpOff);
 
   Block& operator=(const Block&) = delete;
 
@@ -307,25 +330,11 @@ struct RegionDesc::Block {
   bool        empty()             const { return length() == 0; }
   bool        contains(SrcKey sk) const;
   FPInvOffset initialSpOffset()   const { return m_initialSpOffset; }
-  uint16_t    inlineLevel()       const { return m_inlineLevel; }
   TransID     profTransID()       const { return m_profTransID; }
 
   void setID(BlockId id)                  { m_id = id; }
   void setProfTransID(TransID ptid)       { m_profTransID = ptid; }
   void setInitialSpOffset(FPInvOffset sp) { m_initialSpOffset = sp; }
-
-  /*
-   * Set and get whether or not this block ends with an inlined FCall. Inlined
-   * FCalls should not emit any code themselves, and they will be followed by
-   * one or more blocks from the callee.
-   */
-  void setInlinedCallee(const Func* callee) {
-    assertx(callee);
-    m_inlinedCallee = callee;
-  }
-  const Func* inlinedCallee() const {
-    return m_inlinedCallee;
-  }
 
   /*
    * Increase the length of the Block by 1.
@@ -339,20 +348,16 @@ struct RegionDesc::Block {
 
   /*
    * Add a predicted type to this block.
-   *
-   * Pre: sk is in the region delimited by this block.
    */
-  void addPredicted(SrcKey sk, TypedLocation);
+  void addPredicted(TypedLocation);
 
   /*
    * Add a precondition type to this block. Preconditions have no effects on
    * correctness, but entering a block with a known type that violates a
    * precondition is likely to result in a side exit after little to no
    * forward progress.
-   *
-   * Pre: sk is in the region delimited by this block.
    */
-  void addPreCondition(SrcKey sk, TypedLocation);
+  void addPreCondition(TypedLocation);
 
   /*
    * Add information about parameter reffiness to this block.
@@ -362,7 +367,7 @@ struct RegionDesc::Block {
   /*
    * Add a reffiness prediction about a pre-live ActRec.
    */
-  void addReffinessPred(SrcKey, const ReffinessPred&);
+  void addReffinessPred(const ReffinessPred&);
 
   /*
    * Update the statically known Func*. It remains active until another is
@@ -372,9 +377,9 @@ struct RegionDesc::Block {
   void setKnownFunc(SrcKey, const Func*);
 
   /*
-   * Set the postconditions for this Block.
+   * Set the post-conditions for this Block.
    */
-  void setPostConditions(const PostConditions&);
+  void setPostConds(const PostConditions&);
 
   /*
    * The following getters return references to the metadata maps holding the
@@ -382,14 +387,12 @@ struct RegionDesc::Block {
    * iterate over the information is using a MapWalker, since they're all
    * backed by a sorted map.
    */
-  const TypedLocMap& typePredictions() const { return m_typePredictions; }
-  const TypedLocMap& typePreConditions() const {
-    return m_typePreConditions;
-  }
-  const ParamByRefMap& paramByRefs() const { return m_byRefs; }
-  const RefPredMap& reffinessPreds() const { return m_refPreds; }
-  const KnownFuncMap& knownFuncs() const { return m_knownFuncs; }
-  const PostConditions& postConds() const { return m_postConds; }
+  const TypedLocVec&    typePredictions()   const { return m_typePredictions;  }
+  const TypedLocVec&    typePreConditions() const { return m_typePreConditions;}
+  const ParamByRefMap&  paramByRefs()       const { return m_byRefs;           }
+  const RefPredVec&     reffinessPreds()    const { return m_refPreds;         }
+  const KnownFuncMap&   knownFuncs()        const { return m_knownFuncs;       }
+  const PostConditions& postConds()         const { return m_postConds;        }
 
 private:
   void checkInstructions() const;
@@ -406,13 +409,11 @@ private:
   Offset          m_last;
   int             m_length;
   FPInvOffset     m_initialSpOffset;
-  const Func*     m_inlinedCallee;
-  uint16_t        m_inlineLevel; // 0 means the outer-most function
   TransID         m_profTransID;
-  TypedLocMap     m_typePredictions;
-  TypedLocMap     m_typePreConditions;
+  TypedLocVec     m_typePredictions;
+  TypedLocVec     m_typePreConditions;
   ParamByRefMap   m_byRefs;
-  RefPredMap      m_refPreds;
+  RefPredVec      m_refPreds;
   KnownFuncMap    m_knownFuncs;
   PostConditions  m_postConds;
 };
@@ -508,7 +509,7 @@ RegionDescPtr selectHotRegion(TransID transId,
  * whose shape will be analyzed by the InliningDecider.
  */
 RegionDescPtr selectTracelet(const RegionContext& ctx, bool profiling,
-                             bool allowInlining = true);
+                             bool inlining = false);
 
 /*
  * Select the hottest trace beginning with triggerId.
@@ -535,7 +536,7 @@ RegionDescPtr selectHotCFG(TransID headId,
  * satisfy the post-conditions in prevPostConds.
  */
 bool preCondsAreSatisfied(const RegionDesc::BlockPtr& block,
-                          const PostConditions& prevPostConds);
+                          const TypedLocations& prevPostConds);
 
 /*
  * This function returns true for control-flow bytecode instructions that

@@ -8,21 +8,19 @@
  *
  *)
 
+open Core
 open Utils
 open Typing_defs
+open Typing_dependent_type
 
 module Reason = Typing_reason
-module Inst = Typing_instantiate
 module Unify = Typing_unify
 module Env = Typing_env
 module DefsDB = Typing_heap
-module TDef = Typing_tdef
 module TSubst = Typing_subst
 module TUtils = Typing_utils
 module TUEnv = Typing_unification_env
-module ShapeMap = Nast.ShapeMap
 module SN = Naming_special_names
-module TAccess = Typing_taccess
 module Phase = Typing_phase
 
 (* This function checks that the method ft_sub can be used to replace
@@ -81,6 +79,11 @@ let rec subtype_funs_generic ~check_return env r_super ft_super r_sub ft_sub =
  * parameters as unresolved, instead it should stay as a Tgeneric.
  *)
 and subtype_method ~check_return env r_super ft_super r_sub ft_sub =
+  if not ft_super.ft_abstract && ft_sub.ft_abstract then
+    (* It is valid for abstract class to extend a concrete class, but it cannot
+     * redefine already concrete members as abstract.
+     * See override_abstract_concrete.php test case for example. *)
+    Errors.abstract_concrete_override ft_sub.ft_pos ft_super.ft_pos `method_;
   let ety_env = Phase.env_with_self env in
   let env, ft_super_no_tvars =
     Phase.localize_ft ~ety_env ~instantiate_tparams:false env ft_super in
@@ -101,6 +104,16 @@ and subtype_tparams env c_name variancel super_tyl children_tyl =
       let env = subtype_tparam env c_name variance super child in
       subtype_tparams env c_name variancel superl childrenl
 
+and invariance_suggestion c_name =
+  let open Naming_special_names.Collections in
+  if c_name = cVector then
+    "\nDid you mean ConstVector instead?"
+  else if c_name = cMap then
+    "\nDid you mean ConstMap instead?"
+  else if c_name = cSet then
+    "\nDid you mean ConstSet instead?"
+  else ""
+
 and subtype_tparam env c_name variance (r_super, _ as super) child =
   match variance with
   | Ast.Covariant -> sub_type env super child
@@ -111,7 +124,17 @@ and subtype_tparam env c_name variance (r_super, _ as super) child =
         (fun err ->
           let pos = Reason.to_pos r_super in
           Errors.explain_contravariance pos c_name err; env)
-  | Ast.Invariant -> fst (Unify.unify env super child)
+  | Ast.Invariant ->
+      Errors.try_
+        (fun () -> fst (Unify.unify env super child))
+        (fun err ->
+          let suggestion =
+            let s = invariance_suggestion c_name in
+            let try_fun = (fun () ->
+              subtype_tparam env c_name Ast.Covariant super child) in
+            if not (s = "") && Errors.has_no_errors try_fun then s else "" in
+          let pos = Reason.to_pos r_super in
+          Errors.explain_invariance pos c_name suggestion err; env)
 
 (* Distinction b/w sub_type and sub_type_with_uenv similar to unify and
  * unify_with_uenv, see comment there. *)
@@ -121,11 +144,9 @@ and sub_type env ty_super ty_sub =
 and get_super_typevar_set_ env set ty_super =
   let env, ety_super = Env.expand_type env ty_super in
   match ety_super with
-  | _, Tgeneric (x_super, cstr_opt) ->
+  | _, Tabstract (AKgeneric (x_super, super), _) ->
     let set = SSet.add x_super set in
-    (match cstr_opt with
-     | Some (Ast.Constraint_super, ty) -> get_super_typevar_set_ env set ty
-     | _ -> set)
+    Option.value_map super ~f:(get_super_typevar_set_ env set) ~default:set
   | _ -> set
 
 (* If ty_super is a typevar, this function returns a set of the names of all
@@ -138,12 +159,11 @@ and get_super_typevar_set env ty_super =
 and match_typevars_ env super_typevar_set ty_sub =
   let env, ety_sub = Env.expand_type env ty_sub in
   match ety_sub with
-  | _, Tgeneric (x_sub, cstr_opt) ->
+  | _, Tabstract (AKgeneric (x_sub, _), cstr) ->
     if SSet.mem x_sub super_typevar_set then true else
-    (match cstr_opt with
-     | Some (Ast.Constraint_as, ty_sub) ->
-         match_typevars_ env super_typevar_set ty_sub
-     | _ -> false)
+    Option.value_map cstr
+      ~f:(match_typevars_ env super_typevar_set)
+      ~default:false
   | _ -> false
 
 (* This function traverses over all the typevars known to be supertypes of
@@ -156,14 +176,14 @@ and match_typevars env ty_super ty_sub =
 
 and typevars_subtype_ env (uenv_super, ety_super) (uenv_sub, ety_sub) =
   match ety_super, ety_sub with
-  | _, (r_sub, Tgeneric (x_sub, Some (Ast.Constraint_as, ty_sub))) ->
+  | _, (r_sub, Tabstract (AKgeneric (x_sub, _), Some ty_sub)) ->
     Errors.try_
       (fun () ->
         let env, ety_sub = Env.expand_type env ty_sub in
         typevars_subtype_ env (uenv_super, ety_super) (uenv_sub, ety_sub))
       (fun l ->
         Reason.explain_generic_constraint env.Env.pos r_sub x_sub l; env)
-  | (r_super, Tgeneric (x_super, Some (Ast.Constraint_super, ty_super))), _ ->
+  | (r_super, Tabstract (AKgeneric (x_super, Some ty_super), _)), _ ->
     Errors.try_
       (fun () ->
         let env, ety_super = Env.expand_type env ty_super in
@@ -212,19 +232,13 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
    * a second time.
    * The converse goes for seen_tvars_sub and ty_sub.
    * TODO: Right now we only update seen_tvars when recursing into
-   * Tunresolveds, because we are encountering actual code that creates such
-   * recursive types. Should probably update seen_tvars regardless of which
-   * types we are recursing into, or prove that recursive types can't happen
-   * in those cases.
+   * Tunresolveds and Toptions, because we are encountering actual code that
+   * creates such recursive types. Should probably update seen_tvars regardless
+   * of which types we are recursing into, or prove that recursive types can't
+   * happen in those cases.
    * TODO: Figure out a nicer (type-enforced?) way to associate the right
    * uenv with the right type. *)
   match ety_super, ety_sub with
-  | _, (r, Taccess taccess) ->
-      let env, ty_sub = TAccess.expand env r taccess in
-      sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
-  | (r, Taccess taccess), _ ->
-      let env, ty_super = TAccess.expand env r taccess in
-      sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
   | (_, Tunresolved _), (_, Tunresolved _) ->
       let env, _ =
         Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) in
@@ -270,9 +284,9 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
       fst (Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub))
   | _, (_, Tunresolved tyl) when Env.grow_super env ->
       let uenv_sub = {uenv_sub with TUEnv.seen_tvars = seen_tvars_sub} in
-      List.fold_left begin fun env x ->
+      List.fold_left tyl ~f:begin fun env x ->
         sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, x)
-      end env tyl
+      end ~init:env
 (****************************************************************************)
 (* Repeat the previous 3 cases but with the super / sub order reversed *)
 (****************************************************************************)
@@ -285,9 +299,9 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
       fst (Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub))
   | (_, Tunresolved tyl), _ when not (Env.grow_super env) ->
       let uenv_super = {uenv_super with TUEnv.seen_tvars = seen_tvars_super} in
-      List.fold_left begin fun env x ->
+      List.fold_left tyl ~f:begin fun env x ->
         sub_type_with_uenv env (uenv_super, x) (uenv_sub, ty_sub)
-      end env tyl
+      end ~init:env
 (****************************************************************************)
 (* OCaml doesn't inspect `when` clauses when checking pattern matching
  * exhaustiveness, so just assert false here *)
@@ -297,12 +311,51 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
 (****************************************************************************)
 (* ### End Tunresolved madness ### *)
 (****************************************************************************)
-  | (_, Tgeneric ("this", Some (_, ty_super))),
-    (_, Tgeneric ("this", Some (_, ty_sub))) ->
-      sub_type env ty_super ty_sub
-  | (_, Tgeneric (_, _)), (_, Tgeneric (_, Some (Ast.Constraint_as, _)))
-  | (_, Tgeneric (_, Some (Ast.Constraint_super, _))), (_, Tgeneric (_, _)) ->
+  | (r1, Tabstract (AKdependent d1, Some ty_super)),
+    (r2, Tabstract (AKdependent d2, Some ty_sub))
+        when d1 = d2 ->
+      let uenv_super =
+        { uenv_super with
+          TUEnv.dep_tys = (r1, d1)::uenv_super.TUEnv.dep_tys } in
+      let uenv_sub =
+        { uenv_sub with
+          TUEnv.dep_tys = (r2, d2)::uenv_sub.TUEnv.dep_tys } in
+      sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
+  (* This is sort of a hack because our handling of Toption is highly
+   * dependent on how the type is structured. When we see a bare
+   * dependent type we strip it off at this point since it shouldn't be
+   * relevant to subtyping any more.
+   *)
+  | _, (r, Tabstract (AKdependent (`expr _, [] as d), Some ty_sub)) ->
+      let uenv_sub =
+        { uenv_sub with
+          TUEnv.dep_tys = (r, d)::uenv_sub.TUEnv.dep_tys } in
+      sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
+  | (_, Tabstract (AKdependent d1, _)),
+    (r, Tabstract (AKdependent d2, Some sub)) when d1 <> d2 ->
+      let uenv_sub =
+        { uenv_sub with
+          TUEnv.dep_tys = (r, d2)::uenv_sub.TUEnv.dep_tys } in
+      (* If an error occurred while subtyping, we produce a unification error
+       * so we get the full information on how the dependent type was
+       * generated
+       *)
+      Errors.try_when
+        (fun () ->
+          sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, sub))
+        ~when_: begin fun () ->
+          match TUtils.get_base_type ty_super, sub with
+          | (_, Tclass ((_, x), _)), (_, Tclass ((_, y), _)) when x = y -> false
+          | _, _ -> true
+        end
+        ~do_: (fun _ -> TUtils.simplified_uerror env ty_super ty_sub)
+  | (_, Tabstract (AKgeneric _, _)), (_, Tabstract (AKgeneric _, Some _))
+  | (_, Tabstract (AKgeneric (_, Some _), _)),
+      (_, Tabstract (AKgeneric _, _)) ->
       typevars_subtype env (uenv_super, ety_super) (uenv_sub, ety_sub)
+  | (_, Tclass ((_, stringish), _)), (_, Tabstract (ak, _))
+    when stringish = SN.Classes.cStringish &&
+      AbstractKind.is_classname ak -> env
   | (p_super, (Tclass (x_super, tyl_super) as ty_super_)),
       (p_sub, (Tclass (x_sub, tyl_sub) as ty_sub_))
       when Typing_env.get_enum_constraint (snd x_sub) = None  ->
@@ -314,7 +367,7 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
         | None -> fst (Unify.unify env ety_super ety_sub)
         | Some { tc_tparams; _} ->
             let variancel =
-              List.map (fun (variance, _, _) -> variance) tc_tparams
+              List.map tc_tparams (fun (variance, _, _) -> variance)
             in
             subtype_tparams env cid_super variancel tyl_super tyl_sub
       else fst (Unify.unify env ety_super ety_sub)
@@ -334,9 +387,10 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
                   | env, None ->
                     Errors.try_ begin fun () ->
                       let ety_env = {
-                        typedef_expansions = [];
+                        type_expansions = [];
                         substs = SMap.empty;
-                        this_ty = ty_sub;
+                        this_ty = ExprDepTy.apply uenv_sub.TUEnv.dep_tys ty_sub;
+                        from_class = None;
                       } in
                       let env, elt_type =
                         Phase.localize ~ety_env env elt_type in
@@ -355,7 +409,7 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
                   (* We handle the case where a generic A<T> is used as A *)
                   let tyl_sub =
                     if tyl_sub = [] && not (Env.is_strict env)
-                    then List.map (fun _ -> (p_sub, Tany)) class_.tc_tparams
+                    then List.map class_.tc_tparams (fun _ -> (p_sub, Tany))
                     else tyl_sub
                   in
                   if List.length class_.tc_tparams <> List.length tyl_sub
@@ -371,9 +425,10 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
                    * This is covered by test/typecheck/this_tparam2.php
                    *)
                   let ety_env = {
-                    typedef_expansions = [];
+                    type_expansions = [];
                     substs = TSubst.make class_.tc_tparams tyl_sub;
-                    this_ty = Reason.none, TUtils.this_of ty_sub;
+                    this_ty = ExprDepTy.apply uenv_sub.TUEnv.dep_tys ty_sub;
+                    from_class = None;
                   } in
                   let env, up_obj = Phase.localize ~ety_env env up_obj in
                   sub_type env ty_super up_obj
@@ -387,6 +442,8 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
   | (_, Tmixed), _ -> env
   | (_, Tprim Nast.Tnum), (_, Tprim (Nast.Tint | Nast.Tfloat)) -> env
   | (_, Tprim Nast.Tarraykey), (_, Tprim (Nast.Tint | Nast.Tstring)) -> env
+  | (_, Tprim (Nast.Tstring | Nast.Tarraykey)), (_, Tabstract (ak, _))
+    when AbstractKind.is_classname ak -> env
   | (_, Tclass ((_, coll), [tv_super])), (_, Tarray (ty3, ty4))
     when (coll = SN.Collections.cTraversable ||
         coll = SN.Collections.cContainer) ->
@@ -416,10 +473,7 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
   | (_, Tclass ((_, stringish), _)), (_, Tprim Nast.Tstring)
     when stringish = SN.Classes.cStringish -> env
   | (_, Tclass ((_, xhp_child), _)), (_, Tarray _)
-  | (_, Tclass ((_, xhp_child), _)), (_, Tprim Nast.Tint)
-  | (_, Tclass ((_, xhp_child), _)), (_, Tprim Nast.Tfloat)
-  | (_, Tclass ((_, xhp_child), _)), (_, Tprim Nast.Tstring)
-  | (_, Tclass ((_, xhp_child), _)), (_, Tprim Nast.Tnum)
+  | (_, Tclass ((_, xhp_child), _)), (_, Tprim (Nast.Tint | Nast.Tfloat | Nast.Tstring | Nast.Tnum))
     when xhp_child = SN.Classes.cXHPChild -> env
   | (_, (Tarray (Some ty_super, None))), (_, (Tarray (Some ty_sub, None))) ->
       sub_type env ty_super ty_sub
@@ -432,17 +486,33 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
       sub_type env ty_super (reason, Tarray (Some int_type, Some elt_ty))
   | _, (_, Tany) -> env
   | (_, Tany), _ -> fst (Unify.unify env ty_super ty_sub)
+    (* recording seen_tvars for Toption variants to avoid infinte recursion
+       in case of type variable X = ?X *)
   | (_, Toption ty_super), _ when uenv_super.TUEnv.non_null ->
+      let uenv_super = {uenv_super with TUEnv.seen_tvars = seen_tvars_super} in
       sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
   | _, (_, Toption ty_sub) when uenv_sub.TUEnv.non_null ->
+      let uenv_sub = {uenv_sub with TUEnv.seen_tvars = seen_tvars_sub} in
       sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
   | (_, Toption ty_super), (_, Toption ty_sub) ->
-      let uenv_super = { uenv_super with TUEnv.non_null = true } in
-      let uenv_sub = { uenv_sub with TUEnv.non_null = true } in
+      let uenv_super = {
+        TUEnv.non_null = true;
+        TUEnv.seen_tvars = seen_tvars_super;
+        TUEnv.dep_tys = uenv_super.TUEnv.dep_tys;
+      } in
+      let uenv_sub = {
+        TUEnv.non_null = true;
+        TUEnv.seen_tvars = seen_tvars_sub;
+        TUEnv.dep_tys = uenv_sub.TUEnv.dep_tys;
+      } in
       sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
-  | (_, Toption ty_super), _ ->
-      let uenv_super = { uenv_super with TUEnv.non_null = true } in
-      sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
+  | (_, Toption ty_opt), _ ->
+      let uenv_super = {
+        TUEnv.non_null = true;
+        TUEnv.seen_tvars = seen_tvars_super;
+        TUEnv.dep_tys = uenv_super.TUEnv.dep_tys;
+      } in
+      sub_type_with_uenv env (uenv_super, ty_opt) (uenv_sub, ty_sub)
   | (_, Ttuple tyl_super), (_, Ttuple tyl_sub)
     when List.length tyl_super = List.length tyl_sub ->
     wfold_left2 sub_type env tyl_super tyl_sub
@@ -463,64 +533,59 @@ and sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub) =
           let env = sub_type env ft.ft_ret ret in
           env
       )
-  | (r_super, Tshape fdm_super), (r_sub, Tshape fdm_sub) ->
-      ShapeMap.iter begin fun k _ ->
-        if not (ShapeMap.mem k fdm_super)
-        then
-          let p_super = Reason.to_pos r_super in
-          let p_sub = Reason.to_pos r_sub in
-          Errors.field_missing (TUtils.get_shape_field_name k) p_super p_sub
-      end fdm_sub;
-      TUtils.apply_shape sub_type env (r_super, fdm_super) (r_sub, fdm_sub)
-  | (_, Tabstract ((_, name_super), tyl_super, _)),
-      (_, Tabstract ((_, name_sub), tyl_sub, _))
+  | (r_super, Tshape (fields_known_super, fdm_super)),
+      (r_sub, Tshape (fields_known_sub, fdm_sub)) ->
+      fst (TUtils.apply_shape
+        ~on_common_field:(fun (env, acc) _ x y -> sub_type env x y, acc)
+        ~on_missing_optional_field:(fun acc _ _ -> acc)
+        (env, None)
+        (r_super, fields_known_super, fdm_super)
+        (r_sub, fields_known_sub, fdm_sub))
+  | (_, Tabstract (AKnewtype (name_super, tyl_super), _)),
+    (_, Tabstract (AKnewtype (name_sub, tyl_sub), _))
     when name_super = name_sub ->
       let td = Env.get_typedef env name_super in
       (match td with
       | Some (DefsDB.Typedef.Ok (_, tparams, _, _, _)) ->
           let variancel =
-            List.map (fun (variance, _, _) -> variance) tparams
+            List.map tparams (fun (variance, _, _) -> variance)
           in
           subtype_tparams env name_super variancel tyl_super tyl_sub
       | _ -> env
       )
-  | _, (_, Tabstract (_, _, Some x)) ->
+  | _, (_, Tabstract ((AKnewtype (_, _) | AKenum _), Some x)) ->
       Errors.try_
-         (fun () -> fst (Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)))
-         (fun _ -> sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, x))
-  (* Handle enums with subtyping constraints. *)
-  | _, (_, (Tclass ((_, x), [])))
-    when Typing_env.get_enum_constraint x <> None ->
-    (match Typing_env.get_enum_constraint x with
-      | Some base ->
-        (* Handling is the same as abstracts with as *)
-        Errors.try_
-          (fun () -> fst (Unify.unify env ty_super ty_sub))
-          (fun _ ->
-           let ety_env = {
-             typedef_expansions = [];
-             substs = SMap.empty;
-             this_ty = Reason.none, TUtils.this_of ty_sub;
-           } in
-           let env, base = Phase.localize ~ety_env env base in
-           sub_type env ty_super base)
-      | None -> assert false)
+        (fun () ->
+          fst @@
+            Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)
+        )
+        (fun _ -> sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, x))
+  | _, (r, Tabstract (AKdependent d, Some ty)) ->
+      Errors.try_
+        (fun () -> fst (
+          Unify.unify_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub)))
+        (fun _ ->
+          let uenv_sub =
+            { uenv_sub with
+              TUEnv.dep_tys = (r, d)::uenv_sub.TUEnv.dep_tys } in
+          sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty))
   (* If all else fails we fall back to the super/as constraint on a generics. *)
-  | _, (r_sub, Tgeneric (x, Some (Ast.Constraint_as, ty_sub))) ->
+  | _, (r_sub, Tabstract (AKgeneric (x, _), Some ty_sub)) ->
       (Errors.try_
-         (fun () -> sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub))
+         (fun () ->
+           sub_type_with_uenv env (uenv_super, ty_super) (uenv_sub, ty_sub))
          (fun l ->
            Reason.explain_generic_constraint env.Env.pos r_sub x l; env)
       )
-  | (r_super, Tgeneric (x, Some (Ast.Constraint_super, ty))), _ ->
+  | (r_super, Tabstract (AKgeneric (x, Some ty), _)), _ ->
       (Errors.try_
          (fun () ->
            sub_type_with_uenv env (uenv_super, ty) (uenv_sub, ty_sub))
          (fun l ->
            Reason.explain_generic_constraint env.Env.pos r_super x l; env)
       )
-  | (_, (Tarray (_, _) | Tprim _ | Tgeneric (_, _) | Tvar _
-    | Tabstract (_, _, _) | Ttuple _ | Tanon (_, _) | Tfun _
+  | (_, (Tarray (_, _) | Tprim _ | Tvar _
+    | Tabstract (_, _) | Ttuple _ | Tanon (_, _) | Tfun _
     | Tobject | Tshape _ | Tclass (_, _))
     ), _ -> fst (Unify.unify env ty_super ty_sub)
 
@@ -534,15 +599,18 @@ and sub_string p env ty2 =
   match ety2 with
   | (_, Toption ty2) -> sub_string p env ty2
   | (_, Tunresolved tyl) ->
-      List.fold_left (sub_string p) env tyl
+      List.fold_left tyl ~f:(sub_string p) ~init:env
   | (_, Tprim _) ->
       env
-  | (_, Tabstract (_, _, Some ty))
-  | (_, Tgeneric (_, Some (Ast.Constraint_as, ty))) ->
+  | (_, Tabstract (AKenum _, _)) ->
+      (* Enums are either ints or strings, and so can always be used in a
+       * stringish context *)
+      env
+  | (_, Tabstract (ak, _)) when AbstractKind.is_classname ak ->
+      (* A classname is the string 'Foo' obtained via Foo::class *)
+      env
+  | (_, Tabstract (_, Some ty)) ->
       sub_string p env ty
-  | (r, Taccess taccess) ->
-      let env, ety2 = TAccess.expand env r taccess in
-      sub_string p env ety2
   | (r2, Tclass (x, _)) ->
       let class_ = Env.get_class env (snd x) in
       (match class_ with
@@ -551,10 +619,7 @@ and sub_string p env ty2 =
           (* A Stringish is a string or an object with a __toString method
            * that will be converted to a string *)
           when tc.tc_name = SN.Classes.cStringish
-          || SMap.mem SN.Classes.cStringish tc.tc_ancestors
-          (* Apply enum means that we're dealing with enum values,
-           * which are primitives (int/string) *)
-          || tc.tc_kind = Ast.Cenum ->
+          || SMap.mem SN.Classes.cStringish tc.tc_ancestors ->
         env
       | Some _ ->
         Errors.object_string p (Reason.to_pos r2);
@@ -563,7 +628,7 @@ and sub_string p env ty2 =
   | _, Tany ->
     env (* Unifies with anything *)
   | _, Tobject -> env
-  | _, (Tmixed | Tarray (_, _) | Tgeneric (_, _) | Tvar _ | Tabstract (_, _, _)
+  | _, (Tmixed | Tarray (_, _) | Tvar _ | Tabstract (_, _)
     | Ttuple _ | Tanon (_, _) | Tfun _ | Tshape _) ->
       fst (Unify.unify env (Reason.Rwitness p, Tprim Nast.Tstring) ty2)
 

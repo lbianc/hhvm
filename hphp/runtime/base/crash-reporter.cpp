@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -129,11 +129,13 @@ static void bt_handler(int sig) {
 }
 
 void install_crash_reporter() {
+#ifndef _MSC_VER
   signal(SIGQUIT, bt_handler);
+  signal(SIGBUS,  bt_handler);
+#endif
   signal(SIGILL,  bt_handler);
   signal(SIGFPE,  bt_handler);
   signal(SIGSEGV, bt_handler);
-  signal(SIGBUS,  bt_handler);
   signal(SIGABRT, bt_handler);
 
   register_assert_fail_logger(&StackTraceNoHeap::AddExtraLogging);

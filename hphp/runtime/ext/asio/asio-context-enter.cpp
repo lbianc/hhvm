@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -17,18 +17,18 @@
 #include "hphp/runtime/ext/asio/asio-context-enter.h"
 
 #include "hphp/runtime/ext/asio/asio-context.h"
-#include "hphp/runtime/ext/asio/async-function-wait-handle.h"
-#include "hphp/runtime/ext/asio/async-generator-wait-handle.h"
-#include "hphp/runtime/ext/asio/await-all-wait-handle.h"
-#include "hphp/runtime/ext/asio/condition-wait-handle.h"
-#include "hphp/runtime/ext/asio/external-thread-event-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-array-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-map-wait-handle.h"
-#include "hphp/runtime/ext/asio/gen-vector-wait-handle.h"
-#include "hphp/runtime/ext/asio/reschedule-wait-handle.h"
-#include "hphp/runtime/ext/asio/resumable-wait-handle.h"
-#include "hphp/runtime/ext/asio/sleep-wait-handle.h"
-#include "hphp/runtime/ext/asio/waitable-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-generator-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_condition-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-array-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-map-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_gen-vector-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_reschedule-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_waitable-wait-handle.h"
 
 namespace HPHP { namespace asio {
 ///////////////////////////////////////////////////////////////////////////////
@@ -51,10 +51,9 @@ namespace {
 
     bool discoverResumable(c_ResumableWaitHandle* node) {
       if (node->getState() == c_ResumableWaitHandle::STATE_RUNNING) {
-        Object e(SystemLib::AllocInvalidOperationExceptionObject(
+        SystemLib::throwInvalidOperationExceptionObject(
           "Detected cross-context dependency cycle. You are trying to depend "
-          "on something that is running you serially."));
-        throw e;
+          "on something that is running you serially.");
       }
 
       return node->getState() == c_ResumableWaitHandle::STATE_BLOCKED;

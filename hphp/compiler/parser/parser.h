@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,6 +18,7 @@
 #define incl_HPHP_COMPILER_PARSER_H_
 
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "hphp/runtime/base/exceptions.h"
@@ -41,8 +42,6 @@
 #ifdef HPHP_PARSER_ERROR
 #undef HPHP_PARSER_ERROR
 #endif
-#define HPHP_PARSER_ERROR(fmt, p, args...)  \
-  throw HPHP::ParseTimeFatalException((p)->file(), (p)->line1(), fmt, ##args)
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -51,7 +50,6 @@ DECLARE_BOOST_TYPES(Expression);
 DECLARE_BOOST_TYPES(Statement);
 DECLARE_BOOST_TYPES(StatementList);
 DECLARE_BOOST_TYPES(LabelScope);
-DECLARE_BOOST_TYPES(Location);
 DECLARE_BOOST_TYPES(AnalysisResult);
 DECLARE_BOOST_TYPES(BlockScope);
 DECLARE_BOOST_TYPES(TypeAnnotation);
@@ -150,7 +148,8 @@ public:
   void onClassVariableModifer(Token &mod) {}
   void onClassVariableStart(Token &out, Token *modifiers, Token &decl,
                             Token *type, bool abstract = false,
-                            bool typeconst = false);
+                            bool typeconst = false,
+                            const TypeAnnotationPtr& typeAnnot = nullptr);
   void onClassVariable(Token &out, Token *exprs, Token &var, Token *value);
   void onClassConstant(Token &out, Token *exprs, Token &var, Token &value);
   void onClassAbstractConstant(Token &out, Token *exprs, Token &var);
@@ -290,11 +289,15 @@ public:
 
   void onLabel(Token &out, Token &label);
   void onGoto(Token &out, Token &label, bool limited);
+  void setTypeVars(Token &out, const Token &name);
   void onTypedef(Token& out, const Token& name, const Token& type);
 
   void onTypeAnnotation(Token& out, const Token& name, const Token& typeArgs);
   void onTypeList(Token& type1, const Token& type2);
   void onTypeSpecialization(Token& type, char specialization);
+  void onClsCnsShapeField(Token& out, const Token& cls, const Token& cns,
+    const Token& value);
+  void onShape(Token& out, const Token& shapeMemberList);
 
   // for language integrated query expressions
   void onQuery(Token &out, Token &head, Token &body);
@@ -402,8 +405,8 @@ private:
   AnalysisResultPtr m_ar;
   FileScopePtr m_file;
   std::vector<std::string> m_comments; // for docComment stack
-  std::vector<BlockScopePtrVec> m_scopes;
-  std::vector<LabelScopePtrVec> m_labelScopes;
+  std::vector<std::vector<BlockScopePtr>> m_scopes;
+  std::vector<std::vector<LabelScopePtr>> m_labelScopes;
   std::vector<FunctionContext> m_funcContexts;
   std::vector<ScalarExpressionPtr> m_compilerHaltOffsetVec;
   std::string m_clsName; // for T_CLASS_C inside a closure
@@ -434,13 +437,14 @@ private:
   void invalidAwait();
   void setIsAsync();
 
-  static bool canBeAsyncOrGenerator(string funcName, string clsName);
-  void checkFunctionContext(string funcName,
+  static bool canBeAsyncOrGenerator(const std::string& funcName,
+                                    const std::string& clsName);
+  void checkFunctionContext(const std::string& funcName,
                             FunctionContext& funcContext,
                             ModifierExpressionPtr modifiers,
                             int returnsRef);
 
-  string getFunctionName(FunctionType type, Token* name);
+  std::string getFunctionName(FunctionType type, Token* name);
   void prepareConstructorParameters(StatementListPtr stmts,
                                     ExpressionListPtr params,
                                     bool isAbstract);
@@ -452,7 +456,7 @@ private:
   ExpressionPtr getDynamicVariable(ExpressionPtr exp, bool encap);
   ExpressionPtr createDynamicVariable(ExpressionPtr exp);
 
-  void checkThisContext(string var, ThisContextError error);
+  void checkThisContext(const std::string& var, ThisContextError error);
   void checkThisContext(Token &var, ThisContextError error);
   void checkThisContext(ExpressionPtr e, ThisContextError error);
   void checkThisContext(ExpressionListPtr params, ThisContextError error);
@@ -489,12 +493,15 @@ private:
     AliasTable(const hphp_string_imap<std::string>& autoAliases,
                std::function<bool ()> autoOracle);
 
-    std::string getName(std::string alias, int line_no);
-    std::string getNameRaw(std::string alias);
-    AliasType getType(std::string alias);
-    int getLine(std::string alias);
-    bool isAliased(std::string alias);
-    void set(std::string alias, std::string name, AliasType type, int line_no);
+    std::string getName(const std::string& alias, int line_no);
+    std::string getNameRaw(const std::string& alias);
+    AliasType getType(const std::string& alias);
+    int getLine(const std::string& alias);
+    bool isAliased(const std::string& alias);
+    void set(const std::string& alias,
+             const std::string& name,
+             AliasType type,
+             int line_no);
     void clear();
 
   private:
@@ -532,6 +539,17 @@ private:
   const hphp_string_imap<std::string>& getAutoAliasedClasses();
   hphp_string_imap<std::string> getAutoAliasedClassesHelper();
 };
+
+template<typename... Args>
+inline void HPHP_PARSER_ERROR(const char* fmt,
+                       Parser* p,
+                       Args&&... args) {
+  throw ParseTimeFatalException(p->file(), p->line1(), fmt, args...);
+}
+
+inline void HPHP_PARSER_ERROR(const char* msg, Parser* p) {
+  throw ParseTimeFatalException(p->file(), p->line1(), "%s", msg);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 }}

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -67,15 +67,19 @@ namespace Compiler {
 class Label;
 class EmitterVisitor;
 
+using OptLocation = folly::Optional<Location::Range>;
+
 class Emitter {
 public:
   Emitter(ConstructPtr node, UnitEmitter& ue, EmitterVisitor& ev)
-    : m_node(node), m_ue(ue), m_ev(ev) {}
+      : m_node(node), m_ue(ue), m_ev(ev) {}
   UnitEmitter& getUnitEmitter() { return m_ue; }
   ConstructPtr getNode() { return m_node; }
   EmitterVisitor& getEmitterVisitor() { return m_ev; }
-  void setTempLocation(LocationPtr loc) { m_tempLoc = loc; }
-  LocationPtr getTempLocation() { return m_tempLoc; }
+  void setTempLocation(const OptLocation& r) {
+    m_tempLoc = r;
+  }
+  const OptLocation& getTempLocation() { return m_tempLoc; }
   void incStat(int counter, int value) {
     if (RuntimeOption::EnableEmitterStats) {
       IncStat(counter, value);
@@ -146,7 +150,7 @@ private:
   ConstructPtr m_node;
   UnitEmitter& m_ue;
   EmitterVisitor& m_ev;
-  LocationPtr m_tempLoc;
+  OptLocation m_tempLoc;
 };
 
 struct SymbolicStack {
@@ -158,11 +162,6 @@ struct SymbolicStack {
     CLS_STRING_NAME,   // name is the string to use
     CLS_SELF,
     CLS_PARENT
-  };
-
-  enum MetaType {
-    META_NONE,
-    META_LITSTR,
   };
 
 private:
@@ -184,17 +183,14 @@ private:
   struct SymEntry {
     explicit SymEntry(char s = 0)
       : sym(s)
-      , metaType(META_NONE)
+      , name(nullptr)
       , className(nullptr)
       , intval(-1)
       , unnamedLocalStart(InvalidAbsoluteOffset)
       , clsBaseType(CLS_INVALID)
     {}
     char sym;
-    MetaType metaType;
-    union {
-      const StringData* name;   // META_LITSTR
-    }   metaData;
+    const StringData* name;
     const StringData* className;
     int64_t intval; // used for L and I symbolic flavors
 
@@ -208,6 +204,8 @@ private:
     // early.  How this works depends on the type of class base---see
     // emitResolveClsBase for details.
     ClassBaseType clsBaseType;
+
+    std::string pretty() const;
   };
   std::vector<SymEntry> m_symStack;
 
@@ -247,7 +245,8 @@ public:
   bool isCls(int index) const;
   bool isTypePredicted(int index = -1 /* stack top */) const;
   void set(int index, char sym);
-  unsigned size() const;
+  size_t size() const;
+  size_t actualSize() const;
   bool empty() const;
   void clear();
 
@@ -621,13 +620,6 @@ private:
 
 private:
   static constexpr size_t kMinStringSwitchCases = 8;
-  static constexpr bool systemlibDefinesIdx =
-#ifdef FACEBOOK
-    true
-#else
-    false
-#endif
-    ;
 
   UnitEmitter& m_ue;
   FuncEmitter* m_curFunc;
@@ -659,7 +651,7 @@ private:
   std::vector<Array> m_staticArrays;
   std::vector<folly::Optional<CollectionType>> m_staticColType;
   std::set<std::string,stdltistr> m_hoistables;
-  LocationPtr m_tempLoc;
+  OptLocation m_tempLoc;
   std::unordered_set<std::string> m_staticEmitted;
 
   // The stack of all Regions that this EmitterVisitor is currently inside
@@ -676,21 +668,26 @@ public:
   void unexpectedStackSym(char sym, const char* where) const;
 
   int scanStackForLocation(int iLast);
+
   void buildVectorImm(std::vector<unsigned char>& vectorImm,
                       int iFirst, int iLast, bool allowW,
                       Emitter& e);
+  bool emitMOp(int iFirst, int& iLast, bool allowW, Emitter& e,
+               MOpFlags baseFlags, MOpFlags dimFlags);
   enum class PassByRefKind {
     AllowCell,
     WarnOnCell,
     ErrorOnCell,
   };
   PassByRefKind getPassByRefKind(ExpressionPtr exp);
+  void emitCall(Emitter& e, FunctionCallPtr func,
+                ExpressionListPtr params, Offset fpiStart);
   void emitAGet(Emitter& e);
   void emitCGetL2(Emitter& e);
   void emitCGetL3(Emitter& e);
   void emitPushL(Emitter& e);
   void emitCGet(Emitter& e);
-  void emitVGet(Emitter& e);
+  bool emitVGet(Emitter& e, bool skipCells = false);
   void emitIsset(Emitter& e);
   void emitIsType(Emitter& e, IsTypeOp op);
   void emitEmpty(Emitter& e);
@@ -750,6 +747,10 @@ public:
                           FuncEmitter *fe,
                           bool &allowOverride);
   void bindNativeFunc(MethodStatementPtr meth, FuncEmitter *fe);
+  int32_t emitNativeOpCodeImpl(MethodStatementPtr meth,
+                               const char* funcName,
+                               const char* className,
+                               FuncEmitter* fe);
   void emitMethodMetadata(MethodStatementPtr meth,
                           ClosureUseVarVec* useVars,
                           bool top);
@@ -760,10 +761,11 @@ public:
   void emitDeprecationWarning(Emitter& e, MethodStatementPtr meth);
   void emitMethod(MethodStatementPtr meth);
   void emitMemoizeProp(Emitter& e, MethodStatementPtr meth, Id localID,
-                       const std::vector<Id>& paramIDs, uint numParams);
+                       const std::vector<Id>& paramIDs, uint32_t numParams);
   void addMemoizeProp(MethodStatementPtr meth);
   void emitMemoizeMethod(MethodStatementPtr meth, const StringData* methName);
-  void emitConstMethodCallNoParams(Emitter& e, string name);
+  void emitConstMethodCallNoParams(Emitter& e, const std::string& name);
+  bool emitInlineGenva(Emitter& e, const ExpressionPtr);
   bool emitHHInvariant(Emitter& e, SimpleFunctionCallPtr);
   void emitMethodDVInitializers(Emitter& e,
                                 MethodStatementPtr& meth,
@@ -794,13 +796,13 @@ public:
                     ExpressionListPtr paramsOverride = nullptr);
   void emitFuncCallArg(Emitter& e, ExpressionPtr exp, int paramId,
                        bool isUnpack);
-  void emitBuiltinCallArg(Emitter& e, ExpressionPtr exp, int paramId,
-                         bool byRef);
+  bool emitBuiltinCallArg(Emitter& e, ExpressionPtr exp, int paramId,
+                          bool byRef, bool mustBeRef);
   void emitLambdaCaptureArg(Emitter& e, ExpressionPtr exp);
   void emitBuiltinDefaultArg(Emitter& e, Variant& v,
                              MaybeDataType t, int paramId);
   void emitClass(Emitter& e, ClassScopePtr cNode, bool topLevel);
-  void emitTypedef(Emitter& e, TypedefStatementPtr);
+  Id emitTypedef(Emitter& e, TypedefStatementPtr);
   void emitForeachListAssignment(Emitter& e,
                                  ListAssignmentPtr la,
                                  std::function<void()> emitSrc);
@@ -882,8 +884,8 @@ public:
   void newFPIRegion(Offset start, Offset end, Offset fpOff);
   void copyOverCatchAndFaultRegions(FuncEmitter* fe);
   void copyOverFPIRegions(FuncEmitter* fe);
-  void saveMaxStackCells(FuncEmitter* fe);
-  void finishFunc(Emitter& e, FuncEmitter* fe);
+  void saveMaxStackCells(FuncEmitter* fe, int32_t stackPad);
+  void finishFunc(Emitter& e, FuncEmitter* fe, int32_t stackPad);
   void initScalar(TypedValue& tvVal, ExpressionPtr val,
                   folly::Optional<CollectionType> ct = folly::none);
   bool requiresDeepInit(ExpressionPtr initExpr) const;

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -46,7 +46,7 @@
 #include "hphp/runtime/base/php-globals.h"
 #include "hphp/runtime/base/zend-math.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/ext_hash.h"
+#include "hphp/runtime/ext/hash/ext_hash.h"
 #include "hphp/runtime/ext/extension-registry.h"
 #include "hphp/runtime/ext/std/ext_std_misc.h"
 #include "hphp/runtime/ext/std/ext_std_options.h"
@@ -79,7 +79,12 @@ struct Session {
     Active
   };
 
+  template<class F> void scan(F& mark) const {
+    mark(ps_session_handler);
+  }
+
   std::string save_path;
+  bool        reset_save_path{false};
   std::string session_name;
   std::string extern_referer_chk;
   std::string entropy_file;
@@ -128,7 +133,9 @@ struct SessionRequestData final : Session {
   void init() {
     id.detach();
     session_status = Session::None;
-    ps_session_handler = nullptr;
+    ps_session_handler.reset();
+    save_path.clear();
+    if (reset_save_path) IniSetting::ResetSystemDefault("session.save_path");
   }
 
   void destroy() {
@@ -140,6 +147,11 @@ struct SessionRequestData final : Session {
   }
 
   void requestShutdownImpl();
+
+  template<class F> void scan(F& mark) const {
+    Session::scan(mark);
+    mark(id);
+  }
 
 public:
   String id;
@@ -153,7 +165,7 @@ void SessionRequestData::requestShutdownImpl() {
       mod->close();
     } catch (...) {}
   }
-  ps_session_handler = nullptr;
+  ps_session_handler.reset();
   id.reset();
 }
 
@@ -279,7 +291,7 @@ static StaticString s_write("write");
 static StaticString s_gc("gc");
 static StaticString s_destroy("destroy");
 
-LowClassPtr SystemlibSessionModule::s_SHIClass = nullptr;
+LowPtr<Class> SystemlibSessionModule::s_SHIClass = nullptr;
 
 /**
  * Relies on the fact that only one SessionModule will be active
@@ -358,7 +370,7 @@ const Object& SystemlibSessionModule::getObject() {
   if (!m_cls) {
     lookupClass();
   }
-  s_obj->setObject(ObjectData::newInstance(m_cls));
+  s_obj->setObject(Object{m_cls});
   const auto& obj = s_obj->getObject();
   g_context->invokeFuncFew(ret.asTypedValue(), m_ctor, obj.get());
   return obj;
@@ -1118,7 +1130,7 @@ public:
   WddxSessionSerializer() : SessionSerializer("wddx") {}
 
   virtual String encode() {
-    auto wddxPacket = makeSmartPtr<WddxPacket>(empty_string_variant_ref,
+    auto wddxPacket = req::make<WddxPacket>(empty_string_variant_ref,
                                                true, true);
     for (ArrayIter iter(php_global(s__SESSION).toArray()); iter; ++iter) {
       Variant key = iter.first();
@@ -1209,6 +1221,7 @@ static bool ini_on_update_save_dir(const std::string& value) {
   if (value.find('\0') != std::string::npos) {
     return false;
   }
+  if (g_context.isNull()) return false;
   const char *path = value.data() + value.rfind(';') + 1;
   if (File::TranslatePath(path).empty()) {
     return false;
@@ -1304,7 +1317,7 @@ new_session:
    */
 
   /* Unconditionally destroy existing arrays -- possible dirty data */
-  php_global_set(s__SESSION, staticEmptyArray());
+  php_global_set(s__SESSION, Variant{staticEmptyArray()});
 
   s_session->invalid_session_id = false;
   String value;
@@ -1381,7 +1394,7 @@ static void php_session_reset_id() {
     static const auto s_SID = makeStaticString("SID");
     auto const handle = lookupCnsHandle(s_SID);
     if (!handle) {
-      f_define(s_SID, v);
+      f_define(String{s_SID}, v);
     } else {
       TypedValue* cns = &rds::handleToRef<TypedValue>(handle);
       v.setEvalScalar();
@@ -1904,6 +1917,11 @@ static class SessionExtension final : public Extension {
                        ini_on_update_save_dir, nullptr
                      ),
                      &s_session->save_path);
+    Variant v;
+    if (IniSetting::GetSystem("session.save_path", v) &&
+        !v.toString().empty()) {
+      s_session->reset_save_path = true;
+    }
     IniSetting::Bind(ext, IniSetting::PHP_INI_ALL,
                      "session.name",                    "PHPSESSID",
                      &s_session->session_name);
@@ -1986,6 +2004,10 @@ static class SessionExtension final : public Extension {
 
   void requestInit() override {
     s_session->init();
+  }
+
+  void vscan(IMarker& mark) const override {
+    if (s_session) s_session->scan(mark);
   }
 
   /*
