@@ -263,7 +263,8 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
      */
 
     static unsigned seed = 42;
-    auto off = rand_r(&seed) & (kCacheLineSize - 1);
+    /* bit mask keeps instruction alignment to 4 bytes */
+    auto off = rand_r(&seed) & (kCacheLineSize - 4);
     coldCode.init(coldCodeIn.frontier() +
                    RuntimeOption::EvalJitRelocationSize + off,
                    RuntimeOption::EvalJitRelocationSize - off, "cgRelocCold");
