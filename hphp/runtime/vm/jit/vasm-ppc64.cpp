@@ -136,12 +136,7 @@ struct Vgen {
   }
 
   // intrinsics
-  void emit(const bindaddr& i) { not_implemented(); }
-  void emit(const bindcall& i) { not_implemented(); }
-  void emit(const bindjcc1st& i) { not_implemented(); }
-  void emit(const bindjcc& i) { not_implemented(); }
-  void emit(const bindjmp& i) { not_implemented(); }
-//  void emit(const callstub& i) { not_implemented(); }
+  void emit(const callarray& i) { not_implemented(); } ;
   void emit(const callfaststub& i) { not_implemented(); }
   void emit(const contenter& i) { not_implemented(); }
   void emit(const copy& i) { not_implemented(); }
