@@ -105,7 +105,7 @@ struct Vgen {
    * as s.scale is always 1, 2, 4 or 8
    */
   inline void VptrAddressToReg(Vptr s, Vreg d) {
-    /* s.index is optional */
+    /* s.index and s.base are optional */
     if (s.index.isPhys()) {
       /* calculate index position before adding base and displacement */
       int shift_left = 0;
@@ -115,15 +115,25 @@ struct Vgen {
       }
       assert(shift_left <= 3);
 
-      emit(shlqi{shift_left,  s.index,  d, VregSF(0)});
-      emit(addq {s.base,      d,        d, VregSF(0)});
-      emit(addqi{s.disp,      d,        d, VregSF(0)});
-    } else if (!s.base.isPhys()) {
-      /* Baseless Vptr, solve this for ppc64 */
-      not_implemented();
+      emit(shlqi{shift_left, s.index, d, VregSF(0)});
+
+      if (s.base.isPhys()) {
+        /* Valid base */
+        emit(addq {s.base, d, d, VregSF(0)});
+      } else {
+        /* Baseless Vptr: simply don't use it! */
+      }
+      emit(addqi{s.disp, d, d, VregSF(0)});
+
     } else {
-      /* Only add base with displacement */
-      emit(addqi{s.disp,      s.base,   d, VregSF(0)});
+      /* indexless Vptr */
+      if (s.base.isPhys()) {
+        /* Valid base: base + displacement */
+        emit(addqi{s.disp, s.base, d, VregSF(0)});
+      } else {
+        /* Baseless Vptr: only displacement */
+        emit(ldimmq{s.disp, d});
+      }
     }
   }
 
