@@ -72,10 +72,8 @@ enum class BranchConditions {
 #undef BRANCHES
 
 class BranchParams {
-  /* BO and BI parameter mapping related to BranchConditions */
   public:
-    BranchParams() { assert("BranchParams created without parameter"); }
-
+    /* BO and BI parameter mapping related to BranchConditions */
     enum class BO {
       CRNotSet              = 4,
       CRSet                 = 12,
@@ -108,6 +106,7 @@ class BranchParams {
       NoBranchPrediction    = 3
     };
 
+  private:
 #define SWITCHES(cr)                                                    \
   case BranchConditions::CR##cr##_LessThan:                             \
     m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;          break;  \
@@ -126,7 +125,8 @@ class BranchParams {
   case BranchConditions::CR##cr##_NoOverflow:                           \
     m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_SummaryOverflow;   break
 
-    BranchParams(BranchConditions bc) {
+    /* Constructor auxiliary */
+    void defineBoBi(BranchConditions bc) {
       switch (bc) {
         SWITCHES(0);
         SWITCHES(1);
@@ -142,8 +142,12 @@ class BranchParams {
           not_implemented();
       }
     }
-
 #undef SWITCHES
+
+  public:
+    BranchParams() = delete;
+
+    BranchParams(BranchConditions bc) { defineBoBi(bc); }
 
     ~BranchParams() {}
 
