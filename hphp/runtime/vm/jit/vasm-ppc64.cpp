@@ -311,11 +311,11 @@ struct Vgen {
   void emit(const sarq& i) { not_implemented(); }
   void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
   void emit(const setcc& i) { not_implemented(); }
-  void emit(shlli i) { not_implemented(); }
+  void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shlq i) { not_implemented(); }
   /*TODO Rc=1*/
   void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
-  void emit(shrli i) { not_implemented(); }
+  void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }

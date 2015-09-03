@@ -1725,7 +1725,13 @@ public:
     or_(rs, ra, ra);
   }
   void not_()           { not_implemented(); }  //Extended
-  void srwi()           { not_implemented(); }  //Extended
+  void srwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
+    rlwinm(ra, rs, 32-sh, sh, 31);
+  }
+  void slwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
+    /* non-existing mnemonic on ISA, but it's pratical to have it here */
+    rlwinm(ra, rs, sh, 0, 31-sh);
+  }
   void clrwi()          { not_implemented(); }  //Extended
   void extwi()          { not_implemented(); }  //Extended
   void rotlw()          { not_implemented(); }  //Extended
