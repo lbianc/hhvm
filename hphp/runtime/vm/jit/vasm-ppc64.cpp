@@ -345,7 +345,7 @@ struct Vgen {
   void emit(const testqm& i) { not_implemented(); }
   void emit(const testqim& i) { not_implemented(); }
   void emit(const ucomisd& i) { not_implemented(); }
-  void emit(const ud2& i) { a->unimplemented(); }
+  void emit(const ud2& i) { a->trap(); }
   void emit(unpcklpd i) { not_implemented(); }
   void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
