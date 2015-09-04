@@ -48,7 +48,7 @@ void finishARM(Vunit&, Vtext&, const Abi&, AsmInfo*);
  * Optimize, lower for PPC64, register allocator, and perform more optimizations
  * on unit.
  */
-// void optimizePPC64(Vunit& unit, const Abi&);
+void optimizePPC64(Vunit& unit, const Abi&);
 
 /*
  * Emit code for the given unit using the given code areas. The unit should

@@ -338,7 +338,7 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
     assertx(check(vunit));
 
     if (mcg->useLLVM()) {
-      auto x64_unit = vunit;
+      auto ppc64_unit = vunit;
       auto vasm_size = std::numeric_limits<size_t>::max();
 
       jit::vector<UndoMarker> undoAll = {UndoMarker(mcg->globalData())};
@@ -355,9 +355,9 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
       // vasm, just to see how big it is. The cost of this is trivial compared
       // to the LLVM code generation.
       if (RuntimeOption::EvalJitLLVMKeepSize) {
-        optimizeX64(x64_unit, abi(kind));
+        optimizePPC64(ppc64_unit, abi(kind));
         optimized = true;
-        emitX64(x64_unit, vtext, nullptr);
+        emitPPC64(ppc64_unit, vtext, nullptr);
         vasm_size = vtext.main().code.frontier() - vtext.main().start;
         resetCode();
       }
@@ -373,7 +373,8 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
         }
       } catch (const FailedLLVMCodeGen& e) {
         FTRACE_MOD(Trace::llvm,
-                   1, "LLVM codegen failed ({}); falling back to x64 backend\n",
+                   1,
+                   "LLVM codegen failed ({}); falling back to ppc64 backend\n",
                    e.what());
         always_assert_flog(
           RuntimeOption::EvalJitLLVM < 3,
@@ -383,16 +384,16 @@ void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
 
         mcg->setUseLLVM(false);
         resetCode();
-        if (!optimized) optimizeX64(x64_unit, abi(kind));
-        emitX64(x64_unit, vtext, state.asmInfo);
+        if (!optimized) optimizePPC64(ppc64_unit, abi(kind));
+        emitPPC64(ppc64_unit, vtext, state.asmInfo);
 
         if (auto compare = dynamic_cast<const CompareLLVMCodeGen*>(&e)) {
           printLLVMComparison(unit, vasm.unit(), vtext.areas(), compare);
         }
       }
     } else {
-      optimizeX64(vunit, abi(kind));
-      emitX64(vunit, vtext, state.asmInfo);
+      optimizePPC64(vunit, abi(kind));
+      emitPPC64(vunit, vtext, state.asmInfo);
     }
   }
 

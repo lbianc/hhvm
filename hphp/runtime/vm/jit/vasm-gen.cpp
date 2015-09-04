@@ -100,8 +100,7 @@ Vauto::~Vauto() {
           finishARM(unit(), m_text, abi(m_kind), nullptr);
           break;
         case Arch::PPC64:
-          // TODO(racardoso): Optimize PPC64 code
-          // optimizePPC64(unit(), abi(m_kind));
+          optimizePPC64(unit(), abi(m_kind));
           emitPPC64(unit(), m_text, nullptr);
           break;
       }
