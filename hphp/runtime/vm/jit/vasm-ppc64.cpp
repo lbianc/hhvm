@@ -407,7 +407,7 @@ void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
     a->lwz(i.d, i.s);
   } else {
-    not_implemented();//TODO(IBM): SIMD Unsupported
+    a->lfs(i.d, i.s);
   }
 }
 

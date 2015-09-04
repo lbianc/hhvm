@@ -1090,7 +1090,9 @@ public:
   void lfdx()           { not_implemented(); }
   void lfiwax()         { not_implemented(); }
   void lfiwzx()         { not_implemented(); }
-  void lfs()            { not_implemented(); }
+  void lfs(const Reg64& frt, MemoryRef m) { 
+    EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
+  }
   void lfsu()           { not_implemented(); }
   void lfsux()          { not_implemented(); }
   void lfsx()           { not_implemented(); }
