@@ -274,7 +274,7 @@ struct Vgen {
   void emit(const leap& i) { not_implemented(); }
   void emit(const loadups& i) { not_implemented(); }
   void emit(const loadtqb& i) { not_implemented(); }
-  void emit(const loadl& i) { not_implemented(); }
+  void emit(const loadl& i) { a->lwz(Reg64(i.d), i.s); }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
   void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} 
