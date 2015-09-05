@@ -500,10 +500,10 @@ public:
   void addo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void addze(const Reg64& rt, const Reg64& ra, bool rc = 0);
   void addzeo(const Reg64& rt, const Reg64& ra, bool rc = 0);
-  void and_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void andc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void andi(const Reg64& rs, const Reg64& ra, Immed imm);
-  void andis(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void and_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void andc(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void andi(const Reg64& ra, const Reg64& rs, Immed imm);
+  void andis(const Reg64& ra, const Reg64& rs, uint16_t imm);
   void b(int32_t target_addr);
   void ba(uint32_t target_addr);
   void bl(int32_t target_addr);
@@ -518,7 +518,7 @@ public:
   void bclrl(uint8_t bo, uint8_t bi, uint16_t bh);
   void bctar(uint8_t bo, uint8_t bi, uint16_t bh);
   void bctarl(uint8_t bo, uint8_t bi, uint16_t bh);
-  void bpermd(const Reg64& rs, const Reg64& ra, const Reg64& rv);
+  void bpermd(const Reg64& ra, const Reg64& rs, const Reg64& rv);
   void cmp(uint16_t bf, bool l, const Reg64& ra, const Reg64& rb);
   void cmpi(uint16_t bf, bool l, const Reg64& ra, Immed imm);
   void cmpb(const Reg64& rs, const Reg64& ra, const Reg64& rb);
@@ -550,7 +550,7 @@ public:
   void divwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void divwu(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void divwuo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
+  void eqv(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void extsb(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsh(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc = 0);
@@ -597,14 +597,14 @@ public:
   void mulli(const Reg64& rt, const Reg64& ra, uint16_t imm);
   void mullw(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void mullwo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void nand(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
+  void nand(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void neg(const Reg64& rt, const Reg64& ra, bool rc = 0);
   void nego(const Reg64& rt, const Reg64& ra, bool rc = 0);
-  void nor(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void or_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void orc(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void ori(const Reg64& rs, const Reg64& ra, Immed imm);
-  void oris(const Reg64& rs, const Reg64& ra, Immed imm);
+  void nor(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void or_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void orc(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void ori(const Reg64& ra, const Reg64& rs, Immed imm);
+  void oris(const Reg64& ra, const Reg64& rs, Immed imm);
   void popcntb(const Reg64& ra, const Reg64& rs);
   void popcntd(const Reg64& ra, const Reg64& rs);
   void popcntw(const Reg64& ra, const Reg64& rs);
@@ -674,9 +674,9 @@ public:
   void tdi(uint16_t to, const Reg64& ra, uint16_t imm);
   void tw(uint16_t to, const Reg64& ra, const Reg64& rb);
   void twi(uint16_t to, const Reg64& ra, uint16_t imm);
-  void xor_(const Reg64& rs, const Reg64& ra, const Reg64& rb, bool rc = 0);
-  void xori(const Reg64& rs, const Reg64& ra, Immed imm);
-  void xoris(const Reg64& rs, const Reg64& ra, uint16_t imm);
+  void xor_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void xori(const Reg64& ra, const Reg64& rs, Immed imm);
+  void xoris(const Reg64& ra, const Reg64& rs, uint16_t imm);
 
   //Unimplemented Instructions
   void addg6s()         { not_implemented(); }

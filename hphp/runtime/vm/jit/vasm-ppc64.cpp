@@ -169,19 +169,19 @@ struct Vgen {
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
-  void emit(addli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
+  void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(const addlm& i) { not_implemented(); }
   void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
   void emit(const addqim& i) { not_implemented(); }
   void emit(addsd i) { not_implemented(); }
   void emit(andb i) {  a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(andbi i) { a->andi(Reg64(i.s1), Reg64(i.d), i.s0); }
+  void emit(andbi i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(const andbim& i) { not_implemented(); }
   void emit(andl i) { a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(andli i) {a->andi(Reg64(i.s1), Reg64(i.d), i.s0); }
+  void emit(andli i) {a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
-  void emit(andqi i) { a->andi(i.s1, i.d, i.s0); }
+  void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }
   void emit(const call& i) {
     // Need to create a new call stack in order to recover LR in the future
     pushMinCallStack();

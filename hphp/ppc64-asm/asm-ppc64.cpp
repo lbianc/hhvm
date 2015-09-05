@@ -119,22 +119,22 @@ void Assembler::addis(const Reg64& rt, const Reg64& ra, Immed imm) {
   EmitDForm(15, rn(rt), rn(ra), imm.w());
 }
 
-void Assembler::and_(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::and_(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                      bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 28, rc);
 }
 
-void Assembler::andc(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::andc(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                      bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 60, rc);
 }
 
-void Assembler::andi(const Reg64& rs, const Reg64& ra, Immed imm) {
+void Assembler::andi(const Reg64& ra, const Reg64& rs, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
   EmitDForm(28, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::andis(const Reg64& rs, const Reg64& ra, uint16_t imm) {
+void Assembler::andis(const Reg64& ra, const Reg64& rs, uint16_t imm) {
   EmitDForm(29, rn(rs), rn(ra), imm);
 }
 
@@ -194,7 +194,7 @@ void Assembler::bctarl(uint8_t bo, uint8_t bi, uint16_t bh) {
   EmitXLForm(19, bo, bi, (bh & 0x3), 560, 1);
 }
 
-void Assembler::bpermd(const Reg64& rs, const Reg64& ra, const Reg64& rv) {
+void Assembler::bpermd(const Reg64& ra, const Reg64& rs, const Reg64& rv) {
   EmitXForm(31, rn(rs), rn(ra), rn(0), 252);
 }
 
@@ -259,7 +259,7 @@ void Assembler::crxor(uint16_t bt, uint16_t ba, uint16_t bb) {
   EmitXLForm(19, bt, ba, bb, 193);
 }
 
-void Assembler::eqv(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::eqv(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                     bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 284, rc);
 }
@@ -419,32 +419,32 @@ void Assembler::mulli(const Reg64& rt, const Reg64& ra, uint16_t imm) {
   EmitDForm(7, rn(rt), rn(ra), imm);
 }
 
-void Assembler::nand(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::nand(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                      bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 476, rc);
 }
 
-void Assembler::nor(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::nor(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                     bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 124, rc);
 }
 
-void Assembler::or_(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::or_(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                     bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 444, rc);
 }
 
-void Assembler::orc(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::orc(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                     bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 412, rc);
 }
 
-void Assembler::ori(const Reg64& rs, const Reg64& ra, Immed imm) {
+void Assembler::ori(const Reg64& ra, const Reg64& rs, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
   EmitDForm(24, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::oris(const Reg64& rs, const Reg64& ra, Immed imm) {
+void Assembler::oris(const Reg64& ra, const Reg64& rs, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
   EmitDForm(25, rn(rs), rn(ra), imm.w());
 }
@@ -665,17 +665,17 @@ void Assembler::twi(uint16_t to, const Reg64& ra, uint16_t imm) {
   EmitDForm(3, rn(to), rn(ra), imm);
 }
 
-void Assembler::xor_(const Reg64& rs, const Reg64& ra, const Reg64& rb,
+void Assembler::xor_(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                      bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 316, rc);
 }
 
-void Assembler::xori(const Reg64& rs, const Reg64& ra, Immed imm) {
+void Assembler::xori(const Reg64& ra, const Reg64& rs, Immed imm) {
   assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
   EmitDForm(26, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::xoris(const Reg64& rs, const Reg64& ra, uint16_t imm) {
+void Assembler::xoris(const Reg64& ra, const Reg64& rs, uint16_t imm) {
   EmitDForm(27, rn(rs), rn(ra), imm);
 }
 
