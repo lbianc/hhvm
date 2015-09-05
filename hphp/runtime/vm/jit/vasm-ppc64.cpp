@@ -437,27 +437,93 @@ void Vgen::emit(const store& i) {
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+void lower(Vunit& unit) {
+  Timer _t(Timer::vasm_lower);
+  for (size_t b = 0; b < unit.blocks.size(); ++b) {
+    auto& code = unit.blocks[b].code;
+    if (code.empty()) continue;
+    for (size_t i = 0; i < unit.blocks[b].code.size(); ++i) {
+      auto& inst = unit.blocks[b].code[i];
+      switch (inst.op) {
+        case Vinstr::defvmsp:
+          inst = copy{rvmsp(), inst.defvmsp_.d};
+          break;
+        case Vinstr::syncvmsp:
+          inst = copy{inst.syncvmsp_.s, rvmsp()};
+          break;
+        default:
+          break;
+      }
+    }
+  }
+}
+
+/*
+ * Some vasm opcodes don't have equivalent single instructions on PPC64, and the
+ * equivalent instruction sequences require scratch registers.  We have to
+ * lower these to PPC64-suitable vasm opcodes before register allocation.
+ */
+template<typename Inst>
+void lower(Inst& i, Vout& v) {
+  v << i;
+}
+
 /*
  Lower facilitate code generation. In some cases is used because 
  some vasm opcodes doesn't have a 1:1 mapping to machine asm code.
 */
-void lowerForPPC64(Vunit& unit, const Abi& abi) {
-  //TODO(rcardoso) Implement function
+void lowerForPPC64(Vunit& unit) {
+  assertx(check(unit));
+
+  // block order doesn't matter, but only visit reachable blocks.
+  auto blocks = sortBlocks(unit);
+
+  for (auto b : blocks) {
+    auto oldCode = std::move(unit.blocks[b].code);
+    Vout v{unit, b};
+
+    for (auto& inst : oldCode) {
+      v.setOrigin(inst.origin);
+
+      switch (inst.op) {
+#define O(nm, imm, use, def) \
+        case Vinstr::nm: \
+          lower(inst.nm##_, v); \
+          break;
+
+        VASM_OPCODES
+#undef O
+      }
+    }
+  }
+
+  assertx(check(unit));
+  // no tweeking for the moment, let's use ARM's parameter
   printUnit(kVasmARMFoldLevel, "after lower for PPC64", unit);
 }
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
 void optimizePPC64(Vunit& unit, const Abi& abi) {
- // TODO(rcardoso) Implement optimizations here
- //                HHVM have some optimizations for vasm:
- //                   removeTrivialNops(unit);
- //                   fuseBranches(unit);
- //                   optimizeJmps(unit);
- //                   optimizeExits(unit);
- //                   optimizeCopies(unit, abi);
- //                   removeDeadCode(unit);
- //                   allocateRegisters(unit, abi);
+  optimizeExits(unit);
+  lower(unit);
+  simplify(unit);
+  if (!unit.constToReg.empty()) {
+    // TODO(gustavo): implement a foldImms for ppc64
+    //foldImms<ppc64::ImmFolder>(unit);
+  }
+  lowerForPPC64(unit);
+  if (unit.needsRegAlloc()) {
+    Timer _t(Timer::vasm_xls);
+    removeDeadCode(unit);
+    allocateRegisters(unit, abi);
+  }
+  if (unit.blocks.size() > 1) {
+    Timer _t(Timer::vasm_jumps);
+    optimizeJmps(unit);
+  }
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, AsmInfo* asmInfo) {
