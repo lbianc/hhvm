@@ -503,7 +503,7 @@ public:
   void and_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void andc(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void andi(const Reg64& ra, const Reg64& rs, Immed imm);
-  void andis(const Reg64& ra, const Reg64& rs, uint16_t imm);
+  void andis(const Reg64& ra, const Reg64& rs, Immed imm);
   void b(int32_t target_addr);
   void ba(uint32_t target_addr);
   void bl(int32_t target_addr);
@@ -676,7 +676,7 @@ public:
   void twi(uint16_t to, const Reg64& ra, uint16_t imm);
   void xor_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void xori(const Reg64& ra, const Reg64& rs, Immed imm);
-  void xoris(const Reg64& ra, const Reg64& rs, uint16_t imm);
+  void xoris(const Reg64& ra, const Reg64& rs, Immed imm);
 
   //Unimplemented Instructions
   void addg6s()         { not_implemented(); }
@@ -1720,7 +1720,6 @@ public:
   void nop() {
     ori(Reg64(0),Reg64(0),0);
   }
-  void andis()          { not_implemented(); }  //Extended
   void xnop()           { not_implemented(); }  //Extended
   void mr(const Reg64& rs, const Reg64& ra) {
     or_(rs, ra, ra);

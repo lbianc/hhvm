@@ -134,8 +134,9 @@ void Assembler::andi(const Reg64& ra, const Reg64& rs, Immed imm) {
   EmitDForm(28, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::andis(const Reg64& ra, const Reg64& rs, uint16_t imm) {
-  EmitDForm(29, rn(rs), rn(ra), imm);
+void Assembler::andis(const Reg64& ra, const Reg64& rs, Immed imm) {
+  assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
+  EmitDForm(29, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::b(int32_t target_addr) {
@@ -675,8 +676,9 @@ void Assembler::xori(const Reg64& ra, const Reg64& rs, Immed imm) {
   EmitDForm(26, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::xoris(const Reg64& ra, const Reg64& rs, uint16_t imm) {
-  EmitDForm(27, rn(rs), rn(ra), imm);
+void Assembler::xoris(const Reg64& ra, const Reg64& rs, Immed imm) {
+  assert(imm.fits(HPHP::sz::word) && "Immediate is too big");
+  EmitDForm(27, rn(rs), rn(ra), imm.w());
 }
 
 void Assembler::fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb,
