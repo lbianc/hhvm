@@ -407,7 +407,7 @@ void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
     a->lwz(i.d, i.s);
   } else {
-    assertx(i.s.isSIMD());
+    assertx(i.d.isSIMD());
     a->lfs(i.d, i.s);
   }
 }
