@@ -57,7 +57,8 @@ const RegSet kXMMCalleeSaved =
     ppc64_asm::reg::v20 | ppc64_asm::reg::v21 | ppc64_asm::reg::v22
   | ppc64_asm::reg::v23 | ppc64_asm::reg::v24 | ppc64_asm::reg::v25
   | ppc64_asm::reg::v26 | ppc64_asm::reg::v27 | ppc64_asm::reg::v28
-  | ppc64_asm::reg::v29 | ppc64_asm::reg::v30 | ppc64_asm::reg::v31;
+  | ppc64_asm::reg::v29; // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
+
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
 

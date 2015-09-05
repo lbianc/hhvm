@@ -322,8 +322,7 @@ namespace reg {
   constexpr RegXMM v27(27);
   constexpr RegXMM v28(28);
   constexpr RegXMM v29(29);
-  constexpr RegXMM v30(30);
-  constexpr RegXMM v31(31);
+  // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
 
 #define RNAME(x) if (r == x) return "%"#x
 
@@ -350,7 +349,7 @@ namespace reg {
     RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17); 
     RNAME(v18); RNAME(v19); RNAME(v20); RNAME(v21); RNAME(v22); RNAME(v23); 
     RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29); 
-    RNAME(v30); RNAME(v31);
+    // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
     return nullptr;
   }
 #undef RNAME
