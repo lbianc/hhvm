@@ -21,6 +21,8 @@
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-sprop-global.h"
 
+#include "hphp/runtime/vm/hhbc-codec.h"
+
 namespace HPHP { namespace jit { namespace irgen {
 
 bool isInlining(const IRGS& env) {
@@ -64,7 +66,7 @@ bool beginInlining(IRGS& env,
 
   FTRACE(1, "[[[ begin inlining: {}\n", target->fullName()->data());
 
-  SSATmp* params[numParams];
+  SSATmp** params = (SSATmp**)alloca(sizeof(SSATmp*) * numParams);
   for (unsigned i = 0; i < numParams; ++i) {
     params[numParams - i - 1] = popF(env);
   }
@@ -99,6 +101,7 @@ bool beginInlining(IRGS& env,
   data.ctx           = ctx;
   data.retSPOff      = prevSPOff;
   data.spOffset      = offsetFromIRSP(env, BCSPOffset{0});
+  data.numNonDefault = numParams;
 
   // Push state and update the marker before emitting any instructions so
   // they're all given markers in the callee.
@@ -173,8 +176,8 @@ void retFromInlined(IRGS& env) {
 
 //////////////////////////////////////////////////////////////////////
 
-void inlSingletonSLoc(IRGS& env, const Func* func, const Op* op) {
-  assertx(*op == Op::StaticLocInit);
+void inlSingletonSLoc(IRGS& env, const Func* func, PC op) {
+  assertx(peek_op(op) == Op::StaticLocInit);
 
   TransFlags trflags;
   trflags.noinlineSingleton = true;
@@ -197,10 +200,10 @@ void inlSingletonSLoc(IRGS& env, const Func* func, const Op* op) {
 
 void inlSingletonSProp(IRGS& env,
                        const Func* func,
-                       const Op* clsOp,
-                       const Op* propOp) {
-  assertx(*clsOp == Op::String);
-  assertx(*propOp == Op::String);
+                       PC clsOp,
+                       PC propOp) {
+  assertx(peek_op(clsOp) == Op::String);
+  assertx(peek_op(propOp) == Op::String);
 
   TransFlags trflags;
   trflags.noinlineSingleton = true;

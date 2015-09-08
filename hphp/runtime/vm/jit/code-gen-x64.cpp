@@ -37,7 +37,9 @@
 #include "hphp/runtime/base/shape.h"
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/string-data.h"
+
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/hhbc-codec.h"
 #include "hphp/runtime/vm/runtime.h"
 
 #include "hphp/runtime/vm/jit/abi.h"
@@ -277,6 +279,7 @@ NOOP_OPCODE(ExitPlaceholder);
 NOOP_OPCODE(HintLocInner)
 NOOP_OPCODE(HintStkInner)
 NOOP_OPCODE(AssertStk)
+NOOP_OPCODE(FinishMemberOp)
 
 CALL_OPCODE(AddElemStrKey)
 CALL_OPCODE(AddElemIntKey)
@@ -2182,7 +2185,7 @@ void CodeGenerator::cgEagerSyncVMRegs(IRInstruction* inst) {
   auto& v = vmain();
   auto const sync_sp = v.makeReg();
   v << lea{srcLoc(inst, 1).reg()[cellsToBytes(spOff)], sync_sp};
-  emitEagerSyncPoint(v, reinterpret_cast<const Op*>(inst->marker().sk().pc()),
+  emitEagerSyncPoint(v, inst->marker().sk().pc(),
                      rvmtl(), srcLoc(inst, 0).reg(), sync_sp);
 }
 
@@ -2826,8 +2829,8 @@ void CodeGenerator::cgCall(IRInstruction* inst) {
     // The assumption here is that for builtins, the generated func contains
     // only a single opcode (NativeImpl), and there are no non-argument locals.
     assertx(argc == callee->numLocals() && callee->numIterators() == 0);
-    assertx(*reinterpret_cast<const Op*>(callee->getEntry()) == Op::NativeImpl);
-    assertx(instrLen((Op*)callee->getEntry()) == callee->past()-callee->base());
+    assertx(peek_op(callee->getEntry()) == Op::NativeImpl);
+    assertx(instrLen(callee->getEntry()) == callee->past() - callee->base());
     auto retAddr = (int64_t)mcg->tx().uniqueStubs.retHelper;
     v << store{v.cns(retAddr),
                sync_sp[cellsToBytes(argc) + AROFF(m_savedRip)]};
@@ -2842,8 +2845,7 @@ void CodeGenerator::cgCall(IRInstruction* inst) {
     // We sometimes call this while curFunc() isn't really the builtin, so
     // make sure to record the sync point as if we are inside the builtin.
     if (mcg->fixupMap().eagerRecord(callee)) {
-      emitEagerSyncPoint(v, reinterpret_cast<const Op*>(callee->getEntry()),
-                         rds, rvmfp(), sync_sp);
+      emitEagerSyncPoint(v, callee->getEntry(), rds, rvmfp(), sync_sp);
     }
     // Call the native implementation. This will free the locals for us in the
     // normal case. In the case where an exception is thrown, the VM unwinder
@@ -3017,7 +3019,7 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
     v << lea{rSP[spOffset], synced_sp};
     emitEagerSyncPoint(
       v,
-      reinterpret_cast<const Op*>(pc),
+      pc,
       rvmtl(),
       srcLoc(inst, 0).reg(),
       synced_sp
@@ -3174,8 +3176,7 @@ void CodeGenerator::cgNativeImpl(IRInstruction* inst) {
   auto sp = srcLoc(inst, 1).reg();
 
   if (FixupMap::eagerRecord(func)) {
-    emitEagerSyncPoint(v, reinterpret_cast<const Op*>(func->getEntry()),
-                       rvmtl(), fp, sp);
+    emitEagerSyncPoint(v, func->getEntry(), rvmtl(), fp, sp);
   }
   v << vinvoke{
     CppCall::direct(builtinFuncPtr),
@@ -3487,9 +3488,9 @@ void CodeGenerator::cgLdVectorSize(IRInstruction* inst) {
   auto dstReg = dstLoc(inst, 0).reg();
   assertx(vec->type() < TObj);
   assertx(collections::isType(vec->type().clsSpec().cls(),
-                              CollectionType::Vector));
-  vmain() << loadzlq{vecReg[collections::sizeOffset(CollectionType::Vector)],
-                     dstReg};
+                              CollectionType::Vector,
+                              CollectionType::ImmVector));
+  vmain() << loadzlq{vecReg[BaseVector::sizeOffset()], dstReg};
 }
 
 void CodeGenerator::cgLdVectorBase(IRInstruction* inst) {
@@ -3498,7 +3499,8 @@ void CodeGenerator::cgLdVectorBase(IRInstruction* inst) {
   auto dstReg = dstLoc(inst, 0).reg();
   assertx(vec->type() < TObj);
   assertx(collections::isType(vec->type().clsSpec().cls(),
-                              CollectionType::Vector));
+                              CollectionType::Vector,
+                              CollectionType::ImmVector));
   auto& v = vmain();
   auto arr = v.makeReg();
   v << load{vecReg[BaseVector::arrOffset()], arr};
@@ -3512,31 +3514,17 @@ void CodeGenerator::cgLdColArray(IRInstruction* inst) {
   auto const rdst = dstLoc(inst, 0).reg();
   auto& v = vmain();
 
-  auto const isVector    = collections::isType(cls, CollectionType::Vector);
-  auto const isImmVector = collections::isType(cls, CollectionType::ImmVector);
-  if (isVector || isImmVector) {
-    v << load{rsrc[BaseVector::arrOffset()], rdst};
-    return;
-  }
-
-  auto const isMap    = collections::isType(cls, CollectionType::Map);
-  auto const isImmMap = collections::isType(cls, CollectionType::ImmMap);
-  auto const isSet    = collections::isType(cls, CollectionType::Set);
-  auto const isImmSet = collections::isType(cls, CollectionType::ImmSet);
-  if (isMap || isImmMap || isSet || isImmSet) {
-    auto const rdata = v.makeReg();
-    auto const offset =
-      collections::dataOffset(isMap ? CollectionType::Map :
-                              isImmMap ? CollectionType::ImmMap :
-                              isSet ? CollectionType::Set :
-                              /*isImmSet ? */CollectionType::ImmSet);
-    v << load{rsrc[offset], rdata};
-    v << addqi{-int32_t{sizeof(MixedArray)}, rdata, rdst, v.makeReg()};
-    return;
-  }
-
-  always_assert_flog(0, "LdColArray received an unsupported type: {}\n",
-    src->type().toString());
+  always_assert_flog(
+    collections::isType(cls, CollectionType::Vector, CollectionType::ImmVector,
+                        CollectionType::Map, CollectionType::ImmMap,
+                        CollectionType::Set, CollectionType::ImmSet),
+    "LdColArray received an unsupported type: {}\n",
+    src->type().toString()
+  );
+  auto offset = collections::isType(cls, CollectionType::Vector,
+                                    CollectionType::ImmVector) ?
+    BaseVector::arrOffset() : HashCollection::arrOffset();
+  v << load{rsrc[offset], rdst};
 }
 
 void CodeGenerator::cgVectorHasImmCopy(IRInstruction* inst) {
@@ -3576,8 +3564,7 @@ void CodeGenerator::cgLdPairBase(IRInstruction* inst) {
   assertx(pair->type() < TObj);
   assertx(collections::isType(pair->type().clsSpec().cls(),
                               CollectionType::Pair));
-  vmain() << lea{pairReg[collections::dataOffset(CollectionType::Pair)],
-                 dstLoc(inst, 0).reg()};
+  vmain() << lea{pairReg[c_Pair::dataOffset()], dstLoc(inst, 0).reg()};
 }
 
 void CodeGenerator::cgLdElem(IRInstruction* inst) {
@@ -3626,9 +3613,9 @@ Fixup CodeGenerator::makeFixup(const BCMarker& marker, SyncOptions sync) {
 }
 
 void CodeGenerator::cgLdMIStateAddr(IRInstruction* inst) {
-  auto base = srcLoc(inst, 0).reg();
-  int64_t offset = inst->src(1)->intVal();
-  vmain() << lea{base[offset], dstLoc(inst, 0).reg()};
+  auto const base = rvmtl();
+  int64_t offset = inst->src(0)->intVal();
+  vmain() << lea{base[rds::kVmMInstrStateOff + offset], dstLoc(inst, 0).reg()};
 }
 
 void CodeGenerator::cgLdLoc(IRInstruction* inst) {
@@ -3692,8 +3679,16 @@ void CodeGenerator::cgCheckLoc(IRInstruction* inst) {
                 rbase[baseOff + TVOFF(m_data)], inst->taken());
 }
 
-void CodeGenerator::cgDefMIStateBase(IRInstruction* inst) {
-  vmain() << lea{rvmtl()[rds::kVmMInstrStateOff], dstLoc(inst, 0).reg()};
+void CodeGenerator::cgLdMBase(IRInstruction* inst) {
+  vmain() << load{rvmtl()[rds::kVmMInstrStateOff + offsetof(MInstrState, base)],
+                  dstLoc(inst, 0).reg()};
+}
+
+void CodeGenerator::cgStMBase(IRInstruction* inst) {
+  vmain() << store{
+    srcLoc(inst, 0).reg(),
+    rvmtl()[rds::kVmMInstrStateOff + offsetof(MInstrState, base)]
+  };
 }
 
 void CodeGenerator::cgCheckType(IRInstruction* inst) {

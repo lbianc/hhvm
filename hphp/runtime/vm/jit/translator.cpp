@@ -43,6 +43,7 @@
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/hhbc-codec.h"
 #include "hphp/runtime/vm/hhbc.h"
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/treadmill.h"
@@ -483,10 +484,10 @@ int64_t countOperands(uint64_t mask) {
 }
 
 int64_t getStackPopped(PC pc) {
-  auto const op = *reinterpret_cast<const Op*>(pc);
+  auto const op = peek_op(pc);
   switch (op) {
-    case Op::FCall:        return getImm((Op*)pc, 0).u_IVA + kNumActRecCells;
-    case Op::FCallD:       return getImm((Op*)pc, 0).u_IVA + kNumActRecCells;
+    case Op::FCall:        return getImm(pc, 0).u_IVA + kNumActRecCells;
+    case Op::FCallD:       return getImm(pc, 0).u_IVA + kNumActRecCells;
     case Op::FCallArray:   return kNumActRecCells + 1;
 
     case Op::QueryML:   case Op::QueryMC:
@@ -494,9 +495,9 @@ int64_t getStackPopped(PC pc) {
     case Op::NewPackedArray:
     case Op::ConcatN:
     case Op::FCallBuiltin:
-    case Op::CreateCl:     return getImm((Op*)pc, 0).u_IVA;
+    case Op::CreateCl:     return getImm(pc, 0).u_IVA;
 
-    case Op::NewStructArray: return getImmVector((Op*)pc).size();
+    case Op::NewStructArray: return getImmVector(pc).size();
 
     default:             break;
   }
@@ -508,7 +509,7 @@ int64_t getStackPopped(PC pc) {
   assertx((mask & (StackN | BStackN)) == 0);
 
   if (mask & MVector) {
-    count += getImmVector((Op*)pc).numStackValues();
+    count += getImmVector(pc).numStackValues();
     mask &= ~MVector;
   }
 
@@ -516,7 +517,7 @@ int64_t getStackPopped(PC pc) {
 }
 
 int64_t getStackPushed(PC pc) {
-  return countOperands(getInstrInfo(*reinterpret_cast<const Op*>(pc)).out);
+  return countOperands(getInstrInfo(peek_op(pc)).out);
 }
 
 bool isAlwaysNop(Op op) {
@@ -538,20 +539,20 @@ bool isAlwaysNop(Op op) {
 }
 
 static void addMVectorInputs(NormalizedInstruction& ni,
-                             int& currentStackOffset,
-                             std::vector<InputInfo>& inputs) {
+                             BCSPOffset& spOff,
+                             InputInfoVec& inputs) {
   assertx(ni.immVec.isValid());
   ni.immVecM.reserve(ni.immVec.size());
 
   int UNUSED stackCount = 0;
   int UNUSED localCount = 0;
 
-  currentStackOffset -= ni.immVec.numStackValues();
-  int localStackOffset = currentStackOffset;
+  spOff += ni.immVec.numStackValues();
+  auto localSpOff = spOff - 1;
 
   auto push_stack = [&] {
     ++stackCount;
-    inputs.emplace_back(Location(BCSPOffset{localStackOffset++}));
+    inputs.emplace_back(Location(localSpOff--));
   };
   auto push_local = [&] (int imm) {
     ++localCount;
@@ -568,7 +569,7 @@ static void addMVectorInputs(NormalizedInstruction& ni,
    * ids (i.e. string ids), this analysis step is going to have to be
    * a bit wiser.
    */
-  auto opPtr = (const Op*)ni.source.pc();
+  auto opPtr = ni.source.pc();
   auto const location = getMLocation(opPtr);
   auto const lcode = location.lcode;
 
@@ -640,102 +641,91 @@ static void addMVectorInputs(NormalizedInstruction& ni,
 }
 
 /*
- * getInputsImpl --
+ * getInputs --
  *   Returns locations for this instruction's inputs.
- *
- * Throws:
- *   TranslationFailedExc:
- *     Unimplemented functionality, probably an opcode.
- *
- *   UnknownInputExc:
- *     Consumed a datum whose type or value could not be constrained at
- *     translation time, because the tracelet has already modified it.
- *     Truncate the tracelet at the preceding instruction, which must
- *     exists because *something* modified something in it.
  */
-static void getInputsImpl(NormalizedInstruction* ni,
-                          int& currentStackOffset,
-                          InputInfoVec& inputs) {
-#ifdef USE_TRACE
-  auto sk = ni->source;
-#endif
-  if (isAlwaysNop(ni->op())) return;
+InputInfoVec getInputs(NormalizedInstruction& ni) {
+  InputInfoVec inputs;
+  auto UNUSED sk = ni.source;
+  if (isAlwaysNop(ni.op())) return inputs;
 
   assertx(inputs.empty());
   always_assert_flog(
-    instrInfo.count(ni->op()),
+    instrInfo.count(ni.op()),
     "Invalid opcode in getInputsImpl: {}\n",
-    opcodeToName(ni->op())
+    opcodeToName(ni.op())
   );
-  const InstrInfo& info = instrInfo[ni->op()];
+  const InstrInfo& info = instrInfo[ni.op()];
   Operands input = info.in;
+  BCSPOffset spOff{0};
   if (input & FuncdRef) {
     inputs.needsRefCheck = true;
   }
   if (input & Iter) {
-    inputs.emplace_back(Location(Location::Iter, ni->imm[0].u_IVA));
+    inputs.emplace_back(Location(Location::Iter, ni.imm[0].u_IVA));
   }
   if (input & FStack) {
-    currentStackOffset -= ni->imm[0].u_IVA; // arguments consumed
-    currentStackOffset -= kNumActRecCells; // ActRec is torn down as well
+    spOff += ni.imm[0].u_IVA; // arguments consumed
+    spOff += kNumActRecCells; // ActRec is torn down as well
   }
-  if (input & IgnoreInnerType) ni->ignoreInnerType = true;
+  if (input & IgnoreInnerType) ni.ignoreInnerType = true;
   if (input & Stack1) {
-    SKTRACE(1, sk, "getInputs: stack1 %d\n", currentStackOffset - 1);
-    inputs.emplace_back(Location(BCSPOffset{--currentStackOffset}));
+    SKTRACE(1, sk, "getInputs: stack1 %d\n", spOff.offset);
+    inputs.emplace_back(Location(spOff++));
     if (input & DontGuardStack1) inputs.back().dontGuard = true;
     if (input & Stack2) {
-      SKTRACE(1, sk, "getInputs: stack2 %d\n", currentStackOffset - 1);
-      inputs.emplace_back(Location(BCSPOffset{--currentStackOffset}));
+      SKTRACE(1, sk, "getInputs: stack2 %d\n", spOff.offset);
+      inputs.emplace_back(Location(spOff++));
       if (input & Stack3) {
-        SKTRACE(1, sk, "getInputs: stack3 %d\n", currentStackOffset - 1);
-        inputs.emplace_back(Location(BCSPOffset{--currentStackOffset}));
+        SKTRACE(1, sk, "getInputs: stack3 %d\n", spOff.offset);
+        inputs.emplace_back(Location(spOff++));
       }
     }
   }
+  if (input & StackI) {
+    inputs.emplace_back(Location(BCSPOffset{ni.imm[0].u_IVA}));
+  }
   if (input & StackN) {
-    int numArgs = (ni->op() == Op::NewPackedArray ||
-                   ni->op() == Op::ConcatN)
-      ? ni->imm[0].u_IVA
-      : ni->immVec.numStackValues();
+    int numArgs = (ni.op() == Op::NewPackedArray ||
+                   ni.op() == Op::ConcatN)
+      ? ni.imm[0].u_IVA
+      : ni.immVec.numStackValues();
 
-    SKTRACE(1, sk, "getInputs: stackN %d %d\n",
-            currentStackOffset - 1, numArgs);
+    SKTRACE(1, sk, "getInputs: stackN %d %d\n", spOff.offset, numArgs);
     for (int i = 0; i < numArgs; i++) {
-      inputs.emplace_back(Location(BCSPOffset{--currentStackOffset}));
+      inputs.emplace_back(Location(spOff++));
       inputs.back().dontGuard = true;
       inputs.back().dontBreak = true;
     }
   }
   if (input & BStackN) {
-    int numArgs = ni->imm[0].u_IVA;
-    SKTRACE(1, sk, "getInputs: BStackN %d %d\n", currentStackOffset - 1,
-            numArgs);
+    int numArgs = ni.imm[0].u_IVA;
+    SKTRACE(1, sk, "getInputs: BStackN %d %d\n", spOff.offset, numArgs);
     for (int i = 0; i < numArgs; i++) {
-      inputs.emplace_back(Location(BCSPOffset{--currentStackOffset}));
+      inputs.emplace_back(Location(spOff++));
     }
   }
   if (input & MVector) {
-    addMVectorInputs(*ni, currentStackOffset, inputs);
+    addMVectorInputs(ni, spOff, inputs);
   }
   if (input & Local) {
     // (Almost) all instructions that take a Local have its index at
     // their first immediate.
     int loc;
     auto insertAt = inputs.end();
-    switch (ni->op()) {
+    switch (ni.op()) {
       case OpSetWithRefLM:
         insertAt = inputs.begin();
         // fallthrough
       case OpFPassL:
-        loc = ni->imm[1].u_IVA;
+        loc = ni.imm[1].u_IVA;
         break;
       case OpQueryML:
-        loc = ni->imm[3].u_IVA;
+        loc = ni.imm[3].u_IVA;
         break;
 
       default:
-        loc = ni->imm[0].u_IVA;
+        loc = ni.imm[0].u_IVA;
         break;
     }
     SKTRACE(1, sk, "getInputs: local %d\n", loc);
@@ -743,14 +733,14 @@ static void getInputsImpl(NormalizedInstruction* ni,
   }
 
   if (input & AllLocals) {
-    ni->ignoreInnerType = true;
+    ni.ignoreInnerType = true;
   }
 
-  SKTRACE(1, sk, "stack args: virtual sfo now %d\n", currentStackOffset);
+  SKTRACE(1, sk, "stack args: virtual sfo now %d\n", spOff.offset);
   TRACE(1, "%s\n", Trace::prettyNode("Inputs", inputs).c_str());
 
   if (inputs.size() &&
-      ((input & DontGuardAny) || dontGuardAnyInputs(ni->op()))) {
+      ((input & DontGuardAny) || dontGuardAnyInputs(ni.op()))) {
     for (int i = inputs.size(); i--; ) {
       inputs[i].dontGuard = true;
     }
@@ -758,21 +748,7 @@ static void getInputsImpl(NormalizedInstruction* ni,
   if (input & This) {
     inputs.emplace_back(Location(Location::This));
   }
-}
-
-InputInfoVec getInputs(NormalizedInstruction& inst) {
-  InputInfoVec infos;
-  // MCGenerator expected top of stack to be index -1, with indexes growing
-  // down from there. hhir defines top of stack to be index 0, with indexes
-  // growing up from there. To compensate we start with a stack offset of 1 and
-  // negate the index of any stack input after the call to getInputs.
-  int stackOff = 1;
-  getInputsImpl(&inst, stackOff, infos);
-  for (auto& info : infos) {
-    if (!info.loc.isStack()) continue;
-    info.loc.bcRelOffset = -info.loc.bcRelOffset;
-  }
-  return infos;
+  return inputs;
 }
 
 bool dontGuardAnyInputs(Op op) {
@@ -1086,8 +1062,8 @@ bool callDestroysLocals(const NormalizedInstruction& inst,
 
   const FPIEnt *fpi = caller->findFPI(inst.source.offset());
   assertx(fpi);
-  Op* fpushPc = (Op*)unit->at(fpi->m_fpushOff);
-  auto const op = *fpushPc;
+  auto const fpushPc = unit->at(fpi->m_fpushOff);
+  auto const op = peek_op(fpushPc);
 
   if (op == OpFPushFunc) {
     // If the call has any arguments, the FPushFunc will be in a different
@@ -1151,13 +1127,12 @@ Translator::isSrcKeyInBL(SrcKey sk) {
   // opcodes.
   PC pc = nullptr;
   do {
-    pc = (pc == nullptr) ?
-      unit->at(sk.offset()) : pc + instrLen((Op*) pc);
+    pc = (pc == nullptr) ? unit->at(sk.offset()) : pc + instrLen(pc);
     if (m_dbgBLPC.checkPC(pc)) {
       m_dbgBLSrcKey.insert(sk);
       return true;
     }
-  } while (!opcodeBreaksBB(*reinterpret_cast<const Op*>(pc)));
+  } while (!opcodeBreaksBB(peek_op(pc)));
   return false;
 }
 
@@ -1477,7 +1452,7 @@ void translateInstr(
     auto str = ni.m_unit->lookupLitstrId(ni.imm[2].u_SA);
     builtinFunc = Unit::lookupFunc(str);
   }
-  auto pc = reinterpret_cast<const Op*>(ni.pc());
+  auto pc = ni.pc();
   for (auto i = 0, num = instrNumPops(pc); i < num; ++i) {
     auto const type =
       !builtinFunc ? flavorToType(instrInputFlavor(pc, i)) :

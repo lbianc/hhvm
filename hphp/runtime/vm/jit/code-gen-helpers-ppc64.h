@@ -27,6 +27,7 @@
 #include "hphp/runtime/vm/jit/cpp-call.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/phys-reg-saver.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
@@ -49,7 +50,7 @@ namespace ppc64 {
 
 typedef ppc64_asm::Assembler Asm;
 
-void emitEagerSyncPoint(Vout& v, const Op* pc, Vreg rds, Vreg vmfp, Vreg vmsp);
+void emitEagerSyncPoint(Vout& v, PC pc, Vreg rds, Vreg vmfp, Vreg vmsp);
 void emitGetGContext(Vout& as, Vreg dest);
 
 void emitTransCounterInc(Asm& a);
@@ -136,18 +137,18 @@ inline Vptr getTLSVptr(const T& data) {
   uintptr_t virtualAddress = uintptr_t(&data) - tlsBase();
   return Vptr{baseless(virtualAddress), Vptr::FS};
 }
-}
 
 template<typename T>
 inline Vptr
-emitTLSAddr(Vout& v, T& data, Vreg) {
+implTLSAddr(Vout& v, T& data, Vreg) {
   return detail::getTLSVptr(data);
 }
 
 template<typename T>
 inline Vptr
-emitTLSAddr(ppc64_asm::Assembler& a, T& data, Reg64) {
+implTLSAddr(ppc64_asm::Assembler& a, T& data, Reg64) {
    return detail::getTLSVptr(data);
+}
 }
 #else
 /*
@@ -214,15 +215,6 @@ implTLSAddr(Asm& a, long* addr, Reg64 scratch) {
 
 }
 
-#define getGlobalAddrForTls(datum) ([] {                \
-    long* ret;                                          \
-    __asm__("lea %1, %%rax\nmov %%rdi, %0" :            \
-            "=r"(ret) : "m"(datum));                    \
-    return ret;                                         \
-  }())
-
-#define emitTLSAddr(x, datum, r)                        \
-  detail::implTLSAddr((x), getGlobalAddrForTls(datum), r)
 #endif
 
 #ifdef USE_GCC_FAST_TLS
@@ -232,27 +224,31 @@ implTLSAddr(Asm& a, long* addr, Reg64 scratch) {
  * We support both linux and MacOS
  */
 
+namespace detail {
 #ifndef __APPLE__
+
 template<typename T>
 inline void
-emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg reg) {
+implTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum,
+            long* unused, Vreg reg) {
   v << load{detail::getTLSVptr(datum.m_node.m_p), reg};
 }
 
 template<typename T>
 inline void
-emitTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum, Reg64 reg) {
+implTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
+            long* unused, Reg64 reg) {
   auto ptr = detail::getTLSVptr(datum.m_node.m_p);
   Vasm::prefix(a, ptr).loadq(ptr.mr(), reg);
 }
-#else
 
-namespace detail {
+#else
 
 template<typename T>
 inline void
 implTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, long* addr, Vreg dst) {
-  auto ptr = detail::implTLSAddr(v, addr, dst);
+  auto tmp = v.makeReg();
+  auto ptr = detail::implTLSAddr(v, addr, tmp);
   v << load{ptr, dst};
 }
 
@@ -263,12 +259,9 @@ implTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
   auto ptr = detail::implTLSAddr(a, addr, dst);
   Vasm::prefix(a, ptr).loadq(ptr, dst);
 }
-}
-
-#define emitTLSLoad(x, datum, reg)                            \
-  detail::implTLSLoad(x, datum, getGlobalAddrForTls(datum), reg)
 
 #endif
+}
 
 #else // USE_GCC_FAST_TLS
 
@@ -276,7 +269,7 @@ template<typename T>
 inline void
 emitTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, Vreg dest) {
   // We don't know for sure what's alive.
-  PhysRegSaver(v, abi().gpUnreserved - abi().calleeSaved);
+  PhysRegSaver(v, abi().gpUnreserved - abi().calleeSaved, true /* aligned */);
   v << ldimmq{datum.m_key, rarg(0)};
   const CodeAddress addr = (CodeAddress)pthread_getspecific;
   v << call{addr, arg_regs(1)};
@@ -317,20 +310,20 @@ void jccBlock(Asm& a, Lambda body) {
  */
 
 inline MemoryRef lookupDestructor(ppc64_asm::Assembler& a, PhysReg typeReg) {
-/*  auto const table = reinterpret_cast<intptr_t>(g_destructors);
+  auto const table = reinterpret_cast<intptr_t>(g_destructors);
   always_assert_flog(deltaFits(table, sz::dword),
     "Destructor function table is expected to be in the data "
     "segment, with addresses less than 2^31"
   );
-  static_assert((KindOfString        >> kShiftDataTypeToDestrIndex == 1) &&
+/*  static_assert((KindOfString        >> kShiftDataTypeToDestrIndex == 1) &&
                 (KindOfArray         >> kShiftDataTypeToDestrIndex == 2) &&
                 (KindOfObject        >> kShiftDataTypeToDestrIndex == 3) &&
                 (KindOfResource      >> kShiftDataTypeToDestrIndex == 4) &&
                 (KindOfRef           >> kShiftDataTypeToDestrIndex == 5),
-                "lookup of destructors depends on KindOf* values");
-  a.    shrl   (kShiftDataTypeToDestrIndex, r32(typeReg));
-  return baseless(typeReg*8 + table);*/
+                "lookup of destructors depends on KindOf* values");*/
+  //a.    shrl   (kShiftDataTypeToDestrIndex, r32(typeReg));
   not_implemented();
+  return baseless(typeReg*8 + table);
 }
 
 inline Vptr lookupDestructor(Vout& v, Vreg typeReg) {

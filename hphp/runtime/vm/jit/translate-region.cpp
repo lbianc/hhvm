@@ -26,8 +26,9 @@
 
 #include "hphp/runtime/vm/bc-pattern.h"
 
-#include "hphp/runtime/vm/jit/ir-unit.h"
+#include "hphp/runtime/vm/hhbc-codec.h"
 #include "hphp/runtime/vm/jit/inlining-decider.h"
+#include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/irgen.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
@@ -126,6 +127,11 @@ bool blockHasUnprocessedPred(
       return true;
     }
   }
+  if (auto prevRetrans = region.prevRetrans(blockId)) {
+    if (processedBlocks.count(prevRetrans.value()) == 0) {
+      return true;
+    }
+  }
   return false;
 }
 
@@ -140,15 +146,17 @@ bool blockHasUnprocessedPred(
  */
 bool isMerge(const RegionDesc& region, RegionDesc::BlockId blockId) {
   auto const& preds = region.preds(blockId);
-  if (preds.size() == 0)               return false;
-  if (preds.size() > 1)                return true;
+  auto const prevRetrans = region.prevRetrans(blockId);
+  auto const nPreds = preds.size() + (prevRetrans ? 1 : 0);
+  if (nPreds == 0)                     return false;
+  if (nPreds > 1)                      return true;
   if (blockId == region.entry()->id()) return true;
 
   // The destination of a conditional jump is a merge point if both
   // the fallthru and taken offsets are the same.
-  auto predId   = *preds.begin();
-  Op* predOpPtr = (Op*)(region.block(predId)->last().pc());
-  auto predOp   = *predOpPtr;
+  auto predId   = prevRetrans ? prevRetrans.value() : *preds.begin();
+  auto predOpPtr = region.block(predId)->last().pc();
+  auto predOp   = peek_op(predOpPtr);
   if (!instrHasConditionalBranch(predOp)) return false;
   Offset fallthruOffset = instrLen(predOpPtr);
   Offset    takenOffset = *instrJumpOffset(predOpPtr);
@@ -383,11 +391,11 @@ bool tryTranslateSingletonInline(IRGS& irgs,
   auto has_same_local = [] (PC pc, const Captures& captures) {
     if (captures.size() == 0) return false;
 
-    auto cgetl = (const Op*)pc;
-    auto sli = (const Op*)captures[0];
+    auto cgetl = pc;
+    auto sli = captures[0];
 
-    assertx(*cgetl == Op::CGetL);
-    assertx(*sli == Op::StaticLocInit);
+    assertx(peek_op(cgetl) == Op::CGetL);
+    assertx(peek_op(sli) == Op::StaticLocInit);
 
     return (getImm(sli, 0).u_IVA == getImm(cgetl, 0).u_IVA);
   };
@@ -414,7 +422,7 @@ bool tryTranslateSingletonInline(IRGS& irgs,
       irgen::inlSingletonSLoc(
         irgs,
         funcd,
-        (const Op*)result.getCapture(0)
+        result.getCapture(0)
       );
     } catch (const FailedIRGen& e) {
       return false;
@@ -433,10 +441,10 @@ bool tryTranslateSingletonInline(IRGS& irgs,
   // String opcode.
   auto same_string_as = [&] (int i) {
     return Atom(Op::String).onlyif([=] (PC pc, const Captures& captures) {
-      auto string1 = (const Op*)pc;
-      auto string2 = (const Op*)captures[i];
-      assertx(*string1 == Op::String);
-      assertx(*string2 == Op::String);
+      auto string1 = pc;
+      auto string2 = captures[i];
+      assertx(peek_op(string1) == Op::String);
+      assertx(peek_op(string2) == Op::String);
 
       auto const unit = funcd->unit();
       auto sd1 = unit->lookupLitstrId(getImmPtr(string1, 0)->u_SA);
@@ -472,8 +480,8 @@ bool tryTranslateSingletonInline(IRGS& irgs,
       irgen::inlSingletonSProp(
         irgs,
         funcd,
-        (const Op*)result.getCapture(1),
-        (const Op*)result.getCapture(0)
+        result.getCapture(1),
+        result.getCapture(0)
       );
     } catch (const FailedIRGen& e) {
       return false;
@@ -542,7 +550,8 @@ RegionDescPtr getInlinableCalleeRegion(const ProfSrcKey& psk,
                                        const Func* callee,
                                        TranslateRetryContext& retry,
                                        InliningDecider& inl,
-                                       const IRGS& irgs) {
+                                       const IRGS& irgs,
+                                       int32_t maxBCInstrs) {
   if (psk.srcKey.op() != Op::FCall &&
       psk.srcKey.op() != Op::FCallD) {
     return nullptr;
@@ -563,19 +572,17 @@ RegionDescPtr getInlinableCalleeRegion(const ProfSrcKey& psk,
     return nullptr;
   }
 
+  // Task #8249076: Disable inlining when we need to load the context
+  // since it seems broken.
+  if (!info.ctx && !isFPushFunc(info.fpushOpc)) return nullptr;
+
   // We can't inline FPushClsMethod when the callee may have a $this pointer
   if (isFPushClsMethod(info.fpushOpc) && callee->mayHaveThis()) {
     return nullptr;
   }
 
-  RegionDescPtr calleeRegion;
-  // Look up or select a region for `callee'.
-  if (retry.inlines.count(psk)) {
-    calleeRegion = retry.inlines[psk];
-  } else {
-    calleeRegion = selectCalleeRegion(psk.srcKey, callee, irgs);
-    retry.inlines[psk] = calleeRegion;
-  }
+  // Select a region for `callee'.
+  auto calleeRegion = selectCalleeRegion(psk.srcKey, callee, irgs, maxBCInstrs);
   if (!calleeRegion) return nullptr;
 
   // Return the callee region if it's inlinable and update `inl'.
@@ -587,7 +594,8 @@ TranslateResult irGenRegion(IRGS& irgs,
                             const RegionDesc& region,
                             TranslateRetryContext& retry,
                             TransFlags trflags,
-                            InliningDecider& inl) {
+                            InliningDecider& inl,
+                            int32_t& budgetBCInstrs) {
   const Timer translateRegionTimer(Timer::translateRegion);
   FTRACE(1, "translateRegion starting with:\n{}\n", show(region));
 
@@ -599,6 +607,10 @@ TranslateResult irGenRegion(IRGS& irgs,
   always_assert_flog(check(region, errorMsg), "{}", errorMsg);
 
   auto& irb = *irgs.irb;
+
+  auto regionSize = region.instrSize();
+  always_assert(regionSize <= budgetBCInstrs);
+  budgetBCInstrs -= regionSize;
 
   // Create a map from region blocks to their corresponding initial IR blocks.
   auto blockIdToIRBlock = createBlockMap(irgs, region);
@@ -728,7 +740,7 @@ TranslateResult irGenRegion(IRGS& irgs,
       // singleton inliner isn't actively inlining.
       if (!skipTrans) {
         calleeRegion = getInlinableCalleeRegion(psk, inst.funcd, retry, inl,
-                                                irgs);
+                                                irgs, budgetBCInstrs);
       }
 
       if (calleeRegion) {
@@ -736,7 +748,9 @@ TranslateResult irGenRegion(IRGS& irgs,
         auto const* callee = inst.funcd;
 
         // We shouldn't be inlining profiling translations.
-        assert(mcg->tx().mode() != TransKind::Profile);
+        assertx(mcg->tx().mode() != TransKind::Profile);
+
+        assertx(calleeRegion->instrSize() <= budgetBCInstrs);
 
         FTRACE(1, "\nstarting inlined call from {} to {} with {} args "
                "and stack:\n{}\n",
@@ -757,7 +771,10 @@ TranslateResult irGenRegion(IRGS& irgs,
           irb.resetOffsetMapping();
           irb.resetGuardFailBlock();
 
-          auto result = irGenRegion(irgs, *calleeRegion, retry, trflags, inl);
+          auto result = irGenRegion(irgs, *calleeRegion, retry, trflags, inl,
+                                    budgetBCInstrs);
+          assertx(budgetBCInstrs >= 0);
+
           inl.registerEndInlining(callee);
 
           if (result != TranslateResult::Success) {
@@ -901,7 +918,11 @@ TranslateResult translateRegion(IRGS& irgs,
   InliningDecider inl(region.entry()->func());
   if (mcg->tx().mode() == TransKind::Profile) inl.disable();
 
-  auto irGenResult = irGenRegion(irgs, region, retry, trflags, inl);
+  int32_t budgetBCInstrs = RuntimeOption::EvalJitMaxRegionInstrs;
+  auto irGenResult = irGenRegion(irgs, region, retry, trflags, inl,
+                                 budgetBCInstrs);
+  assertx(budgetBCInstrs >= 0);
+  FTRACE(1, "translateRegion: final budgetBCInstrs = {}\n", budgetBCInstrs);
   if (irGenResult != TranslateResult::Success) return irGenResult;
 
   // For profiling translations, grab the postconditions to be used

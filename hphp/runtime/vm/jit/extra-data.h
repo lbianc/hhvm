@@ -22,11 +22,11 @@
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 
-#include "hphp/runtime/vm/jit/ir-opcode.h"
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/srckey.h"
+#include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
+#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/srckey.h"
 #include "hphp/util/arena.h"
 #include "hphp/util/ringbuffer.h"
 
@@ -577,6 +577,7 @@ struct DefInlineFPData : IRExtraData {
   Offset retBCOff;
   FPInvOffset retSPOff;
   IRSPOffset spOffset;  // offset from caller SP to bottom of callee's ActRec
+  uint32_t numNonDefault;
 };
 
 struct CallArrayData : IRExtraData {
@@ -991,10 +992,9 @@ struct ClsNeqData : IRExtraData {
 
 struct MInstrAttrData : IRExtraData {
   explicit MInstrAttrData(MInstrAttr mia) : mia(mia) {}
-  std::string show() const {
-    using U = std::underlying_type<MInstrAttr>::type;
-    return folly::to<std::string>(static_cast<U>(mia));
-  }
+
+  std::string show() const { return HPHP::show(mia); }
+
   MInstrAttr mia;
 };
 
