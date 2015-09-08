@@ -149,8 +149,43 @@ struct Vgen {
   void emit(const callarray& i) { not_implemented(); } ;
   void emit(const callfaststub& i) { not_implemented(); }
   void emit(const contenter& i) { not_implemented(); }
-  void emit(const copy& i) { not_implemented(); }
-  void emit(const copy2& i) { not_implemented(); }
+  void emit(const copy& i) {
+    if (i.s == i.d) return;
+    if (i.s.isGP()) {
+      if (i.d.isGP()) {                 // GP => GP
+        a->mr(i.d, i.s);
+      } else {                             // GP => XMM
+        assertx(i.d.isSIMD());
+        not_implemented();
+      }
+    } else {
+      if (i.d.isGP()) {                 // XMM => GP
+        not_implemented();
+      } else {                             // XMM => XMM
+        assertx(i.d.isSIMD());
+        not_implemented();
+      }
+    }  }
+  void emit(const copy2& i) {
+    assertx(i.s0.isValid() && i.s1.isValid() && i.d0.isValid() && i.d1.isValid());
+    auto s0 = i.s0, s1 = i.s1, d0 = i.d0, d1 = i.d1;
+    assertx(d0 != d1);
+    if (d0 == s1) {
+      if (d1 == s0) {
+        a->mr(ppc64::rvasmtmp(),s1);
+        a->mr(d0,s0);
+        a->mr(d1,ppc64::rvasmtmp());
+      } else {
+        // could do this in a simplify pass
+        if (s1 != d1) a->mr(d1, s1); // save s1 first; d1 != s0
+        if (s0 != d0) a->mr(d0, s0);
+      }
+    } else {
+      // could do this in a simplify pass
+      if (s0 != d0) a->mr(d0, s0);
+      if (s1 != d1) a->mr(d1, s1);
+    }
+  }
   void emit(const debugtrap& i) { not_implemented(); }
   void emit(const fallthru& i) {}
   void emit(const ldimmb& i) { not_implemented(); }
