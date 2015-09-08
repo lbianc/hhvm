@@ -30,17 +30,18 @@ const RegSet kGPCallerSaved =
   | ppc64_asm::reg::r12;  // r11 is a scratch register
 
 const RegSet kGPCalleeSaved =
-    ppc64_asm::reg::r1  | ppc64_asm::reg::r14 | ppc64_asm::reg::r15
-  | ppc64_asm::reg::r16 | ppc64_asm::reg::r17 | ppc64_asm::reg::r18
-  | ppc64_asm::reg::r19 | ppc64_asm::reg::r20 | ppc64_asm::reg::r21
-  | ppc64_asm::reg::r22 | ppc64_asm::reg::r23 | ppc64_asm::reg::r24
-  | ppc64_asm::reg::r25 | ppc64_asm::reg::r26 | ppc64_asm::reg::r27
-  | ppc64_asm::reg::r28 | ppc64_asm::reg::r29 | ppc64_asm::reg::r30;
+    ppc64_asm::reg::r1  | ppc64_asm::reg::r2  | ppc64_asm::reg::r14
+  | ppc64_asm::reg::r15 | ppc64_asm::reg::r16 | ppc64_asm::reg::r17
+  | ppc64_asm::reg::r18 | ppc64_asm::reg::r19 | ppc64_asm::reg::r20
+  | ppc64_asm::reg::r21 | ppc64_asm::reg::r22 | ppc64_asm::reg::r23
+  | ppc64_asm::reg::r24 | ppc64_asm::reg::r25 | ppc64_asm::reg::r26
+  | ppc64_asm::reg::r27;
   // r31 is used as rVasmTmp
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13) | rvmtl();
+const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13)
+  | rvmtl() | rvmfp() | rvmsp() | rvasmtmp() | rAsm;
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 

@@ -44,9 +44,9 @@ namespace ppc64 {
 
 const Abi& abi(CodeKind kind = CodeKind::Trace);
 
-constexpr PhysReg rvmfp()    { return ppc64_asm::reg::r1; }
-constexpr PhysReg rvmsp()    { return ppc64_asm::reg::r1; }
-constexpr PhysReg rvmtl()    { return ppc64_asm::reg::r14; }
+constexpr PhysReg rvmfp()    { return ppc64_asm::reg::r28; }
+constexpr PhysReg rvmsp()    { return ppc64_asm::reg::r29; }
+constexpr PhysReg rvmtl()    { return ppc64_asm::reg::r30; }
 constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r31; }
 constexpr PhysReg rsp()      { return ppc64_asm::reg::r1; }
 
@@ -76,7 +76,7 @@ PhysReg r_svcreq_arg(size_t i);
 /*
  * Scratch register.
  */
-constexpr Reg64 rAsm = ppc64_asm::reg::r2;
+constexpr Reg64 rAsm = ppc64_asm::reg::r11;
 
 ///////////////////////////////////////////////////////////////////////////////
 
