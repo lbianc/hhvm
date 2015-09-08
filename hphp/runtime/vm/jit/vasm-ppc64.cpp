@@ -155,7 +155,18 @@ struct Vgen {
   void emit(const fallthru& i) {}
   void emit(const ldimmb& i) { not_implemented(); }
   void emit(const ldimml& i) { not_implemented(); }
-  void emit(const ldimmq& i) { not_implemented(); }
+  void emit(const ldimmq& i) {
+    auto val = i.s.q();
+    if (i.d.isGP()) {
+      if (val == 0) {
+        a->xor_(i.d, i.d, i.d);
+      } else {
+        a->li64(i.d, val);
+      }
+    } else {
+      not_implemented();
+    }
+  }
   void emit(const ldimmqs& i) { not_implemented(); }
   void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
@@ -201,10 +212,16 @@ struct Vgen {
   void emit(const cmovq& i) { not_implemented(); }
   void emit(const cmpb& i) { a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
   void emit(const cmpbi& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
-  void emit(const cmpbim& i) { not_implemented(); }
+  void emit(const cmpbim& i) {
+    VptrToReg(i.s1, ppc64::rvasmtmp());
+    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
+  }
   void emit(const cmpl& i) {  a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
   void emit(const cmpli& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
-  void emit(const cmplim& i) { not_implemented(); }
+  void emit(const cmplim& i) {
+    VptrToReg(i.s1, ppc64::rvasmtmp());
+    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
+  }
   void emit(const cmplm& i) { not_implemented(); }
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
   void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }
@@ -214,14 +231,20 @@ struct Vgen {
     VptrToReg(i.s1, ppc64::rvasmtmp());
     a->cmpdi(ppc64::rvasmtmp(), i.s0);
   }
-  void emit(const cmpqm& i) { not_implemented(); }
+  void emit(const cmpqm& i) {
+    VptrToReg(i.s1, ppc64::rvasmtmp());
+    a->cmp(0, 0, i.s0, ppc64::rvasmtmp());
+  }
   void emit(cmpsd i) { not_implemented(); }
   void emit(const cqo& i) { not_implemented(); }
   void emit(const cvttsd2siq& i) { not_implemented(); }
   void emit(const cvtsi2sd& i) { not_implemented(); }
   void emit(const cvtsi2sdm& i) { not_implemented(); }
   void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
-  void emit(const declm& i) { not_implemented(); }
+  void emit(const declm& i) {
+    a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), -1);
+    emit(store{ppc64::rvasmtmp() ,i.m});
+  }
   void emit(decq i) { a->addi(i.d, i.s, -1); }
   void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
