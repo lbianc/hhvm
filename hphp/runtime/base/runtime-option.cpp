@@ -435,7 +435,7 @@ static inline bool hhirRelaxGuardsDefault() {
 }
 
 static inline bool evalJitDefault() {
-#if defined(__CYGWIN__) || defined(__powerpc64__)
+#if defined(__CYGWIN__)// || defined(__powerpc64__)
   return false;
 #else
   return true;
