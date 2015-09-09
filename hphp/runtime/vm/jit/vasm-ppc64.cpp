@@ -99,64 +99,40 @@ struct Vgen {
     a->mtlr(ppc64_asm::reg::r0);
   }
 
-
   /*
-    We can have the following address modes in X64
-
-    - Direct Operand: displacement
-    - Indirect Operand: (base)
-    - Base + Displacement: displacement(base)
-    - (Index * Scale) + Displacement: displacement(,index,scale)
-    - Base + Index + Displacement: displacement(base,index)
-    - Base +(Index * Scale) + Displacement: displacement(base, index,scale)
-
-    In PPC64 we can only have
-    Form-D and Form-X 
-    - Direct Operand: displacement (Form-D)
-    - Indirect Operand: (Base with displacement = 0) (Form-D)
-    - Base + Index: Index(Base) (Form-X)
-
-    If we have displacement > 16 bits we have to use Form-X
-  */
-  /*
-   * Calculates address of s and stores it on d
-   *
-   * The address of Vptr can be calculated by:
-   *    s.base + s.index * s.scale + s.disp
-   * the multiplication will be simplified by a shift left,
-   * as s.scale is always 1, 2, 4 or 8
+   * Calculates the effective address of Vptr s and stores on Register d
    */
   inline void VptrAddressToReg(Vptr s, Vreg d) {
-    /* s.index and s.base are optional */
+    // TODO(rcardoso): we always have to emit a shift left? even if the scale 
+    // is equal 1?
     if (s.index.isValid()) {
-      /* calculate index position before adding base and displacement */
-      int shift_left = 0;
+      // Calculate index position before adding base and displacement 
+      int n = 0;
       int scale = s.scale;
       while (scale >>= 1) {
-        ++shift_left;
+        ++n;
       }
-      assert(shift_left <= 3);
+      assert(n <= 3);
+      // scale factor is always 1, 2, 4 or, 8
+      // so we can performe index*scale doing a shift left
+      emit(shlqi{n, s.index, d, VregSF(0)});
 
-      emit(shlqi{shift_left, s.index, d, VregSF(0)});
-
-      if (s.base.isValid()) {
-        /* Valid base */
+      if (s.base.isValid())
         emit(addq {s.base, d, d, VregSF(0)});
-      } else {
-        /* Baseless Vptr: simply don't use it! */
-      }
       emit(addqi{s.disp, d, d, VregSF(0)});
 
     } else {
-      /* indexless Vptr */
+      // Indexless
       if (s.base.isValid()) {
-        /* Valid base: base + displacement */
+        // Base + Displacement
         emit(addqi{s.disp, s.base, d, VregSF(0)});
       } else {
-        /* Baseless Vptr: only displacement */
+        // Baseless
         emit(ldimmq{s.disp, d});
       }
     }
+    //TODO(rcardoso): We can insert this here and get rid of VptrToReg function?
+    //emit(load{*d, d});
   }
 
   /*
@@ -164,7 +140,34 @@ struct Vgen {
    */
   inline void VptrToReg(Vptr s, Vreg d) {
     VptrAddressToReg(s, d);
-    emit(load{*d, d});
+    emit(load{*d, d}); //TODO(rcardoso): ??
+  }
+
+  /*
+   * We can have the following address modes in X64
+   *
+   * - Direct Operand: displacement
+   * - Indirect Operand: (base)
+   * - Base + Displacement: displacement(base)
+   * - (Index * Scale) + Displacement: displacement(,index,scale)
+   * - Base + Index + Displacement: displacement(base,index)
+   * - Base +(Index * Scale) + Displacement: displacement(base, index,scale)
+   * 
+   * In PPC64 we have:
+   * - Direct Operand: displacement (Form-D)
+   * - Indirect Operand: (Base with displacement = 0) (Form-D)
+   * - Base + Index: Index(Base) (Form-X)
+   * 
+   *  If we have displacement > 16 bits we have to use Form-X. So if we get
+   *  a Vptr with a unsupported adress mode (like Index * Scale) we need 
+   *  to convert (patch) this address mode to a supported address mode.
+   */
+  inline void PatchMemoryOperands(Vptr s) {
+    // we do nothing for supported address modes
+    if(s.index.isValid() || ((s.disp << 16) > 0)) {
+      // fix index register
+      VptrToReg(s, s.index);
+    }
   }
 
   // intrinsics
@@ -327,9 +330,6 @@ struct Vgen {
   void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
-  /*TODO(IBM): idiv instruction takes only one paramenter
-    because x64 idiv divides eax:edx by i.s. There is no 
-    such instruction in PPC64. So maybe we need to create another vasm.*/
   void emit(const idiv& i) { not_implemented(); }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(const inclm& i) { not_implemented(); }
@@ -375,12 +375,40 @@ struct Vgen {
   void emit(const leap& i) { not_implemented(); }
   void emit(const loadups& i) { not_implemented(); }
   void emit(const loadtqb& i) { not_implemented(); }
-  void emit(const loadl& i) { a->lwz(Reg64(i.d), i.s); }
+  void emit(const loadl& i) {
+    PatchMemoryOperands(i.s);
+    if(i.s.index.isValid()) {
+      a->lwzx(Reg64(i.d), i.s);
+    } else {
+      a->lwz(Reg64(i.d), i.s);
+    } 
+  }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
-  void emit(const loadzbl& i) { a->lbz(Reg64(i.d), i.s);} 
-  void emit(const loadzbq& i) { a->lbz(i.d, i.s); }
-  void emit(const loadzlq& i) { a->lwz(i.d, i.s); }
+  void emit(const loadzbl& i) {
+    PatchMemoryOperands(i.s); 
+    if(i.s.index.isValid()) {
+      a->lbzx(Reg64(i.d), i.s);
+    } else {
+      a->lbz(Reg64(i.d), i.s);
+    } 
+  } 
+  void emit(const loadzbq& i) {
+    PatchMemoryOperands(i.s);
+    if(i.s.index.isValid()) {
+      a->lbzx(i.d, i.s);
+    } else {
+      a->lbz(i.d, i.s);
+    } 
+  }
+  void emit(const loadzlq& i) {
+    PatchMemoryOperands(i.s);
+    if(i.s.index.isValid()) {
+      a->lwzx(i.d, i.s);
+    } else {
+      a->lwz(i.d, i.s);
+    } 
+  }
   void emit(movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }

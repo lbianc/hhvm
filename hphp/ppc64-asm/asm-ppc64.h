@@ -469,22 +469,44 @@ public:
     PPR32    = 898
   };
 
-  /*
-    TODO(IBM): Must create a macro for these similar instructions.
-               This will make code more clean.
+  
+  // TODO(IBM): Must create a macro for these similar instructions.
+  // This will make code more clean.
 
-    #define CC_ARITH_REG_OP(name, opcode, x_opcode)
-    void name##c
-    void name##co
-    ...
-    #define CC_ARITH_IMM_OP(name, opcode)
+  // #define CC_ARITH_REG_OP(name, opcode, x_opcode)
+  //   void name##c
+  //   void name##co
+  //   ...
+  // #define CC_ARITH_IMM_OP(name, opcode)
 
-    #define LOAD_STORE_OP(name, opcode)
-    void name#w
-    void name#b
-    void name#h
-    void name#d
-  */
+  // #define LOAD_STORE_OP(name) 
+  // void #name(const Reg64& rt, MemoryRef m); 
+  // void #name##u(const Reg64& rt, MemoryRef m); 
+  // void #name##x(const Reg64& rt, MemoryRef m); 
+  // void #name##ux(const Reg64& rt, MemoryRef m); 
+
+  // #define LOAD_STORE_OP_BYTE_REVERSED(name) 
+  // void #name##brx(const Reg64& rt, MemoryRef m); 
+  
+  // LOAD_STORE_OP(lbz)
+  // LOAD_STORE_OP(lh)
+  // LOAD_STORE_OP(lha)
+  // LOAD_STORE_OP_BYTE_REVERSED(lh)
+  // LOAD_STORE_OP(lwz)
+  // LOAD_STORE_OP(lwa)
+  // LOAD_STORE_OP(ld)
+  // LOAD_STORE_OP_BYTE_REVERSED(ld)
+  // LOAD_STORE_OP(stb)
+  // LOAD_STORE_OP(sth)
+  // LOAD_STORE_OP_BYTE_REVERSED(sth)
+  // LOAD_STORE_OP(stw)
+  // LOAD_STORE_OP_BYTE_REVERSED(stw)
+  // LOAD_STORE_OP(std)
+  // LOAD_STORE_OP_BYTE_REVERSED(std)
+
+  // #undef LOAD_STORE_OP
+  // #undef LOAD_STORE_OP_BYTE_REVERSED
+  
 
   //PPC64 ISA - Only Fixed Point instructions have been implemented
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
