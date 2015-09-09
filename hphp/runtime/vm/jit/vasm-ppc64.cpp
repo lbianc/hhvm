@@ -448,13 +448,31 @@ struct Vgen {
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
-  void emit(const storeb& i) { a->stb(Reg64(i.s), i.m); }
+  void emit(const storeb& i) { 
+    if(i.m.index.isValid()) {
+      a->stbx(Reg64(i.s), i.m);
+    } else {
+      a->stb(Reg64(i.s), i.m);
+    }
+  }
   void emit(const storebi& i) { not_implemented(); }
-  void emit(const storel& i) { a->stw(Reg64(i.s), i.m); }
+  void emit(const storel& i) { 
+    if(i.m.index.isValid()) {
+      a->stwx(Reg64(i.s), i.m);
+    } else {
+      a->stw(Reg64(i.s), i.m);
+    }
+  }
   void emit(const storeli& i) { not_implemented(); }
   void emit(const storeqi& i) { not_implemented(); }
   void emit(const storesd& i) { not_implemented(); }
-  void emit(const storew& i) { a->sth(Reg64(i.s), i.m); }
+  void emit(const storew& i) { 
+    if(i.m.index.isValid()) {
+      a->sthx(Reg64(i.s), i.m);
+    } else {
+      a->sth(Reg64(i.s), i.m);
+    } 
+  }
   void emit(const storewi& i) { not_implemented(); }
   void emit(subbi i) { not_implemented(); }
   void emit(subl i) { a->subf(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), false); }
