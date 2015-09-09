@@ -531,11 +531,11 @@ void Vgen::emit(const load& i) {
 void Vgen::patch(Venv& env) {
   for (auto& p : env.jmps) {
     assertx(env.addrs[p.target]);
-    X64Assembler::patchJmp(p.instr, env.addrs[p.target]);
+    ppc64_asm::Assembler::patchBc(p.instr, env.addrs[p.target]);
   }
   for (auto& p : env.jccs) {
     assertx(env.addrs[p.target]);
-    X64Assembler::patchJcc(p.instr, env.addrs[p.target]);
+    ppc64_asm::Assembler::patchBc(p.instr, env.addrs[p.target]);
   }
   assertx(env.bccs.empty());
 }
