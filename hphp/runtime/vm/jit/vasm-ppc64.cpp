@@ -164,7 +164,7 @@ struct Vgen {
    */
   inline void PatchMemoryOperands(Vptr s) {
     // we do nothing for supported address modes
-    if(s.index.isValid() || ((s.disp << 16) > 0)) {
+    if(s.index.isValid() || ((s.disp >> 16) > 0)) {
       // fix index register
       VptrToReg(s, s.index);
     }
