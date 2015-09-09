@@ -150,49 +150,56 @@ class BranchParams {
     BranchParams(BranchConditions bc) { defineBoBi(bc); }
 
     BranchParams(HPHP::jit::ConditionCode cc) {
+      defineBoBi(convertCC(cc));
+    }
+
+    static BranchConditions convertCC(HPHP::jit::ConditionCode cc) {
+      BranchConditions ret = BranchConditions::Always;
+
       switch (cc) {
         case HPHP::jit::CC_O:
-          defineBoBi(BranchConditions::Overflow);         break;
+          ret = BranchConditions::Overflow;         break;
         case HPHP::jit::CC_NO:
-          defineBoBi(BranchConditions::NoOverflow);       break;
+          ret = BranchConditions::NoOverflow;       break;
         case HPHP::jit::CC_B:
-          defineBoBi(BranchConditions::LessThan);         break;
+          ret = BranchConditions::LessThan;         break;
         case HPHP::jit::CC_AE:
-          defineBoBi(BranchConditions::GreaterThanEqual); break;
+          ret = BranchConditions::GreaterThanEqual; break;
         case HPHP::jit::CC_E:
-          defineBoBi(BranchConditions::Equal);            break;
+          ret = BranchConditions::Equal;            break;
         case HPHP::jit::CC_NE:
-          defineBoBi(BranchConditions::NotEqual);         break;
+          ret = BranchConditions::NotEqual;         break;
         case HPHP::jit::CC_BE:
-          defineBoBi(BranchConditions::LessThanEqual);    break;
+          ret = BranchConditions::LessThanEqual;    break;
         case HPHP::jit::CC_A:
-          defineBoBi(BranchConditions::GreaterThan);      break;
+          ret = BranchConditions::GreaterThan;      break;
         case HPHP::jit::CC_S:
-          defineBoBi(BranchConditions::LessThan);         break;
+          ret = BranchConditions::LessThan;         break;
         case HPHP::jit::CC_NS:
-          defineBoBi(BranchConditions::GreaterThan);      break;
+          ret = BranchConditions::GreaterThan;      break;
 
         /*
          * TODO(Gustavo): Parity on ppc64 is not that easy:
          * http://stackoverflow.com/q/32319673/5013070
          */
         case HPHP::jit::CC_P:
-          not_implemented(); /*defineBoBi();*/            break;
+          not_implemented(); /*ret = ;*/            break;
         case HPHP::jit::CC_NP:
-          not_implemented(); /*defineBoBi();*/            break;
+          not_implemented(); /*ret = ;*/            break;
 
         case HPHP::jit::CC_L:
-          defineBoBi(BranchConditions::LessThan);         break;
+          ret = BranchConditions::LessThan;         break;
         case HPHP::jit::CC_NL:
-          defineBoBi(BranchConditions::GreaterThanEqual); break;
+          ret = BranchConditions::GreaterThanEqual; break;
         case HPHP::jit::CC_NG:
-          defineBoBi(BranchConditions::LessThanEqual);    break;
+          ret = BranchConditions::LessThanEqual;    break;
         case HPHP::jit::CC_G:
-          defineBoBi(BranchConditions::GreaterThan);      break;
+          ret = BranchConditions::GreaterThan;      break;
 
         default:
-          not_implemented();                              break;
+          not_implemented();                        break;
       }
+      return ret;
     }
 
     ~BranchParams() {}
@@ -1794,6 +1801,7 @@ public:
   void bla(Label& l);
 
   void bc(Label& l, BranchConditions bc);
+  void bc(Label& l, HPHP::jit::ConditionCode cc);
   void bca(Label& l, BranchConditions bc);
   void bcl(Label& l, BranchConditions bc);
   void bcla(Label& l, BranchConditions bc);
@@ -2326,6 +2334,9 @@ inline void Assembler::bla(Label& l) { bcla(l, BranchConditions::Always); }
 
 inline void Assembler::bc(Label& l, BranchConditions bc) {
   l.branchOffset(*this, bc, LinkReg::DoNotTouch);
+}
+inline void Assembler::bc(Label& l, HPHP::jit::ConditionCode cc) {
+  l.branchOffset(*this, BranchParams::convertCC(cc), LinkReg::DoNotTouch);
 }
 inline void Assembler::bca(Label& l, BranchConditions bc) {
   l.branchAbsolute(*this, bc, LinkReg::DoNotTouch);
