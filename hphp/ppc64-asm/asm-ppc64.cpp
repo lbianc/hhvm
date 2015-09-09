@@ -286,122 +286,122 @@ void Assembler::lbz(const Reg64& rt, MemoryRef m) {
   EmitDForm(34, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lbzu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(35, rn(rt), rn(rb), imm);
+void Assembler::lbzu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(35, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lbzux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 87);
+void Assembler::lbzux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 87);
 }
 
-void Assembler::lbzx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 119);
+void Assembler::lbzx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 119);
 }
 
-void Assembler::ld(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(58, rn(rt), rn(rb), imm, 0);
+void Assembler::ld(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(58, rn(rt), rn(m.r.base), m.r.disp, 0);
 }
 
-void Assembler::ldbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 532);
+void Assembler::ldbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 532);
 }
 
-void Assembler::ldu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(58, rn(rt), rn(rb), imm, 1);
+void Assembler::ldu(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(58, rn(rt), rn(m.r.base), m.r.disp, 1);
 }
 
-void Assembler::ldux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 21);
+void Assembler::ldux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 21);
 }
 
-void Assembler::ldx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 53);
+void Assembler::ldx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 53);
 }
 
-void Assembler::lhbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 790);
+void Assembler::lhbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 790);
 }
 
-void Assembler::lhz(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(40, rn(rt), rn(rb), imm);
+void Assembler::lhz(const Reg64& rt, MemoryRef m) {
+  EmitDForm(40, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lhzu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(41, rn(rt), rn(rb), imm);
+void Assembler::lhzu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(41, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lhzux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 279);
+void Assembler::lhzux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 279);
 }
 
-void Assembler::lhzx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 331);
+void Assembler::lhzx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 331);
 }
 
-void Assembler::lha(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(42, rn(rt), rn(rb), imm);
+void Assembler::lha(const Reg64& rt, MemoryRef m) {
+  EmitDForm(42, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lhau(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(43, rn(rt), rn(rb), imm);
+void Assembler::lhau(const Reg64& rt, MemoryRef m) {
+  EmitDForm(43, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lhaux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 343);
+void Assembler::lhaux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 343);
 }
 
-void Assembler::lhax(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 375);
+void Assembler::lhax(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 375);
 }
 
-void Assembler::lmw(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(46, rn(rt), rn(rb), imm);
+void Assembler::lmw(const Reg64& rt, MemoryRef m) {
+  EmitDForm(46, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lq(const Reg64& rtp, const Reg64& ra, uint16_t imm) {
+void Assembler::lq(const Reg64& rtp, MemoryRef m) {
   //assert invalid instruction form
-  assert(rn(rtp) == rn(ra));
-  EmitDQForm(56, rn(rtp), rn(ra), imm);
+  assert(rn(rtp) == rn(m.r.base));
+  EmitDQForm(56, rn(rtp), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lswi(const Reg64& rt, const Reg64& ra, uint16_t nb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(nb), 597);
+void Assembler::lswi(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 597);
 }
 
-void Assembler::lswx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 533);
+void Assembler::lswx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 533);
 }
 
 void Assembler::lwz(const Reg64& rt, MemoryRef m) {
   EmitDForm(32, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lwzu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(33, rn(rt), rn(rb), imm);
+void Assembler::lwzu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(33, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::lwzux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 23);
+void Assembler::lwzux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 23);
 }
 
-void Assembler::lwzx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 55);
+void Assembler::lwzx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 55);
 }
 
-void Assembler::lwa(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(58, rn(rt), rn(rb), imm, 2);
+void Assembler::lwa(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(58, rn(rt), rn(m.r.base), m.r.disp, 2);
 }
 
-void Assembler::lwaux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 341);
+void Assembler::lwaux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 341);
 }
 
-void Assembler::lwax(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 373);
+void Assembler::lwax(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 373);
 }
 
-void Assembler::lwbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 534);
+void Assembler::lwbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 534);
 }
 
 void Assembler::mcrf(uint16_t bf, uint16_t bfa) {
@@ -554,98 +554,97 @@ void Assembler::srw(const Reg64& ra, const Reg64& rs, const Reg64& rb,
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 536, rc);
 }
 
-void Assembler::stb(const Reg64& rt, MemoryRef m) {
+  void Assembler::stb(const Reg64& rt, MemoryRef m) {
   EmitDForm(38, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::stbu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(39, rn(rt), rn(rb), imm);
+void Assembler::stbu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(39, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::stbux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 215);
+void Assembler::stbux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 215);
 }
 
-void Assembler::stbx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 247);
+void Assembler::stbx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 247);
 }
 
 void Assembler::sth(const Reg64& rt, MemoryRef m) {
   EmitDForm(44, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::sthu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(45, rn(rt), rn(rb), imm);
+void Assembler::sthu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(45, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::sthux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 407);
+void Assembler::sthux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 407);
 }
 
-void Assembler::sthx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 439);
+void Assembler::sthx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 439);
 }
 
 void Assembler::stw(const Reg64& rt, MemoryRef m) {
   EmitDForm(36, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::stwu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(37, rn(rt), rn(rb), imm);
+void Assembler::stwu(const Reg64& rt, MemoryRef m) {
+  EmitDForm(37, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::stwux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 151);
+void Assembler::stwux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 151);
 }
 
-void Assembler::stwx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 183);
+void Assembler::stwx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 183);
 }
 
-void Assembler::std(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(62, rn(rt), rn(rb), imm, 0);
+void Assembler::std(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(62, rn(rt), rn(m.r.base), m.r.disp, 0);
 }
 
-void Assembler::stdu(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(62, rn(rt), rn(rb), imm, 1);
+void Assembler::stdu(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(62, rn(rt), rn(m.r.base), m.r.disp, 1);
 }
 
-void Assembler::stdux(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 149);
+void Assembler::stdux(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 149);
 }
 
-void Assembler::stdx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 181);
+void Assembler::stdx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 181);
 }
 
-void Assembler::stq(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDSForm(62, rn(rt), rn(rb), imm, 2);
+void Assembler::stq(const Reg64& rt, MemoryRef m) {
+  EmitDSForm(62, rn(rt), rn(m.r.base), m.r.disp, 2);
 }
 
-void Assembler::sthbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 918);
+void Assembler::sthbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 918);
 }
 
-void Assembler::stwbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 662);
+void Assembler::stwbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 662);
 }
 
-void Assembler::stdbrx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 660);
+void Assembler::stdbrx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 660);
 }
 
-void Assembler::stmw(const Reg64& rt, const Reg64& rb, uint16_t imm) {
-  EmitDForm(47, rn(rt), rn(rb), imm);
+void Assembler::stmw(const Reg64& rt, MemoryRef m) {
+  EmitDForm(47, rn(rt), rn(m.r.base), m.r.disp);
 }
 
-void Assembler::stswi(const Reg64& rt, const Reg64& ra, uint16_t nb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(nb), 725);
+void Assembler::stswi(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 725);
 }
 
-void Assembler::stswx(const Reg64& rt, const Reg64& ra, const Reg64& rb) {
-  EmitXForm(31, rn(rt), rn(ra), rn(rb), 661);
+void Assembler::stswx(const Reg64& rt, MemoryRef m) {
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 661);
 }
-
 void Assembler::subfic(const Reg64& rt, const Reg64& ra,  uint16_t imm) {
   EmitDForm(8, rn(rt), rn(ra), imm);
 }

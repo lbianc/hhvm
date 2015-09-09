@@ -82,9 +82,11 @@ struct Vgen {
   {
     a->mflr(ppc64_asm::reg::r0);
     // LR on parent call frame
-    a->std(ppc64_asm::reg::r0,  ppc64_asm::reg::r1, 16);
+    Vptr p(ppc64_asm::reg::r1, 16);
+    a->std(ppc64_asm::reg::r0, p);
     // minimum call stack
-    a->stdu(ppc64_asm::reg::r1, ppc64_asm::reg::r1, -32);
+    p.disp = -32;
+    a->stdu(ppc64_asm::reg::r1, p);
   }
 
   inline void popMinCallStack(void)
@@ -92,10 +94,30 @@ struct Vgen {
     // minimum call stack
     a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, 32);
     // LR on parent call frame
-    a->ld(ppc64_asm::reg::r0,   ppc64_asm::reg::r1, 16);
+    Vptr p(ppc64_asm::reg::r1, 16);
+    a->ld(ppc64_asm::reg::r0, p);
     a->mtlr(ppc64_asm::reg::r0);
   }
 
+
+  /*
+    We can have the following address modes in X64
+
+    - Direct Operand: displacement
+    - Indirect Operand: (base)
+    - Base + Displacement: displacement(base)
+    - (Index * Scale) + Displacement: displacement(,index,scale)
+    - Base + Index + Displacement: displacement(base,index)
+    - Base +(Index * Scale) + Displacement: displacement(base, index,scale)
+
+    In PPC64 we can only have
+    Form-D and Form-X 
+    - Direct Operand: displacement (Form-D)
+    - Indirect Operand: (Base with displacement = 0) (Form-D)
+    - Base + Index: Index(Base) (Form-X)
+
+    If we have displacement > 16 bits we have to use Form-X
+  */
   /*
    * Calculates address of s and stores it on d
    *
@@ -423,7 +445,7 @@ struct Vgen {
     emit(testbi{i.s0, ppc64::rvasmtmp(), i.sf});
   }
   void emit(const testwim& i) {
-    a->lhz(ppc64::rvasmtmp(), i.s1.base, i.s1.disp);
+    a->lhz(ppc64::rvasmtmp(), i.s1);
     emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
   }
   void emit(const testl& i) {
@@ -431,17 +453,17 @@ struct Vgen {
   }
   void emit(const testli& i) { a->andi(ppc64::rvasmtmp(), Reg64(i.s1), i.s0); }
   void emit(const testlim& i) {
-    a->lwz(ppc64::rvasmtmp(), i.s1.mr());
+    a->lwz(ppc64::rvasmtmp(), i.s1);
     emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
   }
   void emit(const testq& i) { a->and_(ppc64::rvasmtmp(), i.s0, i.s1, true); }
   void emit(const testqi& i) { a->andi(ppc64::rvasmtmp(), i.s1, i.s0); }
   void emit(const testqm& i) {
-    a->ld(ppc64::rvasmtmp(), i.s1.base, i.s1.disp);
+    a->ld(ppc64::rvasmtmp(), i.s1);
     emit(testq{i.s0, ppc64::rvasmtmp(), i.sf});
   }
   void emit(const testqim& i) {
-    a->ld(ppc64::rvasmtmp(), i.s1.base, i.s1.disp);
+    a->ld(ppc64::rvasmtmp(), i.s1);
     emit(testqi{i.s0, ppc64::rvasmtmp(), i.sf});
   }
   void emit(const ucomisd& i) { not_implemented(); }
