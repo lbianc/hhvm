@@ -167,7 +167,8 @@ struct Vgen {
       }
     }  }
   void emit(const copy2& i) {
-    assertx(i.s0.isValid() && i.s1.isValid() && i.d0.isValid() && i.d1.isValid());
+    assertx(i.s0.isValid() && i.s1.isValid() &&
+            i.d0.isValid() && i.d1.isValid());
     auto s0 = i.s0, s1 = i.s1, d0 = i.d0, d1 = i.d1;
     assertx(d0 != d1);
     if (d0 == s1) {
@@ -413,7 +414,9 @@ struct Vgen {
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { not_implemented(); }
-  void emit(const testb& i) { a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(const testb& i) {
+    a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true);
+  }
   void emit(const testbi& i) { a->andi(ppc64::rvasmtmp(), Reg64(i.s1), i.s0); }
   void emit(const testbim& i) {
     a->lbz(ppc64::rvasmtmp(), i.s1.mr());
