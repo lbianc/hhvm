@@ -1796,6 +1796,9 @@ public:
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, uint32_t imm32);
 
+  // Auxiliary for loading a 32bits unsigned immediate into a register
+  void li32un (const Reg64& rt, uint32_t imm32);
+
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
 

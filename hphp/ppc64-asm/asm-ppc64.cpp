@@ -745,6 +745,22 @@ void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
 
 }
 
+void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
+  xor_(rt, rt, rt);
+  // if immediate has only low 16 bits set, use simple load immediate
+  if ((imm32 >> 16) == 0)
+  {
+    ori(rt, rt, static_cast<int16_t>(imm32));
+  }
+  // if immediate has 32 bits set
+  else
+  {
+    oris(rt, rt, static_cast<int16_t>(imm32 >> 16));
+    ori(rt, rt, static_cast<int16_t>(imm32 & UINT16_MAX));
+  }
+
+}
+
 std::string Decoder::toString(){
     /*
       TODO(rcardoso):

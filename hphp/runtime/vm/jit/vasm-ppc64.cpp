@@ -262,7 +262,7 @@ struct Vgen {
     /* and of immediate up to 32bits */
     if (!i.s0.fits(HPHP::sz::word)) {
       // d = (s0@h & s1@h) | (s0@l & s1@l)
-      a->li32(ppc64::rvasmtmp(), i.s0.l());
+      a->li32un(ppc64::rvasmtmp(), i.s0.l());
       a->and_(Reg64(i.d), ppc64::rvasmtmp(), Reg64(i.d));
     } else {
       // d = s0@l & s1@l
