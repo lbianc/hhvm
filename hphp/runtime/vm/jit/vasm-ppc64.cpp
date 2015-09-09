@@ -439,7 +439,19 @@ struct Vgen {
   */
   void emit(const sarq& i) { not_implemented(); }
   void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
-  void emit(const setcc& i) { not_implemented(); }
+  void emit(const setcc& i) {
+    ppc64_asm::Label l_true, l_end;
+    Reg64 d(i.d);
+
+    a->bc(l_true, i.cc);
+    a->xor_(d, d, d);   /* set output to 0 */
+    a->b(l_end);
+
+    l_true.asm_label(*a);
+    a->li(d, 1);        /* set output to 1 */
+
+    l_end.asm_label(*a);
+  }
   void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shlq i) { not_implemented(); }
   /*TODO Rc=1*/

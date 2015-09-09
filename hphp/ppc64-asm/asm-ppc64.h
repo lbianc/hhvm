@@ -2290,10 +2290,10 @@ public:
     }
   }
 
-  friend void asm_label(Assembler& a, Label& l) {
-    assert(!l.m_address && !l.m_a && "Label was already set");
-    l.m_a = &a;
-    l.m_address = a.frontier();
+  void asm_label(Assembler& a) {
+    assert(!m_address && !m_a && "Label was already set");
+    m_a = &a;
+    m_address = a.frontier();
   }
 
 private:
