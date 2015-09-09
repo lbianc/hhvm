@@ -242,8 +242,7 @@ struct Vgen {
     /* add of immediate up to 32bits */
     if (!i.s0.fits(HPHP::sz::word)) {
       // d = (s0@h + s1@h) + (s0@l + s1@l)
-      a->addis(ppc64::rvasmtmp(), Reg64(i.s1), Immed(i.s0.l() >> 16));
-      a->addi(Reg64(i.d), Reg64(i.s1), i.s0);
+      a->li32(ppc64::rvasmtmp(), i.s0.l());
       a->add(Reg64(i.d), Reg64(i.d), ppc64::rvasmtmp());
     } else {
       // d = s0@l + s1@l
@@ -263,9 +262,8 @@ struct Vgen {
     /* and of immediate up to 32bits */
     if (!i.s0.fits(HPHP::sz::word)) {
       // d = (s0@h & s1@h) | (s0@l & s1@l)
-      a->andis(ppc64::rvasmtmp(), Reg64(i.s1), Immed(i.s0.l() >> 16));
-      a->andi(Reg64(i.d), Reg64(i.s1), i.s0);
-      a->or_(Reg64(i.d), Reg64(i.d), ppc64::rvasmtmp());
+      a->li32(ppc64::rvasmtmp(), i.s0.l());
+      a->and_(Reg64(i.d), ppc64::rvasmtmp(), Reg64(i.d));
     } else {
       // d = s0@l & s1@l
       a->andi(Reg64(i.d), Reg64(i.s1), i.s0);
