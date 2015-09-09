@@ -128,7 +128,7 @@ struct Vgen {
    */
   inline void VptrAddressToReg(Vptr s, Vreg d) {
     /* s.index and s.base are optional */
-    if (s.index.isPhys()) {
+    if (s.index.isValid()) {
       /* calculate index position before adding base and displacement */
       int shift_left = 0;
       int scale = s.scale;
@@ -139,7 +139,7 @@ struct Vgen {
 
       emit(shlqi{shift_left, s.index, d, VregSF(0)});
 
-      if (s.base.isPhys()) {
+      if (s.base.isValid()) {
         /* Valid base */
         emit(addq {s.base, d, d, VregSF(0)});
       } else {
@@ -149,7 +149,7 @@ struct Vgen {
 
     } else {
       /* indexless Vptr */
-      if (s.base.isPhys()) {
+      if (s.base.isValid()) {
         /* Valid base: base + displacement */
         emit(addqi{s.disp, s.base, d, VregSF(0)});
       } else {
