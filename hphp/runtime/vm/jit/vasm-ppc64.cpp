@@ -234,7 +234,7 @@ struct Vgen {
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) { not_implemented(); }
   void emit(const store& i);
-  void emit(const syncpoint& i) { not_implemented(); }
+  void emit(const syncpoint& i);
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
   void emit(const vret& i);
@@ -545,6 +545,12 @@ private:
   jit::vector<Venv::LabelPatch>& jccs;
   jit::vector<Venv::LabelPatch>& catches;
 };
+
+void Vgen::emit(const syncpoint& i) {
+  FTRACE(5, "IR recordSyncPoint: {} {} {}\n", a->frontier(),
+         i.fix.pcOffset, i.fix.spOffset);
+  mcg->recordSyncPoint(a->frontier(), i.fix);
+}
 
 void Vgen::emit(const pop& i) {
   not_implemented();
