@@ -462,24 +462,41 @@ struct Vgen {
   void emit(const storeups& i) { not_implemented(); }
   void emit(const storeb& i) { 
     if(i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
       a->stbx(Reg64(i.s), i.m);
     } else {
       a->stb(Reg64(i.s), i.m);
     }
   }
-  void emit(const storebi& i) { not_implemented(); }
+  void emit(const storebi& i) {
+    //TODO(rcardoso): maybe we need something like li8 and li16.
+    a->li32(ppc64::rvasmtmp(), i.s.b());
+    if(i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
+      a->stbx(ppc64::rvasmtmp(), i.m);
+    } else {
+      a->stb(ppc64::rvasmtmp(), i.m);
+    }
+  }
   void emit(const storel& i) { 
     if(i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
       a->stwx(Reg64(i.s), i.m);
     } else {
       a->stw(Reg64(i.s), i.m);
     }
   }
   void emit(const storeli& i) { not_implemented(); }
-  void emit(const storeqi& i) { not_implemented(); }
+  void emit(const storeqi& i) {
+    a->li64(ppc64::rvasmtmp(), i.s.q());
+    if(i.m.index.isValid())
+      PatchMemoryOperands(i.m);
+    a->stq(ppc64::rvasmtmp(), i.m);
+  }
   void emit(const storesd& i) { not_implemented(); }
   void emit(const storew& i) { 
     if(i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
       a->sthx(Reg64(i.s), i.m);
     } else {
       a->sth(Reg64(i.s), i.m);
