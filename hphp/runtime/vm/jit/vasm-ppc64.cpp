@@ -469,8 +469,7 @@ struct Vgen {
     }
   }
   void emit(const storebi& i) {
-    //TODO(rcardoso): maybe we need something like li8 and li16.
-    a->li32(ppc64::rvasmtmp(), i.s.b());
+    a->ori(ppc64::rvasmtmp(), ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
       a->stbx(ppc64::rvasmtmp(), i.m);
@@ -489,8 +488,9 @@ struct Vgen {
   void emit(const storeli& i) { not_implemented(); }
   void emit(const storeqi& i) {
     a->li64(ppc64::rvasmtmp(), i.s.q());
-    if(i.m.index.isValid())
+    if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
+    }
     a->stq(ppc64::rvasmtmp(), i.m);
   }
   void emit(const storesd& i) { not_implemented(); }
