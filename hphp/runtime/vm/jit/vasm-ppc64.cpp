@@ -334,7 +334,10 @@ struct Vgen {
   void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
-  void emit(const idiv& i) { not_implemented(); }
+  void emit(const idiv& i) { not_implemented(); } // should use vasm srem below
+  void emit(const srem& i) {
+    a->divd(i.d,  i.s0, i.s1, false);
+  }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(const inclm& i) { not_implemented(); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
@@ -450,7 +453,8 @@ struct Vgen {
     obtained by specifying appropriate masks and shift values for 
     certain Rotate instructions.
   */
-  void emit(const sarq& i) { not_implemented(); }
+  void emit(const sarq& i) { not_implemented(); } // should use vasm sar below
+  void emit(sar i) { a->srad(i.d, i.s1, i.s0); }
   void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
   void emit(const setcc& i) {
     ppc64_asm::Label l_true, l_end;
@@ -466,8 +470,9 @@ struct Vgen {
     l_end.asm_label(*a);
   }
   void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
-  void emit(shlq i) { not_implemented(); }
+  void emit(shlq i) { not_implemented(); } // should use vasm shl below
   /*TODO Rc=1*/
+  void emit(shl i) { a->sld(i.d, i.s1, i.s0); }
   void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
   void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
