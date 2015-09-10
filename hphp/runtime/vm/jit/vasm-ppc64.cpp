@@ -648,7 +648,7 @@ void lower(Vunit& unit) {
           inst = copy{rvmsp(), inst.defvmsp_.d};
           break;
         case Vinstr::syncvmsp:
-          inst = copy{inst.syncvmsp_.s, rvmsp()};
+          inst = copy{inst.syncvmsp_.s, PhysReg{ppc64::rvmsp()}};
           break;
         default:
           break;
