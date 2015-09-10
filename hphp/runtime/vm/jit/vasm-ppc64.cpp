@@ -469,7 +469,7 @@ struct Vgen {
     }
   }
   void emit(const storebi& i) {
-    a->ori(ppc64::rvasmtmp(), ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
+    a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
       a->stbx(ppc64::rvasmtmp(), i.m);
