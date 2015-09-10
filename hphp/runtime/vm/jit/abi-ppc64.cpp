@@ -26,8 +26,9 @@ namespace {
 const RegSet kGPCallerSaved =
     ppc64_asm::reg::r0  | ppc64_asm::reg::r3  | ppc64_asm::reg::r4
   | ppc64_asm::reg::r5  | ppc64_asm::reg::r6  | ppc64_asm::reg::r7
-  | ppc64_asm::reg::r8  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10
-  | ppc64_asm::reg::r12;  // r11 is a scratch register
+  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10 | ppc64_asm::reg::r12;
+  // r8 is used as r_svcreq_stub
+  // r11 is used as a scratch register (rAsm)
 
 const RegSet kGPCalleeSaved =
     ppc64_asm::reg::r2  | ppc64_asm::reg::r14 | ppc64_asm::reg::r15
@@ -35,12 +36,16 @@ const RegSet kGPCalleeSaved =
   | ppc64_asm::reg::r19 | ppc64_asm::reg::r20 | ppc64_asm::reg::r21
   | ppc64_asm::reg::r22 | ppc64_asm::reg::r23 | ppc64_asm::reg::r24
   | ppc64_asm::reg::r25 | ppc64_asm::reg::r26 | ppc64_asm::reg::r27;
-  // r31 is used as rVasmTmp
+  // r1 is used as rsp
+  // r28 is used as rvmfp
+  // r29 is used as rvmsp
+  // r30 is used as rvmtl
+  // r31 is used as rvasmtmp
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13)
-  | rvmtl() | rvmfp() | rvmsp() | rvasmtmp() | rAsm | rsp();
+const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13) | rvmtl() | rvmfp()
+  | rvmsp() | rvasmtmp() | rAsm | rsp() | r_svcreq_stub();
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
@@ -56,13 +61,14 @@ const RegSet kXMMCallerSaved =
 const RegSet kXMMCalleeSaved =
     ppc64_asm::reg::v20 | ppc64_asm::reg::v21 | ppc64_asm::reg::v22
   | ppc64_asm::reg::v23 | ppc64_asm::reg::v24 | ppc64_asm::reg::v25
-  | ppc64_asm::reg::v26 | ppc64_asm::reg::v27 | ppc64_asm::reg::v28
-  | ppc64_asm::reg::v29; // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
+  | ppc64_asm::reg::v26 | ppc64_asm::reg::v27 | ppc64_asm::reg::v28;
+  // v29 reserved for Vxls::m_tmp
+  // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
 
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
 
-const RegSet kXMMReserved;
+const RegSet kXMMReserved = RegSet(ppc64_asm::reg::v29);
 
 const RegSet kXMMRegs = kXMMUnreserved | kXMMReserved;
 

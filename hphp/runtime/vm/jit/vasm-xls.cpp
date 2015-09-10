@@ -170,6 +170,7 @@ struct Vxls {
         m_tmp = vixl::x17; // also used as tmp1 by MacroAssembler
         break;
       case Arch::PPC64:
+        m_tmp = ppc64_asm::reg::v29;
         break;
     }
     m_abi.simdUnreserved.remove(m_tmp);
