@@ -340,8 +340,16 @@ struct Vgen {
   void emit(incq i) { a->addi(i.d, i.s, 1); }
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
-  void emit(const incwm& i) { 
-    a->addi(i.m.base, i.m.index, i.m.disp); }
+  void emit(const incwm& i) {
+    VptrToReg(i.m, ppc64::rvasmtmp());
+    a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
+    if (i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
+      a->stdx(ppc64::rvasmtmp(), i.m);
+    } else {
+      a->std(ppc64::rvasmtmp(), i.m);
+    }
+  }
   void emit(const jcc& i) {
     if (i.targets[1] != i.targets[0]) {
       if (next == i.targets[1]) {
