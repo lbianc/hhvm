@@ -172,7 +172,10 @@ struct Vgen {
 
   // intrinsics
   void emit(const callarray& i) { not_implemented(); } ;
-  void emit(const callfaststub& i) { not_implemented(); }
+  void emit(const callfaststub& i) {
+    emit(call{i.target, i.args});
+    emit(syncpoint{i.fix});
+  }
   void emit(const contenter& i) { not_implemented(); }
   void emit(const copy& i) {
     if (i.s == i.d) return;
@@ -190,7 +193,8 @@ struct Vgen {
         assertx(i.d.isSIMD());
         not_implemented();
       }
-    }  }
+    }
+  }
   void emit(const copy2& i) {
     assertx(i.s0.isValid() && i.s1.isValid() &&
             i.d0.isValid() && i.d1.isValid());
