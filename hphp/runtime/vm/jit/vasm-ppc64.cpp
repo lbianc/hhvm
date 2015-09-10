@@ -372,7 +372,7 @@ struct Vgen {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
   void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
-  void emit(const leap& i) { not_implemented(); }
+  void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { not_implemented(); }
   void emit(const loadtqb& i) { not_implemented(); }
   void emit(const loadl& i) {
