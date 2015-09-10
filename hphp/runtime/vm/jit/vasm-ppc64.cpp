@@ -233,11 +233,11 @@ struct Vgen {
     }
   }
   void emit(const ldimmqs& i) { not_implemented(); }
-  void emit(const load& i);
+  void emit(load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) { not_implemented(); }
-  void emit(const store& i);
+  void emit(store& i);
   void emit(const syncpoint& i);
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
@@ -340,7 +340,8 @@ struct Vgen {
   void emit(incq i) { a->addi(i.d, i.s, 1); }
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
-  void emit(const incwm& i) { a->addi(i.m.base, i.m.index, i.m.disp); }
+  void emit(const incwm& i) { 
+    a->addi(i.m.base, i.m.index, i.m.disp); }
   void emit(const jcc& i) {
     if (i.targets[1] != i.targets[0]) {
       if (next == i.targets[1]) {
@@ -492,10 +493,12 @@ struct Vgen {
   void emit(const storeli& i) { not_implemented(); }
   void emit(const storeqi& i) {
     a->li64(ppc64::rvasmtmp(), i.s.q());
-    if(i.m.index.isValid()) {
+    if (i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
+      a->stdx(ppc64::rvasmtmp(), i.m);
+    } else {
+      a->std(ppc64::rvasmtmp(), i.m);
     }
-    a->stq(ppc64::rvasmtmp(), i.m);
   }
   void emit(const storesd& i) { not_implemented(); }
   void emit(const storew& i) { 
@@ -604,11 +607,17 @@ void Vgen::emit(const vret& i) {
   //TODO(IBM): Need to be MemoryRef
   a->bclr(20,0,0); /*brl 0x4e800020*/
 }
-void Vgen::emit(const load& i) {
+void Vgen::emit(load& i) {
   if (i.d.isGP()) {
-    a->lwz(i.d, i.s);
+    if (i.s.index.isValid()){
+      PatchMemoryOperands(i.s);
+      a->ldx(i.d, i.s);
+    } else {
+      a->ld(i.d, i.s);
+    }
   } else {
     assertx(i.d.isSIMD());
+    //TODO(rcardoso): Needs to check if needs to chang to vec instruction
     a->lfs(i.d, i.s);
   }
 }
@@ -629,12 +638,18 @@ void Vgen::pad(CodeBlock& cb) {
   not_implemented();
 }
 
-void Vgen::emit(const store& i) {
+void Vgen::emit(store& i) {
   if (i.s.isGP()) {
-    a->stw(i.s, i.d);
+    if (i.d.index.isValid()){
+      PatchMemoryOperands(i.d);
+      a->stdx(i.s, i.d);
+    } else {
+      a->std(i.s, i.d);
+    }
   } else {
     assertx(i.s.isSIMD());
-    // TODO(rcardoso) : Unsupported
+    //TODO(rcardoso): Needs to check if needs to chang to vec instruction
+    a->stfs(i.s, i.d);
   }
 }
 

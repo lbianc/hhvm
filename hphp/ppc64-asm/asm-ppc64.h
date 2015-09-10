@@ -1260,7 +1260,9 @@ public:
   void stfdux()         { not_implemented(); }
   void stfdx()          { not_implemented(); }
   void stfiwx()         { not_implemented(); }
-  void stfs()           { not_implemented(); }
+  void stfs(const Reg64& frt, MemoryRef m) { 
+    EmitDForm(52, rn(frt), rn(m.r.base), m.r.disp);
+  }
   void stfsu()          { not_implemented(); }
   void stfsux()         { not_implemented(); }
   void stfsx()          { not_implemented(); }
