@@ -670,90 +670,276 @@ void Vgen::emit(store& i) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+void lowerAbsdbl(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& absdbl = inst.absdbl_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
 
-void lower(Vunit& unit) {
+  // clear the high bit
+  auto tmp = v.makeReg();
+  v << psllq{1, absdbl.s, tmp};
+  v << psrlq{1, tmp, absdbl.d};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerVcall(Vunit& unit, Vlabel b, size_t iInst) {
+  auto& blocks = unit.blocks;
+  auto& inst = blocks[b].code[iInst];
+  auto const is_vcall = inst.op == Vinstr::vcall;
+  auto const vcall = inst.vcall_;
+  auto const vinvoke = inst.vinvoke_;
+
+  // Extract all the relevant information from the appropriate instruction.
+  auto const is_smashable = !is_vcall && vinvoke.smashable;
+  auto const call = is_vcall ? vcall.call : vinvoke.call;
+  auto const& vargs = unit.vcallArgs[is_vcall ? vcall.args : vinvoke.args];
+  auto const& stkArgs = vargs.stkArgs;
+  auto const dests = unit.tuples[is_vcall ? vcall.d : vinvoke.d];
+  auto const fixup = is_vcall ? vcall.fixup : vinvoke.fixup;
+  auto const destType = is_vcall ? vcall.destType : vinvoke.destType;
+
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  int32_t const adjust = (stkArgs.size() & 0x1) ? sizeof(uintptr_t) : 0;
+  if (adjust) v << subqi{adjust, reg::rsp, reg::rsp, v.makeReg()};
+
+  // Push stack arguments, in reverse order.
+  for (int i = stkArgs.size() - 1; i >= 0; --i) v << push{stkArgs[i]};
+
+  // Get the arguments in the proper registers.
+  RegSet argRegs;
+  auto doArgs = [&] (const VregList& srcs, PhysReg (*r)(size_t)) {
+    VregList argDests;
+    for (size_t i = 0, n = srcs.size(); i < n; ++i) {
+      auto const reg = r(i);
+      argDests.push_back(reg);
+      argRegs |= reg;
+    }
+
+    if (argDests.size()) {
+      v << copyargs{v.makeTuple(srcs),
+                    v.makeTuple(std::move(argDests))};
+    }
+  };
+  doArgs(vargs.args, rarg);
+  doArgs(vargs.simdArgs, rarg_simd);
+
+  // Emit the call.
+  if (is_smashable) v << mccall{(TCA)call.address(), argRegs};
+  else              emitCall(v, call, argRegs);
+
+  // Handle fixup and unwind information.
+  if (fixup.isValid()) v << syncpoint{fixup};
+
+  if (!is_vcall) {
+    auto& targets = vinvoke.targets;
+    v << unwind{{targets[0], targets[1]}};
+
+    // Insert an lea fixup for any stack args at the beginning of the catch
+    // block.
+    if (auto rspOffset = ((stkArgs.size() + 1) & ~1) * sizeof(uintptr_t)) {
+      auto& taken = unit.blocks[targets[1]].code;
+      assertx(taken.front().op == Vinstr::landingpad ||
+             taken.front().op == Vinstr::jmp);
+      Vinstr v{lea{reg::rsp[rspOffset], reg::rsp}};
+      v.origin = taken.front().origin;
+      if (taken.front().op == Vinstr::jmp) {
+        taken.insert(taken.begin(), v);
+      } else {
+        taken.insert(taken.begin() + 1, v);
+      }
+    }
+
+    // Write out the code so far to the end of b. Remaining code will be
+    // emitted to the next block.
+    vector_splice(blocks[b].code, iInst, 1, blocks[scratch].code);
+  } else if (vcall.nothrow) {
+    v << nothrow{};
+  }
+
+  // Copy the call result to the destination register(s)
+  switch (destType) {
+    case DestType::TV: {
+      // rax contains m_type and m_aux but we're expecting just the type in
+      // the lower bits, so shift the type result register.
+      static_assert(offsetof(TypedValue, m_data) == 0, "");
+      static_assert(offsetof(TypedValue, m_type) == 8, "");
+      if (dests.size() == 2) {
+        v << copy2{reg::rax, reg::rdx, dests[0], dests[1]};
+      } else {
+        // We have cases where we statically know the type but need the value
+        // from native call. Even if the type does not really need a register
+        // (e.g., InitNull), a Vreg is still allocated in assignRegs(), so the
+        // following assertion holds.
+        assertx(dests.size() == 1);
+        v << copy{reg::rax, dests[0]};
+      }
+      break;
+    }
+    case DestType::SIMD: {
+      // rax contains m_type and m_aux but we're expecting just the type in
+      // the lower bits, so shift the type result register.
+      static_assert(offsetof(TypedValue, m_data) == 0, "");
+      static_assert(offsetof(TypedValue, m_type) == 8, "");
+      assertx(dests.size() == 1);
+      pack2(v, reg::rax, reg::rdx, dests[0]);
+      break;
+    }
+    case DestType::SSA:
+    case DestType::Byte:
+      // copy the single-register result to dests[0]
+      assertx(dests.size() == 1);
+      assertx(dests[0].isValid());
+      v << copy{reg::rax, dests[0]};
+      break;
+    case DestType::None:
+      assertx(dests.empty());
+      break;
+    case DestType::Dbl:
+      // copy the single-register result to dests[0]
+      assertx(dests.size() == 1);
+      assertx(dests[0].isValid());
+      v << copy{reg::xmm0, dests[0]};
+      break;
+  }
+
+  if (stkArgs.size() > 0) {
+    v << addqi{safe_cast<int32_t>(stkArgs.size() * sizeof(uintptr_t)
+                                  + adjust),
+               reg::rsp,
+               reg::rsp,
+               v.makeReg()};
+  }
+
+  // Insert new instructions to the appropriate block
+  if (is_vcall) {
+    vector_splice(blocks[b].code, iInst, 1, blocks[scratch].code);
+  } else {
+    vector_splice(blocks[vinvoke.targets[0]].code, 0, 0,
+                  blocks[scratch].code);
+  }
+}
+
+void lower_vcallarray(Vunit& unit, Vlabel b) {
+  auto& code = unit.blocks[b].code;
+  // vcallarray can only appear at the end of a block.
+  auto const inst = code.back().get<vcallarray>();
+  auto const origin = code.back().origin;
+
+  auto argRegs = inst.args;
+  auto const& srcs = unit.tuples[inst.extraArgs];
+  jit::vector<Vreg> dsts;
+  for (int i = 0; i < srcs.size(); ++i) {
+    dsts.emplace_back(rarg(i));
+    argRegs |= rarg(i);
+  }
+
+  code.back() = copyargs{unit.makeTuple(srcs), unit.makeTuple(std::move(dsts))};
+  code.emplace_back(callarray{inst.target, argRegs});
+  code.back().origin = origin;
+  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}});
+  code.back().origin = origin;
+}
+
+/*
+ * Lower a few abstractions to facilitate straightforward PPC64 codegen.
+ */
+void lowerForPPC64(Vunit& unit, const Abi& abi) {
   Timer _t(Timer::vasm_lower);
-  for (size_t b = 0; b < unit.blocks.size(); ++b) {
-    auto& code = unit.blocks[b].code;
-    if (code.empty()) continue;
-    for (size_t i = 0; i < unit.blocks[b].code.size(); ++i) {
-      auto& inst = unit.blocks[b].code[i];
+
+  // This pass relies on having no critical edges in the unit.
+  splitCriticalEdges(unit);
+
+  // Scratch block can change blocks allocation, hence cannot use regular
+  // iterators.
+  auto& blocks = unit.blocks;
+
+  PostorderWalker{unit}.dfs([&](Vlabel ib) {
+    assertx(!blocks[ib].code.empty());
+    auto& back = blocks[ib].code.back();
+    if (back.op == Vinstr::vcallarray) {
+      lower_vcallarray(unit, Vlabel{ib});
+    }
+
+    for (size_t ii = 0; ii < blocks[ib].code.size(); ++ii) {
+      auto& inst = blocks[ib].code[ii];
       switch (inst.op) {
+        case Vinstr::vcall:
+        case Vinstr::vinvoke:
+          lowerVcall(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::absdbl:
+          lowerAbsdbl(unit, Vlabel{ib}, ii);
+          break;
+
         case Vinstr::defvmsp:
           inst = copy{rvmsp(), inst.defvmsp_.d};
           break;
+
         case Vinstr::syncvmsp:
-          inst = copy{inst.syncvmsp_.s, PhysReg{ppc64::rvmsp()}};
+          inst = copy{inst.syncvmsp_.s, rvmsp()};
           break;
+
+        case Vinstr::movtqb:
+          inst = copy{inst.movtqb_.s, inst.movtqb_.d};
+          break;
+
+        case Vinstr::movtql:
+          inst = copy{inst.movtql_.s, inst.movtql_.d};
+          break;
+
+        case Vinstr::countbytecode:
+          inst = incqm{inst.countbytecode_.base[g_bytecodesVasm.handle()],
+                       inst.countbytecode_.sf};
+          break;
+
         default:
           break;
       }
     }
-  }
+  });
+
+  printUnit(kVasmLowerLevel, "after lower for PPC64", unit);
 }
 
-/*
- * Some vasm opcodes don't have equivalent single instructions on PPC64, and the
- * equivalent instruction sequences require scratch registers.  We have to
- * lower these to PPC64-suitable vasm opcodes before register allocation.
- */
-template<typename Inst>
-void lower(Inst& i, Vout& v) {
-  v << i;
-}
-
-/*
- Lower facilitate code generation. In some cases is used because 
- some vasm opcodes doesn't have a 1:1 mapping to machine asm code.
-*/
-void lowerForPPC64(Vunit& unit) {
-  assertx(check(unit));
-
-  // block order doesn't matter, but only visit reachable blocks.
-  auto blocks = sortBlocks(unit);
-
-  for (auto b : blocks) {
-    auto oldCode = std::move(unit.blocks[b].code);
-    Vout v{unit, b};
-
-    for (auto& inst : oldCode) {
-      v.setOrigin(inst.origin);
-
-      switch (inst.op) {
-#define O(nm, imm, use, def) \
-        case Vinstr::nm: \
-          lower(inst.nm##_, v); \
-          break;
-
-        VASM_OPCODES
-#undef O
-      }
-    }
-  }
-
-  assertx(check(unit));
-  // no tweeking for the moment, let's use ARM's parameter
-  printUnit(kVasmARMFoldLevel, "after lower for PPC64", unit);
-}
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
 void optimizePPC64(Vunit& unit, const Abi& abi) {
+  Timer timer(Timer::vasm_optimize);
+
+  removeTrivialNops(unit);
+  optimizePhis(unit);
+  fuseBranches(unit);
+  optimizeJmps(unit);
   optimizeExits(unit);
-  lower(unit);
+
+  lowerForPPC64(unit, abi);
+
   simplify(unit);
+
+#if 0 // TODO(gut): not needed?
   if (!unit.constToReg.empty()) {
-    // TODO(gustavo): implement a foldImms for ppc64
-    //foldImms<ppc64::ImmFolder>(unit);
+    foldImms<x64::ImmFolder>(unit);
   }
-  lowerForPPC64(unit);
+#endif
+  {
+    Timer timer(Timer::vasm_copy);
+    optimizeCopies(unit, abi);
+  }
   if (unit.needsRegAlloc()) {
-    Timer _t(Timer::vasm_xls);
+    Timer timer(Timer::vasm_xls);
     removeDeadCode(unit);
     allocateRegisters(unit, abi);
   }
   if (unit.blocks.size() > 1) {
-    Timer _t(Timer::vasm_jumps);
+    Timer timer(Timer::vasm_jumps);
     optimizeJmps(unit);
   }
 }
