@@ -130,7 +130,7 @@ void emitCall(Asm& a, CppCall call, RegSet args) {
 }
 
 void emitCall(Vout& v, CppCall target, RegSet args) {
-/*  switch (target.kind()) {
+  switch (target.kind()) {
   case CppCall::Kind::Direct:
     v << call{static_cast<TCA>(target.address()), args};
     return;
@@ -163,8 +163,7 @@ void emitCall(Vout& v, CppCall target, RegSet args) {
     v << callm{dtor_ptr, args};
     return;
   }
-  not_reached();*/
-  not_implemented();
+  not_reached();
 }
 
 void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) {
