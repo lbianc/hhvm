@@ -233,11 +233,11 @@ struct Vgen {
     }
   }
   void emit(const ldimmqs& i) { not_implemented(); }
-  void emit(load& i);
+  void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) { not_implemented(); }
-  void emit(store& i);
+  void emit(const store& i);
   void emit(const syncpoint& i);
   void emit(const unwind& i) { not_implemented(); }
   void emit(const landingpad& i) { not_implemented(); }
@@ -623,7 +623,7 @@ void Vgen::emit(const vret& i) {
   a->blr();
 }
 
-void Vgen::emit(load& i) {
+void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
     if (i.s.index.isValid()){
       PatchMemoryOperands(i.s);
@@ -654,7 +654,7 @@ void Vgen::pad(CodeBlock& cb) {
   not_implemented();
 }
 
-void Vgen::emit(store& i) {
+void Vgen::emit(const store& i) {
   if (i.s.isGP()) {
     if (i.d.index.isValid()){
       PatchMemoryOperands(i.d);
