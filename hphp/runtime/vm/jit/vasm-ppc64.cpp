@@ -159,7 +159,7 @@ struct Vgen {
    * - Base + Index: Index(Base) (Form-X)
    * 
    *  If we have displacement > 16 bits we have to use Form-X. So if we get
-   *  a Vptr with a unsupported adress mode (like Index * Scale) we need 
+   *  a Vptr with a unsupported address mode (like Index * Scale) we need
    *  to convert (patch) this address mode to a supported address mode.
    */
   inline void PatchMemoryOperands(Vptr s) {
@@ -394,25 +394,25 @@ struct Vgen {
       a->lwzx(Reg64(i.d), i.s);
     } else {
       a->lwz(Reg64(i.d), i.s);
-    } 
+    }
   }
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
   void emit(const loadzbl& i) {
-    PatchMemoryOperands(i.s); 
+    PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lbzx(Reg64(i.d), i.s);
     } else {
       a->lbz(Reg64(i.d), i.s);
-    } 
-  } 
+    }
+  }
   void emit(const loadzbq& i) {
     PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lbzx(i.d, i.s);
     } else {
       a->lbz(i.d, i.s);
-    } 
+    }
   }
   void emit(const loadzlq& i) {
     PatchMemoryOperands(i.s);
@@ -420,7 +420,7 @@ struct Vgen {
       a->lwzx(i.d, i.s);
     } else {
       a->lwz(i.d, i.s);
-    } 
+    }
   }
   void emit(movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
@@ -473,7 +473,7 @@ struct Vgen {
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
-  void emit(const storeb& i) { 
+  void emit(const storeb& i) {
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
       a->stbx(Reg64(i.s), i.m);
@@ -490,7 +490,7 @@ struct Vgen {
       a->stb(ppc64::rvasmtmp(), i.m);
     }
   }
-  void emit(const storel& i) { 
+  void emit(const storel& i) {
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
       a->stwx(Reg64(i.s), i.m);
@@ -509,13 +509,13 @@ struct Vgen {
     }
   }
   void emit(const storesd& i) { not_implemented(); }
-  void emit(const storew& i) { 
+  void emit(const storew& i) {
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
       a->sthx(Reg64(i.s), i.m);
     } else {
       a->sth(Reg64(i.s), i.m);
-    } 
+    }
   }
   void emit(const storewi& i) { not_implemented(); }
   void emit(subbi i) { not_implemented(); }
