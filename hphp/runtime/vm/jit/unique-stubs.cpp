@@ -610,9 +610,12 @@ void UniqueStubs::emitAll() {
   };
 
 #define ADD(name, stub) name = add(#name, (stub))
+#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(funcPrologueRedispatch, emitFuncPrologueRedispatch(hot()));
   ADD(fcallHelperThunk,       emitFCallHelperThunk(cold));
+#endif
   ADD(funcBodyHelperThunk,    emitFuncBodyHelperThunk(cold));
+#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(functionEnterHelper,    emitFunctionEnterHelper(cold, *this));
   ADD(functionSurprisedOrStackOverflow,
       emitFunctionSurprisedOrStackOverflow(cold, *this));
@@ -634,11 +637,14 @@ void UniqueStubs::emitAll() {
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
   ADD(throwSwitchMode,  emitThrowSwitchMode(frozen));
+#endif
 #undef ADD
 
+#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   add("freeLocalsHelpers",  emitFreeLocalsHelpers(hot(), *this));
   add("resumeInterpHelpers",  emitResumeInterpHelpers(main, *this));
   emitInterpOneCFHelpers(cold, *this);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
