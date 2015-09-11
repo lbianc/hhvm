@@ -611,10 +611,13 @@ void Vgen::emit(const push& i) {
 }
 
 void Vgen::emit(const vret& i) {
-  not_implemented();
-  //TODO(IBM): Need to be MemoryRef
-  a->bclr(20,0,0); /*brl 0x4e800020*/
+  Vreg tmp_lr = ppc64::rvasmtmp();
+  VptrToReg(i.retAddr, tmp_lr);
+  a->mtlr(tmp_lr);
+  a->ldx(i.d, i.prevFP);
+  a->blr();
 }
+
 void Vgen::emit(load& i) {
   if (i.d.isGP()) {
     if (i.s.index.isValid()){
