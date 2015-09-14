@@ -35,7 +35,7 @@ bool is_aligned(TCA frontier, Alignment alignment);
 void align(CodeBlock& cb, Alignment alignment, AlignContext context,
            bool fixups = true);
 
-constexpr size_t cache_line_size() { return 64; }
+constexpr size_t cache_line_size() { return 128; }
 
 /*
  * All the Alignments can be expressed by stipulating that the code region
