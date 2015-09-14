@@ -1,5 +1,5 @@
 (**
- * Copyright (c) 2014, Facebook, Inc.
+ * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
  * This source code is licensed under the BSD-style license found in the
@@ -91,6 +91,17 @@ let exec_read cmd =
   let result = input_line ic in
   assert (Unix.close_process_in ic = Unix.WEXITED 0);
   result
+
+let exec_read_lines ?(reverse=false) cmd =
+  let ic = Unix.open_process_in cmd in
+  let result = ref [] in
+  (try
+    while true do
+      result := input_line ic :: !result
+    done;
+  with End_of_file -> ());
+  assert (Unix.close_process_in ic = Unix.WEXITED 0);
+  if not reverse then List.rev !result else !result
 
 let restart () =
   let cmd = Sys.argv.(0) in

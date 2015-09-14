@@ -234,14 +234,6 @@ implTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum,
   v << load{detail::getTLSVptr(datum.m_node.m_p), reg};
 }
 
-template<typename T>
-inline void
-implTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
-            long* unused, Reg64 reg) {
-  auto ptr = detail::getTLSVptr(datum.m_node.m_p);
-  Vasm::prefix(a, ptr).loadq(ptr.mr(), reg);
-}
-
 #else
 
 template<typename T>
@@ -250,14 +242,6 @@ implTLSLoad(Vout& v, const ThreadLocalNoCheck<T>& datum, long* addr, Vreg dst) {
   auto tmp = v.makeReg();
   auto ptr = detail::implTLSAddr(v, addr, tmp);
   v << load{ptr, dst};
-}
-
-template<typename T>
-inline void
-implTLSLoad(ppc64_asm::Assembler& a, const ThreadLocalNoCheck<T>& datum,
-            long* addr, Reg64 dst) {
-  auto ptr = detail::implTLSAddr(a, addr, dst);
-  Vasm::prefix(a, ptr).loadq(ptr, dst);
 }
 
 #endif

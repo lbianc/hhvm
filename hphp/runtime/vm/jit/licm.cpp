@@ -350,7 +350,8 @@ void analyze_block(LoopEnv& env, Block* blk) {
 
       [&] (IrrelevantEffects) {},
 
-      [&] (ReturnEffects)     { assertx(inst.is(InlineReturn)); },
+      [&] (ReturnEffects)     { assertx(inst.is(InlineReturn) ||
+                                        inst.is(InlineReturnNoFrame)); },
       [&] (ExitEffects)       { assertx(!"tried to exit in a loop"); }
     );
   }
@@ -547,7 +548,7 @@ void find_invariant_code(LoopEnv& env) {
     // of times the loop is invoked, since otherwise we're likely to
     // executed the instruction more by hoisting it out of the loop.
     auto tid = b->front().marker().profTransID();
-    auto profCount = profData->absTransCounter(tid);
+    auto profCount = profData->transCounter(tid);
     if (profCount < numInvocations) {
       FTRACE(4, "   skipping Block {} because of low profile weight ({})\n",
              b->id(), profCount);

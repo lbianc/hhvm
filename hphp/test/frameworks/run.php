@@ -381,12 +381,12 @@ function get_unit_testing_infra_dependencies(): void {
     }
   }
 
-  $checksum = md5(serialize([
-    // Use both in case composer.json has been changed, but the lock file
-    // hasn't been updated yet.
-    file_get_contents(__DIR__.'/composer.json'),
-    file_get_contents(__DIR__.'/composer.lock'),
-  ]));
+
+  // Use both in case composer.json has been changed, but the lock file
+  // hasn't been updated yet.
+  $checksum = md5(file_get_contents(__DIR__.'/composer.json'));
+  $checksum .= '-';
+  $checksum .= md5(file_get_contents(__DIR__.'/composer.lock'));
   $stamp_file = __DIR__.'/vendor/'.$checksum.'.stamp';
   if (file_exists($stamp_file)) {
     return;
@@ -415,6 +415,10 @@ function get_unit_testing_infra_dependencies(): void {
 
   // We don't have a cached vendor/, but as --local-source-only wasn't
   // specified, we can try to download it.
+  invariant(
+    !Options::$local_source_only,
+    'trying to re-run composer, but --local-source-only specified',
+  );
 
   // Quick hack to make sure we get the latest phpunit binary from composer
   $md5_file = __DIR__."/composer.json.md5";

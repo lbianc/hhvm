@@ -303,7 +303,7 @@ void HttpProtocol::PrepareSystemVariables(Transport *transport,
       case 'P':
         postPopulated = true;
         PreparePostVariables(POSTarr, HTTP_RAW_POST_DATA,
-                             FILESarr, transport);
+                             FILESarr, transport, r);
         break;
       case 'c':
       case 'C':
@@ -326,7 +326,7 @@ void HttpProtocol::PrepareSystemVariables(Transport *transport,
     Array dummyPost(Array::Create());
     Array dummyFiles(Array::Create());
     PreparePostVariables(dummyPost, HTTP_RAW_POST_DATA,
-                         dummyFiles, transport);
+                         dummyFiles, transport, r);
   }
 
   PrepareRequestVariables(REQUESTarr,
@@ -370,7 +370,8 @@ void HttpProtocol::PrepareGetVariable(Array& get,
 void HttpProtocol::PreparePostVariables(Array& post,
                                         Variant& raw_post,
                                         Array& files,
-                                        Transport *transport) {
+                                        Transport *transport,
+                                        const RequestURI& r) {
   if (transport->getMethod() != Transport::Method::POST) {
     return;
   }
@@ -431,8 +432,13 @@ void HttpProtocol::PreparePostVariables(Array& post,
       bool decodeData = strncasecmp(contentType.c_str(),
                                     DEFAULT_POST_CONTENT_TYPE,
                                     sizeof(DEFAULT_POST_CONTENT_TYPE)-1) == 0;
-      // Always decode data for now. (macvicar)
-      decodeData = true;
+
+      if (!decodeData) {
+        auto vhost = VirtualHost::GetCurrent();
+        if (vhost && vhost->alwaysDecodePostData(r.originalURL())) {
+          decodeData = true;
+        }
+      }
 
       if (decodeData) {
         DecodeParameters(post, (const char*)data, size, true);

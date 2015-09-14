@@ -15,7 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/ext/xdebug/xdebug_hook_handler.h"
+#include "hphp/runtime/ext/xdebug/hook.h"
 
 #include "hphp/runtime/base/file.h"
 
@@ -37,7 +37,7 @@ namespace HPHP {
 #define UNMATCHED (s_xdebug_breakpoints->m_unmatched)
 
 using BreakType = XDebugBreakpoint::Type;
-using BreakInfo = XDebugHookHandler::BreakInfo;
+using BreakInfo = XDebugHook::BreakInfo;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -295,7 +295,7 @@ bool XDebugThreadBreakpoints::updateBreakpointHitValue(int id, int hitValue) {
   return true;
 }
 
-IMPLEMENT_THREAD_LOCAL(XDebugThreadBreakpoints, s_xdebug_breakpoints);
+IMPLEMENT_THREAD_LOCAL_NO_CHECK(XDebugThreadBreakpoints, s_xdebug_breakpoints);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Debug Hook Handling
@@ -395,13 +395,13 @@ static const Variant get_breakpoint_message(const BreakInfo& bi) {
     Variant(bi.message->data()) : init_null();
 }
 
-DebugHookHandler* XDebugHookHandler::GetInstance() {
-  static DebugHookHandler* instance = new XDebugHookHandler;
+DebuggerHook* XDebugHook::GetInstance() {
+  static DebuggerHook* instance = new XDebugHook();
   return instance;
 }
 
 template<BreakType type>
-void XDebugHookHandler::onBreak(const BreakInfo& bi) {
+void XDebugHook::onBreak(const BreakInfo& bi) {
   // Have to have a server to break.
   if (XDEBUG_GLOBAL(Server) == nullptr) {
     return;
@@ -444,7 +444,7 @@ void XDebugHookHandler::onBreak(const BreakInfo& bi) {
 // Exception::getMessage method name
 const StaticString s_GET_MESSAGE("getMessage");
 
-void XDebugHookHandler::onOpcode(PC pc) {
+void XDebugHook::onOpcode(PC pc) {
   auto server = XDEBUG_GLOBAL(Server);
   if (server == nullptr) {
     return;
@@ -491,7 +491,7 @@ void XDebugHookHandler::onOpcode(PC pc) {
   server->breakpoint(transpath, init_null(), init_null(), line);
 }
 
-void XDebugHookHandler::onExceptionThrown(ObjectData* exception) {
+void XDebugHook::onExceptionThrown(ObjectData* exception) {
   // Grab the exception name and message
   const StringData* name = exception->getVMClass()->name();
   const Variant msg = exception->o_invoke(s_GET_MESSAGE, init_null(), false);
@@ -499,7 +499,7 @@ void XDebugHookHandler::onExceptionThrown(ObjectData* exception) {
   onExceptionBreak(name, msg.isNull() ? nullptr : msg_str.get());
 }
 
-void XDebugHookHandler::onFlowBreak(const Unit* unit, int line) {
+void XDebugHook::onFlowBreak(const Unit* unit, int line) {
   if (XDEBUG_GLOBAL(Server) != nullptr) {
     // Translate the unit filepath and then break
     auto const filepath = String(const_cast<StringData*>(unit->filepath()));
@@ -509,14 +509,14 @@ void XDebugHookHandler::onFlowBreak(const Unit* unit, int line) {
   }
 }
 
-void XDebugHookHandler::onFileLoad(Unit* unit) {
+void XDebugHook::onFileLoad(Unit* unit) {
   // Translate the unit filename to match xdebug's internal format
   String unit_path(const_cast<StringData*>(unit->filepath()));
-  String filename = File::TranslatePath(unit_path);
+  auto const filename = File::TranslatePath(unit_path);
 
   // Loop over all unmatched breakpoints
   for (auto iter = UNMATCHED.begin(); iter != UNMATCHED.end();) {
-    XDebugBreakpoint& bp = BREAKPOINT_MAP.at(*iter);
+    auto& bp = BREAKPOINT_MAP.at(*iter);
     if (bp.type != BreakType::LINE || bp.fileName != filename) {
       ++iter;
       continue;
@@ -535,9 +535,9 @@ void XDebugHookHandler::onFileLoad(Unit* unit) {
   }
 }
 
-void XDebugHookHandler::onDefClass(const Class* cls) {
+void XDebugHook::onDefClass(const Class* cls) {
   // If the class has no methods, no need to loop through breakpoints
-  size_t num_methods = cls->numMethods();
+  auto const num_methods = cls->numMethods();
   if (num_methods == 0) {
     return;
   }
@@ -548,7 +548,7 @@ void XDebugHookHandler::onDefClass(const Class* cls) {
     // Grab the breakpoint, ignore it if it is the wrong type or the classname
     // doesn't match. Note that a classname does not have to exist as the user
     // can specify method bar on class Foo with "Foo::bar"
-    XDebugBreakpoint& bp = BREAKPOINT_MAP.at(*iter);
+    auto& bp = BREAKPOINT_MAP.at(*iter);
     if ((bp.type != BreakType::CALL && bp.type != BreakType::RETURN) ||
         (!bp.className.isNull() &&
          !className->equal(bp.className.toString().get()))) {
@@ -565,10 +565,10 @@ void XDebugHookHandler::onDefClass(const Class* cls) {
   }
 }
 
-void XDebugHookHandler::onDefFunc(const Func* func) {
+void XDebugHook::onDefFunc(const Func* func) {
   // Loop through unmatched function breakpoints
   for (auto iter = UNMATCHED.begin(); iter != UNMATCHED.end();) {
-    XDebugBreakpoint& bp = BREAKPOINT_MAP.at(*iter);
+    auto& bp = BREAKPOINT_MAP.at(*iter);
     if (bp.type != BreakType::CALL && bp.type != BreakType::RETURN) {
       ++iter;
       continue;

@@ -95,7 +95,11 @@ ExecutionContext::ExecutionContext()
     RuntimeOption::SerializationSizeLimit;
 }
 
-template<> void ThreadLocalNoCheck<ExecutionContext>::destroy() {
+// See header for why this is required.
+#ifndef _MSC_VER
+template<>
+#endif
+void ThreadLocalNoCheck<ExecutionContext>::destroy() {
   if (!isNull()) {
     getNoCheck()->sweep();
     setNull();
@@ -108,6 +112,7 @@ void ExecutionContext::cleanup() {
 
   // Discard all units that were created via create_function().
   for (auto& v : m_createdFuncs) delete v;
+  m_createdFuncs.clear();
 
   always_assert(m_activeSims.empty());
 }

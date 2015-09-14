@@ -2120,6 +2120,16 @@ void CodeGenerator::cgInlineReturn(IRInstruction* inst) {
   vmain() << load{fpReg[AROFF(m_sfp)], rvmfp()};
 }
 
+void CodeGenerator::cgInlineReturnNoFrame(IRInstruction* inst) {
+  if (debug) {
+    auto const offset = cellsToBytes(
+      inst->extra<InlineReturnNoFrame>()->frameOffset.offset);
+    for (auto i = 0; i < kNumActRecCells; ++i) {
+      emitTrashTV(rvmfp(), offset - cellsToBytes(i), kTVTrashJITFrame);
+    }
+  }
+}
+
 void CodeGenerator::cgFreeActRec(IRInstruction* inst) {
   auto ptr = srcLoc(inst, 0).reg();
   auto off = AROFF(m_sfp);
@@ -2309,7 +2319,7 @@ void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {
     : mcg->tx().uniqueStubs.freeLocalsHelpers[numLocals - 1];
 
   auto const iterReg = v.makeReg();
-  v << lea{rFp[-numLocals * sizeof(TypedValue)], iterReg};
+  v << lea{rFp[localOffset(numLocals - 1)], iterReg};
 
   auto const& marker = inst->marker();
   auto const fix = Fixup{
@@ -4688,7 +4698,7 @@ void CodeGenerator::cgContStartedCheck(IRInstruction* inst) {
 
   // Take exit if state == 0.
   auto const sf = v.makeReg();
-  v << testbim{int8_t(0xff), contReg[stateOff], sf};
+  v << testbim{int8_t(0xffu), contReg[stateOff], sf};
   v << jcc{CC_Z, sf, {label(inst->next()), label(inst->taken())}};
 }
 

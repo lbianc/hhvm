@@ -168,8 +168,8 @@ namespace StackSym {
   static const char P = 0x50; // Property marker
   static const char S = 0x60; // Static property marker
   static const char M = 0x70; // Non elem/prop/W part of M-vector
-  static const char K = (char)0x80; // Marker for information about a class base
-  static const char Q = (char)0x90; // NullSafe Property marker
+  static const char K = (char)0x80u; // Marker for information about a class base
+  static const char Q = (char)0x90u; // NullSafe Property marker
 
   static const char CN = C | N;
   static const char CG = C | G;
@@ -3704,7 +3704,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         auto scalar = dynamic_pointer_cast<ScalarExpression>(second);
         bool notQuoted = scalar && !scalar->isQuoted();
         std::string s = second->getLiteralString();
-        if (s == "static" && notQuoted) {
+
+        const auto isame =
+          [](const std::string& a, const std::string& b) {
+            return (a.size() == b.size()) &&
+                   !strncasecmp(a.c_str(), b.c_str(), a.size());
+          };
+
+        if (notQuoted && isame(s, "static")) {
           // Can't resolve this to a literal name at emission time
           static const StringData* fname
             = makeStaticString("get_called_class");
@@ -3719,14 +3726,14 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         } else if (s != "") {
           ClassScopeRawPtr cls = second->getClassScope();
           bool isTrait = cls && cls->isTrait();
-          bool isSelf = s == "self" && notQuoted;
-          bool isParent = s == "parent" && notQuoted;
+          bool isSelf = notQuoted && isame(s, "self");
+          bool isParent = notQuoted && isame(s, "parent");
 
           if (isTrait && (isSelf || isParent)) {
             emitConvertToCell(e);
-            if (s == "self" && notQuoted) {
+            if (isSelf) {
               e.Self();
-            } else if (s == "parent" && notQuoted) {
+            } else if (isParent) {
               e.Parent();
             }
 

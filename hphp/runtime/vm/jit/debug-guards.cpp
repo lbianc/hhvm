@@ -22,12 +22,8 @@
 #include "hphp/runtime/vm/srckey.h"
 
 #include "hphp/runtime/vm/jit/types.h"
-#include "hphp/runtime/vm/jit/back-end-x64.h" // XXX Layering violation.
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers-x64.h"
-#include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
-#include "hphp/runtime/vm/jit/code-gen-helpers-arm.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/srcdb.h"
@@ -64,9 +60,9 @@ void addDbgGuardImpl(SrcKey sk, SrcRec* sr) {
 
     v << ldimmq{reinterpret_cast<uintptr_t>(sk.pc()), rarg(0)};
 
-    [&] { ARCH_SWITCH_CALL(emitTLSLoad, v, ThreadInfo::s_threadInfo, tinfo) }();
+    x64::emitTLSLoad(v, ThreadInfo::s_threadInfo, tinfo);
     v << loadb{tinfo[dbgOff], attached};
-    v << testbi{static_cast<int8_t>(0xff), attached, sf};
+    v << testbi{static_cast<int8_t>(0xffu), attached, sf};
 
     v << jcci{CC_NZ, sf, done, mcg->tx().uniqueStubs.interpHelper};
 

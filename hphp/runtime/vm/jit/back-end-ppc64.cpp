@@ -14,16 +14,6 @@
    +----------------------------------------------------------------------+
 */
 
-/*
- * This pragma was set to do not show warnings of no return value for the
- * "implemented" functions for this class.
- * This file was created just to handle PPC64 architecture and initially
- * to support PPC64 with EvalJit=false.
- * This is a work in progress to port HHVM Jit to PPC64 architecture.
- * */
-
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
 #include "hphp/runtime/vm/jit/back-end-x64.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
@@ -71,10 +61,22 @@ TRACE_SET_MOD(hhir);
 
 namespace {
 
-struct BackEnd final : public jit::BackEnd {
+//////////////////////////////////////////////////////////////////////
 
-//TODO PPC64 review this code, since it is duplicated
-#if defined (__powerpc64__)
+struct BackEnd final : jit::BackEnd {
+  /*
+   * enterTCHelper does not save callee-saved registers except %rbp. This means
+   * when we call it from C++, we have to tell gcc to clobber all the other
+   * callee-saved registers.
+   */
+#if defined(__CYGWIN__) || defined(__MINGW__)
+  #define CALLEE_SAVED_BARRIER()                                    \
+      asm volatile("" : : : "rbx", "rsi", "rdi", "r12", "r13", "r14", "r15");
+#elif defined(_MSC_VER)
+  // Unfortunately, we have no way to tell MSVC to do this, so we'll
+  // probably have to use a pair of assembly stubs to manage this.
+  #define CALLEE_SAVED_BARRIER() always_assert(false);
+#elif defined (__powerpc64__)
   #define CALLEE_SAVED_BARRIER()
 #else
   #define CALLEE_SAVED_BARRIER()                                    \
@@ -130,351 +132,16 @@ struct BackEnd final : public jit::BackEnd {
                   .color(color(ANSI_COLOR_BROWN)));
     disasm.disasm(os, begin, end);
   }
-
-  void genCodeImpl(IRUnit& unit, CodeKind, AsmInfo*) override;
 };
 
 //////////////////////////////////////////////////////////////////////
 
-};
+}
+
 std::unique_ptr<jit::BackEnd> newBackEnd() {
   return folly::make_unique<BackEnd>();
-}
-
-static size_t genBlock(CodegenState& state, Vout& v, Vout& vc, Block* block) {
-  FTRACE(6, "genBlock: {}\n", block->id());
-  x64::CodeGenerator cg(state, v, vc);
-  size_t hhir_count{0};
-  for (IRInstruction& inst : *block) {
-    hhir_count++;
-    if (inst.is(EndGuards)) state.pastGuards = true;
-    v.setOrigin(&inst);
-    vc.setOrigin(&inst);
-    cg.cgInst(&inst);
-  }
-  return hhir_count;
-}
-
-/*
- * Print side-by-side code dumps comparing vasm output with LLVM.
- */
-static void printLLVMComparison(const IRUnit& ir_unit,
-                                const Vunit& vasm_unit,
-                                const jit::vector<Varea>& areas,
-                                const CompareLLVMCodeGen* compare) {
-  auto const vasm_size = areas[0].code.frontier() - areas[0].start;
-  auto const percentage = compare->main_size * 100 / vasm_size;
-
-  // We accept a few different formats for the runtime option:
-  // - "all": print all tracelets
-  // - "<x": print when llvm code is < x% the size of vasm
-  // - ">x" or "x": print when llvm code is > x% the size of vasm
-  // - "=x": print when llvm code is = x% the size of vasm
-  folly::StringPiece mode(RuntimeOption::EvalJitLLVMCompare);
-  if (mode.empty()) return;
-  if (mode != "all") {
-    auto pred = '>';
-    switch (mode[0]) {
-      case '<':
-      case '=':
-      case '>':
-        pred = mode[0];
-        mode.pop_front();
-        break;
-
-      default:
-        break;
-    }
-    auto const threshold = folly::to<int>(mode);
-    if ((pred == '<' && percentage >= threshold) ||
-        (pred == '=' && percentage != threshold) ||
-        (pred == '>' && percentage <= threshold)) {
-      return;
-    }
-  }
-
-  Trace::ftraceRelease(
-    "{:-^121}\n{}\n{:-^121}\n{}\n{:-^121}\n{}\n",
-    folly::sformat(
-      " vasm: {} bytes | llvm: {} bytes | llvm is {}% of vasm",
-      vasm_size, compare->main_size, percentage
-    ),
-    show(ir_unit),
-    " vasm unit ",
-    show(vasm_unit),
-    " llvm IR ",
-    compare->llvm
-  );
-
-  auto const& llvmAreas = compare->disasm;
-  assert(llvmAreas.size() == areas.size());
-  Disasm disasm;
-
-  for (auto i = 0; i < kNumAreas; ++i) {
-    std::ostringstream vasmOut;
-    auto& area = areas[i];
-    disasm.disasm(vasmOut, area.start, area.code.frontier());
-    auto const vasmCode = vasmOut.str();
-
-    std::vector<folly::StringPiece> llvmLines, vasmLines;
-    folly::split('\n', llvmAreas[i], llvmLines);
-    folly::split('\n', vasmCode, vasmLines);
-
-    Trace::ftraceRelease("{:-^121}\n", folly::sformat(" area {} ", i));
-    for (auto llvmIt = llvmLines.begin(), vasmIt = vasmLines.begin();
-         llvmIt != llvmLines.end() || vasmIt != vasmLines.end(); ) {
-      folly::StringPiece llvmLine, vasmLine;
-      if (llvmIt != llvmLines.end()) {
-        llvmLine = *llvmIt;
-        ++llvmIt;
-      }
-      if (vasmIt != vasmLines.end()) {
-        vasmLine = *vasmIt;
-        ++vasmIt;
-      }
-      if (vasmLine.empty() && llvmLine.empty()) continue;
-
-      Trace::ftraceRelease("{:60.60} {:.60}\n", vasmLine, llvmLine);
-    }
-    Trace::ftraceRelease("\n");
-  }
-}
-
-void BackEnd::genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* asmInfo) {
-  Timer _t(Timer::codeGen);
-  CodeBlock& mainCodeIn   = mcg->code.main();
-  CodeBlock& coldCodeIn   = mcg->code.cold();
-  CodeBlock* frozenCode   = &mcg->code.frozen();
-
-  CodeBlock mainCode;
-  CodeBlock coldCode;
-  bool do_relocate = false;
-  if (!mcg->useLLVM() &&
-      !RuntimeOption::EvalEnableReusableTC &&
-      RuntimeOption::EvalJitRelocationSize &&
-      coldCodeIn.canEmit(RuntimeOption::EvalJitRelocationSize * 3)) {
-    /*
-     * This is mainly to exercise the relocator, and ensure that its
-     * not broken by new non-relocatable code. Later, it will be
-     * used to do some peephole optimizations, such as reducing branch
-     * sizes.
-     * Allocate enough space that the relocated cold code doesn't
-     * overlap the emitted cold code.
-     */
-
-    static unsigned seed = 42;
-    /* bit mask keeps instruction alignment to 4 bytes */
-    auto off = rand_r(&seed) & (kCacheLineSize - 4);
-    coldCode.init(coldCodeIn.frontier() +
-                   RuntimeOption::EvalJitRelocationSize + off,
-                   RuntimeOption::EvalJitRelocationSize - off, "cgRelocCold");
-
-    mainCode.init(coldCode.frontier() +
-                  RuntimeOption::EvalJitRelocationSize + off,
-                  RuntimeOption::EvalJitRelocationSize - off, "cgRelocMain");
-
-    do_relocate = true;
-  } else {
-    /*
-     * Use separate code blocks, so that attempts to use the mcg's
-     * code blocks directly will fail (eg by overwriting the same
-     * memory being written through these locals).
-     */
-    coldCode.init(coldCodeIn.frontier(), coldCodeIn.available(),
-                  coldCodeIn.name().c_str());
-    mainCode.init(mainCodeIn.frontier(), mainCodeIn.available(),
-                  mainCodeIn.name().c_str());
-  }
-
-  if (frozenCode == &coldCodeIn) {
-    frozenCode = &coldCode;
-  }
-
-  auto frozenStart = frozenCode->frontier();
-  auto coldStart DEBUG_ONLY = coldCodeIn.frontier();
-  auto mainStart DEBUG_ONLY = mainCodeIn.frontier();
-  size_t hhir_count{0};
-
-  {
-    mcg->code.lock();
-    mcg->cgFixups().setBlocks(&mainCode, &coldCode, frozenCode);
-
-    SCOPE_EXIT {
-      mcg->cgFixups().setBlocks(nullptr, nullptr, nullptr);
-      mcg->code.unlock();
-    };
-
-    CodegenState state(unit, asmInfo, *frozenCode);
-    auto const blocks = rpoSortCfg(unit);
-    Vasm vasm;
-    auto& vunit = vasm.unit();
-    SCOPE_ASSERT_DETAIL("vasm unit") { return show(vunit); };
-    // create the initial set of vasm numbered the same as hhir blocks.
-    for (uint32_t i = 0, n = unit.numBlocks(); i < n; ++i) {
-      state.labels[i] = vunit.makeBlock(AreaIndex::Main);
-    }
-    // create vregs for all relevant SSATmps
-    assignRegs(unit, vunit, state, blocks);
-    vunit.entry = state.labels[unit.entry()];
-
-    Vtext vtext { mainCode, coldCode, *frozenCode };
-
-    for (auto block : blocks) {
-      auto& v = block->hint() == Block::Hint::Unlikely ? vasm.cold() :
-               block->hint() == Block::Hint::Unused ? vasm.frozen() :
-               vasm.main();
-      FTRACE(6, "genBlock {} on {}\n", block->id(),
-             area_names[(unsigned)v.area()]);
-      auto b = state.labels[block];
-      vunit.blocks[b].area = v.area();
-      v.use(b);
-      hhir_count += genBlock(state, v, vasm.cold(), block);
-      assertx(v.closed());
-      assertx(vasm.main().empty() || vasm.main().closed());
-      assertx(vasm.cold().empty() || vasm.cold().closed());
-      assertx(vasm.frozen().empty() || vasm.frozen().closed());
-    }
-    printUnit(kInitialVasmLevel, "after initial vasm generation", vunit);
-    assertx(check(vunit));
-
-    if (mcg->useLLVM()) {
-      auto ppc64_unit = vunit;
-      auto vasm_size = std::numeric_limits<size_t>::max();
-
-      jit::vector<UndoMarker> undoAll = {UndoMarker(mcg->globalData())};
-      for (auto const& area : vtext.areas()) undoAll.emplace_back(area.code);
-      auto resetCode = [&] {
-        for (auto& marker : undoAll) marker.undo();
-        mcg->cgFixups().clear();
-      };
-      auto optimized = false;
-
-      // When EvalJitLLVMKeepSize is non-zero, we'll throw away the LLVM code
-      // and use vasm's output instead if the LLVM code is more than x% the
-      // size of the vasm code. First we generate and throw away code with
-      // vasm, just to see how big it is. The cost of this is trivial compared
-      // to the LLVM code generation.
-      if (RuntimeOption::EvalJitLLVMKeepSize) {
-        optimizePPC64(ppc64_unit, abi(kind));
-        optimized = true;
-        emitPPC64(ppc64_unit, vtext, nullptr);
-        vasm_size = vtext.main().code.frontier() - vtext.main().start;
-        resetCode();
-      }
-
-      try {
-        genCodeLLVM(vunit, vtext);
-
-        auto const llvm_size = vtext.main().code.frontier() -
-                               vtext.main().start;
-        if (llvm_size * 100 / vasm_size > RuntimeOption::EvalJitLLVMKeepSize) {
-          throw FailedLLVMCodeGen("LLVM size {}, vasm size {}\n",
-                                  llvm_size, vasm_size);
-        }
-      } catch (const FailedLLVMCodeGen& e) {
-        FTRACE_MOD(Trace::llvm,
-                   1,
-                   "LLVM codegen failed ({}); falling back to ppc64 backend\n",
-                   e.what());
-        always_assert_flog(
-          RuntimeOption::EvalJitLLVM < 3,
-          "Mandatory LLVM codegen failed with reason `{}' on unit:\n{}",
-          e.what(), show(vunit)
-        );
-
-        mcg->setUseLLVM(false);
-        resetCode();
-        if (!optimized) optimizePPC64(ppc64_unit, abi(kind));
-        emitPPC64(ppc64_unit, vtext, state.asmInfo);
-
-        if (auto compare = dynamic_cast<const CompareLLVMCodeGen*>(&e)) {
-          printLLVMComparison(unit, vasm.unit(), vtext.areas(), compare);
-        }
-      }
-    } else {
-      optimizePPC64(vunit, abi(kind));
-      emitPPC64(vunit, vtext, state.asmInfo);
-    }
-  }
-
-  auto bcMap = &mcg->cgFixups().m_bcMap;
-  if (do_relocate && !bcMap->empty()) {
-    TRACE(1, "BCMAPS before relocation\n");
-    for (UNUSED auto& map : *bcMap) {
-      TRACE(1, "%s %-6d %p %p %p\n", map.md5.toString().c_str(),
-             map.bcStart, map.aStart, map.acoldStart, map.afrozenStart);
-    }
-  }
-
-  assertx(coldCodeIn.frontier() == coldStart);
-  assertx(mainCodeIn.frontier() == mainStart);
-
-  if (do_relocate) {
-    if (asmInfo) {
-      printUnit(kRelocationLevel, unit, " before relocation ", asmInfo);
-    }
-
-    RelocationInfo rel;
-    size_t asm_count{0};
-    asm_count += relocate(rel, mainCodeIn,
-                          mainCode.base(), mainCode.frontier(),
-                          mcg->cgFixups(), nullptr);
-
-    asm_count += relocate(rel, coldCodeIn,
-                          coldCode.base(), coldCode.frontier(),
-                          mcg->cgFixups(), nullptr);
-    TRACE(1, "hhir-inst-count %ld asm %ld\n", hhir_count, asm_count);
-
-    if (frozenCode != &coldCode) {
-      rel.recordRange(frozenStart, frozenCode->frontier(),
-                      frozenStart, frozenCode->frontier());
-    }
-    adjustForRelocation(rel);
-    adjustMetaDataForRelocation(rel, asmInfo, mcg->cgFixups());
-    adjustCodeForRelocation(rel, mcg->cgFixups());
-
-    if (asmInfo) {
-      static int64_t mainDeltaTot = 0, coldDeltaTot = 0;
-      int64_t mainDelta =
-        (mainCodeIn.frontier() - mainStart) -
-        (mainCode.frontier() - mainCode.base());
-      int64_t coldDelta =
-        (coldCodeIn.frontier() - coldStart) -
-        (coldCode.frontier() - coldCode.base());
-
-      mainDeltaTot += mainDelta;
-      coldDeltaTot += coldDelta;
-      if (HPHP::Trace::moduleEnabledRelease(HPHP::Trace::printir, 1)) {
-        HPHP::Trace::traceRelease("main delta after relocation: "
-                                  "%" PRId64 " (%" PRId64 ")\n",
-                                  mainDelta, mainDeltaTot);
-        HPHP::Trace::traceRelease("cold delta after relocation: "
-                                  "%" PRId64 " (%" PRId64 ")\n",
-                                  coldDelta, coldDeltaTot);
-      }
-    }
-#ifndef NDEBUG
-    auto& ip = mcg->cgFixups().m_inProgressTailJumps;
-    for (size_t i = 0; i < ip.size(); ++i) {
-      const auto& ib = ip[i];
-      assertx(!mainCode.contains(ib.toSmash()));
-      assertx(!coldCode.contains(ib.toSmash()));
-    }
-    memset(mainCode.base(), 0xcc, mainCode.frontier() - mainCode.base());
-    memset(coldCode.base(), 0xcc, coldCode.frontier() - coldCode.base());
-#endif
-  } else {
-    coldCodeIn.skip(coldCode.frontier() - coldCodeIn.frontier());
-    mainCodeIn.skip(mainCode.frontier() - mainCodeIn.frontier());
-  }
-
-  if (asmInfo) {
-    printUnit(kCodeGenLevel, unit, " after code gen ", asmInfo);
-  }
 }
 
 //////////////////////////////////////////////////////////////////////
 
 }}}
-
-#pragma GCC diagnostic pop
