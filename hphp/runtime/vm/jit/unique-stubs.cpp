@@ -642,11 +642,11 @@ void UniqueStubs::emitAll() {
 #endif
 #undef ADD
 
-#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   add("freeLocalsHelpers",  emitFreeLocalsHelpers(hot(), *this));
+#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   add("resumeInterpHelpers",  emitResumeInterpHelpers(main, *this));
-  emitInterpOneCFHelpers(cold, *this);
 #endif
+  emitInterpOneCFHelpers(cold, *this);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
