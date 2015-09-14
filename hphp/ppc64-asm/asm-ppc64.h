@@ -2268,16 +2268,7 @@ public:
       // that was already filled with the address...
       const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
 
-      // Optimization: the highest 48th up to 63rd bits are never used to
-      // address RAM data so we can assume it's zero
-      a.li   (reg::r12, HPHP::safe_cast<int16_t>(
-                   (address & (ssize_t(UINT16_MAX) << 32)) >> 32));
-      a.sldi (reg::r12, reg::r12, 32);
-      a.oris (reg::r12, reg::r12,
-              HPHP::safe_cast<int16_t>(
-                (address & (ssize_t(UINT16_MAX) << 16)) >> 16));
-      a.ori  (reg::r12, reg::r12,
-              HPHP::safe_cast<int16_t>(address & ssize_t(UINT16_MAX)));
+      a.li64(reg::r12, address);
       // When branching to another context, r12 need to keep the target address
       // to correctly set r2 (TOC reference).
       a.mtctr(reg::r12);
