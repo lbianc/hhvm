@@ -236,7 +236,9 @@ struct Vgen {
   void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
-  void emit(const nothrow& i) { not_implemented(); }
+  void emit(const nothrow& i) {
+    mcg->registerCatchBlock(a->frontier(), nullptr);
+  }
   void emit(const store& i);
   void emit(const syncpoint& i);
   void emit(const unwind& i) { not_implemented(); }
