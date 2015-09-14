@@ -634,8 +634,10 @@ void UniqueStubs::emitAll() {
 
   ADD(decRefGeneric,  emitDecRefGeneric(cold));
 
+#endif
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
+#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(throwSwitchMode,  emitThrowSwitchMode(frozen));
 #endif
 #undef ADD
