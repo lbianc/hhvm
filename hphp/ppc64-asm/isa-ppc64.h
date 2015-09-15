@@ -1962,7 +1962,12 @@ static_assert(sizeof(XX1_format) == sizeof(uint32_t), "XX1_format_t size != 4");
 
 typedef union XX2_format {
   struct {
-    //TODO
+    uint32_t TX:1;
+    uint32_t BX:1;
+    uint32_t XO:9;
+    uint32_t B:5;
+    uint32_t RSV:5;
+    uint32_t T:5;
     uint32_t OP:6;
   };
   PPC64Instr instruction;
@@ -1971,6 +1976,13 @@ static_assert(sizeof(XX2_format) == sizeof(uint32_t), "XX2_format_t size != 4");
 
 typedef union XX3_format {
   struct {
+    uint32_t TX:1;
+    uint32_t BX:1;
+    uint32_t AX:1;
+    uint32_t XO:8;
+    uint32_t B:5;
+    uint32_t A:5;
+    uint32_t T:5;
     uint32_t OP:6;
   };
   PPC64Instr instruction;

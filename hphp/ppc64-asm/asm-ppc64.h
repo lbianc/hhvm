@@ -1149,6 +1149,9 @@ public:
   void lxvdsx()         { not_implemented(); }
   void lxvdx()          { not_implemented(); }
   void lxvwx()          { not_implemented(); }
+  void lxvw4x(const RegXMM& xt, const Reg64& ra, const Reg64&rb) {
+    EmitXX1Form(31, rn(xt), rn(ra), rn(rb), 780, 0);
+  }
   void macchw()         { not_implemented(); }
   void macchwo()        { not_implemented(); }
   void macchws()        { not_implemented(); }
@@ -1286,7 +1289,9 @@ public:
   void stxsiwx()        { not_implemented(); }
   void stxsspx()        { not_implemented(); }
   void stxvd2x()        { not_implemented(); }
-  void stxvw4x()        { not_implemented(); }
+  void stxvw4x(const RegXMM& xs, const Reg64& ra, const Reg64&rb) {
+    EmitXX1Form(31, rn(xs), rn(ra), rn(rb), 972, 0);
+  }
   void sync()           { not_implemented(); }
   void tabort()         { not_implemented(); }
   void tabortdc()       { not_implemented(); }
@@ -1523,7 +1528,10 @@ public:
   void xscvdpspn()      { not_implemented(); }
   void xscvdpsxds()     { not_implemented(); }
   void xscvdpsxws()     { not_implemented(); }
-  void xscvdpuxds()     { not_implemented(); }
+  void xscvdpuxds(const RegXMM& xt, const RegXMM& xb) {
+    //TODO(rcardoso): bx tx bits
+    EmitXX2Form(60, rn(xt), 0, rn(xb), 328, 0, 0);
+  }
   void xscvdpuxws()     { not_implemented(); }
   void xscvspdp()       { not_implemented(); }
   void xscvspdpn()      { not_implemented(); }
@@ -1601,8 +1609,12 @@ public:
   void xvcvuxdsp()      { not_implemented(); }
   void xvcvuxwdp()      { not_implemented(); }
   void xvcvuxwsp()      { not_implemented(); }
-  void xvdivdp()        { not_implemented(); }
-  void xvdivsp()        { not_implemented(); }
+  void xvdivdp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
+    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 56,  0, 0 ,0);
+  }
+  void xvdivsp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
+    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 24, 0, 0 ,0);
+  }
   void xvmaddadp()      { not_implemented(); }
   void xvmaddasp()      { not_implemented(); }
   void xvmaddmdp()      { not_implemented(); }
@@ -2134,11 +2146,64 @@ protected:
     dword(xfx_formater.instruction);
   }
 
+  void EmitXX2Form(const uint8_t op,
+                   const RegNumber t,
+                   const uint8_t uim,
+                   const RegNumber b,
+                   const uint16_t xo,
+                   const bool bx,
+                   const bool tx)  { 
+    XX2_form_t xx2_formater {
+      tx,
+      bx,
+      xo,
+      static_cast<uint32_t>(b),
+      static_cast<uint32_t>(uim & 0x3),
+      static_cast<uint32_t>(t),
+      op
+    };
+    dword(xx2_formater.instruction);
+  }
+
+  void EmitXX3Form(const uint8_t op,
+                   const RegNumber t,
+                   const RegNumber a,
+                   const RegNumber b,
+                   const uint16_t xo,
+                   const bool ax,
+                   const bool bx,
+                   const bool tx) { 
+    XX3_form_t xx3_formater {
+      tx,
+      bx,
+      ax,
+      xo,
+      static_cast<uint32_t>(b),
+      static_cast<uint32_t>(a),
+      static_cast<uint32_t>(t),
+      op
+    };
+    dword(xx3_formater.instruction);
+  }
+
+  void EmitXX1Form(const uint8_t op,
+                   const RegNumber s,
+                   const RegNumber ra,
+                   const RegNumber rb,
+                   const uint16_t xo,
+                   const bool tx) {
+    XX3_form_t xx1_formater {
+      tx,
+      xo,
+      static_cast<uint32_t>(rb),
+      static_cast<uint32_t>(ra),
+      static_cast<uint32_t>(s),
+      op
+    };
+    dword(xx1_formater.instruction);
+  }
   //TODO(IBM): Unimplemented instruction formaters
   void EmitXFLForm()  { not_implemented(); }
-  void EmitXX1Form()  { not_implemented(); }
-  void EmitXX2Form()  { not_implemented(); }
-  void EmitXX3Form()  { not_implemented(); }
   void EmitXX4Form()  { not_implemented(); }
   void EmitXSForm()   { not_implemented(); }
   void EmitVAForm()   { not_implemented(); }
@@ -2170,6 +2235,9 @@ private:
   HPHP::CodeBlock& codeBlock;
 
   RegNumber rn(Reg64 r) {
+    return RegNumber(int(r));
+  }
+  RegNumber rn(RegXMM r) {
     return RegNumber(int(r));
   }
   RegNumber rn(int n) {
