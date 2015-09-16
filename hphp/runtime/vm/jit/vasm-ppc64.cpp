@@ -101,8 +101,11 @@ struct Vgen {
 
   /*
    * Calculates the effective address of Vptr s and stores on Register d
+   * The parameter ignore_base can be used to ignore base register for 
+   * load/store instructions. In this case base cannot be added to index
+   * register.
    */
-  inline void VptrAddressToReg(Vptr s, Vreg d) {
+  inline void VptrAddressToReg(Vptr s, Vreg d, bool ignore_base) {
     // TODO(rcardoso): we always have to emit a shift left? even if the scale 
     // is equal 1?
     if (s.index.isValid()) {
@@ -117,9 +120,13 @@ struct Vgen {
       // so we can performe index*scale doing a shift left
       emit(shlqi{n, s.index, d, VregSF(0)});
 
-      if (s.base.isValid())
+      if (s.base.isValid() && !ignore_base) {
         emit(addq {s.base, d, d, VregSF(0)});
-      emit(addqi{s.disp, d, d, VregSF(0)});
+      }
+      // if we have displacement 0 we can avoid this instruction
+      if(s.disp == 0) {
+        emit(addqi{s.disp, d, d, VregSF(0)});
+      }
 
     } else {
       // Indexless
@@ -138,8 +145,8 @@ struct Vgen {
   /*
    * Stores in d the value pointed by s
    */
-  inline void VptrToReg(Vptr s, Vreg d) {
-    VptrAddressToReg(s, d);
+  inline void VptrToReg(Vptr s, Vreg d, bool ignore_base=0) {
+    VptrAddressToReg(s, d, ignore_base);
     emit(load{*d, d}); //TODO(rcardoso): ??
   }
 
@@ -165,8 +172,7 @@ struct Vgen {
   inline void PatchMemoryOperands(Vptr s) {
     // we do nothing for supported address modes
     if(s.index.isValid() || ((s.disp >> 16) > 0)) {
-      // fix index register
-      VptrToReg(s, s.index);
+      VptrToReg(s, s.index, 1);
     }
   }
 
