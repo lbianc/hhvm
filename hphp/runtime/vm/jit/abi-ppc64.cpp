@@ -26,7 +26,8 @@ namespace {
 namespace reg = ppc64_asm::reg;
 
 const RegSet kGPCallerSaved = reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 |
-  reg::r9 | reg::r10 | reg::r12 | reg::r0;
+  reg::r9 | reg::r10 | reg::r12;
+  // r0 is used on function prologue and epilogue (vasm call and ret)
   // r8 is used as r_svcreq_stub
   // r11 is used as a scratch register (rAsm)
 
@@ -41,7 +42,7 @@ const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(reg::r13) | rvmtl() | rvmfp() |
+const RegSet kGPReserved = RegSet(reg::r13) | reg::r0 | rvmtl() | rvmfp() |
   rvmsp() | rvasmtmp() | rAsm | rsp() | r_svcreq_stub();
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
