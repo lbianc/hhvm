@@ -224,7 +224,15 @@ struct Vgen {
   }
   void emit(const debugtrap& i) { not_implemented(); }
   void emit(const fallthru& i) {}
-  void emit(const ldimmb& i) { not_implemented(); }
+  void emit(const ldimmb& i) { 
+    if(i.d.isGP()) {
+      // Read as 16 bits and mask to avoid another cast
+      a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
+    } else {
+      // TODO(rcardoso): SIMD instruction
+      not_implemented();
+    }
+  }
   void emit(const ldimml& i) { not_implemented(); }
   void emit(const ldimmq& i) {
     auto val = i.s.q();
