@@ -1982,11 +1982,7 @@ void CodeGenerator::cgLdBindAddr(IRInstruction* inst) {
   // rip-relative addressing will work.
   // Also, a rip-relative load, is 1 byte smaller than the corresponding
   // baseless load.
-  #ifdef 
-    // In PowerPC we don't have a accessible ip register.
-  #else
   v << loadqp{rip[addr], dstReg};
-  #endif
 }
 
 void CodeGenerator::cgProfileSwitchDest(IRInstruction* inst) {
