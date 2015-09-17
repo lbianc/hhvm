@@ -247,7 +247,10 @@ struct Vgen {
   }
   void emit(const store& i);
   void emit(const syncpoint& i);
-  void emit(const unwind& i) { not_implemented(); }
+  void emit(const unwind& i) {
+    catches.push_back({a->frontier(), i.targets[1]});
+    emit(jmp{i.targets[0]});
+  }
   void emit(const landingpad& i) { not_implemented(); }
   void emit(const vret& i);
   void emit(const leavetc&) { not_implemented(); }
