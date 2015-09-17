@@ -221,9 +221,9 @@ enum class LinkReg {
 enum class RegNumber : uint32_t {};
 
 namespace reg {
-  constexpr Reg64 r0(0);    /* volatile, used in function prologue / linkage */
-  constexpr Reg64 r1(1);    /* nonvolatile, stack pointer */
-  constexpr Reg64 r2(2);    /* nonvolatile, TOC */
+  constexpr Reg64 r0(0);    // volatile, used in function prologue / linkage
+  constexpr Reg64 r1(1);    // nonvolatile, stack pointer
+  constexpr Reg64 r2(2);    // nonvolatile, TOC
   /* volatile, argument passing registers */
   constexpr Reg64 r3(3);
   constexpr Reg64 r4(4);
@@ -233,10 +233,9 @@ namespace reg {
   constexpr Reg64 r8(8);
   constexpr Reg64 r9(9);
   constexpr Reg64 r10(10);
-
-  constexpr Reg64 r11(11);  /* volatile, environment pointer. Here: scratch */
-  constexpr Reg64 r12(12);  /* volatile, function entry address */
-  constexpr Reg64 r13(13);  /* reserved, thread pointer */
+  constexpr Reg64 r11(11);  // volatile, environment pointer (scratch)
+  constexpr Reg64 r12(12);  // volatile, function entry address
+  constexpr Reg64 r13(13);  // reserved, thread pointer
   /* nonvolatile, local variables */
   constexpr Reg64 r14(14);
   constexpr Reg64 r15(15);
@@ -257,7 +256,7 @@ namespace reg {
   constexpr Reg64 r30(30);
   constexpr Reg64 r31(31);
 
-  constexpr Reg64 f0(0);   /* volatile scratch register */
+  constexpr Reg64 f0(0);   // volatile scratch register
   /* volatile, argument passing floating point registers */
   constexpr Reg64 f1(1);
   constexpr Reg64 f2(2);
@@ -291,9 +290,6 @@ namespace reg {
   constexpr Reg64 f29(29);
   constexpr Reg64 f30(30);
   constexpr Reg64 f31(31);
-
-  // We define vector registers as RegXMM because they are 128.
-  // Check if it's possible they can change this to Reg128.
 
   /* volatile, local variables */
   constexpr RegXMM v0(0);
@@ -329,7 +325,9 @@ namespace reg {
   constexpr RegXMM v27(27);
   constexpr RegXMM v28(28);
   constexpr RegXMM v29(29);
-  // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
+  // Ignoring the vector registers 30, 31 due to kMaxRegs == 64
+  // constexpr RegXMM v30(30);
+  // constexpr RegXMM v30(31);
 
 #define RNAME(x) if (r == x) return "%"#x
 
@@ -356,37 +354,10 @@ namespace reg {
     RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17); 
     RNAME(v18); RNAME(v19); RNAME(v20); RNAME(v21); RNAME(v22); RNAME(v23); 
     RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29); 
-    // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
     return nullptr;
   }
 #undef RNAME
 }
-
-//////////////////////////////////////////////////////////////////////
-
-/*
-  This is extracted from X64 assembler. For PPC64 we maybe need to 
-  implement a TOC as decribed in PPC64 ABI. To futher information see
-  http://physinfo.ulb.ac.be/divers_html/powerpc_programming_info/intro_to_ppc/
-  ppc4_runtime4.html
-*/
-
-/*
- * Select the assembler which contains a given address.
- *
- * Asm& a = codeBlockChoose(toPatch, a, acold);
- *   a.patchJmp(...);
- */
-// inline HPHP::CodeBlock& codeBlockChoose(CodeAddress addr) {
-//   always_assert_flog(false,
-//                     "address {} was not part of any known code block", addr);
-// }
-// template<class... Blocks>
-// HPHP::CodeBlock& codeBlockChoose(CodeAddress addr, HPHP::CodeBlock& a,
-// Blocks&... as) {
-//   if (a.contains(addr)) return a;
-//   return codeBlockChoose(addr, as...);
-// }
 
 //////////////////////////////////////////////////////////////////////
 
@@ -477,7 +448,7 @@ public:
   };
 
   
-  // TODO(IBM): Must create a macro for these similar instructions.
+  // TODO(rcardoso): Must create a macro for these similar instructions.
   // This will make code more clean.
 
   // #define CC_ARITH_REG_OP(name, opcode, x_opcode)
@@ -515,7 +486,7 @@ public:
   // #undef LOAD_STORE_OP_BYTE_REVERSED
   
 
-  //PPC64 ISA - Only Fixed Point instructions have been implemented
+  //PPC64 Instructions
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void addc(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void addco(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
@@ -583,6 +554,13 @@ public:
   void extsb(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsh(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc = 0);
+  void fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb, bool rc = 0);
+  void lfs(const Reg64& frt, MemoryRef m) { 
+    EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
+  }
+  void lxvw4x(const RegXMM& xt, const Reg64& ra, const Reg64&rb) {
+    EmitXX1Form(31, rn(xt), rn(ra), rn(rb), 780, 0);
+  }
   void isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint16_t bc);
   void lbz(const Reg64& rt, MemoryRef m);
   void lbzu(const Reg64& rt, MemoryRef m);
@@ -669,6 +647,9 @@ public:
   void stbu(const Reg64& rs, MemoryRef m);
   void stbux(const Reg64& rs, MemoryRef m);
   void stbx(const Reg64& rs, MemoryRef m);
+  void stfs(const Reg64& frt, MemoryRef m) { 
+    EmitDForm(52, rn(frt), rn(m.r.base), m.r.disp);
+  }
   void sth(const Reg64& rs, MemoryRef m);
   void sthu(const Reg64& rs, MemoryRef m);
   void sthux(const Reg64& rs, MemoryRef m);
@@ -688,6 +669,9 @@ public:
   void stmw(const Reg64& rs, MemoryRef m);
   void stswi(const Reg64& rs, MemoryRef m);
   void stswx(const Reg64& rs, MemoryRef m);
+  void stxvw4x(const RegXMM& xs, const Reg64& ra, const Reg64&rb) {
+    EmitXX1Form(31, rn(xs), rn(ra), rn(rb), 972, 0);
+  }
   void subf(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void subfo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void subfc(const Reg64& rt, const Reg64& ra, const Reg64& rb,  bool rc = 0);
@@ -706,8 +690,18 @@ public:
   void xor_(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void xori(const Reg64& ra, const Reg64& rs, Immed imm);
   void xoris(const Reg64& ra, const Reg64& rs, Immed imm);
+  void xscvdpuxds(const RegXMM& xt, const RegXMM& xb) {
+    //TODO(rcardoso): bx tx bits
+    EmitXX2Form(60, rn(xt), 0, rn(xb), 328, 0, 0);
+  }
+  void xvdivdp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
+    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 56,  0, 0 ,0);
+  }
+  void xvdivsp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
+    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 24, 0, 0 ,0);
+  }
 
-  //Unimplemented Instructions
+  // Unimplemented Instructions
   void addg6s()         { not_implemented(); }
   void bcdadd()         { not_implemented(); }
   void bcdsub()         { not_implemented(); }
@@ -1041,7 +1035,6 @@ public:
   void evsubifw()       { not_implemented(); }
   void evxor()          { not_implemented(); }
   void fabs()           { not_implemented(); }
-  void fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb, bool rc = 0);
   void fadds()          { not_implemented(); }
   void fcfid()          { not_implemented(); }
   void fcfids()         { not_implemented(); }
@@ -1118,9 +1111,6 @@ public:
   void lfdx()           { not_implemented(); }
   void lfiwax()         { not_implemented(); }
   void lfiwzx()         { not_implemented(); }
-  void lfs(const Reg64& frt, MemoryRef m) { 
-    EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
-  }
   void lfsu()           { not_implemented(); }
   void lfsux()          { not_implemented(); }
   void lfsx()           { not_implemented(); }
@@ -1149,9 +1139,6 @@ public:
   void lxvdsx()         { not_implemented(); }
   void lxvdx()          { not_implemented(); }
   void lxvwx()          { not_implemented(); }
-  void lxvw4x(const RegXMM& xt, const Reg64& ra, const Reg64&rb) {
-    EmitXX1Form(31, rn(xt), rn(ra), rn(rb), 780, 0);
-  }
   void macchw()         { not_implemented(); }
   void macchwo()        { not_implemented(); }
   void macchws()        { not_implemented(); }
@@ -1263,9 +1250,6 @@ public:
   void stfdux()         { not_implemented(); }
   void stfdx()          { not_implemented(); }
   void stfiwx()         { not_implemented(); }
-  void stfs(const Reg64& frt, MemoryRef m) { 
-    EmitDForm(52, rn(frt), rn(m.r.base), m.r.disp);
-  }
   void stfsu()          { not_implemented(); }
   void stfsux()         { not_implemented(); }
   void stfsx()          { not_implemented(); }
@@ -1289,9 +1273,6 @@ public:
   void stxsiwx()        { not_implemented(); }
   void stxsspx()        { not_implemented(); }
   void stxvd2x()        { not_implemented(); }
-  void stxvw4x(const RegXMM& xs, const Reg64& ra, const Reg64&rb) {
-    EmitXX1Form(31, rn(xs), rn(ra), rn(rb), 972, 0);
-  }
   void sync()           { not_implemented(); }
   void tabort()         { not_implemented(); }
   void tabortdc()       { not_implemented(); }
@@ -1528,10 +1509,6 @@ public:
   void xscvdpspn()      { not_implemented(); }
   void xscvdpsxds()     { not_implemented(); }
   void xscvdpsxws()     { not_implemented(); }
-  void xscvdpuxds(const RegXMM& xt, const RegXMM& xb) {
-    //TODO(rcardoso): bx tx bits
-    EmitXX2Form(60, rn(xt), 0, rn(xb), 328, 0, 0);
-  }
   void xscvdpuxws()     { not_implemented(); }
   void xscvspdp()       { not_implemented(); }
   void xscvspdpn()      { not_implemented(); }
@@ -1609,12 +1586,6 @@ public:
   void xvcvuxdsp()      { not_implemented(); }
   void xvcvuxwdp()      { not_implemented(); }
   void xvcvuxwsp()      { not_implemented(); }
-  void xvdivdp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
-    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 56,  0, 0 ,0);
-  }
-  void xvdivsp(const RegXMM& xt,  const RegXMM& xa, const RegXMM& xb) {
-    EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 24, 0, 0 ,0);
-  }
   void xvmaddadp()      { not_implemented(); }
   void xvmaddasp()      { not_implemented(); }
   void xvmaddmdp()      { not_implemented(); }
@@ -2250,11 +2221,6 @@ private:
 // Branches
 //////////////////////////////////////////////////////////////////////
 
-/*
- TODO(IBM) We need to check if we can have a 1:1 mapping between vasm opcodes: jccs, jmps, call
- if don't we need to implement this like ARM calling a backend to squash the N instructions to perform
- vasm operations into one.
-*/
 class Label : private boost::noncopyable {
 public:
   Label() : m_a(nullptr) , m_address(nullptr) {}
