@@ -233,7 +233,17 @@ struct Vgen {
       not_implemented();
     }
   }
-  void emit(const ldimml& i) { not_implemented(); }
+  void emit(const ldimml& i) {
+    // ldimml is for Vconst::Long, which is treated as unsigned uint32_t
+    auto val = i.s.l();
+    if (i.d.isGP()) {
+      Vreg64 d = i.d;
+      a->li32un(d,val);
+    } else {
+      // TODO(igornunes): SIMD instruction
+      not_implemented();
+    }
+  }
   void emit(const ldimmq& i) {
     auto val = i.s.q();
     if (i.d.isGP()) {
