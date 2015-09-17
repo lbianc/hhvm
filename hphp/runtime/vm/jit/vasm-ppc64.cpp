@@ -124,7 +124,7 @@ struct Vgen {
         emit(addq {s.base, d, d, VregSF(0)});
       }
       // if we have displacement 0 we can avoid this instruction
-      if(s.disp == 0) {
+      if(s.disp != 0) {
         emit(addqi{s.disp, d, d, VregSF(0)});
       }
 
@@ -652,7 +652,7 @@ void Vgen::emit(const load& i) {
     }
   } else {
     assertx(i.d.isSIMD());
-    //TODO(rcardoso): Needs to check if needs to chang to vec instruction
+    //TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->lfs(i.d, i.s);
   }
 }
@@ -683,7 +683,7 @@ void Vgen::emit(const store& i) {
     }
   } else {
     assertx(i.s.isSIMD());
-    //TODO(rcardoso): Needs to check if needs to chang to vec instruction
+    //TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->stfs(i.s, i.d);
   }
 }
