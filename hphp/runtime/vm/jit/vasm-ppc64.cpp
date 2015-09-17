@@ -82,19 +82,19 @@ struct Vgen {
   {
     a->mflr(ppc64_asm::reg::r0);
     // LR on parent call frame
-    Vptr p(ppc64_asm::reg::r1, 16);
+    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
     a->std(ppc64_asm::reg::r0, p);
     // minimum call stack
-    p.disp = -32;
+    p.disp = -min_callstack_size;
     a->stdu(ppc64_asm::reg::r1, p);
   }
 
   inline void popMinCallStack(void)
   {
     // minimum call stack
-    a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, 32);
+    a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, min_callstack_size);
     // LR on parent call frame
-    Vptr p(ppc64_asm::reg::r1, 16);
+    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
     a->ld(ppc64_asm::reg::r0, p);
     a->mtlr(ppc64_asm::reg::r0);
   }

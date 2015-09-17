@@ -73,6 +73,10 @@ PhysReg r_svcreq_arg(size_t i);
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/* Used on vasm for defining a minimal callstack on call/ret */
+constexpr int min_callstack_size       = 32;
+constexpr int lr_position_on_callstack = 16;
+
 /*
  * Scratch register.
  */
