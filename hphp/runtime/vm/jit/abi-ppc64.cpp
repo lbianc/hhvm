@@ -23,19 +23,16 @@ namespace HPHP { namespace jit { namespace ppc64 {
 
 namespace {
 
-const RegSet kGPCallerSaved =
-    ppc64_asm::reg::r0  | ppc64_asm::reg::r3  | ppc64_asm::reg::r4
-  | ppc64_asm::reg::r5  | ppc64_asm::reg::r6  | ppc64_asm::reg::r7
-  | ppc64_asm::reg::r9  | ppc64_asm::reg::r10 | ppc64_asm::reg::r12;
+namespace reg = ppc64_asm::reg;
+
+const RegSet kGPCallerSaved = reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 |
+  reg::r9 | reg::r10 | reg::r12 | reg::r0;
   // r8 is used as r_svcreq_stub
   // r11 is used as a scratch register (rAsm)
 
-const RegSet kGPCalleeSaved =
-    ppc64_asm::reg::r2  | ppc64_asm::reg::r14 | ppc64_asm::reg::r15
-  | ppc64_asm::reg::r16 | ppc64_asm::reg::r17 | ppc64_asm::reg::r18
-  | ppc64_asm::reg::r19 | ppc64_asm::reg::r20 | ppc64_asm::reg::r21
-  | ppc64_asm::reg::r22 | ppc64_asm::reg::r23 | ppc64_asm::reg::r24
-  | ppc64_asm::reg::r25 | ppc64_asm::reg::r26 | ppc64_asm::reg::r27;
+const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
+  reg::r17 | reg::r18 | reg::r19 | reg::r20 | reg::r21 | reg::r22 | reg::r23 |
+  reg::r24 | reg::r25 | reg::r26 | reg::r27;
   // r1 is used as rsp
   // r28 is used as rvmfp
   // r29 is used as rvmsp
@@ -44,31 +41,25 @@ const RegSet kGPCalleeSaved =
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(ppc64_asm::reg::r13) | rvmtl() | rvmfp()
-  | rvmsp() | rvasmtmp() | rAsm | rsp() | r_svcreq_stub();
+const RegSet kGPReserved = RegSet(reg::r13) | rvmtl() | rvmfp() |
+  rvmsp() | rvasmtmp() | rAsm | rsp() | r_svcreq_stub();
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
-const RegSet kXMMCallerSaved =
-    ppc64_asm::reg::v0  | ppc64_asm::reg::v1  | ppc64_asm::reg::v2
-  | ppc64_asm::reg::v3  | ppc64_asm::reg::v4  | ppc64_asm::reg::v5
-  | ppc64_asm::reg::v6  | ppc64_asm::reg::v7  | ppc64_asm::reg::v8
-  | ppc64_asm::reg::v9  | ppc64_asm::reg::v10 | ppc64_asm::reg::v11
-  | ppc64_asm::reg::v12 | ppc64_asm::reg::v13 | ppc64_asm::reg::v14
-  | ppc64_asm::reg::v15 | ppc64_asm::reg::v16 | ppc64_asm::reg::v17
-  | ppc64_asm::reg::v18 | ppc64_asm::reg::v19;
+const RegSet kXMMCallerSaved = reg::v0 | reg::v1 | reg::v2 | reg::v3 |
+  reg::v4 | reg::v5 | reg::v6 | reg::v7 | reg::v8 | reg::v9 | reg::v10 |
+  reg::v11 | reg::v12 | reg::v13 | reg::v14 | reg::v15 | reg::v16 | reg::v17 |
+  reg::v18 | reg::v19;
 
-const RegSet kXMMCalleeSaved =
-    ppc64_asm::reg::v20 | ppc64_asm::reg::v21 | ppc64_asm::reg::v22
-  | ppc64_asm::reg::v23 | ppc64_asm::reg::v24 | ppc64_asm::reg::v25
-  | ppc64_asm::reg::v26 | ppc64_asm::reg::v27 | ppc64_asm::reg::v28;
-  // v29 reserved for Vxls::m_tmp
-  // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
+const RegSet kXMMCalleeSaved = reg::v20 | reg::v21 | reg::v22 | reg::v23 |
+  reg::v24 | reg::v25 | reg::v26 | reg::v27 | reg::v28;
+ // v29 reserved for Vxls::m_tmp
+ // Ignoring the v30, v31 due to PhysReg::kMaxRegs == 64
 
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
 
-const RegSet kXMMReserved = RegSet(ppc64_asm::reg::v29);
+const RegSet kXMMReserved = RegSet(reg::v29);
 
 const RegSet kXMMRegs = kXMMUnreserved | kXMMReserved;
 
@@ -126,17 +117,14 @@ const Abi helper_abi {
 };
 
 constexpr PhysReg gp_args[] = {
-  ppc64_asm::reg::r3, ppc64_asm::reg::r4, ppc64_asm::reg::r5,
-  ppc64_asm::reg::r6, ppc64_asm::reg::r7, ppc64_asm::reg::r8,
-  ppc64_asm::reg::r9
+  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9
 };
 
 constexpr PhysReg simd_args[] = { //TODO
-    ppc64_asm::reg::v0, ppc64_asm::reg::v1,
-    ppc64_asm::reg::v2 };
+    reg::v0, reg::v1, reg::v2 };
 
 constexpr PhysReg svcreq_args[] = { //TODO
-    ppc64_asm::reg::r8
+    reg::r8
 };
 
 }
