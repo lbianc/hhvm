@@ -799,24 +799,22 @@ void lowerVcall(Vunit& unit, Vlabel b, size_t iInst) {
       static_assert(offsetof(TypedValue, m_data) == 0, "");
       static_assert(offsetof(TypedValue, m_type) == 8, "");
       if (dests.size() == 2) {
-        v << copy2{reg::rax, reg::rdx, dests[0], dests[1]};
+        v << copy2{ppc64_asm::reg::r3, ppc64_asm::reg::r4, dests[0], dests[1]};
       } else {
         // We have cases where we statically know the type but need the value
         // from native call. Even if the type does not really need a register
         // (e.g., InitNull), a Vreg is still allocated in assignRegs(), so the
         // following assertion holds.
         assertx(dests.size() == 1);
-        v << copy{reg::rax, dests[0]};
+        v << copy{ppc64_asm::reg::r3, dests[0]};
       }
       break;
     }
     case DestType::SIMD: {
-      // rax contains m_type and m_aux but we're expecting just the type in
-      // the lower bits, so shift the type result register.
-      static_assert(offsetof(TypedValue, m_data) == 0, "");
-      static_assert(offsetof(TypedValue, m_type) == 8, "");
+      // copy the single-register result to dests[0]
       assertx(dests.size() == 1);
-      pack2(v, reg::rax, reg::rdx, dests[0]);
+      assertx(dests[0].isValid());
+      v << copy{ppc64_asm::reg::v2, dests[0]};
       break;
     }
     case DestType::SSA:
@@ -824,7 +822,7 @@ void lowerVcall(Vunit& unit, Vlabel b, size_t iInst) {
       // copy the single-register result to dests[0]
       assertx(dests.size() == 1);
       assertx(dests[0].isValid());
-      v << copy{reg::rax, dests[0]};
+      v << copy{ppc64_asm::reg::r3, dests[0]};
       break;
     case DestType::None:
       assertx(dests.empty());
@@ -833,7 +831,7 @@ void lowerVcall(Vunit& unit, Vlabel b, size_t iInst) {
       // copy the single-register result to dests[0]
       assertx(dests.size() == 1);
       assertx(dests[0].isValid());
-      v << copy{reg::xmm0, dests[0]};
+      v << copy{ppc64_asm::reg::f1, dests[0]};
       break;
   }
 
