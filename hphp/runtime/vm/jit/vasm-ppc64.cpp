@@ -106,19 +106,20 @@ struct Vgen {
    * register.
    */
   inline void VptrAddressToReg(Vptr s, Vreg d, bool ignore_base) {
-    // TODO(rcardoso): we always have to emit a shift left? even if the scale 
-    // is equal 1?
     if (s.index.isValid()) {
-      // Calculate index position before adding base and displacement 
-      int n = 0;
-      int scale = s.scale;
-      while (scale >>= 1) {
-        ++n;
+      // Calculate index position before adding base and displacement.
+      // If scale is 1 we just ignore it.
+      if(scale > 1) {
+        int n = 0;
+        int scale = s.scale;
+        while (scale >>= 1) {
+          ++n;
+        }
+        assert(n <= 3);
+        // scale factor is always 1, 2, 4 or, 8
+        // so we can perform index*scale doing a shift left
+        emit(shlqi{n, s.index, d, VregSF(0)});
       }
-      assert(n <= 3);
-      // scale factor is always 1, 2, 4 or, 8
-      // so we can performe index*scale doing a shift left
-      emit(shlqi{n, s.index, d, VregSF(0)});
 
       if (s.base.isValid() && !ignore_base) {
         emit(addq {s.base, d, d, VregSF(0)});
