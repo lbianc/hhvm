@@ -78,22 +78,40 @@ struct Vgen {
   }
 
   // auxiliary
-  inline void pushMinCallStack(void)
-  {
+  /*
+   * Check algorithm on of pushMinCallStack and popMinCallStack on:
+   * https://gist.github.com/gut/956d6431412aad0fc626
+   */
+  inline void pushMinCallStack(void) {
     a->mflr(ppc64_asm::reg::r0);
     // LR on parent call frame
     Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
     a->std(ppc64_asm::reg::r0, p);
     // minimum call stack
     p.disp = -min_callstack_size;
+
+#if PPC64_HAS_PUSH_POP
+    // Store the backchain after the last pushed element
+    p.base = ppc64::rstktop();
     a->stdu(ppc64_asm::reg::r1, p);
+    a->mr(ppc64_asm::reg::r1, ppc64::rstktop());
+#else
+    a->stdu(ppc64_asm::reg::r1, p);
+#endif
   }
 
-  inline void popMinCallStack(void)
-  {
+  inline void popMinCallStack(void) {
+#if PPC64_HAS_PUSH_POP
+    // after the minimum call stack the last pushed elements is found
+    a->addi(ppc64::rstktop(), ppc64_asm::reg::r1, min_callstack_size);
+    // use backchain to restore the stack pointer, as the size is unknown.
+    Vptr pBackchain(ppc64_asm::reg::r1, 0);
+    a->ld(ppc64_asm::reg::r1, pBackchain);
+#else
     // minimum call stack
     a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, min_callstack_size);
-    // LR on parent call frame
+#endif
+    // recover LR from callstack
     Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
     a->ld(ppc64_asm::reg::r0, p);
     a->mtlr(ppc64_asm::reg::r0);
@@ -312,6 +330,8 @@ struct Vgen {
     pushMinCallStack();
 
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
+
+    popMinCallStack();
   }
   void emit(const callm& i) {
     // uses scratch register
@@ -319,8 +339,13 @@ struct Vgen {
     emit(callr{ppc64::rvasmtmp(), i.args});
   }
   void emit(const callr& i) {
+    // Need to create a new call stack in order to recover LR in the future
+    pushMinCallStack();
+
     a->mtctr(i.target);
     a->bctrl();
+
+    popMinCallStack();
   }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
@@ -474,8 +499,10 @@ struct Vgen {
   void emit(const push& i);
   void emit(const roundsd& i) { not_implemented(); }
   void emit(const ret& i) {
-    // recover LR from callstack
-    popMinCallStack();
+    // LR on parent call frame
+    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
+    a->ld(ppc64_asm::reg::r0, p);
+    a->mtlr(ppc64_asm::reg::r0);
     a->blr();
   }
   /*Immediate-form logical (unsigned) shift operations are
@@ -631,17 +658,25 @@ void Vgen::emit(const syncpoint& i) {
 }
 
 void Vgen::emit(const pop& i) {
+#if PPC64_HAS_PUSH_POP
+  Vptr p(ppc64::rstktop(), 0);
+  a->ldu(i.d, p);
+  a->addi(ppc64::rstktop(), ppc64::rstktop(), push_pop_elem_size);
+#else
   not_implemented();
-  //TODO(IBM): Instruction pop. Check if this the best way to do this.
-  //a->lwz r0 0(rVmSp)
-  //a->addi rVmSp, rVmSp +4
+#endif
 }
 
+/*
+ * Grows call stack downwards where it's not in use at the moment
+ */
 void Vgen::emit(const push& i) {
+#if PPC64_HAS_PUSH_POP
+  Vptr p(ppc64::rstktop(), -push_pop_elem_size);
+  a->stdu(i.s, p);
+#else
   not_implemented();
-  //TODO(IBM): Instruction push. Check if this the best way to do this.
-  //a->addi rVmSp, rVmSp -4
-  //a->stw r0 0(rVmSp)
+#endif
 }
 
 void Vgen::emit(const vret& i) {
@@ -873,6 +908,25 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   code.back().origin = origin;
 }
 
+#if PPC64_HAS_PUSH_POP
+/*
+ * Should only be called once per block that push/pop is used in order to
+ * initialize it. It'll not remove the original push instruction.
+ */
+void InitializePushStk(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  // adjust the beginning of the stack to be below the frame pointer
+  v << copy{ppc64_asm::reg::r1, ppc64_asm::reg::r31};
+
+  // do not remove the original push (count parameter is 0)
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+#endif
+
 /*
  * Lower a few abstractions to facilitate straightforward PPC64 codegen.
  */
@@ -885,6 +939,13 @@ void lowerForPPC64(Vunit& unit, const Abi& abi) {
   // Scratch block can change blocks allocation, hence cannot use regular
   // iterators.
   auto& blocks = unit.blocks;
+
+#if PPC64_HAS_PUSH_POP
+  // I don't like flags, but this will be very handy:
+  // for the whole block which push/pop is used, the initialization needs to
+  // be called only once and before the first pop.
+  bool has_initialized_pushpop_stack = false;
+#endif
 
   PostorderWalker{unit}.dfs([&](Vlabel ib) {
     assertx(!blocks[ib].code.empty());
@@ -925,6 +986,15 @@ void lowerForPPC64(Vunit& unit, const Abi& abi) {
           inst = incqm{inst.countbytecode_.base[g_bytecodesVasm.handle()],
                        inst.countbytecode_.sf};
           break;
+
+#if PPC64_HAS_PUSH_POP
+        case Vinstr::push:
+          if (!has_initialized_pushpop_stack) {
+            InitializePushStk(unit, Vlabel{ib}, ii);
+            has_initialized_pushpop_stack = true;
+          }
+          break;
+#endif
 
         default:
           break;

@@ -39,16 +39,25 @@ namespace ppc64 {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
+ * Enable all code that is related to the push/pop approach
+ */
+#define PPC64_HAS_PUSH_POP 1
+
+/*
  * Mirrors the API of abi.h.
  */
 
 const Abi& abi(CodeKind kind = CodeKind::Trace);
 
+constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r27; }
 constexpr PhysReg rvmfp()    { return ppc64_asm::reg::r28; }
 constexpr PhysReg rvmsp()    { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()    { return ppc64_asm::reg::r30; }
-constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r31; }
-constexpr PhysReg rsp()      { return ppc64_asm::reg::r1; }
+constexpr PhysReg rsp()      { return ppc64_asm::reg::r1;  }
+
+#if PPC64_HAS_PUSH_POP
+constexpr PhysReg rstktop()  { return ppc64_asm::reg::r31; }
+#endif
 
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
@@ -76,6 +85,11 @@ PhysReg r_svcreq_arg(size_t i);
 /* Used on vasm for defining a minimal callstack on call/ret */
 constexpr int min_callstack_size       = 32;
 constexpr int lr_position_on_callstack = 16;
+
+#if PPC64_HAS_PUSH_POP
+/* Parameters for push/pop and keep stack aligned */
+constexpr int push_pop_elem_size = 16;
+#endif
 
 /*
  * Scratch register.
