@@ -109,10 +109,9 @@ struct Vgen {
     if (s.index.isValid()) {
       // Calculate index position before adding base and displacement.
       // If scale is 1 we just ignore it.
-      if(scale > 1) {
+      if(s.scale > 1) {
         int n = 0;
-        int scale = s.scale;
-        while (scale >>= 1) {
+        while (s.scale >>= 1) {
           ++n;
         }
         assert(n <= 3);
