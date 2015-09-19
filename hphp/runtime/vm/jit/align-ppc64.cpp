@@ -35,7 +35,7 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Targets of jmps on x64 must be aligned to 16 bytes.
+ * Targets of jmps on ppc64 must be aligned to 16 bytes.
  */
 constexpr size_t kJmpTargetAlign = 16;
 
@@ -83,7 +83,7 @@ size_t align_gap(TCA frontier, const AlignInfo& a) {
 }
 
 void pad_for_align(CodeBlock& cb, const AlignInfo& ali, AlignContext context) {
-  X64Assembler a { cb };
+  ppc64_asm::Assembler a { cb };
 
   if (is_aligned(cb.frontier(), ali)) return;
 
@@ -95,12 +95,12 @@ void pad_for_align(CodeBlock& cb, const AlignInfo& ali, AlignContext context) {
       return;
 
     case AlignContext::Dead:
-      if (gap_sz > 2) {
-        a.ud2();
-        gap_sz -= 2;
+      if (gap_sz > 4) {
+        a.trap();
+        gap_sz -= 4;
       }
       if (gap_sz > 0) {
-        a.emitInt3s(gap_sz);
+        a.emitNop(gap_sz);
       }
       return;
   }
