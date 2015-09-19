@@ -2303,6 +2303,7 @@ public:
       // that was already filled with the address...
       const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
 
+      // Use reserved function linkage register
       a.li64(reg::r12, address);
       // When branching to another context, r12 need to keep the target address
       // to correctly set r2 (TOC reference).
