@@ -1984,6 +1984,7 @@ void CodeGenerator::cgLdBindAddr(IRInstruction* inst) {
   // baseless load.
   #if defined(__powerpc64__)
   // In PowerPC we don't have a accessible ip register.
+  v << load{baseless(addr), dstReg};
   #else
   v << loadqp{rip[addr], dstReg};
   #endif
