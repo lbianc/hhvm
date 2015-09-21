@@ -83,38 +83,38 @@ struct Vgen {
    * https://gist.github.com/gut/956d6431412aad0fc626
    */
   inline void pushMinCallStack(void) {
-    a->mflr(ppc64_asm::reg::r0);
+    a->mflr(ppc64::rfuncln());
     // LR on parent call frame
-    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
-    a->std(ppc64_asm::reg::r0, p);
+    Vptr p(ppc64::rsp(), lr_position_on_callstack);
+    a->std(ppc64::rfuncln(), p);
     // minimum call stack
     p.disp = -min_callstack_size;
 
 #if PPC64_HAS_PUSH_POP
     // Store the backchain after the last pushed element
     p.base = ppc64::rstktop();
-    a->stdu(ppc64_asm::reg::r1, p);
-    a->mr(ppc64_asm::reg::r1, ppc64::rstktop());
+    a->stdu(ppc64::rsp(), p);
+    a->mr(ppc64::rsp(), ppc64::rstktop());
 #else
-    a->stdu(ppc64_asm::reg::r1, p);
+    a->stdu(ppc64::rsp(), p);
 #endif
   }
 
   inline void popMinCallStack(void) {
 #if PPC64_HAS_PUSH_POP
     // after the minimum call stack the last pushed elements is found
-    a->addi(ppc64::rstktop(), ppc64_asm::reg::r1, min_callstack_size);
+    a->addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
     // use backchain to restore the stack pointer, as the size is unknown.
-    Vptr pBackchain(ppc64_asm::reg::r1, 0);
-    a->ld(ppc64_asm::reg::r1, pBackchain);
+    Vptr pBackchain(ppc64::rsp(), 0);
+    a->ld(ppc64::rsp(), pBackchain);
 #else
     // minimum call stack
-    a->addi(ppc64_asm::reg::r1, ppc64_asm::reg::r1, min_callstack_size);
+    a->addi(ppc64::rsp(), ppc64::rsp(), min_callstack_size);
 #endif
     // recover LR from callstack
-    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
-    a->ld(ppc64_asm::reg::r0, p);
-    a->mtlr(ppc64_asm::reg::r0);
+    Vptr p(ppc64::rsp(), lr_position_on_callstack);
+    a->ld(ppc64::rfuncln(), p);
+    a->mtlr(ppc64::rfuncln());
   }
 
   /*
@@ -500,9 +500,9 @@ struct Vgen {
   void emit(const roundsd& i) { not_implemented(); }
   void emit(const ret& i) {
     // LR on parent call frame
-    Vptr p(ppc64_asm::reg::r1, lr_position_on_callstack);
-    a->ld(ppc64_asm::reg::r0, p);
-    a->mtlr(ppc64_asm::reg::r0);
+    Vptr p(ppc64::rsp(), lr_position_on_callstack);
+    a->ld(ppc64::rfuncln(), p);
+    a->mtlr(ppc64::rfuncln());
     a->blr();
   }
   /*Immediate-form logical (unsigned) shift operations are
@@ -920,7 +920,7 @@ void InitializePushStk(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   // adjust the beginning of the stack to be below the frame pointer
-  v << copy{ppc64_asm::reg::r1, ppc64_asm::reg::r31};
+  v << copy{ppc64::rsp(), ppc64::rstktop()};
 
   // do not remove the original push (count parameter is 0)
   vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
