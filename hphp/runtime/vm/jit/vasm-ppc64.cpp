@@ -940,19 +940,16 @@ void lowerForPPC64(Vunit& unit, const Abi& abi) {
   // iterators.
   auto& blocks = unit.blocks;
 
-#if PPC64_HAS_PUSH_POP
-  // I don't like flags, but this will be very handy:
-  // for the whole block which push/pop is used, the initialization needs to
-  // be called only once and before the first pop.
-  bool has_initialized_pushpop_stack = false;
-#endif
-
   PostorderWalker{unit}.dfs([&](Vlabel ib) {
     assertx(!blocks[ib].code.empty());
     auto& back = blocks[ib].code.back();
     if (back.op == Vinstr::vcallarray) {
       lower_vcallarray(unit, Vlabel{ib});
     }
+
+#if PPC64_HAS_PUSH_POP
+    InitializePushStk(unit, Vlabel{ib}, 0);
+#endif
 
     for (size_t ii = 0; ii < blocks[ib].code.size(); ++ii) {
       auto& inst = blocks[ib].code[ii];
@@ -986,15 +983,6 @@ void lowerForPPC64(Vunit& unit, const Abi& abi) {
           inst = incqm{inst.countbytecode_.base[g_bytecodesVasm.handle()],
                        inst.countbytecode_.sf};
           break;
-
-#if PPC64_HAS_PUSH_POP
-        case Vinstr::push:
-          if (!has_initialized_pushpop_stack) {
-            InitializePushStk(unit, Vlabel{ib}, ii);
-            has_initialized_pushpop_stack = true;
-          }
-          break;
-#endif
 
         default:
           break;
