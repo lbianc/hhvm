@@ -561,7 +561,15 @@ struct Vgen {
       a->stw(Reg64(i.s), i.m);
     }
   }
-  void emit(const storeli& i) { not_implemented(); }
+  void emit(const storeli& i) {
+    a->li32(ppc64::rvasmtmp(), i.s.l());
+    if (i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
+      a->stwx(ppc64::rvasmtmp(), i.m);
+    } else {
+      a->stw(ppc64::rvasmtmp(), i.m);
+    }
+  }
   void emit(const storeqi& i) {
     a->li64(ppc64::rvasmtmp(), i.s.q());
     if (i.m.index.isValid()) {
@@ -571,7 +579,14 @@ struct Vgen {
       a->std(ppc64::rvasmtmp(), i.m);
     }
   }
-  void emit(const storesd& i) { not_implemented(); }
+  void emit(const storesd& i) {
+    if(i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
+      a->stfdx(i.s, i.m);
+    } else {
+      a->stfd(i.s, i.m);
+    }
+  }
   void emit(const storew& i) {
     if(i.m.index.isValid()) {
       PatchMemoryOperands(i.m);
@@ -580,7 +595,15 @@ struct Vgen {
       a->sth(Reg64(i.s), i.m);
     }
   }
-  void emit(const storewi& i) { not_implemented(); }
+  void emit(const storewi& i) {
+    a->li(ppc64::rvasmtmp(), i.s);
+    if (i.m.index.isValid()) {
+      PatchMemoryOperands(i.m);
+      a->sthx(ppc64::rvasmtmp(), i.m);
+    } else {
+      a->sth(ppc64::rvasmtmp(), i.m);
+    }
+  }
   void emit(subbi i) { not_implemented(); }
   void emit(subl i) { a->subf(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), false); }
   void emit(subli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }

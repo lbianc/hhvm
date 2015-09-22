@@ -648,7 +648,7 @@ public:
   void stbu(const Reg64& rs, MemoryRef m);
   void stbux(const Reg64& rs, MemoryRef m);
   void stbx(const Reg64& rs, MemoryRef m);
-  void stfs(const Reg64& frt, MemoryRef m) { 
+  void stfs(const Reg64& frt, MemoryRef m) {
     EmitDForm(52, rn(frt), rn(m.r.base), m.r.disp);
   }
   void sth(const Reg64& rs, MemoryRef m);
@@ -1242,14 +1242,18 @@ public:
   void stdcx()          { not_implemented(); }
   void stddx()          { not_implemented(); }
   void stdepx()         { not_implemented(); }
-  void stfd()           { not_implemented(); }
+  void stfd(const RegXMM& frt, MemoryRef m) {
+    EmitDForm(54, rn(frt), rn(m.r.base), m.r.disp);
+  }
   void stfddx()         { not_implemented(); }
   void stfdepx()        { not_implemented(); }
   void stfdp()          { not_implemented(); }
   void stfdpx()         { not_implemented(); }
   void stfdu()          { not_implemented(); }
   void stfdux()         { not_implemented(); }
-  void stfdx()          { not_implemented(); }
+  void stfdx(const RegXMM& rt, MemoryRef m) {
+    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 726);
+  }
   void stfiwx()         { not_implemented(); }
   void stfsu()          { not_implemented(); }
   void stfsux()         { not_implemented(); }
