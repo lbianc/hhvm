@@ -130,11 +130,13 @@ const Abi helper_abi {
 };
 
 constexpr PhysReg gp_args[] = {
-  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9
+  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9, reg::r10
 };
 
-constexpr PhysReg simd_args[] = { //TODO
-    reg::v0, reg::v1, reg::v2 };
+constexpr PhysReg simd_args[] = {
+    reg::v2, reg::v3, reg::v4, reg::v5, reg::v6, reg::v7, reg::v8, reg::v9,
+    reg::v10, reg::v11, reg::v12, reg::v13
+};
 
 constexpr PhysReg svcreq_args[] = { //TODO
     reg::r8
@@ -157,6 +159,14 @@ const Abi& abi(CodeKind kind) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+PhysReg rret(size_t i) {
+  assertx(i < 2);
+  return i == 0 ? reg::r3 : reg::r4;
+}
+PhysReg rret_simd(size_t i) {
+  assertx(i == 0);
+  return reg::v2;
+}
 
 PhysReg rarg(size_t i) {
   assertx(i < num_arg_regs());

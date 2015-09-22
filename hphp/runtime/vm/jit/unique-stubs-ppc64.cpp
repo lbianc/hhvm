@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,23 +14,32 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/vm/jit/unique-stubs.h"
+#include "hphp/runtime/vm/jit/unique-stubs-ppc64.h"
 
-#include <sstream>
+#include "hphp/runtime/base/header-kind.h"
+#include "hphp/runtime/base/rds-header.h"
+#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/stats.h"
+#include "hphp/runtime/vm/event-hook.h"
 
-#include "hphp/util/abi-cxx.h"
-#include "hphp/ppc64-asm/asm-ppc64.h"
-#include "hphp/util/disasm.h"
-
-#include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
-#include "hphp/runtime/vm/jit/code-gen-cf.h"
-#include "hphp/runtime/vm/jit/code-gen-helpers-ppc64.h"
-#include "hphp/runtime/vm/jit/mc-generator-internal.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/types.h"
-#include "hphp/runtime/vm/runtime.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
+#include "hphp/runtime/vm/jit/align-ppc64.h"
+#include "hphp/runtime/vm/jit/code-gen-cf.h"
+#include "hphp/runtime/vm/jit/code-gen-helpers.h"
+#include "hphp/runtime/vm/jit/code-gen-tls.h"
+#include "hphp/runtime/vm/jit/fixup.h"
+#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/translator-inline.h"
+#include "hphp/runtime/vm/jit/unique-stubs.h"
+#include "hphp/runtime/vm/jit/unwind-x64.h"
+#include "hphp/runtime/vm/jit/vasm-gen.h"
+#include "hphp/runtime/vm/jit/vasm-instr.h"
+
+#include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/util/data-block.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -40,9 +49,7 @@ TRACE_SET_MOD(ustubs);
 
 //////////////////////////////////////////////////////////////////////
 
-namespace {
-
-void moveToAlign(CodeBlock& cb) {
+static void alignJmpTarget(CodeBlock& cb) {
   align(cb, Alignment::JmpTarget, AlignContext::Dead);
 }
 
@@ -53,7 +60,7 @@ extern "C" void enterTCExit();
 
 //////////////////////////////////////////////////////////////////////
 
-} // end of anonymous namespace
+}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -75,5 +82,5 @@ UniqueStubs emitUniqueStubs() {
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
