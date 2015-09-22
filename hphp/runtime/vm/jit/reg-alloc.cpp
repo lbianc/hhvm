@@ -17,8 +17,10 @@
 #include "hphp/runtime/vm/jit/reg-alloc.h"
 
 #include "hphp/runtime/base/arch.h"
+
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/abi-arm.h"
+#include "hphp/runtime/vm/jit/irlower.h"
 #include "hphp/runtime/vm/jit/minstr-effects.h"
 #include "hphp/runtime/vm/jit/native-calls.h"
 #include "hphp/runtime/vm/jit/print.h"
@@ -154,7 +156,7 @@ PhysReg forceAlloc(const SSATmp& tmp) {
 // a known DataType only get one register. Assign "wide" locations when
 // possible (when all uses and defs can be wide). These will be assigned
 // SIMD registers later.
-void assignRegs(IRUnit& unit, Vunit& vunit, CodegenState& state,
+void assignRegs(IRUnit& unit, Vunit& vunit, irlower::IRLS& state,
                 const BlockList& blocks) {
   // visit instructions to find tmps eligible to use SIMD registers
   auto const try_wide = RuntimeOption::EvalHHIRAllocSIMDRegs;
@@ -244,7 +246,7 @@ void getEffects(const Abi& abi, const Vinstr& i,
       defs = abi.all();
       switch (arch()) {
       case Arch::ARM: break;
-      case Arch::X64: defs.remove(x64::rvmtl()); break;
+      case Arch::X64: defs.remove(rvmtl()); break;
       case Arch::PPC64: break;
       }
       break;
@@ -253,7 +255,7 @@ void getEffects(const Abi& abi, const Vinstr& i,
       defs = abi.all() - RegSet(rvmfp());
       switch (arch()) {
       case Arch::ARM: break;
-      case Arch::X64: defs.remove(x64::rvmtl()); break;
+      case Arch::X64: defs.remove(rvmtl()); break;
       case Arch::PPC64: break;
       }
       break;
