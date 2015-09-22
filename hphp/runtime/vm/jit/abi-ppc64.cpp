@@ -36,17 +36,17 @@ const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
   reg::r17 | reg::r18 | reg::r19 | reg::r20 | reg::r21 | reg::r22 | reg::r23 |
   reg::r24 | reg::r25 | reg::r26
 #if !PPC64_HAS_PUSH_POP
-  | reg::r31
+  | reg::r27
 #endif
   ;
   // r1 is used as rsp
-  // r27 is used as rvasmtmp
+#if PPC64_HAS_PUSH_POP
+  // r27 is used as rstktop
+#endif
   // r28 is used as rvmfp
   // r29 is used as rvmsp
   // r30 is used as rvmtl
-#if PPC64_HAS_PUSH_POP
-  // r31 is used as rstktop
-#endif
+  // r31 is used as rvasmtmp
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 

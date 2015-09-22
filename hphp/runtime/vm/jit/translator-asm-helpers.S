@@ -188,8 +188,6 @@ ETCH_NAME(enterTCHelper):
   std %r30, 160(%r1)  // local variable #17
   std %r31, 168(%r1)  // local variable #18
 
-  mr %r31, %r1        // frame pointer like stack pointer
-
   mr %r3, %r4         // change fp to right register
 
   mr %r12, %r5        // %r12 is the function linkage

@@ -49,16 +49,16 @@ namespace ppc64 {
 
 const Abi& abi(CodeKind kind = CodeKind::Trace);
 
-constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r27; }
+#if PPC64_HAS_PUSH_POP
+constexpr PhysReg rstktop()  { return ppc64_asm::reg::r27; }
+#endif
+
 constexpr PhysReg rvmfp()    { return ppc64_asm::reg::r28; }
 constexpr PhysReg rvmsp()    { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()    { return ppc64_asm::reg::r30; }
+constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r31; }
 constexpr PhysReg rsp()      { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()  { return ppc64_asm::reg::r0;  }
-
-#if PPC64_HAS_PUSH_POP
-constexpr PhysReg rstktop()  { return ppc64_asm::reg::r31; }
-#endif
 
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
