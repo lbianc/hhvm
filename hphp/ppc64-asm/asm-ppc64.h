@@ -1800,6 +1800,10 @@ public:
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch);
 
+  void branchAuto(CodeAddress c,
+                  HPHP::jit::ConditionCode cc,
+                  LinkReg lr = LinkReg::DoNotTouch);
+
   // ConditionCode variants
   void bc(HPHP::jit::ConditionCode cc, int16_t address) {
     BranchParams bp(cc);
@@ -2387,6 +2391,11 @@ inline void Assembler::branchAuto(CodeAddress c,
                               LinkReg lr) {
   Label l(c);
   l.branchAuto(*this, bc, lr);
+}
+inline void Assembler::branchAuto(CodeAddress c,
+                              HPHP::jit::ConditionCode cc,
+                              LinkReg lr) {
+  branchAuto(c, BranchParams::convertCC(cc), lr);
 }
 
 class Decoder {

@@ -419,7 +419,10 @@ struct Vgen {
     }
     emit(jmp{i.targets[0]});
   }
-  void emit(const jcci& i) { not_implemented(); }
+  void emit(const jcci& i) {
+    a->branchAuto(i.taken, i.cc);
+    emit(jmp{i.target});
+  }
   void emit(const jmp& i) {
     if (next == i.target) return;
     jmps.push_back({a->frontier(), i.target});
