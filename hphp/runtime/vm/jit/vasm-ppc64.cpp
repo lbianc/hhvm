@@ -496,7 +496,6 @@ struct Vgen {
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
   void emit(const orqim& i) { not_implemented(); }
   void emit(const pop& i);
-  void emit(const popm& i) { not_implemented(); }
   void emit(psllq i) { not_implemented(); }
   void emit(psrlq i) { not_implemented(); }
   void emit(const push& i);
@@ -795,6 +794,25 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   code.back().origin = origin;
 }
 
+/*
+ * Avoid Vptr type on pop for ppc64
+ */
+void lowerPopm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& popm = inst.popm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  // PPC can only copy mem->mem by using a temporary register
+  auto tmp = v.makeReg();
+  v << pop{tmp};
+  v << store{tmp, popm.d};
+
+  // remove the original popm (count parameter is 1)
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 #if PPC64_HAS_PUSH_POP
 /*
  * Should only be called once per block that push/pop is used in order to
@@ -846,6 +864,10 @@ void lowerForPPC64(Vunit& unit) {
       switch (inst.op) {
         case Vinstr::absdbl:
           lowerAbsdbl(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::popm:
+          lowerPopm(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::movtqb:
