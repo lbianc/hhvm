@@ -257,40 +257,41 @@ namespace reg {
   constexpr Reg64 r30(30);
   constexpr Reg64 r31(31);
 
-  constexpr Reg64 f0(0);   // volatile scratch register
+  constexpr RegXMM f0(0);   // volatile scratch register
   /* volatile, argument passing floating point registers */
-  constexpr Reg64 f1(1);
-  constexpr Reg64 f2(2);
-  constexpr Reg64 f3(3);
-  constexpr Reg64 f4(4);
-  constexpr Reg64 f5(5);
-  constexpr Reg64 f6(6);
-  constexpr Reg64 f7(7);
-  constexpr Reg64 f8(8);
-  constexpr Reg64 f9(9);
-  constexpr Reg64 f10(10);
-  constexpr Reg64 f11(11);
-  constexpr Reg64 f12(12);
-  constexpr Reg64 f13(13);
+  constexpr RegXMM f1(1);
+  constexpr RegXMM f2(2);
+  constexpr RegXMM f3(3);
+  constexpr RegXMM f4(4);
+  constexpr RegXMM f5(5);
+  constexpr RegXMM f6(6);
+  constexpr RegXMM f7(7);
+  constexpr RegXMM f8(8);
+  constexpr RegXMM f9(9);
+  constexpr RegXMM f10(10);
+  constexpr RegXMM f11(11);
+  constexpr RegXMM f12(12);
+  constexpr RegXMM f13(13);
   /* nonvolatile, local variables */
-  constexpr Reg64 f14(14);
-  constexpr Reg64 f15(15);
-  constexpr Reg64 f16(16);
-  constexpr Reg64 f17(17);
-  constexpr Reg64 f18(18);
-  constexpr Reg64 f19(19);
-  constexpr Reg64 f20(20);
-  constexpr Reg64 f21(21);
-  constexpr Reg64 f22(22);
-  constexpr Reg64 f23(23);
-  constexpr Reg64 f24(24);
-  constexpr Reg64 f25(25);
-  constexpr Reg64 f26(26);
-  constexpr Reg64 f27(27);
-  constexpr Reg64 f28(28);
-  constexpr Reg64 f29(29);
-  constexpr Reg64 f30(30);
-  constexpr Reg64 f31(31);
+  constexpr RegXMM f14(14);
+  constexpr RegXMM f15(15);
+  constexpr RegXMM f16(16);
+  constexpr RegXMM f17(17);
+  constexpr RegXMM f18(18);
+  constexpr RegXMM f19(19);
+  constexpr RegXMM f20(20);
+  constexpr RegXMM f21(21);
+  constexpr RegXMM f22(22);
+  constexpr RegXMM f23(23);
+  constexpr RegXMM f24(24);
+  constexpr RegXMM f25(25);
+  constexpr RegXMM f26(26);
+  constexpr RegXMM f27(27);
+  constexpr RegXMM f28(28);
+  constexpr RegXMM f29(29);
+  // Ignoring the floating pointer registers 30, 31 due to kMaxRegs == 64
+  // constexpr Reg64 f30(30);
+  // constexpr Reg64 f31(31);
 
   /* volatile, local variables */
   constexpr RegXMM v0(0);
@@ -333,28 +334,27 @@ namespace reg {
 #define RNAME(x) if (r == x) return "%"#x
 
   inline const char* regname(Reg64 r) {
-    RNAME(r0);  RNAME(r1);  RNAME(r2);  RNAME(r3);  RNAME(r4);  RNAME(r5); 
-    RNAME(r6);  RNAME(r7);  RNAME(r8);  RNAME(r9);  RNAME(r10); RNAME(r11); 
-    RNAME(r12); RNAME(r13); RNAME(r14); RNAME(r15); RNAME(r16); RNAME(r17); 
-    RNAME(r18); RNAME(r19); RNAME(r20); RNAME(r21); RNAME(r22); RNAME(r23); 
-    RNAME(r24); RNAME(r25); RNAME(r26); RNAME(r27); RNAME(r28); RNAME(r29); 
+    RNAME(r0);  RNAME(r1);  RNAME(r2);  RNAME(r3);  RNAME(r4);  RNAME(r5);
+    RNAME(r6);  RNAME(r7);  RNAME(r8);  RNAME(r9);  RNAME(r10); RNAME(r11);
+    RNAME(r12); RNAME(r13); RNAME(r14); RNAME(r15); RNAME(r16); RNAME(r17);
+    RNAME(r18); RNAME(r19); RNAME(r20); RNAME(r21); RNAME(r22); RNAME(r23);
+    RNAME(r24); RNAME(r25); RNAME(r26); RNAME(r27); RNAME(r28); RNAME(r29);
     RNAME(r30); RNAME(r31);
-
-    RNAME(f0);  RNAME(f1);  RNAME(f2);  RNAME(f3);  RNAME(f4);  RNAME(f5); 
-    RNAME(f6);  RNAME(f7);  RNAME(f8);  RNAME(f9);  RNAME(f10); RNAME(f11); 
-    RNAME(f12); RNAME(f13); RNAME(f14); RNAME(f15); RNAME(f16); RNAME(f17); 
-    RNAME(f18); RNAME(f19); RNAME(f20); RNAME(f21); RNAME(f22); RNAME(f23); 
-    RNAME(f24); RNAME(f25); RNAME(f26); RNAME(f27); RNAME(f28); RNAME(f29); 
-    RNAME(f30); RNAME(f31);
     return nullptr;
   }
 
   inline const char* regname(RegXMM r) {
-    RNAME(v0);  RNAME(v1);  RNAME(v2);  RNAME(v3);  RNAME(v4);  RNAME(v5); 
-    RNAME(v6);  RNAME(v7);  RNAME(v8);  RNAME(v9);  RNAME(v10); RNAME(v11); 
-    RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17); 
-    RNAME(v18); RNAME(v19); RNAME(v20); RNAME(v21); RNAME(v22); RNAME(v23); 
-    RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29); 
+    RNAME(f0);  RNAME(f1);  RNAME(f2);  RNAME(f3);  RNAME(f4);  RNAME(f5);
+    RNAME(f6);  RNAME(f7);  RNAME(f8);  RNAME(f9);  RNAME(f10); RNAME(f11);
+    RNAME(f12); RNAME(f13); RNAME(f14); RNAME(f15); RNAME(f16); RNAME(f17);
+    RNAME(f18); RNAME(f19); RNAME(f20); RNAME(f21); RNAME(f22); RNAME(f23);
+    RNAME(f24); RNAME(f25); RNAME(f26); RNAME(f27); RNAME(f28); RNAME(f29);
+
+    RNAME(v0);  RNAME(v1);  RNAME(v2);  RNAME(v3);  RNAME(v4);  RNAME(v5);
+    RNAME(v6);  RNAME(v7);  RNAME(v8);  RNAME(v9);  RNAME(v10); RNAME(v11);
+    RNAME(v12); RNAME(v13); RNAME(v14); RNAME(v15); RNAME(v16); RNAME(v17);
+    RNAME(v18); RNAME(v19); RNAME(v20); RNAME(v21); RNAME(v22); RNAME(v23);
+    RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29);
     return nullptr;
   }
 #undef RNAME
@@ -555,8 +555,9 @@ public:
   void extsb(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsh(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void extsw(const Reg64& ra, const Reg64& rs, bool rc = 0);
-  void fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb, bool rc = 0);
-  void lfs(const Reg64& frt, MemoryRef m) { 
+  void fadd(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
+                                                                  bool rc = 0);
+  void lfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
   }
   void lxvw4x(const RegXMM& xt, const Reg64& ra, const Reg64&rb) {
@@ -648,7 +649,7 @@ public:
   void stbu(const Reg64& rs, MemoryRef m);
   void stbux(const Reg64& rs, MemoryRef m);
   void stbx(const Reg64& rs, MemoryRef m);
-  void stfs(const Reg64& frt, MemoryRef m) {
+  void stfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(52, rn(frt), rn(m.r.base), m.r.disp);
   }
   void sth(const Reg64& rs, MemoryRef m);

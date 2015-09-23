@@ -680,7 +680,7 @@ void Assembler::xoris(const Reg64& ra, const Reg64& rs, Immed imm) {
   EmitDForm(27, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::fadd(const Reg64& frt, const Reg64& fra, const Reg64& frb,
+void Assembler::fadd(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                      bool rc) {
   EmitAForm(63, rn(frt), rn(fra), rn(frb), 21, rc);
 }
