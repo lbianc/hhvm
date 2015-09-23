@@ -529,7 +529,6 @@ struct Vgen {
     l_end.asm_label(*a);
   }
   void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
-  void emit(shlq i) { not_implemented(); } // should use vasm shl below
   /*TODO Rc=1*/
   void emit(shl i) { a->sld(i.d, i.s1, i.s0); }
   void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
