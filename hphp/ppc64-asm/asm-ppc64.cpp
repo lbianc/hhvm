@@ -691,74 +691,66 @@ void Assembler::unimplemented(){
 }
 
 void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
-  // if immediate has only low 16 bits set, use simple load immediate
-  if ((imm64 >> 16) == 0)
-  {
+  if ((imm64 >> 16) == 0) {
+    // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm64));
-    // clear sign
-    clrldi(rt, rt, 48);
-  }
-  // if immediate has only low 32 bits set
-  else if (imm64 >> 32 == 0)
-  {
+    if (imm64 & (1ULL << 15)) {
+      // clear extended sign
+      clrldi(rt, rt, 48);
+    }
+  } else if (imm64 >> 32 == 0) {
+    // immediate has only low 32 bits set
     lis(rt, static_cast<int16_t>(imm64 >> 16));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
-    // clear sign
-    clrldi(rt, rt, 32);
-  }
-  // if immediate has only low 48 bits set
-  else if (imm64 >> 48 == 0)
-  {
+    if (imm64 & (1ULL << 31)) {
+      // clear extended sign
+      clrldi(rt, rt, 32);
+    }
+  } else if (imm64 >> 48 == 0) {
+    // immediate has only low 48 bits set
     lis(rt, static_cast<int16_t>(imm64 >> 32));
     ori(rt, rt, static_cast<int16_t>((imm64 >> 16) & UINT16_MAX));
     sldi(rt,rt,16);
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
-    // clear sign
-    clrldi(rt, rt, 16);
-  }
-  // else load all 64 bits
-  else
-  {
+    if (imm64 & (1ULL << 47)) {
+      // clear extended sign
+      clrldi(rt, rt, 16);
+    }
+  } else {
+    // load all 64 bits
     lis(rt, static_cast<int16_t>(imm64 >> 48));
     ori(rt, rt, static_cast<int16_t>((imm64 >> 32) & UINT16_MAX));
     sldi(rt,rt,32);
     oris(rt, rt, static_cast<int16_t>((imm64 >> 16) & UINT16_MAX));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
   }
-
 }
 
 void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
-  // if immediate has only low 16 bits set, use simple load immediate
-  if ((imm32 >> 16) == 0)
-  {
+  if ((imm32 >> 16) == 0) {
+    // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm32));
-    // clear sign
-    clrldi(rt, rt, 48);
-  }
-  // if immediate has 32 bits set
-  else
-  {
+    if (imm32 & (1ULL << 15)) {
+      // clear extended sign
+      clrldi(rt, rt, 48);
+    }
+  } else {
+    // immediate has 32 bits set
     lis(rt, static_cast<int16_t>(imm32 >> 16));
     ori(rt, rt, static_cast<int16_t>(imm32 & UINT16_MAX));
   }
-
 }
 
 void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
   xor_(rt, rt, rt);
-  // if immediate has only low 16 bits set, use simple load immediate
-  if ((imm32 >> 16) == 0)
-  {
+  if ((imm32 >> 16) == 0) {
+    // immediate has only low 16 bits set, use simple load immediate
     ori(rt, rt, static_cast<int16_t>(imm32));
-  }
-  // if immediate has 32 bits set
-  else
-  {
+  } else {
+    // immediate has 32 bits set
     oris(rt, rt, static_cast<int16_t>(imm32 >> 16));
     ori(rt, rt, static_cast<int16_t>(imm32 & UINT16_MAX));
   }
-
 }
 
 std::string Decoder::toString(){
