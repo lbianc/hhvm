@@ -512,7 +512,6 @@ struct Vgen {
     obtained by specifying appropriate masks and shift values for 
     certain Rotate instructions.
   */
-  void emit(const sarq& i) { not_implemented(); } // should use vasm sar below
   void emit(sar i) { a->srad(i.d, i.s1, i.s0); }
   void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
   void emit(const setcc& i) {
