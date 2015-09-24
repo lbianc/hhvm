@@ -119,7 +119,7 @@ struct Vgen {
 
   /*
    * Calculates the effective address of Vptr s and stores on Register d
-   * The parameter ignore_base can be used to ignore base register for 
+   * The parameter ignore_base can be used to ignore base register for
    * load/store instructions. In this case base cannot be added to index
    * register.
    */
@@ -177,12 +177,12 @@ struct Vgen {
    * - (Index * Scale) + Displacement: displacement(,index,scale)
    * - Base + Index + Displacement: displacement(base,index)
    * - Base +(Index * Scale) + Displacement: displacement(base, index,scale)
-   * 
+   *
    * In PPC64 we have:
    * - Direct Operand: displacement (Form-D)
    * - Indirect Operand: (Base with displacement = 0) (Form-D)
    * - Base + Index: Index(Base) (Form-X)
-   * 
+   *
    *  If we have displacement > 16 bits we have to use Form-X. So if we get
    *  a Vptr with a unsupported address mode (like Index * Scale) we need
    *  to convert (patch) this address mode to a supported address mode.
@@ -242,7 +242,7 @@ struct Vgen {
   }
   void emit(const debugtrap& i) { not_implemented(); }
   void emit(const fallthru& i) {}
-  void emit(const ldimmb& i) { 
+  void emit(const ldimmb& i) {
     if(i.d.isGP()) {
       // Read as 16 bits and mask to avoid another cast
       a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
@@ -508,7 +508,7 @@ struct Vgen {
     a->blr();
   }
   /*Immediate-form logical (unsigned) shift operations are
-    obtained by specifying appropriate masks and shift values for 
+    obtained by specifying appropriate masks and shift values for
     certain Rotate instructions.
   */
   void emit(sar i) { a->srad(i.d, i.s1, i.s0); }
@@ -772,6 +772,19 @@ void lowerAbsdbl(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+void lowerLoadqp(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadqp = inst.loadqp_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  // in PPC we don't have anything like a RIP register
+  // RIP register uses a absolute address so we can perform a baseless load in
+  // this case
+  v << load{ baseless(loadqp.s.r.disp), loadqp.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
   auto& code = unit.blocks[b].code;
@@ -864,6 +877,10 @@ void lowerForPPC64(Vunit& unit) {
       switch (inst.op) {
         case Vinstr::absdbl:
           lowerAbsdbl(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::loadqp:
+          lowerLoadqp(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::popm:

@@ -90,12 +90,7 @@ void storeVMRegs(Vout& v) {
 void loadMCG(Vout& v, Vreg d) {
   // TODO(#8060678): Why does this need to be RIP-relative?
   auto const imcg = reinterpret_cast<uintptr_t>(&mcg);
-  #if defined(__powerpc64__)
-  // In PowerPC we don't have a accessible ip register.
-  v << load{baseless(imcg), d};
-  #else
   v << loadqp{reg::rip[imcg], d};
-  #endif
 }
 
 /*
