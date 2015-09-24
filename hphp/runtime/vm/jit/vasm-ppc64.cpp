@@ -491,7 +491,6 @@ struct Vgen {
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
-  void emit(const orwim& i) { not_implemented(); }
   void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
   void emit(const orqim& i) { not_implemented(); }
