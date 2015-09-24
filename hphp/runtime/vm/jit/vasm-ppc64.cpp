@@ -603,7 +603,7 @@ struct Vgen {
       a->sth(ppc64::rvasmtmp(), i.m);
     }
   }
-  void emit(subbi i) { not_implemented(); }
+  void emit(subbi i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(subl i) { a->subf(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), false); }
   void emit(subli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
