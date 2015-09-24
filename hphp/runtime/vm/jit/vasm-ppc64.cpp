@@ -607,7 +607,7 @@ struct Vgen {
   void emit(subli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
-  void emit(subsd i) { not_implemented(); }
+  void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
   void emit(const testb& i) {
     a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true);
   }

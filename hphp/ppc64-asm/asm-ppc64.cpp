@@ -680,10 +680,17 @@ void Assembler::xoris(const Reg64& ra, const Reg64& rs, Immed imm) {
   EmitDForm(27, rn(rs), rn(ra), imm.w());
 }
 
+/* Floating point operations */
 void Assembler::fadd(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                      bool rc) {
-  EmitAForm(63, rn(frt), rn(fra), rn(frb), 21, rc);
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 21, rc);
 }
+
+void Assembler::fsub(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
+                     bool rc) {
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 20, rc);
+}
+
 
 void Assembler::unimplemented(){
   //Emit a instruction with invalid opcode 0x0

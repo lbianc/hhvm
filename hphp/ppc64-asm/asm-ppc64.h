@@ -557,6 +557,8 @@ public:
   void extsw(const Reg64& ra, const Reg64& rs, bool rc = 0);
   void fadd(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                                                                   bool rc = 0);
+  void fsub(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
+                                                                  bool rc = 0);
   void lfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
   }
