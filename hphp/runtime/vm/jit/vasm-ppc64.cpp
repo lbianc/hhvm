@@ -684,7 +684,7 @@ void Vgen::emit(const syncpoint& i) {
 void Vgen::emit(const pop& i) {
 #if PPC64_HAS_PUSH_POP
   Vptr p(ppc64::rstktop(), 0);
-  a->ldu(i.d, p);
+  a->ld(i.d, p);
   a->addi(ppc64::rstktop(), ppc64::rstktop(), push_pop_elem_size);
 #else
   not_implemented();
