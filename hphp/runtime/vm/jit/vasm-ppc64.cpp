@@ -826,6 +826,26 @@ void lowerPopm(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+void lowerOrwim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& orwim = inst.orwim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  auto tmp = v.makeReg();
+
+  /*
+   * TODO(igor): It would be better if there was a 16 bits load instruction
+   * But, after these instructions, only 16 bits will be stored.
+   */
+  v << load {orwim.m, tmp};
+  v << orqi {orwim.s0, tmp, tmp, orwim.sf};
+  v << storew{tmp, orwim.m};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 #if PPC64_HAS_PUSH_POP
 /*
  * Should only be called once per block that push/pop is used in order to
@@ -885,6 +905,10 @@ void lowerForPPC64(Vunit& unit) {
 
         case Vinstr::popm:
           lowerPopm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::orwim:
+          lowerOrwim(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::movtqb:
