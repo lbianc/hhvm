@@ -106,8 +106,10 @@ extern "C" void enterTCExit();
 
 TCA emitCallToExit(CodeBlock& cb) {
   ppc64_asm::Assembler a { cb };
-
   auto const start = a.frontier();
+
+  // Simply go to enterTCExit, no worries about the stack because it's balanced
+  a.branchAuto(TCA(enterTCExit));
   return start;
 }
 
