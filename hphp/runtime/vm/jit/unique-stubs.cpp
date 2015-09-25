@@ -40,6 +40,7 @@
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/unique-stubs-x64.h"
+#include "hphp/runtime/vm/jit/unique-stubs-ppc64.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
@@ -164,18 +165,39 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 }
 
 TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
-  if (arch() != Arch::X64) not_implemented();
-  return x64::emitFreeLocalsHelpers(cb, us);
+  switch (arch()) {
+    case Arch::X64:
+      return x64::emitFreeLocalsHelpers(cb, us);
+    case Arch::PPC64:
+      return ppc64::emitFreeLocalsHelpers(cb, us);
+    default:
+      not_implemented();
+      break;
+  }
 }
 
 TCA emitCallToExit(CodeBlock& cb) {
-  if (arch() != Arch::X64) not_implemented();
-  return x64::emitCallToExit(cb);
+  switch (arch()) {
+    case Arch::X64:
+      return x64::emitCallToExit(cb);
+    case Arch::PPC64:
+      return ppc64::emitCallToExit(cb);
+    default:
+      not_implemented();
+      break;
+  }
 }
 
 TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
-  if (arch() != Arch::X64) not_implemented();
-  return x64::emitEndCatchHelper(cb, us);
+  switch (arch()) {
+    case Arch::X64:
+      return x64::emitEndCatchHelper(cb, us);
+    case Arch::PPC64:
+      return ppc64::emitEndCatchHelper(cb, us);
+    default:
+      not_implemented();
+      break;
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
