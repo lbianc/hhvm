@@ -6,13 +6,14 @@
  *
  * Note that MSVC uses translator-asm-helpers.asm instead of this.
  *
- * The columns are registers of Linux and Mac ABI / Windows ABI / ARM ABI.
- *   rdi / rcx   / x0:  Cell* vm_sp
- *   rsi / rdx   / x1:  Cell* vm_fp
- *   rdx / r8    / x2:  unsigned char* start
- *   rcx / r9    / x4:  ActRec* firstAR
- *   r8  / stack / x5:  uint8_t* targetCacheBase
- *   r9  / stack / x6:  ActRec* calleeAR
+ * The columns are registers of:
+ * Linux and Mac ABI / Windows ABI / ARM ABI / PPC64 ABI
+ *   rdi / rcx   / x0 / r3:  Cell* vm_sp
+ *   rsi / rdx   / x1 / r4:  Cell* vm_fp
+ *   rdx / r8    / x2 / r5:  unsigned char* start
+ *   rcx / r9    / x4 / r6:  ActRec* firstAR
+ *   r8  / stack / x5 / r7:  uint8_t* targetCacheBase
+ *   r9  / stack / x6 / r8:  ActRec* calleeAR
  *
  * Note that on Windows, ETCH_GET_ARG5/6 borrow r10/r11 respectively
  */
