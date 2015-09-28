@@ -278,13 +278,6 @@ template<class T> T decode(PC& pc) {
   return v;
 }
 
-inline int32_t decode_iva(PC& pc) {
-  auto v = decodeVariableSizeImm(&pc);
-  ONTRACE(2, Trace::trace("decode:     Immediate int32 %" PRIi64"\n",
-          int64_t(v)));
-  return v;
-}
-
 inline StringData* decode_litstr(PC& pc) {
   auto id = decode<Id>(pc);
   return vmfp()->m_func->unit()->lookupLitstrId(id);
@@ -296,10 +289,6 @@ inline int32_t decode_la(PC& pc) {
 
 inline int32_t decode_ia(PC& pc) {
   return decode_iva(pc);
-}
-
-template<class T> T decode_oa(PC& pc) {
-  return decode<T>(pc);
 }
 
 inline Offset decode_ba(PC& pc) {
@@ -6526,10 +6515,8 @@ OPTBLD_INLINE void iopFCallBuiltin(IOP_ARGS) {
     if (func->hasVariadicCaptureParam()) {
       assertx(numArgs > 0);
       assertx(args[1-numArgs].m_type == KindOfArray);
-      Native::callFunc<true, true>(func, nullptr, args, numNonDefault, ret);
-    } else {
-      Native::callFunc<true, false>(func, nullptr, args, numNonDefault, ret);
     }
+    Native::callFunc<true>(func, nullptr, args, numNonDefault, ret);
   } else {
     if (func->attrs() & AttrParamCoerceModeNull) {
       ret.m_type = KindOfNull;
