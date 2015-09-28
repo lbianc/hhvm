@@ -137,23 +137,28 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
   alignJmpTarget(cb);
 
   return vwrap(cb, [&] (Vout& v) {
-    // TODO(rcardoso): need to implement unwind-ppc64 first
-    // v << copy{rvmfp(), rarg(0)};
-    // v << call{TCA(tc_unwind_resume)};
+    auto const done1 = v.makeBlock();
+    auto const sf1 = v.makeReg();
+
+    v << cmpqim{0, udrspo, sf1};
+    v << jcci{CC_NE, sf1, done1, debuggerReturn};
+    v = done1;
 
     // Normal end catch situation: call back to tc_unwind_resume, which returns
-    // the catch trace (or null) in %rax, and the new vmfp in %rdx.
-    // v << copy{reg::rdx, rvmfp()};
+    // the catch trace (or null) in %r3, and the new vmfp in %r4.
+    v << copy{rvmfp(), rarg(0)};
+    v << call{TCA(tc_unwind_resume)};
+    v << copy{ppc64_asm::reg::r4, rvmfp()};
 
-    // auto const done2 = v.makeBlock();
-    // auto const sf2 = v.makeReg();
+    auto const done2 = v.makeBlock();
+    auto const sf2 = v.makeReg();
 
-    // v << testq{reg::rax, reg::rax, sf2};
-    // v << jcci{CC_Z, sf2, done2, resumeCPPUnwind};
-    // v = done2;
+    v << testq{ppc64_asm::reg::r3, ppc64_asm::reg::r3, sf2};
+    v << jcci{CC_Z, sf2, done2, resumeCPPUnwind};
+    v = done2;
 
     // We need to do a syncForLLVMCatch(), but vmfp is already in rdx.
-    // v << jmpr{reg::rax};
+    v << jmpr{ppc64_asm::reg::r3};
   });
 }
 
