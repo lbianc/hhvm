@@ -845,6 +845,22 @@ void lowerOrwim(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+void lowerOrqim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& orqim = inst.orqim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  auto tmp = v.makeReg();
+
+  v << load {orqim.m, tmp};
+  v << orqi {orqim.s0, tmp, tmp, orqim.sf};
+  v << store{tmp, orqim.m};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 #if PPC64_HAS_PUSH_POP
 /*
  * Should only be called once per block that push/pop is used in order to
@@ -908,6 +924,10 @@ void lowerForPPC64(Vunit& unit) {
 
         case Vinstr::orwim:
           lowerOrwim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::orqim:
+          lowerOrqim(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::movtqb:
