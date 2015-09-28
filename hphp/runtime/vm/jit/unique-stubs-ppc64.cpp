@@ -114,8 +114,46 @@ TCA emitCallToExit(CodeBlock& cb) {
 }
 
 TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
+  auto const udrspo = rvmtl()[unwinderDebuggerReturnSPOff()];
+
+  auto const debuggerReturn = vwrap(cb, [&] (Vout& v) {
+    v << load{udrspo, rvmsp()};
+    v << storeqi{0, udrspo};
+  });
+  svcreq::emit_persistent(cb, folly::none, REQ_POST_DEBUGGER_RET);
+
+  auto const resumeCPPUnwind = vwrap(cb, [] (Vout& v) {
+    static_assert(sizeof(tl_regState) == 1,
+                  "The following store must match the size of tl_regState.");
+    auto const regstate = emitTLSAddr(v, tls_datum(tl_regState));
+    v << storebi{static_cast<int32_t>(VMRegState::CLEAN), regstate};
+
+    v << load{rvmtl()[unwinderExnOff()], rarg(0)};
+    v << call{TCA(_Unwind_Resume), arg_regs(1)};
+  });
+  us.endCatchHelperPast = cb.frontier();
+  vwrap(cb, [] (Vout& v) { v << ud2{}; });
+
+  alignJmpTarget(cb);
 
   return vwrap(cb, [&] (Vout& v) {
+    // TODO(rcardoso): need to implement unwind-ppc64 first
+    // v << copy{rvmfp(), rarg(0)};
+    // v << call{TCA(tc_unwind_resume)};
+
+    // Normal end catch situation: call back to tc_unwind_resume, which returns
+    // the catch trace (or null) in %rax, and the new vmfp in %rdx.
+    // v << copy{reg::rdx, rvmfp()};
+
+    // auto const done2 = v.makeBlock();
+    // auto const sf2 = v.makeReg();
+
+    // v << testq{reg::rax, reg::rax, sf2};
+    // v << jcci{CC_Z, sf2, done2, resumeCPPUnwind};
+    // v = done2;
+
+    // We need to do a syncForLLVMCatch(), but vmfp is already in rdx.
+    // v << jmpr{reg::rax};
   });
 }
 

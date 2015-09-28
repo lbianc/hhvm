@@ -8,7 +8,7 @@
  * Don't expect to find all instructions here.
  *
  * If you're looking for something more fully baked, here are some options
- * to consider use Nanojit or LLVM, both of which translate abstract virtual 
+ * to consider use Nanojit or LLVM, both of which translate abstract virtual
  * machine instructions to the native target architecture.
  *
  */
@@ -91,38 +91,38 @@ const uint32_t DecoderList[] = { kDecoderMask1, kDecoderMask2,   kDecoderMask3,
 
 /*
   Defines operands mask and type for a instruction. The flags can be
-  used to encode informations about a operand like kind of register or 
+  used to encode informations about a operand like kind of register or
   if a immediate will be print as a signed or unsigned value.
 */
 struct Operands {
   uint32_t mask_;
   uint32_t flags_;
-  
-  Operands(uint32_t mask, uint32_t flags) 
+
+  Operands(uint32_t mask, uint32_t flags)
   : mask_(mask)
   , flags_(flags)
   {}
-  Operands() 
+  Operands()
   : mask_(0)
   , flags_(0)
   {}
 };
 
-// TODO(rcardoso): Define opcodes mask
+// TODO(rcardoso): Define operand masks
 #define A         { 0x0, 0x0 }
 #define A_L       { 0x0, 0x0 }
-#define BA        { 0x0, 0x0 }
-#define BB        { 0x0, 0x0 }
-#define BD        { 0x0, 0x0 }
+#define BA        { 0x001f0000, 0x0 }
+#define BB        { 0x0000f800, 0x0 }
+#define BD        { 0x0000fffc, 0x0 }
 #define BDA       { 0x0, 0x0 }
 #define BF        { 0x0, 0x0 }
 #define BFA       { 0x0, 0x0 }
 #define BFF       { 0x0, 0x0 }
-#define BH        { 0x0, 0x0 }
+#define BH        { 0x00001800, 0x0 }
 #define BHRBE     { 0x0, 0x0 }
-#define BI        { 0x0, 0x0 }
-#define BO        { 0x0, 0x0 }
-#define BT        { 0x0, 0x0 }
+#define BI        { 0x001f0000, 0x0 }
+#define BO        { 0x03e00000, 0x0 }
+#define BT        { 0x03e00000, 0x0 }
 #define CRFD      { 0x0, 0x0 }
 #define CRB       { 0x0, 0x0 }
 #define CT        { 0x0, 0x0 }
@@ -221,20 +221,20 @@ private:
     Form form_;
     std::string mnemonic_;
     uint32_t operand_size_;
-    Operands* operand_list_; 
-    DecoderInfo* next_; 
+    Operands* operand_list_;
+    DecoderInfo* next_;
 public:
-  DecoderInfo(uint32_t op, Form form, std::string mn , 
+  DecoderInfo(uint32_t op, Form form, std::string mn ,
     std::initializer_list<Operands> oper)
   : opcode_(op)
   , form_(form)
   , mnemonic_(mn)
   , operand_size_(oper.size())
-  , next_(nullptr) 
+  , next_(nullptr)
   {
     operand_list_ = new Operands[oper.size()];
     for(auto i = oper.begin(); i != oper.end(); i++)
-       operand_list_[i - oper.begin()] = *i; 
+       operand_list_[i - oper.begin()] = *i;
   }
 
   ~DecoderInfo(){
@@ -251,15 +251,15 @@ public:
   DecoderInfo* next() { return next_; }
 
   inline bool operator==(const DecoderInfo& i) {
-    return (i.form() == form_ && 
-            i.opcode() == opcode_ && 
-            i.mnemonic() == mnemonic_); 
+    return (i.form() == form_ &&
+            i.opcode() == opcode_ &&
+            i.mnemonic() == mnemonic_);
   }
 
   inline bool operator!=(const DecoderInfo& i) {
-    return (i.form() != form_ || 
-            i.opcode() != opcode_ || 
-            i.mnemonic() != mnemonic_); 
+    return (i.form() != form_ ||
+            i.opcode() != opcode_ ||
+            i.mnemonic() != mnemonic_);
   }
 };
 
@@ -1757,7 +1757,7 @@ DE(evlwwsplatx   ,0x10000318, Form::kEVX, evlwwsplatx ,{ RS, RA, RB });
 
     uint32_t index = (opcode % kDecoderSize);
 
-    while (decoder_table[index] != nullptr && 
+    while (decoder_table[index] != nullptr &&
            decoder_table[index]->opcode() != opcode) {
       index = (index + 1) % kDecoderSize;
     }
@@ -1785,14 +1785,14 @@ private:
 
     uint32_t index = (dinfo.opcode() % kDecoderSize);
 
-    while (decoder_table[index] != nullptr && 
+    while (decoder_table[index] != nullptr &&
            decoder_table[index]->opcode() != dinfo.opcode()) {
         index = (index + 1) % kDecoderSize;
     }
 
     if (decoder_table[index] != nullptr && *decoder_table[index] != dinfo) {
         // in some architectures instructions can share the same opcode or
-        // decoder info. Rhe meaning of the instruction will depends on 
+        // decoder info. Rhe meaning of the instruction will depends on
         // processor mode or execution mode
         decoder_table[index]->next(new DecoderInfo(dinfo));
     } else {
