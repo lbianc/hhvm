@@ -18,13 +18,11 @@
 
 #ifdef __linux__
 #include <link.h>
-#ifdef __x86_64__
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 extern "C" {
 extern int arch_prctl(int, unsigned long*);
 }
-#endif //__x86_64__
 #endif //__linux__
 
 namespace HPHP {
@@ -90,12 +88,7 @@ static int visit_phdr(dl_phdr_info* info, size_t, void*) {
 
 std::pair<void*,size_t> getCppTdata() {
   uintptr_t addr;
-#if defined(__x86_64__)
   if (!arch_prctl(ARCH_GET_FS, &addr)) {
-#elif defined(__powerpc64__)
-  __asm__ ("\tmr %0, 13" : "=r" (addr));
-  if (addr) {
-#endif
     // fs points to the end of the threadlocal area.
     size_t size = dl_iterate_phdr(&visit_phdr, nullptr);
     return {(void*)(addr - size), size};
