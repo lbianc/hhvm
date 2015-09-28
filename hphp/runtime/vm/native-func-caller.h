@@ -2,12 +2,7 @@
 
 static_assert(kMaxBuiltinArgs == 32,"Regenerate native-func-caller.h for updated kMaxBuiltinArgs");
 
-#ifdef __powerpc64__
-// TODO - PPC64 - Port to PPC64 under development
-static_assert(kNumSIMDRegs == 0,"Regenerate native-func-caller.h for updated kNumSIMDRegs");
-#else
 static_assert(kNumSIMDRegs == 8,"Regenerate native-func-caller.h for updated kNumSIMDRegs");
-#endif
 
 double callFuncDoubleImpl(BuiltinFunction f, int64_t* GP, int GP_count, double* SIMD, int SIMD_count) {
   switch (GP_count) {
