@@ -836,6 +836,25 @@ void lowerOrqim(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+/*
+ * As the immediate is bigger than 16 bits, use a temporary register to load
+ * that value and use addq afterwards.
+ */
+void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& addqi = inst.addqi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  auto tmp = v.makeReg();
+
+  v << ldimmq{Immed64(addqi.s0.q()), tmp};
+  v << addq  {tmp, addqi.s1, addqi.d, addqi.sf};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 #if PPC64_HAS_PUSH_POP
 /*
  * Should only be called once per block that push/pop is used in order to
@@ -903,6 +922,13 @@ void lowerForPPC64(Vunit& unit) {
 
         case Vinstr::orqim:
           lowerOrqim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::addqi:
+          // only immediate up to 16bits can be used on addi
+          if (!inst.addqi_.s0.fits(HPHP::sz::word)) {
+            lowerAddqi(unit, Vlabel{ib}, ii);
+          }
           break;
 
         case Vinstr::movtqb:
