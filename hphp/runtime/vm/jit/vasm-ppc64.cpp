@@ -876,6 +876,9 @@ void InitializePushStk(Vunit& unit, Vlabel b, size_t iInst) {
 
 /*
  * Lower a few abstractions to facilitate straightforward PPC64 codegen.
+ * PPC64 doesn't have instructions for operating on less than 64 bits data
+ * (except the memory related load/store), therefore all arithmetic vasms
+ * that intend to deal with smaller data will actually operate on 64bits
  */
 void lowerForPPC64(Vunit& unit) {
   Timer _t(Timer::vasm_lower);
@@ -931,101 +934,97 @@ void lowerForPPC64(Vunit& unit) {
           }
           break;
 
-        case Vinstr::movtqb:
-          inst = copy{inst.movtqb_.s, inst.movtqb_.d};
-          break;
-
-        case Vinstr::movtql:
-          inst = copy{inst.movtql_.s, inst.movtql_.d};
-          break;
-
         case Vinstr::countbytecode:
           inst = incqm{inst.countbytecode_.base[g_bytecodesVasm.handle()],
                        inst.countbytecode_.sf};
           break;
 
+        // Lower movs to copy
+        case Vinstr::movtqb:
+          inst = copy{inst.movtqb_.s, inst.movtqb_.d};
+          break;
+        case Vinstr::movtql:
+          inst = copy{inst.movtql_.s, inst.movtql_.d};
+          break;
+
+        // Lower comparison to cmpq
         case Vinstr::cmpb:
           inst = cmpq{Reg64(inst.cmpb_.s0), Reg64(inst.cmpb_.s1),
                       inst.cmpb_.sf};
           break;
-
         case Vinstr::cmpl:
           inst = cmpq{Reg64(inst.cmpl_.s0), Reg64(inst.cmpl_.s1),
                       inst.cmpl_.sf};
           break;
 
+        // Lower comparison with immediate to cmpqi
         case Vinstr::cmpbi:
           inst = cmpqi{inst.cmpbi_.s0, Reg64(inst.cmpbi_.s1), inst.cmpbi_.sf};
           break;
-
         case Vinstr::cmpli:
           inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
           break;
-
         case Vinstr::cmpbim:
           inst = cmplim{inst.cmpbim_.s0, inst.cmpbim_.s1, inst.cmpbim_.sf};
           break;
 
+        // Lower subtraction to subq
         case Vinstr::subl:
           inst = subq{Reg64(inst.subl_.s0), Reg64(inst.subl_.s1),
                       Reg64(inst.subl_.d), inst.subl_.sf};
           break;
-
         case Vinstr::subbi:
           inst = subqi{inst.subbi_.s0, Reg64(inst.subbi_.s1),
                        Reg64(inst.subbi_.d), inst.subbi_.sf};
           break;
-
         case Vinstr::subli:
           inst = subqi{inst.subli_.s0, Reg64(inst.subli_.s1),
                        Reg64(inst.subli_.d), inst.subli_.sf};
           break;
 
+        // Lower test to testq
         case Vinstr::testb:
           inst = testq{Reg64(inst.testb_.s0), Reg64(inst.testb_.s1),
                        inst.testb_.sf};
           break;
-
         case Vinstr::testl:
           inst = testq{Reg64(inst.testl_.s0), Reg64(inst.testl_.s1),
                        inst.testl_.sf};
           break;
-
         case Vinstr::testbi:
           inst = testqi{inst.testbi_.s0, Reg64(inst.testbi_.s1),
                         inst.testbi_.sf};
           break;
-
         case Vinstr::testli:
           inst = testqi{inst.testli_.s0, Reg64(inst.testli_.s1),
                         inst.testli_.sf};
           break;
 
+        // Lower xor to xorq
         case Vinstr::xorb:
           inst = xorq{Reg64(inst.xorb_.s0), Reg64(inst.xorb_.s1),
                       Reg64(inst.xorb_.d), inst.xorb_.sf};
           break;
-
         case Vinstr::xorl:
           inst = xorq{Reg64(inst.xorl_.s0), Reg64(inst.xorl_.s1),
                       Reg64(inst.xorl_.d), inst.xorl_.sf};
           break;
 
+        // Lower xor with immediate to xorqi
         case Vinstr::xorbi:
           inst = xorqi{inst.xorbi_.s0, Reg64(inst.xorbi_.s1),
                        Reg64(inst.xorbi_.d), inst.xorbi_.sf};
           break;
 
+        // Lower and to andq
         case Vinstr::andb:
           inst = andq{Reg64(inst.andb_.s0), Reg64(inst.andb_.s1),
                        Reg64(inst.andb_.d), inst.andb_.sf};
           break;
-
         case Vinstr::andl:
           inst = andq{Reg64(inst.andl_.s0), Reg64(inst.andl_.s1),
                        Reg64(inst.andl_.d), inst.andl_.sf};
           break;
-
         case Vinstr::andbi:
           inst = andqi{inst.andbi_.s0, Reg64(inst.andbi_.s1),
                        Reg64(inst.andbi_.d), inst.andbi_.sf};
