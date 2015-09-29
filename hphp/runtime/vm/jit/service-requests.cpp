@@ -221,7 +221,7 @@ size_t stub_size() {
       not_implemented();
       break;
     case Arch::PPC64:
-      not_implemented();
+      return kTotalArgs * 4 + 8;
   }
   not_reached();
 }
