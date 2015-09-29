@@ -145,7 +145,7 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     v = done1;
 
     // Normal end catch situation: call back to tc_unwind_resume, which returns
-    // the catch trace (or null) in %r3, and the new vmfp in %r4.
+    // the catch trace (or null) in $r3, and the new vmfp in $r4.
     v << copy{rvmfp(), rarg(0)};
     v << call{TCA(tc_unwind_resume)};
     v << copy{ppc64_asm::reg::r4, rvmfp()};
@@ -157,7 +157,7 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     v << jcci{CC_Z, sf2, done2, resumeCPPUnwind};
     v = done2;
 
-    // We need to do a syncForLLVMCatch(), but vmfp is already in rdx.
+    // We need to do a syncForLLVMCatch(), but vmfp is already in $r4.
     v << jmpr{ppc64_asm::reg::r3};
   });
 }
