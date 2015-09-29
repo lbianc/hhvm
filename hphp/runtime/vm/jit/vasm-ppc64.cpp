@@ -128,8 +128,8 @@ struct Vgen {
       // Calculate index position before adding base and displacement.
       // If scale is 1 we just ignore it.
       if(s.scale > 1) {
-        int n = 0;
-        while (s.scale >>= 1) {
+        uint8_t scale = s.scale, n = 0;
+        while (scale >>= 1) {
           ++n;
         }
         assert(n <= 3);
