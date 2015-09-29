@@ -127,16 +127,14 @@ struct Vgen {
     if (s.index.isValid()) {
       // Calculate index position before adding base and displacement.
       // If scale is 1 we just ignore it.
-      if(s.scale > 1) {
-        uint8_t scale = s.scale, n = 0;
-        while (scale >>= 1) {
-          ++n;
-        }
-        assert(n <= 3);
-        // scale factor is always 1, 2, 4 or, 8
-        // so we can perform index*scale doing a shift left
-        emit(shlqi{n, s.index, d, VregSF(0)});
+      uint8_t scale = s.scale, n = 0;
+      while (scale >>= 1) {
+        ++n;
       }
+      assert(n <= 3);
+      // scale factor is always 1, 2, 4 or, 8
+      // so we can perform index*scale doing a shift left
+      emit(shlqi{n, s.index, d, VregSF(0)});
 
       if (s.base.isValid() && !ignore_base) {
         emit(addq {s.base, d, d, VregSF(0)});
