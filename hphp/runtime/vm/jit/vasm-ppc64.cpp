@@ -308,10 +308,7 @@ struct Vgen {
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
   void emit(const addqim& i) { not_implemented(); }
   void emit(addsd i) { not_implemented(); }
-  void emit(andb i) {  a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(andbi i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(const andbim& i) { not_implemented(); }
-  void emit(andl i) { a->and_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(andli i) {
     /* and of immediate up to 32bits */
     if (!i.s0.fits(HPHP::sz::word)) {
@@ -349,14 +346,6 @@ struct Vgen {
   }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
-  void emit(const cmpb& i) { a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
-  void emit(const cmpbi& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
-  void emit(const cmpbim& i) {
-    VptrToReg(i.s1, ppc64::rvasmtmp());
-    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
-  }
-  void emit(const cmpl& i) {  a->cmp(0, 0, Reg64(i.s0), Reg64(i.s1)); }
-  void emit(const cmpli& i) { a->cmpi(0, 0, Reg64(i.s1), i.s0); }
   void emit(const cmplim& i) {
     VptrToReg(i.s1, ppc64::rvasmtmp());
     a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
@@ -601,16 +590,9 @@ struct Vgen {
       a->sth(ppc64::rvasmtmp(), i.m);
     }
   }
-  void emit(subbi i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
-  void emit(subl i) { a->subf(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), false); }
-  void emit(subli i) { a->addi(Reg64(i.s1), Reg64(i.d), i.s0); }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
-  void emit(const testb& i) {
-    a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true);
-  }
-  void emit(const testbi& i) { a->andi(ppc64::rvasmtmp(), Reg64(i.s1), i.s0); }
   void emit(const testbim& i) {
     a->lbz(ppc64::rvasmtmp(), i.s1.mr());
     emit(testbi{i.s0, ppc64::rvasmtmp(), i.sf});
@@ -619,10 +601,6 @@ struct Vgen {
     a->lhz(ppc64::rvasmtmp(), i.s1);
     emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
   }
-  void emit(const testl& i) {
-    a->and_(ppc64::rvasmtmp(), Reg64(i.s0), Reg64(i.s1), true);
-  }
-  void emit(const testli& i) { a->andi(ppc64::rvasmtmp(), Reg64(i.s1), i.s0); }
   void emit(const testlim& i) {
     a->lwz(ppc64::rvasmtmp(), i.s1);
     emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
@@ -640,9 +618,6 @@ struct Vgen {
   void emit(const ucomisd& i) { not_implemented(); }
   void emit(const ud2& i) { a->trap(); }
   void emit(unpcklpd i) { not_implemented(); }
-  void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
-  void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
 
@@ -941,6 +916,93 @@ void lowerForPPC64(Vunit& unit) {
         case Vinstr::countbytecode:
           inst = incqm{inst.countbytecode_.base[g_bytecodesVasm.handle()],
                        inst.countbytecode_.sf};
+          break;
+
+        case Vinstr::cmpb:
+          inst = cmpq{Reg64(inst.cmpb_.s0), Reg64(inst.cmpb_.s1),
+                      inst.cmpb_.sf};
+          break;
+
+        case Vinstr::cmpl:
+          inst = cmpq{Reg64(inst.cmpl_.s0), Reg64(inst.cmpl_.s1),
+                      inst.cmpl_.sf};
+          break;
+
+        case Vinstr::cmpbi:
+          inst = cmpqi{inst.cmpbi_.s0, Reg64(inst.cmpbi_.s1), inst.cmpbi_.sf};
+          break;
+
+        case Vinstr::cmpli:
+          inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
+          break;
+
+        case Vinstr::cmpbim:
+          inst = cmplim{inst.cmpbim_.s0, inst.cmpbim_.s1, inst.cmpbim_.sf};
+          break;
+
+        case Vinstr::subl:
+          inst = subq{Reg64(inst.subl_.s0), Reg64(inst.subl_.s1),
+                      Reg64(inst.subl_.d), inst.subl_.sf};
+          break;
+
+        case Vinstr::subbi:
+          inst = subqi{inst.subbi_.s0, Reg64(inst.subbi_.s1),
+                       Reg64(inst.subbi_.d), inst.subbi_.sf};
+          break;
+
+        case Vinstr::subli:
+          inst = subqi{inst.subli_.s0, Reg64(inst.subli_.s1),
+                       Reg64(inst.subli_.d), inst.subli_.sf};
+          break;
+
+        case Vinstr::testb:
+          inst = testq{Reg64(inst.testb_.s0), Reg64(inst.testb_.s1),
+                       inst.testb_.sf};
+          break;
+
+        case Vinstr::testl:
+          inst = testq{Reg64(inst.testl_.s0), Reg64(inst.testl_.s1),
+                       inst.testl_.sf};
+          break;
+
+        case Vinstr::testbi:
+          inst = testqi{inst.testbi_.s0, Reg64(inst.testbi_.s1),
+                        inst.testbi_.sf};
+          break;
+
+        case Vinstr::testli:
+          inst = testqi{inst.testli_.s0, Reg64(inst.testli_.s1),
+                        inst.testli_.sf};
+          break;
+
+        case Vinstr::xorb:
+          inst = xorq{Reg64(inst.xorb_.s0), Reg64(inst.xorb_.s1),
+                      Reg64(inst.xorb_.d), inst.xorb_.sf};
+          break;
+
+        case Vinstr::xorl:
+          inst = xorq{Reg64(inst.xorl_.s0), Reg64(inst.xorl_.s1),
+                      Reg64(inst.xorl_.d), inst.xorl_.sf};
+          break;
+
+        case Vinstr::xorbi:
+          inst = xorqi{inst.xorbi_.s0, Reg64(inst.xorbi_.s1),
+                       Reg64(inst.xorbi_.d), inst.xorbi_.sf};
+          break;
+
+        case Vinstr::andb:
+          inst = andq{Reg64(inst.andb_.s0), Reg64(inst.andb_.s1),
+                       Reg64(inst.andb_.d), inst.andb_.sf};
+          break;
+
+        case Vinstr::andl:
+          inst = andq{Reg64(inst.andl_.s0), Reg64(inst.andl_.s1),
+                       Reg64(inst.andl_.d), inst.andl_.sf};
+          break;
+
+        case Vinstr::andbi:
+          inst = andqi{inst.andbi_.s0, Reg64(inst.andbi_.s1),
+                       Reg64(inst.andbi_.d), inst.andbi_.sf};
           break;
 
         default:
