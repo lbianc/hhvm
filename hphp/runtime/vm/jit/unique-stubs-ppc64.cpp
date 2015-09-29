@@ -80,6 +80,39 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 static TCA emitDecRefHelper(CodeBlock& cb, PhysReg tv, PhysReg type,
                             RegSet live) {
   return vwrap(cb, [&] (Vout& v) {
+    // We use the first argument register for the TV data because we may pass
+    // it to the release routine.  It's not live when we enter the helper.
+    auto const data = rarg(0);
+    v << load{tv[TVOFF(m_data)], data};
+
+    auto const sf = v.makeReg();
+    v << cmplim{1, data[FAST_REFCOUNT_OFFSET], sf};
+
+    ifThen(v, CC_NL, sf, [&] (Vout& v) {
+      // The refcount is positive, so the value is refcounted.  We need to
+      // either decref or release.
+      ifThen(v, CC_NE, sf, [&] (Vout& v) {
+        // The refcount is greater than 1; decref it.
+        v << declm{data[FAST_REFCOUNT_OFFSET], v.makeReg()};
+        v << ret{};
+      });
+
+      // Note that the stack is aligned since we called to this helper from an
+      // stack-unaligned stub.
+      PhysRegSaver prs{v, live, true /* aligned */};
+
+      // The refcount is exactly 1; release the value.
+      v << callm{lookupDestructor(v, type)};
+
+      // Between where rsp is now and the saved RIP of the call into the
+      // freeLocalsHelpers stub, we have all the live regs we pushed, plus the
+      // saved RIP of the call from the stub to this helper.
+      v << syncpoint{makeIndirectFixup(prs.dwordsPushed() + 1)};
+      // fallthru
+    });
+
+    // Either we did a decref, or the value was static.
+    v << ret{};
   });
 }
 
@@ -94,8 +127,57 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   align(cb, Alignment::CacheLine, AlignContext::Dead);
   auto const release = emitDecRefHelper(cb, local, type, local | last);
 
+  auto const decref_local = [&] (Vout& v) {
+    auto const sf = v.makeReg();
+
+    // We can't use emitLoadTVType() here because it does a byte load, and we
+    // need to sign-extend since we use `type' as a 32-bit array index to the
+    // destructor table.
+    v << loadzbl{local[TVOFF(m_type)], type};
+    emitCmpTVType(v, sf, KindOfRefCountThreshold, type);
+
+    ifThen(v, CC_G, sf, [&] (Vout& v) {
+      v << call{release, arg_regs(3)};
+    });
+  };
+
+  auto const next_local = [&] (Vout& v) {
+    v << addqi{static_cast<int>(sizeof(TypedValue)),
+               local, local, v.makeReg()};
+  };
+
+  alignJmpTarget(cb);
+
   us.freeManyLocalsHelper = vwrap(cb, [&] (Vout& v) {
+    // We always unroll the final `kNumFreeLocalsHelpers' decrefs, so only loop
+    // until we hit that point.
+    v << lea{rvmfp()[localOffset(kNumFreeLocalsHelpers - 1)], last};
+
+    doWhile(v, CC_NZ, {},
+      [&] (const VregList& in, const VregList& out) {
+        auto const sf = v.makeReg();
+
+        decref_local(v);
+        next_local(v);
+        v << cmpq{local, last, sf};
+        return sf;
+      }
+    );
   });
+
+  for (auto i = kNumFreeLocalsHelpers - 1; i >= 0; --i) {
+    us.freeLocalsHelpers[i] = vwrap(cb, [&] (Vout& v) {
+      decref_local(v);
+      if (i != 0) next_local(v);
+    });
+  }
+
+  // All the stub entrypoints share the same ret.
+  vwrap(cb, [] (Vout& v) { v << ret{}; });
+
+  // This stub is hot, so make sure to keep it small.
+  always_assert(Stats::enabled() ||
+                (cb.frontier() - release <= 4 * cache_line_size()));
 
   return release;
 }
