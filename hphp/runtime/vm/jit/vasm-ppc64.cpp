@@ -124,38 +124,67 @@ struct Vgen {
    * register.
    */
   inline void VptrAddressToReg(Vptr s, Vreg d, bool ignore_base) {
-    if (s.index.isValid()) {
-      // Calculate index position before adding base and displacement.
-      // If scale is 1 we just ignore it.
-      uint8_t scale = s.scale, n = 0;
+
+    enum class AddressModes {
+      kInvalid         = 0,
+      kBaseless        = 1, // Index
+      kDirect          = 2, // Base
+      kBase_Index      = 3, // Base+Index
+      kImmediate       = 4, // Displacement
+      kDisp_Index      = 5, // Dispacement+Index
+      kBase_Disp       = 6, // Base+Displacement
+      kBase_Disp_Index = 7  // Base+Displacement+Index
+    };
+
+    AddressModes mode = static_cast<AddressModes>(
+                      ((s.index.isValid() & 0x1) << 0) ||
+                      (((s.base.isValid() && !ignore_base) & 0x1) << 1) ||
+                      ((s.disp != -1) << 2));
+
+    // Calculate index*scale type address.
+    uint8_t scale = s.scale, n = 0;
+    if(s.scale != 1) {
       while (scale >>= 1) {
         ++n;
       }
       assert(n <= 3);
-      // scale factor is always 1, 2, 4 or, 8
-      // so we can perform index*scale doing a shift left
-      emit(shlqi{n, s.index, d, VregSF(0)});
-
-      if (s.base.isValid() && !ignore_base) {
-        emit(addq {s.base, d, d, VregSF(0)});
-      }
-      // if we have displacement 0 we can avoid this instruction
-      if(s.disp != 0) {
-        emit(addqi{s.disp, d, d, VregSF(0)});
-      }
-
-    } else {
-      // Indexless
-      if (s.base.isValid()) {
-        // Base + Displacement
-        emit(addqi{s.disp, s.base, d, VregSF(0)});
-      } else {
-        // Baseless
-        emit(ldimmq{s.disp, d});
-      }
     }
-    //TODO(rcardoso): We can insert this here and get rid of VptrToReg function?
-    //emit(load{*d, d});
+    emit(shlqi{n, s.index, d, VregSF(0)});
+    Vreg tmp;
+    switch (mode) {
+         case AddressModes::kBaseless:
+           emit(shlqi{n, s.index, d, VregSF(0)});
+           break;
+         case AddressModes::kDirect:
+           emit(copy {s.base, d});
+           break;
+         case AddressModes::kBase_Index:
+           emit(shlqi{n, s.index, d, VregSF(0)});
+           emit(addq {s.base, d, d, VregSF(0)});
+           break;
+         case AddressModes::kImmediate:
+           emit(ldimmq{s.disp, d});
+           break;
+         case AddressModes::kDisp_Index:
+           emit(shlqi{n, s.index, d, VregSF(0)});
+           emit(ldimmq{s.disp, tmp});
+           emit(addq {tmp, d, d, VregSF(0)});
+           break;
+         case AddressModes::kBase_Disp:
+           emit(ldimmq{s.disp, d});
+           emit(addq {s.base, d, d, VregSF(0)});
+           break;
+         case AddressModes::kBase_Disp_Index:
+           emit(shlqi{n, s.index, d, VregSF(0)});
+           emit(addq {s.base, d, d, VregSF(0)});
+           emit(ldimmq{s.disp, tmp});
+           emit(addq {tmp, d, d, VregSF(0)});
+           break;
+         case AddressModes::kInvalid:
+         default:
+           assert(false && "Invalid address mode");
+           break;
+       }
   }
 
   /*
@@ -163,7 +192,7 @@ struct Vgen {
    */
   inline void VptrToReg(Vptr s, Vreg d, bool ignore_base=0) {
     VptrAddressToReg(s, d, ignore_base);
-    emit(load{*d, d}); //TODO(rcardoso): ??
+    emit(load{*d, d});
   }
 
   /*
