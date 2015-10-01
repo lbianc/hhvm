@@ -57,6 +57,9 @@ constexpr PhysReg rvmfp()    { return ppc64_asm::reg::r28; }
 constexpr PhysReg rvmsp()    { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()    { return ppc64_asm::reg::r30; }
 constexpr PhysReg rvasmtmp() { return ppc64_asm::reg::r31; }
+// TODO (lbianc)
+// rvasmtmp2 must be removed, this is a hack to make "VptrAddressToReg" work.
+constexpr PhysReg rvasmtmp2() { return ppc64_asm::reg::r26; }
 constexpr PhysReg rsp()      { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()  { return ppc64_asm::reg::r0;  }
 

@@ -137,8 +137,8 @@ struct Vgen {
     };
 
     AddressModes mode = static_cast<AddressModes>(
-                      ((s.index.isValid() & 0x1) << 0) ||
-                      (((s.base.isValid() && !ignore_base) & 0x1) << 1) ||
+                      ((s.index.isValid() & 0x1) << 0) |
+                      (((s.base.isValid() && !ignore_base) & 0x1) << 1) |
                       ((s.disp != -1) << 2));
 
     // Calculate index*scale type address.
@@ -149,8 +149,13 @@ struct Vgen {
       }
       assert(n <= 3);
     }
-    emit(shlqi{n, s.index, d, VregSF(0)});
-    Vreg tmp;
+
+    // TODO (lbianc)
+    // Using another temp register is not the best way to solve the need of a
+    // temp reg. All VASMs that use a temp register must use the lowering,
+    // since on that context a temp register can be requested by "v.makeReg()".
+    // It avoids allocate a specific register to be used only as temporary.
+    Vreg tmp = ppc64::rvasmtmp2();
     switch (mode) {
          case AddressModes::kBaseless:
            emit(shlqi{n, s.index, d, VregSF(0)});
