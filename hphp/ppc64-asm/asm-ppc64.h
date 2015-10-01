@@ -27,7 +27,6 @@
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
-#include "hphp/util/safe-cast.h"
 
 namespace ppc64_asm {
 
@@ -1838,7 +1837,7 @@ public:
     int16_t* BD = (int16_t*)(jmp);    // target address location in instruction
 
     // Keep AA and LK values
-    *BD = HPHP::safe_cast<int16_t>(diff & 0xFFFC) | ((*BD) & 0x3);
+    *BD = static_cast<int16_t>(diff & 0xFFFC) | ((*BD) & 0x3);
   }
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
@@ -1849,13 +1848,13 @@ public:
     ssize_t diff = dest - jmp;
 
     int16_t *imm = (int16_t*)(jmp);     // immediate field of addi
-    *imm = HPHP::safe_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 32)) >> 32);
+    *imm = static_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 32)) >> 32);
 
     imm += 2*4;                         // skip sldi instruction
-    *imm = HPHP::safe_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 16)) >> 16);
+    *imm = static_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 16)) >> 16);
 
     imm += 4;                           // next instruction
-    *imm = HPHP::safe_cast<int16_t>(diff & ssize_t(UINT16_MAX));
+    *imm = static_cast<int16_t>(diff & ssize_t(UINT16_MAX));
   }
 
   void emitNop(int n) {
