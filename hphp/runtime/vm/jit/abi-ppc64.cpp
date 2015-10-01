@@ -51,8 +51,10 @@ const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(reg::r12) | reg::r13 | rfuncln() | rvmtl() |
-  rvmfp() | rvmsp() | rvasmtmp() | rvasmtmp2() | rAsm | rsp() | r_svcreq_stub()
+const RegSet kGPReserved = RegSet(reg::r12) | rfuncln() | rvmtl() |
+  rvasmtmp2() | rvmfp() | rvmsp() | rvasmtmp() | rAsm | rsp() |
+  r_svcreq_stub() | rthreadptr()
+
 #if PPC64_HAS_PUSH_POP
   | rstktop()
 #endif

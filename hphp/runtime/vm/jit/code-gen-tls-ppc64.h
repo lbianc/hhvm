@@ -21,19 +21,24 @@
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
-#include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/util/thread-local.h"
 
 namespace HPHP { namespace jit { namespace ppc64 { namespace detail {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/*
+ * Same implementation as x64 but uses r13 as thread local storage pointer.
+ *
+ * No segmented memory exists, just need to use relative addressing to r13,
+ * therefore no FS segment was specified.
+ */
 template<typename T>
 Vptr emitTLSAddr(Vout& v, TLSDatum<T> datum) {
-  // Same implementation as x64. Might be incorrect.
-  // TODO: Do the correct porting for POWER.
+
   uintptr_t vaddr = uintptr_t(datum.tls) - tlsBase();
-  return Vptr{baseless(vaddr), Vptr::FS};
+  return Vptr{MemoryRef(DispReg(rthreadptr(),vaddr))};
 }
 
 }}}}
