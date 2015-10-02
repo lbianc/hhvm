@@ -176,8 +176,10 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   vwrap(cb, [] (Vout& v) { v << ret{}; });
 
   // This stub is hot, so make sure to keep it small.
+#if defined(PPC64_PERFORMANCE)
   always_assert(Stats::enabled() ||
                 (cb.frontier() - release <= 4 * cache_line_size()));
+#endif
 
   return release;
 }
