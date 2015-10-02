@@ -925,16 +925,16 @@ void lowerForPPC64(Vunit& unit) {
   // iterators.
   auto& blocks = unit.blocks;
 
+#if PPC64_HAS_PUSH_POP
+  InitializePushStk(unit, Vlabel{0}, 0);
+#endif
+
   PostorderWalker{unit}.dfs([&] (Vlabel ib) {
     assertx(!blocks[ib].code.empty());
     auto& back = blocks[ib].code.back();
     if (back.op == Vinstr::vcallarray) {
       lower_vcallarray(unit, Vlabel{ib});
     }
-
-#if PPC64_HAS_PUSH_POP
-    InitializePushStk(unit, Vlabel{ib}, 0);
-#endif
 
     for (size_t ii = 0; ii < blocks[ib].code.size(); ++ii) {
       auto& inst = blocks[ib].code[ii];
