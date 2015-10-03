@@ -55,6 +55,31 @@
 #define ETCH_R_VM_SP    %rbx
 #define ETCH_R_VM_TL    %r12
 
+#elif defined(__powerpc64__)
+#define CFI(x)          .cfi_##x
+#define CFI2(x, y)      .cfi_##x y
+#define CFI3C(x, y, z)  .cfi_##x y##, z
+#define ETCH_ALIGN16    .align 16
+#define ETCH_ALIGN8     .align 8
+#define ETCH_ALIGN4     .align 4
+#define ETCH_SECTION(x) .section .text.x,"ax"
+#define ETCH_SIZE(x)    .size x, .-x
+#define ETCH_NAME(x)    x
+#define ETCH_LABEL(x)   .L##x
+#define ETCH_TYPE(x, y) .type x, y
+#define ETCH_NAME_REL(x) $ x
+#define ETCH_ARG1       %r3
+#define ETCH_ARG2       %r4
+#define ETCH_ARG3       %r5
+#define ETCH_ARG4       %r6
+#define ETCH_ARG5       %r7
+#define ETCH_ARG6       %r8
+#define ETCH_RET1       %r3
+/* VM Registers must match definition on abi-ppc64.h */
+#define ETCH_R_VM_FP    %r28
+#define ETCH_R_VM_SP    %r29
+#define ETCH_R_VM_TL    %r30
+
 #else /* Other x86 (e.g. linux) */
 #define CFI(x)          .cfi_##x
 #define CFI2(x, y)      .cfi_##x y

@@ -53,6 +53,7 @@ const Abi& abi(CodeKind kind = CodeKind::Trace);
 constexpr PhysReg rstktop()  { return ppc64_asm::reg::r27; }
 #endif
 
+/* VM registers must match etch-helpers.h definitions! */
 constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r28; }
 constexpr PhysReg rvmsp()      { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
