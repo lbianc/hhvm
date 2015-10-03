@@ -160,13 +160,18 @@ enterTCServiceReq:
 // r6: vmFirstAR()
 // r7: rds::tl_base
 // r8: stashedAR
-ETCH_SECTION(enterTCHelper)
-.globl ETCH_NAME(enterTCHelper)
+  ETCH_ALIGN16
+  ETCH_SECTION(enterTCHelper)
+  .globl ETCH_NAME(enterTCHelper)
 ETCH_NAME(enterTCHelper):
   // Prologue
+  CFI(startproc)                // set debug information
+
   mflr %r0
   std %r0, 16(%r1)    // LR on parent call frame
+  CFI3C(offset, lr, -16)        // Where to find previous value of link register
   stdu %r1, -176(%r1) // aligned with Epilogue: addi %r1, %r1, 176
+  CFI2(adjust_cfa_offset, 176)  // cfa is now adjusted
 
   // Save non-volatile registers in order to restore it on Epilogue
   std %r2, 24(%r1)    // TOC
@@ -189,36 +194,36 @@ ETCH_NAME(enterTCHelper):
   std %r30, 160(%r1)  // local variable #17
   std %r31, 168(%r1)  // local variable #18
 
-  mr %r3, %r4         // change fp to right register
+  // Set firstAR->m_sfp to point to this frame.
+  std %r1, 0(ETCH_ARG4)
 
-  mr %r12, %r5        // %r12 is the function linkage
+  // Set up special registers used for translated code.
+  mr ETCH_R_VM_SP, ETCH_ARG1
+  mr ETCH_R_VM_TL, ETCH_ARG5
+  mr ETCH_R_VM_FP, ETCH_ARG2
+
+  cmpdi ETCH_ARG6, 0
+  beq ETCH_LABEL(enterTCHelper$callTC)
+  mr ETCH_R_VM_FP, ETCH_ARG6
+
+ETCH_LABEL(enterTCHelper$callTC):
+  // go to requested code
+  mr %r12, ETCH_ARG3  // %r12 is the function linkage
   mtctr %r12
   bctrl               // mind the 'l' at the end so that it returns here later
-  b enterTCExit
-ETCH_SIZE(enterTCHelper)
-// ==== enterTCHelper ====
 
-ETCH_SECTION(handleSRHelper)
-.globl ETCH_NAME(handleSRHelper)
-ETCH_NAME(handleSRHelper):
-  blr
-ETCH_SIZE(handleSRHelper)
-
-ETCH_SECTION(handleSRResumeTC)
-.globl ETCH_NAME(handleSRResumeTC)
-ETCH_NAME(handleSRResumeTC):
-  blr
-ETCH_SIZE(handleSRResumeTC)
-
-ETCH_SECTION(enterTCServiceReq)
-.globl ETCH_NAME(enterTCServiceReq)
-ETCH_NAME(enterTCServiceReq):
-  blr
-ETCH_SIZE(enterTCServiceReq)
-
-ETCH_SECTION(enterTCExit)
-.globl ETCH_NAME(enterTCExit)
+  /*
+   * enterTCExit is never called directly; this exists to give the jit
+   * access to the address of the expected return address while in the TC.
+   */
+  .globl ETCH_NAME(enterTCExit)
 ETCH_NAME(enterTCExit):
+  /*
+   * Eager vm-reg save. Must match values in rds-header.h
+   */
+  std ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
+  std ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+
   // Epilogue
   // Load non-volatile registers saved on Prologue
   ld %r2, 24(%r1)     // TOC
@@ -245,8 +250,23 @@ ETCH_NAME(enterTCExit):
   ld %r0, 16(%r1)
   mtlr %r0
   blr
-ETCH_SIZE(enterTCExit)
 
+  CFI(endproc)
+  ETCH_SIZE(enterTCHelper)
+// ==== enterTCHelper ====
 
+  // handleSRHelper: Translated code will jump to this stub to perform all
+  // service requests. It calls out to C++ to handle the request, then jumps
+  // to the returned address (which may be the callToExit stub).
+  ETCH_ALIGN16
+  ETCH_SECTION(handleSRHelper)
+  .globl ETCH_NAME(handleSRHelper)
+ETCH_NAME(handleSRHelper):
+  CFI(startproc)
+
+  trap // not yet implemented
+
+  CFI(endproc)
+  ETCH_SIZE(handleSRHelper)
 
 #endif
