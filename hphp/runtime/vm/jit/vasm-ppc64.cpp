@@ -378,6 +378,10 @@ struct Vgen {
   }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
+  void emit(const cmpbim& i) {
+    VptrToReg(i.s1, ppc64::rvasmtmp());
+    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
+  }
   void emit(const cmplim& i) {
     VptrToReg(i.s1, ppc64::rvasmtmp());
     a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
@@ -998,9 +1002,6 @@ void lowerForPPC64(Vunit& unit) {
           break;
         case Vinstr::cmpli:
           inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
-          break;
-        case Vinstr::cmpbim:
-          inst = cmplim{inst.cmpbim_.s0, inst.cmpbim_.s1, inst.cmpbim_.sf};
           break;
 
         // Lower subtraction to subq
