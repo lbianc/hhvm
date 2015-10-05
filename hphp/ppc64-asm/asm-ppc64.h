@@ -565,8 +565,8 @@ public:
   void lfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
   }
-  void lxvw4x(const RegXMM& xt, const Reg64& ra, const Reg64&rb) {
-    EmitXX1Form(31, rn(xt), rn(ra), rn(rb), 780, 0);
+  void lxvw4x(const RegXMM& Xt, const MemoryRef& m) {
+    EmitXX1Form(31, rn(Xt), rn(m.r.base), rn(m.r.index), 780, 0);
   }
   void isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint16_t bc);
   void lbz(const Reg64& rt, MemoryRef m);
