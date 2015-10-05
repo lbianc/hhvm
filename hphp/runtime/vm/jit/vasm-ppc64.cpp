@@ -119,105 +119,45 @@ struct Vgen {
 
   /*
    * Calculates the effective address of Vptr s and stores on Register d
-   * The parameter ignore_base can be used to ignore base register for
-   * load/store instructions. In this case base cannot be added to index
-   * register.
-   */
-  inline void VptrAddressToReg(Vptr s, Vreg d, bool ignore_base) {
-
-    enum class AddressModes {
-      kInvalid         = 0,
-      kBaseless        = 1, // Index
-      kDirect          = 2, // Base
-      kBase_Index      = 3, // Base+Index
-      kImmediate       = 4, // Displacement
-      kDisp_Index      = 5, // Dispacement+Index
-      kBase_Disp       = 6, // Base+Displacement
-      kBase_Disp_Index = 7  // Base+Displacement+Index
-    };
-
-    AddressModes mode = static_cast<AddressModes>(
-                      ((s.index.isValid() & 0x1) << 0) |
-                      (((s.base.isValid() && !ignore_base) & 0x1) << 1) |
-                      ((s.disp != -1) << 2));
-
-    // Calculate index*scale type address.
-    uint8_t scale = s.scale, n = 0;
-    if(s.scale != 1) {
-      while (scale >>= 1) {
-        ++n;
-      }
-      assert(n <= 3);
-    }
-
-    // TODO (lbianc)
-    // Using another temp register is not the best way to solve the need of a
-    // temp reg. All VASMs that use a temp register must use the lowering,
-    // since on that context a temp register can be requested by "v.makeReg()".
-    // It avoids allocate a specific register to be used only as temporary.
-    Vreg tmp = ppc64::rvasmtmp2();
-    switch (mode) {
-         case AddressModes::kBaseless:
-           emit(shlqi{n, s.index, d, VregSF(0)});
-           break;
-         case AddressModes::kDirect:
-           emit(copy {s.base, d});
-           break;
-         case AddressModes::kBase_Index:
-           emit(shlqi{n, s.index, d, VregSF(0)});
-           emit(addq {s.base, d, d, VregSF(0)});
-           break;
-         case AddressModes::kImmediate:
-           emit(ldimmq{s.disp, d});
-           break;
-         case AddressModes::kDisp_Index:
-           emit(shlqi{n, s.index, d, VregSF(0)});
-           emit(ldimmq{s.disp, tmp});
-           emit(addq {tmp, d, d, VregSF(0)});
-           break;
-         case AddressModes::kBase_Disp:
-           emit(ldimmq{s.disp, d});
-           emit(addq {s.base, d, d, VregSF(0)});
-           break;
-         case AddressModes::kBase_Disp_Index:
-           emit(shlqi{n, s.index, d, VregSF(0)});
-           emit(addq {s.base, d, d, VregSF(0)});
-           emit(ldimmq{s.disp, tmp});
-           emit(addq {tmp, d, d, VregSF(0)});
-           break;
-         case AddressModes::kInvalid:
-         default:
-           assert(false && "Invalid address mode");
-           break;
-       }
-  }
-
-  /*
-   * Stores in d the value pointed by s
+   * The parameter ignore_base can be used to tell to function to not add
+   * base register for load/store instructions.
    */
   inline void VptrToReg(Vptr s, Vreg d, bool ignore_base=0) {
-    VptrAddressToReg(s, d, ignore_base);
+
+    // Calculate index*scale type address.
+    uint8_t shift = s.scale == 2 ? 1 :
+                    s.scale == 4 ? 2 :
+                    s.scale == 8 ? 3 : 0;
+    assert(shift > 0);
+
+    if(!s.index.isValid() && !s.base.isValid() &&
+       !ignore_base && s.disp == -1) {
+      assert(false && "Invalid address mode");
+    }
+    if(s.index.isValid()) {
+      emit(shlqi{shift, s.index, d, VregSF(0)});
+    }
+    if((s.base.isValid() &&
+       !ignore_base) && s.disp == -1 && !s.index.isValid()) {
+      emit(copy{s.base, d});
+    }
+    if(s.base.isValid() && !ignore_base) {
+      emit(addq{s.base, d, d, VregSF(0)});
+    }
+    if(s.disp > -1) {
+      if(!s.base.isValid() && !s.index.isValid()){
+        emit(ldimmq{s.disp, d});
+      } else {
+        emit(addqi{s.disp, d, d, VregSF(0)});
+      }
+    }
     emit(load{*d, d});
   }
 
   /*
-   * We can have the following address modes in X64
-   *
-   * - Direct Operand: displacement
-   * - Indirect Operand: (base)
-   * - Base + Displacement: displacement(base)
-   * - (Index * Scale) + Displacement: displacement(,index,scale)
-   * - Base + Index + Displacement: displacement(base,index)
-   * - Base +(Index * Scale) + Displacement: displacement(base, index,scale)
-   *
-   * In PPC64 we have:
-   * - Direct Operand: displacement (Form-D)
-   * - Indirect Operand: (Base with displacement = 0) (Form-D)
-   * - Base + Index: Index(Base) (Form-X)
-   *
-   *  If we have displacement > 16 bits we have to use Form-X. So if we get
-   *  a Vptr with a unsupported address mode (like Index * Scale) we need
-   *  to convert (patch) this address mode to a supported address mode.
+   * A Vptr can represent all address modes for X64. In PPC64 we dont have
+   * some of those address mode, so we need to patch memory operands which
+   * means emit some aditional instruction.
    */
   inline void PatchMemoryOperands(Vptr s) {
     // we do nothing for supported address modes
