@@ -128,7 +128,6 @@ struct Vgen {
     uint8_t shift = s.scale == 2 ? 1 :
                     s.scale == 4 ? 2 :
                     s.scale == 8 ? 3 : 0;
-    assert(shift > 0);
 
     if(!s.index.isValid() && !s.base.isValid() &&
        !ignore_base && s.disp == -1) {
@@ -499,8 +498,8 @@ struct Vgen {
   void emit(const sqrtsd& i) { not_implemented(); }
   void emit(const storeups& i) { not_implemented(); }
   void emit(const storeb& i) {
+    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stbx(Reg64(i.s), i.m);
     } else {
       a->stb(Reg64(i.s), i.m);
@@ -508,16 +507,16 @@ struct Vgen {
   }
   void emit(const storebi& i) {
     a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
+    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stbx(ppc64::rvasmtmp(), i.m);
     } else {
       a->stb(ppc64::rvasmtmp(), i.m);
     }
   }
   void emit(const storel& i) {
+    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stwx(Reg64(i.s), i.m);
     } else {
       a->stw(Reg64(i.s), i.m);
@@ -534,24 +533,24 @@ struct Vgen {
   }
   void emit(const storeqi& i) {
     a->li64(ppc64::rvasmtmp(), i.s.q());
+    PatchMemoryOperands(i.m);
     if (i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stdx(ppc64::rvasmtmp(), i.m);
     } else {
       a->std(ppc64::rvasmtmp(), i.m);
     }
   }
   void emit(const storesd& i) {
+    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stfdx(i.s, i.m);
     } else {
       a->stfd(i.s, i.m);
     }
   }
   void emit(const storew& i) {
+    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->sthx(Reg64(i.s), i.m);
     } else {
       a->sth(Reg64(i.s), i.m);
@@ -559,8 +558,8 @@ struct Vgen {
   }
   void emit(const storewi& i) {
     a->li(ppc64::rvasmtmp(), i.s);
+    PatchMemoryOperands(i.m);
     if (i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->sthx(ppc64::rvasmtmp(), i.m);
     } else {
       a->sth(ppc64::rvasmtmp(), i.m);
@@ -665,8 +664,8 @@ void Vgen::emit(const vret& i) {
 
 void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
+    PatchMemoryOperands(i.s);
     if (i.s.index.isValid()){
-      PatchMemoryOperands(i.s);
       a->ldx(i.d, i.s);
     } else {
       a->ld(i.d, i.s);
@@ -696,8 +695,8 @@ void Vgen::pad(CodeBlock& cb) {
 
 void Vgen::emit(const store& i) {
   if (i.s.isGP()) {
+    PatchMemoryOperands(i.d);
     if (i.d.index.isValid()){
-      PatchMemoryOperands(i.d);
       a->stdx(i.s, i.d);
     } else {
       a->std(i.s, i.d);
