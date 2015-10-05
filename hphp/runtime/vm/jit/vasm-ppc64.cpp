@@ -323,7 +323,15 @@ struct Vgen {
   }
   void emit(const cmplim& i) {
     VptrToReg(i.s1, ppc64::rvasmtmp());
-    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
+
+    if (i.s0.fits(HPHP::sz::word)) {
+      a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
+    }
+    else
+    {
+      a->li32(ppc64::rvasmtmp2(), i.s0.l());
+      a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
+    }
   }
   void emit(const cmplm& i) { not_implemented(); }
   //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
