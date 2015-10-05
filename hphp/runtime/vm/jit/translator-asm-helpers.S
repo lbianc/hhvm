@@ -169,9 +169,7 @@ ETCH_NAME(enterTCHelper):
 
   mflr %r0
   std %r0, 16(%r1)    // LR on parent call frame
-  CFI3C(offset, lr, -16)        // Where to find previous value of link register
   stdu %r1, -176(%r1) // aligned with Epilogue: addi %r1, %r1, 176
-  CFI2(adjust_cfa_offset, 176)  // cfa is now adjusted
 
   // Save non-volatile registers in order to restore it on Epilogue
   std %r2, 24(%r1)    // TOC
