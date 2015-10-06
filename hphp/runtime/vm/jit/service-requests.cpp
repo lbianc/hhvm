@@ -210,10 +210,10 @@ namespace x64 {
   static constexpr int kLeaVmSpLen = 7;
 }
 
-namespace PPC64 {
-  // Standard PPC64 instructions are 4 bytes long
+namespace ppc64 {
+  // Standard ppc64 instructions are 4 bytes long
   static constexpr int kStdIns = 4;
-  // Leap for PPC64, in worst case, have 5 standard PPC64 instructions.
+  // Leap for ppc64, in worst case, have 5 standard ppc64 instructions.
   static constexpr int kLeaVMSpLen = kStdIns * 5;
 }
 
@@ -227,11 +227,11 @@ size_t stub_size() {
     case Arch::ARM:
       not_implemented();
       break;
-    case Arch::PPC64:
+    case Arch::ppc64:
     // This calculus was based on the amount of emitted instructions in
     // emit_svcreq.
-      return (PPC64::kStdIns + PPC64::kLeaVMSpLen) * kTotalArgs +
-          PPC64::kLeaVMSpLen + 3 * PPC64::kStdIns;
+      return (ppc64::kStdIns + ppc64::kLeaVMSpLen) * kTotalArgs +
+          ppc64::kLeaVMSpLen + 3 * ppc64::kStdIns;
   }
   not_reached();
 }
