@@ -139,24 +139,24 @@ void Assembler::andis(const Reg64& ra, const Reg64& rs, Immed imm) {
   EmitDForm(29, rn(rs), rn(ra), imm.w());
 }
 
-void Assembler::b(int32_t target_addr) {
-  EmitIForm(18, uint32_t(target_addr));
+void Assembler::b(int32_t offset) {
+  EmitIForm(18, uint32_t(offset));
 }
 
 void Assembler::ba(uint32_t target_addr) {
   EmitIForm(18, target_addr, 1, 0);
 }
 
-void Assembler::bl(int32_t target_addr) {
-  EmitIForm(18, uint32_t(target_addr), 0, 1);
+void Assembler::bl(int32_t offset) {
+  EmitIForm(18, uint32_t(offset), 0, 1);
 }
 
 void Assembler::bla(uint32_t target_addr) {
   EmitIForm(18, target_addr, 1, 1);
 }
 
-void Assembler::bc(uint8_t bo, uint8_t bi, int16_t target_addr) {
-  EmitBForm(16, bo, bi, uint32_t(target_addr), 0, 0);
+void Assembler::bc(uint8_t bo, uint8_t bi, int16_t offset) {
+  EmitBForm(16, bo, bi, uint32_t(offset), 0, 0);
 }
 
 void Assembler::bca(uint8_t bo, uint8_t bi, uint16_t target_addr) {
@@ -171,8 +171,8 @@ void Assembler::bcctrl(uint8_t bo, uint8_t bi, uint16_t bh) {
   EmitXLForm(19, bo, bi, (bh & 0x3), 528, 1);
 }
 
-void Assembler::bcl(uint8_t bo, uint8_t bi, int16_t target_addr) {
-  EmitBForm(16, bo, bi, target_addr, 0, 1);
+void Assembler::bcl(uint8_t bo, uint8_t bi, int16_t offset) {
+  EmitBForm(16, bo, bi, offset, 0, 1);
 }
 
 void Assembler::bcla(uint8_t bo, uint8_t bi, uint16_t target_addr) {
