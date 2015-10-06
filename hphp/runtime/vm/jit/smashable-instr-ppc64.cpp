@@ -69,8 +69,7 @@ TCA emitSmashableCall(CodeBlock& cb, TCA target) {
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
-  not_implemented();
-  return nullptr;
+  return EMIT_BODY(cb, branchAuto, Jmp, target);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, TCA target, ConditionCode cc) {
