@@ -506,7 +506,7 @@ struct Vgen {
   void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
-  void emit(const storeups& i) { not_implemented(); }
+  void emit(const storeups& i) { PatchMemoryOperands(i.m); a->stxvw4x(i.s,i.m); }
   void emit(const storeb& i) {
     PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {

@@ -676,8 +676,8 @@ public:
   void stmw(const Reg64& rs, MemoryRef m);
   void stswi(const Reg64& rs, MemoryRef m);
   void stswx(const Reg64& rs, MemoryRef m);
-  void stxvw4x(const RegXMM& xs, const Reg64& ra, const Reg64&rb) {
-    EmitXX1Form(31, rn(xs), rn(ra), rn(rb), 972, 0);
+  void stxvw4x(const RegXMM& xs, const MemoryRef& m) {
+    EmitXX1Form(31, rn(xs), rn(m.r.base), rn(m.r.index), 972, 0);
   }
   void subf(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
   void subfo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
