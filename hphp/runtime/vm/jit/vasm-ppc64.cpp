@@ -328,12 +328,9 @@ struct Vgen {
   }
   void emit(const cmplim& i) {
     VptrToReg(i.s1, ppc64::rvasmtmp());
-
     if (i.s0.fits(HPHP::sz::word)) {
       a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
-    }
-    else
-    {
+    } else {
       a->li32(ppc64::rvasmtmp2(), i.s0.l());
       a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
     }
