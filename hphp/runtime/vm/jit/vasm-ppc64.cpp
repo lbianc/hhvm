@@ -147,7 +147,12 @@ struct Vgen {
       if(!s.base.isValid() && !s.index.isValid()){
         emit(ldimmq{s.disp, d});
       } else {
-        emit(addqi{s.disp, d, d, VregSF(0)});
+        if (((Immed)s.disp).fits(HPHP::sz::word)) {
+          emit(addqi{s.disp, d, d, VregSF(0)});
+        } else {
+          emit(ldimml{s.disp, ppc64::rvasmtmp2()});
+          emit(addq{ppc64::rvasmtmp2(), d, d, VregSF(0)});
+        }
       }
     }
     emit(load{*d, d});
