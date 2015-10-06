@@ -227,7 +227,7 @@ size_t stub_size() {
     case Arch::ARM:
       not_implemented();
       break;
-    case Arch::ppc64:
+    case Arch::PPC64:
     // This calculus was based on the amount of emitted instructions in
     // emit_svcreq.
       return (ppc64::kStdIns + ppc64::kLeaVMSpLen) * kTotalArgs +
