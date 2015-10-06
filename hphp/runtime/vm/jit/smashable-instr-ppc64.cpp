@@ -27,7 +27,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * On x64, concurrent modification and execution of instructions is safe if all
+ * Concurrent modification and execution of instructions is safe if all
  * of the following hold:
  *
  *  1/  The modification is done with a single processor store.
@@ -43,14 +43,13 @@ namespace HPHP { namespace jit { namespace ppc64 {
     align(cb, Alignment::Smash##Inst,   \
           AlignContext::Live);          \
     auto const start = cb.frontier();   \
-    X64Assembler a { cb };              \
+    ppc64_asm::Assembler a { cb };      \
     a.inst(__VA_ARGS__);                \
     return start;                       \
   }())
 
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
-  auto const start = EMIT_BODY(cb, movq, Movq, 0xdeadbeeffeedface, d);
-
+  auto const start = EMIT_BODY(cb, li64, Movq, d, 0xdeadbeeffeedface);
   auto immp = reinterpret_cast<uint64_t*>(
     cb.frontier() - smashableMovqLen() + kSmashMovqImmOff
   );
@@ -60,20 +59,23 @@ TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
-  return EMIT_BODY(cb, cmpq, Cmpq, imm, r[disp]);
+  not_implemented();
+  return nullptr;
 }
 
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
-  return EMIT_BODY(cb, call, Call, target);
+  not_implemented();
+  return nullptr;
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
-  return EMIT_BODY(cb, jmp, Jmp, target);
+  not_implemented();
+  return nullptr;
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, TCA target, ConditionCode cc) {
-  assertx(cc != CC_None);
-  return EMIT_BODY(cb, jcc, Jcc, cc, target);
+  not_implemented();
+  return nullptr;
 }
 
 std::pair<TCA,TCA>
@@ -82,11 +84,11 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 
   align(cb, Alignment::SmashJccAndJmp, AlignContext::Live);
 
-  X64Assembler a { cb };
+  ppc64_asm::Assembler a { cb };
   auto const jcc = cb.frontier();
-  a.jcc(cc, target);
+  a.branchAuto(target, cc, ppc64_asm::LinkReg::DoNotTouch);
   auto const jmp = cb.frontier();
-  a.jmp(target);
+  a.branchAuto(target);
 
   return std::make_pair(jcc, jmp);
 }
@@ -106,46 +108,15 @@ void smashCmpq(TCA inst, uint32_t imm) {
 }
 
 void smashCall(TCA inst, TCA target) {
-  always_assert(is_aligned(inst, Alignment::SmashCall));
-  /*
-   * TODO(#7889486): We'd like this just to be:
-   *
-   *    X64Assembler::patchCall(inst, target);
-   *
-   * but presently this causes asserts to fire in MCGenerator because of a bug
-   * with PGO and relocation.
-   */
-  auto& cb = mcg->code.blockFor(inst);
-  CodeCursor cursor { cb, inst };
-  X64Assembler a { cb };
-  a.call(target);
+  not_implemented();
 }
 
 void smashJmp(TCA inst, TCA target) {
-  always_assert(is_aligned(inst, Alignment::SmashJmp));
-
-  auto& cb = mcg->code.blockFor(inst);
-  CodeCursor cursor { cb, inst };
-  X64Assembler a { cb };
-
-  if (target > inst && target - inst <= smashableJmpLen()) {
-    a.emitNop(target - inst);
-  } else {
-    a.jmp(target);
-  }
+  not_implemented();
 }
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
-  always_assert(is_aligned(inst, Alignment::SmashJcc));
-
-  if (cc == CC_None) {
-    X64Assembler::patchJcc(inst, target);
-  } else {
-    auto& cb = mcg->code.blockFor(inst);
-    CodeCursor cursor { cb, inst };
-    X64Assembler a { cb };
-    a.jcc(cc, target);
-  }
+  not_implemented();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
