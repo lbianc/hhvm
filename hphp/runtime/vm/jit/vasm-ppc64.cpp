@@ -833,7 +833,7 @@ void lowerOrqim(Vunit& unit, Vlabel b, size_t iInst) {
 
 /*
  * As the immediate is bigger than 16 bits, use a temporary register to load
- * that value and use addq afterwards.
+ * that value and use addq vasm afterwards.
  */
 void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
@@ -846,6 +846,25 @@ void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
 
   v << ldimmq{Immed64(addqi.s0.q()), tmp};
   v << addq  {tmp, addqi.s1, addqi.d, addqi.sf};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+/*
+ * As the immediate is bigger than 16 bits, use a temporary register to load
+ * that value and use cmpq vasm afterwards.
+ */
+void lowerCmpqi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmpqi = inst.cmpqi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  auto tmp = v.makeReg();
+
+  v << ldimmq{Immed64(cmpqi.s0.q()), tmp};
+  v << cmpq  {tmp, cmpqi.s1, cmpqi.sf};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -923,10 +942,15 @@ void lowerForPPC64(Vunit& unit) {
           break;
 
         case Vinstr::addqi:
-          // only immediate up to 16bits can be used on addi
-          if (!inst.addqi_.s0.fits(HPHP::sz::word)) {
+          // only immediate up to 16bits can be used on addi asm instr
+          if (!inst.addqi_.s0.fits(HPHP::sz::word))
             lowerAddqi(unit, Vlabel{ib}, ii);
-          }
+          break;
+
+        case Vinstr::cmpqi:
+          // only immediate up to 16bits can be used on cmpdi asm instr
+          if (!inst.cmpqi_.s0.fits(HPHP::sz::word))
+            lowerCmpqi(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::countbytecode:
@@ -957,7 +981,12 @@ void lowerForPPC64(Vunit& unit) {
           inst = cmpqi{inst.cmpbi_.s0, Reg64(inst.cmpbi_.s1), inst.cmpbi_.sf};
           break;
         case Vinstr::cmpli:
-          inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
+          if (inst.cmpli_.s0.fits(HPHP::sz::word))
+            // immediate can be used right away
+            inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
+          else
+            // lower it just like cmpqi with immediate size > 16bits
+            lowerCmpqi(unit, Vlabel{ib}, ii);
           break;
 
         // Lower subtraction to subq
