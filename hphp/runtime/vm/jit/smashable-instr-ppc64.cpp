@@ -51,7 +51,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
   auto const start = EMIT_BODY(cb, li64, Movq, d, 0xdeadbeeffeedface);
   auto immp = reinterpret_cast<uint64_t*>(
-    cb.frontier() - smashableMovqLen() + kSmashMovqImmOff
+    cb.frontier() - smashableMovqLen()
   );
   *immp = imm;
 
@@ -98,12 +98,16 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 
 void smashMovq(TCA inst, uint64_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashMovq));
-  *reinterpret_cast<uint64_t*>(inst + kSmashMovqImmOff) = imm;
+  not_implemented();
+  // should use a->patchLi64 ?
+  *reinterpret_cast<uint64_t*>(inst) = imm;
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashCmpq));
-  *reinterpret_cast<uint32_t*>(inst + kSmashCmpqImmOff) = imm;
+  not_implemented();
+  // should use a->patchLi64 ?
+  *reinterpret_cast<uint32_t*>(inst) = imm;
 }
 
 void smashCall(TCA inst, TCA target) {
@@ -121,34 +125,30 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return *reinterpret_cast<uint64_t*>(inst + kSmashMovqImmOff);
+  return *reinterpret_cast<uint64_t*>(inst);
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  return *reinterpret_cast<uint32_t*>(inst + kSmashCmpqImmOff);
+  return *reinterpret_cast<uint32_t*>(inst);
 }
 
 TCA smashableCallTarget(TCA inst) {
-  if (inst[0] != 0xE8) return nullptr;
-  return inst + 5 + ((int32_t*)(inst + 5))[-1];
+  if (((inst[3] >> 2) & 0x3F) != 31) return nullptr; // from mflr
+#if PPC64_HAS_PUSH_POP
+  return inst + kStdIns * 5;
+#else
+  return inst + kStdIns * 4;
+#endif
 }
 
 TCA smashableJmpTarget(TCA inst) {
-  if (inst[0] != 0xe9) {
-    if (inst[0] == 0x0f &&
-        inst[1] == 0x1f &&
-        inst[2] == 0x44) {
-      // 5 byte nop
-      return inst + 5;
-    }
-    return nullptr;
-  }
-  return inst + 5 + ((int32_t*)(inst + 5))[-1];
+  return smashableJmpTarget(inst); // for now, it's also a "bc" instruction
 }
 
 TCA smashableJccTarget(TCA inst) {
-  if (inst[0] != 0x0F || (inst[1] & 0xF0) != 0x80) return nullptr;
-  return inst + 6 + ((int32_t*)(inst + 6))[-1];
+  if (((inst[3] >> 2) & 0x3F) != 16) return nullptr; // from patchBc
+  // target found at the beginning of the instruction
+  return inst;
 }
 
 ConditionCode smashableJccCond(TCA inst) {

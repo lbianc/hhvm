@@ -20,6 +20,7 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
+#include "hphp/runtime/vm/jit/abi-ppc64.h" // For PPC64_HAS_PUSH_POP definition
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/data-block.h"
 
@@ -31,11 +32,18 @@ namespace HPHP { namespace jit { namespace ppc64 {
  * Mirrors the API of smashable-instr.h.
  */
 
-constexpr size_t smashableMovqLen() { return 10; }
-constexpr size_t smashableCmpqLen() { return 8; }
-constexpr size_t smashableCallLen() { return 5; }
-constexpr size_t smashableJmpLen()  { return 5; }
-constexpr size_t smashableJccLen()  { return 6; }
+/// Standard PPC64 instructions are 4 bytes long
+static constexpr int kStdIns = 4;
+
+constexpr size_t smashableMovqLen() { return kStdIns * 5; }  // li64's worst case
+constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
+#if PPC64_HAS_PUSH_POP
+constexpr size_t smashableCallLen() { return kStdIns * 15; } // worst case
+#else
+constexpr size_t smashableCallLen() { return kStdIns * 13; } // worst case
+#endif
+constexpr size_t smashableJmpLen()  { return kStdIns * 1; }  // b
+constexpr size_t smashableJccLen()  { return kStdIns * 1; }  // bc
 
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d);
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp);
@@ -57,14 +65,6 @@ TCA smashableCallTarget(TCA inst);
 TCA smashableJmpTarget(TCA inst);
 TCA smashableJccTarget(TCA inst);
 ConditionCode smashableJccCond(TCA inst);
-
-/*
- * Smashable immediate and target offsets.
- *
- * These are also used by align-ppc64.
- */
-constexpr size_t kSmashMovqImmOff = 2;
-constexpr size_t kSmashCmpqImmOff = 4;
 
 ///////////////////////////////////////////////////////////////////////////////
 

@@ -46,8 +46,8 @@ constexpr AlignInfo s_aligns[] = {
   { cache_line_size(),  cache_line_size(),      0 },  // CacheLine
   { cache_line_size(),  cache_line_size() / 2,  0 },  // CacheLineRoundUp
   { kJmpTargetAlign,    kJmpTargetAlign,        0 },  // JmpTarget
-  { cache_line_size(),  smashableMovqLen(),     kSmashMovqImmOff },
-  { cache_line_size(),  smashableCmpqLen(),     kSmashCmpqImmOff },
+  { cache_line_size(),  smashableMovqLen(),     0 },
+  { cache_line_size(),  smashableCmpqLen(),     0 },
   { cache_line_size(),  smashableCallLen(),     0 },
   { cache_line_size(),  smashableJmpLen(),      0 },
   { cache_line_size(),  smashableJccLen(),      0 },
