@@ -2300,6 +2300,8 @@ public:
 
   void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
     assert(m_address && "Cannot evaluate branch size without defined target");
+#if defined(PPC64_PERFORMANCE)
+    not_implemented();
     auto delta = m_address - a.frontier();
     if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
       // Branch by offset
@@ -2309,8 +2311,12 @@ public:
         a.bcl(*this, bc);
       else
         a.bc(*this, bc);
-    } else {
-      // use CTR to perform absolute branch
+    } else
+#else
+      // force CTR usage to have only 1 case.
+#endif
+    {
+      // use CTR to perform absolute branch up to 64bits addressing mode
       BranchParams bp(bc);
 
       // TODO(gut): is this really the best way? If only there was a register
