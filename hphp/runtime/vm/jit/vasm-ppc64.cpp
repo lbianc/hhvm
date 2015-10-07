@@ -336,10 +336,15 @@ struct Vgen {
     }
   }
   void emit(const cmplm& i) { not_implemented(); }
-  //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
-  void emit(const cmpq& i) { a->cmp(0, 0, i.s0, i.s1); }
-  //TODO(IBM): field 1 indicates cr (cr0) register who holds the bf result
-  void emit(const cmpqi& i) { a->cmpi(0, 0, i.s1, i.s0); }
+  void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
+  void emit(const cmpqi& i) {
+    if (i.s0.fits(HPHP::sz::word)) {
+      a->cmpdi(i.s1, i.s0);
+    } else {
+      emit(ldimmq{i.s0.q(), ppc64::rvasmtmp()});
+      emit(cmpq{ppc64::rvasmtmp(), i.s1, i.sf});
+    }
+  }
   void emit(const cmpqim& i) {
     VptrToReg(i.s1, ppc64::rvasmtmp());
     a->cmpdi(ppc64::rvasmtmp(), i.s0);

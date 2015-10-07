@@ -74,10 +74,7 @@ TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
 
 TCA emitSmashableJcc(CodeBlock& cb, TCA target, ConditionCode cc) {
   assertx(cc != CC_None);
-  return
-    EMIT_BODY(
-      cb, branchAuto, Jcc, target, cc, ppc64_asm::LinkReg::DoNotTouch
-    );
+  return EMIT_BODY(cb, branchAuto, Jcc, target, cc);
 }
 
 std::pair<TCA,TCA>
@@ -88,7 +85,7 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 
   ppc64_asm::Assembler a { cb };
   auto const jcc = cb.frontier();
-  a.branchAuto(target, cc, ppc64_asm::LinkReg::DoNotTouch);
+  a.branchAuto(target, cc);
   auto const jmp = cb.frontier();
   a.branchAuto(target);
 
