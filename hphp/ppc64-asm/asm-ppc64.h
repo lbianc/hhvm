@@ -2300,43 +2300,30 @@ public:
 
   void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
     assert(m_address && "Cannot evaluate branch size without defined target");
-#if defined(PPC64_PERFORMANCE)
-    not_implemented();
-    auto delta = m_address - a.frontier();
-    if (HPHP::jit::deltaFits(delta, HPHP::sz::word)) {
-      // Branch by offset
+    // use CTR to perform absolute branch
+    BranchParams bp(bc);
 
-      // TODO(gut): Use a typedef or something to avoid copying code like below:
-      if (LinkReg::Save == lr)
-        a.bcl(*this, bc);
-      else
-        a.bc(*this, bc);
-    } else
-#else
-      // force CTR usage to have only 1 case.
-#endif
-    {
-      // use CTR to perform absolute branch up to 64bits addressing mode
-      BranchParams bp(bc);
+    const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
+    //const CodeAddress address = m_address;
 
-      // TODO(gut): is this really the best way? If only there was a register
-      // that was already filled with the address...
-      const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
+    // Missing bytes for li64
+    int missing = 0;
+    // Use reserved function linkage register
+    a.li64(reg::r12, address, missing);
+    // Emit nops for missing bytes
+    a.emitNop(missing);
+    // When branching to another context, r12 need to keep the target address
+    // to correctly set r2 (TOC reference).
+    a.mtctr(reg::r12);
 
-      addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
+    addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
 
-      // Use reserved function linkage register
-      a.li64(reg::r12, address);
-      // When branching to another context, r12 need to keep the target address
-      // to correctly set r2 (TOC reference).
-      a.mtctr(reg::r12);
+    // TODO(gut): Use a typedef or something to avoid copying code like below:
+    if (LinkReg::Save == lr)
+      a.bcctrl(bp.bo(), bp.bi(), 0);
+    else
+      a.bcctr(bp.bo(), bp.bi(), 0);
 
-      // TODO(gut): Use a typedef or something to avoid copying code like below:
-      if (LinkReg::Save == lr)
-        a.bcctrl(bp.bo(), bp.bi(), 0);
-      else
-        a.bcctr(bp.bo(), bp.bi(), 0);
-    }
   }
 
   void asm_label(Assembler& a) {
