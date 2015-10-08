@@ -374,7 +374,8 @@ struct Vgen {
   void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
-  void emit(const loadtqb& i) { not_implemented(); }
+  void emit(const loadtqb& i) { a->lbz(Reg64(i.d),i.s); }
+  void emit(const loadb& i) { a->lbz(Reg64(i.d),i.s); }
   void emit(const loadl& i) {
     if(i.s.index.isValid()) {
       a->lwzx(Reg64(i.d), i.s);
