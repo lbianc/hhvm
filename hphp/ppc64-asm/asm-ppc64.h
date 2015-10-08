@@ -1846,28 +1846,24 @@ public:
   }
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
-    // Check Label::branchAuto for details
+    HPHP::CodeBlock cb2;
 
     // It has to skip a mtctr, ori, oris, sldi, ori and lis (6 instructions)
     // uint8_t fits 4 times in a instr, so multiply instructions number by 4
     CodeAddress bctr_addr = jmp + 4 * 6;
     // Opcode located at the 6 most significant bits
     assert(((bctr_addr[3] >> 2) & 0x3F) == 19);  // XL-Form
-    ssize_t diff = dest - jmp;
 
-    int16_t *imm = (int16_t*)(jmp);     // immediate field of addi
-    *imm = static_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 32)) >> 32);
+    // Initialize code block cb2 pointing to li64 and sized 20 (li64 + nops).
+    cb2.init(jmp, 20, "patched bctr");
+    Assembler b{ cb2 };
 
-    imm += 2*4;                         // skip sldi instruction
-    *imm = static_cast<int16_t>((diff & (ssize_t(UINT16_MAX) << 16)) >> 16);
-
-    imm += 4;                           // next instruction
-    *imm = static_cast<int16_t>(diff & ssize_t(UINT16_MAX));
+    b.li64(reg::r12, ssize_t(dest));
   }
 
-  void emitNop(int n) {
-    assert((n % 4 == 0) && "This arch supports only 4 bytes alignment");
-    for (; n > 0; n -= 4)
+  void emitNop(int nbytes) {
+    assert((nbytes % 4 == 0) && "This arch supports only 4 bytes alignment");
+    for (; nbytes > 0; nbytes -= 4)
       nop();
   }
 
