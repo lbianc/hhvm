@@ -1846,9 +1846,10 @@ public:
   }
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
+    // Check Label::branchAuto for details
     HPHP::CodeBlock cb2;
 
-    // It has to skip a mtctr, ori, oris, sldi, ori and lis (6 instructions)
+    // It has to skip 6 instructions: li64 (5 instructions) and mtctr
     // uint8_t fits 4 times in a instr, so multiply instructions number by 4
     CodeAddress bctr_addr = jmp + 4 * 6;
     // Opcode located at the 6 most significant bits
@@ -1857,7 +1858,6 @@ public:
     // Initialize code block cb2 pointing to li64 and sized 20 (li64 + nops).
     cb2.init(jmp, 20, "patched bctr");
     Assembler b{ cb2 };
-
     b.li64(reg::r12, ssize_t(dest));
   }
 
@@ -2302,28 +2302,21 @@ public:
     assert(m_address && "Cannot evaluate branch size without defined target");
     // use CTR to perform absolute branch
     BranchParams bp(bc);
-
-    const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
-    //const CodeAddress address = m_address;
-
     // Missing bytes for li64
     int missing = 0;
+    const ssize_t address = ssize_t(m_address);
     // Use reserved function linkage register
+    addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
     a.li64(reg::r12, address, missing);
     // Emit nops for missing bytes
     a.emitNop(missing);
     // When branching to another context, r12 need to keep the target address
     // to correctly set r2 (TOC reference).
     a.mtctr(reg::r12);
-
-    addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
-
-    // TODO(gut): Use a typedef or something to avoid copying code like below:
     if (LinkReg::Save == lr)
       a.bcctrl(bp.bo(), bp.bi(), 0);
     else
       a.bcctr(bp.bo(), bp.bi(), 0);
-
   }
 
   void asm_label(Assembler& a) {
