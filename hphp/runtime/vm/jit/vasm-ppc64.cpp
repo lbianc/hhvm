@@ -117,59 +117,6 @@ struct Vgen {
     a->mtlr(ppc64::rfuncln());
   }
 
-  /*
-   * Calculates the effective address of Vptr s and stores on Register d
-   * The parameter ignore_base can be used to tell to function to not add
-   * base register for load/store instructions.
-   */
-  inline void VptrToReg(Vptr s, Vreg d, bool ignore_base=0) {
-
-    // Calculate index*scale type address.
-    uint8_t shift = s.scale == 2 ? 1 :
-                    s.scale == 4 ? 2 :
-                    s.scale == 8 ? 3 : 0;
-
-    if(!s.index.isValid() && !s.base.isValid() &&
-       !ignore_base && s.disp == -1) {
-      assert(false && "Invalid address mode");
-    }
-    if(s.index.isValid()) {
-      emit(shlqi{shift, s.index, d, VregSF(0)});
-    }
-    if((s.base.isValid() &&
-       !ignore_base) && s.disp == -1 && !s.index.isValid()) {
-      emit(copy{s.base, d});
-    }
-    if(s.base.isValid() && !ignore_base) {
-      emit(addq{s.base, d, d, VregSF(0)});
-    }
-    if(s.disp > -1) {
-      if(!s.base.isValid() && !s.index.isValid()){
-        emit(ldimmq{s.disp, d});
-      } else {
-        if (((Immed)s.disp).fits(HPHP::sz::word)) {
-          emit(addqi{s.disp, d, d, VregSF(0)});
-        } else {
-          emit(ldimml{s.disp, ppc64::rvasmtmp2()});
-          emit(addq{ppc64::rvasmtmp2(), d, d, VregSF(0)});
-        }
-      }
-    }
-    emit(load{*d, d});
-  }
-
-  /*
-   * A Vptr can represent all address modes for X64. In PPC64 we dont have
-   * some of those address mode, so we need to patch memory operands which
-   * means emit some aditional instruction.
-   */
-  inline void PatchMemoryOperands(Vptr s) {
-    // we do nothing for supported address modes
-    if(s.index.isValid() || ((s.disp >> 16) > 0)) {
-      VptrToReg(s, s.index, 1);
-    }
-  }
-
   // intrinsics
   void emit(const callarray& i) { not_implemented(); } ;
   void emit(const callfaststub& i) {
@@ -307,8 +254,7 @@ struct Vgen {
     popMinCallStack();
   }
   void emit(const callm& i) {
-    // uses scratch register
-    VptrToReg(i.target, ppc64::rvasmtmp());
+    emit(load{i.target, ppc64::rvasmtmp()});
     emit(callr{ppc64::rvasmtmp(), i.args});
   }
   void emit(const callr& i) {
@@ -323,14 +269,15 @@ struct Vgen {
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
   void emit(const cmpbim& i) {
-    VptrToReg(i.s1, ppc64::rvasmtmp());
+    emit(load{i.s1, ppc64::rvasmtmp()}); 
     a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
   }
   void emit(const cmplim& i) {
-    VptrToReg(i.s1, ppc64::rvasmtmp());
     if (i.s0.fits(HPHP::sz::word)) {
+      emit(load{i.s1, ppc64::rvasmtmp()});
       a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
     } else {
+      emit(load{i.s1, ppc64::rvasmtmp()});
       a->li32(ppc64::rvasmtmp2(), i.s0.l());
       a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
     }
@@ -346,11 +293,11 @@ struct Vgen {
     }
   }
   void emit(const cmpqim& i) {
-    VptrToReg(i.s1, ppc64::rvasmtmp());
+    emit(load{i.s1, ppc64::rvasmtmp()});
     a->cmpdi(ppc64::rvasmtmp(), i.s0);
   }
   void emit(const cmpqm& i) {
-    VptrToReg(i.s1, ppc64::rvasmtmp());
+    emit(load{i.s1, ppc64::rvasmtmp()});
     a->cmp(0, 0, i.s0, ppc64::rvasmtmp());
   }
   void emit(cmpsd i) { not_implemented(); }
@@ -377,12 +324,13 @@ struct Vgen {
   void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
   void emit(const incwm& i) {
-    VptrToReg(i.m, ppc64::rvasmtmp());
-    a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
     if (i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
+      a->ldx(ppc64::rvasmtmp(), i.m);
+      a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
       a->stdx(ppc64::rvasmtmp(), i.m);
     } else {
+      a->ld(ppc64::rvasmtmp(), i.m);
+      a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
       a->std(ppc64::rvasmtmp(), i.m);
     }
   }
@@ -418,8 +366,9 @@ struct Vgen {
     a->bctr();
   }
   void emit(const jmpm& i) {
-    // uses scratch register
-    VptrToReg(i.target, ppc64::rvasmtmp());
+    //VptrToReg(i.target, ppc64::rvasmtmp());
+    //emit(jmpr {ppc64::rvasmtmp(), i.args});
+    emit(load{i.target, ppc64::rvasmtmp()});
     emit(jmpr {ppc64::rvasmtmp(), i.args});
   }
   void emit(const jmpi& i) {
@@ -427,10 +376,9 @@ struct Vgen {
   }
   void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
-  void emit(const loadups& i) { PatchMemoryOperands(i.s); a->lxvw4x(i.d,i.s); }
+  void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
   void emit(const loadtqb& i) { not_implemented(); }
   void emit(const loadl& i) {
-    PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lwzx(Reg64(i.d), i.s);
     } else {
@@ -440,7 +388,6 @@ struct Vgen {
   void emit(const loadqp& i) { not_implemented(); }
   void emit(const loadsd& i) { not_implemented(); }
   void emit(const loadzbl& i) {
-    PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lbzx(Reg64(i.d), i.s);
     } else {
@@ -448,7 +395,6 @@ struct Vgen {
     }
   }
   void emit(const loadzbq& i) {
-    PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lbzx(i.d, i.s);
     } else {
@@ -456,7 +402,6 @@ struct Vgen {
     }
   }
   void emit(const loadzlq& i) {
-    PatchMemoryOperands(i.s);
     if(i.s.index.isValid()) {
       a->lwzx(i.d, i.s);
     } else {
@@ -513,9 +458,8 @@ struct Vgen {
   void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { not_implemented(); }
-  void emit(const storeups& i) { PatchMemoryOperands(i.m); a->stxvw4x(i.s,i.m); }
+  void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
   void emit(const storeb& i) {
-    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
       a->stbx(Reg64(i.s), i.m);
     } else {
@@ -524,7 +468,6 @@ struct Vgen {
   }
   void emit(const storebi& i) {
     a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
-    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
       a->stbx(ppc64::rvasmtmp(), i.m);
     } else {
@@ -532,7 +475,6 @@ struct Vgen {
     }
   }
   void emit(const storel& i) {
-    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
       a->stwx(Reg64(i.s), i.m);
     } else {
@@ -542,7 +484,6 @@ struct Vgen {
   void emit(const storeli& i) {
     a->li32(ppc64::rvasmtmp(), i.s.l());
     if (i.m.index.isValid()) {
-      PatchMemoryOperands(i.m);
       a->stwx(ppc64::rvasmtmp(), i.m);
     } else {
       a->stw(ppc64::rvasmtmp(), i.m);
@@ -550,7 +491,6 @@ struct Vgen {
   }
   void emit(const storeqi& i) {
     a->li64(ppc64::rvasmtmp(), i.s.q());
-    PatchMemoryOperands(i.m);
     if (i.m.index.isValid()) {
       a->stdx(ppc64::rvasmtmp(), i.m);
     } else {
@@ -558,7 +498,6 @@ struct Vgen {
     }
   }
   void emit(const storesd& i) {
-    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
       a->stfdx(i.s, i.m);
     } else {
@@ -566,7 +505,6 @@ struct Vgen {
     }
   }
   void emit(const storew& i) {
-    PatchMemoryOperands(i.m);
     if(i.m.index.isValid()) {
       a->sthx(Reg64(i.s), i.m);
     } else {
@@ -575,7 +513,6 @@ struct Vgen {
   }
   void emit(const storewi& i) {
     a->li(ppc64::rvasmtmp(), i.s);
-    PatchMemoryOperands(i.m);
     if (i.m.index.isValid()) {
       a->sthx(ppc64::rvasmtmp(), i.m);
     } else {
@@ -672,16 +609,14 @@ void Vgen::emit(const push& i) {
 }
 
 void Vgen::emit(const vret& i) {
-  Vreg tmp_lr = ppc64::rvasmtmp();
-  VptrToReg(i.retAddr, tmp_lr);
-  a->mtlr(tmp_lr);
+  emit(load{i.retAddr, ppc64::rvasmtmp()});
+  a->mtlr(ppc64::rvasmtmp()); // d already have the correct value due lower
   a->ldx(i.d, i.prevFP);
   a->blr();
 }
 
 void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
-    PatchMemoryOperands(i.s);
     if (i.s.index.isValid()){
       a->ldx(i.d, i.s);
     } else {
@@ -714,7 +649,6 @@ void Vgen::pad(CodeBlock& cb) {
 
 void Vgen::emit(const store& i) {
   if (i.s.isGP()) {
-    PatchMemoryOperands(i.d);
     if (i.d.index.isValid()){
       a->stdx(i.s, i.d);
     } else {
@@ -728,6 +662,338 @@ void Vgen::emit(const store& i) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/*
+ Vptr struct supports fancy x64 addressing modes.
+ So we need to patch it to avoid ppc64el unsuported address modes.
+*/
+void patchVptr(Vptr& p, Vout& v) {
+  Vreg tmp  = v.makeReg();
+  Vreg tmp2 = v.makeReg();
+  tmp = p.index;
+  // Convert scaled*index to index
+  if(p.scale > 1) {
+    uint8_t shift = p.scale == 2 ? 1 :
+                    p.scale == 4 ? 2 :
+                    p.scale == 8 ? 3 : 0;
+    v << shlqi{shift, p.index, tmp, VregSF(0)};
+    p.scale = 1;
+    p.index = tmp;
+  }
+  // Convert index+displacement to index
+  if(p.index.isValid() && p.disp > -1) {
+    v << ldimmq{ p.disp, tmp2 };
+    v << addq{tmp2, tmp, tmp, VregSF(0)};
+    p.index = tmp;
+  } else if((p.disp > -1) && (p.disp >> 16)){
+    // Convert to index if displacement is greater than 16 bits
+    v << ldimmq{ p.disp, tmp };
+    p.index = tmp2;
+  }
+}
+
+void lowerStoreb(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storeb_ = inst.storeb_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storeb_.m;
+  patchVptr(p, v);
+  v << storeb{ storeb_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStorebi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storebi_ = inst.storebi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storebi_.m;
+  patchVptr(p, v);
+  auto ir = v.makeReg();
+  v << ldimmb{ storebi_.s, ir };
+  v << storeb{ ir, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStorel(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storel_ = inst.storel_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storel_.m;
+  patchVptr(p, v);
+  v << storel{ storel_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStoreli(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storeli_ = inst.storeli_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storeli_.m;
+  patchVptr(p, v);
+  auto ir = v.makeReg();
+  v << ldimml{ storeli_.s, ir };
+  v << storel{ ir, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStorew(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storew_ = inst.storew_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storew_.m;
+  patchVptr(p, v);
+  v << storew{ storew_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStorewi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storewi_ = inst.storewi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storewi_.m;
+  patchVptr(p, v);
+  auto ir = v.makeReg();
+  v << ldimml{ storewi_.s, ir };
+  v << storew{ ir, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStoreqi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storeqi_ = inst.storeqi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storeqi_.m;
+  patchVptr(p, v);
+  auto ir = v.makeReg();
+  v << ldimmq{ Immed64(storeqi_.s.q()), ir };
+  v << store{ ir, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStore(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& store_ = inst.store_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = store_.d;
+  patchVptr(p, v);
+  v << store{ store_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStoreups(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storeups_ = inst.storeups_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storeups_.m;
+  patchVptr(p, v);
+  v << storeups{ storeups_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerStoresd(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& storesd_ = inst.storesd_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = storesd_.m;
+  patchVptr(p, v);
+  v << storesd{ storesd_.s, p };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoad(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& load_ = inst.load_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = load_.s;
+  patchVptr(p, v);
+  v << load{ p, load_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoadl(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadl_ = inst.loadl_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = loadl_.s;
+  patchVptr(p, v);
+  v << loadl{ p, loadl_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoadzbl(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadzbl_ = inst.loadzbl_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = loadzbl_.s;
+  patchVptr(p, v);
+  v << loadzbl{ p, loadzbl_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoadzbq(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadzbq_ = inst.loadzbq_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = loadzbq_.s;
+  patchVptr(p, v);
+  v << loadzbq{ p, loadzbq_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoadzlq(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadzlq_ = inst.loadzlq_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = loadzlq_.s;
+  patchVptr(p, v);
+  v << loadzlq{ p, loadzlq_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLoadups(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& loadups_ = inst.loadups_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = loadups_.s;
+  patchVptr(p, v);
+  v << loadups{ p, loadups_.d};
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerIncwm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& incwm_ = inst.incwm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = incwm_.m;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerCmpqim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmpqim_ = inst.cmpqim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = cmpqim_.s1;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerCmpbim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmpbim_ = inst.cmpbim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = cmpbim_.s1;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerCmplim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmplim_ = inst.cmplim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = cmplim_.s1;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerCmpqm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmpqm_ = inst.cmpqm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = cmpqm_.s1;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerJmpm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& jmpm_ = inst.jmpm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = jmpm_.target;
+  patchVptr(p, v);
+  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+}
+
+void lowerCallm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& callm_ = inst.callm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = callm_.target;
+  auto d = v.makeReg();
+  v << load { p, d };
+  v << callr { d, callm_.args };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 void lowerAbsdbl(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& absdbl = inst.absdbl_;
@@ -923,6 +1189,99 @@ void lowerForPPC64(Vunit& unit) {
       vlower(unit, ib, ii);
 
       switch (inst.op) {
+
+        case Vinstr::storeb:
+          lowerStoreb(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::storebi:
+          lowerStoreb(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storel:
+          lowerStorel(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storeli:
+          lowerStoreli(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storew:
+          lowerStorew(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storewi:
+          lowerStorewi(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storeqi:
+          lowerStoreqi(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::store:
+          lowerStore(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storeups:
+          lowerStoreups(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::storesd:
+          lowerStoresd(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::load:
+          lowerLoad(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::loadzbl:
+          lowerLoadzbl(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::loadzbq:
+          lowerLoadzbq(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::loadzlq:
+          lowerLoadzlq(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::loadl:
+          lowerLoadl(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::loadups:
+          lowerLoadups(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::incwm:
+          lowerIncwm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::cmpqim:
+          lowerCmpqim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::cmpbim:
+          lowerCmpbim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::cmplim:
+          lowerCmplim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::cmpqm:
+          lowerCmpqm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::callm:
+          lowerCallm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::jmpm:
+          lowerJmpm(unit, Vlabel{ib}, ii);
+          break;
+
         case Vinstr::absdbl:
           lowerAbsdbl(unit, Vlabel{ib}, ii);
           break;
@@ -1105,3 +1464,4 @@ void emitPPC64(const Vunit& unit, Vtext& text, AsmInfo* asmInfo) {
 
 ///////////////////////////////////////////////////////////////////////////////
 }}
+
