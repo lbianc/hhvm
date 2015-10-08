@@ -698,12 +698,25 @@ void Assembler::unimplemented(){
 }
 
 void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
+  int missing = 0;
+  li64(rt, imm64, missing);
+}
+
+void Assembler::li64 (const Reg64& rt, uint64_t imm64, int &missing) {
+  // li64, in worst case, emits 5 instructions i.e. 20 bytes of instructions.
+  // Assumes that 0 bytes will be missing in the end.
+  missing = 0;
+  int BytesPerIns = 4;
+  int maxInsBytes = 5 * BytesPerIns;
   if ((imm64 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm64));
     if (imm64 & (1ULL << 15)) {
       // clear extended sign
       clrldi(rt, rt, 48);
+      missing = maxInsBytes - 2 * BytesPerIns;
+    } else {
+      missing = maxInsBytes - 1 * BytesPerIns;
     }
   } else if (imm64 >> 32 == 0) {
     // immediate has only low 32 bits set
@@ -712,6 +725,11 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
     if (imm64 & (1ULL << 31)) {
       // clear extended sign
       clrldi(rt, rt, 32);
+      missing = maxInsBytes - 3 * BytesPerIns;
+
+    } else {
+      missing = maxInsBytes - 2 * BytesPerIns;
+
     }
   } else if (imm64 >> 48 == 0) {
     // immediate has only low 48 bits set
@@ -722,6 +740,8 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
     if (imm64 & (1ULL << 47)) {
       // clear extended sign
       clrldi(rt, rt, 16);
+    } else {
+      missing = maxInsBytes - 4 * BytesPerIns;
     }
   } else {
     // load all 64 bits
