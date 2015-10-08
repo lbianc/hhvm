@@ -1847,8 +1847,11 @@ public:
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
     // Check Label::branchAuto for details
 
+    // It has to skip a mtctr, ori, oris, sldi, ori and lis (6 instructions)
+    // uint8_t fits 4 times in a instr, so multiply instructions number by 4
+    CodeAddress bctr_addr = jmp + 4 * 6;
     // Opcode located at the 6 most significant bits
-    assert(((jmp[3] >> 2) & 0x3F) == 19);  // XL-Form
+    assert(((bctr_addr[3] >> 2) & 0x3F) == 19);  // XL-Form
     ssize_t diff = dest - jmp;
 
     int16_t *imm = (int16_t*)(jmp);     // immediate field of addi
@@ -2323,13 +2326,13 @@ public:
       // that was already filled with the address...
       const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
 
+      addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
+
       // Use reserved function linkage register
       a.li64(reg::r12, address);
       // When branching to another context, r12 need to keep the target address
       // to correctly set r2 (TOC reference).
       a.mtctr(reg::r12);
-
-      addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
 
       // TODO(gut): Use a typedef or something to avoid copying code like below:
       if (LinkReg::Save == lr)

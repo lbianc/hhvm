@@ -339,12 +339,11 @@ struct Vgen {
       if (next == i.targets[1]) {
         return emit(jcc{ccNegate(i.cc), i.sf, {i.targets[1], i.targets[0]}});
       }
+      auto taken = i.targets[1];
+      jccs.push_back({a->frontier(), taken});
+
       // offset to be determined by a->patchBctr
       a->branchAuto(a->frontier(), i.cc);
-
-      auto taken = i.targets[1];
-      // rewind 4 bytes to record the address of the bctr instruction
-      jccs.push_back({a->frontier()-4, taken});
     }
     emit(jmp{i.targets[0]});
   }
@@ -354,12 +353,10 @@ struct Vgen {
   }
   void emit(const jmp& i) {
     if (next == i.target) return;
+    jmps.push_back({a->frontier(), i.target});
 
     // offset to be determined by a->patchBctr
     a->branchAuto(a->frontier());
-
-    // rewind 4 bytes to record the address of the bctr instruction
-    jmps.push_back({a->frontier()-4, i.target});
   }
   void emit(const jmpr& i) {
     a->mtctr(i.target);
