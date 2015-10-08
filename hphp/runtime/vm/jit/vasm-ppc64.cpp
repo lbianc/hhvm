@@ -607,8 +607,8 @@ void Vgen::emit(const push& i) {
 
 void Vgen::emit(const vret& i) {
   emit(load{i.retAddr, ppc64::rvasmtmp()});
-  a->mtlr(ppc64::rvasmtmp()); // d already have the correct value due lower
-  a->ldx(i.d, i.prevFP);
+  a->mtlr(ppc64::rvasmtmp());
+  emit(load{i.prevFP, i.d});
   a->blr();
 }
 
@@ -914,7 +914,8 @@ void lowerIncwm(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = incwm_.m;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << incwm{ p, incwm_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerCmpqim(Vunit& unit, Vlabel b, size_t iInst) {
@@ -926,7 +927,8 @@ void lowerCmpqim(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = cmpqim_.s1;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << cmpqim{ cmpqim_.s0, p, cmpqim_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerCmpbim(Vunit& unit, Vlabel b, size_t iInst) {
@@ -938,7 +940,8 @@ void lowerCmpbim(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = cmpbim_.s1;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << cmpbim{ cmpbim_.s0, p, cmpbim_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerCmplim(Vunit& unit, Vlabel b, size_t iInst) {
@@ -950,7 +953,8 @@ void lowerCmplim(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = cmplim_.s1;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << cmplim{ cmplim_.s0, p, cmplim_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerCmpqm(Vunit& unit, Vlabel b, size_t iInst) {
@@ -962,7 +966,8 @@ void lowerCmpqm(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = cmpqm_.s1;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << cmpqm{ cmpqm_.s0, p, cmpqm_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerJmpm(Vunit& unit, Vlabel b, size_t iInst) {
@@ -974,7 +979,8 @@ void lowerJmpm(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = jmpm_.target;
   patchVptr(p, v);
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
+  v << jmpm{ p, jmpm_.args };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerCallm(Vunit& unit, Vlabel b, size_t iInst) {
@@ -988,6 +994,21 @@ void lowerCallm(Vunit& unit, Vlabel b, size_t iInst) {
   auto d = v.makeReg();
   v << load { p, d };
   v << callr { d, callm_.args };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerVret(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& vret_ = inst.vret_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = vret_.retAddr;
+  Vptr prevFP = vret_.prevFP;
+  patchVptr(p, v);
+  patchVptr(prevFP, v);
+  v << vret{ p, prevFP, vret_.d, vret_.args };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1278,6 +1299,10 @@ void lowerForPPC64(Vunit& unit) {
         case Vinstr::jmpm:
           lowerJmpm(unit, Vlabel{ib}, ii);
           break;
+
+      case Vinstr::vret:
+          lowerVret(unit, Vlabel{ib}, ii);
+        break;
 
         case Vinstr::absdbl:
           lowerAbsdbl(unit, Vlabel{ib}, ii);
