@@ -168,29 +168,37 @@ ETCH_NAME(enterTCHelper):
   CFI(startproc)                // set debug information
 
   mflr %r0
-  std %r0, 16(%r1)    // LR on parent call frame
-  stdu %r1, -176(%r1) // aligned with Epilogue: addi %r1, %r1, 176
+  std %r0, 16(%r1)              // LR on parent call frame
+  stdu %r1, -176(%r1)           // aligned with Epilogue: addi %r1, %r1, 176
+  CFI2(adjust_cfa_offset, 176)  // debug information about stack pointer change
+  CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
 
   // Save non-volatile registers in order to restore it on Epilogue
-  std %r2, 24(%r1)    // TOC
-  std %r14, 32(%r1)   // local variable #1
-  std %r15, 40(%r1)   // local variable #2
-  std %r16, 48(%r1)   // local variable #3
-  std %r17, 56(%r1)   // local variable #4
-  std %r18, 64(%r1)   // local variable #5
-  std %r19, 72(%r1)   // local variable #6
-  std %r20, 80(%r1)   // local variable #7
-  std %r21, 88(%r1)   // local variable #8
-  std %r22, 96(%r1)   // local variable #9
-  std %r23, 104(%r1)  // local variable #10
-  std %r24, 112(%r1)  // local variable #11
-  std %r25, 120(%r1)  // local variable #12
-  std %r26, 128(%r1)  // local variable #13
-  std %r27, 136(%r1)  // local variable #14
-  std %r28, 144(%r1)  // local variable #15
-  std %r29, 152(%r1)  // local variable #16
-  std %r30, 160(%r1)  // local variable #17
-  std %r31, 168(%r1)  // local variable #18
+  // also takes care of debug information
+#define SAVE_REG(reg, pos)              \
+  std %r##reg, pos(%r1); CFI3C(offset, reg, pos - 176)
+
+  SAVE_REG(2, 24)    // TOC
+  SAVE_REG(14, 32)   // local variable #1
+  SAVE_REG(15, 40)   // local variable #2
+  SAVE_REG(16, 48)   // local variable #3
+  SAVE_REG(17, 56)   // local variable #4
+  SAVE_REG(18, 64)   // local variable #5
+  SAVE_REG(19, 72)   // local variable #6
+  SAVE_REG(20, 80)   // local variable #7
+  SAVE_REG(21, 88)   // local variable #8
+  SAVE_REG(22, 96)   // local variable #9
+  SAVE_REG(23, 104)  // local variable #10
+  SAVE_REG(24, 112)  // local variable #11
+  SAVE_REG(25, 120)  // local variable #12
+  SAVE_REG(26, 128)  // local variable #13
+  SAVE_REG(27, 136)  // local variable #14
+  SAVE_REG(28, 144)  // local variable #15
+  SAVE_REG(29, 152)  // local variable #16
+  SAVE_REG(30, 160)  // local variable #17
+  SAVE_REG(31, 168)  // local variable #18
+
+#undef SAVE_REG
 
   // Set firstAR->m_sfp to point to this frame.
   std %r1, 0(ETCH_ARG4)
@@ -245,6 +253,7 @@ ETCH_NAME(enterTCExit):
   ld %r31, 168(%r1)   // local variable #18
 
   addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
+  CFI2(adjust_cfa_offset, -176)  // debug information about stack pointer change
   ld %r0, 16(%r1)
   mtlr %r0
   blr
