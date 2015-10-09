@@ -50,8 +50,6 @@ using HPHP::CodeAddress;
   CR##cr##_Overflow,         \
   CR##cr##_NoOverflow
 
-constexpr auto msk_reg_size = 0xffffffe0;
-
 enum class BranchConditions {
   BRANCHES(0),
   BRANCHES(1),
@@ -1890,9 +1888,9 @@ protected:
                   const bool rc = 0) {
 
     // GP Register cannot be greater than 31
-    assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
-    assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-    assert(!(static_cast<uint32_t>(rt) & msk_reg_size));
+    assert(static_cast<uint32_t>(rb) < 32);
+    assert(static_cast<uint32_t>(ra) < 32);
+    assert(static_cast<uint32_t>(rt) < 32);
 
     XO_form_t xo_formater {
                             rc,
@@ -1913,8 +1911,8 @@ protected:
                  const int16_t imm) {
 
     // GP Register cannot be greater than 31
-    assert(!(static_cast<uint32_t>(rt) & msk_reg_size));
-    assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
+    assert(static_cast<uint32_t>(rt) < 32);
+    assert(static_cast<uint32_t>(ra) < 32);
 
     D_form_t d_formater {
                           static_cast<uint32_t>(imm),
@@ -1978,9 +1976,9 @@ protected:
                   const bool rc = 0){
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rt) & msk_reg_size));
+     assert(static_cast<uint32_t>(rb) < 32);
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rt) < 32);
 
       X_form_t x_formater {
                             rc,
@@ -2001,8 +1999,8 @@ protected:
                    const uint16_t xop) {
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rt) & msk_reg_size));
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rt) < 32);
 
       DS_form_t ds_formater {
                              xop,
@@ -2021,7 +2019,7 @@ protected:
                    uint16_t imm){
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
+     assert(static_cast<uint32_t>(ra) < 32);
 
       DQ_form_t dq_formater {
                              0x0, //Reserved
@@ -2063,9 +2061,9 @@ protected:
                   const bool rc = 0) {
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(rt) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
+     assert(static_cast<uint32_t>(rt) < 32);
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rb) < 32);
 
       A_form_t a_formater {
                            rc,
@@ -2089,9 +2087,9 @@ protected:
                   const bool rc = 0) {
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
+     assert(static_cast<uint32_t>(rb) < 32);
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rb) < 32);
 
       M_form_t m_formater {
                            rc,
@@ -2115,8 +2113,8 @@ protected:
                    const bool rc = 0) {
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rs) & msk_reg_size));
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rs) < 32);
 
       MD_form_t md_formater {
         rc,
@@ -2141,9 +2139,9 @@ protected:
                     const bool rc = 0) {
 
      // GP Register cannot be greater than 31
-     assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-     assert(!(static_cast<uint32_t>(rs) & msk_reg_size));
+     assert(static_cast<uint32_t>(rb) < 32);
+     assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint32_t>(rs) < 32);
 
       MDS_form_t mds_formater {
                                rc,
@@ -2165,7 +2163,7 @@ protected:
                    const uint8_t rsv = 0) {
 
     // GP Register cannot be greater than 31
-    assert(!(static_cast<uint32_t>(rs) & msk_reg_size));
+    assert(static_cast<uint32_t>(rs) < 32);
 
     XFX_form_t xfx_formater {
       rsv,
@@ -2227,9 +2225,9 @@ protected:
                    const bool tx) {
 
     // GP Register cannot be greater than 31
-    assert(!(static_cast<uint32_t>(s) & msk_reg_size));
-    assert(!(static_cast<uint32_t>(ra) & msk_reg_size));
-    assert(!(static_cast<uint32_t>(rb) & msk_reg_size));
+    assert(static_cast<uint32_t>(s) < 32);
+    assert(static_cast<uint32_t>(ra) < 32);
+    assert(static_cast<uint32_t>(rb) < 32);
 
     XX3_form_t xx1_formater {
       tx,
