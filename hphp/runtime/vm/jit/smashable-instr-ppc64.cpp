@@ -59,8 +59,15 @@ TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
-  not_implemented();
-  return nullptr;
+  align(cb, Alignment::SmashCmpq, AlignContext::Live);
+
+  auto const start = cb.frontier();
+
+  ppc64_asm::Assembler a { cb };
+  a.ld(rvasmtmp() ,r[disp]);
+  a.cmpdi(rvasmtmp(), imm);
+
+  return start; 
 }
 
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
