@@ -197,7 +197,7 @@ struct Vgen {
       not_implemented();
     }
   }
-  void emit(const ldimmqs& i) { not_implemented(); }
+  void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
   void emit(const load& i);
   void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
