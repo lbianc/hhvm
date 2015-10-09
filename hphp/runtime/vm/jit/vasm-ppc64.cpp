@@ -679,14 +679,21 @@ void patchVptr(Vptr& p, Vout& v) {
     p.index = tmp;
   }
   // Convert index+displacement to index
-  if(p.index.isValid() && p.disp > -1) {
+  if (p.index.isValid() && p.disp) {
     v << ldimmq{ p.disp, tmp2 };
     v << addq{tmp2, tmp, tmp, VregSF(0)};
     p.index = tmp;
-  } else if((p.disp > -1) && (p.disp >> 16)){
+    p.disp = 0;
+  } else if (p.disp >> 16) {
     // Convert to index if displacement is greater than 16 bits
     v << ldimmq{ p.disp, tmp };
     p.index = tmp2;
+    p.disp = 0;
+  }
+
+  //Check if base is valid, otherwise set R0 (as zero)
+  if (!p.base.isValid()) {
+    p.base = Vreg(0);
   }
 }
 
@@ -992,6 +999,7 @@ void lowerCallm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = callm_.target;
+  patchVptr(p, v);
   auto d = v.makeReg();
   v << load { p, d };
   v << callr { d, callm_.args };
