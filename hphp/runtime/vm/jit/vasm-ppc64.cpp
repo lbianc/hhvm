@@ -278,7 +278,7 @@ struct Vgen {
       a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
     } else {
       emit(load{i.s1, ppc64::rvasmtmp()});
-      a->li32(ppc64::rvasmtmp2(), i.s0.l());
+      a->li32(ppc64::rvasmtmp(), i.s0.l());
       a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
     }
   }
@@ -1214,7 +1214,7 @@ void lowerForPPC64(Vunit& unit) {
           break;
 
         case Vinstr::storebi:
-          lowerStoreb(unit, Vlabel{ib}, ii);
+          lowerStorebi(unit, Vlabel{ib}, ii);
           break;
 
        case Vinstr::storel:
