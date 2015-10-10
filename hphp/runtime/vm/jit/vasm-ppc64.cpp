@@ -658,10 +658,9 @@ void Vgen::emit(const store& i) {
  * So we need to patch it to avoid ppc64el unsuported address modes.
  */
 void patchVptr(Vptr& p, Vout& v) {
-  Vreg tmp  = v.makeReg();
-  Vreg tmp2 = v.makeReg();
   // Convert scaled*index to index
   if(p.scale > 1) {
+    Vreg tmp  = v.makeReg();
     uint8_t shift = p.scale == 2 ? 1 :
                     p.scale == 4 ? 2 :
                     p.scale == 8 ? 3 : 0;
@@ -671,12 +670,15 @@ void patchVptr(Vptr& p, Vout& v) {
   }
   // Convert index+displacement to index
   if (p.index.isValid() && p.disp) {
+    Vreg tmp  = v.makeReg();
+    Vreg tmp2 = v.makeReg();
     v << ldimmq{ p.disp, tmp2 };
-    v << addq{tmp2, tmp, tmp, VregSF(0)};
+    v << addq{tmp2, p.index, tmp, VregSF(0)};
     p.index = tmp;
     p.disp = 0;
   } else if (p.disp >> 16) {
     // Convert to index if displacement is greater than 16 bits
+    Vreg tmp  = v.makeReg();
     v << ldimmq{ p.disp, tmp };
     p.index = tmp;
     p.disp = 0;
