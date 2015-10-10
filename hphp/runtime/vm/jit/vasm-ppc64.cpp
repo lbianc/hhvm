@@ -668,7 +668,6 @@ void Vgen::emit(const store& i) {
 void patchVptr(Vptr& p, Vout& v) {
   Vreg tmp  = v.makeReg();
   Vreg tmp2 = v.makeReg();
-  tmp = p.index;
   // Convert scaled*index to index
   if(p.scale > 1) {
     uint8_t shift = p.scale == 2 ? 1 :
