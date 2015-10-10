@@ -687,7 +687,7 @@ void patchVptr(Vptr& p, Vout& v) {
   } else if (p.disp >> 16) {
     // Convert to index if displacement is greater than 16 bits
     v << ldimmq{ p.disp, tmp };
-    p.index = tmp2;
+    p.index = tmp;
     p.disp = 0;
   }
 
