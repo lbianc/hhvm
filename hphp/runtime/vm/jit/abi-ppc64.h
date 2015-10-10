@@ -82,7 +82,7 @@ PhysReg rarg_simd(size_t i);
 size_t num_arg_regs();
 size_t num_arg_regs_simd();
 
-constexpr PhysReg r_svcreq_req()  { return ppc64_asm::reg::r8; }
+constexpr PhysReg r_svcreq_req()  { return ppc64_asm::reg::r3; }
 constexpr PhysReg r_svcreq_stub() { return ppc64_asm::reg::r8; }
 PhysReg r_svcreq_sf();
 PhysReg r_svcreq_arg(size_t i);

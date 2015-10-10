@@ -26,9 +26,8 @@ namespace {
 namespace reg = ppc64_asm::reg;
 
 const RegSet kGPCallerSaved = reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 |
-  reg::r9 | reg::r10;
+  reg::r8 | reg::r9 | reg::r10;
   // r0 is used in function linkage as rfuncln
-  // r8 is used as r_svcreq_stub
   // r11 is used as a scratch register (rAsm)
   // r12 is used in function linkage
 
@@ -141,8 +140,8 @@ constexpr PhysReg simd_args[] = {
     reg::v10, reg::v11, reg::v12, reg::v13
 };
 
-constexpr PhysReg svcreq_args[] = { //TODO
-    reg::r8
+constexpr PhysReg svcreq_args[] = {
+    reg::r4, reg::r5, reg::r6, reg::r7
 };
 
 }

@@ -104,9 +104,22 @@ ETCH_LABEL(enterTCHelper$prologue):
   CFI(endproc)
   ETCH_SIZE(enterTCHelper)
 
-  // handleSRHelper: Translated code will jump to this stub to perform all
-  // service requests. It calls out to C++ to handle the request, then jumps
-  // to the returned address (which may be the callToExit stub).
+/*
+ * handleSRHelper
+ *
+ * Translated code will jump to this stub to perform all
+ * service requests. It calls out to C++ to handle the request, then jumps
+ * to the returned address (which may be the callToExit stub).
+ *
+ * The columns are registers of:
+ * X64 ABI / PPC64 ABI
+ *   rdi / r3:  ServiceRequest req (r_svcreq_req)
+ *   r10 / r8:  TCA stub (r_svcreq_stub)
+ *   rsi / r4:  args[0]
+ *   rdx / r5:  args[1]
+ *   rcx / r6:  args[2]
+ *   r8  / r7:  args[3]
+ */
   ETCH_ALIGN16
   ETCH_SECTION(handleSRHelper)
   .globl ETCH_NAME(handleSRHelper)
@@ -117,13 +130,13 @@ ETCH_NAME(handleSRHelper):
   mov ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
   mov ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
 
-  // Push a ServiceReqInfo struct onto the stack and call handleServiceRequest.
-  push %r8
-  push %rcx
-  push %rdx
-  push %rsi
-  push %r10
-  push %rdi
+  // Push a ReqInfo struct onto the stack and call handleServiceRequest.
+  push ETCH_SVCREQ_ARG4
+  push ETCH_SVCREQ_ARG3
+  push ETCH_SVCREQ_ARG2
+  push ETCH_SVCREQ_ARG1
+  push ETCH_SVCREQ_STUB
+  push ETCH_SVCREQ_REQ
   CFI2(adjust_cfa_offset, 0x30)
 
   // call mcg->handleServiceRequest(%rsp)
@@ -131,7 +144,7 @@ ETCH_NAME(handleSRHelper):
   mov %rsp, ETCH_ARG2
   call MCGenerator_handleServiceRequest
 
-  // Pop the ServiceReqInfo off the stack.
+  // Pop the ReqInfo struct off the stack.
   add $0x30, %rsp
   CFI2(adjust_cfa_offset, -0x30)
 
@@ -140,7 +153,8 @@ ETCH_NAME(handleSRHelper):
   mov 0x10(ETCH_R_VM_TL), ETCH_R_VM_SP
   mov 0x20(ETCH_R_VM_TL), ETCH_R_VM_FP
 
-  jmp *%rax
+  jmp *ETCH_RET1
+
   CFI(endproc)
   ETCH_SIZE(handleSRHelper)
 
@@ -166,6 +180,10 @@ enterTCServiceReq:
 ETCH_NAME(enterTCHelper):
   // Prologue
   CFI(startproc)                // set debug information
+
+  // PIC code setup
+  addis %r2, %r12, .TOC.-enterTCHelper@ha
+  addi  %r2, %r2,  .TOC.-enterTCHelper@l
 
   mflr %r0
   std %r0, 16(%r1)              // LR on parent call frame
@@ -262,16 +280,56 @@ ETCH_NAME(enterTCExit):
   ETCH_SIZE(enterTCHelper)
 // ==== enterTCHelper ====
 
-  // handleSRHelper: Translated code will jump to this stub to perform all
-  // service requests. It calls out to C++ to handle the request, then jumps
-  // to the returned address (which may be the callToExit stub).
+// ==== handleSRHelper ====
   ETCH_ALIGN16
   ETCH_SECTION(handleSRHelper)
   .globl ETCH_NAME(handleSRHelper)
 ETCH_NAME(handleSRHelper):
   CFI(startproc)
 
-  trap // not yet implemented
+  // PIC code setup
+  addis %r2, %r12, .TOC.-handleSRHelper@ha
+  addi  %r2, %r2,  .TOC.-handleSRHelper@l
+
+  // Sync vmsp & vmfp
+  std ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
+  std ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+
+  // Push a ReqInfo struct onto the stack and call handleServiceRequest.
+  mflr %r0
+  std %r0, 16(%r1)    // LR on parent call frame
+  stdu %r1, -80(%r1)  // aligned with Epilogue: addi %r1, %r1, 80
+  CFI2(adjust_cfa_offset, 80)   // debug information about stack pointer change
+  CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
+
+  std ETCH_SVCREQ_ARG4, 72(%r1)
+  std ETCH_SVCREQ_ARG3, 64(%r1)
+  std ETCH_SVCREQ_ARG2, 56(%r1)
+  std ETCH_SVCREQ_ARG1, 48(%r1)
+  std ETCH_SVCREQ_STUB, 40(%r1)
+  std ETCH_SVCREQ_REQ,  32(%r1)
+
+  // call mcg->handleServiceRequest()
+  ld   ETCH_ARG1, mcg@got(%r2)
+  addi ETCH_ARG2, %r1, 32
+
+  ld   %r12, MCGenerator_handleServiceRequest@got(%r2)
+  mtctr %r12
+  bctrl
+
+  // Pop the ReqInfo struct off the stack.
+  addi %r1, %r1, 80   // aligned with Prologue: stdu %r1, -80(%r1)
+  CFI2(adjust_cfa_offset, -80)
+  ld %r0, 16(%r1)
+  mtlr %r0
+
+  // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
+  // we interpreted anything. Reload them.
+  ld ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
+  ld ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+
+  mtctr ETCH_RET1
+  bctr
 
   CFI(endproc)
   ETCH_SIZE(handleSRHelper)
