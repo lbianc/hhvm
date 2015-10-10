@@ -716,10 +716,11 @@ void lowerStorebi(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, inst.origin);
 
-  Vptr p = storebi_.m;
-  patchVptr(p, v);
   auto ir = v.makeReg();
   v << ldimmb{ storebi_.s, ir };
+
+  Vptr p = storebi_.m;
+  patchVptr(p, v);
   v << storeb{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -744,10 +745,11 @@ void lowerStoreli(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, inst.origin);
 
-  Vptr p = storeli_.m;
-  patchVptr(p, v);
   auto ir = v.makeReg();
   v << ldimml{ storeli_.s, ir };
+
+  Vptr p = storeli_.m;
+  patchVptr(p, v);
   v << storel{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -772,10 +774,11 @@ void lowerStorewi(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, inst.origin);
 
-  Vptr p = storewi_.m;
-  patchVptr(p, v);
   auto ir = v.makeReg();
   v << ldimml{ storewi_.s, ir };
+
+  Vptr p = storewi_.m;
+  patchVptr(p, v);
   v << storew{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -787,10 +790,11 @@ void lowerStoreqi(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, inst.origin);
 
-  Vptr p = storeqi_.m;
-  patchVptr(p, v);
   auto ir = v.makeReg();
   v << ldimmq{ Immed64(storeqi_.s.q()), ir };
+
+  Vptr p = storeqi_.m;
+  patchVptr(p, v);
   v << store{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
