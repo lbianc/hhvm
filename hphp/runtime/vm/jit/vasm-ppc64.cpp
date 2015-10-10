@@ -363,8 +363,6 @@ struct Vgen {
     a->bctr();
   }
   void emit(const jmpm& i) {
-    //VptrToReg(i.target, ppc64::rvasmtmp());
-    //emit(jmpr {ppc64::rvasmtmp(), i.args});
     emit(load{i.target, ppc64::rvasmtmp()});
     emit(jmpr {ppc64::rvasmtmp(), i.args});
   }
@@ -412,7 +410,7 @@ struct Vgen {
   void emit(movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
-  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } //no-op form
+  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(notb i) { not_implemented(); }
   void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
@@ -552,12 +550,6 @@ struct Vgen {
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
 
 private:
-  // helpers
-  //void prep(Reg8 s, Reg8 d) { if (s != d) a->movb(s, d); }
-  //void prep(Reg32 s, Reg32 d) { if (s != d) a->movl(s, d); }
-  //void prep(Reg64 s, Reg64 d) { if (s != d) a->movq(s, d); }
-  //void prep(RegXMM s, RegXMM d) { if (s != d) a->movdqa(s, d); }
-
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
   template<class Inst> void binary(Inst& i) { prep(i.s1, i.d); }
   template<class Inst> void commuteSF(Inst&);
@@ -622,7 +614,7 @@ void Vgen::emit(const load& i) {
     }
   } else {
     assertx(i.d.isSIMD());
-    //TODO(rcardoso): Needs to check if needs to change to vec instruction
+    // TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->lfs(i.d, i.s);
   }
 }
@@ -654,7 +646,7 @@ void Vgen::emit(const store& i) {
     }
   } else {
     assertx(i.s.isSIMD());
-    //TODO(rcardoso): Needs to check if needs to change to vec instruction
+    // TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->stfs(i.s, i.d);
   }
 }
@@ -662,9 +654,9 @@ void Vgen::emit(const store& i) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- Vptr struct supports fancy x64 addressing modes.
- So we need to patch it to avoid ppc64el unsuported address modes.
-*/
+ * Vptr struct supports fancy x64 addressing modes.
+ * So we need to patch it to avoid ppc64el unsuported address modes.
+ */
 void patchVptr(Vptr& p, Vout& v) {
   Vreg tmp  = v.makeReg();
   Vreg tmp2 = v.makeReg();
@@ -690,7 +682,7 @@ void patchVptr(Vptr& p, Vout& v) {
     p.disp = 0;
   }
 
-  //Check if base is valid, otherwise set R0 (as zero)
+  // Check if base is valid, otherwise set R0 (as zero)
   if (!p.base.isValid()) {
     p.base = Vreg(0);
   }
