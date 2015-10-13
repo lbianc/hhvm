@@ -291,11 +291,11 @@ void Assembler::lbzu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::lbzux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 87);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 119);
 }
 
 void Assembler::lbzx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 119);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 87);
 }
 
 void Assembler::ld(const Reg64& rt, MemoryRef m) {
@@ -311,11 +311,11 @@ void Assembler::ldu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::ldux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 21);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 53);
 }
 
 void Assembler::ldx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 53);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 21);
 }
 
 void Assembler::lhbrx(const Reg64& rt, MemoryRef m) {
@@ -331,11 +331,11 @@ void Assembler::lhzu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::lhzux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 279);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 331);
 }
 
 void Assembler::lhzx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 331);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 279);
 }
 
 void Assembler::lha(const Reg64& rt, MemoryRef m) {
@@ -347,11 +347,11 @@ void Assembler::lhau(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::lhaux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 343);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 375);
 }
 
 void Assembler::lhax(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 375);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 343);
 }
 
 void Assembler::lmw(const Reg64& rt, MemoryRef m) {
@@ -381,11 +381,11 @@ void Assembler::lwzu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::lwzux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 23);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 55);
 }
 
 void Assembler::lwzx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 55);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 23);
 }
 
 void Assembler::lwa(const Reg64& rt, MemoryRef m) {
@@ -393,11 +393,11 @@ void Assembler::lwa(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::lwaux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 341);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 373);
 }
 
 void Assembler::lwax(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 373);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 341);
 }
 
 void Assembler::lwbrx(const Reg64& rt, MemoryRef m) {
@@ -563,11 +563,11 @@ void Assembler::stbu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::stbux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 215);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 247);
 }
 
 void Assembler::stbx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 247);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 215);
 }
 
 void Assembler::sth(const Reg64& rt, MemoryRef m) {
@@ -579,11 +579,11 @@ void Assembler::sthu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::sthux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 407);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 439);
 }
 
 void Assembler::sthx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 439);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 407);
 }
 
 void Assembler::stw(const Reg64& rt, MemoryRef m) {
@@ -611,11 +611,11 @@ void Assembler::stdu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::stdux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 149);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 181);
 }
 
 void Assembler::stdx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 181);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 141);
 }
 
 void Assembler::stq(const Reg64& rt, MemoryRef m) {
