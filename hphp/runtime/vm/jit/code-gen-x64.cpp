@@ -2035,9 +2035,8 @@ void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {
   auto const numLocals = getFunc(inst->marker())->numLocals();
   auto& v = vmain();
 
-//  assertx(rFp == rvmfp() &&
-//         "free locals helper assumes the frame pointer is rvmfp()");
-// TODO PPC64
+  assertx(rFp == rvmfp() &&
+         "free locals helper assumes the frame pointer is rvmfp()");
 
   if (numLocals == 0) return;
 
