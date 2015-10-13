@@ -310,7 +310,10 @@ ETCH_NAME(handleSRHelper):
   std ETCH_SVCREQ_REQ,  32(%r1)
 
   // call mcg->handleServiceRequest()
+    // get the address pointed by mcg@got to be the "this" pointer
   ld   ETCH_ARG1, mcg@got(%r2)
+  ld   ETCH_ARG1, 0(ETCH_ARG1)
+    // address of the ReqInfo structure
   addi ETCH_ARG2, %r1, 32
 
   ld   %r12, MCGenerator_handleServiceRequest@got(%r2)
