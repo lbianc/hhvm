@@ -615,7 +615,7 @@ void Assembler::stdux(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::stdx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 141);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 149);
 }
 
 void Assembler::stq(const Reg64& rt, MemoryRef m) {
