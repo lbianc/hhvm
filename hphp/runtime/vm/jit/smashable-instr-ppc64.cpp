@@ -67,7 +67,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
   a.ld(rvasmtmp() ,r[disp]);
   a.cmpdi(rvasmtmp(), imm);
 
-  return start; 
+  return start;
 }
 
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
