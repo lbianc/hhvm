@@ -595,11 +595,11 @@ void Assembler::stwu(const Reg64& rt, MemoryRef m) {
 }
 
 void Assembler::stwux(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 151);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 183);
 }
 
 void Assembler::stwx(const Reg64& rt, MemoryRef m) {
-  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 183);
+  EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 151);
 }
 
 void Assembler::std(const Reg64& rt, MemoryRef m) {
