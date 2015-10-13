@@ -71,8 +71,38 @@ TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
 }
 
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
-  not_implemented();
-  return nullptr;
+  align(cb, Alignment::SmashCmpq, AlignContext::Live);
+
+  auto const start = cb.frontier();
+
+  ppc64_asm::Assembler a { cb };
+
+  a.mflr(ppc64::rfuncln());
+  Vptr p(ppc64::rsp(), lr_position_on_callstack);
+  a.std(ppc64::rfuncln(), p);
+  p.disp = -min_callstack_size;
+
+#if PPC64_HAS_PUSH_POP
+  p.base = ppc64::rstktop();
+  a.stdu(ppc64::rsp(), p);
+  a.mr(ppc64::rsp(), ppc64::rstktop());
+#else
+  a.stdu(ppc64::rsp(), p);
+#endif
+  a.branchAuto(target, ppc64_asm::BranchConditions::Always, 
+  ppc64_asm::LinkReg::Save);
+#if PPC64_HAS_PUSH_POP
+  a.addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
+  Vptr bc(ppc64::rsp(), 0); // backchain
+  a.ld(ppc64::rsp(), bc);
+#else
+  a.addi(ppc64::rsp(), ppc64::rsp(), min_callstack_size);
+#endif
+  p.disp = lr_position_on_callstack;
+  a.ld(ppc64::rfuncln(), p);
+  a.mtlr(ppc64::rfuncln());
+
+  return start;
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
