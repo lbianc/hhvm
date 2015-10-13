@@ -453,7 +453,7 @@ struct Vgen {
   void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
   void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
-  void emit(const sqrtsd& i) { not_implemented(); }
+  void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
   void emit(const storeb& i) {
     if(i.m.index.isValid()) {

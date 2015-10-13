@@ -1561,7 +1561,9 @@ public:
   void xsrsp()          { not_implemented(); }
   void xsrsqrtedp()     { not_implemented(); }
   void xsrsqrtesp()     { not_implemented(); }
-  void xssqrtdp()       { not_implemented(); }
+  void xssqrtdp(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 75, 0, 0);  
+  }
   void xssqrtsp()       { not_implemented(); }
   void xssubdp()        { not_implemented(); }
   void xssubsp()        { not_implemented(); }
