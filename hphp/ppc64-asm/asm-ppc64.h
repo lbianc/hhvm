@@ -2244,13 +2244,33 @@ protected:
 
     dword(xx1_formater.instruction);
   }
+
+  void EmitVXForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
+                  const RegNumber rb,
+                  const uint16_t xo) {
+
+    assert(static_cast<uint32_t>(rt) < 32);
+    assert(static_cast<uint32_t>(ra) < 32);
+    assert(static_cast<uint32_t>(rb) < 32);
+
+    VX_form_t vx_formater {
+      xo,
+      static_cast<uint32_t>(rb),
+      static_cast<uint32_t>(ra),
+      static_cast<uint32_t>(rt),
+      op
+    };
+
+    dword(vx_formater.instruction);
+  }
   //TODO(rcardoso): Unimplemented instruction formaters
   void EmitXFLForm()  { not_implemented(); }
   void EmitXX4Form()  { not_implemented(); }
   void EmitXSForm()   { not_implemented(); }
   void EmitVAForm()   { not_implemented(); }
   void EmitVCForm()   { not_implemented(); }
-  void EmitVXForm()   { not_implemented(); }
   void EmitZ23Form()  { not_implemented(); }
   void EmitEVXForm()  { not_implemented(); }
   void EmitEVSForm()  { not_implemented(); }
