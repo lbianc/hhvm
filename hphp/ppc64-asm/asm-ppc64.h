@@ -1551,7 +1551,9 @@ public:
   void xsnmsubasp()     { not_implemented(); }
   void xsnmsubmdp()     { not_implemented(); }
   void xsnmsubmsp()     { not_implemented(); }
-  void xsrdpi()         { not_implemented(); }
+  void xsrdpi(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 73, 0, 0);
+  }
   void xsrdpic()        { not_implemented(); }
   void xsrdpim()        { not_implemented(); }
   void xsrdpip()        { not_implemented(); }
@@ -1562,7 +1564,7 @@ public:
   void xsrsqrtedp()     { not_implemented(); }
   void xsrsqrtesp()     { not_implemented(); }
   void xssqrtdp(const RegXMM& xt, const RegXMM& xb) {
-   EmitXX2Form(60, rn(xt), 0, rn(xb), 75, 0, 0);  
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 75, 0, 0);
   }
   void xssqrtsp()       { not_implemented(); }
   void xssubdp()        { not_implemented(); }
