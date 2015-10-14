@@ -77,7 +77,9 @@ struct BackEnd final : jit::BackEnd {
   // probably have to use a pair of assembly stubs to manage this.
   #define CALLEE_SAVED_BARRIER() always_assert(false);
 #elif defined (__powerpc64__)
-  #define CALLEE_SAVED_BARRIER()
+  // PPC64 port under development
+  #define CALLEE_SAVED_BARRIER()                                    \
+      not_implemented();
 #else
   #define CALLEE_SAVED_BARRIER()                                    \
       asm volatile("" : : : "rbx", "r12", "r13", "r14", "r15");

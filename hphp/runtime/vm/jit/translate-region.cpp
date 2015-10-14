@@ -247,7 +247,6 @@ void emitPredictionsAndPreConditions(IRGS& irgs,
         break;
       case Arch::PPC64:
         break;
-
     }
   }
 }

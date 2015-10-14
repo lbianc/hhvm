@@ -109,7 +109,7 @@ void emit_svcreq(CodeBlock& cb,
       }
       live_out |= r;
     }
-    FTRACE(2, ") : stub@{}");
+    FTRACE(2, ") : stub@");
 
     if (persist) {
       FTRACE(2, "<none>");
@@ -258,6 +258,7 @@ FPInvOffset extract_spoff(TCA stub) {
 
     case Arch::PPC64:
       not_implemented();
+      break;
   }
   not_reached();
 }

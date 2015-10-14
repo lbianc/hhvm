@@ -319,7 +319,7 @@ void liveRelocate(int time) {
     // Relocation is not supported on arm.
     return;
   case Arch::PPC64:
-    // Relocation is not supported on ppc64.
+    // Relocation is not implemented on ppc64.
     return;
   }
 

@@ -1,17 +1,18 @@
-/**
- * Copyright 2015, IBM
- * All Rights Reserved
- *
- * @author: Rogerio Alves
- *
- * This is a experimental macro assembler for PPC64.
- * Don't expect to find all instructions here.
- *
- * If you're looking for something more fully baked, here are some options
- * to consider use Nanojit or LLVM, both of which translate abstract virtual 
- * machine instructions to the native target architecture.
- *
- */
+/*
+   +----------------------------------------------------------------------+
+   | HipHop for PHP                                                       |
+   +----------------------------------------------------------------------+
+   | (c) Copyright IBM Corporation 2015                                   |
+   +----------------------------------------------------------------------+
+   | This source file is subject to version 3.01 of the PHP license,      |
+   | that is bundled with this package in the file LICENSE, and is        |
+   | available through the world-wide-web at the following url:           |
+   | http://www.php.net/license/3_01.txt                                  |
+   | If you did not receive a copy of the PHP license and are unable to   |
+   | obtain it through the world-wide-web, please send a note to          |
+   | license@php.net so we can mail you a copy immediately.               |
+   +----------------------------------------------------------------------+
+*/
 
 #ifndef INCLUDE_ASM_PPC64_H_
 #define INCLUDE_ASM_PPC64_H_
@@ -182,7 +183,7 @@ class BranchParams {
           ret = BranchConditions::GreaterThan;      break;
 
         /*
-         * TODO(Gustavo): Parity on ppc64 is not that easy:
+         * TODO(gut): Parity on ppc64 is not that easy:
          * http://stackoverflow.com/q/32319673/5013070
          */
         case HPHP::jit::CC_P:
@@ -451,7 +452,7 @@ public:
     PPR32    = 898
   };
 
-  
+
   // TODO(rcardoso): Must create a macro for these similar instructions.
   // This will make code more clean.
 
@@ -461,15 +462,15 @@ public:
   //   ...
   // #define CC_ARITH_IMM_OP(name, opcode)
 
-  // #define LOAD_STORE_OP(name) 
-  // void #name(const Reg64& rt, MemoryRef m); 
-  // void #name##u(const Reg64& rt, MemoryRef m); 
-  // void #name##x(const Reg64& rt, MemoryRef m); 
-  // void #name##ux(const Reg64& rt, MemoryRef m); 
+  // #define LOAD_STORE_OP(name)
+  // void #name(const Reg64& rt, MemoryRef m);
+  // void #name##u(const Reg64& rt, MemoryRef m);
+  // void #name##x(const Reg64& rt, MemoryRef m);
+  // void #name##ux(const Reg64& rt, MemoryRef m);
 
-  // #define LOAD_STORE_OP_BYTE_REVERSED(name) 
-  // void #name##brx(const Reg64& rt, MemoryRef m); 
-  
+  // #define LOAD_STORE_OP_BYTE_REVERSED(name)
+  // void #name##brx(const Reg64& rt, MemoryRef m);
+
   // LOAD_STORE_OP(lbz)
   // LOAD_STORE_OP(lh)
   // LOAD_STORE_OP(lha)
@@ -488,7 +489,6 @@ public:
 
   // #undef LOAD_STORE_OP
   // #undef LOAD_STORE_OP_BYTE_REVERSED
-  
 
   //PPC64 Instructions
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);
@@ -624,23 +624,23 @@ public:
   void popcntw(const Reg64& ra, const Reg64& rs);
   void prtyd(const Reg64& ra, const Reg64& rs);
   void prtyw(const Reg64& ra, const Reg64& rs);
-  void rldcl(const Reg64& ra, const Reg64& rs, const Reg64& rb, 
+  void rldcl(const Reg64& ra, const Reg64& rs, const Reg64& rb,
              uint8_t mb, bool rc = 0);
-  void rldcr(const Reg64& ra, const Reg64& rs,  const Reg64& rb, 
+  void rldcr(const Reg64& ra, const Reg64& rs,  const Reg64& rb,
              uint8_t mb, bool rc = 0);
-  void rldic(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+  void rldic(const Reg64& ra, const Reg64& rs, uint8_t sh,
              uint8_t mb, bool rc = 0);
-  void rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+  void rldicl(const Reg64& ra, const Reg64& rs, uint8_t sh,
               uint8_t mb, bool rc = 0);
-  void rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+  void rldicr(const Reg64& ra, const Reg64& rs, uint8_t sh,
               uint8_t mb, bool rc = 0);
-  void rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh, 
+  void rldimi(const Reg64& ra, const Reg64& rs, uint8_t sh,
               uint8_t mb, bool rc = 0);
-  void rlwimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+  void rlwimi(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb,
               uint16_t me, bool rc = 0);
-  void rlwinm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+  void rlwinm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb,
               uint16_t me, bool rc = 0);
-  void rlwnm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb, 
+  void rlwnm(const Reg64& ra, const Reg64& rs, uint8_t sh, uint8_t mb,
              uint16_t me, bool rc = 0);
   void sc(uint16_t lev);
   void sld(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
@@ -1562,7 +1562,7 @@ public:
   void xsrsqrtedp()     { not_implemented(); }
   void xsrsqrtesp()     { not_implemented(); }
   void xssqrtdp(const RegXMM& xt, const RegXMM& xb) {
-   EmitXX2Form(60, rn(xt), 0, rn(xb), 75, 0, 0);  
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 75, 0, 0);
   }
   void xssqrtsp()       { not_implemented(); }
   void xssubdp()        { not_implemented(); }
@@ -1791,7 +1791,7 @@ public:
   void mflr(const Reg64& rx) {
     mfspr(SpecialReg::LR, rx);
   }
-  
+
   // Label variants
   void b(Label& l);
   void ba(Label& l);
@@ -1879,8 +1879,8 @@ public:
 protected:
 
   // type instruction emitters
-  // TODO(IBM): try remove cast for uint32_t
-  // TODO(IBM): make those functions inline
+  // TODO(rcardoso): try remove cast for uint32_t
+  // TODO(rcardoso): make those functions inline
   void EmitXOForm(const uint8_t op,
                   const RegNumber rt,
                   const RegNumber ra,
@@ -2185,7 +2185,7 @@ protected:
                    const RegNumber b,
                    const uint16_t xo,
                    const bool bx,
-                   const bool tx)  { 
+                   const bool tx)  {
     XX2_form_t xx2_formater {
       tx,
       bx,
@@ -2205,7 +2205,7 @@ protected:
                    const uint16_t xo,
                    const bool ax,
                    const bool bx,
-                   const bool tx) { 
+                   const bool tx) {
     XX3_form_t xx3_formater {
       tx,
       bx,
@@ -2242,7 +2242,7 @@ protected:
 
     dword(xx1_formater.instruction);
   }
-  //TODO(IBM): Unimplemented instruction formaters
+  //TODO(rcardoso): Unimplemented instruction formaters
   void EmitXFLForm()  { not_implemented(); }
   void EmitXX4Form()  { not_implemented(); }
   void EmitXSForm()   { not_implemented(); }
@@ -2432,19 +2432,19 @@ inline void Assembler::bcla(Label& l, BranchConditions bc) {
 }
 
 inline void Assembler::branchAuto(Label& l,
-                              BranchConditions bc,
-                              LinkReg lr) {
+                                  BranchConditions bc,
+                                  LinkReg lr) {
   l.branchAuto(*this, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
-                              BranchConditions bc,
-                              LinkReg lr) {
+                                  BranchConditions bc,
+                                  LinkReg lr) {
   Label l(c);
   l.branchAuto(*this, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
-                              HPHP::jit::ConditionCode cc,
-                              LinkReg lr) {
+                                  HPHP::jit::ConditionCode cc,
+                                  LinkReg lr) {
   branchAuto(c, BranchParams::convertCC(cc), lr);
 }
 
@@ -2452,14 +2452,13 @@ class Decoder {
 public:
   explicit Decoder(uint32_t* ip)
   : ip_(*ip),
-  decoded_instr_(nullptr)
-  { decode(ip); }
+  decoded_instr_(nullptr) { decode(ip); }
 
   ~Decoder() {
     delete decoded_instr_;
     decoded_instr_ = nullptr;
   }
-  
+
   std::string toString();
 private:
   void decode(uint32_t* ip);
