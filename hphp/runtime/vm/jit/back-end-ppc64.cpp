@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -77,7 +77,11 @@ struct BackEnd final : jit::BackEnd {
   // probably have to use a pair of assembly stubs to manage this.
   #define CALLEE_SAVED_BARRIER() always_assert(false);
 #elif defined (__powerpc64__)
-  #define CALLEE_SAVED_BARRIER()
+  #define CALLEE_SAVED_BARRIER()                                    \
+      asm volatile("" : : : "r14", "r15", "r16", "r17", "r18",      \
+                            "r19", "r20", "r21", "r22", "r23",      \
+                            "r24", "r25", "r26", "r27", "r28",      \
+                            "r29", "r30", "r31");
 #else
   #define CALLEE_SAVED_BARRIER()                                    \
       asm volatile("" : : : "rbx", "r12", "r13", "r14", "r15");
@@ -87,10 +91,10 @@ struct BackEnd final : jit::BackEnd {
    * enterTCHelper is a handwritten assembly function that transfers control in
    * and out of the TC.
    */
-/*  static_assert(x64::rvmsp() == rbx &&
-                x64::rvmfp() == rbp &&
-                x64::rvmtl() == r12,
-                "__enterTCHelper needs to be modified to use the correct ABI");*/
+  static_assert(ppc64::rvmsp() == ppc64_asm::reg::r29 &&
+                ppc64::rvmfp() == ppc64_asm::reg::r28 &&
+                ppc64::rvmtl() == ppc64_asm::reg::r30,
+                "__enterTCHelper needs to be modified to use the correct ABI");
 
   void enterTCHelper(TCA start, ActRec* stashedAR) override {
     // We have to force C++ to spill anything that might be in a callee-saved
