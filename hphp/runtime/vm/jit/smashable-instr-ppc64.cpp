@@ -152,7 +152,17 @@ void smashCall(TCA inst, TCA target) {
 }
 
 void smashJmp(TCA inst, TCA target) {
-  not_implemented();
+  always_assert(is_aligned(inst, Alignment::SmashJmp));
+
+  auto& cb = mcg->code.blockFor(inst);
+  CodeCursor cursor { cb, inst };
+  ppc64_asm::Assembler a { cb };
+
+  if (target > inst && target - inst <= smashableJmpLen()) {
+    a.emitNop(target - inst);
+  } else {
+    a.branchAuto(target);
+  }
 }
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
@@ -178,8 +188,17 @@ TCA smashableCallTarget(TCA inst) {
 #endif
 }
 
+// TODO: This function is just checking if the instruction is a branch and
+// return the TCA received. It makes the instruction be emitted again with the
+// correct target.
+// For now it is enough for PPC64, but will be implemented soon.
 TCA smashableJmpTarget(TCA inst) {
-  return smashableJmpTarget(inst); // for now, it's also a "bc" instruction
+  // jump the smashableJmpLen-1(inst size) to get branch instruction
+  if ((((inst + (smashableJmpLen() - kStdIns))[3] >> 2) & 0x3F) != 19) {
+    return nullptr;
+  }
+  // target found at the beginning of the instruction
+  return inst;
 }
 
 TCA smashableJccTarget(TCA inst) {

@@ -35,15 +35,20 @@ namespace HPHP { namespace jit { namespace ppc64 {
 /// Standard PPC64 instructions are 4 bytes long
 static constexpr int kStdIns = 4;
 
-constexpr size_t smashableMovqLen() { return kStdIns * 5; }  // li64's worst case
+// li64's worst case
+constexpr size_t smashableMovqLen() { return kStdIns * 5; }
 constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
 #if PPC64_HAS_PUSH_POP
 constexpr size_t smashableCallLen() { return kStdIns * 15; } // worst case
 #else
 constexpr size_t smashableCallLen() { return kStdIns * 13; } // worst case
 #endif
-constexpr size_t smashableJmpLen()  { return kStdIns * 1; }  // b
-constexpr size_t smashableJccLen()  { return kStdIns * 1; }  // bc
+
+// li64 + mtctr + bcrt
+constexpr size_t smashableJmpLen()  { return kStdIns * 7; }
+
+// li64 + mtctr + bccrt
+constexpr size_t smashableJccLen()  { return kStdIns * 7; }
 
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d);
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp);
