@@ -1127,17 +1127,19 @@ void lowerOrwim(Vunit& unit, Vlabel b, size_t iInst) {
   auto scratch = unit.makeScratchBlock();
   SCOPE_EXIT {unit.freeScratchBlock(scratch);};
   Vout v(unit, scratch, inst.origin);
-
-  auto tmp = v.makeReg();
-
   /*
    * TODO(igor): It would be better if there was a 16 bits load instruction
    * But, after these instructions, only 16 bits will be stored.
    */
+  Vreg tmp = v.makeReg();
+  Vreg tmp2;
   v << load {orwim.m, tmp};
-  v << orqi {orwim.s0, tmp, tmp, orwim.sf};
+  if (patchImm(orwim.s0.q(), v, tmp2)) {
+    v << orq {tmp2, tmp, tmp, orwim.sf};
+  } else {
+    v << orqi {orwim.s0, tmp, tmp, orwim.sf};
+  }
   v << storew{tmp, orwim.m};
-
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1148,12 +1150,15 @@ void lowerOrqim(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT {unit.freeScratchBlock(scratch);};
   Vout v(unit, scratch, inst.origin);
 
-  auto tmp = v.makeReg();
-
+  Vreg tmp = v.makeReg();
+  Vreg tmp2;
   v << load {orqim.m, tmp};
-  v << orqi {orqim.s0, tmp, tmp, orqim.sf};
+  if (patchImm(orqim.s0.q(), v, tmp2)) {
+    v << orq {tmp2, tmp, tmp, orqim.sf};
+  } else {
+    v << orqi {orqim.s0, tmp, tmp, orqim.sf};
+  }
   v << store{tmp, orqim.m};
-
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1168,12 +1173,11 @@ void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT {unit.freeScratchBlock(scratch);};
   Vout v(unit, scratch, inst.origin);
 
-  auto tmp = v.makeReg();
-
-  v << ldimmq{Immed64(addqi.s0.q()), tmp};
-  v << addq  {tmp, addqi.s1, addqi.d, addqi.sf};
-
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  Vreg tmp;
+  if (patchImm(addqi.s0.q(), v, tmp)) {
+    v << addq  {tmp, addqi.s1, addqi.d, addqi.sf};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 /*
@@ -1187,12 +1191,11 @@ void lowerCmpqi(Vunit& unit, Vlabel b, size_t iInst) {
   SCOPE_EXIT {unit.freeScratchBlock(scratch);};
   Vout v(unit, scratch, inst.origin);
 
-  auto tmp = v.makeReg();
-
-  v << ldimmq{Immed64(cmpqi.s0.q()), tmp};
-  v << cmpq  {tmp, cmpqi.s1, cmpqi.sf};
-
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  Vreg tmp;
+  if (patchImm(cmpqi.s0.q(), v, tmp)) {
+    v << cmpq  {tmp, cmpqi.s1, cmpqi.sf};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 #if PPC64_HAS_PUSH_POP
@@ -1365,9 +1368,7 @@ void lowerForPPC64(Vunit& unit) {
           break;
 
         case Vinstr::addqi:
-          // only immediate up to 16bits can be used on addi asm instr
-          if (!inst.addqi_.s0.fits(HPHP::sz::word))
-            lowerAddqi(unit, Vlabel{ib}, ii);
+          lowerAddqi(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::cmpqi:
