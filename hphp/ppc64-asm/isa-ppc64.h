@@ -110,15 +110,28 @@ struct Operands {
 };
 
 // TODO(rcardoso): Define operand masks
+#define PPC_OPERAND_GPR      0x0
+#define PPC_OPERAND_GPR_0    0x0
+#define PPC_OPERAND_SIGNED   0x0
+#define PPC_OPERAND_PAREN    0x0
+#define PPC_OPERAND_RELATIVE 0x0
+#define PPC_OPERAND_ABSOLUTE 0x0
+#define PPC_OPERAND_OPTIONAL 0x0
+#define PPC_OPERAND_FPR      0x0
+#define PPC_OPERAND_VR       0x0
+#define PPC_OPERAND_VSX      0x0
+#define PPC_OPERAND_SIGNOPT  0x0
+#define PPC_OPERAND_CR       0x0
+
 #define A         { 0x0, 0x0 }
 #define A_L       { 0x0, 0x0 }
 #define BA        { 0x001f0000, 0x0 }
 #define BB        { 0x0000f800, 0x0 }
 #define BD        { 0x0000fffc, 0x0 }
-#define BDA       { 0x0, 0x0 }
-#define BF        { 0x0, 0x0 }
-#define BFA       { 0x0, 0x0 }
-#define BFF       { 0x0, 0x0 }
+#define BDA       { 0xfffc, PPC_OPERAND_ABSOLUTE | PPC_OPERAND_SIGNED }
+#define BF        BDA
+#define BFA       { 0x1c0000, PPC_OPERAND_CR }
+#define BFF       { 0x3800000, 0x0 }
 #define BH        { 0x00001800, 0x0 }
 #define BHRBE     { 0x0, 0x0 }
 #define BI        { 0x001f0000, 0x0 }
@@ -126,8 +139,8 @@ struct Operands {
 #define BT        { 0x03e00000, 0x0 }
 #define CRFD      { 0x0, 0x0 }
 #define CRB       { 0x0, 0x0 }
-#define CT        { 0x0, 0x0 }
-#define D         { 0x0, 0x0 }
+#define CT        { 0x7, PPC_OPERAND_CR }
+#define D         { 0xffff, PPC_OPERAND_PAREN | PPC_OPERAND_SIGNED }
 #define DCM       { 0x0, 0x0 }
 #define DGM       { 0x0, 0x0 }
 #define DM        { 0x0, 0x0 }
@@ -137,24 +150,24 @@ struct Operands {
 #define DUIS      { 0x0, 0x0 }
 #define E         { 0x0, 0x0 }
 #define EH        { 0x0, 0x0 }
-#define EVUIMM    { 0x0, 0x0 }
-#define EVUIMM_2  { 0x0, 0x0 }
-#define EVUIMM_4  { 0x0, 0x0 }
-#define EVUIMM_8  { 0x0, 0x0 }
+#define EVUIMM    { 0xf800, 0x0 }
+#define EVUIMM_2  { 0xf800, PPC_OPERAND_PAREN }
+#define EVUIMM_4  EVUIMM_2
+#define EVUIMM_8  EVUIMM_4
 #define FLM       { 0x0, 0x0 }
-#define FRA       { 0x0, 0x0 }
-#define FRB       { 0x0, 0x0 }
-#define FRC       { 0x0, 0x0 }
-#define FRS       { 0x0, 0x0 }
-#define FRT       { 0x0, 0x0 }
+#define FRA       { 0x1f0000, PPC_OPERAND_FPR }
+#define FRB       { 0xf800, PPC_OPERAND_FPR }
+#define FRC       { 0x7c0, PPC_OPERAND_FPR }
+#define FRS       { 0x3e00000, PPC_OPERAND_FPR }
+#define FRT       FRS
 #define FXM       { 0x0, 0x0 }
 #define L         { 0x0, 0x0 }
-#define LEV       { 0x0, 0x0 }
-#define LI        { 0x0, 0x0 }
-#define LIA       { 0x0, 0x0 }
+#define LEV       { 0xfe0, PPC_OPERAND_OPTIONAL }
+#define LI        { 0x3fffffc, PPC_OPERAND_RELATIVE | PPC_OPERAND_SIGNED }
+#define LIA       { 0x3fffffc, PPC_OPERAND_ABSOLUTE | PPC_OPERAND_SIGNED }
 #define LS        { 0x0, 0x0 }
-#define MB6       { 0x0, 0x0 }
-#define ME6       { 0x0, 0x0 }
+#define MB6       { 0x7e0, 0x0 }
+#define ME6       MB6
 #define MBE       { 0x0, 0x0 }
 #define ME        { 0x0, 0x0 }
 #define MO        { 0x0, 0x0 }
@@ -163,31 +176,32 @@ struct Operands {
 #define PMR       { 0x0, 0x0 }
 #define PS        { 0x0, 0x0 }
 #define R         { 0x0, 0x0 }
-#define RA        { 0x0, 0x0 }
-#define RA0       { 0x0, 0x0 }
+#define RA        { 0x1f0000, PPC_OPERAND_GPR }
+// 0 in the RA field means zero, not r0.
+#define RA0       { 0x1f0000, PPC_OPERAND_GPR_0 }
 #define RAL       { 0x0, 0x0 }
 #define RAM       { 0x0, 0x0 }
 #define RAOPT     { 0x0, 0x0 }
 #define RAQ       { 0x0, 0x0 }
 #define RAS       { 0x0, 0x0 }
-#define RB        { 0x0, 0x0 }
+#define RB        { 0xf800, 0x0 }
 #define RMC       { 0x0, 0x0 }
-#define RS        { 0x0, 0x0 }
+#define RS        { 0x3e00000, 0x0 }
 #define RSO       { 0x0, 0x0 }
 #define RSQ       { 0x0, 0x0 }
-#define RT        { 0x0, 0x0 }
+#define RT        RS
 #define RTO       { 0x0, 0x0 }
 #define RTQ       { 0x0, 0x0 }
-#define S         { 0x0, 0x0 }
+#define S         { 0x100000, 0x0 }
 #define SH        { 0x0, 0x0 }
 #define SH16      { 0x0, 0x0 }
 #define SH6       { 0x0, 0x0 }
 #define SHB       { 0x0, 0x0 }
-#define SHO       { 0x0, 0x0 }
+#define SHO       { 0xf800, PPC_OPERAND_OPTIONAL }
 #define SHW       { 0x0, 0x0 }
-#define SI        { 0x0, 0x0 }
-#define SIMM      { 0x0, 0x0 }
-#define SISIGNOPT { 0x0, 0x0 }
+#define SI        { 0xffff, PPC_OPERAND_SIGNED }
+#define SIMM      { 0x1f0000, 0x0 }
+#define SISIGNOPT { 0xffff, PPC_OPERAND_SIGNED | PPC_OPERAND_SIGNOPT }
 #define SIX       { 0x0, 0x0 }
 #define SP        { 0x0, 0x0 }
 #define SPR       { 0x0, 0x0 }
@@ -197,24 +211,23 @@ struct Operands {
 #define TE        { 0x0, 0x0 }
 #define TH        { 0x0, 0x0 }
 #define TO        { 0x0, 0x0 }
-#define U         { 0x0, 0x0 }
+#define U         { 0xf000, 0x0 }
 #define UI        { 0x0, 0x0 }
 #define UIMM      { 0x0, 0x0 }
 #define UN        { 0x0, 0x0 }
-#define VA        { 0x0, 0x0 }
-#define VB        { 0x0, 0x0 }
-#define VC        { 0x0, 0x0 }
-#define VD        { 0x0, 0x0 }
-#define VS        { 0x0, 0x0 }
+#define VA        { 0x1f0000, PPC_OPERAND_VR }
+#define VB        { 0xf800, PPC_OPERAND_VR }
+#define VC        { 0x7c0, PPC_OPERAND_VR }
+#define VD        { 0x3e00000, PPC_OPERAND_VR }
+#define VS        VD
 #define W         { 0x0, 0x0 }
 #define WC        { 0x0, 0x0 }
-#define XA        { 0x0, 0x0 }
-#define XB        { 0x0, 0x0 }
-#define XC        { 0x0, 0x0 }
+#define XA        { 0x1f0000, PPC_OPERAND_VSX }
+#define XB        { 0xf800, PPC_OPERAND_VSX }
+#define XC        { 0xf800, PPC_OPERAND_VSX }
 #define XFL_L     { 0x0, 0x0 }
-#define XFL_L     { 0x0, 0x0 }
-#define XS        { 0x0, 0x0 }
-#define XT        { 0x0, 0x0 }
+#define XS        { 0x3e00000, PPC_OPERAND_VSX }
+#define XT        XS
 
 struct DecoderInfo {
 private:
