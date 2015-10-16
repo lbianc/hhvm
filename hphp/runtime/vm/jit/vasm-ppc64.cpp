@@ -319,9 +319,9 @@ struct Vgen {
     a->divd(i.d,  i.s0, i.s1, false);
   }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
-  void emit(const inclm& i) { not_implemented(); }
+  // void emit(const inclm& i) { not_implemented(); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
-  void emit(const incqm& i) { not_implemented(); }
+  // void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
   void emit(const incwm& i) {
     if (i.m.index.isValid()) {
@@ -952,6 +952,25 @@ void lowerInclm(Vunit& unit, Vlabel b, size_t iInst) {
 
   v << loadl{p, tmp};
   v << addli{1, tmp, tmp, inclm_.sf};
+  v << storel{tmp, p};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerIncqm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& incqm_ = inst.incqm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = incqm_.m;
+  patchVptr(p, v);
+
+  Vreg tmp = v.makeReg();
+
+  v << load{p, tmp};
+  v << addli{1, tmp, tmp, incqm_.sf};
   v << store{tmp, p};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
@@ -1317,6 +1336,14 @@ void lowerForPPC64(Vunit& unit) {
 
        case Vinstr::incwm:
           lowerIncwm(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::inclm:
+          lowerInclm(unit, Vlabel{ib}, ii);
+          break;
+
+       case Vinstr::incqm:
+          lowerIncqm(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::cmpqim:
