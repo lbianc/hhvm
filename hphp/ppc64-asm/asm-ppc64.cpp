@@ -699,25 +699,22 @@ void Assembler::unimplemented(){
 }
 
 void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
-  int missing = 0;
-  li64(rt, imm64, missing);
-}
-
-void Assembler::li64 (const Reg64& rt, uint64_t imm64, int &missing) {
   // li64, in worst case, emits 5 instructions i.e. 20 bytes of instructions.
   // Assumes that 0 bytes will be missing in the end.
-  missing = 0;
-  const int kBytesPerIns = 4;
-  const int kmaxInsBytes = 5 * kBytesPerIns;
+  uint8_t missing = 0;
+
+  // for assert purposes
+  CodeAddress li64StartPos = frontier();
+
   if ((imm64 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm64));
     if (imm64 & (1ULL << 15)) {
       // clear extended sign
       clrldi(rt, rt, 48);
-      missing = kmaxInsBytes - 2 * kBytesPerIns;
+      missing = kLi64InstrLen - 2 * kBytesPerInstr;
     } else {
-      missing = kmaxInsBytes - 1 * kBytesPerIns;
+      missing = kLi64InstrLen - 1 * kBytesPerInstr;
     }
   } else if (imm64 >> 32 == 0) {
     // immediate has only low 32 bits set
@@ -726,9 +723,9 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64, int &missing) {
     if (imm64 & (1ULL << 31)) {
       // clear extended sign
       clrldi(rt, rt, 32);
-      missing = kmaxInsBytes - 3 * kBytesPerIns;
+      missing = kLi64InstrLen - 3 * kBytesPerInstr;
     } else {
-      missing = kmaxInsBytes - 2 * kBytesPerIns;
+      missing = kLi64InstrLen - 2 * kBytesPerInstr;
     }
   } else if (imm64 >> 48 == 0) {
     // immediate has only low 48 bits set
@@ -740,7 +737,7 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64, int &missing) {
       // clear extended sign
       clrldi(rt, rt, 16);
     } else {
-      missing = kmaxInsBytes - 4 * kBytesPerIns;
+      missing = kLi64InstrLen - 4 * kBytesPerInstr;
     }
   } else {
     // load all 64 bits
@@ -750,6 +747,10 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64, int &missing) {
     oris(rt, rt, static_cast<int16_t>((imm64 >> 16) & UINT16_MAX));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
   }
+  emitNop(missing);
+
+  // guarantee our math with kLi64InstrLen is working
+  assert(kLi64InstrLen == frontier() - li64StartPos);
 }
 
 void Assembler::li32 (const Reg64& rt, uint32_t imm32) {

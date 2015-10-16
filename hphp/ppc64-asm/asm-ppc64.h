@@ -452,6 +452,11 @@ public:
     PPR32    = 898
   };
 
+  // How many bytes a PPC64 instruction length is
+  static const uint8_t kBytesPerInstr = sizeof(PPC64Instr);
+
+  // Total ammount of bytes that a li64 function emits
+  static const uint8_t kLi64InstrLen = 5 * kBytesPerInstr;
 
   // TODO(rcardoso): Must create a macro for these similar instructions.
   // This will make code more clean.
@@ -1825,7 +1830,6 @@ public:
   }
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64 (const Reg64& rt, uint64_t imm64, int &missing);
   void li64 (const Reg64& rt, uint64_t imm64);
 
   // Auxiliary for loading a 32bits immediate into a register
@@ -1853,9 +1857,8 @@ public:
     // Check Label::branchAuto for details
     HPHP::CodeBlock cb2;
 
-    // It has to skip 6 instructions: li64 (5 instructions) and mtctr
-    // uint8_t fits 4 times in a instr, so multiply instructions number by 4
-    CodeAddress bctr_addr = jmp + 4 * 6;
+    // It has to skip the li64 and a mtctr instruction
+    CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
     // Opcode located at the 6 most significant bits
     assert(((bctr_addr[3] >> 2) & 0x3F) == 19);  // XL-Form
 
@@ -2378,14 +2381,10 @@ public:
     assert(m_address && "Cannot evaluate branch size without defined target");
     // use CTR to perform absolute branch
     BranchParams bp(bc);
-    // Missing bytes for li64
-    int missing = 0;
     const ssize_t address = ssize_t(m_address);
     // Use reserved function linkage register
     addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
-    a.li64(reg::r12, address, missing);
-    // Emit nops for missing bytes
-    a.emitNop(missing);
+    a.li64(reg::r12, address);
     // When branching to another context, r12 need to keep the target address
     // to correctly set r2 (TOC reference).
     a.mtctr(reg::r12);

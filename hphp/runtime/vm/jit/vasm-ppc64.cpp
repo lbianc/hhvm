@@ -190,6 +190,10 @@ struct Vgen {
     if (i.d.isGP()) {
       if (val == 0) {
         a->xor_(i.d, i.d, i.d);
+        // emit nops to fill a standard li64 instruction block
+        // this will be useful on patching and smashable operations
+        a->emitNop(ppc64_asm::Assembler::kLi64InstrLen -
+            1 * ppc64_asm::Assembler::kBytesPerInstr);
       } else {
         a->li64(i.d, val);
       }

@@ -32,8 +32,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
  * Mirrors the API of smashable-instr.h.
  */
 
-/// Standard PPC64 instructions are 4 bytes long
-static constexpr int kStdIns = 4;
+static constexpr uint8_t kStdIns = ppc64_asm::Assembler::kBytesPerInstr;
 
 // li64's worst case
 constexpr size_t smashableMovqLen() { return kStdIns * 5; }
