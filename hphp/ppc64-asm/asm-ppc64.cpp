@@ -753,6 +753,91 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
   assert(kLi64InstrLen == frontier() - li64StartPos);
 }
 
+uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
+  // @ca_instr should be pointing to the beginning of the li64 block
+  //
+  // It's easier to know how many 16bits of data the immediate uses
+  // by counting how many nops there are inside of the code
+
+  uint8_t nops = [&]() {
+    // TODO(gut) use Decoder, but for now, do it hardcoded
+    auto isNop = [&](PPC64Instr instr) -> bool {
+      D_form_t d_formater {0, 0, 0, 24 }; // check Assembler::ori
+      return instr == d_formater.instruction;
+    };
+
+    uint8_t nNops = 0;
+    for (PPC64Instr* i = pinstr; i < pinstr + kLi64InstrLen/kBytesPerInstr;
+        i++) {
+      nNops += isNop(*i) ? 1 : 0;
+    }
+    return nNops;
+  }();
+
+  // TODO(gut) use Decoder, but for now, do it hardcoded
+  auto hasClearSignBit = [&](PPC64Instr* instr) -> bool {
+    bool op = (*instr >> 26) == 30;         // check opcode
+    bool xop = ((*instr >> 2) & 0x7) == 0;  // check extended opcode
+    return op && xop;
+  };
+
+  // TODO(gut) use Decoder, but for now, do it hardcoded
+  auto getImm = [&](PPC64Instr* instr) -> uint64_t {
+    return *instr & UINT16_MAX;
+  };
+
+  uint8_t immParts = 0;
+  switch (nops) {
+    case 4:
+      immParts = 1;                                   // 16bits, sign bit = 0
+      break;
+    case 3:
+      if (hasClearSignBit(pinstr + 1)) immParts = 1;  // 16bits, sign bit = 1
+      else immParts = 2;                              // 32bits, sign bit = 0
+      break;
+    case 2:
+      immParts = 2;                                   // 32bits, sign bit = 1
+      break;
+    case 1:
+      immParts = 3;                                   // 48bits, sign bit = 0
+      break;
+    case 0:
+      if (hasClearSignBit(pinstr + 4)) immParts = 3;  // 48bits, sign bit = 1
+      else immParts = 4;                              // 64bits, sign bit = 0
+      break;
+    default:
+      assert(false && "Unexpected number of nops in getLi64");
+      break;
+  }
+
+  uint64_t imm64 = 0;
+  switch (immParts) {
+    case 1:
+      imm64 |= getImm(pinstr);
+      break;
+    case 2:
+      imm64 |= getImm(pinstr)     << 16;
+      imm64 |= getImm(pinstr + 1);
+      break;
+    case 3:
+      imm64 |= getImm(pinstr)     << 32;
+      imm64 |= getImm(pinstr + 1) << 16;
+      imm64 |= getImm(pinstr + 3);        // jumps the sldi
+      break;
+    case 4:
+      imm64 |= getImm(pinstr)     << 48;
+      imm64 |= getImm(pinstr + 1) << 32;
+      imm64 |= getImm(pinstr + 3) << 16;  // jumps the sldi
+      imm64 |= getImm(pinstr + 4);
+      break;
+    default:
+      assert(false && "No immediate detected on getLi64");
+      break;
+  }
+
+  return imm64;
+}
+
 void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
   if ((imm32 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate

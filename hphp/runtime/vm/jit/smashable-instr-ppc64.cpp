@@ -89,7 +89,7 @@ TCA emitSmashableCall(CodeBlock& cb, TCA target) {
 #else
   a.stdu(ppc64::rsp(), p);
 #endif
-  a.branchAuto(target, ppc64_asm::BranchConditions::Always, 
+  a.branchAuto(target, ppc64_asm::BranchConditions::Always,
   ppc64_asm::LinkReg::Save);
 #if PPC64_HAS_PUSH_POP
   a.addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
@@ -188,23 +188,19 @@ TCA smashableCallTarget(TCA inst) {
 #endif
 }
 
-// TODO: This function is just checking if the instruction is a branch and
-// return the TCA received. It makes the instruction be emitted again with the
-// correct target.
-// For now it is enough for PPC64, but will be implemented soon.
 TCA smashableJmpTarget(TCA inst) {
-  // jump the smashableJmpLen-1(inst size) to get branch instruction
-  if ((((inst + (smashableJmpLen() - kStdIns))[3] >> 2) & 0x3F) != 19) {
-    return nullptr;
-  }
-  // target found at the beginning of the instruction
-  return inst;
+  return smashableJccTarget(inst); // for now, it's the same as Jcc
 }
 
 TCA smashableJccTarget(TCA inst) {
-  if (((inst[3] >> 2) & 0x3F) != 16) return nullptr; // from patchBc
-  // target found at the beginning of the instruction
-  return inst;
+  // from patchBctr:
+  // It has to skip 6 instructions: li64 (5 instructions) and mtctr
+  // uint8_t fits 4 times in a instr, so multiply instructions number by 4
+  CodeAddress bctr_addr = inst + 4 * 6;
+  // Opcode located at the 6 most significant bits
+  if (((bctr_addr[3] >> 2) & 0x3F) != 19) return nullptr; // from bctr
+
+  return reinterpret_cast<TCA>(ppc64_asm::Assembler::getLi64(inst));
 }
 
 ConditionCode smashableJccCond(TCA inst) {

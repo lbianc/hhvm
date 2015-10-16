@@ -1832,6 +1832,14 @@ public:
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64 (const Reg64& rt, uint64_t imm64);
 
+  // Retrieve the target defined by li64 instruction
+  static uint64_t getLi64(PPC64Instr* instr);
+  static CodeAddress getLi64(CodeAddress instr) {
+    return reinterpret_cast<CodeAddress>(
+        getLi64(reinterpret_cast<PPC64Instr*>(instr))
+        );
+  }
+
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, uint32_t imm32);
 
