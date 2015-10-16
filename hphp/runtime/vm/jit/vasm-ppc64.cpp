@@ -923,6 +923,27 @@ void lowerIncwm(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+void lowerInclm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& inclm_ = inst.inclm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = inclm_.m;
+  patchVptr(p, v);
+
+  //We need an auxiliary reg. as the PPC does not increase
+  //memory content directly by means of a single instruction
+  Vreg tmp = v.makeReg();
+
+  v << loadl{p, tmp};
+  v << addli{1, tmp, tmp, inclm_.sf};
+  v << store{tmp, p};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 void lowerCmpqim(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& cmpqim_ = inst.cmpqim_;
