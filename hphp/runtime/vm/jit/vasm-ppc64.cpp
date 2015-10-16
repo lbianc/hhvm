@@ -693,7 +693,7 @@ void patchVptr(Vptr& p, Vout& v) {
 template <typename typeImm>
 bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
   uint64_t imm64 = (uint64_t)imm;
-  if ((imm64 >> 16) <= 0 ) {
+  if (!(imm64 >> 16)) {
     // Immediate value sizes 16 bits
     return false;
   } else {
