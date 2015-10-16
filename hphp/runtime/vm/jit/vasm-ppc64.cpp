@@ -690,6 +690,19 @@ void patchVptr(Vptr& p, Vout& v) {
   }
 }
 
+template <typename typeImm>
+bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
+  uint64_t imm64 = (uint64_t)imm;
+  if ((imm64 >> 16) <= 0 ) {
+    // Immediate value sizes 16 bits
+    return false;
+  } else {
+    tmpRegister  = v.makeReg();
+    v << ldimmq{ imm64, tmpRegister };
+    return true;
+  }
+}
+
 void lowerStoreb(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& storeb_ = inst.storeb_;
