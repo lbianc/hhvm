@@ -69,22 +69,17 @@ struct BackEnd final : jit::BackEnd {
    * when we call it from C++, we have to tell gcc to clobber all the other
    * callee-saved registers.
    */
-#if defined(__CYGWIN__) || defined(__MINGW__)
-  #define CALLEE_SAVED_BARRIER()                                    \
-      asm volatile("" : : : "rbx", "rsi", "rdi", "r12", "r13", "r14", "r15");
-#elif defined(_MSC_VER)
-  // Unfortunately, we have no way to tell MSVC to do this, so we'll
-  // probably have to use a pair of assembly stubs to manage this.
-  #define CALLEE_SAVED_BARRIER() always_assert(false);
-#elif defined (__powerpc64__)
+#if defined (__powerpc64__)
   #define CALLEE_SAVED_BARRIER()                                    \
       asm volatile("" : : : "r14", "r15", "r16", "r17", "r18",      \
                             "r19", "r20", "r21", "r22", "r23",      \
                             "r24", "r25", "r26", "r27", "r28",      \
                             "r29", "r30");
 #else
+  // Not interesting, this back-end is only for ppc64 but it needs to compile
+  // on other platforms
   #define CALLEE_SAVED_BARRIER()                                    \
-      asm volatile("" : : : "rbx", "r12", "r13", "r14", "r15");
+      not_implemented();
 #endif
 
   /*
