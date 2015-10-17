@@ -180,12 +180,18 @@ uint32_t smashableCmpqImm(TCA inst) {
 }
 
 TCA smashableCallTarget(TCA inst) {
+  // a call always begin with a call to pushMinCallStack
   if (((inst[3] >> 2) & 0x3F) != 31) return nullptr; // from mflr
+
+  // points out how many instructions ahead the li64 can be found
 #if PPC64_HAS_PUSH_POP
-  return inst + kStdIns * 5;
+  uint8_t skipPushMinCallStack = 5;
 #else
-  return inst + kStdIns * 4;
+  uint8_t skipPushMinCallStack = 4;
 #endif
+
+  return reinterpret_cast<TCA>(
+      ppc64_asm::Assembler::getLi64(inst + kStdIns * skipPushMinCallStack));
 }
 
 TCA smashableJmpTarget(TCA inst) {
@@ -204,6 +210,7 @@ TCA smashableJccTarget(TCA inst) {
 }
 
 ConditionCode smashableJccCond(TCA inst) {
+  not_implemented();
   return DecodedInstruction(inst).jccCondCode();
 }
 
