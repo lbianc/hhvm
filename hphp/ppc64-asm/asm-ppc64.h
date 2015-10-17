@@ -1865,10 +1865,12 @@ public:
     // Check Label::branchAuto for details
     HPHP::CodeBlock cb2;
 
+#ifndef NDEBUG  // avoid "unused variable ‘bctr_addr’" warning on release build
     // It has to skip the li64 and a mtctr instruction
     CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
     // Opcode located at the 6 most significant bits
     assert(((bctr_addr[3] >> 2) & 0x3F) == 19);  // XL-Form
+#endif
 
     // Initialize code block cb2 pointing to li64 and sized 20 (li64 + nops).
     cb2.init(jmp, 20, "patched bctr");
