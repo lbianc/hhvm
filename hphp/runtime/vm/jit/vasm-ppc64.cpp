@@ -974,7 +974,26 @@ void lowerIncqm(Vunit& unit, Vlabel b, size_t iInst) {
   Vreg tmp = v.makeReg();
 
   v << load{p, tmp};
-  v << addli{1, tmp, tmp, incqm_.sf};
+  v << addqi{1, tmp, tmp, incqm_.sf};
+  v << store{tmp, p};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerDecqm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& inclm_ = inst.inclm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = inclm_.m;
+  patchVptr(p, v);
+
+  Vreg tmp = v.makeReg();
+
+  v << load{p, tmp};
+  v << addqi{-1, tmp, tmp, inclm_.sf};
   v << store{tmp, p};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
