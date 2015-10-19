@@ -373,7 +373,6 @@ struct Vgen {
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
-  void emit(const lea& i) { a->addi(i.d, i.s.base, i.s.disp); }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
   void emit(const loadtqb& i) { a->lbz(Reg64(i.d),i.s); }
@@ -860,6 +859,29 @@ void lowerLoad(Vunit& unit, Vlabel b, size_t iInst) {
   Vptr p = load_.s;
   patchVptr(p, v);
   v << load{ p, load_.d };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerLea(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& lea_ = inst.lea_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  // could do this in a simplify pass
+  if (lea_.s.disp == 0 && lea_.s.base.isValid() && !lea_.s.index.isValid()) {
+    v << copy{lea_.s.base, lea_.d};
+  } else {
+    Vptr p = lea_.s;
+    patchVptr(p, v);
+
+    if (p.index.isValid()) {
+      v << addq{p.base, p.index, lea_.d, VregSF(0)};
+    } else {
+      v << addqi{p.disp, p.base, lea_.d, VregSF(0)};
+    }
+  }
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1420,6 +1442,10 @@ void lowerForPPC64(Vunit& unit) {
 
         case Vinstr::orqim:
           lowerOrqim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::lea:
+          lowerLea(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::addqi:
