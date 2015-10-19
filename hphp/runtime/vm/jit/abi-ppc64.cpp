@@ -95,7 +95,7 @@ const RegSet kScratchCrossTraceRegs =
 /*
  * Helper code ABI registers.
  */
-const RegSet kGPHelperRegs; //TODO
+const RegSet kGPHelperRegs = ppc64::rAsm | reg::r10; //TODO
 const RegSet kXMMHelperRegs; // TODO
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -132,7 +132,7 @@ const Abi helper_abi {
 };
 
 constexpr PhysReg gp_args[] = {
-  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9, reg::r10
+  reg::r3, reg::r4, reg::r5, reg::r6, reg::r7, reg::r8, reg::r9
 };
 
 constexpr PhysReg simd_args[] = {
