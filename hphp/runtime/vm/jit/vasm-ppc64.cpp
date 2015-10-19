@@ -657,6 +657,18 @@ void Vgen::emit(const store& i) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+template <typename typeImm>
+bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
+  uint64_t imm64 = static_cast<uint64_t>(imm);
+  if (!(imm64 >> 16)) {
+    // Immediate value sizes less than 16 bits
+    return false;
+  } else {
+    tmpRegister  = v.makeReg();
+    v << ldimmq{ imm64, tmpRegister };
+    return true;
+  }
+}
 /*
  * Vptr struct supports fancy x64 addressing modes.
  * So we need to patch it to avoid ppc64el unsuported address modes.
@@ -672,19 +684,20 @@ void patchVptr(Vptr& p, Vout& v) {
     p.scale = 1;
     p.index = tmp;
   }
+  Vreg tmp2;
+  bool patchedDisp = patchImm(p.disp,v,tmp2);
   // Convert index+displacement to index
   if (p.index.isValid() && p.disp) {
     Vreg tmp  = v.makeReg();
-    Vreg tmp2 = v.makeReg();
-    v << ldimmq{ p.disp, tmp2 };
-    v << addq{tmp2, p.index, tmp, VregSF(0)};
+    if(patchedDisp)
+      v << addq{tmp2, p.index, tmp, VregSF(0)};
+    else
+      v << addqi{p.disp,p.index,tmp,VregSF(0)};
     p.index = tmp;
     p.disp = 0;
-  } else if (p.disp >> 16) {
+  } else if (patchedDisp) {
     // Convert to index if displacement is greater than 16 bits
-    Vreg tmp  = v.makeReg();
-    v << ldimmq{ p.disp, tmp };
-    p.index = tmp;
+    p.index = tmp2;
     p.disp = 0;
   }
 
@@ -694,18 +707,6 @@ void patchVptr(Vptr& p, Vout& v) {
   }
 }
 
-template <typename typeImm>
-bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
-  uint64_t imm64 = (uint64_t)imm;
-  if (!(imm64 >> 16)) {
-    // Immediate value sizes 16 bits
-    return false;
-  } else {
-    tmpRegister  = v.makeReg();
-    v << ldimmq{ imm64, tmpRegister };
-    return true;
-  }
-}
 
 void lowerStoreb(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
