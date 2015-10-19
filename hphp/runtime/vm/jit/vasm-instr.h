@@ -240,6 +240,11 @@ struct Vunit;
   O(xorl, Inone, U(s0) U(s1), D(d) D(sf))\
   O(xorq, Inone, U(s0) U(s1), D(d) D(sf))\
   O(xorqi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
+  /* ppc64 instructions */\
+  O(addl, Inone, U(s0) U(s1), D(d) D(sf)) \
+  O(loadw, Inone, U(s), D(d))\
+  O(incw, Inone, UH(s,d), DH(d,s) D(sf))\
+  O(ldimmw, I(s), Un, D(d))\
   /* */
 
 /*
@@ -782,15 +787,13 @@ struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 ///////////////////////////////////////////////////////////////////////////////
 //PPC64.
 
-//TODO(IBM): Create specific vasm opcodes for PPC64 instructions if need so.
-
-/**
- * PPC64-specific intrinsics
- */
-
 /**
  * PPC64-specific instructions
  */
+struct addl  { Vreg32 s0, s1, d; VregSF sf; };
+struct loadw { Vptr s; Vreg16 d; };
+struct incw { Vreg16 s, d; VregSF sf; };
+struct ldimmw { Immed s; Vreg16 d; };
 
 ///////////////////////////////////////////////////////////////////////////////
 struct Vinstr {

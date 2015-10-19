@@ -36,6 +36,7 @@ typedef boost::dynamic_bitset<> LiveSet;
 bool effectful(Vinstr& inst) {
   switch (inst.op) {
     case Vinstr::absdbl:
+    case Vinstr::addl:
     case Vinstr::addli:
     case Vinstr::addq:
     case Vinstr::addqi:
@@ -76,6 +77,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::incq:
     case Vinstr::ldimmq:
     case Vinstr::ldimml:
+    case Vinstr::ldimmw:
     case Vinstr::ldimmb:
     case Vinstr::ldimmqs:
     case Vinstr::lea:
@@ -86,6 +88,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::loadl:
     case Vinstr::loadqp:
     case Vinstr::loadsd:
+    case Vinstr::loadw:
     case Vinstr::loadtqb:
     case Vinstr::loadzbl:
     case Vinstr::loadzbq:
@@ -173,6 +176,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::inclm:
     case Vinstr::incqm:
     case Vinstr::incqmlock:
+    case Vinstr::incw:
     case Vinstr::incwm:
     case Vinstr::jcc:
     case Vinstr::jcci:
