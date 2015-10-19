@@ -149,9 +149,9 @@ struct Vgen {
     assertx(d0 != d1);
     if (d0 == s1) {
       if (d1 == s0) {
-        a->mr(ppc64::rvasmtmp(),s1);
-        a->mr(d0,s0);
-        a->mr(d1,ppc64::rvasmtmp());
+        a->mr(ppc64::rAsm, s1);
+        a->mr(d0, s0);
+        a->mr(d1, ppc64::rAsm);
       } else {
         // could do this in a simplify pass
         if (s1 != d1) a->mr(d1, s1); // save s1 first; d1 != s0
@@ -167,8 +167,15 @@ struct Vgen {
   void emit(const fallthru& i) {}
   void emit(const ldimmb& i) {
     if(i.d.isGP()) {
-      // Read as 16 bits and mask to avoid another cast
-      a->li(i.d, (i.s.l() & UINT8_MAX));
+      a->li(i.d, i.s); // should be only 8bits available
+    } else {
+      // TODO(rcardoso): SIMD instruction
+      not_implemented();
+    }
+  }
+  void emit(const ldimmw& i) {
+    if(i.d.isGP()) {
+      a->li(Reg64(i.d), i.s); // should be only 16bits available
     } else {
       // TODO(rcardoso): SIMD instruction
       not_implemented();
@@ -219,34 +226,13 @@ struct Vgen {
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
-  void emit(addli i) {
-    /* add of immediate up to 32bits */
-    if (!i.s0.fits(HPHP::sz::word)) {
-      // d = (s0@h + s1@h) + (s0@l + s1@l)
-      a->li32(ppc64::rvasmtmp(), i.s0.l());
-      a->add(Reg64(i.d), Reg64(i.d), ppc64::rvasmtmp());
-    } else {
-      // d = s0@l + s1@l
-      a->addi(Reg64(i.d), Reg64(i.s1), i.s0);
-    }
-  }
-  void emit(const addlm& i) { not_implemented(); }
+  void emit(addl i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0)); }
+  void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
-  void emit(const addqim& i) { not_implemented(); }
   void emit(addsd i) { not_implemented(); }
   void emit(const andbim& i) { not_implemented(); }
-  void emit(andli i) {
-    /* and of immediate up to 32bits */
-    if (!i.s0.fits(HPHP::sz::word)) {
-      // d = (s0@h & s1@h) | (s0@l & s1@l)
-      a->li32un(ppc64::rvasmtmp(), i.s0.l());
-      a->and_(Reg64(i.d), ppc64::rvasmtmp(), Reg64(i.d));
-    } else {
-      // d = s0@l & s1@l
-      a->andi(Reg64(i.d), Reg64(i.s1), i.s0);
-    }
-  }
+  void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }
   void emit(const call& i) {
@@ -256,10 +242,6 @@ struct Vgen {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
 
     popMinCallStack();
-  }
-  void emit(const callm& i) {
-    emit(load{i.target, ppc64::rvasmtmp()});
-    emit(callr{ppc64::rvasmtmp(), i.args});
   }
   void emit(const callr& i) {
     // Need to create a new call stack in order to recover LR in the future
@@ -272,73 +254,24 @@ struct Vgen {
   }
   void emit(const cloadq& i) { not_implemented(); }
   void emit(const cmovq& i) { not_implemented(); }
-  void emit(const cmpbim& i) {
-    emit(load{i.s1, ppc64::rvasmtmp()}); 
-    a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
-  }
-  void emit(const cmplim& i) {
-    if (i.s0.fits(HPHP::sz::word)) {
-      emit(load{i.s1, ppc64::rvasmtmp()});
-      a->cmpi(0, 0, ppc64::rvasmtmp(), i.s0);
-    } else {
-      emit(load{i.s1, ppc64::rvasmtmp()});
-      a->li32(ppc64::rvasmtmp(), i.s0.l());
-      a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
-    }
-  }
-//void emit(const cmplm& i) { not_implemented(); }
   void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
+  void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
-  void emit(const cmpqi& i) {
-    if (i.s0.fits(HPHP::sz::word)) {
-      a->cmpdi(i.s1, i.s0);
-    } else {
-      emit(ldimmq{i.s0.q(), ppc64::rvasmtmp()});
-      emit(cmpq{ppc64::rvasmtmp(), i.s1, i.sf});
-    }
-  }
-  void emit(const cmpqim& i) {
-    emit(load{i.s1, ppc64::rvasmtmp()});
-    a->cmpdi(ppc64::rvasmtmp(), i.s0);
-  }
-  void emit(const cmpqm& i) {
-    emit(load{i.s1, ppc64::rvasmtmp()});
-    a->cmp(0, 0, i.s0, ppc64::rvasmtmp());
-  }
+  void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
   void emit(cmpsd i) { not_implemented(); }
   void emit(const cqo& i) { not_implemented(); }
   void emit(const cvttsd2siq& i) { not_implemented(); }
   void emit(const cvtsi2sd& i) { not_implemented(); }
   void emit(const cvtsi2sdm& i) { not_implemented(); }
   void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
-  void emit(const declm& i) {
-    a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), -1);
-    emit(store{ppc64::rvasmtmp() ,i.m});
-  }
   void emit(decq i) { a->addi(i.d, i.s, -1); }
-  void emit(const decqm& i) { not_implemented(); }
   void emit(divsd i) { not_implemented(); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
-  void emit(const idiv& i) { not_implemented(); } // should use vasm srem below
-  void emit(const srem& i) {
-    a->divd(i.d,  i.s0, i.s1, false);
-  }
+  void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
+  void emit(incw i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
-  // void emit(const inclm& i) { not_implemented(); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
-  // void emit(const incqm& i) { not_implemented(); }
   void emit(const incqmlock& i) { not_implemented(); }
-  void emit(const incwm& i) {
-    if (i.m.index.isValid()) {
-      a->ldx(ppc64::rvasmtmp(), i.m);
-      a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
-      a->stdx(ppc64::rvasmtmp(), i.m);
-    } else {
-      a->ld(ppc64::rvasmtmp(), i.m);
-      a->addi(ppc64::rvasmtmp(), ppc64::rvasmtmp(), 1);
-      a->std(ppc64::rvasmtmp(), i.m);
-    }
-  }
   void emit(const jcc& i) {
     if (i.targets[1] != i.targets[0]) {
       if (next == i.targets[1]) {
@@ -367,10 +300,6 @@ struct Vgen {
     a->mtctr(i.target);
     a->bctr();
   }
-  void emit(const jmpm& i) {
-    emit(load{i.target, ppc64::rvasmtmp()});
-    emit(jmpr {ppc64::rvasmtmp(), i.args});
-  }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
@@ -378,6 +307,13 @@ struct Vgen {
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
   void emit(const loadtqb& i) { a->lbz(Reg64(i.d),i.s); }
   void emit(const loadb& i) { a->lbz(Reg64(i.d),i.s); }
+  void emit(const loadw& i) {
+    if(i.s.index.isValid()) {
+      a->lhzx(Reg64(i.d), i.s);
+    } else {
+      a->lhz(Reg64(i.d), i.s);
+    }
+  }
   void emit(const loadl& i) {
     if(i.s.index.isValid()) {
       a->lwzx(Reg64(i.d), i.s);
@@ -466,35 +402,11 @@ struct Vgen {
       a->stb(Reg64(i.s), i.m);
     }
   }
-  void emit(const storebi& i) {
-    a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
-    if(i.m.index.isValid()) {
-      a->stbx(ppc64::rvasmtmp(), i.m);
-    } else {
-      a->stb(ppc64::rvasmtmp(), i.m);
-    }
-  }
   void emit(const storel& i) {
     if(i.m.index.isValid()) {
       a->stwx(Reg64(i.s), i.m);
     } else {
       a->stw(Reg64(i.s), i.m);
-    }
-  }
-  void emit(const storeli& i) {
-    a->li32(ppc64::rvasmtmp(), i.s.l());
-    if (i.m.index.isValid()) {
-      a->stwx(ppc64::rvasmtmp(), i.m);
-    } else {
-      a->stw(ppc64::rvasmtmp(), i.m);
-    }
-  }
-  void emit(const storeqi& i) {
-    a->li64(ppc64::rvasmtmp(), i.s.q());
-    if (i.m.index.isValid()) {
-      a->stdx(ppc64::rvasmtmp(), i.m);
-    } else {
-      a->std(ppc64::rvasmtmp(), i.m);
     }
   }
   void emit(const storesd& i) {
@@ -511,39 +423,18 @@ struct Vgen {
       a->sth(Reg64(i.s), i.m);
     }
   }
-  void emit(const storewi& i) {
-    a->li(ppc64::rvasmtmp(), i.s);
-    if (i.m.index.isValid()) {
-      a->sthx(ppc64::rvasmtmp(), i.m);
-    } else {
-      a->sth(ppc64::rvasmtmp(), i.m);
-    }
-  }
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
-  void emit(const testbim& i) {
-    a->lbz(ppc64::rvasmtmp(), i.s1.mr());
-    emit(testbi{i.s0, ppc64::rvasmtmp(), i.sf});
+  void emit(const testq& i) {
+    // More information on:
+    // https://www.freelists.org/post/hhvm-ppc/Review-on-testb-vasm-change-aka-how-to-translate-x64s-test-operator-to-ppc64
+    if (i.s0 != i.s1)
+      a->and_(ppc64::rAsm, i.s0, i.s1, true); // result is not used, only flags
+    else
+      a->cmpdi(i.s0, Immed(0));
   }
-  void emit(const testwim& i) {
-    a->lhz(ppc64::rvasmtmp(), i.s1);
-    emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
-  }
-  void emit(const testlim& i) {
-    a->lwz(ppc64::rvasmtmp(), i.s1);
-    emit(testli{i.s0, ppc64::rvasmtmp(), i.sf});
-  }
-  void emit(const testq& i) { a->and_(ppc64::rvasmtmp(), i.s0, i.s1, true); }
-  void emit(const testqi& i) { a->andi(ppc64::rvasmtmp(), i.s1, i.s0); }
-  void emit(const testqm& i) {
-    a->ld(ppc64::rvasmtmp(), i.s1);
-    emit(testq{i.s0, ppc64::rvasmtmp(), i.sf});
-  }
-  void emit(const testqim& i) {
-    a->ld(ppc64::rvasmtmp(), i.s1);
-    emit(testqi{i.s0, ppc64::rvasmtmp(), i.sf});
-  }
+  void emit(const testqi& i) { a->andi(ppc64::rAsm, i.s1, i.s0); }
   void emit(const ucomisd& i) { not_implemented(); }
   void emit(const ud2& i) { a->trap(); }
   void emit(unpcklpd i) { not_implemented(); }
@@ -603,9 +494,9 @@ void Vgen::emit(const push& i) {
 }
 
 void Vgen::emit(const vret& i) {
-  emit(load{i.retAddr, ppc64::rvasmtmp()});
-  a->mtlr(ppc64::rvasmtmp());
-  emit(load{i.prevFP, i.d});
+  a->ld(ppc64::rfuncln(), i.retAddr);
+  a->mtlr(ppc64::rfuncln());
+  a->ld(i.d, i.prevFP);
   a->blr();
 }
 
@@ -669,20 +560,25 @@ bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
     return true;
   }
 }
+
 /*
  * Vptr struct supports fancy x64 addressing modes.
  * So we need to patch it to avoid ppc64el unsuported address modes.
+ *
+ * Returns true if anything was patched, false otherwise.
  */
-void patchVptr(Vptr& p, Vout& v) {
+bool patchVptr(Vptr& p, Vout& v) {
+  bool modified = false;
   // Convert scaled*index to index
   if(p.scale > 1) {
-    Vreg tmp  = v.makeReg();
+    Vreg tmp = v.makeReg();
     uint8_t shift = p.scale == 2 ? 1 :
                     p.scale == 4 ? 2 :
                     p.scale == 8 ? 3 : 0;
     v << shlqi{shift, p.index, tmp, VregSF(RegSF{0})};
     p.scale = 1;
     p.index = tmp;
+    modified = true;
   }
   Vreg tmp2;
   bool patchedDisp = patchImm(p.disp,v,tmp2);
@@ -695,18 +591,29 @@ void patchVptr(Vptr& p, Vout& v) {
       v << addqi{p.disp,p.index,tmp,VregSF(RegSF{0})};
     p.index = tmp;
     p.disp = 0;
+    modified = true;
   } else if (patchedDisp) {
     // Convert to index if displacement is greater than 16 bits
     p.index = tmp2;
     p.disp = 0;
+    modified = true;
   }
 
   // Check if base is valid, otherwise set R0 (as zero)
   if (!p.base.isValid()) {
     p.base = Vreg(0);
+    modified = true;
   }
+  return modified;
 }
 
+
+/*
+ * Rules for the lowering of these vasms:
+ * 1) All vasms emitted in lowering are already adjusted/patched.
+ *   In other words, it will not be lowered afterwards.
+ * 2) If a vasm has a Vptr that can be removed by emitting load/store, do it!
+ */
 
 void lowerStoreb(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
@@ -716,9 +623,10 @@ void lowerStoreb(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = storeb_.m;
-  patchVptr(p, v);
-  v << storeb{ storeb_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << storeb{ storeb_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerStorebi(Vunit& unit, Vlabel b, size_t iInst) {
@@ -732,7 +640,7 @@ void lowerStorebi(Vunit& unit, Vlabel b, size_t iInst) {
   v << ldimmb{ storebi_.s, ir };
 
   Vptr p = storebi_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
   v << storeb{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -745,9 +653,10 @@ void lowerStorel(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = storel_.m;
-  patchVptr(p, v);
-  v << storel{ storel_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << storel{ storel_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerStoreli(Vunit& unit, Vlabel b, size_t iInst) {
@@ -761,7 +670,7 @@ void lowerStoreli(Vunit& unit, Vlabel b, size_t iInst) {
   v << ldimml{ storeli_.s, ir };
 
   Vptr p = storeli_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
   v << storel{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -774,9 +683,10 @@ void lowerStorew(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = storew_.m;
-  patchVptr(p, v);
-  v << storew{ storew_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << storew{ storew_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerStorewi(Vunit& unit, Vlabel b, size_t iInst) {
@@ -787,10 +697,10 @@ void lowerStorewi(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   auto ir = v.makeReg();
-  v << ldimml{ storewi_.s, ir };
+  v << ldimmw{ storewi_.s, ir };
 
   Vptr p = storewi_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
   v << storew{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -806,7 +716,7 @@ void lowerStoreqi(Vunit& unit, Vlabel b, size_t iInst) {
   v << ldimmq{ Immed64(storeqi_.s.q()), ir };
 
   Vptr p = storeqi_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
   v << store{ ir, p };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -819,9 +729,10 @@ void lowerStore(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = store_.d;
-  patchVptr(p, v);
-  v << store{ store_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << store{ store_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerStoreups(Vunit& unit, Vlabel b, size_t iInst) {
@@ -832,9 +743,10 @@ void lowerStoreups(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = storeups_.m;
-  patchVptr(p, v);
-  v << storeups{ storeups_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << storeups{ storeups_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerStoresd(Vunit& unit, Vlabel b, size_t iInst) {
@@ -845,9 +757,10 @@ void lowerStoresd(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = storesd_.m;
-  patchVptr(p, v);
-  v << storesd{ storesd_.s, p };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << storesd{ storesd_.s, p };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLoad(Vunit& unit, Vlabel b, size_t iInst) {
@@ -858,9 +771,10 @@ void lowerLoad(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = load_.s;
-  patchVptr(p, v);
-  v << load{ p, load_.d };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << load{ p, load_.d };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLea(Vunit& unit, Vlabel b, size_t iInst) {
@@ -894,9 +808,10 @@ void lowerLoadl(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = loadl_.s;
-  patchVptr(p, v);
-  v << loadl{ p, loadl_.d };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << loadl{ p, loadl_.d };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLoadzbl(Vunit& unit, Vlabel b, size_t iInst) {
@@ -907,9 +822,10 @@ void lowerLoadzbl(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = loadzbl_.s;
-  patchVptr(p, v);
-  v << loadzbl{ p, loadzbl_.d };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << loadzbl{ p, loadzbl_.d };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLoadzbq(Vunit& unit, Vlabel b, size_t iInst) {
@@ -920,9 +836,10 @@ void lowerLoadzbq(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = loadzbq_.s;
-  patchVptr(p, v);
-  v << loadzbq{ p, loadzbq_.d };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << loadzbq{ p, loadzbq_.d };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLoadzlq(Vunit& unit, Vlabel b, size_t iInst) {
@@ -933,9 +850,10 @@ void lowerLoadzlq(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = loadzlq_.s;
-  patchVptr(p, v);
-  v << loadzlq{ p, loadzlq_.d };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << loadzlq{ p, loadzlq_.d };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerLoadups(Vunit& unit, Vlabel b, size_t iInst) {
@@ -946,9 +864,10 @@ void lowerLoadups(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = loadups_.s;
-  patchVptr(p, v);
-  v << loadups{ p, loadups_.d};
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  if (patchVptr(p, v)) {
+    v << loadups{ p, loadups_.d};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerIncwm(Vunit& unit, Vlabel b, size_t iInst) {
@@ -959,9 +878,13 @@ void lowerIncwm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = incwm_.m;
-  patchVptr(p, v);
-  v << incwm{ p, incwm_.sf };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  (void)patchVptr(p, v);
+
+  Vreg tmp = v.makeReg();
+  Vreg tmp2 = v.makeReg();  // needed as VRegs  can only be defined once
+  v << loadw{p, tmp};
+  v << incw{tmp, tmp2, incwm_.sf};
+  v << storew{tmp2, p};
 }
 
 void lowerInclm(Vunit& unit, Vlabel b, size_t iInst) {
@@ -972,15 +895,13 @@ void lowerInclm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = inclm_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
 
-  //We need an auxiliary reg. as the PPC does not increase
-  //memory content directly by means of a single instruction
   Vreg tmp = v.makeReg();
-
+  Vreg tmp2 = v.makeReg();  // needed as VRegs  can only be defined once
   v << loadl{p, tmp};
-  v << addli{1, tmp, tmp, inclm_.sf};
-  v << storel{tmp, p};
+  v << incl{tmp, tmp2, inclm_.sf};
+  v << storel{tmp2, p};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -993,32 +914,51 @@ void lowerIncqm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = incqm_.m;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
 
   Vreg tmp = v.makeReg();
-
+  Vreg tmp2 = v.makeReg();  // needed as VRegs  can only be defined once
   v << load{p, tmp};
-  v << addqi{1, tmp, tmp, incqm_.sf};
-  v << store{tmp, p};
+  v << incq{tmp, tmp2, incqm_.sf};
+  v << store{tmp2, p};
+
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerDeclm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& declm_ = inst.declm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = declm_.m;
+  (void)patchVptr(p, v);
+
+  Vreg tmp = v.makeReg();
+  Vreg tmp2 = v.makeReg();  // needed as VRegs  can only be defined once
+  v << loadl{p, tmp};
+  v << decl{tmp, tmp2, declm_.sf};
+  v << storel{tmp2, p};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
 void lowerDecqm(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
-  auto const& inclm_ = inst.inclm_;
+  auto const& decqm_ = inst.decqm_;
   auto scratch = unit.makeScratchBlock();
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, inst.origin);
 
-  Vptr p = inclm_.m;
+  Vptr p = decqm_.m;
   patchVptr(p, v);
 
   Vreg tmp = v.makeReg();
-
+  Vreg tmp2 = v.makeReg();  // needed as VRegs  can only be defined once
   v << load{p, tmp};
-  v << addqi{-1, tmp, tmp, inclm_.sf};
-  v << store{tmp, p};
+  v << decq{tmp, tmp2, decqm_.sf};
+  v << store{tmp2, p};
 
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -1031,8 +971,16 @@ void lowerCmpqim(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = cmpqim_.s1;
-  patchVptr(p, v);
-  v << cmpqim{ cmpqim_.s0, p, cmpqim_.sf };
+  (void)(patchVptr(p, v));
+  Vreg tmp2 = v.makeReg();
+  v << load{p, tmp2};
+
+  Vreg tmp;
+  if (patchImm(cmpqim_.s0.q(), v, tmp)) {
+    v << cmpq{ tmp, tmp2, cmpqim_.sf };
+  } else {
+    v << cmpqi{ cmpqim_.s0, tmp2, cmpqim_.sf };
+  }
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1044,8 +992,12 @@ void lowerCmpbim(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = cmpbim_.s1;
-  patchVptr(p, v);
-  v << cmpbim{ cmpbim_.s0, p, cmpbim_.sf };
+  (void)patchVptr(p, v);
+  Vreg tmp2 = v.makeReg();
+  v << loadb{p, tmp2};
+
+  // comparison only up to 8bits. The immediate can't be bigger than that.
+  v << cmpli{ cmpbim_.s0, tmp2, cmpbim_.sf };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1057,8 +1009,16 @@ void lowerCmplim(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = cmplim_.s1;
-  patchVptr(p, v);
-  v << cmplim{ cmplim_.s0, p, cmplim_.sf };
+  (void)patchVptr(p, v);
+  Vreg tmp2 = v.makeReg();
+  v << loadl{p, tmp2};
+
+  Vreg tmp;
+  if (patchImm(cmplim_.s0.q(), v, tmp)) {
+    v << cmpl{ tmp, tmp2, cmplim_.sf };
+  } else {
+    v << cmpli{ cmplim_.s0, tmp2, cmplim_.sf };
+  }
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1070,13 +1030,11 @@ void lowerCmplm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = cmplm_.s1;
-  patchVptr(p, v);
-
+  (void)patchVptr(p, v);
   Vreg tmp = v.makeReg();
-
   v << loadl{ p, tmp };
-  v << cmpl{ cmplm_.s0, tmp, cmplm_.sf };
 
+  v << cmpl{ cmplm_.s0, tmp, cmplm_.sf };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1088,8 +1046,11 @@ void lowerCmpqm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = cmpqm_.s1;
-  patchVptr(p, v);
-  v << cmpqm{ cmpqm_.s0, p, cmpqm_.sf };
+  (void)patchVptr(p, v);
+  Vreg tmp = v.makeReg();
+  v << load { p, tmp };
+
+  v << cmpq{ cmpqm_.s0, tmp, cmpqm_.sf };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1101,8 +1062,11 @@ void lowerJmpm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = jmpm_.target;
-  patchVptr(p, v);
-  v << jmpm{ p, jmpm_.args };
+  (void)patchVptr(p, v);
+  Vreg tmp = v.makeReg();
+  v << load { p, tmp };
+
+  v << jmpr { tmp, jmpm_.args };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1114,9 +1078,10 @@ void lowerCallm(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = callm_.target;
-  patchVptr(p, v);
+  (void)patchVptr(p, v);
   auto d = v.makeReg();
   v << load { p, d };
+
   v << callr { d, callm_.args };
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
@@ -1129,11 +1094,14 @@ void lowerVret(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vptr p = vret_.retAddr;
+  bool vret_patched = patchVptr(p, v);
   Vptr prevFP = vret_.prevFP;
-  patchVptr(p, v);
-  patchVptr(prevFP, v);
-  v << vret{ p, prevFP, vret_.d, vret_.args };
-  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  bool prevfp_patched = patchVptr(prevFP, v);
+
+  if (vret_patched || prevfp_patched) {
+    v << vret{ p, prevFP, vret_.d, vret_.args };
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
 }
 
 void lowerAbsdbl(Vunit& unit, Vlabel b, size_t iInst) {
@@ -1211,19 +1179,14 @@ void lowerOrwim(Vunit& unit, Vlabel b, size_t iInst) {
   auto scratch = unit.makeScratchBlock();
   SCOPE_EXIT {unit.freeScratchBlock(scratch);};
   Vout v(unit, scratch, inst.origin);
-  /*
-   * TODO(igor): It would be better if there was a 16 bits load instruction
-   * But, after these instructions, only 16 bits will be stored.
-   */
+
+  Vptr p = orwim.m;
+  (void)patchVptr(p, v);
   Vreg tmp = v.makeReg();
-  Vreg tmp2;
-  v << load {orwim.m, tmp};
-  if (patchImm(orwim.s0.q(), v, tmp2)) {
-    v << orq {tmp2, tmp, tmp, orwim.sf};
-  } else {
-    v << orqi {orwim.s0, tmp, tmp, orwim.sf};
-  }
-  v << storew{tmp, orwim.m};
+  v << loadw{ p, tmp };
+
+  v << orqi {orwim.s0, tmp, tmp, orwim.sf};
+  v << storew{tmp, p};
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
@@ -1235,21 +1198,18 @@ void lowerOrqim(Vunit& unit, Vlabel b, size_t iInst) {
   Vout v(unit, scratch, inst.origin);
 
   Vreg tmp = v.makeReg();
-  Vreg tmp2;
   v << load {orqim.m, tmp};
+
+  Vreg tmp2;
   if (patchImm(orqim.s0.q(), v, tmp2)) {
     v << orq {tmp2, tmp, tmp, orqim.sf};
   } else {
-    v << orqi {orqim.s0, tmp, tmp, orqim.sf};
+    v << orqi{orqim.s0, tmp, tmp, orqim.sf};
   }
   v << store{tmp, orqim.m};
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
-/*
- * As the immediate is bigger than 16 bits, use a temporary register to load
- * that value and use addq vasm afterwards.
- */
 void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& addqi = inst.addqi_;
@@ -1264,10 +1224,73 @@ void lowerAddqi(Vunit& unit, Vlabel b, size_t iInst) {
   }
 }
 
-/*
- * As the immediate is bigger than 16 bits, use a temporary register to load
- * that value and use cmpq vasm afterwards.
- */
+void lowerAddqim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& addqim = inst.addqim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = addqim.m;
+  (void)patchVptr(p, v);
+  Vreg tmp = v.makeReg();
+  v << load { p, tmp };
+
+  Vreg tmp2;
+  if (patchImm(addqim.s0.q(), v, tmp2)) {
+    v << addq {tmp2, tmp, tmp, addqim.sf};
+  } else {
+    v << addqi{addqim.s0, tmp, tmp, addqim.sf};
+  }
+  v << store{tmp, p};
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerAddli(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& addli = inst.addli_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  Vreg tmp;
+  if (patchImm(addli.s0.l(), v, tmp)) {
+    v << addl  {tmp, addli.s1, addli.d, addli.sf};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
+}
+
+void lowerAddlm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& addlm = inst.addlm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = addlm.m;
+  (void)patchVptr(p, v);
+  Vreg tmp = v.makeReg();
+  v << loadw { p, tmp };
+
+  v << addl  {addlm.s0, tmp, tmp, addlm.sf};
+  v << storew{tmp, p};
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerAndli(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& andli = inst.andli_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  Vreg tmp;
+  if (patchImm(andli.s0.l(), v, tmp)) {
+    v << andl  {tmp, andli.s1, andli.d, andli.sf};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
+}
+
 void lowerCmpqi(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& cmpqi = inst.cmpqi_;
@@ -1281,6 +1304,113 @@ void lowerCmpqi(Vunit& unit, Vlabel b, size_t iInst) {
     vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
   }
 }
+
+void lowerTestqm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testqm_ = inst.testqm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = testqm_.s1;
+  (void)(patchVptr(p, v));
+  Vreg tmp = v.makeReg();
+  v << load{p, tmp};
+
+  v << testq{ testqm_.s0, tmp, testqm_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerTestqim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testqim_ = inst.testqim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = testqim_.s1;
+  (void)(patchVptr(p, v));
+  Vreg tmp2 = v.makeReg();
+  v << load{p, tmp2};
+
+  Vreg tmp;
+  if (patchImm(testqim_.s0.q(), v, tmp)) {
+    v << testq{ tmp, tmp2, testqim_.sf };
+  } else {
+    v << testqi{ testqim_.s0, tmp2, testqim_.sf };  // doesn't need lowering
+  }
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerTestlim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testlim_ = inst.testlim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = testlim_.s1;
+  (void)patchVptr(p, v);
+  Vreg tmp2 = v.makeReg();
+  v << loadl{p, tmp2};
+
+  Vreg tmp;
+  if (patchImm(testlim_.s0.q(), v, tmp)) {
+    v << testq{ tmp, tmp2, testlim_.sf };
+  } else {
+    v << testqi{ testlim_.s0, tmp2, testlim_.sf };  // doesn't need lowering
+  }
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerTestwim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testwim_ = inst.testwim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = testwim_.s1;
+  (void)patchVptr(p, v);
+  Vreg tmp2 = v.makeReg();
+  v << loadw{p, tmp2};
+
+  // comparison only up to 8bits. The immediate can't be bigger than that.
+  v << testqi{ testwim_.s0, tmp2, testwim_.sf };  // doesn't need lowering
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerTestbim(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testbim_ = inst.testbim_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = testbim_.s1;
+  (void)patchVptr(p, v);
+  Vreg tmp2 = v.makeReg();
+  v << loadb{p, tmp2};
+
+  // comparison only up to 8bits. The immediate can't be bigger than that.
+  v << testqi{ testbim_.s0, tmp2, testbim_.sf };  // doesn't need lowering
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
+void lowerTestqi(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& testqi = inst.testqi_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+  Vout v(unit, scratch, inst.origin);
+
+  Vreg tmp;
+  if (patchImm(testqi.s0.q(), v, tmp)) {
+    v << testq  {tmp, testqi.s1, testqi.sf};
+    vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+  }
+}
+
 
 #if PPC64_HAS_PUSH_POP
 /*
@@ -1343,75 +1473,79 @@ void lowerForPPC64(Vunit& unit) {
           lowerStorebi(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storel:
+        case Vinstr::storel:
           lowerStorel(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storeli:
+        case Vinstr::storeli:
           lowerStoreli(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storew:
+        case Vinstr::storew:
           lowerStorew(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storewi:
+        case Vinstr::storewi:
           lowerStorewi(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storeqi:
+        case Vinstr::storeqi:
           lowerStoreqi(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::store:
+        case Vinstr::store:
           lowerStore(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storeups:
+        case Vinstr::storeups:
           lowerStoreups(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::storesd:
+        case Vinstr::storesd:
           lowerStoresd(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::load:
+        case Vinstr::load:
           lowerLoad(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::loadzbl:
+        case Vinstr::loadzbl:
           lowerLoadzbl(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::loadzbq:
+        case Vinstr::loadzbq:
           lowerLoadzbq(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::loadzlq:
+        case Vinstr::loadzlq:
           lowerLoadzlq(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::loadl:
+        case Vinstr::loadl:
           lowerLoadl(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::loadups:
+        case Vinstr::loadups:
           lowerLoadups(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::incwm:
+        case Vinstr::incwm:
           lowerIncwm(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::inclm:
+        case Vinstr::inclm:
           lowerInclm(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::incqm:
+        case Vinstr::incqm:
           lowerIncqm(unit, Vlabel{ib}, ii);
           break;
 
-       case Vinstr::decqm:
+        case Vinstr::declm:
+          lowerDeclm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::decqm:
           lowerDecqm(unit, Vlabel{ib}, ii);
           break;
 
@@ -1443,9 +1577,9 @@ void lowerForPPC64(Vunit& unit) {
           lowerJmpm(unit, Vlabel{ib}, ii);
           break;
 
-      case Vinstr::vret:
+        case Vinstr::vret:
           lowerVret(unit, Vlabel{ib}, ii);
-        break;
+          break;
 
         case Vinstr::absdbl:
           lowerAbsdbl(unit, Vlabel{ib}, ii);
@@ -1475,10 +1609,48 @@ void lowerForPPC64(Vunit& unit) {
           lowerAddqi(unit, Vlabel{ib}, ii);
           break;
 
+        case Vinstr::addqim:
+          lowerAddqim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::addli:
+          lowerAddli(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::addlm:
+          lowerAddlm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::andli:
+          lowerAndli(unit, Vlabel{ib}, ii);
+          break;
+
         case Vinstr::cmpqi:
-          // only immediate up to 16bits can be used on cmpdi asm instr
-          if (!inst.cmpqi_.s0.fits(HPHP::sz::word))
-            lowerCmpqi(unit, Vlabel{ib}, ii);
+          lowerCmpqi(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testqm:
+          lowerTestqm(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testqim:
+          lowerTestqim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testlim:
+          lowerTestlim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testwim:
+          lowerTestwim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testbim:
+          lowerTestbim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::testqi:
+          lowerTestqi(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::countbytecode:
@@ -1509,12 +1681,9 @@ void lowerForPPC64(Vunit& unit) {
           inst = cmpqi{inst.cmpbi_.s0, Reg64(inst.cmpbi_.s1), inst.cmpbi_.sf};
           break;
         case Vinstr::cmpli:
-          if (inst.cmpli_.s0.fits(HPHP::sz::word))
-            // immediate can be used right away
-            inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
-          else
-            // lower it just like cmpqi with immediate size > 16bits
-            lowerCmpqi(unit, Vlabel{ib}, ii);
+          // convert cmpli to cmpqi before lowering it
+          inst = cmpqi{inst.cmpli_.s0, Reg64(inst.cmpli_.s1), inst.cmpli_.sf};
+          lowerCmpqi(unit, Vlabel{ib}, ii);
           break;
 
         // Lower subtraction to subq
@@ -1541,12 +1710,16 @@ void lowerForPPC64(Vunit& unit) {
                        inst.testl_.sf};
           break;
         case Vinstr::testbi:
+          // convert testbi to testqi before lowering it
           inst = testqi{inst.testbi_.s0, Reg64(inst.testbi_.s1),
                         inst.testbi_.sf};
+          lowerTestqi(unit, Vlabel{ib}, ii);
           break;
         case Vinstr::testli:
+          // convert testli to testqi before lowering it
           inst = testqi{inst.testli_.s0, Reg64(inst.testli_.s1),
                         inst.testli_.sf};
+          lowerTestqi(unit, Vlabel{ib}, ii);
           break;
 
         // Lower xor to xorq
@@ -1575,6 +1748,7 @@ void lowerForPPC64(Vunit& unit) {
                        Reg64(inst.andl_.d), inst.andl_.sf};
           break;
         case Vinstr::andbi:
+          // patchImm doesn't need to be called as it should be < 8 bits
           inst = andqi{inst.andbi_.s0, Reg64(inst.andbi_.s1),
                        Reg64(inst.andbi_.d), inst.andbi_.sf};
           break;
