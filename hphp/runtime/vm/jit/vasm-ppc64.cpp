@@ -1369,6 +1369,10 @@ void lowerForPPC64(Vunit& unit) {
           lowerIncqm(unit, Vlabel{ib}, ii);
           break;
 
+       case Vinstr::decqm:
+          lowerDecqm(unit, Vlabel{ib}, ii);
+          break;
+
         case Vinstr::cmpqim:
           lowerCmpqim(unit, Vlabel{ib}, ii);
           break;
