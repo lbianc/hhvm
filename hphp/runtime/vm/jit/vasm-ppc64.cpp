@@ -286,7 +286,7 @@ struct Vgen {
       a->cmpw(ppc64::rvasmtmp(), ppc64::rvasmtmp2());
     }
   }
-  void emit(const cmplm& i) { not_implemented(); }
+//void emit(const cmplm& i) { not_implemented(); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) {
     if (i.s0.fits(HPHP::sz::word)) {
@@ -1061,6 +1061,19 @@ void lowerCmplim(Vunit& unit, Vlabel b, size_t iInst) {
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
+void lowerCmplm(Vunit& unit, Vlabel b, size_t iInst) {
+  auto const& inst = unit.blocks[b].code[iInst];
+  auto const& cmplm_ = inst.cmplm_;
+  auto scratch = unit.makeScratchBlock();
+  SCOPE_EXIT { unit.freeScratchBlock(scratch); };
+  Vout v(unit, scratch, inst.origin);
+
+  Vptr p = cmplm_.s1;
+  patchVptr(p, v);
+  v << cmplm{ cmplm_.s0, p, cmplm_.sf };
+  vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
+}
+
 void lowerCmpqm(Vunit& unit, Vlabel b, size_t iInst) {
   auto const& inst = unit.blocks[b].code[iInst];
   auto const& cmpqm_ = inst.cmpqm_;
@@ -1406,6 +1419,10 @@ void lowerForPPC64(Vunit& unit) {
 
         case Vinstr::cmplim:
           lowerCmplim(unit, Vlabel{ib}, ii);
+          break;
+
+        case Vinstr::cmplm:
+          lowerCmplm(unit, Vlabel{ib}, ii);
           break;
 
         case Vinstr::cmpqm:
