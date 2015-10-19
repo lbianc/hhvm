@@ -679,7 +679,7 @@ void patchVptr(Vptr& p, Vout& v) {
     uint8_t shift = p.scale == 2 ? 1 :
                     p.scale == 4 ? 2 :
                     p.scale == 8 ? 3 : 0;
-    v << shlqi{shift, p.index, tmp, VregSF(0)};
+    v << shlqi{shift, p.index, tmp, VregSF(RegSF{0})};
     p.scale = 1;
     p.index = tmp;
   }
@@ -689,9 +689,9 @@ void patchVptr(Vptr& p, Vout& v) {
   if (p.index.isValid() && p.disp) {
     Vreg tmp  = v.makeReg();
     if(patchedDisp)
-      v << addq{tmp2, p.index, tmp, VregSF(0)};
+      v << addq{tmp2, p.index, tmp, VregSF(RegSF{0})};
     else
-      v << addqi{p.disp,p.index,tmp,VregSF(0)};
+      v << addqi{p.disp,p.index,tmp,VregSF(RegSF{0})};
     p.index = tmp;
     p.disp = 0;
   } else if (patchedDisp) {
@@ -877,9 +877,9 @@ void lowerLea(Vunit& unit, Vlabel b, size_t iInst) {
     patchVptr(p, v);
 
     if (p.index.isValid()) {
-      v << addq{p.base, p.index, lea_.d, VregSF(0)};
+      v << addq{p.base, p.index, lea_.d, VregSF(RegSF{0})};
     } else {
-      v << addqi{p.disp, p.base, lea_.d, VregSF(0)};
+      v << addqi{p.disp, p.base, lea_.d, VregSF(RegSF{0})};
     }
   }
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
