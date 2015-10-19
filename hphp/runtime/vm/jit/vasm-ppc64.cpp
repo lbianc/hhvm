@@ -287,6 +287,7 @@ struct Vgen {
     }
   }
 //void emit(const cmplm& i) { not_implemented(); }
+  void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) {
     if (i.s0.fits(HPHP::sz::word)) {
@@ -1070,7 +1071,12 @@ void lowerCmplm(Vunit& unit, Vlabel b, size_t iInst) {
 
   Vptr p = cmplm_.s1;
   patchVptr(p, v);
-  v << cmplm{ cmplm_.s0, p, cmplm_.sf };
+
+  Vreg tmp = v.makeReg();
+
+  v << loadl{ p, tmp };
+  v << cmpl{ cmplm_.s0, tmp, cmplm_.sf };
+
   vector_splice(unit.blocks[b].code, iInst, 1, unit.blocks[scratch].code);
 }
 
