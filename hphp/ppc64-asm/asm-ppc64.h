@@ -1263,7 +1263,7 @@ public:
   void stfdu()          { not_implemented(); }
   void stfdux()         { not_implemented(); }
   void stfdx(const RegXMM& rt, MemoryRef m) {
-    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 726);
+    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 727);
   }
   void stfiwx()         { not_implemented(); }
   void stfsu()          { not_implemented(); }
