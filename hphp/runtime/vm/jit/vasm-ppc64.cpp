@@ -168,7 +168,7 @@ struct Vgen {
   void emit(const ldimmb& i) {
     if(i.d.isGP()) {
       // Read as 16 bits and mask to avoid another cast
-      a->li(ppc64::rvasmtmp(), (i.s.l() & UINT8_MAX));
+      a->li(i.d, (i.s.l() & UINT8_MAX));
     } else {
       // TODO(rcardoso): SIMD instruction
       not_implemented();
