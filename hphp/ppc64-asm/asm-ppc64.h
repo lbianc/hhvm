@@ -744,7 +744,9 @@ public:
   void dci()            { not_implemented(); }
   void dcmpo()          { not_implemented(); }
   void dcmpoq()         { not_implemented(); }
-  void dcmpu()          { not_implemented(); }
+  void dcmpu(const RegXMM& fra, const RegXMM& frb) {
+    EmitXForm(59, rn(0), rn(fra), rn(frb), 642);
+  }
   void dcmpuq()         { not_implemented(); }
   void dcread()         { not_implemented(); }
   void dctdp()          { not_implemented(); }
