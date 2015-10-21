@@ -118,12 +118,10 @@ struct Vgen {
   }
 
   // intrinsics
-  void emit(const callarray& i) { not_implemented(); } ;
   void emit(const callfaststub& i) {
     emit(call{i.target, i.args});
     emit(syncpoint{i.fix});
   }
-  void emit(const contenter& i) { not_implemented(); }
   void emit(const copy& i) {
     if (i.s == i.d) return;
     if (i.s.isGP()) {
@@ -163,7 +161,6 @@ struct Vgen {
       if (s1 != d1) a->mr(d1, s1);
     }
   }
-  void emit(const debugtrap& i) { not_implemented(); }
   void emit(const fallthru& i) {}
   void emit(const ldimmb& i) {
     if(i.d.isGP()) {
@@ -210,7 +207,6 @@ struct Vgen {
   }
   void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
   void emit(const load& i);
-  void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) {
     mcg->registerCatchBlock(a->frontier(), nullptr);
   }
@@ -221,15 +217,12 @@ struct Vgen {
     emit(jmp{i.targets[0]});
   }
   void emit(const landingpad& i) {}
-  void emit(const leavetc&) { not_implemented(); }
 
   // instructions
   void emit(addl i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0)); }
   void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
-  void emit(addsd i) { not_implemented(); }
-  void emit(const andbim& i) { not_implemented(); }
   void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }
@@ -250,26 +243,17 @@ struct Vgen {
 
     popMinCallStack();
   }
-  void emit(const cloadq& i) { not_implemented(); }
-  void emit(const cmovq& i) { not_implemented(); }
   void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
-  void emit(cmpsd i) { not_implemented(); }
-  void emit(const cqo& i) { not_implemented(); }
-  void emit(const cvttsd2siq& i) { not_implemented(); }
-  void emit(const cvtsi2sd& i) { not_implemented(); }
-  void emit(const cvtsi2sdm& i) { not_implemented(); }
   void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
   void emit(decq i) { a->addi(i.d, i.s, -1); }
-  void emit(divsd i) { not_implemented(); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(incw i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
-  void emit(const incqmlock& i) { not_implemented(); }
   void emit(const jcc& i) {
     if (i.targets[1] != i.targets[0]) {
       if (next == i.targets[1]) {
@@ -319,8 +303,6 @@ struct Vgen {
       a->lwz(Reg64(i.d), i.s);
     }
   }
-  void emit(const loadqp& i) { not_implemented(); }
-  void emit(const loadsd& i) { not_implemented(); }
   void emit(const loadzbl& i) {
     if(i.s.index.isValid()) {
       a->lbzx(Reg64(i.d), i.s);
@@ -346,17 +328,12 @@ struct Vgen {
   void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
-  void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
-  void emit(notb i) { not_implemented(); }
   void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
-  void emit(const orqim& i) { not_implemented(); }
   void emit(const pop& i);
-  void emit(psllq i) { not_implemented(); }
-  void emit(psrlq i) { not_implemented(); }
   void emit(const push& i);
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
@@ -435,7 +412,6 @@ struct Vgen {
   void emit(const testqi& i) { a->andi(ppc64::rAsm, i.s1, i.s0); }
   void emit(const ucomisd& i) { a->dcmpu(i.s0,i.s1); }
   void emit(const ud2& i) { a->trap(); }
-  void emit(unpcklpd i) { not_implemented(); }
   void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
@@ -470,27 +446,23 @@ void Vgen::emit(const syncpoint& i) {
   mcg->recordSyncPoint(a->frontier(), i.fix);
 }
 
-void Vgen::emit(const pop& i) {
 #if PPC64_HAS_PUSH_POP
+void Vgen::emit(const pop& i) {
   Vptr p(ppc64::rstktop(), 0);
   a->ld(i.d, p);
   a->addi(ppc64::rstktop(), ppc64::rstktop(), push_pop_elem_size);
-#else
-  not_implemented();
-#endif
 }
+#endif
 
+#if PPC64_HAS_PUSH_POP
 /*
  * Grows call stack downwards where it's not in use at the moment
  */
 void Vgen::emit(const push& i) {
-#if PPC64_HAS_PUSH_POP
   Vptr p(ppc64::rstktop(), -push_pop_elem_size);
   a->stdu(i.s, p);
-#else
-  not_implemented();
-#endif
 }
+#endif
 
 void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
