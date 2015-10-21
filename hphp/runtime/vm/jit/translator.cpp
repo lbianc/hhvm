@@ -411,6 +411,7 @@ static const struct {
   { OpYieldK,      {StackTop2,        Stack1,       OutUnknown      }},
   { OpContCheck,   {None,             None,         OutNone         }},
   { OpContValid,   {None,             Stack1,       OutBoolean      }},
+  { OpContStarted, {None,             Stack1,       OutBoolean      }},
   { OpContKey,     {None,             Stack1,       OutUnknown      }},
   { OpContCurrent, {None,             Stack1,       OutUnknown      }},
 
@@ -436,10 +437,20 @@ static const struct {
   { OpDimInt,      {MBase,            MBase,        OutNone         }},
   { OpDimStr,      {MBase,            MBase,        OutNone         }},
   { OpDimNewElem,  {MBase,            MBase,        OutNone         }},
-  { OpQueryML,     {Local|MBase,      Stack1,       OutUnknown      }},
-  { OpQueryMC,     {Stack1|MBase,     Stack1,       OutUnknown      }},
-  { OpQueryMInt,   {MBase,            Stack1,       OutUnknown      }},
-  { OpQueryMStr,   {MBase,            Stack1,       OutUnknown      }},
+  { OpQueryML,     {BStackN|Local|MBase,
+                                      Stack1,       OutUnknown      }},
+  { OpQueryMC,     {BStackN|MBase,    Stack1,       OutUnknown      }},
+  { OpQueryMInt,   {BStackN|MBase,    Stack1,       OutUnknown      }},
+  { OpQueryMStr,   {BStackN|MBase,    Stack1,       OutUnknown      }},
+  { OpSetML,       {Stack1|BStackN|Local|MBase,
+                                      Stack1,       OutUnknown      }},
+  { OpSetMC,       {Stack1|BStackN|MBase,
+                                      Stack1,       OutUnknown      }},
+  { OpSetMInt,     {Stack1|BStackN|MBase,
+                                      Stack1,       OutUnknown      }},
+  { OpSetMStr,     {Stack1|BStackN|MBase,
+                                      Stack1,       OutUnknown      }},
+  { OpSetMNewElem, {Stack1|MBase,     Stack1,       OutUnknown      }},
 };
 
 static hphp_hash_map<Op, InstrInfo> instrInfo;
@@ -506,6 +517,10 @@ int64_t getStackPopped(PC pc) {
     case Op::ConcatN:
     case Op::FCallBuiltin:
     case Op::CreateCl:     return getImm(pc, 0).u_IVA;
+
+    case Op::SetML:   case Op::SetMC:
+    case Op::SetMInt: case Op::SetMStr: case Op::SetMNewElem:
+      return getImm(pc, 0).u_IVA + 1;
 
     case Op::NewStructArray: return getImmVector(pc).size();
 
@@ -736,6 +751,7 @@ InputInfoVec getInputs(NormalizedInstruction& ni) {
         loc = ni.imm[1].u_IVA;
         break;
       case OpQueryML:
+      case OpSetML:
         loc = ni.imm[3].u_IVA;
         break;
 
@@ -891,6 +907,7 @@ bool dontGuardAnyInputs(Op op) {
   case Op::ContCurrent:
   case Op::ContKey:
   case Op::ContValid:
+  case Op::ContStarted:
   case Op::CreateCl:
   case Op::DefCns:
   case Op::DefFunc:
@@ -987,6 +1004,11 @@ bool dontGuardAnyInputs(Op op) {
   case Op::QueryMC:
   case Op::QueryMInt:
   case Op::QueryMStr:
+  case Op::SetML:
+  case Op::SetMC:
+  case Op::SetMInt:
+  case Op::SetMStr:
+  case Op::SetMNewElem:
     return false;
 
   // These are instructions that are always interp-one'd, or are always no-ops.

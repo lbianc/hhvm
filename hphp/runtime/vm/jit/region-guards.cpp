@@ -219,11 +219,15 @@ void removeDuplicates(BlockDataVec& data, RegionDesc& region) {
         const auto d = data[i].blockId == entryId ? j : i;
         const auto m = i + j - d;
         assertx(data[d].blockId != entryId);
-        assertx(!data[d].merged);
         assertx(!data[m].deleted);
         data[d].deleted = true;
         data[m].merged  = true;
         region.addMerged(data[d].blockId, data[m].blockId);
+        if (data[d].merged) {
+          for (auto mid : region.merged(data[d].blockId)) {
+            region.addMerged(mid, data[m].blockId);
+          }
+        }
         FTRACE(2, "removeDuplicates(): merging Block {} into Block {}\n",
                data[d].blockId, data[m].blockId);
         break;
@@ -508,10 +512,54 @@ void optimizeChain(RegionDesc&         region,
  * Optimize the `region's guards, operating on one retranslation chain
  * at a time.
  */
-void optimizeGuards(RegionDesc& region, const ProfData& profData) {
+void optimizeProfiledGuards(RegionDesc& region, const ProfData& profData) {
   auto chainRoots = findRetransChainRoots(region);
   for (auto rootId : chainRoots) {
     optimizeChain(region, rootId, profData);
+  }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void optimizeGuards(RegionDesc& region, bool simple) {
+  for (auto block : region.blocks()) {
+    bool relaxed = false;
+    RegionDesc::Block::GuardedLocVec newPreConds;
+    auto& oldPreConds = block->typePreConditions();
+
+    for (auto& preCond : oldPreConds) {
+      auto category = preCond.category;
+      if (simple && category > DataTypeGeneric && category < DataTypeSpecific) {
+        category = DataTypeSpecific;
+      }
+      auto newType = preCond.type == TCls ? TCls :
+                     relaxType(preCond.type, category);
+
+      if (newType != TGen) {
+        newPreConds.push_back({preCond.location, newType, preCond.category});
+      }
+
+      if (newType != preCond.type) {
+        assertx(preCond.type < newType);
+        FTRACE(1, "optimizeGuardEagerly: Block {}, {} [{}]: {} => {}\n",
+               block->id(), show(preCond.location),
+               typeCategoryName(category), preCond.type, newType);
+        relaxed = true;
+      }
+    }
+
+    if (relaxed) {
+      // Note that we don't update the original block, but instead
+      // make a copy and update it instead.  This allows the `region'
+      // to originally contain blocks stored in ProfData, which may be
+      // reused later with different guard-relaxation decisions.
+      auto newBlock = std::make_shared<RegionDesc::Block>(*block);
+      newBlock->clearPreConditions();
+      for (auto& preCond : newPreConds) {
+        newBlock->addPreCondition(preCond);
+      }
+      region.replaceBlock(block->id(), newBlock);
+    }
   }
 }
 

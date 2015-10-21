@@ -1392,15 +1392,17 @@ To string conversions:
 
 | RetCtrl<spOff,suspendingResumed>, ND, S(StkPtr) S(FramePtr), T
 
-  Ensure that S0 + `spOff' (in cells) is stored in rVmSp, S1's saved frame
-  pointer is stored in rVmFp, and return to the saved return address in
-  S1. `suspendingResumed' indicates when this instruction is suspending a
+  Ensure that S0 + `spOff' (in cells) is stored in rvmsp, S1's saved frame
+  pointer is stored in rvmfp, and return to the saved return address in
+  S1.  `suspendingResumed' indicates when this instruction is suspending a
   resumable rather than performing a normal function return.
 
-| AsyncRetCtrl<spOff>, ND, S(StkPtr) S(FramePtr), T
+| AsyncRetCtrl<spOff,suspendingResumed>, ND, S(StkPtr) S(FramePtr), T
 
   Ensure that S0 + `spOff` (in cells) is stored in rVmSp, S1 is stored in
-  rVmFp.  Returns by leaving the TC to enterTCHelper.
+  rVmFp.  `suspendingResumed' indicates when this instruction is suspending a
+  resumable rather than performing an async function return.  Returns by
+  leaving the TC to enterTCHelper.
 
 | StRetVal, ND, S(FramePtr) S(Gen), CRc
 
@@ -1866,6 +1868,11 @@ To string conversions:
 
   Return true if a generator is not done, false otherwise.
 
+| ContStarted, D(Bool), S(Obj), NF
+
+  Return true if a generator has been run at least once, i.e. is not in the
+  Created state, false otherwise.
+
 | ContArIncKey, ND, S(FramePtr), NF
 
   Special-case key update for generator, ActRec of which is S0, which
@@ -2013,6 +2020,11 @@ To string conversions:
   When EvalHHIRGenerateAsserts is on, this instruction is inserted at the
   start of each region, to emit some sanity checking code.
 
+| DbgAssertFunc, ND, S(Func) S(Func), NF
+
+  Assert that S0 and S1 are the same function at runtime. If the assertion
+  fails, execution is aborted via a hardware exception.
+
 | RBTraceEntry, ND, NA, NF
 
 | RBTraceMsg, ND, NA, NF
@@ -2133,13 +2145,15 @@ To string conversions:
   Load an MInstrState address. Returns a pointer to offset S0 within the
   current MInstrState.
 
-| LdMBase, D(PtrToGen), NA, NF
+| LdMBase, DParam, NA, NF
 
   Load the current value of the member base register.
 
 | StMBase, ND, S(PtrToGen), NF
 
-  Store a new value to the member base register.
+  Store a new value to the member base register. It is illegal for any
+  instruction other than StMBase or InterpOne (when interpreting a member
+  instruction) to modify the member base register.
 
 | FinishMemberOp, ND, NA, NF
 
@@ -2308,9 +2322,9 @@ fields of that struct for holding intermediate values.
 
 | ArraySetRef, ND, S(Arr) S(Int,Str) S(Cell) S(BoxedCell), CRc|Er
 
-  Like ArraySet, but for binding operations on the array. The parameter in S3
-  must point to a RefData with an array type when this instruction is executed,
-  and it must be the same array that is in S0.
+  Like ArraySet, but for binding operations on the array. S3 must point to a
+  RefData with an array type when this instruction is executed, and it must be
+  the same array that is in S0.
 
 | MapSet, ND, S(Obj) S(Int,Str) S(Cell), Er
 

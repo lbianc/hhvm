@@ -415,6 +415,7 @@ bool canDCE(IRInstruction* inst) {
   case ContPreNext:
   case ContStartedCheck:
   case ContValid:
+  case ContStarted:
   case ContArIncKey:
   case ContArIncIdx:
   case ContArUpdateIdx:
@@ -435,6 +436,7 @@ bool canDCE(IRInstruction* inst) {
   case DbgAssertRefCount:
   case DbgAssertPtr:
   case DbgAssertType:
+  case DbgAssertFunc:
   case RBTraceEntry:
   case RBTraceMsg:
   case ZeroErrorLevel:

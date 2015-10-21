@@ -130,6 +130,7 @@ UNSUPPORTED_FILES_UNPARSER = {
         'type_structure/*.php',
         'constraints/class_type_constant*.php',
         'instantiate_from_unresolved_class_id_type.php',
+        'array_get_tconst.php',
     ],
     "Memoize": [
         'memoize/*.php',
@@ -287,6 +288,8 @@ UNSUPPORTED_FILES_CONVERTER = {
         'yield_wait_forva_bad1.php',
         'yield_wait_forvr.php',
         'yield_wait_forvr_result_bad1.php',
+        'akshape/gena_ok.php',
+        'akshape/gena_error.php',
     ],
     "await is currently not supported. (Other[0])": [
         'dynamic_yield/IUseDynamicYield_interface1.php',
@@ -424,6 +427,7 @@ OTHER_UNPARSEABLE_FILES = [
     'unsafeexpr3.php',
     'variadic_args1.php',
     'constraints/tapply_is_newtype.php',
+    'array_get_newtype.php',
 ]
 
 UNPARSEABLE_OUTPUT = set([

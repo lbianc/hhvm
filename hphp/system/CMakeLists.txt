@@ -13,8 +13,6 @@ add_custom_command(
        "${CMAKE_CURRENT_BINARY_DIR}/constants.h"
        "${CMAKE_CURRENT_SOURCE_DIR}/idl/constants.idl.json"
        ${EXTENSION_IDL_SOURCES}
-       # TODO: This will get moved into a config.cmake soon, until then...
-       "${CMAKE_CURRENT_SOURCE_DIR}/idl/closure.idl.json"
   COMMENT "Generating class_map.cpp and constants.h")
 
 set(CXX_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/class_map.cpp"
@@ -56,7 +54,7 @@ add_custom_command(
   DEPENDS "php.txt" ${SYSTEMLIB_SRCS}
   COMMAND "INSTALL_DIR=${CMAKE_CURRENT_BINARY_DIR}"
           "FBCODE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../.."
-          "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/ext_hhvm/make_systemlib.sh"
+          "${CMAKE_CURRENT_SOURCE_DIR}/make_systemlib.sh"
           "--install_dir=${CMAKE_CURRENT_BINARY_DIR}"
           "--fbcode_dir=${CMAKE_CURRENT_SOURCE_DIR}/.."
           "${SYSTEMLIB_SRCS_STR}"

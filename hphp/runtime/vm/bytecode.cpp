@@ -76,7 +76,7 @@
 #include "hphp/runtime/ext/asio/ext_wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_waitable-wait-handle.h"
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
-#include "hphp/runtime/ext/ext_closure.h"
+#include "hphp/runtime/ext/closure/ext_closure.h"
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/ext/hh/ext_hh.h"
@@ -85,6 +85,7 @@
 #include "hphp/runtime/ext/std/ext_std_math.h"
 #include "hphp/runtime/ext/std/ext_std_variable.h"
 #include "hphp/runtime/ext/string/ext_string.h"
+#include "hphp/runtime/ext/hash/hash_murmur.h"
 
 #include "hphp/runtime/server/rpc-request-handler.h"
 #include "hphp/runtime/server/source-root-info.h"
@@ -1394,6 +1395,39 @@ Array ExecutionContext::getCallerInfo() {
   return result;
 }
 
+int64_t ExecutionContext::getDebugBacktraceHash() {
+  VMRegAnchor _;
+  ActRec* ar = vmfp();
+  int64_t hash = 0x9e3779b9;
+  Unit* prev_unit = nullptr;
+
+  while (ar != nullptr) {
+    if (!ar->skipFrame()) {
+      Unit* unit = ar->m_func->unit();
+
+      // Only do a filehash if the file changed. It is very common
+      // to see sequences of calls within the same file
+      // File paths are already hashed, and the hash bits are random enough
+      // That allows us to do a faster combination of hashes using a known
+      // implementation (boost::hash_combine)
+      if (prev_unit != unit) {
+        prev_unit = unit;
+        auto filehash = unit->filepath()->hash();
+        hash ^= filehash + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+      }
+
+      // Function names are already hashed, and the hash bits are random enough
+      // That allows us to do a faster combination of hashes using a known
+      // implementation (boost::hash_combine)
+      auto funchash = ar->m_func->fullName()->hash();
+      hash ^= funchash + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    }
+    ar = getPrevVMState(ar);
+  }
+
+  return hash;
+}
+
 Array getDefinedVariables(const ActRec* fp) {
   if ((fp->func()->attrs() & AttrMayUseVV) && fp->hasVarEnv()) {
     return fp->m_varEnv->getDefinedVariables();
@@ -1415,22 +1449,28 @@ Array getDefinedVariables(const ActRec* fp) {
 ActRec* ExecutionContext::getFrameAtDepth(int frame) {
   VMRegAnchor _;
   auto fp = vmfp();
-  for (; frame > 0; --frame) {
-    if (!fp) break;
-    fp = getPrevVMState(fp);
-  }
   if (UNLIKELY(!fp)) return nullptr;
+  auto pc = fp->func()->unit()->offsetOf(vmpc());
+  for (; frame > 0; --frame) {
+    fp = getPrevVMState(fp, &pc);
+    if (UNLIKELY(!fp)) return nullptr;
+  }
   if (fp->skipFrame()) {
-    fp = getPrevVMState(fp);
+    fp = getPrevVMState(fp, &pc);
   }
   if (UNLIKELY(!fp || fp->localsDecRefd())) return nullptr;
+  auto const curOp = fp->func()->unit()->getOp(pc);
+  if (UNLIKELY(curOp == Op::RetC || curOp == Op::RetV ||
+               curOp == Op::CreateCont || curOp == Op::Await)) {
+    return nullptr;
+  }
   assert(!fp->magicDispatch());
   return fp;
 }
 
 VarEnv* ExecutionContext::getOrCreateVarEnv(int frame) {
   auto const fp = getFrameAtDepth(frame);
-  if (!(fp->func()->attrs() & AttrMayUseVV)) {
+  if (!fp || !(fp->func()->attrs() & AttrMayUseVV)) {
     raise_error("Could not create variable environment");
   }
   if (!fp->hasVarEnv()) {
@@ -2986,11 +3026,8 @@ static inline void lookupClsRef(TypedValue* input,
 
 static UNUSED int innerCount(const TypedValue* tv) {
   if (isRefcountedType(tv->m_type)) {
-    if (tv->m_type == KindOfRef) {
-      return tv->m_data.pref->getRealCount();
-    } else {
-      return tv->m_data.pref->getCount();
-    }
+    if (tv->m_type == KindOfRef) return tv->m_data.pref->getRealCount();
+    return TV_GENERIC_DISPATCH(*tv, getCount);
   }
   return -1;
 }
@@ -3025,6 +3062,7 @@ static inline TypedValue* ratchetRefs(TypedValue* result, TypedValue& tvRef,
     return &tvRef2;
   }
 
+  assert(result != &tvRef);
   return result;
 }
 
@@ -4985,8 +5023,18 @@ OPTBLD_INLINE void iopDimNewElem(IOP_ARGS) {
   mstate.base = ratchetRefs(result, mstate.tvRef, mstate.tvRef2);
 }
 
-template<typename F>
-static OPTBLD_INLINE void queryMImpl(PC& pc, F decode_key) {
+static OPTBLD_INLINE void mFinal(MInstrState& mstate,
+                                 int32_t nDiscard,
+                                 folly::Optional<TypedValue> result) {
+  auto& stack = vmStack();
+  for (auto i = 0; i < nDiscard; ++i) stack.popTV();
+  if (result) tvCopy(*result, *stack.allocTV());
+
+  tvUnlikelyRefcountedDecRef(mstate.tvRef);
+  tvUnlikelyRefcountedDecRef(mstate.tvRef2);
+}
+
+static OPTBLD_INLINE void queryMImpl(PC& pc, TypedValue (*decode_key)(PC&)) {
   auto nDiscard = decode_iva(pc);
   auto op = decode_oa<QueryMOp>(pc);
   auto flags = getMOpFlags(op);
@@ -5021,35 +5069,95 @@ static OPTBLD_INLINE void queryMImpl(PC& pc, F decode_key) {
       break;
   }
 
-  for (auto i = 0; i < nDiscard; ++i) vmStack().popTV();
-  tvCopy(result, *vmStack().allocTV());
+  mFinal(mstate, nDiscard, result);
+}
 
-  tvUnlikelyRefcountedDecRef(mstate.tvRef);
-  tvUnlikelyRefcountedDecRef(mstate.tvRef2);
+static inline TypedValue local_key(PC& pc) {
+  return *frame_local_inner(vmfp(), decode_la(pc));
+}
+
+static inline TypedValue int_key(PC& pc) {
+  return make_tv<KindOfInt64>(decode<int64_t>(pc));
+}
+
+static inline TypedValue str_key(PC& pc) {
+  return make_tv<KindOfStaticString>(decode_litstr(pc));
 }
 
 OPTBLD_INLINE void iopQueryML(IOP_ARGS) {
-  queryMImpl(pc, [](PC& pc) {
-    return *frame_local_inner(vmfp(), decode_la(pc));
-  });
+  queryMImpl(pc, local_key);
 }
 
 OPTBLD_INLINE void iopQueryMC(IOP_ARGS) {
-  queryMImpl(pc, [](PC& pc) {
-    return *vmStack().topC();
-  });
+  queryMImpl(pc, [](PC&) { return *vmStack().topC(); });
 }
 
 OPTBLD_INLINE void iopQueryMInt(IOP_ARGS) {
-  queryMImpl(pc, [](PC& pc) {
-    return make_tv<KindOfInt64>(decode<int64_t>(pc));
-  });
+  queryMImpl(pc, int_key);
 }
 
 OPTBLD_INLINE void iopQueryMStr(IOP_ARGS) {
-  queryMImpl(pc, [](PC& pc) {
-    return make_tv<KindOfStaticString>(decode_litstr(pc));
-  });
+  queryMImpl(pc, str_key);
+}
+
+static OPTBLD_INLINE void setMImpl(PC& pc, TypedValue (*decode_key)(PC&)) {
+  auto const nDiscard = decode_iva(pc);
+  auto const propElem = decode_oa<PropElemOp>(pc);
+  auto const key = decode_key(pc);
+
+  auto& mstate = vmMInstrState();
+  auto const topC = vmStack().topC();
+
+  switch (propElem) {
+    case PropElemOp::Prop: {
+      auto const ctx = arGetContextClass(vmfp());
+      SetProp<true>(ctx, mstate.base, key, topC);
+      break;
+    }
+    case PropElemOp::Elem: {
+      auto const result = SetElem<true>(mstate.base, key, topC);
+      if (result) {
+        tvRefcountedDecRef(topC);
+        topC->m_type = KindOfString;
+        topC->m_data.pstr = result;
+      }
+      break;
+    }
+    case PropElemOp::PropQ:
+      always_assert(false);
+  }
+
+  auto const result = *topC;
+  vmStack().discard();
+  mFinal(mstate, nDiscard, result);
+}
+
+OPTBLD_INLINE void iopSetML(IOP_ARGS) {
+  setMImpl(pc, local_key);
+}
+
+OPTBLD_INLINE void iopSetMC(IOP_ARGS) {
+  setMImpl(pc, [](PC&) { return *vmStack().indC(1); });
+}
+
+OPTBLD_INLINE void iopSetMInt(IOP_ARGS) {
+  setMImpl(pc, int_key);
+}
+
+OPTBLD_INLINE void iopSetMStr(IOP_ARGS) {
+  setMImpl(pc, str_key);
+}
+
+OPTBLD_INLINE void iopSetMNewElem(IOP_ARGS) {
+  auto const nDiscard = decode_iva(pc);
+
+  auto& mstate = vmMInstrState();
+  auto const topC = vmStack().topC();
+  SetNewElem<true>(mstate.base, topC);
+
+  auto const result = *topC;
+  vmStack().discard();
+  mFinal(mstate, nDiscard, result);
 }
 
 static inline void vgetl_body(TypedValue* fr, TypedValue* to) {
@@ -7359,15 +7467,20 @@ OPTBLD_INLINE void iopContValid(IOP_ARGS) {
     this_generator(vmfp())->getState() != BaseGenerator::State::Done);
 }
 
+OPTBLD_INLINE void iopContStarted(IOP_ARGS) {
+  vmStack().pushBool(
+    this_generator(vmfp())->getState() != BaseGenerator::State::Created);
+}
+
 OPTBLD_INLINE void iopContKey(IOP_ARGS) {
   Generator* cont = this_generator(vmfp());
-  cont->startedCheck();
+  if (!RuntimeOption::AutoprimeGenerators) cont->startedCheck();
   cellDup(cont->m_key, *vmStack().allocC());
 }
 
 OPTBLD_INLINE void iopContCurrent(IOP_ARGS) {
   Generator* cont = this_generator(vmfp());
-  cont->startedCheck();
+  if (!RuntimeOption::AutoprimeGenerators) cont->startedCheck();
   cellDup(cont->m_value, *vmStack().allocC());
 }
 
@@ -7833,9 +7946,8 @@ TCA dispatchImpl() {
     opPC = pc;                                                          \
     op = decode_op(pc);                                                 \
     COND_STACKTRACE("dispatch:                    ");                   \
-    ONTRACE(1,                                                          \
-            Trace::trace("dispatch: %d: %s\n", pcOff(),                 \
-                         opcodeToName(op)));                            \
+    FTRACE(1, "dispatch: {}: {}\n", pcOff(),                            \
+           instrToString(opPC, vmfp()->m_func->unit()));                \
     DISPATCH_ACTUAL();                                                  \
 } while (0)
 

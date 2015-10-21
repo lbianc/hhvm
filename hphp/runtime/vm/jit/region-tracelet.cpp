@@ -185,6 +185,8 @@ RegionDescPtr RegionFormer::go() {
 
     if (!prepareInstruction()) break;
 
+    m_curBlock->setKnownFunc(m_sk, m_inst.funcd);
+
     if (traceThroughJmp()) {
       // We're going to skip the call to translateInstr, which is what
       // inserts the EndGuards when HHIRConstrictGuards is enabled.
@@ -192,8 +194,6 @@ RegionDescPtr RegionFormer::go() {
       if (RuntimeOption::EvalHHIRConstrictGuards) irgen::gen(m_irgs, EndGuards);
       continue;
     }
-
-    m_curBlock->setKnownFunc(m_sk, m_inst.funcd);
 
     m_inst.interp = m_interp.count(m_sk);
 
@@ -652,13 +652,20 @@ RegionDescPtr selectTracelet(const RegionContext& ctx, int32_t maxBCInstrs,
     return RegionDescPtr { nullptr };
   }
 
-  FTRACE(1, "selectTracelet returning, {}, {} tries:\n{}\n",
-         inlining ? "inlining" : "not inlining", tries, show(*region));
   if (region->blocks().back()->length() == 0) {
     // If the final block is empty because it would've only contained
     // instructions producing literal values, kill it.
     region->deleteBlock(region->blocks().back()->id());
   }
+
+  if (RuntimeOption::EvalRegionRelaxGuards) {
+    FTRACE(1, "selectTracelet: before optimizeGuards:\n{}\n",
+           show(*region));
+    optimizeGuards(*region, profiling);
+  }
+
+  FTRACE(1, "selectTracelet returning, {}, {} tries:\n{}\n",
+         inlining ? "inlining" : "not inlining", tries, show(*region));
   return region;
 }
 

@@ -27,18 +27,14 @@
 #define ENABLE_EXTENSION_ASIO
 #define ENABLE_EXTENSION_CLOSURE
 #define ENABLE_EXTENSION_COLLECTIONS
-#define ENABLE_EXTENSION_FB
 #define ENABLE_EXTENSION_SIMPLEXML
 #endif
 
 #ifdef ENABLE_EXTENSION_CLOSURE
-#include "hphp/runtime/ext/ext_closure.h"
+#include "hphp/runtime/ext/closure/ext_closure.h"
 #endif
 #ifdef ENABLE_EXTENSION_COLLECTIONS
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
-#endif
-#ifdef ENABLE_EXTENSION_FB
-#include "hphp/runtime/ext/fb/ext_fb.h"
 #endif
 
 // half-IDL, half-HNI

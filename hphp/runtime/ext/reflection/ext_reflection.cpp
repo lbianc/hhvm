@@ -29,7 +29,7 @@
 #include "hphp/runtime/vm/native-data.h"
 
 #include "hphp/runtime/ext/debugger/ext_debugger.h"
-#include "hphp/runtime/ext/ext_closure.h"
+#include "hphp/runtime/ext/closure/ext_closure.h"
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/std/ext_std_misc.h"
 #include "hphp/runtime/ext/string/ext_string.h"
@@ -1735,6 +1735,18 @@ static String HHVM_METHOD(ReflectionTypeAlias, getAssignedTypeText) {
   return TypeStructure::toString(typeStructure);
 }
 
+static Array HHVM_METHOD(ReflectionTypeAlias, getAttributes) {
+  auto const req = ReflectionTypeAliasHandle::GetTypeAliasReqFor(this_);
+  assert(req);
+  auto const userAttrs = req->userAttrs;
+
+  ArrayInit ai(userAttrs.size(), ArrayInit::Mixed{});
+  for (auto& attr : userAttrs) {
+    ai.set(StrNR(attr.first), tvAsCVarRef(&attr.second));
+  }
+  return ai.toArray();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 class ReflectionExtension final : public Extension {
  public:
@@ -1798,6 +1810,7 @@ class ReflectionExtension final : public Extension {
 
     HHVM_ME(ReflectionTypeAlias, __init);
     HHVM_ME(ReflectionTypeAlias, getTypeStructure);
+    HHVM_ME(ReflectionTypeAlias, getAttributes);
     HHVM_ME(ReflectionTypeAlias, getAssignedTypeText);
 
     HHVM_ME(ReflectionClass, __init);

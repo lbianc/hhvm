@@ -427,13 +427,11 @@ void MemoryManager::refreshStatsImpl(MemoryUsageStats& stats) {
       stats.usage, stats.totalAlloc);
 }
 #endif
+  assert(stats.maxBytes > 0);
+  if (live && stats.usage > stats.maxBytes && m_couldOOM) {
+    refreshStatsHelperExceeded();
+  }
   if (stats.usage > stats.peakUsage) {
-    // NOTE: the peak memory usage monotonically increases, so there cannot
-    // be a second OOM exception in one request.
-    assert(stats.maxBytes > 0);
-    if (live && m_couldOOM && stats.usage > stats.maxBytes) {
-      refreshStatsHelperExceeded();
-    }
     // Check whether the process's active memory limit has been exceeded, and
     // if so, stop the server.
     //
@@ -638,8 +636,8 @@ inline void* MemoryManager::realloc(void* ptr, size_t nbytes) {
 }
 
 const char* header_names[] = {
-  "Packed", "Struct", "Mixed", "Empty", "Apc", "Globals", "Proxy",
-  "String", "Resource", "Ref",
+  "PackedArray", "StructArray", "MixedArray", "EmptyArray", "ApcArray",
+  "GlobalsArray", "ProxyArray", "String", "Resource", "Ref",
   "Object", "ResumableObj", "AwaitAllWH",
   "Vector", "Map", "Set", "Pair", "ImmVector", "ImmMap", "ImmSet",
   "Resumable", "Native", "SmallMalloc", "BigMalloc", "BigObj",

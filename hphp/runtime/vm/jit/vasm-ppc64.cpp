@@ -210,7 +210,6 @@ struct Vgen {
   }
   void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
   void emit(const load& i);
-  void emit(const mccall& i) { not_implemented(); }
   void emit(const mcprep& i) { not_implemented(); }
   void emit(const nothrow& i) {
     mcg->registerCatchBlock(a->frontier(), nullptr);
@@ -222,7 +221,6 @@ struct Vgen {
     emit(jmp{i.targets[0]});
   }
   void emit(const landingpad& i) {}
-  void emit(const vret& i);
   void emit(const leavetc&) { not_implemented(); }
 
   // instructions
@@ -491,13 +489,6 @@ void Vgen::emit(const push& i) {
 #else
   not_implemented();
 #endif
-}
-
-void Vgen::emit(const vret& i) {
-  a->ld(ppc64::rfuncln(), i.retAddr);
-  a->mtlr(ppc64::rfuncln());
-  a->ld(i.d, i.prevFP);
-  a->blr();
 }
 
 void Vgen::emit(const load& i) {
@@ -928,19 +919,6 @@ bool lowerForPPC64(Vout& v, callm& inst) {
 
   v << callr { d, inst.args };
   return true;
-}
-
-bool lowerForPPC64(Vout& v, vret& inst) {
-  Vptr p = inst.retAddr;
-  bool vret_patched = patchVptr(p, v);
-  Vptr prevFP = inst.prevFP;
-  bool prevfp_patched = patchVptr(prevFP, v);
-
-  if (vret_patched || prevfp_patched) {
-    v << vret{ p, prevFP, inst.d, inst.args };
-    return true;
-  }
-  return false;
 }
 
 bool lowerForPPC64(Vout& v, absdbl& inst) {

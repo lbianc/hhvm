@@ -22,6 +22,7 @@
 
 #include "hphp/runtime/vm/jit/alias-class.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
+#include "hphp/runtime/vm/jit/memory-effects.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 
 namespace HPHP { namespace jit {
@@ -303,9 +304,9 @@ TEST(AliasClass, SpecializedUnions) {
   EXPECT_TRUE(stk_and_prop.maybe(rel_stk_and_frame));
   EXPECT_FALSE(rel_stk_and_frame <= stk_and_prop);
 
-  AliasClass const some_mis = AMIState::fromTV(0x10);
+  auto const some_mis = AMIStateTvRef;
   {
-    AliasClass const some_heap = AElemIAny;
+    auto const some_heap = AElemIAny;
     auto const u1 = some_heap | some_mis;
     auto const u2 = AFrameAny | u1;
     EXPECT_TRUE((AHeapAny | some_heap) == AHeapAny);
@@ -315,7 +316,17 @@ TEST(AliasClass, SpecializedUnions) {
 
   auto const mis_stk = some_mis | stk;
   auto const mis_stk_any = AStackAny | mis_stk;
-  EXPECT_TRUE(mis_stk_any == (AStackAny | AMIStateAny));
+
+  EXPECT_EQ(some_mis, AliasClass{*mis_stk_any.mis()});
+  EXPECT_NE(mis_stk_any, AStackAny | AMIStateAny);
+
+  auto const other_mis = AMIStateBase;
+
+  EXPECT_LE(some_mis,  some_mis | other_mis);
+  EXPECT_LE(other_mis, some_mis | other_mis);
+
+  EXPECT_NE(some_mis, some_mis | other_mis);
+  EXPECT_NE(other_mis, some_mis | other_mis);
 }
 
 TEST(AliasClass, StackUnions) {
@@ -446,6 +457,14 @@ TEST(AliasClass, IterUnion) {
     // too big for that right now.
     EXPECT_TRUE(!u1.precise_union(iterP1));
   }
+}
+
+TEST(AliasClass, Pointees) {
+  IRUnit unit{test_context};
+  auto const marker = BCMarker::Dummy();
+  auto ptr = unit.gen(LdMBase, marker, TPtrToGen)->dst();
+  auto const acls = pointee(ptr);
+  EXPECT_EQ(AHeapAny | AFrameAny | AStackAny | AMIStateTV, acls);
 }
 
 //////////////////////////////////////////////////////////////////////

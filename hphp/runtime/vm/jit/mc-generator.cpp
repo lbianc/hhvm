@@ -67,7 +67,7 @@
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/zend-string.h"
-#include "hphp/runtime/ext/ext_closure.h"
+#include "hphp/runtime/ext/closure/ext_closure.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/server/source-root-info.h"
@@ -142,22 +142,22 @@ static __thread size_t s_initialTCSize;
 // The global MCGenerator object.
 MCGenerator* mcg;
 
-CppCall MCGenerator::getDtorCall(DataType type) {
+CallSpec MCGenerator::getDtorCall(DataType type) {
   switch (type) {
     case KindOfString:
-      return CppCall::method(&StringData::release);
+      return CallSpec::method(&StringData::release);
     case KindOfArray:
-      return CppCall::method(&ArrayData::release);
+      return CallSpec::method(&ArrayData::release);
     case KindOfObject:
-      return CppCall::method(
+      return CallSpec::method(
         RuntimeOption::EnableObjDestructCall
           ? &ObjectData::release
           : &ObjectData::releaseNoObjDestructCheck
       );
     case KindOfResource:
-      return CppCall::method(&ResourceHdr::release);
+      return CallSpec::method(&ResourceHdr::release);
     case KindOfRef:
-      return CppCall::method(&RefData::release);
+      return CallSpec::method(&RefData::release);
     DT_UNCOUNTED_CASE:
     case KindOfClass:
       break;
@@ -477,6 +477,8 @@ static void populateLiveContext(RegionContext& ctx) {
 
   const ActRec*     const fp {vmfp()};
   const TypedValue* const sp {vmsp()};
+
+  always_assert(ctx.func == fp->m_func);
 
   for (uint32_t i = 0; i < fp->m_func->numLocals(); ++i) {
     ctx.liveTypes.push_back(
@@ -2424,16 +2426,16 @@ bool MCGenerator::dumpTCCode(const char* filename) {
   size_t count = code.hot().used();
   bool result = (fwrite(code.hot().base(), 1, count, ahotFile) == count);
   if (result) {
-    count = code.main().used();
-    result = (fwrite(code.main().base(), 1, count, aFile) == count);
+    count = code.realMain().used();
+    result = (fwrite(code.realMain().base(), 1, count, aFile) == count);
   }
   if (result) {
     count = code.prof().used();
     result = (fwrite(code.prof().base(), 1, count, aprofFile) == count);
   }
   if (result) {
-    count = code.cold().used();
-    result = (fwrite(code.cold().base(), 1, count, acoldFile) == count);
+    count = code.realCold().used();
+    result = (fwrite(code.realCold().base(), 1, count, acoldFile) == count);
   }
   if (result) {
     count = code.frozen().used();
@@ -2480,9 +2482,9 @@ bool MCGenerator::dumpTCData() {
                 "afrozen.frontier = %p\n\n",
                 kRepoSchemaId,
                 code.hot().base(), code.hot().frontier(),
-                code.main().base(), code.main().frontier(),
+                code.realMain().base(), code.realMain().frontier(),
                 code.prof().base(), code.prof().frontier(),
-                code.cold().base(), code.cold().frontier(),
+                code.realCold().base(), code.realCold().frontier(),
                 code.frozen().base(), code.frozen().frontier())) {
     return false;
   }
