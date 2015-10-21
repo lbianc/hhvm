@@ -345,7 +345,7 @@ struct Vgen {
   void emit(movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
-  void emit(movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
+  void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
   void emit(mulsd i) { not_implemented(); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
@@ -441,6 +441,7 @@ struct Vgen {
   void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
+  void emit(const callstub& i);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -503,6 +504,10 @@ void Vgen::emit(const load& i) {
     // TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->lfs(i.d, i.s);
   }
+}
+
+void Vgen::emit(const callstub& i) {
+  emit(call{ i.target, i.args });
 }
 
 void Vgen::patch(Venv& env) {
@@ -934,7 +939,30 @@ bool lowerForPPC64(Vout& v, loadqp& inst) {
   // in PPC we don't have anything like a RIP register
   // RIP register uses a absolute address so we can perform a baseless load in
   // this case
-  v << load{ baseless(inst.s.r.disp), inst.d };
+  Vptr p = baseless(inst.s.r.disp);
+  (void)patchVptr(p, v);
+  v << load{ p, inst.d };
+  return true;
+}
+
+bool lowerForPPC64(Vout& v, phplogue& inst) {
+  // phplogue is the popm
+  auto lowered = popm{ inst.fp[AROFF(m_savedRip)] };
+  return lowerForPPC64(v, lowered);
+}
+
+bool lowerForPPC64(Vout& v, phpret& inst) {
+  Vreg tmp = v.makeReg();
+  Vptr p = inst.fp[AROFF(m_savedRip)];
+  (void)patchVptr(p, v);
+  v << load{ p, tmp };
+  v << push{ tmp };
+  if (!inst.noframe) {
+    Vptr p = inst.fp[AROFF(m_sfp)];
+    (void)patchVptr(p, v);
+    v << load{ p, inst.d };
+  }
+  v << ret{};
   return true;
 }
 
@@ -965,6 +993,7 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
 bool lowerForPPC64(Vout& v, popm& inst) {
   // PPC can only copy mem->mem by using a temporary register
   auto tmp = v.makeReg();
+  patchVptr(inst.d, v);
   v << pop{tmp};
   v << store{tmp, inst.d};
 
