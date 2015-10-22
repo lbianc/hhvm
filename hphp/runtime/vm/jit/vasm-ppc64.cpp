@@ -945,12 +945,6 @@ bool lowerForPPC64(Vout& v, loadqp& inst) {
   return true;
 }
 
-bool lowerForPPC64(Vout& v, phplogue& inst) {
-  // phplogue is the popm
-  auto lowered = popm{ inst.fp[AROFF(m_savedRip)] };
-  return lowerForPPC64(v, lowered);
-}
-
 bool lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
@@ -999,6 +993,12 @@ bool lowerForPPC64(Vout& v, popm& inst) {
 
   // remove the original popm (count parameter is 1)
   return true;
+}
+
+bool lowerForPPC64(Vout& v, phplogue& inst) {
+  // phplogue is the popm
+  auto lowered = popm{ inst.fp[AROFF(m_savedRip)] };
+  return lowerForPPC64(v, lowered);
 }
 
 bool lowerForPPC64(Vout& v, orwim& inst) {
