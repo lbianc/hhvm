@@ -166,7 +166,16 @@ void smashJmp(TCA inst, TCA target) {
 }
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
-  not_implemented();
+  always_assert(is_aligned(inst, Alignment::SmashJcc));
+
+  if (cc == CC_None) {
+    ppc64_asm::Assembler::patchBctr(inst, target);
+  } else {
+    auto& cb = mcg->code.blockFor(inst);
+    CodeCursor cursor { cb, inst };
+    ppc64_asm::Assembler a { cb };
+    a.branchAuto(target, cc);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
