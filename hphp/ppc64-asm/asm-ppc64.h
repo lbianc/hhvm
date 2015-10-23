@@ -1596,8 +1596,12 @@ public:
   void xvcvdpuxds()     { not_implemented(); }
   void xvcvdpuxws()     { not_implemented(); }
   void xvcvspdp()       { not_implemented(); }
-  void xvcvspsxds()     { not_implemented(); }
-  void xvcvspsxws()     { not_implemented(); }
+  void xvcvspsxds(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 408, 0, 0);
+  }
+  void xvcvspsxws(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 152, 0, 0);
+  }
   void xvcvspuxds()     { not_implemented(); }
   void xvcvspuxws()     { not_implemented(); }
   void xvcvsxddp()      { not_implemented(); }
