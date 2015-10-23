@@ -118,10 +118,6 @@ struct Vgen {
   }
 
   // intrinsics
-  void emit(const callfaststub& i) {
-    emit(call{i.target, i.args});
-    emit(syncpoint{i.fix});
-  }
   void emit(const copy& i) {
     if (i.s == i.d) return;
     if (i.s.isGP()) {
@@ -206,15 +202,8 @@ struct Vgen {
     }
   }
   void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
-  void emit(const load& i);
   void emit(const nothrow& i) {
     mcg->registerCatchBlock(a->frontier(), nullptr);
-  }
-  void emit(const store& i);
-  void emit(const syncpoint& i);
-  void emit(const unwind& i) {
-    catches.push_back({a->frontier(), i.targets[1]});
-    emit(jmp{i.targets[0]});
   }
   void emit(const landingpad& i) {}
 
@@ -254,30 +243,6 @@ struct Vgen {
   void emit(incw i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
-  void emit(const jcc& i) {
-    if (i.targets[1] != i.targets[0]) {
-      if (next == i.targets[1]) {
-        return emit(jcc{ccNegate(i.cc), i.sf, {i.targets[1], i.targets[0]}});
-      }
-      auto taken = i.targets[1];
-      jccs.push_back({a->frontier(), taken});
-
-      // offset to be determined by a->patchBctr
-      a->branchAuto(a->frontier(), i.cc);
-    }
-    emit(jmp{i.targets[0]});
-  }
-  void emit(const jcci& i) {
-    a->branchAuto(i.taken, i.cc);
-    emit(jmp{i.target});
-  }
-  void emit(const jmp& i) {
-    if (next == i.target) return;
-    jmps.push_back({a->frontier(), i.target});
-
-    // offset to be determined by a->patchBctr
-    a->branchAuto(a->frontier());
-  }
   void emit(const jmpr& i) {
     a->mtctr(i.target);
     a->bctr();
@@ -333,8 +298,6 @@ struct Vgen {
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
   void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
-  void emit(const pop& i);
-  void emit(const push& i);
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
     // LR on parent call frame
@@ -417,7 +380,21 @@ struct Vgen {
   void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
   void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
+
+  // The following vasms reemit other vasms. They are implemented afterwards in
+  // order to guarantee that the desired vasm is already defined or else it'll
+  // fallback to the templated emit function.
+  void emit(const callfaststub& i);
   void emit(const callstub& i);
+  void emit(const jcc& i);
+  void emit(const jcci& i);
+  void emit(const jmp& i);
+  void emit(const load& i);
+  void emit(const pop& i);
+  void emit(const push& i);
+  void emit(const store& i);
+  void emit(const syncpoint& i);
+  void emit(const unwind& i);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -480,6 +457,39 @@ void Vgen::emit(const load& i) {
 
 void Vgen::emit(const callstub& i) {
   emit(call{ i.target, i.args });
+}
+
+void Vgen::emit(const callfaststub& i) {
+  emit(call{i.target, i.args});
+  emit(syncpoint{i.fix});
+}
+void Vgen::emit(const unwind& i) {
+  catches.push_back({a->frontier(), i.targets[1]});
+  emit(jmp{i.targets[0]});
+}
+void Vgen::emit(const jmp& i) {
+  if (next == i.target) return;
+  jmps.push_back({a->frontier(), i.target});
+
+  // offset to be determined by a->patchBctr
+  a->branchAuto(a->frontier());
+}
+void Vgen::emit(const jcc& i) {
+  if (i.targets[1] != i.targets[0]) {
+    if (next == i.targets[1]) {
+      return emit(jcc{ccNegate(i.cc), i.sf, {i.targets[1], i.targets[0]}});
+    }
+    auto taken = i.targets[1];
+    jccs.push_back({a->frontier(), taken});
+
+    // offset to be determined by a->patchBctr
+    a->branchAuto(a->frontier(), i.cc);
+  }
+  emit(jmp{i.targets[0]});
+}
+void Vgen::emit(const jcci& i) {
+  a->branchAuto(i.taken, i.cc);
+  emit(jmp{i.target});
 }
 
 void Vgen::patch(Venv& env) {
