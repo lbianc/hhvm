@@ -29,7 +29,7 @@ namespace HPHP {
 // unoffset bit position in their reference param.
 template<typename I64>
 inline bool ffs64(I64 input, I64 &out) {
-  bool retval;
+  bool retval = false;
 #if defined(__x86_64__)
   asm volatile (
     "bsfq  %2, %1\n\t"   // bit scan forward
@@ -51,22 +51,20 @@ inline bool ffs64(I64 input, I64 &out) {
 #elif defined(__powerpc64__)
   // In PowerPC 64, bit 0 is the most significant
   asm volatile (
-    "nor    23, %2, %2\n\t" // negate each bit of input
-    "addi   23, 23, 1\n\t"
-    "and    23, %2, 23\n\t"
-    "cntlzd %1, 23\n\t" // count leading zeros (starting from index 0)
+    "neg    %0, %2\n\t"     // 2-complement of input, using retval as temp
+    "and    %0, %2, %0\n\t"
+    "cntlzd %1, %0\n\t"     // count leading zeros (starting from index 0)
     "cmpdi  %1, 64\n\t"
-    "beq    0f\n\t"     // zero retval if input == 0
-    "addi   23, 0, 63\n\t"
-    "sub    %1, 23, %1\n\t"
-    "addi   %0, 0, 1\n\t"
-    "0:\n\t":
-    "=r"(retval), "=r"(out):
+    "li     %0, 1\n\t"      // using retval as temp
+    "iseleq %0, 0, %0\n\t"  // (input == 0) ? 0 : 1
+    "neg    %1, %1\n\t"
+    "addi   %1, %1, 63\n\t":// 63 - amount of leading zeros -> position in LSB
+    "+r"(retval), "=r"(out):// +r else %0 and %2 will be the same register
     "r"(input):
-    "r23", "cr0"
+    "cr0"
   );
 #else
-  out = folly::findFirstSet(input);
+  out = folly::findFirstSet(input)-1;
   retval = input != 0;
 #endif
   return retval;
@@ -98,22 +96,18 @@ inline bool fls64(I64 input, I64 &out) {
 #elif defined(__powerpc64__)
   // In PowerPC 64, bit 0 is the most significant
   asm volatile (
-    "nor    23, %2, %2\n\t" // negate each bit of input
-    "addi   23, 23, 1\n\t"
-    "and    23, %2, 23\n\t"
-    "cntlzd %1, 23\n\t" // count leading zeros (starting from index 0)
+    "cntlzd %1, %2\n\t"     // count leading zeros (starting from index 0)
     "cmpdi  %1, 64\n\t"
-    "beq    0f\n\t"     // zero retval if input == 0
-    "addi   23, 0, 63\n\t"
-    "sub    %1, 23, %1\n\t"
-    "addi   %0, 0, 1\n\t"
-    "0:\n\t":
+    "li     %0, 1\n\t"      // using retval as temp
+    "iseleq %0, 0, %0\n\t"  // (input == 0) ? 0 : 1
+    "neg    %1, %1\n\t"
+    "addi   %1, %1, 63\n\t":// 63 - amount of leading zeros -> position in LSB
     "=r"(retval), "=r"(out):
     "r"(input):
-    "r23", "cr0"
+    "cr0"
   );
 #else
-  out = folly::findLastSet(input);
+  out = folly::findLastSet(input)-1;
   retval = input != 0;
 #endif
   return retval;
