@@ -639,13 +639,14 @@ void UniqueStubs::emitAll() {
   ADD(debuggerGenRetHelper,       emitDebuggerInterpGenRet<false>(cold));
   ADD(debuggerAsyncGenRetHelper,  emitDebuggerInterpGenRet<true>(cold));
 
-  ADD(bindCallStub,           emitBindCallStub<false>(cold));
-  ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
   ADD(fcallArrayHelper,       emitFCallArrayHelper(hot()));
 
   ADD(decRefGeneric,  emitDecRefGeneric(cold));
 
 #endif
+  ADD(bindCallStub,           emitBindCallStub<false>(cold));
+  ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
+
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
 #if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?

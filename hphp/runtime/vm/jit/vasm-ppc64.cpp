@@ -808,6 +808,15 @@ void lowerForPPC64(Vout& v, popm& inst) {
   v << store{tmp, inst.d};
 }
 
+void lowerForPPC64(Vout& v, tailcallphp& inst) {
+  Vreg tmp = v.makeReg();
+  Vptr p = inst.fp[AROFF(m_savedRip)];
+  (void)patchVptr(p, v);
+  v << load{p, tmp};
+  v << push{tmp};
+  v << jmpr{inst.target, inst.args};
+}
+
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
