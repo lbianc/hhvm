@@ -621,10 +621,8 @@ void UniqueStubs::emitAll() {
   };
 
 #define ADD(name, stub) name = add(#name, (stub))
-#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(funcPrologueRedispatch, emitFuncPrologueRedispatch(hot()));
   ADD(fcallHelperThunk,       emitFCallHelperThunk(cold));
-#endif
   ADD(funcBodyHelperThunk,    emitFuncBodyHelperThunk(cold));
 #if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(functionEnterHelper,    emitFunctionEnterHelper(cold, *this));
@@ -636,12 +634,9 @@ void UniqueStubs::emitAll() {
   ADD(genRetHelper,               emitInterpGenRet<false>(cold));
   ADD(asyncGenRetHelper,          emitInterpGenRet<true>(cold));
   ADD(retInlHelper,               emitInterpRet(cold));
-
-#if 0
   ADD(debuggerRetHelper,          emitDebuggerInterpRet(cold));
   ADD(debuggerGenRetHelper,       emitDebuggerInterpGenRet<false>(cold));
   ADD(debuggerAsyncGenRetHelper,  emitDebuggerInterpGenRet<true>(cold));
-#endif
 
   ADD(bindCallStub,           emitBindCallStub<false>(cold));
   ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
@@ -651,9 +646,7 @@ void UniqueStubs::emitAll() {
 
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
-#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(throwSwitchMode,  emitThrowSwitchMode(frozen));
-#endif
 #undef ADD
 
   add("freeLocalsHelpers",  emitFreeLocalsHelpers(hot(), *this));

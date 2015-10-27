@@ -835,6 +835,11 @@ void lowerForPPC64(Vout& v, stubret& inst) {
   v << ret{};
 }
 
+void lowerForPPC64(Vout& v, tailcallstub& inst) {
+  v << addqi{8, reg::rsp, reg::rsp, VregSF(RegSF{0})};
+  v << jmpi{inst.target, inst.args};
+}
+
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
