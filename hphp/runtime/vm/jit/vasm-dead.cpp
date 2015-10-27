@@ -93,6 +93,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::loadzbl:
     case Vinstr::loadzbq:
     case Vinstr::loadzlq:
+    case Vinstr::mfvsrd:
     case Vinstr::movb:
     case Vinstr::movl:
     case Vinstr::movtqb:
@@ -145,6 +146,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::xorl:
     case Vinstr::xorq:
     case Vinstr::xorqi:
+    case Vinstr::xscvdpsxds:
       return false;
 
     case Vinstr::addlm:

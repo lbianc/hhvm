@@ -236,6 +236,8 @@ struct Vgen {
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
+  void emit(const xscvdpsxds& i) { a->xscvdpsxds(i.d, i.s); }
+  void emit(const mfvsrd& i) { a->mfvsrd(i.d, i.s); }
   void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
   void emit(decq i) { a->addi(i.d, i.s, -1); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
@@ -845,6 +847,16 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
   auto lowered = cmpqi{inst.s0, Reg64(inst.s1), inst.sf};
   lowerForPPC64(v, lowered);
   if (v.empty()) v << lowered;
+}
+
+void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
+  auto tmp = v.makeReg(); //to be used as a 128-bit register
+
+  //round double-precision scalar to signed integer
+  v << xscvdpsxds{inst.s, tmp};
+
+  //move from VSR (128-bit) to GPR (64-bit)
+  v << mfvsrd{tmp, inst.d};
 }
 
 // Lower subtraction to subq

@@ -1191,7 +1191,9 @@ public:
   void mfsr()           { not_implemented(); }
   void mfsrin()         { not_implemented(); }
   void mftbmfvscr()     { not_implemented(); }
-  void mfvsrd()         { not_implemented(); }
+  void mfvsrd(const Reg64& ra, const RegXMM& xs) {
+   EmitXX1Form(31, rn(xs), rn(ra), rn(0) /* reserved */, 51, 0);
+  }
   void mfvsrwz()        { not_implemented(); }
   void msgclr()         { not_implemented(); }
   void msgclrp()        { not_implemented(); }
@@ -1525,7 +1527,9 @@ public:
   void xscpsgndp()      { not_implemented(); }
   void xscvdpsp()       { not_implemented(); }
   void xscvdpspn()      { not_implemented(); }
-  void xscvdpsxds()     { not_implemented(); }
+  void xscvdpsxds(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 344, 0, 0);
+  }
   void xscvdpsxws()     { not_implemented(); }
   void xscvdpuxws()     { not_implemented(); }
   void xscvspdp()       { not_implemented(); }

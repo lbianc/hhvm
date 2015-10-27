@@ -253,6 +253,8 @@ struct Vunit;
   O(loadw, Inone, U(s), D(d))\
   O(incw, Inone, UH(s,d), DH(d,s) D(sf))\
   O(ldimmw, I(s), Un, D(d))\
+  O(xscvdpsxds, Inone, U(s), D(d))\
+  O(mfvsrd, Inone, U(s), D(d))\
   /* */
 
 /*
@@ -920,6 +922,8 @@ struct addl  { Vreg32 s0, s1, d; VregSF sf; };
 struct loadw { Vptr s; Vreg16 d; };
 struct incw { Vreg16 s, d; VregSF sf; };
 struct ldimmw { Immed s; Vreg16 d; };
+struct xscvdpsxds { Vreg128 s, d; };
+struct mfvsrd { Vreg128 s; Vreg64 d; };
 
 ///////////////////////////////////////////////////////////////////////////////
 struct Vinstr {
