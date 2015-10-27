@@ -817,6 +817,24 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
   v << jmpr{inst.target, inst.args};
 }
 
+void lowerForPPC64(Vout& v, stublogue& inst) {
+  if (inst.saveframe) {
+    v << push{rvmfp()};
+  } else {
+    Vreg tmp = v.makeReg();
+    v << subqi{8, reg::rsp, reg::rsp, tmp};
+  }
+}
+
+void lowerForPPC64(Vout& v, stubret& inst) {
+  if (inst.saveframe) {
+    v << pop{rvmfp()};
+  } else {
+    v << addqi{8, reg::rsp, reg::rsp, VregSF(RegSF{0})};
+  }
+  v << ret{};
+}
+
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];

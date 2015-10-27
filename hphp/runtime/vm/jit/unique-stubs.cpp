@@ -638,14 +638,15 @@ void UniqueStubs::emitAll() {
   ADD(debuggerRetHelper,          emitDebuggerInterpRet(cold));
   ADD(debuggerGenRetHelper,       emitDebuggerInterpGenRet<false>(cold));
   ADD(debuggerAsyncGenRetHelper,  emitDebuggerInterpGenRet<true>(cold));
-
-  ADD(fcallArrayHelper,       emitFCallArrayHelper(hot()));
-
-  ADD(decRefGeneric,  emitDecRefGeneric(cold));
-
 #endif
+
   ADD(bindCallStub,           emitBindCallStub<false>(cold));
   ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
+  ADD(fcallArrayHelper,       emitFCallArrayHelper(hot()));
+
+#if 0
+  ADD(decRefGeneric,  emitDecRefGeneric(cold));
+#endif
 
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
