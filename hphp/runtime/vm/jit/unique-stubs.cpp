@@ -630,11 +630,14 @@ void UniqueStubs::emitAll() {
   ADD(functionEnterHelper,    emitFunctionEnterHelper(cold, *this));
   ADD(functionSurprisedOrStackOverflow,
       emitFunctionSurprisedOrStackOverflow(cold, *this));
+#endif
 
   ADD(retHelper,                  emitInterpRet(cold));
   ADD(genRetHelper,               emitInterpGenRet<false>(cold));
   ADD(asyncGenRetHelper,          emitInterpGenRet<true>(cold));
   ADD(retInlHelper,               emitInterpRet(cold));
+
+#if 0
   ADD(debuggerRetHelper,          emitDebuggerInterpRet(cold));
   ADD(debuggerGenRetHelper,       emitDebuggerInterpGenRet<false>(cold));
   ADD(debuggerAsyncGenRetHelper,  emitDebuggerInterpGenRet<true>(cold));
@@ -644,9 +647,7 @@ void UniqueStubs::emitAll() {
   ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
   ADD(fcallArrayHelper,       emitFCallArrayHelper(hot()));
 
-#if 0
   ADD(decRefGeneric,  emitDecRefGeneric(cold));
-#endif
 
   ADD(callToExit,       emitCallToExit(main));
   ADD(endCatchHelper,   emitEndCatchHelper(frozen, *this));
