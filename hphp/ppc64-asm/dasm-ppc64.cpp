@@ -14,6 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
-namespace ppc64 {
+#include "hphp/ppc64-asm/dasm-ppc64.h"
 
-} // namespace ppc64
+namespace ppc64_asm {
+
+ void Dissasembler::dissasembly(std::ostream& out, PPC64Instr* instr) {}
+
+} // namespace ppc64_asm

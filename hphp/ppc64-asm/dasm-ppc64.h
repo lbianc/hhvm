@@ -16,15 +16,28 @@
 
 #include <ostream>
 
-namespace ppc64 {
+#include "hphp/ppc64-asm/isa-ppc64.h"
+
+namespace ppc64_asm {
 
 struct Dissasembler {
  public:
   Dissasembler()
    : print_encoding_(false)
-   , print_address(false)
+   , print_address_(false)
    , indent_level_(0)
-   , color_(nullptr){}
+   , color_(nullptr)
+   {}
+
+  Dissasembler(bool print_enc,
+     bool print_addr, int indent_level, std::string color)
+   : print_encoding_(print_enc)
+   , print_address_(print_addr)
+   , indent_level_(indent_level)
+   , color_(color)
+   {}
+
+  void dissasembly(std::ostream& out, PPC64Instr* instr);
 
  private:
   bool print_encoding_;
@@ -33,4 +46,4 @@ struct Dissasembler {
   std::string color_;
 };
 
-} // namespace ppc64
+} // namespace ppc64_asm
