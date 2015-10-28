@@ -37,6 +37,7 @@ namespace ppc64_asm {
 
 using HPHP::jit::Reg64;
 using HPHP::jit::RegXMM;
+using HPHP::jit::RegSF;
 using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
 using HPHP::CodeAddress;
@@ -335,7 +336,7 @@ namespace reg {
   // constexpr RegXMM v30(30);
   // constexpr RegXMM v30(31);
 
-#define RNAME(x) if (r == x) return "%"#x
+#define RNAME(x) if (r == x) return #x
 
   inline const char* regname(Reg64 r) {
     RNAME(r0);  RNAME(r1);  RNAME(r2);  RNAME(r3);  RNAME(r4);  RNAME(r5);
@@ -361,6 +362,9 @@ namespace reg {
     RNAME(v24); RNAME(v25); RNAME(v26); RNAME(v27); RNAME(v28); RNAME(v29);
     return nullptr;
   }
+ inline const char* regname(RegSF) {
+    return "cr0";
+ }
 #undef RNAME
 }
 
