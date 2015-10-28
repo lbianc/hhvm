@@ -182,8 +182,10 @@ ETCH_NAME(enterTCHelper):
   CFI(startproc)                // set debug information
 
   // PIC code setup
-  addis %r2, %r12, .TOC.-enterTCHelper@ha
-  addi  %r2, %r2,  .TOC.-enterTCHelper@l
+    // As this function is not called with $r12 pointing out to this function,
+    // it's forbidden to set it. Why is the linker pointing out incorrectly?
+  // addis %r2, %r12, .TOC.-enterTCHelper@ha
+  // addi  %r2, %r2,  .TOC.-enterTCHelper@l
 
   mflr %r0
   std %r0, 16(%r1)              // LR on parent call frame

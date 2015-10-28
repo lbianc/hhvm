@@ -19,8 +19,6 @@
 #include <stdarg.h>
 #include <string>
 
-//#include "hphp/runtime/vm/jit/back-end-ppc64.h"
-//#include "hphp/runtime/vm/jit/service-requests-ppc64.h"
 #include "hphp/runtime/vm/treadmill.h"
 
 #include "hphp/runtime/vm/jit/mc-generator.h"

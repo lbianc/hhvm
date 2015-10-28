@@ -32,8 +32,6 @@
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator-runtime.h"
-//#include "hphp/runtime/vm/jit/back-end-x64.h"
-//#include "hphp/runtime/vm/jit/back-end-ppc64.h"
 #include "hphp/runtime/vm/jit/write-lease.h"
 
 #include "hphp/util/text-util.h"

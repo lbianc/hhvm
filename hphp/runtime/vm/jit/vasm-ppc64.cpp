@@ -18,7 +18,6 @@
 
 #include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/func-guard-ppc64.h"
@@ -291,7 +290,7 @@ struct Vgen {
       a->lwz(i.d, i.s);
     }
   }
-  void emit(movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }

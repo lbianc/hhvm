@@ -41,11 +41,22 @@
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit { namespace ppc64 {
+namespace HPHP { namespace jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 TRACE_SET_MOD(ustubs);
+
+extern "C" void enterTCHelper(Cell* vm_sp,
+                              ActRec* vm_fp,
+                              TCA start,
+                              ActRec* firstAR,
+                              void* targetCacheBase,
+                              ActRec* stashedAR);
+
+///////////////////////////////////////////////////////////////////////////////
+
+namespace ppc64 {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -244,6 +255,18 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     // We need to do a syncForLLVMCatch(), but vmfp is already in $r4.
     v << jmpr{ppc64_asm::reg::r3};
   });
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void enterTCImpl(TCA start, ActRec* stashedAR) {
+  // We have to force C++ to spill anything that might be in a callee-saved
+  // register (aside from %rbp), since enterTCHelper does not save them.
+  CALLEE_SAVED_BARRIER();
+  auto& regs = vmRegsUnsafe();
+  jit::enterTCHelper(regs.stack.top(), regs.fp, start,
+                     vmFirstAR(), rds::tl_base, stashedAR);
+  CALLEE_SAVED_BARRIER();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
