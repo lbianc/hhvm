@@ -397,6 +397,7 @@ struct Vgen {
   void emit(const store& i);
   void emit(const syncpoint& i);
   void emit(const unwind& i);
+  void emit(const leavetc&) { emit(ret{}); };
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
