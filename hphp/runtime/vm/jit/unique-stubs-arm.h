@@ -14,30 +14,23 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/vm/jit/back-end.h"
+#ifndef incl_HPHP_JIT_UNIQUE_STUBS_ARM_H_
+#define incl_HPHP_JIT_UNIQUE_STUBS_ARM_H_
 
-#include "hphp/runtime/base/arch.h"
+#include "hphp/runtime/vm/jit/types.h"
 
-#include "hphp/runtime/vm/jit/back-end-ppc64.h"
-#include "hphp/runtime/vm/jit/back-end-x64.h"
-#include "hphp/runtime/vm/jit/back-end-arm.h"
+namespace HPHP {
 
-namespace HPHP { namespace jit {
+struct ActRec;
 
-std::unique_ptr<BackEnd> newBackEnd() {
+namespace jit { namespace arm {
 
-  switch (arch()) {
-  case Arch::X64:
-    return x64::newBackEnd();
-  case Arch::ARM:
-    return arm::newBackEnd();
-  case Arch::PPC64:
-    return ppc64::newBackEnd();
-  }
-  not_reached();
-}
+///////////////////////////////////////////////////////////////////////////////
 
-BackEnd::~BackEnd() {
-}
+void enterTCImpl(TCA start, ActRec* stashedAR);
 
-}}
+///////////////////////////////////////////////////////////////////////////////
+
+}}}
+
+#endif

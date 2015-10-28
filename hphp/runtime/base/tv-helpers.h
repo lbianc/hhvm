@@ -46,12 +46,10 @@ struct Variant;
  *
  * This assumes isRefcountedType() is true.
  */
-#define TV_GENERIC_DISPATCH_FAST(exp, func)                             \
-  HPHP::CountableManip::func(                                           \
-    *reinterpret_cast<HPHP::RefCount*>(                                 \
-      (exp).m_data.num + HPHP::FAST_REFCOUNT_OFFSET                     \
-    )                                                                   \
-  )
+#define TV_GENERIC_DISPATCH_FAST(exp, func)                     \
+  reinterpret_cast<HPHP::HeaderWord<uint16_t,HPHP::Counted::Maybe>*>(\
+      (exp).m_data.num + HPHP::HeaderOffset                     \
+  )->func()
 
 #define TV_GENERIC_DISPATCH_SLOW(exp, func) \
   [](HPHP::TypedValue tv) {                                     \
@@ -126,7 +124,7 @@ bool tvDecRefWillRelease(TypedValue* tv);
  */
 inline bool tvDecRefWillCallHelper(TypedValue* tv) {
   return isRefcountedType(tv->m_type) &&
-    !TV_GENERIC_DISPATCH(*tv, hasMultipleRefs);
+         TV_GENERIC_DISPATCH(*tv, decWillRelease);
 }
 
 inline void tvDecRefStr(TypedValue* tv) {
@@ -151,9 +149,7 @@ inline void tvDecRefRes(TypedValue* tv) {
 
 // Assumes 'r' is live and points to a RefData
 inline void tvDecRefRefInternal(RefData* r) {
-  assert(tvIsPlausible(*r->tv()));
-  assert(r->tv()->m_type != KindOfRef);
-  assert(r->getRealCount() > 0);
+  assert(cellIsPlausible(*r->tv()));
   decRefRef(r);
 }
 
@@ -747,6 +743,15 @@ struct TVCoercionException : public std::runtime_error {
 private:
   TypedValue m_tv;
 };
+
+// for debugging & instrumentation only! otherwise, stick to the
+// predicates defined in countable.h
+inline RefCount tvGetCount(const TypedValue* tv) {
+  assert(isRefcountedType(tv->m_type));
+  return reinterpret_cast<const HeaderWord<>*>(
+    reinterpret_cast<const char*>(tv->m_data.parr) + HeaderOffset
+  )->count;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 }

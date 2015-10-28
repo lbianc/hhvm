@@ -150,6 +150,7 @@ bool effectful(Vinstr& inst) {
       return false;
 
     case Vinstr::addlm:
+    case Vinstr::addlim:
     case Vinstr::addqim:
     case Vinstr::andbim:
     case Vinstr::bindaddr:
@@ -192,6 +193,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::leavetc:
     case Vinstr::mcprep:
     case Vinstr::nothrow:
+    case Vinstr::orbim:
     case Vinstr::orqim:
     case Vinstr::orwim:
     case Vinstr::phidef:

@@ -866,9 +866,9 @@ void miIntermediate(MIS& env) {
 //////////////////////////////////////////////////////////////////////
 // final prop ops
 
-void miFinalIssetProp(MIS& env) {
-  auto const name = mcodeStringKey(env);
-  miPop(env);
+void miFinalIssetProp(ISS& env, int32_t nDiscard, Type key) {
+  auto const name = mStringKey(key);
+  discard(env, nDiscard);
   if (name && mustBeThisObj(env, env.state.base)) {
     if (auto const pt = thisPropAsCell(env, name)) {
       if (pt->subtypeOf(TNull))  return push(env, TFalse);
@@ -1304,7 +1304,9 @@ void miFinal(MIS& env, const bc::EmptyM& op) {
 }
 
 void miFinal(MIS& env, const bc::IssetM& op) {
-  if (mcodeIsProp(env.mcode())) return miFinalIssetProp(env);
+  if (mcodeIsProp(env.mcode())) {
+    return miFinalIssetProp(env, numVecPops(env.mvec), mcodeKey(env));
+  }
   // Elem case (MW would be a fatal):
   if (env.mcode() != MemberCode::MW) mcodeKey(env);
   miPop(env);
@@ -1433,18 +1435,25 @@ void miQuery(ISS& env, int32_t nDiscard, QueryMOp op, PropElemOp propElem,
     case PropElemOp::PropQ:
       switch (op) {
         case QueryMOp::CGet:
+        case QueryMOp::CGetQuiet:
           return miFinalCGetProp(env, nDiscard, key);
         case QueryMOp::Isset:
+          return miFinalIssetProp(env, nDiscard, key);
         case QueryMOp::Empty:
-          not_implemented();
+          discard(env, nDiscard);
+          push(env, TBool);
+          return;
       }
     case PropElemOp::Elem:
       switch (op) {
         case QueryMOp::CGet:
+        case QueryMOp::CGetQuiet:
           return miFinalCGetElem(env, nDiscard, key);
         case QueryMOp::Isset:
         case QueryMOp::Empty:
-          not_implemented();
+          discard(env, nDiscard);
+          push(env, TBool);
+          return;
       }
   }
 }

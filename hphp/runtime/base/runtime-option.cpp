@@ -29,6 +29,7 @@
 
 #include <folly/String.h>
 
+#include "hphp/util/code-cache.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/network.h"
@@ -435,14 +436,6 @@ static inline std::string pgoRegionSelectorDefault() {
 #endif
 }
 
-static inline bool hhirConstrictGuardsDefault() {
-#ifdef HHVM_CONSTRICT_GUARDS_BY_DEFAULT
-  return true;
-#else
-  return false;
-#endif
-}
-
 static inline bool hhirRelaxGuardsDefault() {
   return false;
 }
@@ -513,7 +506,6 @@ const uint64_t kEvalVMStackElmsDefault =
 const uint32_t kEvalVMInitialGlobalTableSizeDefault = 512;
 static const int kDefaultProfileInterpRequests = debug ? 1 : 11;
 static const uint32_t kDefaultProfileRequests = debug ? 1 << 31 : 500;
-static const size_t kJitGlobalDataDef = RuntimeOption::EvalJitASize >> 2;
 static const uint64_t kJitRelocationSizeDefault = 1 << 20;
 
 static const bool kJitTimerDefault =
@@ -524,9 +516,6 @@ static const bool kJitTimerDefault =
 #endif
 ;
 
-inline size_t maxUsageDef() {
-  return RuntimeOption::EvalJitASize;
-}
 using std::string;
 #define F(type, name, def) \
   type RuntimeOption::Eval ## name = type(def);
@@ -1021,6 +1010,7 @@ void RuntimeOption::Load(
     Config::Bind(RepoAuthoritative, ini, config, "Repo.Authoritative", false);
     Config::Bind(RepoPreload, ini, config, "Repo.Preload", false);
   }
+
   {
     // Eval
     Config::Bind(EnableHipHopSyntax, ini, config, "Eval.EnableHipHopSyntax");
@@ -1115,6 +1105,37 @@ void RuntimeOption::Load(
       Config::Bind(DebuggerDefaultRpcTimeout, ini, config,
                    "Eval.Debugger.RPC.DefaultTimeout", 30);
     }
+  }
+  {
+    // CodeCache
+    Config::Bind(CodeCache::AHotSize, ini, config, "Eval.JitAHotSize",
+                 ahotDefault());
+    Config::Bind(CodeCache::ASize, ini, config, "Eval.JitASize", 60 << 20);
+
+    if (RuntimeOption::EvalJitPGO) {
+      Config::Bind(CodeCache::AProfSize, ini, config, "Eval.JitAProfSize",
+                   64 << 20);
+    } else {
+      CodeCache::AProfSize = 0;
+    }
+    Config::Bind(CodeCache::AColdSize, ini, config, "Eval.JitAColdSize",
+                 24 << 20);
+    Config::Bind(CodeCache::AFrozenSize, ini, config, "Eval.JitAFrozenSize",
+                 40 << 20);
+    Config::Bind(CodeCache::GlobalDataSize, ini, config,
+                 "Eval.JitGlobalDataSize", CodeCache::ASize >> 2);
+    Config::Bind(CodeCache::AMaxUsage, ini, config, "Eval.JitAMaxUsage",
+                 CodeCache::ASize);
+
+    Config::Bind(CodeCache::MapTCHuge, ini, config, "Eval.MapTCHuge",
+                 hugePagesSoundNice());
+
+    Config::Bind(CodeCache::TCNumHugeHotMB, ini, config,
+                 "Eval.TCNumHugeHotMB", 16);
+    Config::Bind(CodeCache::TCNumHugeColdMB, ini, config,
+                 "Eval.TCNumHugeColdMB", 4);
+
+    Config::Bind(CodeCache::AutoTCShift, ini, config, "Eval.JitAutoTCShift", 1);
   }
   {
     // Hack Language
