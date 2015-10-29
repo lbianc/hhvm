@@ -294,10 +294,6 @@ struct Vgen {
   void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
-    // LR on parent call frame
-    Vptr p(ppc64::rsp(), lr_position_on_callstack);
-    a->ld(ppc64::rfuncln(), p);
-    a->mtlr(ppc64::rfuncln());
     a->blr();
   }
   /*Immediate-form logical (unsigned) shift operations are
