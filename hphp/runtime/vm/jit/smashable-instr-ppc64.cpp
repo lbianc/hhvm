@@ -77,30 +77,30 @@ TCA emitSmashableCall(CodeBlock& cb, TCA target) {
 
   ppc64_asm::Assembler a { cb };
 
-  a.mflr(ppc64::rfuncln());
-  Vptr p(ppc64::rsp(), lr_position_on_callstack);
-  a.std(ppc64::rfuncln(), p);
+  a.mflr(rfuncln());
+  Vptr p(rsp(), lr_position_on_callstack);
+  a.std(rfuncln(), p);
   p.disp = -min_callstack_size;
 
 #if PPC64_HAS_PUSH_POP
-  p.base = ppc64::rstktop();
-  a.stdu(ppc64::rsp(), p);
-  a.mr(ppc64::rsp(), ppc64::rstktop());
+  p.base = rstktop();
+  a.stdu(rsp(), p);
+  a.mr(rsp(), rstktop());
 #else
-  a.stdu(ppc64::rsp(), p);
+  a.stdu(rsp(), p);
 #endif
   a.branchAuto(target, ppc64_asm::BranchConditions::Always,
   ppc64_asm::LinkReg::Save);
 #if PPC64_HAS_PUSH_POP
-  a.addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
-  Vptr bc(ppc64::rsp(), 0); // backchain
-  a.ld(ppc64::rsp(), bc);
+  a.addi(rstktop(), rsp(), min_callstack_size);
+  Vptr bc(rsp(), 0); // backchain
+  a.ld(rsp(), bc);
 #else
-  a.addi(ppc64::rsp(), ppc64::rsp(), min_callstack_size);
+  a.addi(rsp(), rsp(), min_callstack_size);
 #endif
   p.disp = lr_position_on_callstack;
-  a.ld(ppc64::rfuncln(), p);
-  a.mtlr(ppc64::rfuncln());
+  a.ld(rfuncln(), p);
+  a.mtlr(rfuncln());
 
   return start;
 }
