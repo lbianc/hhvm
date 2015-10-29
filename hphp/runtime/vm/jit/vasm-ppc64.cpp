@@ -391,6 +391,7 @@ struct Vgen {
   void emit(const unwind& i);
   void emit(const leavetc&) { emit(ret{}); };
   void emit(const callphp&);
+  void emit(const cmovq&);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -486,6 +487,11 @@ void Vgen::emit(const jcc& i) {
 void Vgen::emit(const jcci& i) {
   a->branchAuto(i.taken, i.cc);
   emit(jmp{i.target});
+}
+
+void Vgen::emit(const cmovq& i) {
+  BranchParams bp (i.cc);
+  a->isel(i.d, i.t, i.f, bp.bi());
 }
 
 void Vgen::patch(Venv& env) {
@@ -956,6 +962,14 @@ void lowerForPPC64(Vout& v, absdbl& inst) {
   auto tmp = v.makeReg();
   v << psllq{1, inst.s, tmp};
   v << psrlq{1, tmp, inst.d};
+}
+
+void lowerForPPC64(Vout& v, cloadq& inst) {
+  auto m = inst.t;
+  (void)patchVptr(m, v);
+  auto tmp = v.makeReg();
+  v << load{m, tmp};
+  v << cmovq{inst.cc, inst.sf, inst.f, tmp, inst.d};
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
