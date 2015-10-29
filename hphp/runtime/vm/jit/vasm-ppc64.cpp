@@ -291,8 +291,8 @@ struct Vgen {
     }
   }
   void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
-  void emit(movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
-  void emit(movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(const movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(const movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
   void emit(neg i) { a->neg(i.d, i.s, false); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
