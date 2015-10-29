@@ -625,11 +625,9 @@ void UniqueStubs::emitAll() {
   ADD(funcPrologueRedispatch, emitFuncPrologueRedispatch(hot()));
   ADD(fcallHelperThunk,       emitFCallHelperThunk(cold));
   ADD(funcBodyHelperThunk,    emitFuncBodyHelperThunk(cold));
-#if 0  // TODO(Gustavo): only to run fibonacci , do we need that much?
   ADD(functionEnterHelper,    emitFunctionEnterHelper(cold, *this));
   ADD(functionSurprisedOrStackOverflow,
       emitFunctionSurprisedOrStackOverflow(cold, *this));
-#endif
 
   ADD(retHelper,                  emitInterpRet(cold));
   ADD(genRetHelper,               emitInterpGenRet<false>(cold));
