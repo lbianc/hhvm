@@ -1004,13 +1004,6 @@ void lowerForPPC64(Vout& v, phplogue& inst) {
   lowerForPPC64(v, lowered);
 }
 
-void lowerForPPC64(Vout& v, absdbl& inst) {
-  // clear the high bit
-  auto tmp = v.makeReg();
-  v << psllq{1, inst.s, tmp};
-  v << psrlq{1, tmp, inst.d};
-}
-
 void lowerForPPC64(Vout& v, cloadq& inst) {
   auto m = inst.t;
   patchVptr(m, v);
