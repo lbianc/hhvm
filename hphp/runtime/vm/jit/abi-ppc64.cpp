@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | (c) Copyright IBM Corporation 2015                                   |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -21,7 +21,11 @@
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
+///////////////////////////////////////////////////////////////////////////////
+
 namespace {
+
+///////////////////////////////////////////////////////////////////////////////
 
 namespace reg = ppc64_asm::reg;
 
@@ -73,13 +77,11 @@ const RegSet kXMMCalleeSaved = reg::v20 | reg::v21 | reg::v22 | reg::v23 |
 
 
 const RegSet kXMMUnreserved = kXMMCallerSaved | kXMMCalleeSaved;
-
 const RegSet kXMMReserved = RegSet(reg::v29);
 
 const RegSet kXMMRegs = kXMMUnreserved | kXMMReserved;
 
 const RegSet kCallerSaved = kGPCallerSaved | kXMMCallerSaved;
-
 const RegSet kCalleeSaved = kGPCalleeSaved | kXMMCalleeSaved;
 
 const RegSet kSF = RegSet(RegSF{0});
@@ -144,6 +146,8 @@ constexpr PhysReg svcreq_args[] = {
     reg::r4, reg::r5, reg::r6, reg::r7
 };
 
+///////////////////////////////////////////////////////////////////////////////
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -161,6 +165,7 @@ const Abi& abi(CodeKind kind) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
 PhysReg rret(size_t i) {
   assertx(i < 2);
   return i == 0 ? reg::r3 : reg::r4;
@@ -185,6 +190,7 @@ size_t num_arg_regs() {
 size_t num_arg_regs_simd() {
   return sizeof(simd_args) / sizeof(PhysReg);
 }
+
 
 PhysReg r_svcreq_sf() {
   return abi().sf.findFirst();

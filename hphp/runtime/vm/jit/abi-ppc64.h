@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | (c) Copyright IBM Corporation 2015                                   |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,17 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
-/*
- * Enumerations and constants defining the binary interface between
- * tracelets.
- *
- * Most changes here will likely require corresponding changes in
- * __enterTCHelper and other parts of mc-generator.cpp and the IR
- * translator.
- */
-
-#ifndef incl_HPHP_VM_RUNTIME_TRANSLATOR_ABI_PPC64_H_
-#define incl_HPHP_VM_RUNTIME_TRANSLATOR_ABI_PPC64_H_
+#ifndef incl_HPHP_JIT_ABI_PPC64_H_
+#define incl_HPHP_JIT_ABI_PPC64_H_
 
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
