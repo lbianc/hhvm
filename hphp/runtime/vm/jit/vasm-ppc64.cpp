@@ -390,6 +390,7 @@ struct Vgen {
   void emit(const syncpoint& i);
   void emit(const unwind& i);
   void emit(const leavetc&) { emit(ret{}); };
+  void emit(const callphp&);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -517,6 +518,11 @@ void Vgen::emit(const store& i) {
     // TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->stfs(i.s, i.d);
   }
+}
+
+void Vgen::emit(const callphp& i) {
+  emitSmashableCall(a->code(), i.stub);
+  emit(unwind{{i.targets[0], i.targets[1]}});
 }
 
 ///////////////////////////////////////////////////////////////////////////////
