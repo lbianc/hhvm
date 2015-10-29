@@ -84,18 +84,13 @@ struct Vgen {
   inline void pushMinCallStack(void) {
     a->mflr(ppc64::rfuncln());
     // LR on parent call frame
-    Vptr p(ppc64::rsp(), lr_position_on_callstack);
-    a->std(ppc64::rfuncln(), p);
-    // minimum call stack
-    p.disp = -min_callstack_size;
-
+    a->std(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
 #if PPC64_HAS_PUSH_POP
     // Store the backchain after the last pushed element
-    p.base = ppc64::rstktop();
-    a->stdu(ppc64::rsp(), p);
+    a->stdu(ppc64::rstktop(), ppc64::rstktop()[-min_callstack_size]);
     a->mr(ppc64::rsp(), ppc64::rstktop());
 #else
-    a->stdu(ppc64::rsp(), p);
+    a->stdu(ppc64::rsp(), ppc64::rsp()[-min_callstack_size]);
 #endif
   }
 
@@ -104,15 +99,13 @@ struct Vgen {
     // after the minimum call stack the last pushed elements is found
     a->addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
     // use backchain to restore the stack pointer, as the size is unknown.
-    Vptr pBackchain(ppc64::rsp(), 0);
-    a->ld(ppc64::rsp(), pBackchain);
+    a->ld(ppc64::rsp(), rsp()[0]);
 #else
     // minimum call stack
     a->addi(ppc64::rsp(), ppc64::rsp(), min_callstack_size);
 #endif
     // recover LR from callstack
-    Vptr p(ppc64::rsp(), lr_position_on_callstack);
-    a->ld(ppc64::rfuncln(), p);
+    a->ld(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
     a->mtlr(ppc64::rfuncln());
   }
 
