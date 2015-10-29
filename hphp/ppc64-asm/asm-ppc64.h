@@ -2402,7 +2402,6 @@ public:
   }
 
   void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
-    assert(m_address && "Cannot evaluate branch size without defined target");
     // use CTR to perform absolute branch
     BranchParams bp(bc);
     const ssize_t address = ssize_t(m_address);
