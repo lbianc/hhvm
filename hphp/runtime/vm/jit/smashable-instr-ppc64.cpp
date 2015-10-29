@@ -64,8 +64,8 @@ TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
   auto const start = cb.frontier();
 
   ppc64_asm::Assembler a { cb };
-  a.ld(rvasmtmp() ,r[disp]);
-  a.cmpdi(rvasmtmp(), imm);
+  a.ld(rAsm ,r[disp]);
+  a.cmpdi(rAsm, imm);
 
   return start;
 }
