@@ -529,11 +529,14 @@ void Vgen::emit(const callphp& i) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/*
+ * Native ppc64 instructions can't handle an immediate bigger than 16 bits and
+ * need to be loaded into a register in order to be used.
+ */
 template <typename typeImm>
 bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
   uint64_t imm64 = static_cast<uint64_t>(imm);
   if (!(imm64 >> 16)) {
-    // Immediate value sizes less than 16 bits
     return false;
   } else {
     tmpRegister  = v.makeReg();
@@ -550,36 +553,88 @@ bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
  * displacement.
  */
 void patchVptr(Vptr& p, Vout& v) {
-  // Convert scaled*index to index
-  if(p.scale > 1) {
-    Vreg tmp = v.makeReg();
-    uint8_t shift = p.scale == 2 ? 1 :
-                    p.scale == 4 ? 2 :
-                    p.scale == 8 ? 3 : 0;
-    v << shlqi{shift, p.index, tmp, VregSF(RegSF{0})};
-    p.scale = 1;
-    p.index = tmp;
-  }
-  Vreg tmp2;
-  bool patchedDisp = patchImm(p.disp,v,tmp2);
-  // Convert index+displacement to index
-  if (p.index.isValid() && p.disp) {
-    Vreg tmp  = v.makeReg();
-    if(patchedDisp)
-      v << addq{tmp2, p.index, tmp, VregSF(RegSF{0})};
-    else
-      v << addqi{p.disp,p.index,tmp,VregSF(RegSF{0})};
-    p.index = tmp;
-    p.disp = 0;
-  } else if (patchedDisp) {
-    // Convert to index if displacement is greater than 16 bits
-    p.index = tmp2;
-    p.disp = 0;
+  // Map all address modes that Vptr can be so it can be handled.
+  enum class AddressModes {
+    kInvalid         = 0,
+    kDisp            = 1, //            Displacement
+    kBase            = 2, //       Base
+    kBase_Disp       = 3, //       Base+Displacement
+    kIndex           = 4, // Index
+    kIndex_Disp      = 5, // Index     +Dispacement
+    kIndex_Base      = 6, // Index+Base
+    kIndex_Base_Disp = 7  // Index+Base+Displacement
+  };
+
+  AddressModes mode = static_cast<AddressModes>(
+                    (((p.disp != 0)     & 0x1) << 0) |
+                    ((p.base.isValid()  & 0x1) << 1) |
+                    ((p.index.isValid() & 0x1) << 2));
+
+  // Index can never be used directly if shifting is necessary. Handling it here
+  uint8_t shift = p.scale == 2 ? 1 :
+                  p.scale == 4 ? 2 :
+                  p.scale == 8 ? 3 : 0;
+
+  if (p.index.isValid() && shift) {
+    Vreg shifted_index_reg = v.makeReg();
+    v << shlqi{shift, p.index, shifted_index_reg, VregSF(RegSF{0})};
+    p.index = shifted_index_reg;
+    p.scale = 1;  // scale is now normalized.
   }
 
-  // Check if base is valid, otherwise set R0 (as zero)
-  if (!p.base.isValid()) {
-    p.base = Vreg(0);
+  // taking care of the displacement, in case it is > 16bits
+  Vreg disp_reg;
+  bool patched_disp = patchImm(p.disp, v, disp_reg);
+  switch (mode) {
+    case AddressModes::kBase:
+    case AddressModes::kIndex_Base:
+      // ppc64 can handle these address modes. Nothing to do here.
+      break;
+
+    case AddressModes::kBase_Disp:
+      // ppc64 can handle this address mode if displacement < 16bits
+      if (patched_disp) {
+        // disp is loaded on a register. Change address mode to kBase_Index
+        p.index = disp_reg;
+        p.disp = 0;
+      }
+      break;
+
+    case AddressModes::kIndex:
+        // treat it as kBase to avoid a kIndex_Disp asm handling.
+        std::swap(p.base, p.index);
+      break;
+
+    case AddressModes::kDisp:
+    case AddressModes::kIndex_Disp:
+      if (patched_disp) {
+        // disp is loaded on a register. Change address mode to kBase_Index
+        p.base = disp_reg;
+        p.disp = 0;
+      }
+      else {
+        // treat it as kBase_Disp to avoid a kIndex_Disp asm handling.
+        p.base = p.index;
+      }
+      break;
+
+    case AddressModes::kIndex_Base_Disp: {
+      // This mode is not supported: Displacement will be embedded on Index
+      Vreg index_disp_reg = v.makeReg();
+      if (patched_disp) {
+        v << addq{disp_reg, p.index, index_disp_reg, VregSF(RegSF{0})};
+      } else {
+        v << addqi{p.disp, p.index, index_disp_reg, VregSF(RegSF{0})};
+      }
+      p.index = index_disp_reg;
+      p.disp = 0;
+      break;
+    }
+
+    case AddressModes::kInvalid:
+    default:
+      assert(false && "Invalid address mode");
+      break;
   }
 }
 
