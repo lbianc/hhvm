@@ -546,10 +546,10 @@ bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
  * Vptr struct supports fancy x64 addressing modes.
  * So we need to patch it to avoid ppc64el unsuported address modes.
  *
- * Returns true if anything was patched, false otherwise.
+ * After patching, the Vptr @p will only have either base and index or base and
+ * displacement.
  */
-bool patchVptr(Vptr& p, Vout& v) {
-  bool modified = false;
+void patchVptr(Vptr& p, Vout& v) {
   // Convert scaled*index to index
   if(p.scale > 1) {
     Vreg tmp = v.makeReg();
@@ -559,7 +559,6 @@ bool patchVptr(Vptr& p, Vout& v) {
     v << shlqi{shift, p.index, tmp, VregSF(RegSF{0})};
     p.scale = 1;
     p.index = tmp;
-    modified = true;
   }
   Vreg tmp2;
   bool patchedDisp = patchImm(p.disp,v,tmp2);
@@ -572,20 +571,16 @@ bool patchVptr(Vptr& p, Vout& v) {
       v << addqi{p.disp,p.index,tmp,VregSF(RegSF{0})};
     p.index = tmp;
     p.disp = 0;
-    modified = true;
   } else if (patchedDisp) {
     // Convert to index if displacement is greater than 16 bits
     p.index = tmp2;
     p.disp = 0;
-    modified = true;
   }
 
   // Check if base is valid, otherwise set R0 (as zero)
   if (!p.base.isValid()) {
     p.base = Vreg(0);
-    modified = true;
   }
-  return modified;
 }
 
 
@@ -613,7 +608,7 @@ void lowerForPPC64(Vout& v, Inst& inst) {}
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg();                                               \
   Vptr p = inst.attr_addr;                                              \
-  (void)patchVptr(p, v);                                                \
+  patchVptr(p, v);                                                      \
   v << vasm_imm{inst.attr_data, tmp} << vasm_dst{tmp, p};               \
 }
 
@@ -629,14 +624,15 @@ void lowerForPPC64(Vout& v, storeqi& inst) {
   v << ldimmq {Immed64(inst.s.q()), ir};
 
   Vptr p = inst.m;
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   v << store {ir, p};
 }
 
-// Patches the Vptr and re-emmit the same vasm updated
+// Simply take care of the vasm's Vptr, reemmiting it if patch occured
 #define X(vasm, attr_addr, attr_1, attr_2)                              \
 void lowerForPPC64(Vout& v, vasm& inst) {                               \
-  if (patchVptr(inst.attr_addr, v)) v << vasm{inst.attr_1, inst.attr_2};\
+  patchVptr(inst.attr_addr, v);                                         \
+  if (!v.empty()) v << vasm{inst.attr_1, inst.attr_2};                  \
 }
 
 X(storeb,   m, s, m);
@@ -680,7 +676,7 @@ X(cmpqi,  cmpq,  s0.q(), ONE(s1))
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg(), tmp2 = v.makeReg();                           \
   Vptr p = inst.attr_addr;                                              \
-  (void)patchVptr(p, v);                                                \
+  patchVptr(p, v);                                                      \
   v << vasm_load{p, tmp} << vasm_dst{attrs tmp, tmp2, inst.sf};         \
   v << vasm_store{tmp2, p};                                             \
 }
@@ -705,7 +701,7 @@ X(addlm, addl, loadw, storew, m, ONE(s0))
                   attr_addr, attr_data)                                 \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vptr p = inst.attr_addr;                                              \
-  (void)patchVptr(p, v);                                                \
+  patchVptr(p, v);                                                      \
   Vreg tmp2 = v.makeReg(), tmp;                                         \
   v << vasm_load{p, tmp2};                                              \
   if (patchImm(inst.attr_data.q(), v, tmp))                             \
@@ -730,7 +726,7 @@ X(testqim, testq, testqi, load,  s1, s0)
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg(), tmp3 = v.makeReg(), tmp2;                     \
   Vptr p = inst.attr_addr;                                              \
-  (void)patchVptr(p, v);                                                \
+  patchVptr(p, v);                                                      \
   v << vasm_load{p, tmp};                                               \
   if (patchImm(inst.attr_data.q(), v, tmp2))                            \
     v << vasm_dst_reg{tmp2, tmp, tmp3, inst.sf};                        \
@@ -749,7 +745,7 @@ X(addqim,  addq, addqi, load,  store,  m, s0)
 #define X(vasm_src, vasm_dst, vasm_load, attr_addr, attr)               \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vptr p = inst.attr_addr;                                              \
-  (void)(patchVptr(p, v));                                              \
+  patchVptr(p, v);                                                      \
   Vreg tmp = v.makeReg();                                               \
   v << vasm_load{p, tmp} << vasm_dst{inst.attr, tmp, inst.sf};          \
 }
@@ -763,7 +759,7 @@ X(cmpqm,  cmpq,  load,  s1, s0)
 // Other lowers that didn't fit the macros above or are not so numerous.
 void lowerForPPC64(Vout& v, jmpm& inst) {
   Vptr p = inst.target;
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   Vreg tmp = v.makeReg();
   v << load{p, tmp};
   v << jmpr{tmp, inst.args};
@@ -771,7 +767,7 @@ void lowerForPPC64(Vout& v, jmpm& inst) {
 
 void lowerForPPC64(Vout& v, callm& inst) {
   Vptr p = inst.target;
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   auto d = v.makeReg();
   v << load{p, d};
   v << callr{d, inst.args};
@@ -798,7 +794,7 @@ void lowerForPPC64(Vout& v, loadqp& inst) {
   // RIP register uses a absolute address so we can perform a baseless load in
   // this case
   Vptr p = baseless(inst.s.r.disp);
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   v << load{p, inst.d};
 }
 
@@ -812,7 +808,7 @@ void lowerForPPC64(Vout& v, popm& inst) {
 void lowerForPPC64(Vout& v, tailcallphp& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   v << load{p, tmp};
   v << push{tmp};
   v << jmpr{inst.target, inst.args};
@@ -844,12 +840,12 @@ void lowerForPPC64(Vout& v, tailcallstub& inst) {
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
-  (void)patchVptr(p, v);
+  patchVptr(p, v);
   v << load{p, tmp};
   v << push{tmp};
   if (!inst.noframe) {
-    Vptr p = inst.fp[AROFF(m_sfp)];
-    (void)patchVptr(p, v);
+    p = inst.fp[AROFF(m_sfp)];
+    patchVptr(p, v);
     v << load{p, inst.d};
   }
   v << ret{};
@@ -962,7 +958,7 @@ void lowerForPPC64(Vout& v, absdbl& inst) {
 
 void lowerForPPC64(Vout& v, cloadq& inst) {
   auto m = inst.t;
-  (void)patchVptr(m, v);
+  patchVptr(m, v);
   auto tmp = v.makeReg();
   v << load{m, tmp};
   v << cmovq{inst.cc, inst.sf, inst.f, tmp, inst.d};
