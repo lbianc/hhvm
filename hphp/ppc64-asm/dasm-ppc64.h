@@ -16,6 +16,7 @@
 
 #include <ostream>
 
+#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
@@ -37,7 +38,7 @@ struct Dissasembler {
    , color_(color)
    {}
 
-  void dissasembly(std::ostream& out, PPC64Instr* instr);
+  void dissasembly(std::ostream& out, uint8_t* instr);
 
  private:
   bool print_encoding_;

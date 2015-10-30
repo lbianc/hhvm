@@ -25,6 +25,8 @@ typedef uint32_t PPC64Instr;
 
 const int kDecoderSize = 1374;
 
+const int kInstructionSize = 4;
+
 enum class Form {
   kInvalid = 0,
   kX,
