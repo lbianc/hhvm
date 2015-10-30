@@ -257,6 +257,10 @@ struct Vunit;
   O(ldimmw, I(s), Un, D(d))\
   O(xscvdpsxds, Inone, U(s), D(d))\
   O(mfvsrd, Inone, U(s), D(d))\
+  O(mtvsrd, Inone, U(s), D(d))\
+  O(xscvsxddp, Inone, U(s), D(d))\
+  O(xxlxor, Inone, U(s0) U(s1), D(d))\
+  O(xxpermdi, Inone, U(s0) U(s1), D(d))\
   /* */
 
 /*
@@ -928,6 +932,11 @@ struct incw { Vreg16 s, d; VregSF sf; };
 struct ldimmw { Immed s; Vreg16 d; };
 struct xscvdpsxds { Vreg128 s, d; };
 struct mfvsrd { Vreg128 s; Vreg64 d; };
+struct mtvsrd { Vreg64 s; Vreg128 d; };
+struct xscvsxddp { Vreg128 s, d; };
+struct xxlxor { Vreg128 s0, s1, d; };
+struct xxpermdi { Vreg128 s0, s1, d; };
+
 
 ///////////////////////////////////////////////////////////////////////////////
 struct Vinstr {

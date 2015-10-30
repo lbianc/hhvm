@@ -1214,7 +1214,9 @@ public:
   void mtsr()           { not_implemented(); }
   void mtsrin()         { not_implemented(); }
   void mtvscr()         { not_implemented(); }
-  void mtvsrd()         { not_implemented(); }
+  void mtvsrd(const RegXMM& xt, const Reg64& ra) {
+   EmitXX1Form(31, rn(xt), rn(ra), rn(0) /* reserved */, 179, 0);
+  }
   void mtvsrwa()        { not_implemented(); }
   void mtvsrwz()        { not_implemented(); }
   void mulchw()         { not_implemented(); }
@@ -1538,7 +1540,9 @@ public:
   void xscvdpuxws()     { not_implemented(); }
   void xscvspdp()       { not_implemented(); }
   void xscvspdpn()      { not_implemented(); }
-  void xscvsxddp()      { not_implemented(); }
+  void xscvsxddp(const RegXMM& xt, const RegXMM& xb) {
+   EmitXX2Form(60, rn(xt), 0, rn(xb), 376, 0, 0);
+  }
   void xscvsxdsp()      { not_implemented(); }
   void xscvuxddp()      { not_implemented(); }
   void xscvuxdsp()      { not_implemented(); }
@@ -1675,10 +1679,17 @@ public:
   void xxlnor()         { not_implemented(); }
   void xxlor()          { not_implemented(); }
   void xxlorc()         { not_implemented(); }
-  void xxlxor()         { not_implemented(); }
+  void xxlxor(const RegXMM& xt, const RegXMM& xa, const RegXMM& xb) {
+   EmitXX3Form(60, rn(xt), rn(xa), rn(xb), 154, 0, 0, 0);
+  }
   void xxmrghw()        { not_implemented(); }
   void xxmrglw()        { not_implemented(); }
-  void xxpermdi()       { not_implemented(); }
+  void xxpermdi(const RegXMM& tx, const RegXMM& xa, const RegXMM& xb) {
+   EmitXX3Form(60, rn(tx), rn(xa), rn(xb),  10, 0, 0, 0);
+   // Note that I decided to hardcode DM bit as 0
+   // (xo field = 10), because it's sufficent for now.
+   // However, I might not be the case in the future
+  }
   void xxsel()          { not_implemented(); }
   void xxsldwi()        { not_implemented(); }
   void xxspltw()        { not_implemented(); }
