@@ -49,8 +49,6 @@ namespace HPHP { namespace jit {
 using namespace ppc64;
 using namespace ppc64_asm;
 
-namespace ppc64 { struct ImmFolder; }
-
 namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -135,9 +133,9 @@ struct Vgen {
     assertx(d0 != d1);
     if (d0 == s1) {
       if (d1 == s0) {
-        a->mr(ppc64::rAsm, s1);
+        a->mr(rAsm, s1);
         a->mr(d0, s0);
-        a->mr(d1, ppc64::rAsm);
+        a->mr(d1, rAsm);
       } else {
         // could do this in a simplify pass
         if (s1 != d1) a->mr(d1, s1); // save s1 first; d1 != s0
@@ -241,12 +239,12 @@ struct Vgen {
   void emit(incw i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incl i) { a->addi(Reg64(i.d), Reg64(i.s), 1); }
   void emit(incq i) { a->addi(i.d, i.s, 1); }
+  void emit(const jmpi& i) {
+    a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
+  }
   void emit(const jmpr& i) {
     a->mtctr(i.target);
     a->bctr();
-  }
-  void emit(const jmpi& i) {
-    a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
@@ -362,11 +360,11 @@ struct Vgen {
     // More information on:
     // https://www.freelists.org/post/hhvm-ppc/Review-on-testb-vasm-change-aka-how-to-translate-x64s-test-operator-to-ppc64
     if (i.s0 != i.s1)
-      a->and_(ppc64::rAsm, i.s0, i.s1, true); // result is not used, only flags
+      a->and_(rAsm, i.s0, i.s1, true); // result is not used, only flags
     else
       a->cmpdi(i.s0, Immed(0));
   }
-  void emit(const testqi& i) { a->andi(ppc64::rAsm, i.s1, i.s0); }
+  void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }
   void emit(const ucomisd& i) { a->dcmpu(i.s0,i.s1); }
   void emit(const ud2& i) { a->trap(); }
   void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
