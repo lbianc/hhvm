@@ -230,8 +230,8 @@ struct Vgen {
   void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
   void emit(const xscvdpsxds& i) { a->xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a->xscvsxddp(i.d, i.s); }
-  void emit(const xxlxor& i) { a->xxlxor(i.d, i.s0, i.s1); }
-  void emit(const xxpermdi& i) { a->xxpermdi(i.d, i.s0, i.s1); }
+  void emit(const xxlxor& i) { a->xxlxor(i.d, i.s1, i.s0); }
+  void emit(const xxpermdi& i) { a->xxpermdi(i.d, i.s1, i.s0); }
   void emit(const mfvsrd& i) { a->mfvsrd(i.d, i.s); }
   void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
   void emit(decl i) { a->addi(Reg64(i.d), Reg64(i.s), -1); }
@@ -948,23 +948,31 @@ void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
 }
 
 void lowerForPPC64(Vout& v, cvtsi2sd& inst) {
-  auto tmp = v.makeReg(); //to be used as a 128-bit register
 
-  //move integer from GPR (64-bit) to VSR (128-bit). Higher doubleword
-  //change to undefined state, lower doubleword contains the integer
-  v << mtvsrd{inst.s, inst.d};
+  // 128-bit scratch registers
+  auto tmp0 = v.makeReg();
+  auto tmp1 = v.makeReg();
+  auto tmp2 = v.makeReg();
 
-  //convert integer to double-precision FP, put it back in the same
-  //register and lower doubleword position
-  v << xscvsxddp{inst.d,inst.d};
+  // Move integer from GPR (64-bit) to VSR (128-bit). High doubleword
+  // change to undefined state, low doubleword contains the integer.
+  v << mtvsrd{inst.s, tmp0};
 
-  //zero a register in order to just use its higher doubleword
-  v << xxlxor{tmp,tmp,tmp};
+  // Convert integer to double-precision FP. High doubleword change
+  // to undefined state, low doubleword contains the integer.
+  v << xscvsxddp{tmp0, tmp1};
 
-  //destination =
-  //lower doubleword = untouched (rounded integer) +
-  //higher doubleword = zero
-  v << xxpermdi{inst.d,inst.d,tmp};
+  // Zero register just to use its high doubleword element in
+  // permutation (see next instruction), as the convertion from integer
+  // yields an undefined state in high doubleword element.
+  // Use tmp0 value to zero tmp2 as we can not use something
+  // similar to pure asm in lowering, like 'xxlxor r1,r1,r1'
+  // to zero a register.
+  v << xxlxor{tmp0,tmp0,tmp2};
+
+  // Permute. Get low doubleword (rounded integer) from tmp1, and
+  // high doubleword (zero) from tmp2.
+  v << xxpermdi{tmp2,tmp1,inst.d};
 }
 
 // Lower subtraction to subq
