@@ -387,6 +387,7 @@ struct Vgen {
   void emit(const pop& i);
   void emit(const push& i);
   void emit(const store& i);
+  void emit(const mcprep&);
   void emit(const syncpoint& i);
   void emit(const unwind& i);
   void emit(const leavetc&) { emit(ret{}); };
@@ -524,6 +525,22 @@ void Vgen::emit(const store& i) {
     // TODO(rcardoso): Needs to check if needs to change to vec instruction
     a->stfs(i.s, i.d);
   }
+}
+
+void Vgen::emit(const mcprep& i) {
+  /*
+   * Initially, we set the cache to hold (addr << 1) | 1 (where `addr' is the
+   * address of the movq) so that we can find the movq from the handler.
+   *
+   * We set the low bit for two reasons: the Class* will never be a valid
+   * Class*, so we'll always miss the inline check before it's smashed, and
+   * handlePrimeCacheInit can tell it's not been smashed yet
+   */
+  auto const mov_addr = emitSmashableMovq(a->code(), 0, r64(i.d));
+  auto const imm = reinterpret_cast<uint64_t>(mov_addr);
+  smashMovq(mov_addr, (imm << 1) | 1);
+
+  mcg->cgFixups().m_addressImmediates.insert(reinterpret_cast<TCA>(~imm));
 }
 
 void Vgen::emit(const callphp& i) {
