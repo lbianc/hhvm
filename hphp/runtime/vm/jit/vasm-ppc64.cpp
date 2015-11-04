@@ -879,13 +879,35 @@ void lowerForPPC64(Vout& v, popm& inst) {
   v << store{tmp, inst.d};
 }
 
+/*
+ * Tailcall elimination:
+ *
+ *                 tail call -\
+ *                            |
+ * caller -> current_function -> target <- savedRip <- caller
+ *
+ * Instead this basic approach will be used:
+ *
+ *                 tail call -\
+ *                            |
+ * caller -> current_function -> target <- current_function -> savedRip <-
+ *   current_function <- caller
+ *
+ * Symbols used:
+ *  -> : Call
+ *  <- : Return
+ */
 void lowerForPPC64(Vout& v, tailcallphp& inst) {
-  Vreg tmp = v.makeReg();
+  Vreg new_return = v.makeReg();
   Vptr p = inst.fp[AROFF(m_savedRip)];
   patchVptr(p, v);
-  v << load{p, tmp};
-  v << push{tmp};
-  v << jmpr{inst.target, inst.args};
+  v << load{p, new_return};
+
+  v << callr{inst.target, inst.args};
+
+  v << callr{new_return, RegSet()};
+
+  v << ret{};
 }
 
 void lowerForPPC64(Vout& v, stublogue& inst) {
