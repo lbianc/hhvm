@@ -913,16 +913,11 @@ void lowerForPPC64(Vout& v, tailcallstub& inst) {
 
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
-  Vptr p = inst.fp[AROFF(m_savedRip)];
-  patchVptr(p, v);
-  v << load{p, tmp};
-  v << push{tmp};
+  v << load{inst.fp[AROFF(m_savedRip)], tmp};
   if (!inst.noframe) {
-    p = inst.fp[AROFF(m_sfp)];
-    patchVptr(p, v);
-    v << load{p, inst.d};
+    v << load{inst.fp[AROFF(m_sfp)], inst.d};
   }
-  v << ret{};
+  v << jmpr{tmp};
 }
 
 void lowerForPPC64(Vout& v, countbytecode& inst) {
