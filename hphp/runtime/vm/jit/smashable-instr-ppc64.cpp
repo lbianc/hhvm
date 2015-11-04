@@ -78,28 +78,16 @@ TCA emitSmashableCall(CodeBlock& cb, TCA target) {
   ppc64_asm::Assembler a { cb };
 
   a.mflr(rfuncln());
-  Vptr p(rsp(), lr_position_on_callstack);
-  a.std(rfuncln(), p);
-  p.disp = -min_callstack_size;
+  a.std(rfuncln(), rsp()[lr_position_on_callstack]);
 
-#if PPC64_HAS_PUSH_POP
-  p.base = rstktop();
-  a.stdu(rsp(), p);
-  a.mr(rsp(), rstktop());
-#else
-  a.stdu(rsp(), p);
-#endif
+  a.stdu(rsp(), rsp()[-min_callstack_size]);
+
   a.branchAuto(target, ppc64_asm::BranchConditions::Always,
   ppc64_asm::LinkReg::Save);
-#if PPC64_HAS_PUSH_POP
-  a.addi(rstktop(), rsp(), min_callstack_size);
-  Vptr bc(rsp(), 0); // backchain
-  a.ld(rsp(), bc);
-#else
+
   a.addi(rsp(), rsp(), min_callstack_size);
-#endif
-  p.disp = lr_position_on_callstack;
-  a.ld(rfuncln(), p);
+
+  a.ld(rfuncln(), rsp()[lr_position_on_callstack]);
   a.mtlr(rfuncln());
 
   return start;
@@ -189,15 +177,11 @@ uint32_t smashableCmpqImm(TCA inst) {
 }
 
 TCA smashableCallTarget(TCA inst) {
-  // a call always begin with a call to pushMinCallStack
+  // a call always begin with a LR save
   if (((inst[3] >> 2) & 0x3F) != 31) return nullptr; // from mflr
 
   // points out how many instructions ahead the li64 can be found
-#if PPC64_HAS_PUSH_POP
-  uint8_t skipPushMinCallStack = 5;
-#else
-  uint8_t skipPushMinCallStack = 4;
-#endif
+  uint8_t skipPushMinCallStack = 3; // skips mflr, std, stdu
 
   return reinterpret_cast<TCA>(
       ppc64_asm::Assembler::getLi64(inst + kStdIns * skipPushMinCallStack));

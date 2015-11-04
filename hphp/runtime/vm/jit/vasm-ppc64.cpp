@@ -83,25 +83,16 @@ struct Vgen {
     a->mflr(ppc64::rfuncln());
     // LR on parent call frame
     a->std(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
-#if PPC64_HAS_PUSH_POP
     // Store the backchain after the last pushed element
     a->stdu(ppc64::rstktop(), ppc64::rstktop()[-min_callstack_size]);
     a->mr(ppc64::rsp(), ppc64::rstktop());
-#else
-    a->stdu(ppc64::rsp(), ppc64::rsp()[-min_callstack_size]);
-#endif
   }
 
   inline void popMinCallStack(void) {
-#if PPC64_HAS_PUSH_POP
     // after the minimum call stack the last pushed elements is found
     a->addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
     // use backchain to restore the stack pointer, as the size is unknown.
     a->ld(ppc64::rsp(), rsp()[0]);
-#else
-    // minimum call stack
-    a->addi(ppc64::rsp(), ppc64::rsp(), min_callstack_size);
-#endif
     // recover LR from callstack
     a->ld(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
     a->mtlr(ppc64::rfuncln());
@@ -419,15 +410,12 @@ void Vgen::emit(const syncpoint& i) {
   mcg->recordSyncPoint(a->frontier(), i.fix);
 }
 
-#if PPC64_HAS_PUSH_POP
 void Vgen::emit(const pop& i) {
   Vptr p(ppc64::rstktop(), 0);
   a->ld(i.d, p);
   a->addi(ppc64::rstktop(), ppc64::rstktop(), push_pop_elem_size);
 }
-#endif
 
-#if PPC64_HAS_PUSH_POP
 /*
  * Grows call stack downwards where it's not in use at the moment
  */
@@ -435,7 +423,6 @@ void Vgen::emit(const push& i) {
   Vptr p(ppc64::rstktop(), -push_pop_elem_size);
   a->stdu(i.s, p);
 }
-#endif
 
 void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
@@ -1097,7 +1084,6 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
 }
 
 
-#if PPC64_HAS_PUSH_POP
 /*
  * Should only be called once per block that push/pop is used in order to
  * initialize it. It'll not remove the original push instruction.
@@ -1114,7 +1100,6 @@ void InitializePushStk(Vunit& unit, Vlabel b, size_t iInst) {
   // do not remove the original push (count parameter is 0)
   vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
 }
-#endif
 
 /*
  * Lower a few abstractions to facilitate straightforward PPC64 codegen.
@@ -1132,9 +1117,7 @@ void lowerForPPC64(Vunit& unit) {
   // iterators.
   auto& blocks = unit.blocks;
 
-#if PPC64_HAS_PUSH_POP
   InitializePushStk(unit, Vlabel{0}, 0);
-#endif
 
   PostorderWalker{unit}.dfs([&] (Vlabel ib) {
     assertx(!blocks[ib].code.empty());

@@ -28,21 +28,11 @@ struct Abi;
 namespace ppc64 {
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/*
- * Enable all code that is related to the push/pop approach
- */
-#define PPC64_HAS_PUSH_POP 1
-
 /*
  * Mirrors the API of abi.h.
  */
 
 const Abi& abi(CodeKind kind = CodeKind::Trace);
-
-#if PPC64_HAS_PUSH_POP
-constexpr PhysReg rstktop()  { return ppc64_asm::reg::r27; }
-#endif
 
 /* VM registers must match etch-helpers.h definitions! */
 constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r28; }
@@ -80,10 +70,8 @@ PhysReg r_svcreq_arg(size_t i);
 constexpr int min_callstack_size       = 32;
 constexpr int lr_position_on_callstack = 16;
 
-#if PPC64_HAS_PUSH_POP
 /* Parameters for push/pop and keep stack aligned */
 constexpr int push_pop_elem_size = 16;
-#endif
 
 /*
  * Scratch register.
