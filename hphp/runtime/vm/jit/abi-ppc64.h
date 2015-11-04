@@ -40,7 +40,7 @@ constexpr PhysReg rvmsp()      { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
 constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
-constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13;  }
+constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
 
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
@@ -71,7 +71,7 @@ constexpr int min_callstack_size       = 32;
 constexpr int lr_position_on_callstack = 16;
 
 /* Parameters for push/pop and keep stack aligned */
-constexpr int push_pop_elem_size = 16;
+constexpr int push_pop_position        = 8;
 
 /*
  * Scratch register.

@@ -74,30 +74,6 @@ struct Vgen {
                        vinst_names[Vinstr(i).op], size_t(current));
   }
 
-  // auxiliary
-  /*
-   * Check algorithm on of pushMinCallStack and popMinCallStack on:
-   * https://gist.github.com/gut/956d6431412aad0fc626
-   */
-  inline void pushMinCallStack(void) {
-    a->mflr(ppc64::rfuncln());
-    // LR on parent call frame
-    a->std(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
-    // Store the backchain after the last pushed element
-    a->stdu(ppc64::rstktop(), ppc64::rstktop()[-min_callstack_size]);
-    a->mr(ppc64::rsp(), ppc64::rstktop());
-  }
-
-  inline void popMinCallStack(void) {
-    // after the minimum call stack the last pushed elements is found
-    a->addi(ppc64::rstktop(), ppc64::rsp(), min_callstack_size);
-    // use backchain to restore the stack pointer, as the size is unknown.
-    a->ld(ppc64::rsp(), rsp()[0]);
-    // recover LR from callstack
-    a->ld(ppc64::rfuncln(), rsp()[lr_position_on_callstack]);
-    a->mtlr(ppc64::rfuncln());
-  }
-
   // intrinsics
   void emit(const copy& i) {
     if (i.s == i.d) return;
@@ -196,23 +172,6 @@ struct Vgen {
   void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
   void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }
-  void emit(const call& i) {
-    // Need to create a new call stack in order to recover LR in the future
-    pushMinCallStack();
-
-    a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
-
-    popMinCallStack();
-  }
-  void emit(const callr& i) {
-    // Need to create a new call stack in order to recover LR in the future
-    pushMinCallStack();
-
-    a->mtctr(i.target);
-    a->bctrl();
-
-    popMinCallStack();
-  }
   void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
@@ -379,9 +338,15 @@ struct Vgen {
   void emit(const mcprep&);
   void emit(const syncpoint& i);
   void emit(const unwind& i);
-  void emit(const leavetc&) { emit(ret{}); };
   void emit(const callphp&);
   void emit(const cmovq&);
+  void emit(const leavetc&);
+
+  // auxiliary for emit(call) and emit(callr)
+  template<class Func>
+  void callExtern(Func func);
+  void emit(const call& i);
+  void emit(const callr& i);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -410,18 +375,15 @@ void Vgen::emit(const syncpoint& i) {
   mcg->recordSyncPoint(a->frontier(), i.fix);
 }
 
-void Vgen::emit(const pop& i) {
-  Vptr p(ppc64::rstktop(), 0);
-  a->ld(i.d, p);
-  a->addi(ppc64::rstktop(), ppc64::rstktop(), push_pop_elem_size);
-}
-
 /*
- * Grows call stack downwards where it's not in use at the moment
+ * Push/pop mechanism is as simple as X64: it stores 8 bytes below the SP.
  */
+void Vgen::emit(const pop& i) {
+  a->ld(i.d, rsp()[0]);                         // popped element
+  a->addi(rsp(), rsp(), push_pop_position);     // recover stack
+}
 void Vgen::emit(const push& i) {
-  Vptr p(ppc64::rstktop(), -push_pop_elem_size);
-  a->stdu(i.s, p);
+  a->stdu(i.s, rsp()[-push_pop_position]);      // pushed element
 }
 
 void Vgen::emit(const load& i) {
@@ -531,6 +493,46 @@ void Vgen::emit(const mcprep& i) {
 void Vgen::emit(const callphp& i) {
   emitSmashableCall(a->code(), i.stub);
   emit(unwind{{i.targets[0], i.targets[1]}});
+}
+
+void Vgen::emit(const leavetc&) {
+  emit(ret{});
+}
+
+template<class Func>
+void Vgen::callExtern(Func func) {
+  // save caller's return address to a new callstack as pushing would destroy
+  // the ppc64's ABI call stack format
+  a->stdu(rsp(), rsp()[-min_callstack_size]);
+
+  a->mflr(rfuncln());
+  a->std(rfuncln(), rsp()[lr_position_on_callstack]); // ABI expected position
+  a->std(rfuncln(), rsp()[8]);         // ActRec->m_savedRip expected position
+  a->stdu(rsp(), rsp()[-min_callstack_size]);
+
+  // branch
+  func();
+
+  // pop caller's return address
+  a->addi(rsp(), rsp(), min_callstack_size);
+  a->ld(rfuncln(), rsp()[lr_position_on_callstack]);
+  a->mtlr(rfuncln());
+
+  // and restore the additional stack
+  a->addi(rsp(), rsp(), min_callstack_size);
+}
+
+void Vgen::emit(const call& i) {
+  callExtern([&]() {
+      a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
+  });
+}
+
+void Vgen::emit(const callr& i) {
+  callExtern([&]() {
+      a->mtctr(i.target);
+      a->bctrl();
+  });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -886,9 +888,7 @@ void lowerForPPC64(Vout& v, popm& inst) {
  */
 void lowerForPPC64(Vout& v, tailcallphp& inst) {
   Vreg new_return = v.makeReg();
-  Vptr p = inst.fp[AROFF(m_savedRip)];
-  patchVptr(p, v);
-  v << load{p, new_return};
+  v << load{inst.fp[AROFF(m_savedRip)], new_return};
 
   v << callr{inst.target, inst.args};
 
@@ -902,7 +902,7 @@ void lowerForPPC64(Vout& v, stublogue& inst) {
     v << push{rvmfp()};
   } else {
     Vreg tmp = v.makeReg();
-    v << subqi{8, reg::rsp, reg::rsp, tmp};
+    v << subqi{push_pop_position, rsp(), rsp(), tmp};
   }
 }
 
@@ -910,13 +910,13 @@ void lowerForPPC64(Vout& v, stubret& inst) {
   if (inst.saveframe) {
     v << pop{rvmfp()};
   } else {
-    v << addqi{8, reg::rsp, reg::rsp, VregSF(RegSF{0})};
+    v << addqi{push_pop_position, rsp(), rsp(), VregSF(RegSF{0})};
   }
   v << ret{};
 }
 
 void lowerForPPC64(Vout& v, tailcallstub& inst) {
-  v << addqi{8, reg::rsp, reg::rsp, VregSF(RegSF{0})};
+  v << addqi{push_pop_position, rsp(), rsp(), VregSF(RegSF{0})};
   v << jmpi{inst.target, inst.args};
 }
 
@@ -1085,23 +1085,6 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
 
 
 /*
- * Should only be called once per block that push/pop is used in order to
- * initialize it. It'll not remove the original push instruction.
- */
-void InitializePushStk(Vunit& unit, Vlabel b, size_t iInst) {
-  auto const& inst = unit.blocks[b].code[iInst];
-  auto scratch = unit.makeScratchBlock();
-  SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-  Vout v(unit, scratch, inst.origin);
-
-  // adjust the beginning of the stack to be below the frame pointer
-  v << copy{ppc64::rsp(), ppc64::rstktop()};
-
-  // do not remove the original push (count parameter is 0)
-  vector_splice(unit.blocks[b].code, iInst, 0, unit.blocks[scratch].code);
-}
-
-/*
  * Lower a few abstractions to facilitate straightforward PPC64 codegen.
  * PPC64 doesn't have instructions for operating on less than 64 bits data
  * (except the memory related load/store), therefore all arithmetic vasms
@@ -1116,8 +1099,6 @@ void lowerForPPC64(Vunit& unit) {
   // Scratch block can change blocks allocation, hence cannot use regular
   // iterators.
   auto& blocks = unit.blocks;
-
-  InitializePushStk(unit, Vlabel{0}, 0);
 
   PostorderWalker{unit}.dfs([&] (Vlabel ib) {
     assertx(!blocks[ib].code.empty());
