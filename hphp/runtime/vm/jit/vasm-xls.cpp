@@ -247,7 +247,7 @@ struct VxlsContext {
         tmp = vixl::x17; // also used as tmp1 by MacroAssembler
         break;
       case Arch::PPC64:
-        m_tmp = ppc64_asm::reg::v29;
+        tmp = ppc64_asm::reg::v29;
         break;
     }
     this->abi.simdUnreserved.remove(tmp);
