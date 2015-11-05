@@ -914,7 +914,10 @@ void lowerForPPC64(Vout& v, stubret& inst) {
   } else {
     v << addqi{push_pop_position, rsp(), rsp(), VregSF(RegSF{0})};
   }
-  v << ret{};
+  Vreg tmp = v.makeReg();
+  // simulates X64's return behavior
+  v << pop{tmp};
+  v << jmpr{tmp};
 }
 
 void lowerForPPC64(Vout& v, tailcallstub& inst) {
