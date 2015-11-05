@@ -14,10 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
+#ifndef INCLUDE_DASM_PPC64_H_
+#define INCLUDE_DASM_PPC64_H_
+
 #include <ostream>
 
 #include "hphp/runtime/vm/jit/types.h"
-#include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
 
@@ -38,6 +40,8 @@ struct Dissasembler {
    , color_(color)
    {}
 
+  ~Dissasembler() {}
+
   void dissasembly(std::ostream& out, uint8_t* instr);
 
  private:
@@ -48,3 +52,5 @@ struct Dissasembler {
 };
 
 } // namespace ppc64_asm
+
+#endif

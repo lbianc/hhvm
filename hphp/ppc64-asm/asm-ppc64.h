@@ -2503,26 +2503,6 @@ inline void Assembler::branchAuto(CodeAddress c,
   branchAuto(c, BranchParams::convertCC(cc), lr);
 }
 
-class Decoder {
-public:
-  explicit Decoder(uint32_t* ip)
-  : ip_(*ip),
-  decoded_instr_(nullptr) { decode(ip); }
-
-  ~Decoder() {
-    delete decoded_instr_;
-    decoded_instr_ = nullptr;
-  }
-
-  std::string toString();
-private:
-  void decode(uint32_t* ip);
-
-  uint32_t ip_;
-  DecoderInfo* decoded_instr_;
-  DecoderTable decoder_table_;
-};
-
 } // namespace ppc64_asm
 
 #endif
