@@ -67,12 +67,41 @@ static void alignJmpTarget(CodeBlock& cb) {
 ///////////////////////////////////////////////////////////////////////////////
 
 TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
-  alignJmpTarget(cb);
+    alignJmpTarget(cb);
 
-  auto const start = vwrap(cb, [&] (Vout& v) {
-  });
+    ppc64_asm::Assembler a { cb };
 
-  return start;
+    auto const start = a.frontier();
+
+    a.mflr(rfuncln());
+    a.std(rfuncln(), rsp()[16]);
+    a.stdu(rsp(), rsp()[-80]);
+
+    bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
+    unsigned char *hook_ptr = (unsigned char *)hook;
+
+    a.branchAuto((hook_ptr), ppc64_asm::BranchConditions::Always,
+        ppc64_asm::LinkReg::Save);
+
+    auto const HelperReturn = a.frontier();
+    us.functionEnterHelperReturn = HelperReturn;
+    a.cmpdi(rret(),0);
+    ppc64_asm::Label l;
+    a.branchAuto(l,ppc64_asm::BranchConditions::Equal,
+        ppc64_asm::LinkReg::DoNotTouch);
+        a.ld(rsp(),rsp()[0]);
+        a.addi(rsp(),rsp(),80);
+
+        a.ld(rfuncln(), rsp()[16]);
+        ppc64_asm::BranchParams bp(ppc64_asm::BranchConditions::Always);
+        a.mtctr(rfuncln());
+        a.bcctr(bp.bo(), bp.bi(), 0);
+
+    l.asm_label(a);
+    a.ld(rsp(),rsp()[0]);
+    a.addi(rsp(),rsp(),80);
+
+    return start;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

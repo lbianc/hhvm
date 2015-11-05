@@ -125,8 +125,15 @@ RegSet syncForLLVMCatch(Vout& v) {
 ///////////////////////////////////////////////////////////////////////////////
 
 TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
-  if (arch() != Arch::X64) not_implemented();
-  return x64::emitFunctionEnterHelper(cb, us);
+  switch (arch()) {
+    case Arch::X64:
+      return x64::emitFunctionEnterHelper(cb, us);
+    case Arch::PPC64:
+      return ppc64::emitFunctionEnterHelper(cb, us);
+    default:
+      not_implemented();
+      break;
+  }
 }
 
 TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
