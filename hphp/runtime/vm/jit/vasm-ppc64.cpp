@@ -235,6 +235,8 @@ struct Vgen {
       a->lwz(i.d, i.s);
     }
   }
+  void emit(const mflr& i) { a->mflr(i.d); }
+  void emit(const mtlr& i) { a->mtlr(i.s); }
   void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
