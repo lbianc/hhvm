@@ -28,6 +28,10 @@ namespace HPHP {
 // return the location of the current thread's tdata section
 std::pair<void*,size_t> getCppTdata();
 
+#ifdef _MSC_VER
+extern "C" int _tls_index;
+#endif
+
 inline uintptr_t tlsBase() {
   uintptr_t retval;
 #if defined(__x86_64__)
@@ -39,8 +43,8 @@ inline uintptr_t tlsBase() {
 #elif defined (__powerpc64__)
   asm ("mr  %0,13" : "=r" (retval));
 #elif defined(_M_X64)
-  retval = (uintptr_t)_readfsbase_u64();
-  retval = *(uintptr_t*)(retval + 88);
+  retval = (uintptr_t)__readgsqword(88);
+  retval = *(uintptr_t*)(retval + (_tls_index * 8));
 #else
 # error How do you access thread-local storage on this machine?
 #endif

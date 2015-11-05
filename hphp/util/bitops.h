@@ -107,7 +107,7 @@ inline bool fls64(I64 input, I64 &out) {
     "cr0"
   );
 #else
-  out = folly::findLastSet(input)-1;
+  out = folly::findLastSet(input) - 1;
   retval = input != 0;
 #endif
   return retval;
