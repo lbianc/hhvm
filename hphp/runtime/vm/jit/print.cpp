@@ -36,7 +36,6 @@
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
-#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/vixl/a64/disasm-a64.h"
 #include "hphp/ppc64-asm/dasm-ppc64.h"
 
@@ -273,7 +272,7 @@ void disasmRange(std::ostream& os, TCA begin, TCA end) {
     case Arch::PPC64:
      ppc64_asm::Dissasembler disasm(dumpIR, true, kIndent + 4,
                                     color(ANSI_COLOR_BROWN));
-     for (; begin < end; begin += ppc64_asm::Assembler::kBytesPerInstr) {
+     for (; begin < end; begin += ppc64_asm::kInstructionSize) {
         disasm.dissasembly(os, begin);
      }
      return;

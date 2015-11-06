@@ -15,40 +15,21 @@
 */
 
 #include <folly/Format.h>
-
-#include "hphp/ppc64-asm/asm-ppc64.h"
-#include "hphp/ppc64-asm/decoder-ppc64.h"
-
 #include "hphp/ppc64-asm/dasm-ppc64.h"
-
+#include <iostream>
 namespace ppc64_asm {
 
 void Dissasembler::dissasembly(std::ostream& out, uint8_t* instr) {
-  if (!color_.empty()) {
-    out << color_;
+  for(int i=0; i < indent_level_; i++) {
+    out << ' ';
   }
 
-  for (int i=0; i < indent_level_; i++) {
-     out << ' ';
-  }
+  //if(print_encoding_) {
+   out << folly::format(
+      "{:#16x} \t\t\n",
+      reinterpret_cast<uint64_t>(instr));
+  //} else {}
 
-  // print memory address
-  out << folly::format("{:#16x}: \t", reinterpret_cast<uint64_t>(instr));
-
-  int pos;
-  uint32_t instruction = 0;
-
-  for (pos  = 0; pos < Assembler::kBytesPerInstr; ++pos) {
-     //if (print_encoding_) {
-     out << folly::format("{:02x} ", (uint8_t)instr[pos]);
-     //}
-     instruction |= ((uint8_t)instr[pos]) << (8 * pos);
-  }
-  out << "\t";
-  // Decode instruction and get mnemonic representation
-  DecoderTable::GetDecoder().DecodeInstruction(instruction);
-  out << DecoderTable::GetDecoder().ToString();
-  out << "\n";
 }
 
 } // namespace ppc64_asm
