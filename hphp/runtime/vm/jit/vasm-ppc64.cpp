@@ -199,42 +199,6 @@ struct Vgen {
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
   void emit(const loadtqb& i) { a->lbz(Reg64(i.d),i.s); }
-  void emit(const loadb& i) { a->lbz(Reg64(i.d),i.s); }
-  void emit(const loadw& i) {
-    if(i.s.index.isValid()) {
-      a->lhzx(Reg64(i.d), i.s);
-    } else {
-      a->lhz(Reg64(i.d), i.s);
-    }
-  }
-  void emit(const loadl& i) {
-    if(i.s.index.isValid()) {
-      a->lwzx(Reg64(i.d), i.s);
-    } else {
-      a->lwz(Reg64(i.d), i.s);
-    }
-  }
-  void emit(const loadzbl& i) {
-    if(i.s.index.isValid()) {
-      a->lbzx(Reg64(i.d), i.s);
-    } else {
-      a->lbz(Reg64(i.d), i.s);
-    }
-  }
-  void emit(const loadzbq& i) {
-    if(i.s.index.isValid()) {
-      a->lbzx(i.d, i.s);
-    } else {
-      a->lbz(i.d, i.s);
-    }
-  }
-  void emit(const loadzlq& i) {
-    if(i.s.index.isValid()) {
-      a->lwzx(i.d, i.s);
-    } else {
-      a->lwz(i.d, i.s);
-    }
-  }
   void emit(const mflr& i) { a->mflr(i.d); }
   void emit(const mtlr& i) { a->mtlr(i.s); }
   void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
@@ -277,34 +241,27 @@ struct Vgen {
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
-  void emit(const storeb& i) {
-    if(i.m.index.isValid()) {
-      a->stbx(Reg64(i.s), i.m);
-    } else {
-      a->stb(Reg64(i.s), i.m);
-    }
-  }
-  void emit(const storel& i) {
-    if(i.m.index.isValid()) {
-      a->stwx(Reg64(i.s), i.m);
-    } else {
-      a->stw(Reg64(i.s), i.m);
-    }
-  }
-  void emit(const storesd& i) {
-    if(i.m.index.isValid()) {
-      a->stfdx(i.s, i.m);
-    } else {
-      a->stfd(i.s, i.m);
-    }
-  }
-  void emit(const storew& i) {
-    if(i.m.index.isValid()) {
-      a->sthx(Reg64(i.s), i.m);
-    } else {
-      a->sth(Reg64(i.s), i.m);
-    }
-  }
+
+  // macro for commonlizing X-/D-form of load/store instructions
+#define X(instr, dst, ptr)                                \
+  do {                                                    \
+    if (ptr.index.isValid()) a->instr##x(dst, ptr);       \
+    else                     a->instr   (dst, ptr);       \
+  } while(0)
+
+  void emit(const loadb& i)   { X(lbz,  Reg64(i.d), i.s); }
+  void emit(const loadw& i)   { X(lhz,  Reg64(i.d), i.s); }
+  void emit(const loadl& i)   { X(lwz,  Reg64(i.d), i.s); }
+  void emit(const loadzbl& i) { X(lbz,  Reg64(i.d), i.s); }
+  void emit(const loadzbq& i) { X(lbz,  i.d,        i.s); }
+  void emit(const loadzlq& i) { X(lwz,  i.d,        i.s); }
+  void emit(const storeb& i)  { X(stb,  Reg64(i.s), i.m); }
+  void emit(const storel& i)  { X(stw,  Reg64(i.s), i.m); }
+  void emit(const storew& i)  { X(sth,  Reg64(i.s), i.m); }
+  void emit(const storesd& i) { X(stfd, i.s,        i.m); }
+
+#undef X
+
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
   void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
   void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
