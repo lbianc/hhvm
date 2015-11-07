@@ -311,15 +311,8 @@ struct Vgen {
   void emit(const tailcallstub& i);
 
 private:
-  template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
-  template<class Inst> void binary(Inst& i) { prep(i.s1, i.d); }
-  template<class Inst> void commuteSF(Inst&);
-  template<class Inst> void commute(Inst&);
-  template<class Inst> void noncommute(Inst&);
-
   CodeBlock& frozen() { return text.frozen().code; }
 
-private:
   Vtext& text;
   ppc64_asm::Assembler assem;
   ppc64_asm::Assembler* a;
