@@ -53,29 +53,29 @@ ALWAYS_INLINE bool isPrologueStub(TCA addr) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void emitFuncGuard(const Func* func, CodeBlock& cb) {
-/*  using namespace reg;
   ppc64_asm::Assembler a { cb };
 
-//  assertx(x64::abi(CodeKind::CrossTrace).gpUnreserved.contains(rax));
+  const auto tmp1 = ppc64_asm::reg::r3, tmp2 = ppc64_asm::reg::r4;
+  assertx(ppc64::abi(CodeKind::CrossTrace).gpUnreserved.contains(tmp1));
+  assertx(ppc64::abi(CodeKind::CrossTrace).gpUnreserved.contains(tmp2));
 
+#if defined(PPC64_PERFORMANCE)
   auto const funcImm = Immed64(func);
-
-  if (funcImm.fits(sz::dword)) {
+  if (funcImm.fits(sz::word)) {
     emitSmashableCmpq(a.code(), funcImm.l(), rvmfp(),
-                      safe_cast<int8_t>(AROFF(m_func)));
-  } else {
-    // Although func doesn't fit in a signed 32-bit immediate, it may still fit
-    // in an unsigned one.  Rather than deal with yet another case (which only
-    // happens when we disable jemalloc), just emit a smashable mov followed by
-    // a register cmp.
-    emitSmashableMovq(a.code(), uint64_t(func), rax);
-    a.  cmpq   (rax, rvmfp()[AROFF(m_func)]);
+        safe_cast<int8_t>(AROFF(m_func)));
+  } else
+#endif
+  {
+    a.  li64   (tmp1, uint64_t(func));
+    a.  ld     (tmp2, rvmfp()[AROFF(m_func)]);
+    a.  cmpld  (tmp1, tmp2);
   }
-  a.    jnz    (mcg->tx().uniqueStubs.funcPrologueRedispatch);
+  a.    branchAuto(mcg->tx().uniqueStubs.funcPrologueRedispatch,
+                  ppc64_asm::BranchConditions::NotEqual);
 
   DEBUG_ONLY auto guard = funcGuardFromPrologue(a.frontier(), func);
-  assertx(funcGuardMatches(guard, func));*/
-  not_implemented();
+  assertx(funcGuardMatches(guard, func));
 }
 
 TCA funcGuardFromPrologue(TCA prologue, const Func* func) {
