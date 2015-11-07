@@ -252,7 +252,14 @@ struct ActRec {
     TypedValue _dummyA;
     struct {
       ActRec* m_sfp;         // Previous hardware frame pointer/ActRec.
+#if defined(__powerpc64__)
+      uint32_t m_savedCR;    // PPC64's sign flags (CR)
+      uint32_t m_reserved;   // Reserved word as on ABI
+#endif
       uint64_t m_savedRip;   // In-TC address to return to.
+#if defined(__powerpc64__)
+      uint64_t m_savedToc;   // TOC save doubleword
+#endif
     };
   };
   union {

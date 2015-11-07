@@ -827,59 +827,47 @@ void lowerForPPC64(Vout& v, popm& inst) {
   v << store{tmp, inst.d};
 }
 
-/*
- * Tailcall elimination:
- *
- *                 tail call -\
- *                            |
- * caller -> current_function -> target <- savedRip <- caller
- *
- * Instead this basic approach will be used:
- *
- *                 tail call -\
- *                            |
- * caller -> current_function -> target <- current_function -> savedRip <-
- *   current_function <- caller
- *
- * Symbols used:
- *  -> : Call
- *  <- : Return
- */
-void lowerForPPC64(Vout& v, tailcallphp& inst) {
-  Vreg new_return = v.makeReg();
-  v << load{inst.fp[AROFF(m_savedRip)], new_return};
-
-  v << callr{inst.target, inst.args};
-
-  v << callr{new_return, RegSet()};
-
-  v << ret{};
+void lowerForPPC64(Vout& v, countbytecode& inst) {
+  v << incqm{inst.base[g_bytecodesVasm.handle()], inst.sf};
 }
 
+/////////////////////////////////////////////////////////////////////////////
+/*
+ * Stub function ABI
+ */
+/*
+ * Unlike X64, the return address is not stored in the stack but on LR. Perform
+ * the prologue simply by saving the rvmfp on current stack
+ */
 void lowerForPPC64(Vout& v, stublogue& inst) {
   if (inst.saveframe) {
-    v << push{rvmfp()};
+    v << store{rvmfp(), rsp()[rvmfp_position_on_callstack]};
   } else {
-    Vreg tmp = v.makeReg();
-    v << subqi{push_pop_position, rsp(), rsp(), tmp};
+    // nothing to do, stack is already reserved.
   }
 }
 
 void lowerForPPC64(Vout& v, stubret& inst) {
   if (inst.saveframe) {
-    v << pop{rvmfp()};
+    v << load{rsp()[rvmfp_position_on_callstack], rvmfp()};
   } else {
-    v << addqi{push_pop_position, rsp(), rsp(), VregSF(RegSF{0})};
+    // nothing to do, stack is already reserved.
   }
-  Vreg tmp = v.makeReg();
-  // simulates X64's return behavior
-  v << pop{tmp};
-  v << jmpr{tmp};
+  v << ret{};
 }
 
 void lowerForPPC64(Vout& v, tailcallstub& inst) {
-  v << addqi{push_pop_position, rsp(), rsp(), VregSF(RegSF{0})};
   v << jmpi{inst.target, inst.args};
+}
+
+/////////////////////////////////////////////////////////////////////////////
+/*
+ * PHP function ABI
+ */
+void lowerForPPC64(Vout& v, phplogue& inst) {
+  Vreg ret_address = v.makeReg();
+  v << mflr{ret_address};
+  v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
 }
 
 void lowerForPPC64(Vout& v, phpret& inst) {
@@ -891,9 +879,18 @@ void lowerForPPC64(Vout& v, phpret& inst) {
   v << jmpr{tmp};
 }
 
-void lowerForPPC64(Vout& v, countbytecode& inst) {
-  v << incqm{inst.base[g_bytecodesVasm.handle()], inst.sf};
+/*
+ * Tail call elimination on ppc64: call without creating a stack and keep LR
+ * contents as prior to the call.
+ */
+void lowerForPPC64(Vout& v, tailcallphp& inst) {
+  Vreg new_return = v.makeReg();
+  v << load{inst.fp[AROFF(m_savedRip)], new_return};
+  v << mtlr{new_return};
+  v << jmpr{inst.target, inst.args};
 }
+
+/////////////////////////////////////////////////////////////////////////////
 
 // Lower movs to copy
 void lowerForPPC64(Vout& v, movtqb& inst) { v << copy{inst.s, inst.d}; }
@@ -1009,11 +1006,6 @@ void lowerForPPC64(Vout& v, andl& inst) {
 void lowerForPPC64(Vout& v, andbi& inst) {
   // patchImm doesn't need to be called as it should be < 8 bits
   v << andqi{inst.s0, Reg64(inst.s1), Reg64(inst.d), inst.sf};
-}
-
-void lowerForPPC64(Vout& v, phplogue& inst) {
-  auto lowered = popm{inst.fp[AROFF(m_savedRip)]};
-  lowerForPPC64(v, lowered);
 }
 
 void lowerForPPC64(Vout& v, cloadq& inst) {

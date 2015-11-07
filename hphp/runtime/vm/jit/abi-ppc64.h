@@ -67,11 +67,12 @@ PhysReg r_svcreq_arg(size_t i);
 ///////////////////////////////////////////////////////////////////////////////
 
 /* Used on vasm for defining a minimal callstack on call/ret */
-constexpr int min_callstack_size       = 32;
-constexpr int lr_position_on_callstack = 16;
+constexpr int min_callstack_size          = 32;
+constexpr int lr_position_on_callstack    = 16;
+constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
 
 /* Parameters for push/pop and keep stack aligned */
-constexpr int push_pop_position        = 8;
+constexpr int push_pop_position           = 8;
 
 /*
  * Scratch register.
