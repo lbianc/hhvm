@@ -306,6 +306,9 @@ struct Vgen {
   void callExtern(Func func);
   void emit(const call& i);
   void emit(const callr& i);
+  void emit(const stublogue& i);
+  void emit(const stubret& i);
+  void emit(const tailcallstub& i);
 
 private:
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
@@ -492,6 +495,33 @@ void Vgen::emit(const callr& i) {
       a->mtctr(i.target);
       a->bctrl();
   });
+}
+
+/////////////////////////////////////////////////////////////////////////////
+/*
+ * Stub function ABI
+ */
+/*
+ * Unlike X64, the return address is not stored in the stack but on LR. Perform
+ * the prologue simply by saving the rvmfp on current stack
+ */
+void Vgen::emit(const stublogue& i) {
+  if (i.saveframe) {
+    // will not be lowered, but this Vptr doesn't need to be patched, so it's ok
+    emit(store{rvmfp(), rsp()[rvmfp_position_on_callstack]});
+  }
+}
+
+void Vgen::emit(const stubret& i) {
+  if (i.saveframe) {
+    // will not be lowered, but this Vptr doesn't need to be patched, so it's ok
+    emit(load{rsp()[rvmfp_position_on_callstack], rvmfp()});
+  }
+  emit(ret{});
+}
+
+void Vgen::emit(const tailcallstub& i) {
+  emit(jmpi{i.target, i.args});
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -829,35 +859,6 @@ void lowerForPPC64(Vout& v, popm& inst) {
 
 void lowerForPPC64(Vout& v, countbytecode& inst) {
   v << incqm{inst.base[g_bytecodesVasm.handle()], inst.sf};
-}
-
-/////////////////////////////////////////////////////////////////////////////
-/*
- * Stub function ABI
- */
-/*
- * Unlike X64, the return address is not stored in the stack but on LR. Perform
- * the prologue simply by saving the rvmfp on current stack
- */
-void lowerForPPC64(Vout& v, stublogue& inst) {
-  if (inst.saveframe) {
-    v << store{rvmfp(), rsp()[rvmfp_position_on_callstack]};
-  } else {
-    // nothing to do, stack is already reserved.
-  }
-}
-
-void lowerForPPC64(Vout& v, stubret& inst) {
-  if (inst.saveframe) {
-    v << load{rsp()[rvmfp_position_on_callstack], rvmfp()};
-  } else {
-    // nothing to do, stack is already reserved.
-  }
-  v << ret{};
-}
-
-void lowerForPPC64(Vout& v, tailcallstub& inst) {
-  v << jmpi{inst.target, inst.args};
 }
 
 /////////////////////////////////////////////////////////////////////////////
