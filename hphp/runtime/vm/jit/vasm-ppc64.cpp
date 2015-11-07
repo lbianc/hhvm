@@ -241,6 +241,7 @@ struct Vgen {
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
   void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
+  void emit(const loadb& i) { a->lbz(Reg64(i.d), i.s); }
 
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -249,7 +250,6 @@ struct Vgen {
     else                     a->instr   (dst, ptr);       \
   } while(0)
 
-  void emit(const loadb& i)   { X(lbz,  Reg64(i.d), i.s); }
   void emit(const loadw& i)   { X(lhz,  Reg64(i.d), i.s); }
   void emit(const loadl& i)   { X(lwz,  Reg64(i.d), i.s); }
   void emit(const loadzbl& i) { X(lbz,  Reg64(i.d), i.s); }
