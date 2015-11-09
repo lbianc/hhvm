@@ -136,7 +136,11 @@ void smashCmpq(TCA inst, uint32_t imm) {
 }
 
 void smashCall(TCA inst, TCA target) {
-  not_implemented();
+  auto& cb = mcg->code.blockFor(inst);
+  CodeCursor cursor { cb, inst };
+  ppc64_asm::Assembler a { cb };
+  a.branchAuto(target, ppc64_asm::BranchConditions::Always,
+      ppc64_asm::LinkReg::Save);
 }
 
 void smashJmp(TCA inst, TCA target) {
