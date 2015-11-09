@@ -35,8 +35,7 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-constexpr auto kFuncGuardLen = 20;
-constexpr auto kFuncGuardShortLen = 14;
+constexpr auto kFuncGuardLen = 0x38;
 
 ALWAYS_INLINE bool isSmall(const Func* func) {
   return deltaFits(reinterpret_cast<uintptr_t>(func), sz::dword);
@@ -80,16 +79,14 @@ void emitFuncGuard(const Func* func, CodeBlock& cb) {
 
 TCA funcGuardFromPrologue(TCA prologue, const Func* func) {
   if (isPrologueStub(prologue)) return prologue;
-  return prologue - (isSmall(func) ? kFuncGuardShortLen : kFuncGuardLen);
+  return (prologue - kFuncGuardLen);
 }
 
 bool funcGuardMatches(TCA guard, const Func* func) {
   if (isPrologueStub(guard)) return false;
 
   auto const ifunc = reinterpret_cast<uintptr_t>(func);
-  return isSmall(func)
-    ? smashableCmpqImm(guard) == ifunc
-    : smashableMovqImm(guard) == ifunc;
+  return reinterpret_cast<uint64_t>(ppc64_asm::Assembler::getLi64(guard)) == ifunc;
 }
 
 void clobberFuncGuard(TCA guard, const Func* func) {
