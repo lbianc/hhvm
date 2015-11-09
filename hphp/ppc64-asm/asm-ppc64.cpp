@@ -838,6 +838,13 @@ uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
   return imm64;
 }
 
+Reg64 Assembler::getLi64Reg(PPC64Instr* instr) {
+  // First instruction is always either li or lis, both are D-form
+  D_form_t d_instr;
+  d_instr.instruction = *instr;
+  return Reg64(d_instr.RT);
+}
+
 void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
   if ((imm32 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate

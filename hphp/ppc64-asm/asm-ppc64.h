@@ -1867,6 +1867,12 @@ public:
         );
   }
 
+  // Retrieve the register used by li64 instruction
+  static Reg64 getLi64Reg(PPC64Instr* instr);
+  static Reg64 getLi64Reg(CodeAddress instr) {
+    return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
+  }
+
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, uint32_t imm32);
 

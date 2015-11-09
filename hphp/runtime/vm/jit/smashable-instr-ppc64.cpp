@@ -117,9 +117,13 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 
 void smashMovq(TCA inst, uint64_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashMovq));
-  not_implemented();
-  // should use a->patchLi64 ?
-  *reinterpret_cast<uint64_t*>(inst) = imm;
+
+  Reg64 reg = ppc64_asm::Assembler::getLi64Reg(inst);
+
+  CodeBlock cb;
+  cb.init(inst, smashableMovqLen(), "smashMovq");
+  ppc64_asm::Assembler a { cb };
+  a.li64(reg, imm);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
