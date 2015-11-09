@@ -308,6 +308,7 @@ struct Vgen {
   void callExtern(Func func);
   void emit(const call& i);
   void emit(const callr& i);
+  void emit(const calls& i);
   void emit(const stublogue& i);
   void emit(const stubret& i);
   void emit(const tailcallstub& i);
@@ -506,6 +507,10 @@ void Vgen::emit(const callr& i) {
       a->mtctr(i.target);
       a->bctrl();
   });
+}
+
+void Vgen::emit(const calls& i) {
+  emitSmashableCall(a->code(), i.target);
 }
 
 /////////////////////////////////////////////////////////////////////////////
