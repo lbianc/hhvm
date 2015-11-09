@@ -67,24 +67,9 @@ TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
   align(cb, Alignment::SmashCmpq, AlignContext::Live);
 
-  auto const start = cb.frontier();
-
-  ppc64_asm::Assembler a { cb };
-
-  a.mflr(rfuncln());
-  a.std(rfuncln(), rsp()[lr_position_on_callstack]);
-
-  a.stdu(rsp(), rsp()[-min_callstack_size]);
-
-  a.branchAuto(target, ppc64_asm::BranchConditions::Always,
-  ppc64_asm::LinkReg::Save);
-
-  a.addi(rsp(), rsp(), min_callstack_size);
-
-  a.ld(rfuncln(), rsp()[lr_position_on_callstack]);
-  a.mtlr(rfuncln());
-
-  return start;
+  return vwrap(cb, [&] (Vout& v) {
+    v << call{target};
+  });
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
