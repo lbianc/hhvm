@@ -35,7 +35,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
 static constexpr uint8_t kStdIns = ppc64_asm::Assembler::kBytesPerInstr;
 
 // li64's worst case
-constexpr size_t smashableMovqLen() { return kStdIns * 5; }
+constexpr size_t smashableMovqLen() { return kStdIns * 5; }  // li64
 constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
 constexpr size_t smashableCallLen() { return kStdIns * 13; }
 

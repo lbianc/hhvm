@@ -35,9 +35,9 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Targets of jmps on ppc64 must be aligned to 16 bytes.
+ * Targets of jmps on ppc64 must be aligned to instruction.
  */
-constexpr size_t kJmpTargetAlign = 16;
+constexpr size_t kJmpTargetAlign = ppc64_asm::Assembler::kBytesPerInstr;
 
 /*
  * Alignment info table.

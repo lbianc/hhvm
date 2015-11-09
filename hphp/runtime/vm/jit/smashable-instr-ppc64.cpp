@@ -49,13 +49,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
   }())
 
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
-  auto const start = EMIT_BODY(cb, li64, Movq, d, 0xdeadbeeffeedface);
-  auto immp = reinterpret_cast<uint64_t*>(
-    cb.frontier() - smashableMovqLen()
-  );
-  *immp = imm;
-
-  return start;
+  return EMIT_BODY(cb, li64, Movq, d, imm);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
