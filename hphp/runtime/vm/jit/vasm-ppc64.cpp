@@ -165,6 +165,7 @@ struct Vgen {
   void emit(const landingpad& i) {}
 
   // instructions
+  void emit(absdbl i) { a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s))); }
   void emit(addl i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0)); }
   void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }
   void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }

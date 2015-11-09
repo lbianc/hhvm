@@ -1052,7 +1052,9 @@ public:
   void evsubfw()        { not_implemented(); }
   void evsubifw()       { not_implemented(); }
   void evxor()          { not_implemented(); }
-  void fabs()           { not_implemented(); }
+  void fabs(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+    EmitXForm(63, rn(frt), rn(0), rn(frb), 364, rc);
+  }
   void fadds()          { not_implemented(); }
   void fcfid()          { not_implemented(); }
   void fcfids()         { not_implemented(); }
