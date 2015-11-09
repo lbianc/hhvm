@@ -710,6 +710,7 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 X(addli,  addl,  s0.l(), TWO(s1, d))
 X(addqi,  addq,  s0.q(), TWO(s1, d))
 X(andli,  andl,  s0.l(), TWO(s1, d))
+X(andqi,  andq,  s0.q(), TWO(s1, d))
 X(testqi, testq, s0.q(), ONE(s1))
 X(cmpqi,  cmpq,  s0.q(), ONE(s1))
 
