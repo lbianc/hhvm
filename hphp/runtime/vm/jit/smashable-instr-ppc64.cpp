@@ -55,13 +55,14 @@ TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
   align(cb, Alignment::SmashCmpq, AlignContext::Live);
 
-  auto const start = cb.frontier();
-
-  ppc64_asm::Assembler a { cb };
-  a.ld(rAsm ,r[disp]);
-  a.cmpdi(rAsm, imm);
-
-  return start;
+  // don't use cmpqim because of smashableCmpqImm implementation. A ldimml is
+  // mandatory
+  return vwrap(cb, [&] (Vout& v) {
+    Vreg op1 = v.makeReg(), op2 = v.makeReg();
+    v << ldimml{Immed(imm), op1};
+    v << loadl{r[disp], op2};
+    v << cmpq{op1, op2, VregSF(RegSF{0})};
+  });
 }
 
 TCA emitSmashableCall(CodeBlock& cb, TCA target) {
@@ -114,9 +115,15 @@ void smashMovq(TCA inst, uint64_t imm) {
 
 void smashCmpq(TCA inst, uint32_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashCmpq));
-  not_implemented();
-  // should use a->patchLi64 ?
-  *reinterpret_cast<uint32_t*>(inst) = imm;
+
+  auto& cb = mcg->code.blockFor(inst);
+  CodeCursor cursor { cb, inst };
+  ppc64_asm::Assembler a { cb };
+
+  // the first instruction is a vasm ldimml, which is a li32
+  Reg64 reg = ppc64_asm::Assembler::getLi32Reg(inst);
+
+  a.li32(reg, imm);
 }
 
 void smashCall(TCA inst, TCA target) {
@@ -169,7 +176,7 @@ uint64_t smashableMovqImm(TCA inst) {
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  return *reinterpret_cast<uint32_t*>(inst);
+  return reinterpret_cast<uint32_t>(ppc64_asm::Assembler::getLi32(inst));
 }
 
 TCA smashableCallTarget(TCA inst) {
