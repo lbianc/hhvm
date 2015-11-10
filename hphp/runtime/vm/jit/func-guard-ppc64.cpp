@@ -37,10 +37,6 @@ namespace {
 
 constexpr auto kFuncGuardLen = 0x38;
 
-ALWAYS_INLINE bool isSmall(const Func* func) {
-  return deltaFits(reinterpret_cast<uintptr_t>(func), sz::dword);
-}
-
 ALWAYS_INLINE bool isPrologueStub(TCA addr) {
   return addr == mcg->tx().uniqueStubs.fcallHelperThunk;
 }
@@ -58,18 +54,10 @@ void emitFuncGuard(const Func* func, CodeBlock& cb) {
   assertx(ppc64::abi(CodeKind::CrossTrace).gpUnreserved.contains(tmp1));
   assertx(ppc64::abi(CodeKind::CrossTrace).gpUnreserved.contains(tmp2));
 
-#if defined(PPC64_PERFORMANCE)
-  auto const funcImm = Immed64(func);
-  if (funcImm.fits(sz::word)) {
-    emitSmashableCmpq(a.code(), funcImm.l(), rvmfp(),
-        safe_cast<int8_t>(AROFF(m_func)));
-  } else
-#endif
-  {
-    a.  li64   (tmp1, uint64_t(func));
-    a.  ld     (tmp2, rvmfp()[AROFF(m_func)]);
-    a.  cmpld  (tmp1, tmp2);
-  }
+  a.  li64   (tmp1, uint64_t(func));
+  a.  ld     (tmp2, rvmfp()[AROFF(m_func)]);
+  a.  cmpld  (tmp1, tmp2);
+
   a.    branchAuto(mcg->tx().uniqueStubs.funcPrologueRedispatch,
                   ppc64_asm::BranchConditions::NotEqual);
 
@@ -90,8 +78,8 @@ bool funcGuardMatches(TCA guard, const Func* func) {
 }
 
 void clobberFuncGuard(TCA guard, const Func* func) {
-  return isSmall(func) ? smashCmpq(guard, 0)
-                       : smashMovq(guard, 0);
+  not_implemented();
+  return;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
