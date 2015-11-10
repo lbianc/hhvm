@@ -103,11 +103,12 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 void smashMovq(TCA inst, uint64_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashMovq));
 
+  auto& cb = mcg->code.blockFor(inst);
+  CodeCursor cursor { cb, inst };
+  ppc64_asm::Assembler a { cb };
+
   Reg64 reg = ppc64_asm::Assembler::getLi64Reg(inst);
 
-  CodeBlock cb;
-  cb.init(inst, smashableMovqLen(), "smashMovq");
-  ppc64_asm::Assembler a { cb };
   a.li64(reg, imm);
 }
 
@@ -156,7 +157,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return *reinterpret_cast<uint64_t*>(inst);
+  return reinterpret_cast<uint64_t>(ppc64_asm::Assembler::getLi64(inst));
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
