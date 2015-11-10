@@ -327,16 +327,16 @@ private:
 
 
 void Vgen::emit(const contenter& i) {
- ppc64_asm::Label Stub, End;
+ ppc64_asm::Label stub, end;
  Reg64 fp = i.fp;
- a->ba(End);
+ a->ba(end);
 
- Stub.asm_label(*a);
+ stub.asm_label(*a);
  emit(popm{fp[AROFF(m_savedRip)]});
  emit(jmpr{i.target, i.args});
 
- End.asm_label(*a);
- a->bla(Stub);
+ end.asm_label(*a);
+ a->bla(stub);
 
  emit(unwind{{i.targets[0], i.targets[1]}});
 }
