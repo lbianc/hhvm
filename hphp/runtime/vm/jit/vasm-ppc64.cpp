@@ -300,6 +300,7 @@ struct Vgen {
   void emit(const callphp&);
   void emit(const cmovq&);
   void emit(const leavetc&);
+  void emit(const contenter&);
 
   // auxiliary for emit(call) and emit(callr)
   template<class Func>
@@ -323,6 +324,22 @@ private:
   jit::vector<Venv::LabelPatch>& jccs;
   jit::vector<Venv::LabelPatch>& catches;
 };
+
+
+void Vgen::emit(const contenter& i) {
+ ppc64_asm::Label Stub, End;
+ Reg64 fp = i.fp;
+ a->ba(End);
+
+ Stub.asm_label(*a);
+ emit(popm{fp[AROFF(m_savedRip)]});
+ emit(jmpr{i.target, i.args});
+
+ End.asm_label(*a);
+ a->bla(Stub);
+
+ emit(unwind{{i.targets[0], i.targets[1]}});
+}
 
 void Vgen::emit(const syncpoint& i) {
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", a->frontier(),
