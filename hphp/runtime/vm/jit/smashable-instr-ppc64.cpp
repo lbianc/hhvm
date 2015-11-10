@@ -191,8 +191,7 @@ TCA smashableJmpTarget(TCA inst) {
 TCA smashableJccTarget(TCA inst) {
   // from patchBctr:
   // It has to skip 6 instructions: li64 (5 instructions) and mtctr
-  // uint8_t fits 4 times in a instr, so multiply instructions number by 4
-  CodeAddress bctr_addr = inst + 4 * 6;
+  CodeAddress bctr_addr = inst + kStdIns * 6;
   // Opcode located at the 6 most significant bits
   if (((bctr_addr[3] >> 2) & 0x3F) != 19) return nullptr; // from bctr
 
