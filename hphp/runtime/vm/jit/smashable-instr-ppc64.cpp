@@ -123,8 +123,16 @@ void smashCall(TCA inst, TCA target) {
   auto& cb = mcg->code.blockFor(inst);
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
-  a.branchAuto(target, ppc64_asm::BranchConditions::Always,
-      ppc64_asm::LinkReg::Save);
+
+  // a call always begin with a stdu callstack save, only used here.
+  if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
+    always_assert(false && "smashCall has unexpected block");
+
+  // points out how many instructions ahead the li64 can be found
+  uint8_t skipPushMinCallStack = 5; // skips stdu, mflr, std, std, stdu
+  a.setFrontier(inst + kStdIns * skipPushMinCallStack);
+
+  a.li64(ppc64_asm::reg::r12, reinterpret_cast<uint64_t>(target));
 }
 
 void smashJmp(TCA inst, TCA target) {
@@ -165,11 +173,12 @@ uint32_t smashableCmpqImm(TCA inst) {
 }
 
 TCA smashableCallTarget(TCA inst) {
-  // a call always begin with a LR save
-  if (((inst[3] >> 2) & 0x3F) != 31) return nullptr; // from mflr
+  // a call always begin with a stdu callstack save, only used here.
+  if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
+    return nullptr;
 
   // points out how many instructions ahead the li64 can be found
-  uint8_t skipPushMinCallStack = 3; // skips mflr, std, stdu
+  uint8_t skipPushMinCallStack = 5; // skips stdu, mflr, std, std, stdu
 
   return reinterpret_cast<TCA>(
       ppc64_asm::Assembler::getLi64(inst + kStdIns * skipPushMinCallStack));
