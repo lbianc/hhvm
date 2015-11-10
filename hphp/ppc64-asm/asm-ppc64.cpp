@@ -754,7 +754,7 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
 }
 
 uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
-  // @ca_instr should be pointing to the beginning of the li64 block
+  // @pinstr should be pointing to the beginning of the li64 block
   //
   // It's easier to know how many 16bits of data the immediate uses
   // by counting how many nops there are inside of the code
@@ -875,4 +875,38 @@ void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
   }
 }
 
+uint32_t Assembler::getLi32(PPC64Instr* pinstr) {
+  // @pinstr should be pointing to the beginning of the li32 block
+
+  // TODO(gut) use Decoder, but for now, do it hardcoded
+  auto getImm = [&](PPC64Instr* instr) -> uint32_t {
+    return *instr & UINT16_MAX;
+  };
+
+  // if first instruction is a li, it's using 16bits only
+  bool is_16b_only = [&](PPC64Instr instr) -> bool {
+    return (instr >> 26) == 14;        // check opcode
+  }(*pinstr);
+
+  uint32_t imm32 = 0;
+  if (is_16b_only) {
+    imm32 |= getImm(pinstr);
+
+    // It's easier to see if a 16bits immediate is signed or not by checking if
+    // a NOP is emitted as 2nd instruction
+    bool has_nop = [&](PPC64Instr instr) -> bool {
+      D_form_t d_formater {0, 0, 0, 24 }; // check Assembler::ori
+      return instr == d_formater.instruction;
+    }(*(pinstr+1)); // check the 2nd instruction
+
+    if (!has_nop) {
+      // extend sign
+      imm32 |= UINT16_MAX << 16;
+    }
+  } else {
+    imm32 |= getImm(pinstr)     << 16;  // lis
+    imm32 |= getImm(pinstr + 1);        // ori
+  }
+  return imm32;
+}
 } // namespace ppc64_asm

@@ -1860,10 +1860,10 @@ public:
   void li64 (const Reg64& rt, uint64_t imm64);
 
   // Retrieve the target defined by li64 instruction
-  static uint64_t getLi64(PPC64Instr* instr);
-  static CodeAddress getLi64(CodeAddress instr) {
+  static uint64_t getLi64(PPC64Instr* pinstr);
+  static CodeAddress getLi64(CodeAddress pinstr) {
     return reinterpret_cast<CodeAddress>(
-        getLi64(reinterpret_cast<PPC64Instr*>(instr))
+        getLi64(reinterpret_cast<PPC64Instr*>(pinstr))
         );
   }
 
@@ -1878,6 +1878,21 @@ public:
 
   // Auxiliary for loading a 32bits unsigned immediate into a register
   void li32un (const Reg64& rt, uint32_t imm32);
+
+  // Retrieve the target defined by li32 instruction
+  static uint32_t getLi32(PPC64Instr* pinstr);
+  static uint32_t getLi32(CodeAddress pinstr) {
+    return getLi32(reinterpret_cast<PPC64Instr*>(pinstr));
+  }
+
+  // Retrieve the register used by li32 instruction
+  static Reg64 getLi32Reg(PPC64Instr* instr) {
+    // it also starts with li or lis, so the same as getLi64
+    return getLi64Reg(instr);
+  }
+  static Reg64 getLi32Reg(CodeAddress instr) {
+    return getLi32Reg(reinterpret_cast<PPC64Instr*>(instr));
+  }
 
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
