@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <boost/noncopyable.hpp>
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
@@ -245,7 +246,7 @@ public:
   }
 };
 
-class DecoderTable {
+class DecoderTable : private boost::noncopyable {
 private:
 
   DecoderInfo **decoder_table;
@@ -272,7 +273,13 @@ private:
     }
   }
 
-  DecoderTable() {
+ /*
+   Disable optimizations for this constructor. In release mode -O3 causes
+   compilation to hang due the huge initialization list. This is a static
+   singleton constructor, it's only called once and, when trace is enabled
+   so optimization here is not a big issue.
+ */
+  __attribute__((optimize("O0"))) DecoderTable() {
     decoded_instr_ = nullptr;
     decoder_table = new DecoderInfo*[kDecoderSize];
     for(int i = 0; i < kDecoderSize; i++)
@@ -1760,17 +1767,6 @@ private:
   #undef XFL_L
   #undef XS
   #undef XT
-  }
-
-  DecoderTable(const DecoderTable& dt) {
-    decoder = dt.decoder;
-  }
-
-  DecoderTable& operator = (const DecoderTable& dt) {
-    if (this != &dt) {
-      decoder = dt.decoder;
-    }
-    return *this;
   }
 
   ~DecoderTable() {
