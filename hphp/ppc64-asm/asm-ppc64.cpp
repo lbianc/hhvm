@@ -699,7 +699,7 @@ void Assembler::unimplemented(){
 }
 
 void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
-  // li64, in worst case, emits 5 instructions i.e. 20 bytes of instructions.
+  // li64 always emits 5 instructions i.e. 20 bytes of instructions.
   // Assumes that 0 bytes will be missing in the end.
   uint8_t missing = 0;
 
@@ -852,6 +852,8 @@ void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
     if (imm32 & (1ULL << 15)) {
       // clear extended sign
       clrldi(rt, rt, 48);
+    } else {
+      emitNop(kBytesPerInstr); // emit nop for a balanced li32 with 2 instr
     }
   } else {
     // immediate has 32 bits set
@@ -865,6 +867,7 @@ void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
   if ((imm32 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate
     ori(rt, rt, static_cast<int16_t>(imm32));
+    emitNop(kBytesPerInstr); // emit nop for a balanced li32un with 2 instr
   } else {
     // immediate has 32 bits set
     oris(rt, rt, static_cast<int16_t>(imm32 >> 16));
