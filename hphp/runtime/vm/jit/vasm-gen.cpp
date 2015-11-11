@@ -91,8 +91,7 @@ Vauto::~Vauto() {
           finishARM(unit(), m_text, abi(m_kind), nullptr);
           break;
         case Arch::PPC64:
-          optimizePPC64(unit(), abi(m_kind));
-          emitPPC64(unit(), m_text, nullptr);
+          finishPPC64(unit(), m_text, abi(m_kind), nullptr);
           break;
       }
       return;

@@ -237,8 +237,7 @@ void genArch(Vunit& vunit, Vtext& vtext, CodeKind kind, AsmInfo* ai) {
       return;
 
     case Arch::PPC64:
-      optimizePPC64(vunit, abi(kind));
-      emitPPC64(vunit, vtext, ai);
+      finishPPC64(vunit, vtext, abi(kind), ai);
       return;
   }
   not_reached();
