@@ -183,13 +183,13 @@ struct Vgen {
   void emit(const xxpermdi& i) { a->xxpermdi(i.d, i.s1, i.s0); }
   void emit(const mfvsrd& i) { a->mfvsrd(i.d, i.s); }
   void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
-  void emit(decl i) { a->subf(Reg64(i.d), ppc64::rone(), Reg64(i.s), true); }
-  void emit(decq i) { a->subf(i.d, ppc64::rone(), i.s, true); }
+  void emit(decl i) { a->subf(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(decq i) { a->subf(i.d, rone(), i.s, true); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
-  void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), ppc64::rone(), true); }
-  void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), ppc64::rone(), true); }
-  void emit(incq i) { a->add(i.d, i.s, ppc64::rone(), true); }
+  void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(incq i) { a->add(i.d, i.s, rone(), true); }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
