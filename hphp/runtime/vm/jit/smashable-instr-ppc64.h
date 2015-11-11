@@ -42,6 +42,9 @@ constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
 // Currently this calculation considers:
 // stdu, mflr, std, stdu, li64 (5 instr), mtctr, bctrl
 constexpr size_t smashableCallLen() { return kStdIns * 11; }
+// prologue of call function until the li64 takes place:
+// skips stdu, mflr, std, stdu
+constexpr uint8_t smashableCallSkip() { return kStdIns * 4; }
 
 // li64 + mtctr + bcrt
 constexpr size_t smashableJmpLen()  { return kStdIns * 7; }

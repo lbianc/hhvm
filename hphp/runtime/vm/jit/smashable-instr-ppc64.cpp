@@ -135,9 +135,7 @@ void smashCall(TCA inst, TCA target) {
   if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
     always_assert(false && "smashCall has unexpected block");
 
-  // points out how many instructions ahead the li64 can be found
-  uint8_t skipPushMinCallStack = 5; // skips stdu, mflr, std, std, stdu
-  a.setFrontier(inst + kStdIns * skipPushMinCallStack);
+  a.setFrontier(inst + smashableCallSkip());
 
   a.li64(ppc64_asm::reg::r12, reinterpret_cast<uint64_t>(target));
 }
@@ -184,11 +182,8 @@ TCA smashableCallTarget(TCA inst) {
   if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
     return nullptr;
 
-  // points out how many instructions ahead the li64 can be found
-  uint8_t skipPushMinCallStack = 5; // skips stdu, mflr, std, std, stdu
-
   return reinterpret_cast<TCA>(
-      ppc64_asm::Assembler::getLi64(inst + kStdIns * skipPushMinCallStack));
+      ppc64_asm::Assembler::getLi64(inst + smashableCallSkip()));
 }
 
 TCA smashableJmpTarget(TCA inst) {
