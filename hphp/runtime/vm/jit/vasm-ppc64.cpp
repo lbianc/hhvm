@@ -264,7 +264,7 @@ struct Vgen {
 #undef X
 
   void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
-  void emit(subqi i) { a->addi(i.s1, i.d, i.s0); /*addi with negative value*/ }
+  void emit(subqi i) { a->addi(i.s1, i.d, -i.s0); /*addi with negative value*/ }
   void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
   void emit(const testq& i) {
     // More information on:
