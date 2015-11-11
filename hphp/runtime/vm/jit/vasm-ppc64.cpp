@@ -480,8 +480,7 @@ void Vgen::callExtern(Func func) {
   a->stdu(rsp(), rsp()[-min_callstack_size]);
 
   a->mflr(rfuncln());
-  a->std(rfuncln(), rsp()[lr_position_on_callstack]); // ABI expected position
-  a->std(rfuncln(), rsp()[8]);         // ActRec->m_savedRip expected position
+  a->std(rfuncln(), rsp()[lr_position_on_callstack]);
   a->stdu(rsp(), rsp()[-min_callstack_size]);
 
   // branch

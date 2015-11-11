@@ -37,7 +37,11 @@ static constexpr uint8_t kStdIns = ppc64_asm::Assembler::kBytesPerInstr;
 // li64's worst case
 constexpr size_t smashableMovqLen() { return kStdIns * 5; }  // li64
 constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
-constexpr size_t smashableCallLen() { return kStdIns * 13; }
+// The following instruction size is from the beginning of the smashableCall
+// to the address the LR saves upon branching with bctrl (so the following)
+// Currently this calculation considers:
+// stdu, mflr, std, stdu, li64 (5 instr), mtctr, bctrl
+constexpr size_t smashableCallLen() { return kStdIns * 11; }
 
 // li64 + mtctr + bcrt
 constexpr size_t smashableJmpLen()  { return kStdIns * 7; }
