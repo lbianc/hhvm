@@ -41,6 +41,7 @@ using HPHP::jit::RegSF;
 using HPHP::jit::MemoryRef;
 using HPHP::jit::Immed;
 using HPHP::CodeAddress;
+using HPHP::jit::ConditionCode;
 
 #define BRANCHES(cr) \
   CR##cr##_LessThan,         \
@@ -154,11 +155,11 @@ class BranchParams {
 
     BranchParams(BranchConditions bc) { defineBoBi(bc); }
 
-    BranchParams(HPHP::jit::ConditionCode cc) {
+    BranchParams(ConditionCode cc) {
       defineBoBi(convertCC(cc));
     }
 
-    static BranchConditions convertCC(HPHP::jit::ConditionCode cc) {
+    static BranchConditions convertCC(ConditionCode cc) {
       BranchConditions ret = BranchConditions::Always;
 
       switch (cc) {
@@ -1833,7 +1834,7 @@ public:
   void bla(Label& l);
 
   void bc(Label& l, BranchConditions bc);
-  void bc(Label& l, HPHP::jit::ConditionCode cc);
+  void bc(Label& l, ConditionCode cc);
   void bca(Label& l, BranchConditions bc);
   void bcl(Label& l, BranchConditions bc);
   void bcla(Label& l, BranchConditions bc);
@@ -1847,11 +1848,11 @@ public:
                   LinkReg lr = LinkReg::DoNotTouch);
 
   void branchAuto(CodeAddress c,
-                  HPHP::jit::ConditionCode cc,
+                  ConditionCode cc,
                   LinkReg lr = LinkReg::DoNotTouch);
 
   // ConditionCode variants
-  void bc(HPHP::jit::ConditionCode cc, int16_t address) {
+  void bc(ConditionCode cc, int16_t address) {
     BranchParams bp(cc);
     bc(bp.bo(), bp.bi(), address);
   }
@@ -2496,7 +2497,7 @@ inline void Assembler::bla(Label& l) { bcla(l, BranchConditions::Always); }
 inline void Assembler::bc(Label& l, BranchConditions bc) {
   l.branchOffset(*this, bc, LinkReg::DoNotTouch);
 }
-inline void Assembler::bc(Label& l, HPHP::jit::ConditionCode cc) {
+inline void Assembler::bc(Label& l, ConditionCode cc) {
   l.branchOffset(*this, BranchParams::convertCC(cc), LinkReg::DoNotTouch);
 }
 inline void Assembler::bca(Label& l, BranchConditions bc) {
@@ -2521,7 +2522,7 @@ inline void Assembler::branchAuto(CodeAddress c,
   l.branchAuto(*this, bc, lr);
 }
 inline void Assembler::branchAuto(CodeAddress c,
-                                  HPHP::jit::ConditionCode cc,
+                                  ConditionCode cc,
                                   LinkReg lr) {
   branchAuto(c, BranchParams::convertCC(cc), lr);
 }
