@@ -51,6 +51,8 @@ constexpr uint8_t smashableCallSkip() { return kStdIns * 4; }
 
 // li64 + mtctr + bccrt
 constexpr size_t smashableJccLen()  { return kStdIns * 7; }
+// to analyse the cc, it has to skip the li64 + mtctr
+constexpr size_t smashableJccSkip() { return kStdIns * 6; }
 
 // Same length as Jcc
 constexpr size_t smashableJmpLen()  { return smashableJccLen(); }

@@ -203,8 +203,10 @@ TCA smashableJccTarget(TCA inst) {
 }
 
 ConditionCode smashableJccCond(TCA inst) {
-  not_implemented();
-  return DecodedInstruction(inst).jccCondCode();
+  // skip to the branch instruction in order to get its condition
+  ppc64_asm::BranchParams bp(
+      *reinterpret_cast<ppc64_asm::PPC64Instr*>(inst + smashableJccSkip()));
+  return bp;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

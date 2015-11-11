@@ -208,7 +208,54 @@ class BranchParams {
       return ret;
     }
 
+    /*
+     * Get the BranchParams from an emitted conditional branch
+     */
+    BranchParams(PPC64Instr instr) {
+      // first, guarantee that is a conditional branch
+      if (((instr >> 26) == 16) || ((instr >> 26) == 19)) {
+        // bc, bclr, bcctr, bctar
+        m_bo = (BranchParams::BO)((instr >> 21) & 0x1F);
+        m_bi = (BranchParams::BI)((instr >> 16) & 0x1F);
+      } else {
+        assert(false && "Not a valid conditional branch instruction");
+        // also possible: defineBoBi(BranchConditions::Always);
+      }
+    }
+
     ~BranchParams() {}
+
+    /*
+     * Converts to ConditionCode upon casting to it
+     */
+    /* implicit */ operator ConditionCode() {
+      ConditionCode ret = HPHP::jit::CC_None;
+
+      switch (m_bi) {
+        case BI::CR0_LessThan:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_B;  // CC_S, CC_L
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_AE; // CC_NL
+          break;
+        case BI::CR0_GreaterThan:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_A;  // CC_NS, CC_G
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_BE; // CC_NG
+          break;
+        case BI::CR0_Equal:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_E;
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_NE;
+          break;
+        case BI::CR0_SummaryOverflow:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_O;
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_NO;
+          break;
+        default:
+          assert(false && "Not a valid conditional branch parameter");
+          break;
+      }
+
+      return ret;
+    }
+
 
     uint8_t bo() { return (uint8_t)m_bo; }
     uint8_t bi() { return (uint8_t)m_bi; }
