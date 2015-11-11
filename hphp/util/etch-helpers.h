@@ -25,6 +25,8 @@
 #define ETCH_GET_ARG5     mov 0x28(%rsp), %r10
 #define ETCH_GET_ARG6     mov 0x30(%rsp), %r11
 #define ETCH_RET1         %rax
+#define ETCH_V_ONE        /*not used*/
+#define ETCH_R_ONE        /*not used*/
 /* VM Registers must match definition on abi-x64.h */
 #define ETCH_R_VM_FP      %rbp
 #define ETCH_R_VM_SP      %rbx
@@ -59,6 +61,8 @@
 #define ETCH_GET_ARG5     /* not used */
 #define ETCH_GET_ARG6     /* not used */
 #define ETCH_RET1         %rax
+#define ETCH_V_ONE        /*not used*/
+#define ETCH_R_ONE        /*not used*/
 /* VM Registers must match definition on abi-x64.h */
 #define ETCH_R_VM_FP      %rbp
 #define ETCH_R_VM_SP      %rbx
@@ -92,6 +96,8 @@
 #define ETCH_ARG6         %r8
 #define ETCH_RET1         %r3
 /* VM Registers must match definition on abi-ppc64.h */
+#define ETCH_V_ONE        1
+#define ETCH_R_ONE        %r27
 #define ETCH_R_VM_FP      %r28
 #define ETCH_R_VM_SP      %r29
 #define ETCH_R_VM_TL      %r30
@@ -125,6 +131,8 @@
 #define ETCH_GET_ARG5     /* not used */
 #define ETCH_GET_ARG6     /* not used */
 #define ETCH_RET1         %rax
+#define ETCH_V_ONE        /*not used*/
+#define ETCH_R_ONE        /*not used*/
 /* VM Registers must match definition on abi-x64.h */
 #define ETCH_R_VM_FP      %rbp
 #define ETCH_R_VM_SP      %rbx

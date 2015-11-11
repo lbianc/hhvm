@@ -42,6 +42,13 @@ constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
 constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
 
+// rone() returns register 27, which has the value "1" (Initiated in
+// translator-asm-helpers.S).
+// This is necessary for PPC64 since instructions like "inc" must updates the
+// CR depending the instruction result and instructions like "addi" (using
+// immediate) does not set the CR.
+constexpr PhysReg rone()       { return ppc64_asm::reg::r27; }
+
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
   const RegSet kVMRegsNoSP  = rvmfp() | rvmtl();

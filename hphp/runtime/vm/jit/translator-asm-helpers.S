@@ -228,6 +228,9 @@ ETCH_NAME(enterTCHelper):
   mr ETCH_R_VM_TL, ETCH_ARG5
   mr ETCH_R_VM_FP, ETCH_ARG2
 
+  // Set up ETCH_R_ONE with value "1" (see abi definition for more details)
+  li ETCH_R_ONE, ETCH_V_ONE
+
   cmpdi ETCH_ARG6, 0
   beq ETCH_LABEL(enterTCHelper$callTC)
   mr ETCH_R_VM_FP, ETCH_ARG6
