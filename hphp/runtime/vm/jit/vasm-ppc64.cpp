@@ -136,7 +136,7 @@ struct Vgen {
     auto val = i.s.l();
     if (i.d.isGP()) {
       Vreg64 d = i.d;
-      a->li32un(d,val);
+      a->li32(d,val);
     } else {
       // TODO(igornunes): SIMD instruction
       not_implemented();
