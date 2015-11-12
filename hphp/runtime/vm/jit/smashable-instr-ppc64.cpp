@@ -104,7 +104,9 @@ emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
 void smashMovq(TCA inst, uint64_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashMovq));
 
-  auto& cb = mcg->code.blockFor(inst);
+  HPHP::CodeBlock cb;
+  // Initialize code block cb pointing to li64
+  cb.init(inst, ppc64_asm::Assembler::kLi64InstrLen, "smashing Movq");
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
 
