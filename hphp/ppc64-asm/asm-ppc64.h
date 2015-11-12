@@ -1920,8 +1920,8 @@ public:
     assert(((bctr_addr[3] >> 2) & 0x3F) == 19);  // XL-Form
 #endif
 
-    // Initialize code block cb2 pointing to li64 and sized 20 (li64 + nops).
-    cb2.init(jmp, 20, "patched bctr");
+    // Initialize code block cb2 pointing to li64
+    cb2.init(jmp, kLi64InstrLen, "patched bctr");
     Assembler b{ cb2 };
     b.li64(reg::r12, ssize_t(dest));
   }
