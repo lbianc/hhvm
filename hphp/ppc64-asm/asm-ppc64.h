@@ -86,10 +86,10 @@ class BranchParams {
     };
 
 #define CR_CONDITIONS(cr) \
-      CR##cr##_LessThan          = 0x80000000ULL >> (32 - (0 + (cr * 4))), \
-      CR##cr##_GreaterThan       = 0x80000000ULL >> (32 - (1 + (cr * 4))), \
-      CR##cr##_Equal             = 0x80000000ULL >> (32 - (2 + (cr * 4))), \
-      CR##cr##_SummaryOverflow   = 0x80000000ULL >> (32 - (3 + (cr * 4)))
+      CR##cr##_LessThan          = (0 + (cr * 4)), \
+      CR##cr##_GreaterThan       = (1 + (cr * 4)), \
+      CR##cr##_Equal             = (2 + (cr * 4)), \
+      CR##cr##_SummaryOverflow   = (3 + (cr * 4))
 
     enum class BI {
       CR_CONDITIONS(0),
