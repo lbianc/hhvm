@@ -251,8 +251,16 @@ struct Vgen {
     else                     a->instr   (dst, ptr);       \
   } while(0)
 
-  void emit(const loadw& i)   { X(lhz,  Reg64(i.d), i.s); }
-  void emit(const loadl& i)   { X(lwz,  Reg64(i.d), i.s); }
+  // As all registers are 64-bits wide, a smaller number from the memory should
+  // have its sign extended after loading except for the 'z' vasm variants
+  void emit(const loadw& i) {
+    X(lhz,  Reg64(i.d), i.s);
+    a->extsh(Reg64(i.d), Reg64(i.d));
+  }
+  void emit(const loadl& i) {
+    X(lwz,  Reg64(i.d), i.s);
+    a->extsw(Reg64(i.d), Reg64(i.d));
+  }
   void emit(const loadzbl& i) { X(lbz,  Reg64(i.d), i.s); }
   void emit(const loadzbq& i) { X(lbz,  i.d,        i.s); }
   void emit(const loadzlq& i) { X(lwz,  i.d,        i.s); }
