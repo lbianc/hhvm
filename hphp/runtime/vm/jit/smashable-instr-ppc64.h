@@ -34,9 +34,12 @@ namespace HPHP { namespace jit { namespace ppc64 {
 
 static constexpr uint8_t kStdIns = ppc64_asm::Assembler::kBytesPerInstr;
 
-// li64's worst case
-constexpr size_t smashableMovqLen() { return kStdIns * 5; }  // li64
-constexpr size_t smashableCmpqLen() { return kStdIns * 6; }  // li64 + cmpd
+// li64
+constexpr size_t smashableMovqLen() { return kStdIns * 5; }
+
+// li64 + cmpd
+constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
+
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
@@ -46,11 +49,11 @@ constexpr size_t smashableCallLen() { return kStdIns * 11; }
 // skips stdu, mflr, std, stdu
 constexpr uint8_t smashableCallSkip() { return kStdIns * 4; }
 
-// li64 + mtctr + bcrt
-constexpr size_t smashableJmpLen()  { return kStdIns * 7; }
-
 // li64 + mtctr + bccrt
 constexpr size_t smashableJccLen()  { return kStdIns * 7; }
+
+// Same length as Jcc
+constexpr size_t smashableJmpLen()  { return smashableJccLen(); }
 
 TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d);
 TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp);
