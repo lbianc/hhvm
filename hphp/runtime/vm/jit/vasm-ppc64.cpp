@@ -283,7 +283,7 @@ struct Vgen {
       a->cmpdi(i.s0, Immed(0));
   }
   void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }
-  void emit(const ucomisd& i) { a->dcmpu(i.s0,i.s1); }
+  void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }
   void emit(const ud2& i) { a->trap(); }
   void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
   void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
