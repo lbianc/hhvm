@@ -46,8 +46,8 @@ void Dissasembler::dissasembly(std::ostream& out, uint8_t* instr) {
   }
   out << "\t";
   // Decode instruction and get mnemonic representation
-  DecoderTable::GetDecoder().DecodeInstruction(instruction);
-  out << DecoderTable::GetDecoder().ToString();
+  DecoderInfo* dec_info =  Decoder::GetDecoder().decode(instruction);
+  out << dec_info->toString();
   out << "\n";
 }
 

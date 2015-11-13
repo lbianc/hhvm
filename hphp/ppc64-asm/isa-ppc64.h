@@ -21,8 +21,6 @@ namespace ppc64_asm {
 
 typedef uint32_t PPC64Instr;
 
-const int kDecoderSize = 1374;
-
 enum class Form {
   kInvalid = 0,
   kX,

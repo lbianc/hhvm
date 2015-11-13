@@ -14,15 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef INCLUDE_PPC64_DECODER_H_
-#define INCLUDE_PPC64_DECODER_H_
+#ifndef incl_PPC64_ASM_DECODER_H_
+#define incl_PPC64_ASM_DECODER_H_
 
 #include <cstdint>
 #include <string>
 #include <boost/noncopyable.hpp>
+
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
+
+// decoder size is the next prime number from the table size
+// decoder table is a hash table and this avoids some collisions, it's not
+// the better way to do this but it's simple.
+const int kDecoderSize = 1373;
 
 // Instruction type decoder masks
 const uint32_t kDecoderMask1  = (0x3F << 26);
@@ -75,6 +81,19 @@ struct Operands {
   : mask_(0)
   , flags_(0)
   {}
+
+  // calculates operand mask shift factor
+  int operandShift() {
+    int s = 32;
+    if (mask_) {
+      uint32_t n = mask_;
+      n = (n ^ (n - 1)) >> 1;
+      for (s = 0; n; s++) {
+         n >>=1;
+      }
+    }
+    return s;
+  }
 };
 
 // Operand Masks
@@ -201,12 +220,14 @@ struct Operands {
 
 struct DecoderInfo {
 private:
-    uint32_t opcode_;
-    Form form_;
-    std::string mnemonic_;
-    uint32_t operand_size_;
-    Operands* operand_list_;
-    DecoderInfo* next_;
+  uint32_t opcode_;
+  Form form_;
+  std::string mnemonic_;
+  uint32_t operand_size_;
+  uint32_t instr_image_;
+  Operands* operand_list_;
+  DecoderInfo* next_;
+
 public:
   DecoderInfo(uint32_t op, Form form, std::string mn ,
     std::initializer_list<Operands> oper)
@@ -214,6 +235,7 @@ public:
   , form_(form)
   , mnemonic_(mn)
   , operand_size_(oper.size())
+  , instr_image_(0x0)
   , next_(nullptr) {
     operand_list_ = new Operands[oper.size()];
     for(auto i = oper.begin(); i != oper.end(); i++)
@@ -226,12 +248,16 @@ public:
   }
 
   DecoderInfo() = delete;
+  void next(DecoderInfo* i) { next_ = i;}
+  DecoderInfo* next() { return next_; }
 
   inline Form form() const { return form_; }
   inline uint32_t opcode() const { return opcode_; }
   inline std::string mnemonic() const { return mnemonic_; }
-  void next(DecoderInfo* i) { next_ = i;}
-  DecoderInfo* next() { return next_; }
+  std::string toString();
+
+  uint32_t instruction_image() { return instr_image_; }
+  void instruction_image(uint32_t i) { instr_image_ = i; }
 
   inline bool operator==(const DecoderInfo& i) {
     return (i.form() == form_ &&
@@ -244,16 +270,17 @@ public:
             i.opcode() != opcode_ ||
             i.mnemonic() != mnemonic_);
   }
+
+  bool isNop(uint32_t instr);
 };
 
-class DecoderTable : private boost::noncopyable {
+class Decoder : private boost::noncopyable {
 private:
 
   DecoderInfo **decoder_table;
-  DecoderInfo* decoded_instr_; // holds the last decoded instruction
-  static DecoderTable* decoder;
+  static Decoder* decoder;
 
-  void SetInstruction(DecoderInfo dinfo) {
+  void setInstruction(DecoderInfo dinfo) {
 
     uint32_t index = (dinfo.opcode() % kDecoderSize);
 
@@ -279,15 +306,15 @@ private:
    singleton constructor, it's only called once and, when trace is enabled
    so optimization here is not a big issue.
  */
-  __attribute__((optimize("O0"))) DecoderTable() {
-    decoded_instr_ = nullptr;
+  __attribute__((optimize("O0"))) Decoder() {
+
     decoder_table = new DecoderInfo*[kDecoderSize];
     for(int i = 0; i < kDecoderSize; i++)
       decoder_table[i] = nullptr;
 
-#define DE(name, op, type, mnemonic, ... )\
-  DecoderInfo instr_##name {op, type, #mnemonic, __VA_ARGS__ };\
-  SetInstruction(instr_##name)
+  #define DE(name, op, type, mnemonic, ... )\
+     DecoderInfo instr_##name {op, type, #mnemonic, __VA_ARGS__ };\
+     setInstruction(instr_##name)
 
   DE(add,           0x7C000214, Form::kXO,  add,         { RT, RA, RB });
   DE(adddot,        0x7C000215, Form::kXO,  add.,        { RT, RA, RB });
@@ -303,7 +330,7 @@ private:
   DE(addi,          0x38000000, Form::kD,   addi,        { RT, RA0, SI });
   DE(addic,         0x30000000, Form::kD,   addic,       { RT, RA, SI });
   DE(addicdot,      0x34000000, Form::kD,   addic.,      { RT, RA, SI });
-  DE(addis,         0x3C000000, Form::kD,   addis,      { RT, RA0, SISIGNOPT });
+  DE(addis,         0x3C000000, Form::kD,   addis,     { RT, RA0, SISIGNOPT });
   DE(addme,         0x7C0001D4, Form::kXO,  addme,       { RT, RA });
   DE(addmedot,      0x7C0001D5, Form::kXO,  addme.,      { RT, RA });
   DE(addmeo,        0x7C0005D4, Form::kXO,  addmeo,      { RT, RA });
@@ -1767,9 +1794,9 @@ private:
   #undef XFL_L
   #undef XS
   #undef XT
-  }
+ }
 
-  ~DecoderTable() {
+  ~Decoder() {
     for(int i = 0; i < kDecoderSize; i++)
        if(decoder_table[i] != nullptr) {
           delete decoder_table[i];
@@ -1779,33 +1806,13 @@ private:
 
 public:
 
-  DecoderInfo* GetInstruction(uint32_t opcode) {
-
-    uint32_t index = (opcode % kDecoderSize);
-
-    while (decoder_table[index] != nullptr &&
-           decoder_table[index]->opcode() != opcode) {
-      index = (index + 1) % kDecoderSize;
-    }
-
-    if (decoder_table[index] != nullptr) {
-      return decoder_table[index];
-    } else {
-      DecoderInfo* invalid = new DecoderInfo(0, Form::kInvalid, "", { UN });
-      #undef UN // Undef UN now
-      return invalid;
-    }
-  }
-
-  static DecoderTable& GetDecoder() {
-   static DecoderTable dec;
+  static Decoder& GetDecoder() {
+   static Decoder dec;
    decoder= &dec;
    return *decoder;
   }
 
-  std::string ToString();
-
-  void DecodeInstruction(uint32_t ip);
+  DecoderInfo* decode(uint32_t ip);
 };
 
 } // namespace ppc64_asm

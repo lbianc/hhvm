@@ -18,55 +18,93 @@
 
 namespace ppc64_asm {
 
-DecoderTable* DecoderTable::decoder = nullptr;
+Decoder* Decoder::decoder = nullptr;
 
-std::string DecoderTable::ToString(){
-    /*
-     * TODO(rcardoso):
-     * DRAFT:
-     *     Print Instruction
-     *     1- Read instruction name (done)
-     *     2- Get Operand masks
-     *     3- Convert operands to apropriated string and concat with name
-     *     5- Return formated string
-     * CAVEATS:
-     *   If instruction is kInvalid maybe it's data. What to do in this case?
-     */
-    if(decoded_instr_->form() == Form::kInvalid) {
-      return ".long ";
-    }
-    return decoded_instr_->mnemonic();
+std::string DecoderInfo::toString(){
+
+  std::string instr;
+
+  if (form() == Form::kInvalid) {
+    return ".long " + std::to_string(instruction_image());
+  }
+  if (isNop(instruction_image())) {
+    return "nop";
+  }
+
+  instr = mnemonic();
+  instr += " ";
+
+  bool hasParen = false;
+  for (auto i = 0; i < operand_size_; i++) {
+     int s = operand_list_[i].operandShift();
+     uint32_t op = (instruction_image() & operand_list_[i].mask_);
+     op = op >> s;
+
+     if (operand_list_[i].flags_ & PPC_OPERAND_GPR) {
+        instr += "r";
+     }
+     if (operand_list_[i].flags_ & PPC_OPERAND_GPR_0) {
+       if (op != 0) {
+         instr += "r";
+       }
+     }
+     if (operand_list_[i].flags_ & PPC_OPERAND_FPR) {
+       instr += "f";
+     }
+     if (operand_list_[i].flags_ & PPC_OPERAND_VR) {
+      instr += "v";
+     }
+     if (operand_list_[i].flags_ & PPC_OPERAND_SIGNED) {
+       int32_t n = static_cast<int32_t>(op);
+       if (n < 0) {
+         instr += "-";
+       }
+       instr += std::to_string(n);
+     } else {
+       instr += std::to_string(op);
+     }
+     if (i+1 < operand_size_) {
+       hasParen = (operand_list_[i].flags_ & PPC_OPERAND_PAREN);
+       (hasParen && (i+1 == 2)) ? instr += "(" : instr += ",";
+     } else {
+       if (hasParen) {
+         instr += ")";
+         hasParen = false;
+       }
+     }
+  }
+  return instr;
 }
 
-void DecoderTable::DecodeInstruction(uint32_t ip) {
-  /*
-   * TODO(rcardoso):
-   * The decoder table is in fact a hash table. We can have k decoder masks
-   * so we can need to test and retrieve the first who match. In worst case
-   * we have k*x where x is a number of access to decoder table
-   * and depends on number of  collisions in best case 1 (no collisions)
-   * or, in worst case, n (if all keys collide).
-   * And we have k*x + y where y is the number of alternate instructions
-   * (next pointer on DecoderInfo). It's '+' y because we retrieve the whole
-   * structure do a linear search if we need. So, in worst case y=n,
-   * then we have k*n + n => O(k*2n). But in pratice, this will not
-   * gonna happens because we have a limited number of execution modes and
-   * we cannot have a 'n' size collision so, we have O(k*c + c) = O(1) at most.
-   * This is not the best algorithm but this will work. Sorry for any math
-   * mistakes.
-   */
+bool DecoderInfo::isNop(uint32_t instr) {
+  return (instr == opcode()) && (opcode() == 0x60000000);
+}
 
+DecoderInfo* Decoder::decode(uint32_t instr) {
   // To decode a instruction we extract the decoder fields
   // masking the instruction and test if it 'hits' the decoder table.
-  decoded_instr_ = nullptr;
-  for(int i = 0; i < kDecoderListSize; i++) {
-    uint32_t instr_image = ip;
-    instr_image &= DecoderList[i];
+  DecoderInfo* decoded_instr;
 
-    decoded_instr_ = GetInstruction(instr_image);
-    if(decoded_instr_->form() != Form::kInvalid)
-       break;
+  for (int i = 0; i < kDecoderListSize; i++) {
+     uint32_t instr_image = instr;
+     instr_image &= DecoderList[i];
+
+     uint32_t index = (instr_image % kDecoderSize);
+
+     while (decoder_table[index] != nullptr &&
+          decoder_table[index]->opcode() != instr_image) {
+          index = (index + 1) % kDecoderSize;
+     }
+
+     if (decoder_table[index] != nullptr) {
+       decoder_table[index]->instruction_image(instr);
+       return decoder_table[index];
+     }
   }
+  decoded_instr = new DecoderInfo(0x0, Form::kInvalid, "", { UN });
+  decoded_instr->instruction_image(instr);
+  #undef UN
+  return decoded_instr;
 }
 
-} //namespace ppc64_asm
+} // namespace ppc64_ams
