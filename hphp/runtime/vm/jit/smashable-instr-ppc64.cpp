@@ -172,11 +172,11 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return reinterpret_cast<uint64_t>(ppc64_asm::Assembler::getLi64(inst));
+  return static_cast<uint64_t>(ppc64_asm::Assembler::getLi64(inst));
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  return reinterpret_cast<uint32_t>(ppc64_asm::Assembler::getLi32(inst));
+  return static_cast<uint32_t>(ppc64_asm::Assembler::getLi32(inst));
 }
 
 TCA smashableCallTarget(TCA inst) {

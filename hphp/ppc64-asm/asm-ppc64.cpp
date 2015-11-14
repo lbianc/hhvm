@@ -698,7 +698,7 @@ void Assembler::unimplemented(){
   EmitDForm(0, rn(0), rn(0), 0);
 }
 
-void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
+void Assembler::li64 (const Reg64& rt, int64_t imm64) {
   // li64 always emits 5 instructions i.e. 20 bytes of instructions.
   // Assumes that 0 bytes will be missing in the end.
   uint8_t missing = 0;
@@ -706,22 +706,24 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
   // for assert purposes
   CodeAddress li64StartPos = frontier();
 
-  if ((imm64 >> 16) == 0) {
+  if (HPHP::jit::deltaFits(imm64, HPHP::sz::word)) {
     // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm64));
-    if (imm64 & (1ULL << 15)) {
-      // clear extended sign
+    if (imm64 & (1ULL << 15) && !(imm64 & (1ULL << 16))) {
+      // clear extended sign that should not be set
+      // (32bits number. Sets the 16th bit but not the 17th, it's not negative!)
       clrldi(rt, rt, 48);
       missing = kLi64InstrLen - 2 * kBytesPerInstr;
     } else {
       missing = kLi64InstrLen - 1 * kBytesPerInstr;
     }
-  } else if (imm64 >> 32 == 0) {
+  } else if (HPHP::jit::deltaFits(imm64, HPHP::sz::dword)) {
     // immediate has only low 32 bits set
     lis(rt, static_cast<int16_t>(imm64 >> 16));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
-    if (imm64 & (1ULL << 31)) {
+    if (imm64 & (1ULL << 31) && !(imm64 & (1ULL << 32))) {
       // clear extended sign
+      // (64bits number. Sets the 32th bit but not the 33th, it's not negative!)
       clrldi(rt, rt, 32);
       missing = kLi64InstrLen - 3 * kBytesPerInstr;
     } else {
@@ -753,7 +755,7 @@ void Assembler::li64 (const Reg64& rt, uint64_t imm64) {
   assert(kLi64InstrLen == frontier() - li64StartPos);
 }
 
-uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
+int64_t Assembler::getLi64(PPC64Instr* pinstr) {
   // @pinstr should be pointing to the beginning of the li64 block
   //
   // It's easier to know how many 16bits of data the immediate uses
@@ -782,7 +784,7 @@ uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
   };
 
   // TODO(gut) use Decoder, but for now, do it hardcoded
-  auto getImm = [&](PPC64Instr* instr) -> uint64_t {
+  auto getImm = [&](PPC64Instr* instr) -> uint16_t {
     return *instr & UINT16_MAX;
   };
 
@@ -810,24 +812,28 @@ uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
       break;
   }
 
-  uint64_t imm64 = 0;
+  // first getImm is suppose to get the sign
+  uint64_t imm64 = static_cast<uint64_t>(
+                        static_cast<int16_t>(getImm(pinstr)));
   switch (immParts) {
     case 1:
-      imm64 |= getImm(pinstr);
       break;
     case 2:
-      imm64 |= getImm(pinstr)     << 16;
+      imm64 <<= 16;
       imm64 |= getImm(pinstr + 1);
       break;
     case 3:
-      imm64 |= getImm(pinstr)     << 32;
-      imm64 |= getImm(pinstr + 1) << 16;
-      imm64 |= getImm(pinstr + 3);        // jumps the sldi
+      imm64 <<= 16;
+      imm64 |= getImm(pinstr + 1);
+      imm64 <<= 16;
+      imm64 |= getImm(pinstr + 3);  // jumps the sldi
       break;
     case 4:
-      imm64 |= getImm(pinstr)     << 48;
-      imm64 |= getImm(pinstr + 1) << 32;
-      imm64 |= getImm(pinstr + 3) << 16;  // jumps the sldi
+      imm64 <<= 16;
+      imm64 |= getImm(pinstr + 1);
+      imm64 <<= 16;
+      imm64 |= getImm(pinstr + 3);  // jumps the sldi
+      imm64 <<= 16;
       imm64 |= getImm(pinstr + 4);
       break;
     default:
@@ -835,7 +841,7 @@ uint64_t Assembler::getLi64(PPC64Instr* pinstr) {
       break;
   }
 
-  return imm64;
+  return static_cast<int64_t>(imm64);
 }
 
 Reg64 Assembler::getLi64Reg(PPC64Instr* instr) {
@@ -845,12 +851,14 @@ Reg64 Assembler::getLi64Reg(PPC64Instr* instr) {
   return Reg64(d_instr.RT);
 }
 
-void Assembler::li32 (const Reg64& rt, uint32_t imm32) {
-  if ((imm32 >> 16) == 0) {
+void Assembler::li32 (const Reg64& rt, int32_t imm32) {
+
+  if (HPHP::jit::deltaFits(imm32, HPHP::sz::word)) {
     // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm32));
-    if (imm32 & (1ULL << 15)) {
-      // clear extended sign
+    if (imm32 & (1ULL << 15) && !(imm32 & (1ULL << 16))) {
+      // clear extended sign that should not be set
+      // (32bits number. Sets the 16th bit but not the 17th, it's not negative!)
       clrldi(rt, rt, 48);
     } else {
       emitNop(kBytesPerInstr); // emit nop for a balanced li32 with 2 instr
@@ -867,7 +875,7 @@ void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
   if ((imm32 >> 16) == 0) {
     // immediate has only low 16 bits set, use simple load immediate
     ori(rt, rt, static_cast<int16_t>(imm32));
-    emitNop(kBytesPerInstr); // emit nop for a balanced li32un with 2 instr
+    emitNop(kBytesPerInstr); // emit nop for a balanced li32un with 3 instr
   } else {
     // immediate has 32 bits set
     oris(rt, rt, static_cast<int16_t>(imm32 >> 16));
@@ -875,7 +883,7 @@ void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
   }
 }
 
-uint32_t Assembler::getLi32(PPC64Instr* pinstr) {
+int32_t Assembler::getLi32(PPC64Instr* pinstr) {
   // @pinstr should be pointing to the beginning of the li32 block
 
   // TODO(gut) use Decoder, but for now, do it hardcoded
@@ -890,23 +898,11 @@ uint32_t Assembler::getLi32(PPC64Instr* pinstr) {
 
   uint32_t imm32 = 0;
   if (is_16b_only) {
-    imm32 |= getImm(pinstr);
-
-    // It's easier to see if a 16bits immediate is signed or not by checking if
-    // a NOP is emitted as 2nd instruction
-    bool has_nop = [&](PPC64Instr instr) -> bool {
-      D_form_t d_formater {0, 0, 0, 24 }; // check Assembler::ori
-      return instr == d_formater.instruction;
-    }(*(pinstr+1)); // check the 2nd instruction
-
-    if (!has_nop) {
-      // extend sign
-      imm32 |= UINT16_MAX << 16;
-    }
+    imm32 |= static_cast<int16_t>(getImm(pinstr));
   } else {
     imm32 |= getImm(pinstr)     << 16;  // lis
     imm32 |= getImm(pinstr + 1);        // ori
   }
-  return imm32;
+  return static_cast<int32_t>(imm32);
 }
 } // namespace ppc64_asm

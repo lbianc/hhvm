@@ -132,11 +132,8 @@ struct Vgen {
     }
   }
   void emit(const ldimml& i) {
-    // ldimml is for Vconst::Long, which is treated as unsigned uint32_t
-    auto val = i.s.l();
     if (i.d.isGP()) {
-      Vreg64 d = i.d;
-      a->li32(d,val);
+      a->li32(Reg64(i.d, i.s.l());
     } else {
       // TODO(igornunes): SIMD instruction
       not_implemented();

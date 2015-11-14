@@ -74,7 +74,7 @@ bool funcGuardMatches(TCA guard, const Func* func) {
   if (isPrologueStub(guard)) return false;
 
   auto const ifunc = reinterpret_cast<uintptr_t>(func);
-  return reinterpret_cast<uint64_t>(ppc64_asm::Assembler::getLi64(guard)) == ifunc;
+  return static_cast<uintptr_t>(ppc64_asm::Assembler::getLi64(guard)) == ifunc;
 }
 
 void clobberFuncGuard(TCA guard, const Func* func) {

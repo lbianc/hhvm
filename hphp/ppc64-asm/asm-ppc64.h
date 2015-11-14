@@ -1905,14 +1905,12 @@ public:
   }
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64 (const Reg64& rt, uint64_t imm64);
+  void li64 (const Reg64& rt, int64_t imm64);
 
   // Retrieve the target defined by li64 instruction
-  static uint64_t getLi64(PPC64Instr* pinstr);
-  static CodeAddress getLi64(CodeAddress pinstr) {
-    return reinterpret_cast<CodeAddress>(
-        getLi64(reinterpret_cast<PPC64Instr*>(pinstr))
-        );
+  static int64_t getLi64(PPC64Instr* pinstr);
+  static int64_t getLi64(CodeAddress pinstr) {
+    return getLi64(reinterpret_cast<PPC64Instr*>(pinstr));
   }
 
   // Retrieve the register used by li64 instruction
@@ -1922,14 +1920,14 @@ public:
   }
 
   // Auxiliary for loading a 32bits immediate into a register
-  void li32 (const Reg64& rt, uint32_t imm32);
+  void li32 (const Reg64& rt, int32_t imm32);
 
   // Auxiliary for loading a 32bits unsigned immediate into a register
   void li32un (const Reg64& rt, uint32_t imm32);
 
   // Retrieve the target defined by li32 instruction
-  static uint32_t getLi32(PPC64Instr* pinstr);
-  static uint32_t getLi32(CodeAddress pinstr) {
+  static int32_t getLi32(PPC64Instr* pinstr);
+  static int32_t getLi32(CodeAddress pinstr) {
     return getLi32(reinterpret_cast<PPC64Instr*>(pinstr));
   }
 
