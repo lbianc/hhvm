@@ -165,14 +165,14 @@ struct Vgen {
   void emit(const landingpad& i) {}
 
   // instructions
-  void emit(absdbl i) { a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s))); }
-  void emit(addl i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0)); }
-  void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }
-  void emit(addq i) { a->add(i.d, i.s0, i.s1, false); }
-  void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }
-  void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }
-  void emit(andq i) { a->and_(i.d, i.s0, i.s1, false); }
-  void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }
+  void emit(absdbl i) { a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s)), false); }
+  void emit(addl i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true); }
+  void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
+  void emit(addq i) { a->add(i.d, i.s0, i.s1, true); }
+  void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }                  // needs SF
+  void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
+  void emit(andq i) { a->and_(i.d, i.s0, i.s1, true); }
+  void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }                  // needs SF
   void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
@@ -185,7 +185,7 @@ struct Vgen {
   void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
   void emit(decl i) { a->subf(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(decq i) { a->subf(i.d, rone(), i.s, true); }
-  void emit(imul i) { a->mullw(i.d, i.s1, i.s0, false); }
+  void emit(imul i) { a->mullw(i.d, i.s1, i.s0, true); }
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
@@ -206,11 +206,11 @@ struct Vgen {
   void emit(const movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
-  void emit(neg i) { a->neg(i.d, i.s, false); }
+  void emit(neg i) { a->neg(i.d, i.s, true); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(not i) { a->nor(i.d, i.s, i.s, false); }
-  void emit(orq i) { a->or_(i.d, i.s0, i.s1, false); }
-  void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }
+  void emit(orq i) { a->or_(i.d, i.s0, i.s1, true); }
+  void emit(orqi i) { a->ori(i.d, i.s1, i.s0); }                    // needs SF
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
     a->blr();
@@ -219,14 +219,14 @@ struct Vgen {
     obtained by specifying appropriate masks and shift values for
     certain Rotate instructions.
   */
-  void emit(sar i) { a->srad(i.d, i.s1, i.s0); }
-  void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), false); }
+  void emit(sar i) { a->srad(i.d, i.s1, i.s0, true); }
+  void emit(sarqi i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), true); }
   void emit(const setcc& i) {
     ppc64_asm::Label l_true, l_end;
     Reg64 d(i.d);
 
     a->bc(l_true, i.cc);
-    a->xor_(d, d, d);   /* set output to 0 */
+    a->xor_(d, d, d, true);   /* set output to 0 */
     a->b(l_end);
 
     l_true.asm_label(*a);
@@ -234,12 +234,11 @@ struct Vgen {
 
     l_end.asm_label(*a);
   }
-  void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
-  /*TODO Rc=1*/
-  void emit(shl i) { a->sld(i.d, i.s1, i.s0); }
-  void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }
-  void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); }
-  void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }
+  void emit(shlli i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); } // needs SF
+  void emit(shl i) { a->sld(i.d, i.s1, i.s0, true); }
+  void emit(shlqi i) { a->sldi(i.d, i.s1, i.s0.b()); }              // needs SF
+  void emit(shrli i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); } // needs SF
+  void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }              // needs SF
   void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
   void emit(const loadb& i) { a->lbz(Reg64(i.d), i.s); }
@@ -271,9 +270,9 @@ struct Vgen {
 
 #undef X
 
-  void emit(subq i) { a->subf(i.d, i.s1, i.s0, false); }
-  void emit(subqi i) { a->addi(i.s1, i.d, -i.s0); /*addi with negative value*/ }
-  void emit(subsd i) { a->fsub(i.d, i.s0, i.s1); /* d = s1 - s0 */ }
+  void emit(subq i) { a->subf(i.d, i.s1, i.s0, true); }             // needs SF
+  void emit(subqi i) { a->addi(i.s1, i.d, -i.s0); }                 // needs SF
+  void emit(subsd i) { a->fsub(i.d, i.s0, i.s1, false); /* d = s1 - s0 */ }
   void emit(const testq& i) {
     // More information on:
     // https://www.freelists.org/post/hhvm-ppc/Review-on-testb-vasm-change-aka-how-to-translate-x64s-test-operator-to-ppc64
@@ -282,14 +281,14 @@ struct Vgen {
     else
       a->cmpdi(i.s0, Immed(0));
   }
-  void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }
-  void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }
+  void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }         // needs SF
+  void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }              // needs SF
   void emit(const ud2& i) { a->trap(); }
-  void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }
-  void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), false); }
-  void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, false); }
-  void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }
+  void emit(xorb i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(xorbi i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
+  void emit(xorl i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(xorq i) { a->xor_(i.d, i.s0, i.s1, true); }
+  void emit(xorqi i) { a->xori(i.d, i.s1, i.s0); }                  // needs SF
 
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
