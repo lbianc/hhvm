@@ -549,15 +549,15 @@ void Vgen::emit(const tailcallstub& i) {
  * Native ppc64 instructions can't handle an immediate bigger than 16 bits and
  * need to be loaded into a register in order to be used.
  */
-template <typename typeImm>
-bool patchImm(typeImm imm, Vout& v, Vreg& tmpRegister) {
-  uint64_t imm64 = static_cast<uint64_t>(imm);
-  if (!(imm64 >> 16)) {
-    return false;
-  } else {
-    tmpRegister  = v.makeReg();
-    v << ldimmq{imm64, tmpRegister};
+bool patchImm(Immed imm, Vout& v, Vreg& tmpRegister) {
+  // TODO(gut): find out why negative numbers are crashing later on
+    //if (!imm.fits(HPHP::sz::word)) {
+  if ((imm.l() >> 16)) {
+    tmpRegister = v.makeReg();
+    v << ldimml{imm, tmpRegister};
     return true;
+  } else {
+    return false;
   }
 }
 
@@ -600,7 +600,7 @@ void patchVptr(Vptr& p, Vout& v) {
 
   // taking care of the displacement, in case it is > 16bits
   Vreg disp_reg;
-  bool patched_disp = patchImm(p.disp, v, disp_reg);
+  bool patched_disp = patchImm(Immed(p.disp), v, disp_reg);
   switch (mode) {
     case AddressModes::kBase:
     case AddressModes::kIndex_Base:
@@ -686,18 +686,9 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 X(storebi, s, storeb, m, ldimmb)
 X(storewi, s, storew, m, ldimmw)
 X(storeli, s, storel, m, ldimml)
-// X(storeqi, s, store,  m, ldimmq)  // not possible due to Immed64
+X(storeqi, s, store,  m, ldimml)
 
 #undef X
-
-void lowerForPPC64(Vout& v, storeqi& inst) {
-  auto ir = v.makeReg();
-  v << ldimmq {Immed64(inst.s.q()), ir};
-
-  Vptr p = inst.m;
-  patchVptr(p, v);
-  v << store {ir, p};
-}
 
 // Simply take care of the vasm's Vptr, reemmiting it if patch occured
 #define X(vasm, attr_addr, attr_1, attr_2)                              \
@@ -733,12 +724,12 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   if (patchImm(inst.attr_imm, v, tmp)) v << vasm_dst{tmp, attrs inst.sf}; \
 }
 
-X(addli,  addl,  s0.l(), TWO(s1, d))
-X(addqi,  addq,  s0.q(), TWO(s1, d))
-X(andli,  andl,  s0.l(), TWO(s1, d))
-X(andqi,  andq,  s0.q(), TWO(s1, d))
-X(testqi, testq, s0.q(), ONE(s1))
-X(cmpqi,  cmpq,  s0.q(), ONE(s1))
+X(addli,  addl,  s0, TWO(s1, d))
+X(addqi,  addq,  s0, TWO(s1, d))
+X(andli,  andl,  s0, TWO(s1, d))
+X(andqi,  andq,  s0, TWO(s1, d))
+X(testqi, testq, s0, ONE(s1))
+X(cmpqi,  cmpq,  s0, ONE(s1))
 
 #undef X
 
@@ -776,7 +767,7 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   patchVptr(p, v);                                                      \
   Vreg tmp2 = v.makeReg(), tmp;                                         \
   v << vasm_load{p, tmp2};                                              \
-  if (patchImm(inst.attr_data.q(), v, tmp))                             \
+  if (patchImm(inst.attr_data, v, tmp))                                 \
     v << vasm_dst_reg{tmp, tmp2, inst.sf};                              \
   else v << vasm_dst_imm{inst.attr_data, tmp2, inst.sf};                \
 }
@@ -800,7 +791,7 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vptr p = inst.attr_addr;                                              \
   patchVptr(p, v);                                                      \
   v << vasm_load{p, tmp};                                               \
-  if (patchImm(inst.attr_data.q(), v, tmp2))                            \
+  if (patchImm(inst.attr_data, v, tmp2))                                \
     v << vasm_dst_reg{tmp2, tmp, tmp3, inst.sf};                        \
   else v << vasm_dst_imm{inst.attr_data, tmp, tmp3, inst.sf};           \
   v << vasm_store{tmp3, p};                                             \
