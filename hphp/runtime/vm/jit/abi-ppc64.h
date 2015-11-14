@@ -18,6 +18,7 @@
 #define incl_HPHP_JIT_ABI_PPC64_H_
 
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/bytecode.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 
@@ -74,8 +75,8 @@ PhysReg r_svcreq_arg(size_t i);
 ///////////////////////////////////////////////////////////////////////////////
 
 /* Used on vasm for defining a minimal callstack on call/ret */
-constexpr int min_callstack_size          = 32;
-constexpr int lr_position_on_callstack    = 16;
+constexpr int min_callstack_size          = AROFF(_dummyB);   // next union
+constexpr int lr_position_on_callstack    = AROFF(m_savedRip);
 constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
 
 /* Parameters for push/pop and keep stack aligned */
