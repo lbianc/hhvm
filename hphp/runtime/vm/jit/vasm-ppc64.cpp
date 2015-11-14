@@ -133,7 +133,7 @@ struct Vgen {
   }
   void emit(const ldimml& i) {
     if (i.d.isGP()) {
-      a->li32(Reg64(i.d, i.s.l());
+      a->li32(i.d, i.s.l());
     } else {
       // TODO(igornunes): SIMD instruction
       not_implemented();
