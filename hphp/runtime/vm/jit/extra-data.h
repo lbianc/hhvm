@@ -525,12 +525,10 @@ struct ActRecInfo : IRExtraData {
   IRSPOffset spOffset;
   const StringData* invName;  // may be nullptr
   int32_t numArgs;
-  bool fromFPushCtor;
 
   std::string show() const {
     return folly::to<std::string>(spOffset.offset, ',',
                                   numArgs,
-                                  fromFPushCtor ? ",ctor" : "",
                                   invName ? " M" : "");
   }
 };
@@ -564,7 +562,6 @@ struct DefInlineFPData : IRExtraData {
   std::string show() const {
     return folly::to<std::string>(
       target->fullName()->data(), "(),",
-      fromFPushCtor ? "ctor," : "",
       retBCOff, ',',
       retSPOff.offset, ',',
       spOffset.offset
@@ -572,7 +569,6 @@ struct DefInlineFPData : IRExtraData {
   }
 
   const Func* target;
-  bool fromFPushCtor;
   SSATmp* ctx;       // Ctx, Cls or Nullptr.
   Offset retBCOff;
   FPInvOffset retSPOff;
@@ -986,19 +982,6 @@ struct IndexData : IRExtraData {
   std::string show() const { return folly::format("{}", index).str(); }
 };
 
-struct ClsNeqData : IRExtraData {
-  explicit ClsNeqData(Class* testClass) : testClass(testClass) {}
-
-  std::string show() const {
-    return testClass->name()->data();
-  }
-
-  bool equals(ClsNeqData o) const { return testClass == o.testClass; }
-  size_t hash() const { return std::hash<Class*>()(testClass); }
-
-  Class* testClass; // class we're checking equality with
-};
-
 struct MInstrAttrData : IRExtraData {
   explicit MInstrAttrData(MInstrAttr mia) : mia(mia) {}
 
@@ -1011,6 +994,14 @@ struct SetOpData : IRExtraData {
   explicit SetOpData(SetOpOp op) : op(op) {}
   std::string show() const { return subopToName(op); }
   SetOpOp op;
+};
+
+struct DecRefData : IRExtraData {
+  explicit DecRefData(int locId = -1) : locId(locId) {}
+  std::string show() const {
+    return locId != -1 ? folly::to<std::string>("Loc", locId) : "-";
+  }
+  int locId; // If a known local, this has its id; -1 otherwise.
 };
 
 struct IncDecData : IRExtraData {
@@ -1166,6 +1157,7 @@ X(CallBuiltin,                  CallBuiltinData);
 X(CallArray,                    CallArrayData);
 X(RetCtrl,                      RetCtrlData);
 X(AsyncRetCtrl,                 RetCtrlData);
+X(AsyncRetFast,                 RetCtrlData);
 X(LdArrFuncCtx,                 IRSPOffsetData);
 X(LdArrFPushCuf,                IRSPOffsetData);
 X(LdStrFPushCuf,                IRSPOffsetData);
@@ -1198,7 +1190,6 @@ X(ProfilePackedArray,           RDSHandleData);
 X(ProfileStructArray,           RDSHandleData);
 X(ProfileObjClass,              RDSHandleData);
 X(LdRDSAddr,                    RDSHandleData);
-X(ClsNeq,                       ClsNeqData);
 X(BaseG,                        MInstrAttrData);
 X(PropX,                        MInstrAttrData);
 X(PropDX,                       MInstrAttrData);
@@ -1234,6 +1225,7 @@ X(ContValid,                    IsAsyncData);
 X(LdContResumeAddr,             IsAsyncData);
 X(LdContActRec,                 IsAsyncData);
 X(GenericIdx,                   IRSPOffsetData);
+X(DecRef,                       DecRefData);
 
 #undef X
 

@@ -21,7 +21,7 @@
 #include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/zend-functions.h"
-#include "hphp/runtime/ext/closure/ext_closure.h"
+#include "hphp/runtime/ext/std/ext_std_closure.h"
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/hh/ext_hh.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
@@ -832,7 +832,7 @@ void checkFrame(ActRec* fp, Cell* sp, bool fullCheck, Offset bcOff) {
 
   visitStackElems(
     fp, sp, bcOff,
-    [](const ActRec* ar) {
+    [](const ActRec* ar, Offset) {
       ar->func()->validate();
     },
     [](const TypedValue* tv) {
@@ -1236,6 +1236,11 @@ void throwSwitchMode() {
   // clean.
   tl_regState = VMRegState::CLEAN;
   throw VMSwitchMode();
+}
+
+bool methodExistsHelper(Class* cls, StringData* meth) {
+  assertx(isNormalClass(cls) && !isAbstract(cls));
+  return cls->lookupMethod(meth) != nullptr;
 }
 
 namespace MInstrHelpers {

@@ -24,22 +24,13 @@
 // Super temporary
 #ifndef USE_CMAKE
 #include "hphp/facebook/extensions/phpmc/ext_phpmc.h"
-#define ENABLE_EXTENSION_ASIO
-#define ENABLE_EXTENSION_CLOSURE
 #define ENABLE_EXTENSION_COLLECTIONS
-#define ENABLE_EXTENSION_SIMPLEXML
 #endif
 
-#ifdef ENABLE_EXTENSION_CLOSURE
-#include "hphp/runtime/ext/closure/ext_closure.h"
-#endif
+#include "hphp/runtime/ext/std/ext_std_closure.h"
+
 #ifdef ENABLE_EXTENSION_COLLECTIONS
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
-#endif
-
-// half-IDL, half-HNI
-#ifdef ENABLE_EXTENSION_ASIO
-#include "hphp/runtime/ext/asio/ext_asio.h"
 #endif
 
 #endif // incl_EXT_LIST_EXT_H_

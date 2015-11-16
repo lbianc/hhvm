@@ -30,6 +30,7 @@
 #include "hphp/util/text-util.h"
 #include "hphp/util/abi-cxx.h"
 
+#include "hphp/runtime/base/apc-local-array.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/rds-header.h"
@@ -75,7 +76,7 @@
 #include "hphp/runtime/ext/asio/asio-blockable.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_wait-handle.h"
-#include "hphp/runtime/ext/closure/ext_closure.h"
+#include "hphp/runtime/ext/std/ext_std_closure.h"
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 
@@ -330,7 +331,6 @@ CALL_OPCODE(ConvObjToArr);
 CALL_OPCODE(ConvStrToArr);
 CALL_OPCODE(ConvCellToArr);
 
-CALL_OPCODE(ConvStrToBool);
 CALL_OPCODE(ConvCellToBool);
 
 CALL_OPCODE(ConvArrToDbl);
@@ -443,6 +443,8 @@ CALL_OPCODE(LdClsPropAddrOrNull)
 CALL_OPCODE(LdClsPropAddrOrRaise)
 CALL_OPCODE(LdGblAddrDef)
 
+CALL_OPCODE(MethodExists)
+
 // Vector instruction helpers
 CALL_OPCODE(StringGet)
 CALL_OPCODE(BindElem)
@@ -486,6 +488,7 @@ DELEGATE_OPCODE(AddDbl)
 DELEGATE_OPCODE(SubDbl)
 DELEGATE_OPCODE(MulDbl)
 DELEGATE_OPCODE(DivDbl)
+DELEGATE_OPCODE(DivInt)
 DELEGATE_OPCODE(Mod)
 DELEGATE_OPCODE(Floor)
 DELEGATE_OPCODE(Ceil)
@@ -1173,14 +1176,15 @@ void CodeGenerator::cgExtendsClass(IRInstruction* inst) {
   });
 }
 
-void CodeGenerator::cgClsNeq(IRInstruction* inst) {
-  auto const rdst      = dstLoc(inst, 0).reg();
-  const Vreg rObjClass = srcLoc(inst, 0).reg();
+void CodeGenerator::cgEqCls(IRInstruction* inst) {
+  auto const dst  = dstLoc(inst, 0).reg();
+  auto const src1 = srcLoc(inst, 0).reg();
+  auto const src2 = srcLoc(inst, 1).reg();
+
   auto& v = vmain();
-  auto testClass       = v.cns(inst->extra<ClsNeqData>()->testClass);
   auto const sf = v.makeReg();
-  emitCmpClass(v, sf, testClass, rObjClass);
-  v << setcc{CC_NE, sf, rdst};
+  emitCmpClass(v, sf, src2, src1);
+  v << setcc{CC_E, sf, dst};
 }
 
 void CodeGenerator::cgConvDblToInt(IRInstruction* inst) {
@@ -1357,6 +1361,33 @@ void CodeGenerator::cgConvObjToBool(IRInstruction* inst) {
       return v.cns(true);
     }
   );
+}
+
+void CodeGenerator::cgConvStrToBool(IRInstruction* inst) {
+  auto const dst = dstLoc(inst, 0).reg();
+  auto const src = srcLoc(inst, 0).reg();
+  auto& v = vmain();
+
+  auto const sf = v.makeReg();
+
+  v << cmplim{1, src[StringData::sizeOff()], sf};
+  unlikelyCond(v, vcold(), CC_E, sf, dst, [&] (Vout& v) {
+    // Unlikely case is we end up having to check whether the first byte of the
+    // string is equal to '0'.
+    auto const dst = v.makeReg();
+    auto const sd  = v.makeReg();
+    auto const sf  = v.makeReg();
+    v << load{src[StringData::dataOff()], sd};
+    v << cmpbim{'0', sd[0], sf};
+    v << setcc{CC_NE, sf, dst};
+    return dst;
+  }, [&] (Vout& v) {
+    // Common case is we have an empty string or a string with size bigger than
+    // one.
+    auto const dst = v.makeReg();
+    v << setcc{CC_G, sf, dst};
+    return dst;
+  });
 }
 
 void CodeGenerator::emitConvBoolOrIntToDbl(IRInstruction* inst) {
@@ -2097,11 +2128,12 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
   // Without profiling data, we assume destroy is unlikely.
   if (kind != TransKind::Profile && kind != TransKind::Optimize) return 0.0;
 
+  auto const locId = inst->extra<DecRef>()->locId;
   auto const profileKey =
     makeStaticString(folly::to<std::string>("DecRefProfile-",
                                             opcodeName(inst->op()),
-                                            '-',
-                                            type.toString()));
+                                            '-', type.toString(),
+                                            '-', locId));
   profile.emplace(m_state.unit.context(), inst->marker(), profileKey);
 
   auto& v = vmain();
@@ -2154,6 +2186,10 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
 void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                                const OptDecRefProfile& profile,
                                bool unlikelyDestroy) {
+  static const auto TPackedArr = Type::Array(ArrayData::kPackedKind);
+  static const auto TMixedArr = Type::Array(ArrayData::kMixedKind);
+  static const auto TApcArr = Type::Array(ArrayData::kApcKind);
+  auto const llvm = mcg->useLLVM();
   auto const ty   = inst->src(0)->type();
   auto const base = srcLoc(inst, 0).reg(0);
 
@@ -2164,17 +2200,15 @@ void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
       v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, destroy)],
                  v.makeReg()};
     }
-
-    cgCallHelper(
-      v,
-      ty.isKnownDataType()
-        ? mcg->getDtorCall(ty.toDataType())
-        : CallSpec::destruct(srcLoc(inst, 0).reg(1)),
-      kVoidDest,
-      SyncOptions::Sync,
-      argGroup(inst)
-        .reg(base)
-    );
+    // LLVM backend doesn't support CallSpec::Array
+    auto dtor = ty <= TPackedArr ? CallSpec::direct(PackedArray::Release) :
+                ty <= TMixedArr ? CallSpec::direct(MixedArray::Release) :
+                ty <= TApcArr ? CallSpec::direct(APCLocalArray::Release) :
+                ty <= TArr && !llvm ? CallSpec::array(&g_array_funcs.release) :
+                ty.isKnownDataType() ? mcg->getDtorCall(ty.toDataType()) :
+                CallSpec::destruct(srcLoc(inst, 0).reg(1));
+    cgCallHelper(v, dtor, kVoidDest, SyncOptions::Sync,
+                 argGroup(inst).reg(base));
   };
 
   emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Decl
@@ -2373,9 +2407,6 @@ void CodeGenerator::cgSpillFrame(IRInstruction* inst) {
   }
 
   auto flags = ActRec::Flags::None;
-  if (extra->fromFPushCtor) {
-    flags = static_cast<ActRec::Flags>(flags | ActRec::Flags::FromFPushCtor);
-  }
   if (magicName) {
     flags = static_cast<ActRec::Flags>(flags | ActRec::Flags::MagicDispatch);
   }
@@ -4639,7 +4670,7 @@ void CodeGenerator::cgAFWHBlockOn(IRInstruction* inst) {
   auto parentArReg = srcLoc(inst, 0).reg();
   auto childReg = srcLoc(inst, 1).reg();
   auto& v = vmain();
-  const int8_t blocked = c_WaitHandle::toKindState(
+  const int8_t afblocked = c_WaitHandle::toKindState(
     c_WaitHandle::Kind::AsyncFunction,
     c_AsyncFunctionWaitHandle::STATE_BLOCKED
   );
@@ -4659,7 +4690,7 @@ void CodeGenerator::cgAFWHBlockOn(IRInstruction* inst) {
                                  - c_AsyncFunctionWaitHandle::arOff();
 
   // parent->setState(STATE_BLOCKED);
-  v << storebi{blocked, parentArReg[stateToArOff]};
+  v << storebi{afblocked, parentArReg[stateToArOff]};
 
   // parent->m_blockable.m_bits = child->m_parentChain.m_firstParent|Kind::AFWH;
   auto firstParent = v.makeReg();
@@ -4674,6 +4705,57 @@ void CodeGenerator::cgAFWHBlockOn(IRInstruction* inst) {
 
   // parent->m_child = child;
   v << store{childReg, parentArReg[childToArOff]};
+}
+
+// Packing the TV type and data into two registers.
+void emitPackTVRegs(Vout& v, Vloc loc, const SSATmp* src,
+                    Vreg rData, Vreg rType) {
+  auto const type = src->type();
+  auto const typeShort = v.makeReg();
+
+  assertx(!loc.isFullSIMD());
+  if (type.needsReg()) {
+    assertx(loc.hasReg(1));
+    v << copy{loc.reg(1), typeShort};
+  } else {
+    v << copy{v.cns(type.toDataType()), typeShort};
+  }
+  // We are passing the packed registers to asyncRetCtrl unique stub, which
+  // expects both rType and rData to be i64 regs.
+  v << movzbq{typeShort, rType};
+
+  // Ignore the values of null type
+  if (!(src->isA(TNull))) {
+    if (src->hasConstVal()) {
+      // Skip potential zero-extend if we know the value.
+      v << copy{v.cns(src->rawVal()), rData};
+    } else {
+      assertx(loc.hasReg(0));
+      auto const extended = zeroExtendIfBool(v, src, loc.reg(0));
+      v << copy{extended, rData};
+    }
+  }
+}
+
+void CodeGenerator::cgAsyncRetFast(IRInstruction* inst) {
+  auto const retValLoc = srcLoc(inst, 2);
+  auto const retValSrc = inst->src(2);
+  auto& v = vmain();
+
+  // Here we sync stack assuming the return value will be pushed onto stack by
+  // the stub, i.e. the fast path case.  If slow path is taken, SP will be
+  // adjusted accordingly.
+  adjustSPForReturn(m_state, inst);
+
+  // The asyncRetCtrl stub takes 2 arguments: data and type of the return value.
+  emitPackTVRegs(v, retValLoc, retValSrc, rarg(0), rarg(1));
+
+  RegSet asyncStubRegs(vm_regs_with_sp() | rarg(1));
+  if (!(retValSrc->isA(TNull))) {
+      asyncStubRegs |= rarg(0);
+  }
+  auto const stub = mcg->tx().uniqueStubs.asyncRetCtrl;
+  v << jmpi{stub, asyncStubRegs};
 }
 
 void CodeGenerator::cgIsWaitHandle(IRInstruction* inst) {

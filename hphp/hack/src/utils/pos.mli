@@ -49,8 +49,6 @@ val make_from : 'a -> 'a pos
 
 val btw : 'a pos -> 'a pos -> 'a pos
 
-val set_line : 'a pos -> int -> 'a pos
-
 val to_absolute : t -> absolute
 
 val to_relative_string : t -> string pos
@@ -63,6 +61,8 @@ val compare : 'a pos -> 'a pos -> int
  * you feel a need to use this. *)
 val pos_start : 'a pos -> Lexing.position
 val pos_end : 'a pos -> Lexing.position
+
+val destruct_range : 'a pos -> (int * int * int * int)
 
 (* XXX deprecated: should only be used by Flow *)
 val make_from_lexing_pos :

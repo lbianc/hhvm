@@ -32,7 +32,7 @@ struct FrameStateMgr;
 /*
  * The main optimization passes.
  */
-void optimizeRefcounts2(IRUnit&);
+void optimizeRefcounts(IRUnit&);
 void optimizePredictions(IRUnit&);
 void hoistTypeChecks(IRUnit&);
 void gvn(IRUnit&);
@@ -40,6 +40,7 @@ void optimizeLoads(IRUnit&);
 void optimizeStores(IRUnit&);
 void optimizeLoopInvariantCode(IRUnit&);
 void cleanCfg(IRUnit&);
+void optimizePhis(IRUnit&);
 
 /*
  * For debugging, we can run this pass, which inserts various sanity checking

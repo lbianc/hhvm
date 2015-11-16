@@ -98,13 +98,6 @@ let btw x1 x2 =
   then failwith "Invalid positions Pos.btw" ;
   { x1 with pos_end = x2.pos_end }
 
-let set_line pos value =
-  let pos_start = pos.pos_start in
-  let pos_end = pos.pos_end in
-  let pos_start = { pos_start with pos_lnum = value } in
-  let pos_end = { pos_end with pos_lnum = value } in
-  { pos with pos_start; pos_end }
-
 let to_absolute p = { p with pos_file = Relative_path.to_absolute (p.pos_file) }
 
 let to_relative_string p =
@@ -120,12 +113,17 @@ let compare x y =
         if result <> 0 then result else seq rl
   in
   seq [(fun x y -> compare x.pos_file y.pos_file);
-       (fun x y -> compare x.pos_start.pos_lnum y.pos_start.pos_lnum);
        (fun x y -> compare x.pos_start.pos_cnum y.pos_start.pos_cnum);
        (fun x y -> compare x.pos_end.pos_cnum y.pos_end.pos_cnum)]
 
 let pos_start p = p.pos_start
 let pos_end p = p.pos_end
+
+let destruct_range (p : 'a pos) : (int * int * int * int) =
+  line p,
+  p.pos_start.pos_cnum - p.pos_start.pos_bol + 1,
+  end_line p,
+  p.pos_end.pos_cnum - p.pos_end.pos_bol + 1
 
 let make_from_lexing_pos ~pos_file ~pos_start ~pos_end =
   { pos_file; pos_start; pos_end }

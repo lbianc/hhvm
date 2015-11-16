@@ -17,7 +17,6 @@
 
 #include "hphp/runtime/ext/asio/ext_asio.h"
 
-#include "hphp/runtime/ext/closure/ext_closure.h"
 #include "hphp/runtime/ext/asio/asio-context.h"
 #include "hphp/runtime/ext/asio/asio-session.h"
 #include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
@@ -69,8 +68,6 @@ void AsioExtension::initFunctions() {
     asio_get_current_context_idx);
   HHVM_FALIAS(HH\\asio_get_running_in_context, asio_get_running_in_context);
   HHVM_FALIAS(HH\\asio_get_running, asio_get_running);
-
-  loadSystemlib();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

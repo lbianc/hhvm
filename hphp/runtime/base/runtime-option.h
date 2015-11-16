@@ -97,8 +97,7 @@ public:
   static bool NoInfiniteRecursionDetection;
   static bool WarnTooManyArguments;
   static bool EnableHipHopErrors;
-  static bool AssertActive;
-  static bool AssertWarning;
+  static bool AssertEmitted;
   static int64_t NoticeFrequency; // output 1 out of NoticeFrequency notices
   static int64_t WarningFrequency;
   static int RaiseDebuggingFrequency;
@@ -448,6 +447,7 @@ public:
   F(bool, EmitSwitch,                  true)                            \
   F(bool, EmitNewMInstrs,              newMInstrsDefault())             \
   F(bool, LogThreadCreateBacktraces,   false)                           \
+  F(bool, FailJitPrologs,              false)                           \
   /* CheckReturnTypeHints:
      0 - No checks or enforcement for return type hints.
      1 - Raises E_WARNING if a return type hint fails.
@@ -508,6 +508,7 @@ public:
   F(bool, HHIRGenOpts,                 true)                            \
   F(bool, HHIRRefcountOpts,            true)                            \
   F(bool, HHIREnableGenTimeInlining,   true)                            \
+  F(uint32_t, HHIRInliningMaxBindJmps, 0)                               \
   F(uint32_t, HHIRInliningMaxReturns,  3)                               \
   F(uint32_t, HHIRInliningMaxCost,     13)                              \
   F(uint32_t, HHIRInliningMaxDepth,    4)                               \

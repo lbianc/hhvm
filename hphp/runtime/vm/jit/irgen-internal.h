@@ -85,6 +85,10 @@ inline FPInvOffset invSPOff(const IRGS& env) {
 //////////////////////////////////////////////////////////////////////
 // Control-flow helpers.
 
+inline Block* defBlock(IRGS& env, Block::Hint hint = Block::Hint::Neither) {
+  return env.unit.defBlock(curProfCount(env), hint);
+}
+
 inline void hint(IRGS& env, Block::Hint h) {
   env.irb->curBlock()->setHint(h);
 }
@@ -125,8 +129,8 @@ template<> struct BranchImpl<SSATmp*> {
  */
 template<class Branch, class Next, class Taken>
 SSATmp* cond(IRGS& env, Branch branch, Next next, Taken taken) {
-  auto const taken_block = env.unit.defBlock();
-  auto const done_block = env.unit.defBlock();
+  auto const taken_block = defBlock(env);
+  auto const done_block  = defBlock(env);
 
   using T = decltype(branch(taken_block));
   auto const v1 = BranchImpl<T>::go(branch, taken_block, next);
@@ -162,8 +166,8 @@ SSATmp* cond(IRGS& env, Branch branch, Next next, Taken taken) {
  */
 template<class Branch, class Next, class Taken>
 void ifThenElse(IRGS& env, Branch branch, Next next, Taken taken) {
-  auto const taken_block = env.unit.defBlock();
-  auto const done_block = env.unit.defBlock();
+  auto const taken_block = defBlock(env);
+  auto const done_block  = defBlock(env);
   branch(taken_block);
   next();
   // patch the last block added by the Next lambda to jump to
@@ -194,8 +198,8 @@ void ifThenElse(IRGS& env, Branch branch, Next next, Taken taken) {
  */
 template<class Branch, class Taken>
 void ifThen(IRGS& env, Branch branch, Taken taken) {
-  auto const taken_block = env.unit.defBlock();
-  auto const done_block = env.unit.defBlock();
+  auto const taken_block = defBlock(env);
+  auto const done_block  = defBlock(env);
   branch(taken_block);
   auto const cur = env.irb->curBlock();
   if (cur->empty() || !cur->back().isBlockEnd()) {
@@ -224,7 +228,7 @@ void ifThen(IRGS& env, Branch branch, Taken taken) {
  */
 template<class Branch, class Next>
 void ifElse(IRGS& env, Branch branch, Next next) {
-  auto const done_block = env.unit.defBlock();
+  auto const done_block = defBlock(env);
   branch(done_block);
   next();
   // patch the last block added by the Next lambda to jump to
@@ -310,10 +314,14 @@ inline void discard(IRGS& env, uint32_t n) {
   env.irb->fs().decSyncedSpLevel(n);
 }
 
+inline void decRef(IRGS& env, SSATmp* tmp, int locId=-1) {
+  gen(env, DecRef, DecRefData(locId), tmp);
+}
+
 inline void popDecRef(IRGS& env,
                       TypeConstraint tc = DataTypeCountness) {
   auto const val = pop(env, tc);
-  gen(env, DecRef, val);
+  decRef(env, val);
 }
 
 inline SSATmp* push(IRGS& env, SSATmp* tmp) {
@@ -412,29 +420,6 @@ inline SSATmp* unbox(IRGS& env, SSATmp* val, Block* exit) {
       return gen(env, AssertType, TCell, val);
     }
   );
-}
-
-//////////////////////////////////////////////////////////////////////
-// Type helpers
-
-inline Type relaxToGuardable(Type ty) {
-  assertx(ty <= TGen);
-  ty = ty.unspecialize();
-
-  // ty is unspecialized and we don't support guarding on CountedArr or
-  // StaticArr, so widen any subtypes of Arr to Arr.
-  if (ty <= TArr) return TArr;
-
-  // We can guard on StaticStr but not CountedStr.
-  if (ty <= TCountedStr)     return TStr;
-
-  if (ty <= TBoxedCell)      return TBoxedCell;
-  if (ty.isKnownDataType())  return ty;
-  if (ty <= TUncountedInit)  return TUncountedInit;
-  if (ty <= TUncounted)      return TUncounted;
-  if (ty <= TCell)           return TCell;
-  if (ty <= TGen)            return TGen;
-  not_reached();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -620,7 +605,7 @@ inline SSATmp* stLocImpl(IRGS& env,
   auto unboxed_case = [&] {
     stLocRaw(env, id, fp(env), newVal);
     if (incRefNew) gen(env, IncRef, newVal);
-    if (decRefOld) gen(env, DecRef, oldLoc);
+    if (decRefOld) decRef(env, oldLoc);
     return newVal;
   };
 
@@ -638,7 +623,7 @@ inline SSATmp* stLocImpl(IRGS& env,
     gen(env, StRef, box, newVal);
     if (incRefNew) gen(env, IncRef, newVal);
     if (decRefOld) {
-      gen(env, DecRef, innerCell);
+      decRef(env, innerCell);
       env.irb->constrainValue(box, DataTypeCountness);
     }
     return newVal;
@@ -700,7 +685,7 @@ inline SSATmp* pushStLoc(IRGS& env,
 
 inline SSATmp* ldLocAddr(IRGS& env, uint32_t locId) {
   env.irb->constrainLocal(locId, DataTypeSpecific, "LdLocAddr");
-  return gen(env, LdLocAddr, TPtrToFrameGen, LocalId(locId), fp(env));
+  return gen(env, LdLocAddr, LocalId(locId), fp(env));
 }
 
 inline SSATmp* ldStkAddr(IRGS& env, BCSPOffset relOffset) {
@@ -709,7 +694,6 @@ inline SSATmp* ldStkAddr(IRGS& env, BCSPOffset relOffset) {
   return gen(
     env,
     LdStkAddr,
-    TPtrToStkGen,
     IRSPOffsetData { offset },
     sp(env)
   );
@@ -719,7 +703,7 @@ inline void decRefLocalsInline(IRGS& env) {
   assertx(!curFunc(env)->isPseudoMain());
   for (int id = curFunc(env)->numLocals() - 1; id >= 0; --id) {
     auto const loc = ldLoc(env, id, nullptr, DataTypeGeneric);
-    gen(env, DecRef, loc);
+    decRef(env, loc, id);
   }
 }
 
@@ -733,7 +717,7 @@ inline void decRefThis(IRGS& env) {
     },
     [&] {  // Next: it's a this
       auto const this_ = gen(env, CastCtxThis, ctx);
-      gen(env, DecRef, this_);
+      decRef(env, this_);
     },
     [&] {  // Taken: static context, or psuedomain w/o a $this
       // No op.

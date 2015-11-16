@@ -31,7 +31,8 @@ TRACE_SET_MOD(hhir);
 
 IRUnit::IRUnit(TransContext context)
   : m_context(context)
-  , m_entry(defBlock())
+  , m_entry(defBlock()) // For Optimize translations, the entry block's
+                        // profCount is adjusted later in translateRegion.
 {}
 
 IRInstruction* IRUnit::defLabel(unsigned numDst, BCMarker marker) {
@@ -72,9 +73,10 @@ void IRUnit::expandJmp(IRInstruction* jmp, SSATmp* value) {
   jmp->setSrcs(i, newSrcs);
 }
 
-Block* IRUnit::defBlock(Block::Hint hint) {
+Block* IRUnit::defBlock(uint64_t profCount /* =1 */,
+                        Block::Hint hint   /* =Neither */ ) {
   FTRACE(2, "IRUnit defining B{}\n", m_nextBlockId);
-  auto const block = new (m_arena) Block(m_nextBlockId++);
+  auto const block = new (m_arena) Block(m_nextBlockId++, profCount);
   block->setHint(hint);
   return block;
 }
@@ -112,13 +114,14 @@ static bool endsUnitAtSrcKey(const Block* block, SrcKey sk) {
     case RaiseError:
     case ThrowOutOfBounds:
     case ThrowInvalidOperation:
-      return instSk == sk;;
+      return instSk == sk;
 
     // The RetCtrl is generally ending a bytecode instruction, with the
     // exception being in an Await bytecode instruction, where we consider the
     // end of the bytecode instruction to be the non-suspending path.
     case RetCtrl:
     case AsyncRetCtrl:
+    case AsyncRetFast:
       return inst.marker().sk().op() != Op::Await;
 
     // A ReqBindJmp ends a unit and it jumps to the next instruction

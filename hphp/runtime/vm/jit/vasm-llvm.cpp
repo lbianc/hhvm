@@ -1547,6 +1547,7 @@ O(decl) \
 O(declm) \
 O(decq) \
 O(decqm) \
+O(divint) \
 O(divsd) \
 O(imul) \
 O(fallback) \
@@ -2945,6 +2946,10 @@ void LLVMEmitter::emit(const roundsd& inst) {
 
 void LLVMEmitter::emit(const srem& inst) {
   defineValue(inst.d, m_irb.CreateSRem(value(inst.s0), value(inst.s1)));
+}
+
+void LLVMEmitter::emit(const divint& inst) {
+  defineValue(inst.d, m_irb.CreateSDiv(value(inst.s0), value(inst.s1)));
 }
 
 void LLVMEmitter::emit(const sar& inst) {

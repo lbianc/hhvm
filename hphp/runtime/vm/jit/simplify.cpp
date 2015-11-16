@@ -677,23 +677,45 @@ SSATmp* simplifyMod(State& env, const IRInstruction* inst) {
 }
 
 SSATmp* simplifyDivDbl(State& env, const IRInstruction* inst) {
-  auto src1 = inst->src(0);
-  auto src2 = inst->src(1);
+  auto const src1 = inst->src(0);
+  auto const src2 = inst->src(1);
 
   if (!src2->hasConstVal()) return nullptr;
 
-  // not supporting integers (#2570625)
-  double src2Val = src2->dblVal();
+  auto src2Val = src2->dblVal();
 
-  // X / 0 -> bool(false)
   if (src2Val == 0.0) {
-    // Ideally we'd generate a RaiseWarning and return false here, but we need
-    // a catch trace for that and we can't make a catch trace here.
+    // The branch emitted during irgen will deal with this
     return nullptr;
   }
 
   // statically compute X / Y
   return src1->hasConstVal() ? cns(env, src1->dblVal() / src2Val) : nullptr;
+}
+
+SSATmp* simplifyDivInt(State& env, const IRInstruction* inst) {
+  auto const dividend = inst->src(0);
+  auto const divisor  = inst->src(1);
+
+  if (!divisor->hasConstVal()) return nullptr;
+
+  auto const divisorVal = divisor->intVal();
+
+  if (divisorVal == 0) {
+    // The branch emitted during irgen will deal with this
+    return nullptr;
+  }
+
+  if (!dividend->hasConstVal()) return nullptr;
+
+  auto const dividendVal = dividend->intVal();
+
+  if (dividendVal == LLONG_MIN || dividendVal % divisorVal) {
+    // This should be unreachable
+    return nullptr;
+  }
+
+  return cns(env, dividendVal / divisorVal);
 }
 
 SSATmp* simplifyAndInt(State& env, const IRInstruction* inst) {
@@ -1273,6 +1295,15 @@ X(NeqRes, Res)
 
 #undef X
 
+SSATmp* simplifyEqCls(State& env, const IRInstruction* inst) {
+  auto const left = inst->src(0);
+  auto const right = inst->src(1);
+  if (left->hasConstVal() && right->hasConstVal()) {
+    return cns(env, left->clsVal() == right->clsVal());
+  }
+  return nullptr;
+}
+
 SSATmp* simplifyCmpBool(State& env, const IRInstruction* inst) {
   auto const left = inst->src(0);
   auto const right = inst->src(1);
@@ -1383,6 +1414,17 @@ SSATmp* isTypeImpl(State& env, const IRInstruction* inst) {
   assertx(IMPLIES(type <= TStr, type == TStr));
   assertx(IMPLIES(type <= TArr, type == TArr));
 
+  // Specially handle checking if an uninit var's type is null. The Type class
+  // doesn't fully correctly handle the fact that the earlier stages of the
+  // compiler consider null to be either initalized or uninitalized, so we need
+  // to do this check first. Right here is really the only place in the backend
+  // it seems to matter, especially since manipulating an uninit is kind of
+  // weird; as of this writing, "$uninitalized_variable ?? 42" is the only
+  // place it really comes up.
+  if (srcType <= TUninit && type <= TNull) {
+    return cns(env, trueSense);
+  }
+
   // The types are disjoint; the result must be false.
   if (!srcType.maybe(type)) {
     return cns(env, !trueSense);
@@ -1477,6 +1519,21 @@ SSATmp* simplifyIsScalarType(State& env, const IRInstruction* inst) {
   auto const src = inst->src(0);
   if (src->type().isKnownDataType()) {
     return cns(env, src->isA(TInt | TDbl | TStr | TBool));
+  }
+  return nullptr;
+}
+
+SSATmp* simplifyMethodExists(State& env, const IRInstruction* inst) {
+  auto const src1 = inst->src(0);
+  auto const src2 = inst->src(1);
+
+  auto const clsSpec = src1->type().clsSpec();
+
+  if (clsSpec.cls() != nullptr && src2->hasConstVal(TStr)) {
+    // If we don't have an exact type, then we can't say for sure the class
+    // doesn't have the method.
+    auto const result = clsSpec.cls()->lookupMethod(src2->strVal()) != nullptr;
+    return (clsSpec.exact() || result) ? cns(env, result) : nullptr;
   }
   return nullptr;
 }
@@ -2382,6 +2439,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(DecRefNZ)
   X(DefLabel)
   X(DivDbl)
+  X(DivInt)
   X(ExtendsClass)
   X(Floor)
   X(GetCtxFwdCall)
@@ -2399,6 +2457,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(LdClsCtx)
   X(LdClsName)
   X(LdStrLen)
+  X(MethodExists)
   X(CheckCtxThis)
   X(CastCtxThis)
   X(LdObjClass)
@@ -2474,6 +2533,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(EqRes)
   X(NeqRes)
   X(CmpRes)
+  X(EqCls)
   X(ArrayGet)
   X(OrdStr)
   X(LdLoc)
@@ -2705,17 +2765,8 @@ void simplifyPass(IRUnit& unit) {
 //////////////////////////////////////////////////////////////////////
 
 void copyProp(IRInstruction* inst) {
-  for (uint32_t i = 0; i < inst->numSrcs(); i++) {
-    auto tmp     = inst->src(i);
-    auto srcInst = tmp->inst();
-
-    if (srcInst->is(Mov)) {
-      inst->setSrc(i, srcInst->src(0));
-    }
-
-    // We're assuming that all of our src instructions have already been
-    // copyPropped.
-    assertx(!inst->src(i)->inst()->is(Mov));
+  for (auto& src : inst->srcs()) {
+    while (src->inst()->is(Mov)) src = src->inst()->src(0);
   }
 }
 

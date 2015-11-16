@@ -30,7 +30,7 @@
 #include "hphp/runtime/ext/json/ext_json.h"
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/vm/native-data.h"
-#include "hphp/runtime/ext/closure/ext_closure.h"
+#include "hphp/runtime/ext/std/ext_std_closure.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -1540,8 +1540,11 @@ static void serializeObjectImpl(const ObjectData* obj,
     // Only serialize CPP extension type instances which can actually
     // be deserialized.  Otherwise, raise a warning and serialize
     // null.
+    // Similarly, do not try to serialize WaitHandles
+    // as they contain internal state via non-NativeData means.
     auto cls = obj->getVMClass();
-    if (cls->instanceCtor() && !cls->isCppSerializable()) {
+    if ((cls->instanceCtor() && !cls->isCppSerializable()) ||
+        obj->getAttribute(ObjectData::IsWaitHandle)) {
       raise_warning("Attempted to serialize unserializable builtin class %s",
                     obj->getVMClass()->preClass()->name()->data());
       Variant placeholder = init_null();

@@ -44,7 +44,7 @@ Block* getBlock(IRGS& env, Offset offset) {
   // to the region, so we just create an exit block.
   if (!env.irb->hasBlock(sk)) return makeExit(env, offset);
 
-  return env.irb->makeBlock(sk);
+  return env.irb->makeBlock(sk, curProfCount(env));
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -59,7 +59,7 @@ void implCondJmp(IRGS& env, Offset taken, bool negate, SSATmp* src) {
   auto const target = getBlock(env, taken);
   assertx(target != nullptr);
   auto const boolSrc = gen(env, ConvCellToBool, src);
-  gen(env, DecRef, src);
+  decRef(env, src);
   gen(env, negate ? JmpZero : JmpNZero, target, boolSrc);
 }
 
@@ -125,7 +125,7 @@ void emitSwitch(IRGS& env,
     return;
   }
   if (type <= TArr) {
-    gen(env, DecRef, switchVal);
+    decRef(env, switchVal);
     gen(env, Jmp, getBlock(env, defaultOff));
     return;
   }
@@ -268,7 +268,7 @@ void emitSSwitch(IRGS& env, const ImmVector& iv) {
                                  : LdSSwitchDestSlow,
                         data,
                         testVal);
-  gen(env, DecRef, testVal);
+  decRef(env, testVal);
   gen(
     env,
     JmpSSwitchDest,
