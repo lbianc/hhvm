@@ -124,7 +124,7 @@ PhysReg forceAlloc(const SSATmp& tmp) {
     switch (arch()) {
     case Arch::X64: return false;
     case Arch::ARM: return true;
-    case Arch::PPC64: return true;
+    case Arch::PPC64: return false;
     }
     not_reached();
   }();
