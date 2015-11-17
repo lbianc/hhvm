@@ -35,9 +35,9 @@ const RegSet kGPCallerSaved = reg::r3 | reg::r4 | reg::r5 | reg::r6 | reg::r7 |
   // r11 is used as a scratch register (rAsm)
   // r12 is used in function linkage
 
-const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
-  reg::r17 | reg::r18 | reg::r19 | reg::r20 | reg::r21 | reg::r22 | reg::r23 |
-  reg::r24 | reg::r25 | reg::r26 | reg::r31;
+const RegSet kGPCalleeSaved = reg::r14 | reg::r15 | reg::r16 | reg::r17 |
+  reg::r18 | reg::r19 | reg::r20 | reg::r21 | reg::r22 | reg::r23 | reg::r24 |
+  reg::r25 | reg::r26 | reg::r31;
   // r1 is used as rsp
   // r27 is used as value 1
   // r28 is used as rvmfp
@@ -46,8 +46,9 @@ const RegSet kGPCalleeSaved = reg::r2 | reg::r14 | reg::r15 | reg::r16 |
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
-const RegSet kGPReserved = RegSet(reg::r12) | rfuncln() | rvmtl() |
+const RegSet kGPReserved = RegSet(reg::r12) | reg::r2 | rfuncln() | rvmtl() |
   rvmfp() | rvmsp() | rAsm | rsp() | r_svcreq_stub() | rthreadptr() | rone();
+  // Reserve the r2 TOC register to avoid changing it
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
 
