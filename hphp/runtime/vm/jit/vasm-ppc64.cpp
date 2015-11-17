@@ -305,6 +305,7 @@ struct Vgen {
   void emit(const callphp&);
   void emit(const cmovq&);
   void emit(const leavetc&);
+  void emit(const lea&);
   void emit(const contenter&);
 
   // auxiliary for emit(call) and emit(callr)
@@ -475,6 +476,21 @@ void Vgen::emit(const callphp& i) {
 
 void Vgen::emit(const leavetc&) {
   emit(ret{});
+}
+
+void Vgen::emit(const lea& i) {
+  // could do this in a simplify pass
+  if (i.s.disp == 0 && i.s.base.isValid() && !i.s.index.isValid()) {
+    emit(copy{i.s.base, i.d});
+  } else {
+    // don't reuse addq and addqi as they need a SF
+    Vptr p = i.s;
+    if (p.index.isValid()) {
+      a->add(i.d, p.base, p.index);
+    } else {
+      a->addi(i.d, p.base, p.disp);
+    }
+  }
 }
 
 template<class Func>
@@ -709,6 +725,7 @@ X(loadzbl,  s, s, d);
 X(loadzbq,  s, s, d);
 X(loadzlq,  s, s, d);
 X(loadups,  s, s, d);
+X(lea,      s, s, d);
 
 #undef X
 
@@ -834,22 +851,6 @@ void lowerForPPC64(Vout& v, callm& inst) {
   auto d = v.makeReg();
   v << load{p, d};
   v << callr{d, inst.args};
-}
-
-void lowerForPPC64(Vout& v, lea& inst) {
-  // could do this in a simplify pass
-  if (inst.s.disp == 0 && inst.s.base.isValid() && !inst.s.index.isValid()) {
-    v << copy{inst.s.base, inst.d};
-  } else {
-    Vptr p = inst.s;
-    patchVptr(p, v);
-
-    if (p.index.isValid()) {
-      v << addq{p.base, p.index, inst.d, VregSF(RegSF{0})};
-    } else {
-      v << addqi{p.disp, p.base, inst.d, VregSF(RegSF{0})};
-    }
-  }
 }
 
 void lowerForPPC64(Vout& v, loadqp& inst) {
