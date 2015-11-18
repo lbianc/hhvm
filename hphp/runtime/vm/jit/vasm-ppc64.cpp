@@ -337,14 +337,19 @@ private:
 void Vgen::emit(const contenter& i) {
  ppc64_asm::Label stub, end;
  Reg64 fp = i.fp;
- a->ba(end);
+ a->ba(end); // jmp in x64
 
  stub.asm_label(*a);
- emit(popm{fp[AROFF(m_savedRip)]});
+ // The following two lines are equivalent to popm lower.
+ // Since we can't call popm lower function here at the
+ // moment it seems sufficient.
+ // rAsm is a scratch register.
+ emit(pop{rAsm});
+ emit(store{rAsm, fp[AROFF(m_savedRip)]});
  emit(jmpr{i.target, i.args});
 
  end.asm_label(*a);
- a->bla(stub);
+ a->bla(stub); // call in x64
 
  emit(unwind{{i.targets[0], i.targets[1]}});
 }
