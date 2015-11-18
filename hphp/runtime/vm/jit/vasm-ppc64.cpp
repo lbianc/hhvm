@@ -196,7 +196,6 @@ struct Vgen {
   }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
-  void emit(const loadtqb& i) { a->lbz(Reg64(i.d),i.s); }
   void emit(const mflr& i) { a->mflr(i.d); }
   void emit(const mtlr& i) { a->mtlr(i.s); }
   void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
@@ -238,7 +237,6 @@ struct Vgen {
   void emit(shrqi i) { a->srdi(i.d, i.s1, i.s0.b()); }              // needs SF
   void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
-  void emit(const loadb& i) { a->lbz(Reg64(i.d), i.s); }
 
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -257,6 +255,9 @@ struct Vgen {
     X(lwz,  Reg64(i.d), i.s);
     a->extsw(Reg64(i.d), Reg64(i.d));
   }
+
+  void emit(const loadb& i)   { X(lbz, Reg64(i.d),  i.s); }
+  void emit(const loadtqb& i) { X(lbz, Reg64(i.d),  i.s); }
   void emit(const loadzbl& i) { X(lbz,  Reg64(i.d), i.s); }
   void emit(const loadzbq& i) { X(lbz,  i.d,        i.s); }
   void emit(const loadzlq& i) { X(lwz,  i.d,        i.s); }
@@ -272,7 +273,7 @@ struct Vgen {
   void emit(subsd i) { a->fsub(i.d, i.s0, i.s1, false); /* d = s1 - s0 */ }
   void emit(const testq& i) {
     // More information on:
-    // https://www.freelists.org/post/hhvm-ppc/Review-on-testb-vasm-change-aka-how-to-translate-x64s-test-operator-to-ppc64
+    // https://goo.gl/F1wrbO
     if (i.s0 != i.s1)
       a->and_(rAsm, i.s0, i.s1, true); // result is not used, only flags
     else
@@ -720,6 +721,7 @@ X(store,    d, s, d);
 X(storeups, m, s, m);
 X(storesd,  m, s, m);
 X(load,     s, s, d);
+X(loadb,    s, s, d);
 X(loadl,    s, s, d);
 X(loadzbl,  s, s, d);
 X(loadzbq,  s, s, d);
