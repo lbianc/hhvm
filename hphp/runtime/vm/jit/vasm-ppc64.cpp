@@ -567,9 +567,7 @@ void Vgen::emit(const tailcallstub& i) {
  * need to be loaded into a register in order to be used.
  */
 bool patchImm(Immed imm, Vout& v, Vreg& tmpRegister) {
-  // TODO(gut): find out why negative numbers are crashing later on
-    //if (!imm.fits(HPHP::sz::word)) {
-  if ((imm.l() >> 16)) {
+  if (!imm.fits(HPHP::sz::word)) {
     tmpRegister = v.makeReg();
     v << ldimml{imm, tmpRegister};
     return true;
