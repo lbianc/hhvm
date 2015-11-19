@@ -692,6 +692,16 @@ void Assembler::fsub(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
   EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 20, rc);
 }
 
+void Assembler::fmul(const RegXMM& frt, const RegXMM& fra, const RegXMM& frc,
+                     bool rc) {
+  EmitAForm(63, rn(frt), rn(fra), rn(0), rn(frc), 25, rc);
+}
+
+void Assembler::fdiv(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
+                     bool rc) {
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 18, rc);
+}
+
 
 void Assembler::unimplemented(){
   //Emit a instruction with invalid opcode 0x0

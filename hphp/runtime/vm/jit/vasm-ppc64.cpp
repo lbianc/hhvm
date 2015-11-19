@@ -167,6 +167,7 @@ struct Vgen {
   void emit(addli i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(addq i) { a->add(i.d, i.s0, i.s1, true); }
   void emit(addqi i) { a->addi(i.d, i.s1, i.s0); }                  // needs SF
+  void emit(addsd i) { a->fadd(i.d, i.s0, i.s1); }
   void emit(andli i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(andq i) { a->and_(i.d, i.s0, i.s1, true); }
   void emit(andqi i) { a->andi(i.d, i.s1, i.s0); }                  // needs SF
@@ -184,6 +185,8 @@ struct Vgen {
   void emit(decq i) { a->subf(i.d, rone(), i.s, true); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, true); }
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
+  void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
+  void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
   void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incq i) { a->add(i.d, i.s, rone(), true); }

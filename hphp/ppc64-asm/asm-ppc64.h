@@ -619,6 +619,10 @@ public:
                                                                   bool rc = 0);
   void fsub(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                                                                   bool rc = 0);
+  void fmul(const RegXMM& frt, const RegXMM& fra, const RegXMM& frc,
+                                                                  bool rc = 0);
+  void fdiv(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
+                                                                  bool rc = 0);
   void lfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
   }
