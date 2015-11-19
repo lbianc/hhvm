@@ -1109,13 +1109,17 @@ public:
   }
   void fadds()          { not_implemented(); }
   void fcfid()          { not_implemented(); }
-  void fcfids()         { not_implemented(); }
+  void fcfids(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+    EmitXForm(59, rn(frt), rn(0), rn(frb), 846, rc);
+  }
   void fcfidu()         { not_implemented(); }
   void fcfidus()        { not_implemented(); }
   void fcmpo()          { not_implemented(); }
   void fcmpu()          { not_implemented(); }
   void fcpsgn()         { not_implemented(); }
-  void fctid()          { not_implemented(); }
+  void fctid(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+    EmitXForm(63, rn(frt), rn(0), rn(frb), 814, rc);
+  }
   void fctidu()         { not_implemented(); }
   void fctiduz()        { not_implemented(); }
   void fctidz()         { not_implemented(); }
@@ -1173,14 +1177,18 @@ public:
   void ldcix()          { not_implemented(); }
   void lddx()           { not_implemented(); }
   void ldepx()          { not_implemented(); }
-  void lfd()            { not_implemented(); }
+  void lfd(const RegXMM& frt, MemoryRef m) {
+    EmitDForm(50, rn(frt), rn(m.r.base), m.r.disp);
+  }
   void lfddx()          { not_implemented(); }
   void lfdepx()         { not_implemented(); }
   void lfdp()           { not_implemented(); }
   void lfdpx()          { not_implemented(); }
   void lfdu()           { not_implemented(); }
   void lfdux()          { not_implemented(); }
-  void lfdx()           { not_implemented(); }
+  void lfdx(const RegXMM& rt, MemoryRef m) {
+    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 599);
+  }
   void lfiwax()         { not_implemented(); }
   void lfiwzx()         { not_implemented(); }
   void lfsu()           { not_implemented(); }
