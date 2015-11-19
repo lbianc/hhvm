@@ -629,7 +629,7 @@ public:
   void lxvw4x(const RegXMM& Xt, const MemoryRef& m) {
     EmitXX1Form(31, rn(Xt), rn(m.r.base), rn(m.r.index), 780, 0);
   }
-  void isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint16_t bc);
+  void isel(const Reg64& rt, const Reg64& ra, const Reg64& rb, uint8_t bc);
   void lbz(const Reg64& rt, MemoryRef m);
   void lbzu(const Reg64& rt, MemoryRef m);
   void lbzux(const Reg64& rt, MemoryRef m);
@@ -2179,7 +2179,7 @@ protected:
                   const RegNumber rt,
                   const RegNumber ra,
                   const RegNumber rb,
-                  const uint16_t bc,
+                  const RegNumber bc,
                   const uint16_t xop,
                   const bool rc = 0) {
 
@@ -2187,11 +2187,12 @@ protected:
      assert(static_cast<uint32_t>(rt) < 32);
      assert(static_cast<uint32_t>(ra) < 32);
      assert(static_cast<uint32_t>(rb) < 32);
+     assert(static_cast<uint32_t>(bc) < 32);
 
       A_form_t a_formater {
                            rc,
                            xop,
-                           bc,
+                           static_cast<uint32_t>(bc),
                            static_cast<uint32_t>(rb),
                            static_cast<uint32_t>(ra),
                            static_cast<uint32_t>(rt),

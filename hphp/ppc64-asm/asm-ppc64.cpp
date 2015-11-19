@@ -279,8 +279,8 @@ void Assembler::extsw(const Reg64& ra, const Reg64& rs, bool rc) {
 }
 
 void Assembler::isel(const Reg64& rt, const Reg64& ra, const Reg64& rb,
-                     uint16_t bc) {
-  EmitAForm(31, rn(rt), rn(ra), rn(rb), bc, 15);
+                     uint8_t bc) {
+  EmitAForm(31, rn(rt), rn(ra), rn(rb), rn(bc), 15);
 }
 
 void Assembler::lbz(const Reg64& rt, MemoryRef m) {
@@ -684,12 +684,12 @@ void Assembler::xoris(const Reg64& ra, const Reg64& rs, Immed imm) {
 /* Floating point operations */
 void Assembler::fadd(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                      bool rc) {
-  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 21, rc);
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), rn(0), 21, rc);
 }
 
 void Assembler::fsub(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                      bool rc) {
-  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 20, rc);
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), rn(0), 20, rc);
 }
 
 void Assembler::fmul(const RegXMM& frt, const RegXMM& fra, const RegXMM& frc,
@@ -699,7 +699,7 @@ void Assembler::fmul(const RegXMM& frt, const RegXMM& fra, const RegXMM& frc,
 
 void Assembler::fdiv(const RegXMM& frt, const RegXMM& fra, const RegXMM& frb,
                      bool rc) {
-  EmitAForm(63, rn(frt), rn(fra), rn(frb), 0, 18, rc);
+  EmitAForm(63, rn(frt), rn(fra), rn(frb), rn(0), 18, rc);
 }
 
 
