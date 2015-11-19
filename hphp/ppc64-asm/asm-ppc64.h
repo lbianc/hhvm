@@ -2340,7 +2340,7 @@ protected:
     assert(static_cast<uint32_t>(ra) < 32);
     assert(static_cast<uint32_t>(rb) < 32);
 
-    XX3_form_t xx1_formater {
+    XX1_form_t xx1_formater {
       tx,
       xo,
       static_cast<uint32_t>(rb),
