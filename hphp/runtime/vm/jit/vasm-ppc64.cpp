@@ -413,9 +413,7 @@ void Vgen::emit(const load& i) {
     }
   } else {
     assertx(i.d.isSIMD());
-    // using single precision despite load meaning 8 bytes because all FP
-    // operations can be faster with single-precision
-    a->lfs(i.d, i.s);
+    a->lfd(i.d, i.s);
   }
 }
 
@@ -488,9 +486,7 @@ void Vgen::emit(const store& i) {
     }
   } else {
     assertx(i.s.isSIMD());
-    // using single precision despite load meaning 8 bytes because all FP
-    // operations can be faster with single-precision
-    a->stfs(i.s, i.d);
+    a->stfd(i.s, i.d);
   }
 }
 
