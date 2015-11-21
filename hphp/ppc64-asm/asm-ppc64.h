@@ -1114,8 +1114,12 @@ public:
   }
   void fcfidu()         { not_implemented(); }
   void fcfidus()        { not_implemented(); }
-  void fcmpo()          { not_implemented(); }
-  void fcmpu()          { not_implemented(); }
+  void fcmpo(uint16_t bf, const RegXMM& fra, const RegXMM& frb) {
+    EmitXForm(63, rn(bf << 2), rn(fra), rn(frb), 32);
+  }
+  void fcmpu(uint16_t bf, const RegXMM& fra, const RegXMM& frb) {
+    EmitXForm(63, rn(bf << 2), rn(fra), rn(frb), 0);
+  }
   void fcpsgn()         { not_implemented(); }
   void fctid(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
     EmitXForm(63, rn(frt), rn(0), rn(frb), 814, rc);
@@ -1249,7 +1253,9 @@ public:
   void mcrfs()          { not_implemented(); }
   void mcrxr()          { not_implemented(); }
   void mfbhrbe()        { not_implemented(); }
-  void mfcr()           { not_implemented(); }
+  void mfcr(const Reg64& rt) {
+    EmitXFXForm(31, rn(rt), static_cast<SpecialReg>(0), 19);
+  }
   void mfdcr()          { not_implemented(); }
   void mfdcrux ()       { not_implemented(); }
   void mfdcrx()         { not_implemented(); }

@@ -200,9 +200,12 @@ struct Vgen {
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
+  void emit(const fcmpo& i) { a->fcmpo(i.bf.b(), i.s1, i.s0); }
+  void emit(const fcmpu& i) { a->fcmpu(i.bf.b(), i.s1, i.s0); }
   void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incq i) { a->add(i.d, i.s, rone(), true); }
+  void emit(isel i) { a->isel(i.d, i.s1, i.s0, i.bc.b()); }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
@@ -212,6 +215,7 @@ struct Vgen {
   }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
   void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
+  void emit(const mfcr& i) { a->mfcr(i.d); }
   void emit(const mflr& i) { a->mflr(i.d); }
   void emit(const mtlr& i) { a->mtlr(i.s); }
   void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
@@ -1024,6 +1028,36 @@ void lowerForPPC64(Vout& v, cloadq& inst) {
   auto tmp = v.makeReg();
   v << load{m, tmp};
   v << cmovq{inst.cc, inst.sf, inst.f, tmp, inst.d};
+}
+
+void lowerForPPC64(Vout& v, cmpsd& inst) {
+  // use CR1, a volatile not used in the whole VM
+  const uint8_t cr = 1;
+  auto cr_eq_bit = Immed(cr * 4 + 1);  // 2nd bit. Each CR has 4 bits.
+  auto cr_value = v.makeReg();
+  auto r64_d = v.makeReg();
+
+  switch (inst.pred) {
+  case ComparisonPred::eq_ord: { // scope for the zero variable initialization
+    v << fcmpo{cr, inst.s0, inst.s1};
+    // now set the inst.d if CR has EQ bit set, else 0
+    auto zero = v.makeReg();
+    v << ldimmb{0, zero};
+    v << mfcr{cr_value};
+    v << isel{cr_eq_bit, rone(), zero, r64_d};
+    break;
+  }
+  case ComparisonPred::ne_unord:
+    v << fcmpu{cr, inst.s0, inst.s1};
+    // now clear the inst.d if CR has EQ bit set, else 1
+    v << mfcr{cr_value};
+    // isel's s0 being 0 means immediate 0, not the contents of register 0.
+    v << isel{cr_eq_bit, Vreg64(0), rone(), r64_d};
+    break;
+  default:
+    assert(false && "Invalid ComparisonPred for cmpsd");
+  }
+  v << copy{r64_d, inst.d};
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
