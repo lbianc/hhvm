@@ -184,12 +184,7 @@ struct Vgen {
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
-  void emit(const cvtsi2sd& i) {
-    // As described on ISA page 727, F.2.6
-    a->std(i.s, rsp()[-8]);
-    a->lfd(i.d, rsp()[-8]);
-    a->fcfids(i.d, i.d);
-  }
+  void emit(const cvtsi2sd& i) { a->fcfids(i.d, i.s); }
   void emit(const xscvdpsxds& i) { a->xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a->xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a->xxlxor(i.d, i.s1, i.s0); }
@@ -962,33 +957,6 @@ void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
 
   //move from VSR (128-bit) to GPR (64-bit)
   v << mfvsrd{tmp, inst.d};
-}
-
-void lowerForPPC64(Vout& v, cvtsi2sd& inst) {
-
-  // 128-bit scratch registers
-  auto tmp0 = v.makeReg();
-  auto tmp1 = v.makeReg();
-  auto tmp2 = v.makeReg();
-
-  // Move integer from GPR (64-bit) to VSR (128-bit).
-  v << mtvsrd{inst.s, tmp0};
-
-  // Convert integer to double-precision FP. High doubleword change
-  // to undefined state, low doubleword contains DP FP.
-  v << xscvsxddp{tmp0, tmp1};
-
-  // Zero register just to use its high doubleword element in
-  // permutation (see next instruction), as the convertion from integer
-  // set high doubleword element to undefined state.
-  // Use tmp0 value to zero tmp2 as we can not use something
-  // similar to pure asm in lowering, like 'xxlxor r1,r1,r1'
-  // to zero a register.
-  v << xxlxor{tmp0,tmp0,tmp2};
-
-  // Permute. Get low doubleword (double-precision DP) from tmp1, and
-  // high doubleword (zero) from tmp2.
-  v << xxpermdi{tmp2,tmp1,inst.d};
 }
 
 // Lower subtraction to subq
