@@ -86,6 +86,7 @@ constexpr int push_pop_position           = 8;
  * Scratch register.
  */
 constexpr Reg64 rAsm = ppc64_asm::reg::r11;
+constexpr RegXMM rFasm = ppc64_asm::reg::f29;
 
 ///////////////////////////////////////////////////////////////////////////////
 

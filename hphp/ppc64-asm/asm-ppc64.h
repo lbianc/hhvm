@@ -1131,7 +1131,9 @@ public:
   void fdivs()          { not_implemented(); }
   void fmadd()          { not_implemented(); }
   void fmadds()         { not_implemented(); }
-  void fmr()            { not_implemented(); }
+  void fmr(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+    EmitXForm(63, rn(frt), rn(0), rn(frb), 72, rc);
+  }
   void fmrgew()         { not_implemented(); }
   void fmrgow()         { not_implemented(); }
   void fmsub()          { not_implemented(); }

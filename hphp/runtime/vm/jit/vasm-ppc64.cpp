@@ -78,18 +78,21 @@ struct Vgen {
   void emit(const copy& i) {
     if (i.s == i.d) return;
     if (i.s.isGP()) {
-      if (i.d.isGP()) {                 // GP => GP
+      if (i.d.isGP()) {                     // GP => GP
         a->mr(i.d, i.s);
-      } else {                             // GP => XMM
+      } else {                              // GP => XMM
         assertx(i.d.isSIMD());
-        not_implemented();
+        a->std(i.s, rsp()[-8]);
+        a->lfd(i.d, rsp()[-8]);
       }
     } else {
-      if (i.d.isGP()) {                 // XMM => GP
-        not_implemented();
-      } else {                             // XMM => XMM
+      assertx(i.d.isSIMD());
+      if (i.d.isGP()) {                     // XMM => GP
+        a->stfd(i.s, rsp()[-8]);
+        a->ld(i.d, rsp()[-8]);
+      } else {                              // XMM => XMM
         assertx(i.d.isSIMD());
-        not_implemented();
+        a->fmr(i.d, i.s);
       }
     }
   }
