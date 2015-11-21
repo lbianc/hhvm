@@ -118,55 +118,13 @@ struct Vgen {
     }
   }
   void emit(const fallthru& i) {}
-  void emit(const ldimmb& i) {
-    if(i.d.isGP()) {
-      a->li(i.d, i.s); // should be only 8bits available
-    } else {
-      assertx(i.d.isSIMD());
-      a->li(rAsm, i.s);
-      // As described on ISA page 727, F.2.6
-      a->std(rAsm, rsp()[-8]);
-      a->lfd(i.d, rsp()[-8]);
-      a->fcfids(i.d, i.d);
-    }
-  }
+  void emit(const ldimmb& i);
   void emit(const ldimmw& i) {
     // PPC64 specific. i.d is not Vreg but Vreg16, so it can't be a SIMD.
     a->li(Reg64(i.d), i.s); // should be only 16bits available
   }
-  void emit(const ldimml& i) {
-    if (i.d.isGP()) {
-      a->li32(i.d, i.s.l());
-    } else {
-      assertx(i.d.isSIMD());
-      a->li32(rAsm, i.s.l());
-      // As described on ISA page 727, F.2.6
-      a->std(rAsm, rsp()[-8]);
-      a->lfd(i.d, rsp()[-8]);
-      a->fcfids(i.d, i.d);
-    }
-  }
-  void emit(const ldimmq& i) {
-    auto val = i.s.q();
-    if (i.d.isGP()) {
-      if (val == 0) {
-        a->xor_(i.d, i.d, i.d);
-        // emit nops to fill a standard li64 instruction block
-        // this will be useful on patching and smashable operations
-        a->emitNop(ppc64_asm::Assembler::kLi64InstrLen -
-            1 * ppc64_asm::Assembler::kBytesPerInstr);
-      } else {
-        a->li64(i.d, val);
-      }
-    } else {
-      assertx(i.d.isSIMD());
-      a->li64(rAsm, i.s.q());
-      // As described on ISA page 727, F.2.6
-      a->std(rAsm, rsp()[-8]);
-      a->lfd(i.d, rsp()[-8]);
-      a->fcfids(i.d, i.d);
-    }
-  }
+  void emit(const ldimml& i);
+  void emit(const ldimmq& i);
   void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
   void emit(const nothrow& i) {
     mcg->registerCatchBlock(a->frontier(), nullptr);
@@ -187,7 +145,6 @@ struct Vgen {
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
-  void emit(const cvtsi2sd& i) { a->fcfids(i.d, i.s); }
   void emit(const xscvdpsxds& i) { a->xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a->xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a->xxlxor(i.d, i.s1, i.s0); }
@@ -312,6 +269,8 @@ struct Vgen {
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
   // fallback to the templated emit function.
+  void emit(const cvtsi2sd& i);
+  void emit(const cvttsd2siq& i);
   void emit(const callfaststub& i);
   void emit(const callstub& i);
   void emit(const jcc& i);
@@ -354,6 +313,59 @@ private:
   jit::vector<Venv::LabelPatch>& catches;
 };
 
+void Vgen::emit(const cvtsi2sd& i) {
+  // As described on ISA page 727, F.2.6
+  emit(copy{i.s, i.d});
+  a->fcfids(i.d, i.d);
+}
+
+void Vgen::emit(const cvttsd2siq& i) {
+  // As described on ISA page 726, F.2.2
+  a->fctid(rFasm, i.s);
+  emit(copy{rFasm, i.d});
+}
+
+void Vgen::emit(const ldimmb& i) {
+  if(i.d.isGP()) {
+    a->li(i.d, i.s); // should be only 8bits available
+  } else {
+    assertx(i.d.isSIMD());
+    a->li(rAsm, i.s);
+    // no conversion necessary. The i.s already comes converted to FP
+    emit(copy{rAsm, i.d});
+  }
+}
+
+void Vgen::emit(const ldimml& i) {
+  if (i.d.isGP()) {
+    a->li32(i.d, i.s.l());
+  } else {
+    assertx(i.d.isSIMD());
+    a->li32(rAsm, i.s.l());
+    // no conversion necessary. The i.s already comes converted to FP
+    emit(copy{rAsm, i.d});
+  }
+}
+
+void Vgen::emit(const ldimmq& i) {
+  auto val = i.s.q();
+  if (i.d.isGP()) {
+    if (val == 0) {
+      a->xor_(i.d, i.d, i.d);
+      // emit nops to fill a standard li64 instruction block
+      // this will be useful on patching and smashable operations
+      a->emitNop(ppc64_asm::Assembler::kLi64InstrLen -
+          1 * ppc64_asm::Assembler::kBytesPerInstr);
+    } else {
+      a->li64(i.d, val);
+    }
+  } else {
+    assertx(i.d.isSIMD());
+    a->li64(rAsm, i.s.q());
+    // no conversion necessary. The i.s already comes converted to FP
+    emit(copy{rAsm, i.d});
+  }
+}
 
 void Vgen::emit(const contenter& i) {
  ppc64_asm::Label stub, end;
@@ -954,16 +966,6 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
   auto lowered = cmpqi{inst.s0, Reg64(inst.s1), inst.sf};
   lowerForPPC64(v, lowered);
   if (v.empty()) v << lowered;
-}
-
-void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
-  auto tmp = v.makeReg(); //to be used as a 128-bit register
-
-  //round double-precision scalar to signed integer
-  v << xscvdpsxds{inst.s, tmp};
-
-  //move from VSR (128-bit) to GPR (64-bit)
-  v << mfvsrd{tmp, inst.d};
 }
 
 // Lower subtraction to subq
