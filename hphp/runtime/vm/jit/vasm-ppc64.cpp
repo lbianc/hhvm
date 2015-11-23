@@ -567,7 +567,8 @@ void Vgen::emit(const call& i) {
 
 void Vgen::emit(const callr& i) {
   callExtern([&]() {
-      a->mtctr(i.target);
+      a->mr(rfuncentry(), i.target);
+      a->mtctr(rfuncentry());
       a->bctrl();
   });
 }

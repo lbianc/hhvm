@@ -42,6 +42,7 @@ constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
 constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
 constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
+constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
 
 // rone() returns register 27, which has the value "1" (Initiated in
 // translator-asm-helpers.S).
