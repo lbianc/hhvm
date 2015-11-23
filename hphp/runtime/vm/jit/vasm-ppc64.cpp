@@ -154,7 +154,13 @@ struct Vgen {
   void emit(decl i) { a->subf(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(decq i) { a->subf(i.d, rone(), i.s, true); }
   void emit(imul i) { a->mullw(i.d, i.s1, i.s0, true); }
-  void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
+  void emit(const srem& i) {
+    // remainder as described on divd documentation:
+    a->divd(i.d, i.s0, i.s1);   // i.d = quotient
+    a->mulld(i.d, i.d, i.s1);   // i.d = quotient×divisor
+    a->subf(i.d, i.d, i.s0);    // i.d = remainder
+  }
+  void emit(const divint& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
   void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s1, i.s0); }
