@@ -153,7 +153,7 @@ struct Vgen {
   void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
   void emit(decl i) { a->subf(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(decq i) { a->subf(i.d, rone(), i.s, true); }
-  void emit(imul i) { a->mullw(i.d, i.s1, i.s0, true); }
+  void emit(imul i) { a->mulld(i.d, i.s1, i.s0, true); }
   void emit(const srem& i) {
     // remainder as described on divd documentation:
     a->divd(i.d, i.s0, i.s1);   // i.d = quotient
