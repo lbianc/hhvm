@@ -1114,11 +1114,11 @@ public:
   }
   void fcfidu()         { not_implemented(); }
   void fcfidus()        { not_implemented(); }
-  void fcmpo(uint16_t bf, const RegXMM& fra, const RegXMM& frb) {
-    EmitXForm(63, rn(bf << 2), rn(fra), rn(frb), 32);
+  void fcmpo(const RegSF& sf, const RegXMM& fra, const RegXMM& frb) {
+    EmitXForm(63, rn(int(sf) << 2), rn(fra), rn(frb), 32);
   }
-  void fcmpu(uint16_t bf, const RegXMM& fra, const RegXMM& frb) {
-    EmitXForm(63, rn(bf << 2), rn(fra), rn(frb), 0);
+  void fcmpu(const RegSF& sf, const RegXMM& fra, const RegXMM& frb) {
+    EmitXForm(63, rn(int(sf) << 2), rn(fra), rn(frb), 0);
   }
   void fcpsgn()         { not_implemented(); }
   void fctid(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
@@ -2428,6 +2428,9 @@ private:
     return RegNumber(int(r));
   }
   RegNumber rn(RegXMM r) {
+    return RegNumber(int(r));
+  }
+  RegNumber rn(RegSF r) {
     return RegNumber(int(r));
   }
   RegNumber rn(int n) {

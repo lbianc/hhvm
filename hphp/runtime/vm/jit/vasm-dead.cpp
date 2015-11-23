@@ -73,6 +73,8 @@ bool effectful(Vinstr& inst) {
     case Vinstr::defvmsp:
     case Vinstr::divint:
     case Vinstr::divsd:
+    case Vinstr::fcmpo:
+    case Vinstr::fcmpu:
     case Vinstr::imul:
     case Vinstr::incl:
     case Vinstr::incq:
@@ -184,8 +186,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::fallback:
     case Vinstr::fallbackcc:
     case Vinstr::fallthru:
-    case Vinstr::fcmpo:
-    case Vinstr::fcmpu:
     case Vinstr::hostcall:
     case Vinstr::idiv:
     case Vinstr::inclm:

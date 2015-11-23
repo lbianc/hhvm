@@ -254,8 +254,8 @@ struct Vunit;
   /* ppc64 instructions */\
   O(addl, Inone, U(s0) U(s1), D(d) D(sf)) \
   O(loadw, Inone, U(s), D(d))\
-  O(fcmpo, I(bf), U(s0) U(s1), Dn)\
-  O(fcmpu, I(bf), U(s0) U(s1), Dn)\
+  O(fcmpo, Inone, U(s0) U(s1), D(sf))\
+  O(fcmpu, Inone, U(s0) U(s1), D(sf))\
   O(incw, Inone, UH(s,d), DH(d,s) D(sf))\
   O(isel, I(bc), U(s0) U(s1), D(d))\
   O(ldimmw, I(s), Un, D(d))\
@@ -940,8 +940,8 @@ struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; };
  */
 struct addl  { Vreg32 s0, s1, d; VregSF sf; };
 struct loadw { Vptr s; Vreg16 d; };
-struct fcmpo { Immed bf; VregDbl s0; VregDbl s1; };
-struct fcmpu { Immed bf; VregDbl s0; VregDbl s1; };
+struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
+struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };
 struct incw { Vreg16 s, d; VregSF sf; };
 struct isel { Immed bc; Vreg64 s0; Vreg64 s1; Vreg64 d; };
 struct ldimmw { Immed s; Vreg16 d; };

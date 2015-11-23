@@ -157,8 +157,8 @@ struct Vgen {
   void emit(const srem& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
-  void emit(const fcmpo& i) { a->fcmpo(i.bf.b(), i.s1, i.s0); }
-  void emit(const fcmpu& i) { a->fcmpu(i.bf.b(), i.s1, i.s0); }
+  void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s1, i.s0); }
+  void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s1, i.s0); }
   void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incq i) { a->add(i.d, i.s, rone(), true); }
@@ -455,8 +455,16 @@ void Vgen::emit(const jcci& i) {
 }
 
 void Vgen::emit(const cmovq& i) {
+  // A CR bit parameter in ppc64 is a combination of X64's cc and sf variables:
+  // CR group (4 bits per group) is a sf and the CR bit (1 of the 4) is the cc
   BranchParams bp (i.cc);
-  a->isel(i.d, i.t, i.f, bp.bi());
+  auto t = i.t;
+  auto f = i.f;
+  if (static_cast<uint8_t>(BranchParams::BO::CRNotSet) == bp.bo()) {
+    // invert the true/false parameters, as only the bp.bi field is used
+    std::swap(t,f);
+  }
+  a->isel(i.d, t, f, (4 * int(i.sf.asReg())) + bp.bi());
 }
 
 void Vgen::patch(Venv& env) {
@@ -1029,33 +1037,30 @@ void lowerForPPC64(Vout& v, cloadq& inst) {
 }
 
 void lowerForPPC64(Vout& v, cmpsd& inst) {
-  // use CR1, a volatile not used in the whole VM
-  const uint8_t cr = 1;
-  auto cr_eq_bit = Immed(cr * 4 + 1);  // 2nd bit. Each CR has 4 bits.
-  auto cr_value = v.makeReg();
-  auto r64_d = v.makeReg();
+  auto sf = v.makeReg();
+  auto r64_d = v.makeReg(); // auxiliary for GP -> FP conversion
+
+  // assume standard ComparisonPred as eq_ord
+  Vreg equal = rone();
+  Vreg nequal = v.makeReg();
+  v << ldimmb{0, nequal};
 
   switch (inst.pred) {
   case ComparisonPred::eq_ord: { // scope for the zero variable initialization
-    v << fcmpo{cr, inst.s0, inst.s1};
-    // now set the inst.d if CR has EQ bit set, else 0
-    auto zero = v.makeReg();
-    v << ldimmb{0, zero};
-    v << mfcr{cr_value};
-    v << isel{cr_eq_bit, rone(), zero, r64_d};
+    v << fcmpo{inst.s0, inst.s1, sf};
+    // now set the inst.d if the CR's EQ bit is set, else clear it
     break;
   }
   case ComparisonPred::ne_unord:
-    v << fcmpu{cr, inst.s0, inst.s1};
-    // now clear the inst.d if CR has EQ bit set, else 1
-    v << mfcr{cr_value};
-    // isel's s0 being 0 means immediate 0, not the contents of register 0.
-    v << isel{cr_eq_bit, Vreg64(0), rone(), r64_d};
+    v << fcmpu{inst.s0, inst.s1, sf};
+    // now clear the inst.d if the CR's EQ bit is set, else set it
+    std::swap(equal, nequal);
     break;
   default:
     assert(false && "Invalid ComparisonPred for cmpsd");
   }
-  v << copy{r64_d, inst.d};
+  v << cmovq{CC_E, sf, nequal, equal, r64_d};
+  v << copy{r64_d, inst.d}; // GP -> FP
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
