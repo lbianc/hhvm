@@ -86,7 +86,7 @@ struct Vgen {
         a->lfd(i.d, rsp()[-8]);
       }
     } else {
-      assertx(i.d.isSIMD());
+      assertx(i.s.isSIMD());
       if (i.d.isGP()) {                     // XMM => GP
         a->stfd(i.s, rsp()[-8]);
         a->ld(i.d, rsp()[-8]);
