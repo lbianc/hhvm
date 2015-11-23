@@ -162,7 +162,6 @@ struct Vgen {
   void emit(incw i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incl i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(incq i) { a->add(i.d, i.s, rone(), true); }
-  void emit(isel i) { a->isel(i.d, i.s1, i.s0, i.bc.b()); }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
