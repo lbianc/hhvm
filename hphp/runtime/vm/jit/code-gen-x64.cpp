@@ -851,7 +851,7 @@ void CodeGenerator::emitTypeTest(Type type, Loc1 typeSrc, Loc2 dataSrc,
   // negativeCheckType() to indicate whether it is precise or not.
   always_assert(!type.hasConstVal());
   always_assert_flog(
-    !type.subtypeOfAny(TCls, TCountedStr, TStaticArr, TCountedArr),
+    !type.subtypeOfAny(TCls, TCountedStr, TPersistentArr),
     "Unsupported type in emitTypeTest: {}", type
   );
   auto& v = vmain();
@@ -861,6 +861,9 @@ void CodeGenerator::emitTypeTest(Type type, Loc1 typeSrc, Loc2 dataSrc,
     cc = CC_E;
   } else if (type <= TStr) {
     emitTestTVType(v, sf, KindOfStringBit, typeSrc);
+    cc = CC_NZ;
+  } else if (type <= TArr) {
+    emitTestTVType(v, sf, KindOfArrayBit, typeSrc);
     cc = CC_NZ;
   } else if (type == TNull) {
     emitCmpTVType(v, sf, KindOfNull, typeSrc);
@@ -1465,11 +1468,10 @@ void CodeGenerator::cgUnboxPtr(IRInstruction* inst) {
   });
 }
 
-Vreg CodeGenerator::cgLdFuncCachedCommon(IRInstruction* inst, Vreg dst) {
-  auto const name = inst->extra<LdFuncCachedData>()->name;
+Vreg CodeGenerator::cgLdFuncCachedCommon(const StringData* name, Vreg dst) {
   auto const ch   = NamedEntity::get(name)->getFuncHandle();
   auto& v = vmain();
-  v << load{rvmtl()[ch], dst};
+  emitLdLowPtr(v, rvmtl()[ch], dst, sizeof(LowPtr<Func>));
   auto const sf = v.makeReg();
   v << testq{dst, dst, sf};
   return sf;
@@ -1478,7 +1480,8 @@ Vreg CodeGenerator::cgLdFuncCachedCommon(IRInstruction* inst, Vreg dst) {
 void CodeGenerator::cgLdFuncCached(IRInstruction* inst) {
   auto& v = vmain();
   auto dst1 = v.makeReg();
-  auto const sf = cgLdFuncCachedCommon(inst, dst1);
+  auto const sf =
+    cgLdFuncCachedCommon(inst->extra<LdFuncCachedData>()->name, dst1);
   unlikelyCond(v, vcold(), CC_Z, sf, dstLoc(inst, 0).reg(), [&] (Vout& v) {
     auto dst2 = v.makeReg();
     const Func* (*const func)(const StringData*) = lookupUnknownFunc;
@@ -1496,20 +1499,17 @@ void CodeGenerator::cgLdFuncCached(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgLdFuncCachedSafe(IRInstruction* inst) {
-  cgLdFuncCachedCommon(inst, dstLoc(inst, 0).reg());
+  cgLdFuncCachedCommon(inst->extra<LdFuncCachedData>()->name,
+                       dstLoc(inst, 0).reg());
 }
 
 void CodeGenerator::cgLdFuncCachedU(IRInstruction* inst) {
   auto const dstReg    = dstLoc(inst, 0).reg();
   auto const extra     = inst->extra<LdFuncCachedU>();
-  auto const hFunc     = NamedEntity::get(extra->name)->getFuncHandle();
-  auto& v = vmain();
 
-  // Check the first function handle, otherwise try to autoload.
-  auto dst1 = v.makeReg();
-  v << load{rvmtl()[hFunc], dst1};
-  auto const sf = v.makeReg();
-  v << testq{dst1, dst1, sf};
+  auto& v = vmain();
+  auto const dst1 = v.makeReg();
+  auto const sf = cgLdFuncCachedCommon(extra->name, dst1);
 
   unlikelyCond(v, vcold(), CC_Z, sf, dstReg, [&] (Vout& v) {
     // If we get here, things are going to be slow anyway, so do all the
@@ -1903,7 +1903,7 @@ void CodeGenerator::cgInlineReturn(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgInlineReturnNoFrame(IRInstruction* inst) {
-  if (debug) {
+  if (RuntimeOption::EvalHHIRGenerateAsserts) {
     auto const offset = cellsToBytes(
       inst->extra<InlineReturnNoFrame>()->frameOffset.offset);
     for (auto i = 0; i < kNumActRecCells; ++i) {
@@ -2158,6 +2158,35 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
   return 0.0;
 }
 
+static CallSpec makeDtorCall(Type ty, Vloc loc, ArgGroup& args) {
+  // LLVM backend doesn't support CallSpec::Array
+  auto const llvm = mcg->useLLVM();
+
+  static auto const TPackedArr = Type::Array(ArrayData::kPackedKind);
+  static auto const TMixedArr = Type::Array(ArrayData::kMixedKind);
+  static auto const TApcArr = Type::Array(ArrayData::kApcKind);
+
+  if (ty <= TPackedArr) return CallSpec::direct(PackedArray::Release);
+  if (ty <= TMixedArr) return CallSpec::direct(MixedArray::Release);
+  if (ty <= TApcArr) return CallSpec::direct(APCLocalArray::Release);
+  if (ty <= TArr && !llvm) return  CallSpec::array(&g_array_funcs.release);
+
+  if (ty <= TObj && ty.clsSpec().cls()) {
+    auto cls = ty.clsSpec().cls();
+
+    // These conditions must match what causes us to call cls->instanceDtor()
+    // in ObjectData::release().
+    if ((cls->attrs() & AttrNoOverride) &&
+        !cls->getDtor() && cls->instanceDtor()) {
+      args.immPtr(cls);
+      return CallSpec::direct(cls->instanceDtor().get());
+    }
+  }
+
+  return ty.isKnownDataType() ? mcg->getDtorCall(ty.toDataType())
+                              : CallSpec::destruct(loc.reg(1));
+}
+
 /*
  * We've tried a variety of tweaks to this and found the current state of
  * things optimal, at least when measurements of the following factors were
@@ -2186,10 +2215,6 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
 void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                                const OptDecRefProfile& profile,
                                bool unlikelyDestroy) {
-  static const auto TPackedArr = Type::Array(ArrayData::kPackedKind);
-  static const auto TMixedArr = Type::Array(ArrayData::kMixedKind);
-  static const auto TApcArr = Type::Array(ArrayData::kApcKind);
-  auto const llvm = mcg->useLLVM();
   auto const ty   = inst->src(0)->type();
   auto const base = srcLoc(inst, 0).reg(0);
 
@@ -2200,15 +2225,9 @@ void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
       v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, destroy)],
                  v.makeReg()};
     }
-    // LLVM backend doesn't support CallSpec::Array
-    auto dtor = ty <= TPackedArr ? CallSpec::direct(PackedArray::Release) :
-                ty <= TMixedArr ? CallSpec::direct(MixedArray::Release) :
-                ty <= TApcArr ? CallSpec::direct(APCLocalArray::Release) :
-                ty <= TArr && !llvm ? CallSpec::array(&g_array_funcs.release) :
-                ty.isKnownDataType() ? mcg->getDtorCall(ty.toDataType()) :
-                CallSpec::destruct(srcLoc(inst, 0).reg(1));
-    cgCallHelper(v, dtor, kVoidDest, SyncOptions::Sync,
-                 argGroup(inst).reg(base));
+    auto args = argGroup(inst).reg(base);
+    auto const dtor = makeDtorCall(ty, srcLoc(inst, 0), args);
+    cgCallHelper(v, dtor, kVoidDest, SyncOptions::Sync, args);
   };
 
   emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Decl
@@ -3812,7 +3831,8 @@ void CodeGenerator::cgLdClsMethodCacheCommon(IRInstruction* inst, Offset off) {
   auto const methodName = extra.methodName;
   auto const ch = StaticMethodCache::alloc(clsName, methodName,
                                      getContextName(getClass(inst->marker())));
-  vmain() << load{rvmtl()[ch + off], dstReg};
+  static_assert(sizeof(LowPtr<const Class>) == sizeof(LowPtr<const Func>), "");
+  emitLdLowPtr(vmain(), rvmtl()[ch + off], dstReg, sizeof(LowPtr<const Class>));
 }
 
 void CodeGenerator::cgLdClsMethodCacheFunc(IRInstruction* inst) {
@@ -3881,7 +3901,7 @@ void CodeGenerator::cgLdClsMethodFCacheFunc(IRInstruction* inst) {
   auto const ch = StaticMethodFCache::alloc(
     clsName, methodName, getContextName(getClass(inst->marker()))
   );
-  vmain() << load{rvmtl()[ch], dstReg};
+  emitLdLowPtr(vmain(), rvmtl()[ch], dstReg, sizeof(LowPtr<const Func>));
 }
 
 void CodeGenerator::cgLookupClsMethodFCache(IRInstruction* inst) {
@@ -3979,7 +3999,7 @@ rds::Handle CodeGenerator::cgLdClsCachedCommon(Vout& v, IRInstruction* inst,
                                                Vreg dst, Vreg sf) {
   const StringData* className = inst->src(0)->strVal();
   auto ch = NamedEntity::get(className)->getClassHandle();
-  v << load{rvmtl()[ch], dst};
+  emitLdLowPtr(v, rvmtl()[ch], dst, sizeof(LowPtr<Class>));
   v << testq{dst, dst, sf};
   return ch;
 }
@@ -3991,8 +4011,7 @@ void CodeGenerator::cgLdClsCached(IRInstruction* inst) {
   auto ch = cgLdClsCachedCommon(v, inst, dst1, sf);
   unlikelyCond(v, vcold(), CC_E, sf, dstLoc(inst, 0).reg(), [&] (Vout& v) {
     auto dst2 = v.makeReg();
-    Class* (*const func)(Class**, const StringData*) = jit::lookupKnownClass;
-    cgCallHelper(v, CallSpec::direct(func), callDest(dst2),
+    cgCallHelper(v, CallSpec::direct(jit::lookupKnownClass), callDest(dst2),
                  SyncOptions::Sync,
                  argGroup(inst).addr(rvmtl(), safe_cast<int32_t>(ch))
                            .ssa(0));
@@ -4013,7 +4032,7 @@ void CodeGenerator::cgDerefClsRDSHandle(IRInstruction* inst) {
   auto const ch   = srcLoc(inst, 0).reg();
   const Vreg rds = rvmtl();
   auto& v = vmain();
-  v << load{rds[ch], dreg};
+  emitLdLowPtr(v, rds[ch], dreg, sizeof(LowPtr<Class>));
 }
 
 void CodeGenerator::cgLdCls(IRInstruction* inst) {

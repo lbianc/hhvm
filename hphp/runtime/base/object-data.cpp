@@ -152,15 +152,15 @@ NEVER_INLINE
 void ObjectData::releaseNoObjDestructCheck() noexcept {
   assert(kindIsValid());
 
-  auto const attrs = getAttributes();
-
-  if (UNLIKELY(!(attrs & Attribute::NoDestructor))) {
+  if (UNLIKELY(!getAttribute(NoDestructor))) {
     if (UNLIKELY(!destructImpl())) return;
   }
 
   auto const cls = getVMClass();
 
-  if (UNLIKELY(attrs & InstanceDtor))  return cls->instanceDtor()(this, cls);
+  if (UNLIKELY(hasInstanceDtor())) {
+    return cls->instanceDtor()(this, cls);
+  }
 
   assert(!cls->preClass()->builtinObjSize());
   assert(!cls->preClass()->builtinODOffset());
@@ -177,7 +177,7 @@ void ObjectData::releaseNoObjDestructCheck() noexcept {
 
   // Deliberately reload `attrs' to check for dynamic properties.  This made
   // gcc generate better code at the time it was done (saving a spill).
-  if (UNLIKELY(getAttributes() & HasDynPropArr)) freeDynPropArray(this);
+  if (UNLIKELY(getAttribute(HasDynPropArr))) freeDynPropArray(this);
 
   auto& pmax = os_max_id;
   if (o_id && o_id == pmax) --pmax;
@@ -292,9 +292,16 @@ Array& ObjectData::reserveProperties(int numDynamic /* = 2 */) {
     return dynPropArray();
   }
 
+  return
+    setDynPropArray(Array::attach(MixedArray::MakeReserveMixed(numDynamic)));
+}
+
+Array& ObjectData::setDynPropArray(const Array& newArr) {
   assert(!g_context->dynPropTable.count(this));
+  assert(!getAttribute(HasDynPropArr));
+
   auto& arr = g_context->dynPropTable[this].arr();
-  arr = Array::attach(MixedArray::MakeReserveMixed(numDynamic));
+  arr = newArr;
   setAttribute(HasDynPropArr);
   return arr;
 }
@@ -881,18 +888,6 @@ void deepInitHelper(TypedValue* propVec, const TypedValueAux* propData,
       collections::deepCopy(dst);
     }
   }
-}
-
-TypedValue* ObjectData::propVec() {
-  auto const ret = reinterpret_cast<uintptr_t>(this + 1);
-  if (UNLIKELY(getAttribute(IsCppBuiltin))) {
-    return reinterpret_cast<TypedValue*>(ret + m_cls->builtinODTailSize());
-  }
-  return reinterpret_cast<TypedValue*>(ret);
-}
-
-const TypedValue* ObjectData::propVec() const {
-  return const_cast<ObjectData*>(this)->propVec();
 }
 
 /**
@@ -1805,10 +1800,6 @@ ObjectData* ObjectData::cloneImpl() {
   g_context->invokeMethodV(o.get(), method);
 
   return o.detach();
-}
-
-bool ObjectData::hasDynProps() const {
-  return getAttribute(HasDynPropArr) && dynPropArray().size() != 0;
 }
 
 const char* ObjectData::classname_cstr() const {

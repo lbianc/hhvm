@@ -22,6 +22,7 @@
 #include "hphp/runtime/vm/type-alias.h"
 
 #include "hphp/util/portability.h"
+#include "hphp/util/low-ptr.h"
 
 #include <folly/AtomicHashMap.h>
 
@@ -188,12 +189,13 @@ struct NamedEntity {
   // Data members.
 
 public:
-  mutable rds::Link<Class*> m_cachedClass;
-  mutable rds::Link<Func*> m_cachedFunc;
+  mutable rds::Link<LowPtr<Class>> m_cachedClass;
+  mutable rds::Link<LowPtr<Func>> m_cachedFunc;
   mutable rds::Link<TypeAliasReq> m_cachedTypeAlias;
 
 private:
-  std::atomic<Class*> m_clsList{nullptr};
+  AtomicLowPtr<Class, std::memory_order_acquire,
+               std::memory_order_release> m_clsList{nullptr};
 };
 
 /*
