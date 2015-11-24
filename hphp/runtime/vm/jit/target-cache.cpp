@@ -442,9 +442,8 @@ void handlePrimeCacheInit(Entry* mce,
   ActRec* framePtr;
   asm volatile("mov %%rbp, %0" : "=r" (framePtr) ::);
 #elif defined(__powerpc64__)
-  // moves the 2nd argument register to the framePtr
-  ActRec* framePtr;
-  asm volatile("mr %0, 4" : "=r" (framePtr) ::);
+  ActRec* framePtr = nullptr;
+  asm volatile("ld %0, 0(1)" : "=r" (framePtr) ::); // follow backchain
 #else
   ActRec* framePtr = ar;
   always_assert(false);
