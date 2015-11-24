@@ -251,9 +251,10 @@ struct Vgen {
 
 #undef X
 
-  void emit(subq i) { a->subf(i.d, i.s1, i.s0, true); }             // needs SF
-  void emit(subqi i) { a->addi(i.s1, i.d, -i.s0); }                 // needs SF
-  void emit(subsd i) { a->fsub(i.d, i.s0, i.s1, false); /* d = s1 - s0 */ }
+  /* Subtractions: d = s1 - s0 */
+  void emit(subq i) { a->sub(i.d, i.s1, i.s0, true); }
+  void emit(subqi i) { a->subi(i.d, i.s1, i.s0); }                  // needs SF
+  void emit(subsd i) { a->fsub(i.d, i.s1, i.s0, false); }
   void emit(const testq& i) {
     // More information on:
     // https://goo.gl/F1wrbO

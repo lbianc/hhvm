@@ -1793,12 +1793,16 @@ public:
     addi(rt, Reg64(0), imm);
   }
   void la()             { not_implemented(); }  //Extended addi Rx,Ry,disp
-  void subi()           { not_implemented(); }  //Extended addi Rx,Ry,-value
+  void subi(const Reg64& rt, const Reg64& ra, Immed imm) {
+    addi(rt, ra, -imm);
+  }
   void lis(const Reg64& rt, Immed imm) {
     addis(rt, Reg64(0), imm);
   }
   void subis()          { not_implemented(); }  //Extended addis Rx,Ry,-value
-  void sub()            { not_implemented(); }  //Extended subf Rx,Rz,Ry
+  void sub(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0) {
+    subf(rt, rb, ra, rc);
+  }
   void subic()          { not_implemented(); }  //Extended addic Rx,Ry,-value
   void subc()           { not_implemented(); }  //Extended subfc Rx,Rz,Ry
   void cmpdi(const Reg64& ra, Immed imm) {
