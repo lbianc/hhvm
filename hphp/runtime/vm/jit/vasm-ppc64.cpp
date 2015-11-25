@@ -546,10 +546,6 @@ void Vgen::emit(const lea& i) {
 
 template<class Func>
 void Vgen::callExtern(Func func) {
-  // save caller's return address to a new callstack as pushing would destroy
-  // the ppc64's ABI call stack format
-  a->stdu(rsp(), rsp()[-min_callstack_size]);
-
   a->mflr(rfuncln());
   a->std(rfuncln(), rsp()[lr_position_on_callstack]);
   a->stdu(rsp(), rsp()[-min_callstack_size]);
@@ -561,9 +557,6 @@ void Vgen::callExtern(Func func) {
   a->addi(rsp(), rsp(), min_callstack_size);
   a->ld(rfuncln(), rsp()[lr_position_on_callstack]);
   a->mtlr(rfuncln());
-
-  // and restore the additional stack
-  a->addi(rsp(), rsp(), min_callstack_size);
 }
 
 void Vgen::emit(const call& i) {

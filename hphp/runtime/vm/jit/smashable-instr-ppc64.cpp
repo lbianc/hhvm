@@ -133,8 +133,7 @@ void smashCall(TCA inst, TCA target) {
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
 
-  // a call always begin with a stdu callstack save, only used here.
-  if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
+  if (!isCall(inst))
     always_assert(false && "smashCall has unexpected block");
 
   a.setFrontier(inst + smashableCallSkip());
@@ -180,8 +179,7 @@ uint32_t smashableCmpqImm(TCA inst) {
 }
 
 TCA smashableCallTarget(TCA inst) {
-  // a call always begin with a stdu callstack save, only used here.
-  if ((((inst[3] >> 2) & 0x3F) != 62) && ((inst[0] & 0x3) != 1)) // OPCD and XO
+  if (!isCall(inst))
     return nullptr;
 
   return reinterpret_cast<TCA>(
