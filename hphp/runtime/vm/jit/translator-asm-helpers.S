@@ -187,9 +187,26 @@ ETCH_NAME(enterTCHelper):
   // addis %r2, %r12, .TOC.-enterTCHelper@ha
   // addi  %r2, %r2,  .TOC.-enterTCHelper@l
 
+  /*
+   * Manipulating the call stack in order to use the pthread memory section.
+   *
+   *                          pointer value : pointed value
+   * -----------------------------------------------------------
+   * current sp:              0x7fffffffcb90: 0x00007fffffffcbb0
+   * current vmFirstAR():     0x7fffe187ffc0: 0x0000000000000000
+   *
+   * sp should be:            0x7fffffffcb70: 0x00007fffe187ffc0
+   * vmFirstAR() should be:   0x7fffe187ffc0: 0x00007fffffffcb90
+   */
+
+  // Set firstAR->m_sfp to point to this frame.
+  std %r1, 0(ETCH_ARG4)
+  // Set backchain to rvmsp
+  std ETCH_ARG4, -176(%r1)
+
   mflr %r0
   std %r0, 16(%r1)              // LR on parent call frame
-  stdu %r1, -176(%r1)           // aligned with Epilogue: addi %r1, %r1, 176
+  la %r1, -176(%r1)             // backchain was taken care above on -176(%r1)
   CFI2(adjust_cfa_offset, 176)  // debug information about stack pointer change
   CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
 
@@ -219,9 +236,6 @@ ETCH_NAME(enterTCHelper):
   SAVE_REG(31, 168)  // floating point local variable #18
 
 #undef SAVE_REG
-
-  // Set firstAR->m_sfp to point to this frame.
-  std %r1, 0(ETCH_ARG4)
 
   // Set up special registers used for translated code.
   mr ETCH_R_VM_SP, ETCH_ARG1
@@ -274,7 +288,7 @@ ETCH_NAME(enterTCExit):
   ld %f30, 160(%r1)   // floating point local variable #17
   ld %f31, 168(%r1)   // floating point local variable #18
 
-  addi %r1, %r1, 176            // aligned with Prologue: stdu %r1, -176(%r1)
+  addi %r1, %r1, 176            // aligned with Prologue: std %r1, -176(%r1)
   CFI2(adjust_cfa_offset, -176) // debug information about stack pointer change
   ld %r0, 16(%r1)
   mtlr %r0
