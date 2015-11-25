@@ -195,28 +195,28 @@ ETCH_NAME(enterTCHelper):
 
   // Save non-volatile registers in order to restore it on Epilogue
   // also takes care of debug information
-#define SAVE_REG(reg, pos)              \
-  std %r##reg, pos(%r1); CFI3C(offset, reg, pos - 176)
 
-  SAVE_REG(2, 24)    // TOC
-  SAVE_REG(14, 32)   // local variable #1
-  SAVE_REG(15, 40)   // local variable #2
-  SAVE_REG(16, 48)   // local variable #3
-  SAVE_REG(17, 56)   // local variable #4
-  SAVE_REG(18, 64)   // local variable #5
-  SAVE_REG(19, 72)   // local variable #6
-  SAVE_REG(20, 80)   // local variable #7
-  SAVE_REG(21, 88)   // local variable #8
-  SAVE_REG(22, 96)   // local variable #9
-  SAVE_REG(23, 104)  // local variable #10
-  SAVE_REG(24, 112)  // local variable #11
-  SAVE_REG(25, 120)  // local variable #12
-  SAVE_REG(26, 128)  // local variable #13
-  SAVE_REG(27, 136)  // local variable #14
-  SAVE_REG(28, 144)  // local variable #15
-  SAVE_REG(29, 152)  // local variable #16
-  SAVE_REG(30, 160)  // local variable #17
-  SAVE_REG(31, 168)  // local variable #18
+#define SAVE_REG(reg, pos)              \
+  std %f##reg, pos(%r1); CFI3C(offset, 32 + reg, pos - 176)
+
+  SAVE_REG(14, 32)   // floating point local variable #1
+  SAVE_REG(15, 40)   // floating point local variable #2
+  SAVE_REG(16, 48)   // floating point local variable #3
+  SAVE_REG(17, 56)   // floating point local variable #4
+  SAVE_REG(18, 64)   // floating point local variable #5
+  SAVE_REG(19, 72)   // floating point local variable #6
+  SAVE_REG(20, 80)   // floating point local variable #7
+  SAVE_REG(21, 88)   // floating point local variable #8
+  SAVE_REG(22, 96)   // floating point local variable #9
+  SAVE_REG(23, 104)  // floating point local variable #10
+  SAVE_REG(24, 112)  // floating point local variable #11
+  SAVE_REG(25, 120)  // floating point local variable #12
+  SAVE_REG(26, 128)  // floating point local variable #13
+  SAVE_REG(27, 136)  // floating point local variable #14
+  SAVE_REG(28, 144)  // floating point local variable #15
+  SAVE_REG(29, 152)  // floating point local variable #16
+  SAVE_REG(30, 160)  // floating point local variable #17
+  SAVE_REG(31, 168)  // floating point local variable #18
 
 #undef SAVE_REG
 
@@ -255,28 +255,27 @@ ETCH_NAME(enterTCExit):
 
   // Epilogue
   // Load non-volatile registers saved on Prologue
-  ld %r2, 24(%r1)     // TOC
-  ld %r14, 32(%r1)    // local variable #1
-  ld %r15, 40(%r1)    // local variable #2
-  ld %r16, 48(%r1)    // local variable #3
-  ld %r17, 56(%r1)    // local variable #4
-  ld %r18, 64(%r1)    // local variable #5
-  ld %r19, 72(%r1)    // local variable #6
-  ld %r20, 80(%r1)    // local variable #7
-  ld %r21, 88(%r1)    // local variable #8
-  ld %r22, 96(%r1)    // local variable #9
-  ld %r23, 104(%r1)   // local variable #10
-  ld %r24, 112(%r1)   // local variable #11
-  ld %r25, 120(%r1)   // local variable #12
-  ld %r26, 128(%r1)   // local variable #13
-  ld %r27, 136(%r1)   // local variable #14
-  ld %r28, 144(%r1)   // local variable #15
-  ld %r29, 152(%r1)   // local variable #16
-  ld %r30, 160(%r1)   // local variable #17
-  ld %r31, 168(%r1)   // local variable #18
+  ld %f14, 32(%r1)    // floating point local variable #1
+  ld %f15, 40(%r1)    // floating point local variable #2
+  ld %f16, 48(%r1)    // floating point local variable #3
+  ld %f17, 56(%r1)    // floating point local variable #4
+  ld %f18, 64(%r1)    // floating point local variable #5
+  ld %f19, 72(%r1)    // floating point local variable #6
+  ld %f20, 80(%r1)    // floating point local variable #7
+  ld %f21, 88(%r1)    // floating point local variable #8
+  ld %f22, 96(%r1)    // floating point local variable #9
+  ld %f23, 104(%r1)   // floating point local variable #10
+  ld %f24, 112(%r1)   // floating point local variable #11
+  ld %f25, 120(%r1)   // floating point local variable #12
+  ld %f26, 128(%r1)   // floating point local variable #13
+  ld %f27, 136(%r1)   // floating point local variable #14
+  ld %f28, 144(%r1)   // floating point local variable #15
+  ld %f29, 152(%r1)   // floating point local variable #16
+  ld %f30, 160(%r1)   // floating point local variable #17
+  ld %f31, 168(%r1)   // floating point local variable #18
 
-  addi %r1, %r1, 176  // aligned with Prologue: stdu %r1, -176(%r1)
-  CFI2(adjust_cfa_offset, -176)  // debug information about stack pointer change
+  addi %r1, %r1, 176            // aligned with Prologue: stdu %r1, -176(%r1)
+  CFI2(adjust_cfa_offset, -176) // debug information about stack pointer change
   ld %r0, 16(%r1)
   mtlr %r0
   blr
