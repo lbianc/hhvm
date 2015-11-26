@@ -49,6 +49,11 @@ bool FixupMap::getFrameRegs(const ActRec* ar, VMRegs* outVMRegs) const {
   // frame.
   ar = ar->m_sfp;
 
+#if defined(__powerpc64__)
+  // This frame was needed for the backchain. The TC frame is the next one.
+  ar = ar->m_sfp;
+#endif
+
   regsFromActRec(tca, ar, ent->fixup, outVMRegs);
   return true;
 }
@@ -62,6 +67,10 @@ void FixupMap::fixupWork(ExecutionContext* ec, ActRec* rbp) const {
   rbp = 0;
 
   do {
+#if defined(__powerpc64__)
+    // The fixup saved address is located on the prior frame
+    auto priorFrame = rbp;
+#endif
     rbp = nextRbp;
     assertx(rbp && "Missing fixup for native call");
     nextRbp = rbp->m_sfp;
@@ -71,7 +80,11 @@ void FixupMap::fixupWork(ExecutionContext* ec, ActRec* rbp) const {
       TRACE(2, "fixup checking vm frame %s\n",
                nextRbp->m_func->name()->data());
       VMRegs regs;
+#if defined(__powerpc64__)
+      if (getFrameRegs(priorFrame, &regs)) {
+#else
       if (getFrameRegs(rbp, &regs)) {
+#endif
         TRACE(2, "fixup(end): func %s fp %p sp %p pc %p\n",
               regs.fp->m_func->name()->data(),
               regs.fp, regs.sp, regs.pc);
