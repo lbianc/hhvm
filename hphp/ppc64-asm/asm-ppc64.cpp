@@ -535,14 +535,17 @@ void Assembler::srad(const Reg64& ra, const Reg64& rs, const Reg64& rb,
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 794, rc);
 }
 
+void Assembler::sradi(const Reg64& ra, const Reg64& rs, uint8_t sh, bool rc) {
+  EmitXSForm(31, rn(rs), rn(ra), sh, 413, rc);
+}
+
 void Assembler::sraw(const Reg64& ra, const Reg64& rs, const Reg64& rb,
                      bool rc) {
   EmitXForm(31, rn(rs), rn(ra), rn(rb), 792, rc);
 }
 
-void Assembler::srawi(const Reg64& ra, const Reg64& rs, const Reg64& rb,
-                      bool rc) {
-  EmitXForm(31, rn(rs), rn(ra), rn(rb), 824, rc);
+void Assembler::srawi(const Reg64& ra, const Reg64& rs, uint8_t sh, bool rc) {
+  EmitXForm(31, rn(rs), rn(ra), rn(sh), 824, rc);
 }
 
 void Assembler::srd(const Reg64& ra, const Reg64& rs, const Reg64& rb,

@@ -708,7 +708,7 @@ public:
   void slw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void srad(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void sraw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
-  void srawi(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
+  void srawi(const Reg64& ra, const Reg64& rs, uint8_t sh, bool rc = 0);
   void srd(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void srw(const Reg64& ra, const Reg64& rs, const Reg64& rb, bool rc = 0);
   void stb(const Reg64& rs, MemoryRef m);
@@ -1324,7 +1324,7 @@ public:
   void slbmfev()        { not_implemented(); }
   void slbmte()         { not_implemented(); }
   void sleep()          { not_implemented(); }
-  void sradi()          { not_implemented(); }
+  void sradi(const Reg64& ra, const Reg64& rs, uint8_t sh, bool rc = 0);
   void stbcix()         { not_implemented(); }
   void stbcx()          { not_implemented(); }
   void stbdx()          { not_implemented(); }
@@ -2400,7 +2400,29 @@ protected:
   //TODO(rcardoso): Unimplemented instruction formaters
   void EmitXFLForm()  { not_implemented(); }
   void EmitXX4Form()  { not_implemented(); }
-  void EmitXSForm()   { not_implemented(); }
+  void EmitXSForm(const uint8_t op,
+                  const RegNumber rt,
+                  const RegNumber ra,
+                  const uint8_t sh,
+                  const uint16_t xop,
+                  const bool rc = 0){
+
+     // GP Register cannot be greater than 31
+     assert(static_cast<uint32_t>(rt) < 32);
+     assert(static_cast<uint32_t>(ra) < 32);
+
+      XS_form_t xs_formater {
+                            rc,
+                            static_cast<uint32_t>(sh >> 5),
+                            xop,
+                            static_cast<uint32_t>(sh & 0x1F),
+                            static_cast<uint32_t>(ra),
+                            static_cast<uint32_t>(rt),
+                            op
+                          };
+
+      dword(xs_formater.instruction);
+   }
   void EmitVAForm()   { not_implemented(); }
   void EmitVCForm()   { not_implemented(); }
   void EmitZ23Form()  { not_implemented(); }

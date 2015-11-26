@@ -198,7 +198,7 @@ struct Vgen {
     certain Rotate instructions.
   */
   void emit(const sar& i) { a->srad(i.d, i.s1, i.s0, true); }
-  void emit(const sarqi& i) { a->srawi(i.d, i.s1, Reg64(i.s0.w()), true); }
+  void emit(const sarqi& i) { a->sradi(i.d, i.s1, i.s0.b(), true); }
   void emit(const setcc& i) {
     ppc64_asm::Label l_true, l_end;
     Reg64 d(i.d);
