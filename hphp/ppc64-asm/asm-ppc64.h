@@ -1881,6 +1881,9 @@ public:
     rldicr(ra, rs, sh, 63-sh);
   }
   void clrrdi()         { not_implemented(); }  //Extended
+  void clrrwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
+    rlwinm(ra, rs, 0, 0, 31-sh);
+  }
   void clrlsldi()       { not_implemented(); }  //Extended
   void rotld()          { not_implemented(); }  //Extended
   void insrdi()         { not_implemented(); }  //Extended
