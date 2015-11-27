@@ -189,6 +189,7 @@ struct Vunit;
   O(movl, Inone, UH(s,d), DH(d,s))\
   O(movzbl, Inone, UH(s,d), DH(d,s))\
   O(movzbq, Inone, UH(s,d), DH(d,s))\
+  O(extsb, Inone, UH(s,d), DH(d,s) D(sf))\
   O(movtqb, Inone, UH(s,d), DH(d,s))\
   O(movtql, Inone, UH(s,d), DH(d,s))\
   O(mulsd, Inone, U(s0) U(s1), D(d))\
@@ -862,6 +863,9 @@ struct movl { Vreg32 s, d; };
 // Move zero-extended s to d.
 struct movzbl { Vreg8 s; Vreg32 d; };
 struct movzbq { Vreg8 s; Vreg64 d; };
+
+// Extend byte sign
+struct extsb { Vreg64 s; Vreg64 d; VregSF sf; };
 
 // Move truncated s to d.
 struct movtqb { Vreg64 s; Vreg8 d; };
