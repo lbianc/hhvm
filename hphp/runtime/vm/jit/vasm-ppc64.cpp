@@ -180,10 +180,23 @@ struct Vgen {
   void emit(const mfcr& i) { a->mfcr(i.d); }
   void emit(const mflr& i) { a->mflr(i.d); }
   void emit(const mtlr& i) { a->mtlr(i.s); }
-  void emit(const movb& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
-  void emit(const movl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
+  void emit(const movl& i) {
+    int8_t sh = sizeof(int) * CHAR_BIT;
+    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
+    a->mr(Reg64(i.d), rAsm);
+    a->extsw(Reg64(i.d), Reg64(i.d));
+  }
+  void emit(const movb& i) {
+    int8_t sh = CHAR_BIT;
+    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
+    a->clrrwi(Reg64(i.d), Reg64(i.d), sh);
+    a->or_(Reg64(i.d), Reg64(i.d), rAsm);
+  }
   void emit(const movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
+  void emit(const extsb& i) {
+    a->extsb(i.d, i.s);
+  }
   void emit(const neg& i) { a->neg(i.d, i.s, true); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(const not& i) { a->nor(i.d, i.s, i.s, false); }
@@ -333,7 +346,11 @@ void Vgen::emit(const cvttsd2siq& i) {
 
 void Vgen::emit(const ldimmb& i) {
   if(i.d.isGP()) {
-    a->li(i.d, i.s); // should be only 8bits available
+    // This is necessary since x86_64 can load only the byte and do not
+    // touch the other bits of destination register
+    a->li(rAsm, i.s); // should be only 8bits available
+    a->clrrwi(i.d, i.d, 8);
+    a->or_(i.d, i.d, rAsm);
   } else {
     assertx(i.d.isSIMD());
     a->li(rAsm, i.s);
@@ -959,21 +976,49 @@ void lowerForPPC64(Vout& v, movtql& inst) { v << copy{inst.s, inst.d}; }
 
 // Lower comparison to cmpq
 void lowerForPPC64(Vout& v, cmpb& inst) {
-  v << cmpq{Reg64(inst.s0), Reg64(inst.s1), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg(),
+      tmp4 = v.makeReg();
+
+  // As PPC64 there is no instruction to compare bytes, the value is placed
+  // into a register and then compared
+  v << movb{ inst.s0, tmp1 };
+  v << extsb { tmp1, tmp2, VregSF(RegSF{0}) };
+  v << movb{ inst.s1, tmp3 };
+  v << extsb { tmp3, tmp4, VregSF(RegSF{0}) };
+  v << cmpq{tmp2, tmp4, inst.sf};
 }
+
 void lowerForPPC64(Vout& v, cmpl& inst) {
-  v << cmpq{Reg64(inst.s0), Reg64(inst.s1), inst.sf};
+  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
+
+  v << movl{ inst.s0, tmp1 };
+  v << movl{ inst.s1, tmp2 };
+  v << cmpq{tmp1, tmp2, inst.sf};
 }
 
 // Lower comparison with immediate to cmpqi
 void lowerForPPC64(Vout& v, cmpbi& inst) {
-  v << cmpqi{inst.s0, Reg64(inst.s1), inst.sf};
+  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
+
+  // As PPC64 there is no instruction to compare bytes, the value is placed
+  // into a register and then compared
+  v << movb{ inst.s1, tmp1 };
+  v << extsb { tmp1, tmp2, VregSF(RegSF{0}) };
+  v << cmpqi{inst.s0, tmp2, inst.sf};
 }
+
 void lowerForPPC64(Vout& v, cmpli& inst) {
   // convert cmpli to cmpqi or ldimmq + cmpq by cmpqi's lowering
-  auto lowered = cmpqi{inst.s0, Reg64(inst.s1), inst.sf};
-  lowerForPPC64(v, lowered);
-  if (v.empty()) v << lowered;
+  Vreg tmp = v.makeReg(), tmp2 = v.makeReg();
+
+  v << movl{ inst.s1, tmp };
+  auto lowered = cmpqi{inst.s0, tmp, inst.sf};
+  // Lowering for cmpqi removed, since movl was emitted, then the empty
+  // will always return false
+  if (patchImm(inst.s0, v, tmp2)) v << cmpq{tmp2, tmp, inst.sf};
+  else v << lowered;
 }
 
 // Lower subtraction to subq
