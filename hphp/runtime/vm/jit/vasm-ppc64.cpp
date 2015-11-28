@@ -132,8 +132,12 @@ struct Vgen {
   void emit(const landingpad& i) {}
 
   // instructions
-  void emit(const absdbl& i) { a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s)), false); }
-  void emit(const addl& i) { a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true); }
+  void emit(const absdbl& i) {
+    a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s)), false);
+  }
+  void emit(const addl& i) {
+    a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
+  }
   void emit(const addli& i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(const addq& i) { a->add(i.d, i.s0, i.s1, true); }
   void emit(const addqi& i) { a->addi(i.d, i.s1, i.s0); }                  // needs SF
@@ -279,9 +283,13 @@ struct Vgen {
   void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }         // needs SF
   void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }              // needs SF
   void emit(const ud2& i) { a->trap(); }
-  void emit(const xorb& i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(const xorb& i) {
+    a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+  }
   void emit(const xorbi& i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
-  void emit(const xorl& i) { a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true); }
+  void emit(const xorl& i) {
+    a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+  }
   void emit(const xorq& i) { a->xor_(i.d, i.s0, i.s1, true); }
   void emit(const xorqi& i) { a->xori(i.d, i.s1, i.s0); }                  // needs SF
 
