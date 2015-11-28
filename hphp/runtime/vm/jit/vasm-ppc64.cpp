@@ -229,11 +229,15 @@ struct Vgen {
 
     l_end.asm_label(*a);
   }
-  void emit(const shlli& i) { a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); } // needs SF
+  void emit(const shlli& i) {
+    a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+  }
   void emit(const shl& i) { a->sld(i.d, i.s1, i.s0, true); }
-  void emit(const shlqi& i) { a->sldi(i.d, i.s1, i.s0.b()); }              // needs SF
-  void emit(const shrli& i) { a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b()); } // needs SF
-  void emit(const shrqi& i) { a->srdi(i.d, i.s1, i.s0.b()); }              // needs SF
+  void emit(const shlqi& i) { a->sldi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shrli& i) {
+    a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+  }
+  void emit(const shrqi& i) { a->srdi(i.d, i.s1, i.s0.b(), true); }
   void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
 

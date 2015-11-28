@@ -1858,31 +1858,31 @@ public:
     or_(rs, ra, ra);
   }
   void not_()           { not_implemented(); }  //Extended
-  void srwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
-    rlwinm(ra, rs, 32-sh, sh, 31);
+  void srwi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rlwinm(ra, rs, 32-sh, sh, 31, rc);
   }
-  void slwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
+  void slwi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
     /* non-existing mnemonic on ISA, but it's pratical to have it here */
-    rlwinm(ra, rs, sh, 0, 31-sh);
+    rlwinm(ra, rs, sh, 0, 31-sh, rc);
   }
   void clrwi()          { not_implemented(); }  //Extended
   void extwi()          { not_implemented(); }  //Extended
   void rotlw()          { not_implemented(); }  //Extended
   void inslwi()         { not_implemented(); }  //Extended
   void extrdi()         { not_implemented(); }  //Extended
-  void srdi(const Reg64& ra, const Reg64& rs, int8_t sh) {
-    rldicl(ra, rs, 64-sh, sh);
+  void srdi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rldicl(ra, rs, 64-sh, sh, rc);
   }
-  void clrldi(const Reg64& ra, const Reg64& rs, int8_t sh) {
-    rldicl(ra, rs, 0, sh);
+  void clrldi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rldicl(ra, rs, 0, sh, rc);
   }
   void extldi()         { not_implemented(); }  //Extended
-  void sldi(const Reg64& ra, const Reg64& rs, int8_t sh) {
-    rldicr(ra, rs, sh, 63-sh);
+  void sldi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rldicr(ra, rs, sh, 63-sh, rc);
   }
   void clrrdi()         { not_implemented(); }  //Extended
-  void clrrwi(const Reg64& ra, const Reg64& rs, int8_t sh) {
-    rlwinm(ra, rs, 0, 0, 31-sh);
+  void clrrwi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rlwinm(ra, rs, 0, 0, 31-sh, rc);
   }
   void clrlsldi()       { not_implemented(); }  //Extended
   void rotld()          { not_implemented(); }  //Extended
