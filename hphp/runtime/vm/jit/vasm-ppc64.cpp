@@ -138,13 +138,19 @@ struct Vgen {
   void emit(const addl& i) {
     a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
   }
-  void emit(const addli& i) { a->addi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(const addq& i) { a->add(i.d, i.s0, i.s1, true); }
-  void emit(const addqi& i) { a->addi(i.d, i.s1, i.s0); }                  // needs SF
+
+  // Addqi can't be lowered to addq if the destiny is rsp(). To avoid this
+  // issue, addqi is the only vasm that it'll be lowered directly by using rAsm
+  // on its emission.
+  void emit(const addqi& i) {
+    if (i.s0.fits(HPHP::sz::word))  a->li(rAsm, i.s0);
+    else                            a->li32(rAsm, i.s0.l());
+    a->add(i.d, i.s1, rAsm, true);
+  }
   void emit(const addsd& i) { a->fadd(i.d, i.s0, i.s1); }
-  void emit(const andli& i) { a->andi(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(const andq& i) { a->and_(i.d, i.s0, i.s1, true); }
-  void emit(const andqi& i) { a->andi(i.d, i.s1, i.s0); }                  // needs SF
+  void emit(const andqi& i) { a->andi(i.d, i.s1, i.s0); } // andi changes CR0
   void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
@@ -205,7 +211,6 @@ struct Vgen {
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(const not& i) { a->nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) { a->or_(i.d, i.s0, i.s1, true); }
-  void emit(const orqi& i) { a->ori(i.d, i.s1, i.s0); }                    // needs SF
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
     a->blr();
@@ -274,7 +279,6 @@ struct Vgen {
 
   /* Subtractions: d = s1 - s0 */
   void emit(const subq& i) { a->sub(i.d, i.s1, i.s0, true); }
-  void emit(const subqi& i) { a->subi(i.d, i.s1, i.s0); }                  // needs SF
   void emit(const subsd& i) { a->fsub(i.d, i.s1, i.s0, false); }
   void emit(const testq& i) {
     // More information on:
@@ -284,18 +288,15 @@ struct Vgen {
     else
       a->cmpdi(i.s0, Immed(0));
   }
-  void emit(const testqi& i) { a->andi(rAsm, i.s1, i.s0); }         // needs SF
   void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }              // needs SF
   void emit(const ud2& i) { a->trap(); }
   void emit(const xorb& i) {
     a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
-  void emit(const xorbi& i) { a->xori(Reg64(i.d), Reg64(i.s1), i.s0); }    // needs SF
   void emit(const xorl& i) {
     a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
   void emit(const xorq& i) { a->xor_(i.d, i.s0, i.s1, true); }
-  void emit(const xorqi& i) { a->xori(i.d, i.s1, i.s0); }                  // needs SF
 
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
@@ -640,6 +641,20 @@ void Vgen::emit(const tailcallstub& i) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
+ * Lower the immediate to a register in order to use ppc64 instructions that
+ * can change required Condition Register (on vasm world, that's the SF
+ * register).
+ */
+void lowerImm(Immed imm, Vout& v, Vreg& tmpRegister) {
+  tmpRegister = v.makeReg();
+  if (imm.fits(HPHP::sz::word)) {
+    v << ldimmw{imm, tmpRegister};
+  } else {
+    v << ldimml{imm, tmpRegister};
+  }
+}
+
+/*
  * Native ppc64 instructions can't handle an immediate bigger than 16 bits and
  * need to be loaded into a register in order to be used.
  */
@@ -808,22 +823,27 @@ X(lea,      s, s, d);
 
 // Auxiliary macros to handle vasms with different attributes
 #define NONE
-#define ONE(attr_1)         inst.attr_1,
-#define TWO(attr_1, attr_2) inst.attr_1, inst.attr_2,
+#define ONE(attr_1)             inst.attr_1,
+#define TWO(attr_1, attr_2)     inst.attr_1, inst.attr_2,
+#define ONE_R64(attr_1)         Reg64(inst.attr_1),
+#define TWO_R64(attr_1, attr_2) Reg64(inst.attr_1), Reg64(inst.attr_2),
 
 // If it patches the Immed, replace the vasm for its non-immediate variant
 #define X(vasm_src, vasm_dst, attr_imm, attrs)                          \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp;                                                             \
-  if (patchImm(inst.attr_imm, v, tmp)) v << vasm_dst{tmp, attrs inst.sf}; \
+  lowerImm(inst.attr_imm, v, tmp);                                      \
+  v << vasm_dst{tmp, attrs inst.sf};                                    \
 }
 
 X(addli,  addl,  s0, TWO(s1, d))
-X(addqi,  addq,  s0, TWO(s1, d))
-X(andli,  andl,  s0, TWO(s1, d))
-X(andqi,  andq,  s0, TWO(s1, d))
+X(andli,  andl,  s0, TWO(s1, d))    // could use patchImm
+X(andqi,  andq,  s0, TWO(s1, d))    // could use patchImm
 X(testqi, testq, s0, ONE(s1))
 X(cmpqi,  cmpq,  s0, ONE(s1))
+X(subbi,  subq,  s0, TWO_R64(s1, d))
+X(subli,  subq,  s0, TWO_R64(s1, d))
+X(subqi,  subq,  s0, TWO(s1, d))
 
 #undef X
 
@@ -850,6 +870,8 @@ X(addlm, addl, loadw, storew, m, ONE(s0))
 #undef NONE
 #undef ONE
 #undef TWO
+#undef ONE_R64
+#undef TWO_R64
 
 // Also deals with MemoryRef vasms like above but these ones have Immed data
 // too. Load data and emit a new vasm depending if the Immed fits a direct
@@ -878,22 +900,21 @@ X(testqim, testq, testqi, load,  s1, s0)
 
 // Very similar with the above case: handles MemoryRef and Immed, but also
 // stores the result in the memory.
-#define X(vasm_src, vasm_dst_reg, vasm_dst_imm, vasm_load, vasm_store,  \
+#define X(vasm_src, vasm_dst, vasm_load, vasm_store,                    \
                   attr_addr, attr_data)                                 \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg(), tmp3 = v.makeReg(), tmp2;                     \
   Vptr p = inst.attr_addr;                                              \
   patchVptr(p, v);                                                      \
   v << vasm_load{p, tmp};                                               \
-  if (patchImm(inst.attr_data, v, tmp2))                                \
-    v << vasm_dst_reg{tmp2, tmp, tmp3, inst.sf};                        \
-  else v << vasm_dst_imm{inst.attr_data, tmp, tmp3, inst.sf};           \
+  lowerImm(inst.attr_data, v, tmp2);                                    \
+  v << vasm_dst{tmp2, tmp, tmp3, inst.sf};                              \
   v << vasm_store{tmp3, p};                                             \
 }
 
-X(orwim,   orq,  orqi,  loadw, storew, m, s0)
-X(orqim,   orq,  orqi,  load,  store,  m, s0)
-X(addqim,  addq, addqi, load,  store,  m, s0)
+X(orwim,   orq,  loadw, storew, m, s0)
+X(orqim,   orq,  load,  store,  m, s0)
+X(addqim,  addq, load,  store,  m, s0)
 
 #undef X
 
@@ -1036,12 +1057,6 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
 // Lower subtraction to subq
 void lowerForPPC64(Vout& v, subl& inst) {
   v << subq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
-}
-void lowerForPPC64(Vout& v, subbi& inst) {
-  v << subqi{inst.s0, Reg64(inst.s1), Reg64(inst.d), inst.sf};
-}
-void lowerForPPC64(Vout& v, subli& inst) {
-  v << subqi{inst.s0, Reg64(inst.s1), Reg64(inst.d), inst.sf};
 }
 
 // Lower test to testq
