@@ -218,7 +218,7 @@ struct Vgen {
     a->li32(rAsm,i.s0.l());
 
    a->or_(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
-  } // needs SF
+  }
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
     a->blr();
@@ -312,7 +312,7 @@ struct Vgen {
     a->li32(rAsm, i.s0.l());
 
     a->xor_(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
-  } // needs SF
+  }
 
 
   // The following vasms reemit other vasms. They are implemented afterwards in
