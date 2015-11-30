@@ -211,6 +211,14 @@ struct Vgen {
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
   void emit(const not& i) { a->nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) { a->or_(i.d, i.s0, i.s1, true); }
+  void emit(const orqi& i) {
+   if (i.s0.fits(HPHP::sz::word))
+    a->li(rAsm,i.s0);
+   else
+    a->li32(rAsm,i.s0.l());
+
+   a->or_(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
+  } // needs SF
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
     a->blr();
@@ -297,6 +305,15 @@ struct Vgen {
     a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
   void emit(const xorq& i) { a->xor_(i.d, i.s0, i.s1, true); }
+  void emit(const xorqi& i) {
+   if (i.s0.fits(HPHP::sz::word))
+    a->li(rAsm, i.s0);
+   else
+    a->li32(rAsm, i.s0.l());
+
+    a->xor_(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
+  } // needs SF
+
 
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
