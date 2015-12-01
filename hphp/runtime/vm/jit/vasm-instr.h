@@ -269,6 +269,8 @@ struct Vunit;
   O(xxpermdi, Inone, U(s0) U(s1), D(d))\
   /* PPC64 instructions */\
   O(extsb, Inone, UH(s,d), DH(d,s) D(sf))\
+  O(extsw, Inone, UH(s,d), DH(d,s) D(sf))\
+  O(movlk, Inone, UH(s,d), DH(d,s))\
   /* */
 
 /*
@@ -949,6 +951,8 @@ struct xscvdpsxds { Vreg128 s, d; };
 struct mfcr { Vreg64 d; };
 struct mflr { Vreg64 d; };
 struct mfvsrd { Vreg128 s; Vreg64 d; };
+// move 32bits into a register and keep the higher 32bits
+struct movlk { Vreg64 s, d; };
 struct mtlr { Vreg64 s; };
 struct mtvsrd { Vreg64 s; Vreg128 d; };
 struct xscvsxddp { Vreg128 s, d; };
@@ -957,6 +961,8 @@ struct xxpermdi { Vreg128 s0, s1, d; };
 
 // Extend byte sign
 struct extsb { Vreg64 s; Vreg64 d; VregSF sf; };
+struct extsw { Vreg64 s; Vreg64 d; VregSF sf; };
+
 
 ///////////////////////////////////////////////////////////////////////////////
 struct Vinstr {

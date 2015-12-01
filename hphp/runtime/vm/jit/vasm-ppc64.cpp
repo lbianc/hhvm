@@ -194,7 +194,12 @@ struct Vgen {
     int8_t sh = sizeof(int) * CHAR_BIT;
     a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
     a->mr(Reg64(i.d), rAsm);
-    a->extsw(Reg64(i.d), Reg64(i.d));
+  }
+  void emit(const movlk& i) {
+    int8_t sh = sizeof(int) * CHAR_BIT;
+    a->rlwinm(rAsm, i.s, 0, 32-sh, 31);
+    a->clrrwi(i.d, i.d, sh);
+    a->or_(i.d, i.d, rAsm);
   }
   void emit(const movb& i) {
     int8_t sh = CHAR_BIT;
@@ -206,6 +211,9 @@ struct Vgen {
   void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
   void emit(const extsb& i) {
     a->extsb(i.d, i.s);
+  }
+  void emit(const extsw& i) {
+    a->extsw(i.d, i.s);
   }
   void emit(const neg& i) { a->neg(i.d, i.s, true); }
   void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
@@ -379,7 +387,8 @@ void Vgen::emit(const ldimmb& i) {
     // This is necessary since x86_64 can load only the byte and do not
     // touch the other bits of destination register
     a->li(rAsm, i.s); // should be only 8bits available
-    a->clrrwi(i.d, i.d, 8);
+    a->clrrwi(i.d, i.d, CHAR_BIT); // Clear lower byte
+    // Place only the byte into the register, keeping the higher 56bits
     a->or_(i.d, i.d, rAsm);
   } else {
     assertx(i.d.isSIMD());
@@ -858,8 +867,6 @@ X(andli,  andl,  s0, TWO(s1, d))    // could use patchImm
 X(andqi,  andq,  s0, TWO(s1, d))    // could use patchImm
 X(testqi, testq, s0, ONE(s1))
 X(cmpqi,  cmpq,  s0, ONE(s1))
-X(subbi,  subq,  s0, TWO_R64(s1, d))
-X(subli,  subq,  s0, TWO_R64(s1, d))
 X(subqi,  subq,  s0, TWO(s1, d))
 
 #undef X
@@ -1024,6 +1031,19 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
 void lowerForPPC64(Vout& v, movtqb& inst) { v << copy{inst.s, inst.d}; }
 void lowerForPPC64(Vout& v, movtql& inst) { v << copy{inst.s, inst.d}; }
 
+// For PPC64 there are no instructions to perform operations with only part of
+// a register, differently of x86_64.
+// The VASMs that are composed of these kind of operations, must be lowered to
+// first extract the operator into a register and later perform operation using
+// the entire register, i. e., 64bits. If it needs a result, like subtract
+// operations, the destination register must be filled considering the size of
+// operation. For example:
+// Consider d register with the value "0x44582C24A50CAD2".
+// For a subl instruction (l means 32bits), the result must be placed in the
+// lower 32bits (X means the result value):
+// "0x44582C2XXXXXXXX" and the higher 32bits should not be touched.
+// For operands the treatment is analogous, only the lower 32bits are
+// considered to perform the operation.
 // Lower comparison to cmpq
 void lowerForPPC64(Vout& v, cmpb& inst) {
   Vreg tmp1 = v.makeReg(),
@@ -1031,94 +1051,197 @@ void lowerForPPC64(Vout& v, cmpb& inst) {
       tmp3 = v.makeReg(),
       tmp4 = v.makeReg();
 
-  // As PPC64 there is no instruction to compare bytes, the value is placed
-  // into a register and then compared
-  v << movb{ inst.s0, tmp1 };
-  v << extsb { tmp1, tmp2, VregSF(RegSF{0}) };
-  v << movb{ inst.s1, tmp3 };
-  v << extsb { tmp3, tmp4, VregSF(RegSF{0}) };
-  v << cmpq{tmp2, tmp4, inst.sf};
+  v << movb{inst.s0, tmp1}; // Extract s0
+  v << extsb {tmp1, tmp2, VregSF(RegSF{0})}; // Extend byte sign
+  v << movb{inst.s1, tmp3}; // Extract s1
+  v << extsb {tmp3, tmp4, VregSF(RegSF{0})}; // Extend byte sign
+  v << cmpq{tmp2, tmp4, inst.sf}; // Compare values
 }
 
 void lowerForPPC64(Vout& v, cmpl& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg(),
+      tmp4 = v.makeReg();
 
-  v << movl{ inst.s0, tmp1 };
-  v << movl{ inst.s1, tmp2 };
-  v << cmpq{tmp1, tmp2, inst.sf};
+  v << movl{inst.s0, tmp1}; // Extract byte from s0
+  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
+  v << movl{inst.s1, tmp3}; // extract byte from s1
+  v << extsw{tmp3, tmp4, VregSF(RegSF{0})}; // Extend word sign
+  v << cmpq{tmp3, tmp4, inst.sf}; // Compare the extracted values
 }
 
 // Lower comparison with immediate to cmpqi
 void lowerForPPC64(Vout& v, cmpbi& inst) {
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
 
-  // As PPC64 there is no instruction to compare bytes, the value is placed
-  // into a register and then compared
-  v << movb{ inst.s1, tmp1 };
-  v << extsb { tmp1, tmp2, VregSF(RegSF{0}) };
+  v << movb{inst.s1, tmp1}; // extract s0
+  v << extsb {tmp1, tmp2, VregSF(RegSF{0})}; // extend byte sign
+  // compare immed only with the byte extracted
   v << cmpqi{inst.s0, tmp2, inst.sf};
 }
 
 void lowerForPPC64(Vout& v, cmpli& inst) {
   // convert cmpli to cmpqi or ldimmq + cmpq by cmpqi's lowering
-  Vreg tmp = v.makeReg(), tmp2 = v.makeReg();
+  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
 
-  v << movl{ inst.s1, tmp };
-  auto lowered = cmpqi{inst.s0, tmp, inst.sf};
+  v << movl{inst.s1, tmp1}; // Extract s1
+  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
   // Lowering for cmpqi removed, since movl was emitted, then the empty
   // will always return false
-  if (patchImm(inst.s0, v, tmp2)) v << cmpq{tmp2, tmp, inst.sf};
-  else v << lowered;
+  if (patchImm(inst.s0, v, tmp3)) v << cmpq{tmp3, tmp2, inst.sf};
+  else v << cmpqi{inst.s0, tmp2, inst.sf};
 }
 
 // Lower subtraction to subq
 void lowerForPPC64(Vout& v, subl& inst) {
-  v << subq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg(),
+        tmp3 = v.makeReg(),
+        tmp4 = v.makeReg(),
+        tmp5 = v.makeReg();
+
+  v << movl{inst.s0, tmp1}; // Extract s0
+  v << movl{inst.s1, tmp2}; // Extract s1
+  v << extsw{tmp1, tmp3, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp2, tmp4, VregSF(RegSF{0})}; // Extend word sign
+  v << subq{tmp3, tmp4, tmp5, inst.sf}; // subtract
+  // Move word to d and do not touch the higher 32bits
+  v << movlk{tmp5, Reg64(inst.d)};
+}
+
+void lowerForPPC64(Vout& v, subbi& inst) {
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg(),
+        tmp3 = v.makeReg();
+
+  v << movb{inst.s1, tmp1}; // Extract s1
+  v << extsb{tmp1, tmp2, VregSF(RegSF{0})}; // Extend byte sign
+  v << subqi{inst.s0, tmp2, tmp3, inst.sf}; // subtract immediate
+  // move byte to destiny and do not touch higher 56bits
+  v << movb{tmp3, inst.d};
+}
+
+void lowerForPPC64(Vout& v, subli& inst) {
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg(),
+        tmp3 = v.makeReg();
+
+  v << movl{inst.s1, tmp1}; // Extract s1
+  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
+  v << subqi{inst.s0, tmp2, tmp3, inst.sf}; // Subtract immediate
+  // move word to destiny and do not touch the higher 32bits
+  v << movlk{tmp3, Reg64(inst.d)};
 }
 
 // Lower test to testq
 void lowerForPPC64(Vout& v, testb& inst) {
-  v << testq{Reg64(inst.s0), Reg64(inst.s1), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg();
+
+  v << movb{inst.s0, tmp1};// Extract s0
+  v << movb{inst.s1, tmp2};// Extract s1
+  v << testq{tmp1, tmp2, inst.sf};// Compare lower byte of each source
 }
+
 void lowerForPPC64(Vout& v, testl& inst) {
-  v << testq{Reg64(inst.s0), Reg64(inst.s1), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg();
+
+  v << movl{inst.s0, tmp1}; // Extract s0
+  v << movl{inst.s1, tmp2}; // Extract s1
+  v << testq{tmp1, tmp2, inst.sf}; // Compare low 32bits of each source
 }
+
 void lowerForPPC64(Vout& v, testbi& inst) {
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg(),
+        tmp3 = v.makeReg();
+
+  v << movb{inst.s1, tmp1}; // Extract byte
   // convert testbi to testqi or ldimmq + testq by testqi's lowering
-  auto lowered = testqi{inst.s0, Reg64(inst.s1), inst.sf};
-  lowerForPPC64(v, lowered);
-  if (v.empty()) v << lowered;
+  if (patchImm(inst.s0, v, tmp3)) v << testq{tmp3, tmp2, inst.sf};
+  else testqi{inst.s0, tmp2, inst.sf}; // perform test operation
 }
+
 void lowerForPPC64(Vout& v, testli& inst) {
+  Vreg tmp1 = v.makeReg(),
+        tmp2 = v.makeReg();
+
+  v << movl{inst.s1, tmp1}; // Extract word
   // convert testli to testqi or ldimmq + testq by testqi's lowering
-  auto lowered = testqi{inst.s0, Reg64(inst.s1), inst.sf};
-  lowerForPPC64(v, lowered);
-  if (v.empty()) v << lowered;
+  if (patchImm(inst.s0, v, tmp2)) v << testq{tmp2, tmp1, inst.sf};
+  else v << testqi{inst.s0, tmp1, inst.sf};
 }
 
 // Lower xor to xorq
 void lowerForPPC64(Vout& v, xorb& inst) {
-  v << xorq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg();
+
+  v << movb{inst.s0, tmp1}; // Extract byte
+  v << movb{inst.s1, tmp2}; // Extract byte
+  v << xorq{tmp1, tmp2, tmp3, inst.sf}; // Perform xorq
+  // Place only byte result into d and do not touch higher 56bits
+  v << movb{tmp3, inst.d};
 }
 void lowerForPPC64(Vout& v, xorl& inst) {
-  v << xorq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg();
+
+  v << movl{inst.s0, tmp1}; // Extract word
+  v << movl{inst.s1, tmp2}; // Extract word
+  v << xorq{tmp1, tmp2, tmp3, inst.sf}; // Perform xorq
+  // Place only byte result into d and do not touch higher 32bits
+  v << movlk{tmp3, Reg64(inst.d)};
 }
 
 // Lower xor with immediate to xorqi
 void lowerForPPC64(Vout& v, xorbi& inst) {
-  v << xorqi{inst.s0, Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg();
+
+  v << movb {inst.s1, tmp1}; // Extract byte
+  v << xorqi {inst.s0, tmp1, tmp2, VregSF(RegSF{0})}; // Perform xorqi
+  // move only the byte result to the destination, keeping the higher 56bits
+  v << movb {inst.d, tmp1};
 }
 
 // Lower and to andq
 void lowerForPPC64(Vout& v, andb& inst) {
-  v << andq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg();
+
+  v << movb{inst.s0, tmp1}; // Extract s0
+  v << movb{inst.s1, tmp2}; // Extract s1
+  v << andq{tmp1, tmp2, tmp3, inst.sf};
+  // move only the byte result to the destination, keeping the higher 56bits
+  v << movb{tmp3, inst.d};
 }
+
 void lowerForPPC64(Vout& v, andl& inst) {
-  v << andq{Reg64(inst.s0), Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg(),
+      tmp3 = v.makeReg();
+
+  v << movl{inst.s0, tmp1}; // extract s0
+  v << movl{inst.s1, tmp2}; // extract s1
+  v << andq{tmp1, tmp2, tmp3, inst.sf};
+  v << movlk{tmp3, Reg64(inst.d)}; // Move result keeping the higher 32bits
 }
+
 void lowerForPPC64(Vout& v, andbi& inst) {
+  Vreg tmp1 = v.makeReg(),
+      tmp2 = v.makeReg();
+
+  v << movb{inst.s1, tmp1}; // Extract s1
   // patchImm doesn't need to be called as it should be < 8 bits
-  v << andqi{inst.s0, Reg64(inst.s1), Reg64(inst.d), inst.sf};
+  v << andqi{inst.s0, tmp1, tmp2, inst.sf};
+  // move only the byte result to the destination, keeping the higher 56bits
+  v << movb{inst.d, tmp2};
 }
 
 void lowerForPPC64(Vout& v, cloadq& inst) {
