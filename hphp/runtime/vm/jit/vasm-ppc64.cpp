@@ -220,12 +220,12 @@ struct Vgen {
   void emit(const not& i) { a->nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) { a->or_(i.d, i.s0, i.s1, true); }
   void emit(const orqi& i) {
-   if (i.s0.fits(HPHP::sz::word))
-    a->li(rAsm,i.s0);
-   else
-    a->li32(rAsm,i.s0.l());
+    if (i.s0.fits(HPHP::sz::word))
+      a->li(rAsm,i.s0);
+    else
+      a->li32(rAsm,i.s0.l());
 
-   a->or_(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
+    a->or_(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
   }
   void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
@@ -314,10 +314,10 @@ struct Vgen {
   }
   void emit(const xorq& i) { a->xor_(i.d, i.s0, i.s1, true); }
   void emit(const xorqi& i) {
-   if (i.s0.fits(HPHP::sz::word))
-    a->li(rAsm, i.s0);
-   else
-    a->li32(rAsm, i.s0.l());
+    if (i.s0.fits(HPHP::sz::word))
+      a->li(rAsm, i.s0);
+    else
+      a->li32(rAsm, i.s0.l());
 
     a->xor_(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
   }
@@ -383,7 +383,7 @@ void Vgen::emit(const cvttsd2siq& i) {
 }
 
 void Vgen::emit(const ldimmb& i) {
-  if(i.d.isGP()) {
+  if (i.d.isGP()) {
     // This is necessary since x86_64 can load only the byte and do not
     // touch the other bits of destination register
     a->li(rAsm, i.s); // should be only 8bits available
