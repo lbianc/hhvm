@@ -475,7 +475,7 @@ void Vgen::emit(const load& i) {
 }
 
 void Vgen::emit(const callstub& i) {
-  emit(call{ i.target, i.args });
+  emit(call{i.target, i.args});
 }
 
 void Vgen::emit(const callfaststub& i) {
