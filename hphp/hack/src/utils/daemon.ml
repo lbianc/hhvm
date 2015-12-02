@@ -18,6 +18,10 @@ type ('in_, 'out) handle = {
   pid : int;
 }
 
+type log_mode =
+| Log_file
+| Parent_streams
+
 let to_channel :
   'a out_channel -> ?flags:Marshal.extern_flags list -> ?flush:bool ->
   'a -> unit =
@@ -153,6 +157,7 @@ let fork ?log_file (f : ('a, 'b) channel_pair -> unit) :
   | -1 -> failwith "Go get yourself a real computer"
   | 0 -> (* child *)
     (try
+      ignore(Unix.setsid());
       close_in parent_in;
       close_out parent_out;
       Sys_utils.with_umask 0o111 begin fun () ->
@@ -197,7 +202,7 @@ let setup_channels channel_mode =
 
 let spawn
     (type param) (type input) (type output)
-    ?reason ?log_file ?(channel_mode = `pipe)
+    ?reason ?log_file ?(channel_mode = `pipe) ?(log_mode = Log_file)
     (entry: (param, input, output) entry)
     (param: param) : (output, input) handle =
   let (parent_in, child_out), (child_in, parent_out) =
@@ -205,16 +210,24 @@ let spawn
   Entry.set_context entry param (child_in, child_out);
   let null_fd =
     Unix.openfile null_path [Unix.O_RDONLY; Unix.O_CREAT] 0o777 in
-  let out_path =
-    Option.value_map log_file
-      ~default:null_path
-      ~f:(fun fn ->
-          Sys_utils.mkdir_no_fail (Filename.dirname fn);
-          fn)  in
-  let out_fd =
-    Unix.openfile out_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o666 in
+  let out_fd, err_fd =
+    match log_mode with
+    | Log_file ->
+      let out_path =
+        Option.value_map log_file
+          ~default:null_path
+          ~f:(fun fn ->
+              Sys_utils.mkdir_no_fail (Filename.dirname fn);
+              fn)  in
+      let out_fd =
+        Unix.openfile out_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
+        0o666 in
+      out_fd, out_fd
+    | Parent_streams ->
+      Unix.stdout, Unix.stderr
+  in
   let exe = Sys_utils.executable_path () in
-  let pid = Unix.create_process exe [|exe|] null_fd out_fd out_fd in
+  let pid = Unix.create_process exe [|exe|] null_fd out_fd err_fd in
   Option.iter reason ~f:(fun reason -> PidLog.log ~reason pid);
   (match channel_mode with
   | `pipe ->

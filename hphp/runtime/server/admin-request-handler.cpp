@@ -132,9 +132,19 @@ static void malloc_write_cb(void *cbopaque, const char *s) {
 extern unsigned low_arena;
 #endif
 
+void WarnIfNotOK(Transport* transport) {
+  auto code = static_cast<Transport::StatusCode>(transport->getResponseCode());
+  if (code != Transport::StatusCode::OK) {
+    Logger::Warning("Non-OK response from admin server: %d %s",
+                    static_cast<int>(code),
+                    transport->getResponseInfo().c_str());
+  }
+}
+
 void AdminRequestHandler::logToAccessLog(Transport* transport) {
   GetAccessLog().onNewRequest();
   GetAccessLog().log(transport, nullptr);
+  WarnIfNotOK(transport);
 }
 
 void AdminRequestHandler::setupRequest(Transport* transport) {
@@ -145,6 +155,7 @@ void AdminRequestHandler::setupRequest(Transport* transport) {
 void AdminRequestHandler::teardownRequest(Transport* transport) noexcept {
   SCOPE_EXIT { hphp_memory_cleanup(); };
   GetAccessLog().log(transport, nullptr);
+  WarnIfNotOK(transport);
 }
 
 void AdminRequestHandler::handleRequest(Transport *transport) {
@@ -396,10 +407,6 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
     }
     if (strncmp(cmd.c_str(), "static-strings", 14) == 0 &&
         handleStaticStringsRequest(cmd, transport)) {
-      break;
-    }
-    if (strncmp(cmd.c_str(), "static-strings-rds", 18) == 0 &&
-        handleStaticStringsRdsRequest(cmd, transport)) {
       break;
     }
     if (strncmp(cmd.c_str(), "dump-static-strings", 19) == 0) {
@@ -1045,18 +1052,18 @@ bool AdminRequestHandler::handleConstSizeRequest (const std::string &cmd,
 
 bool AdminRequestHandler::handleStaticStringsRequest(const std::string& cmd,
                                                      Transport* transport) {
-  std::ostringstream result;
-  result << makeStaticStringCount();
-  transport->sendString(result.str());
-  return true;
-}
-
-bool AdminRequestHandler::handleStaticStringsRdsRequest(const std::string& cmd,
-                                                        Transport* transport) {
-  std::ostringstream result;
-  result << countStaticStringConstants();
-  transport->sendString(result.str());
-  return true;
+  if (cmd == "static-strings") {
+    std::ostringstream result;
+    result << makeStaticStringCount();
+    transport->sendString(result.str());
+    return true;
+  } else if (cmd == "static-strings-rds") {
+    std::ostringstream result;
+    result << countStaticStringConstants();
+    transport->sendString(result.str());
+    return true;
+  }
+  return false;
 }
 
 bool AdminRequestHandler::handleDumpStaticStrings(const std::string& cmd,

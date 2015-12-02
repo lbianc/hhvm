@@ -116,9 +116,7 @@ let print_wait_msg_and_sleep start_time tail_env =
     open_and_get_tail_msg start_time tail_env in
   if load_state_not_found then
     Printf.eprintf "%s\n%!" ClientMessages.load_state_not_found_msg;
-  Printf.eprintf
-    "hh_server is busy: %s %s%!"
-    tail_msg (Tty.spinner());
+  Tty.eprintf "hh_server is busy: %s %s%!" tail_msg (Tty.spinner());
   Unix.sleep 1;
   if Tty.spinner_used () then Tty.print_clear_line stderr
 
@@ -213,14 +211,17 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
         raise Exit_status.(Exit_with No_server_running)
       end
     | CCS.Server_busy ->
-    (** In the monitor-typechecker split role world, this should never happen
-     * because if a monitor already exists, it readily accepts connections even
-     * when the typechecker hasn't finished initializing and if one doesn't
-     * exist then the client starts one and waits until the typechecker is
-     * finished before attempting a connection.*)
-      Printf.eprintf
-        "hh_server is busy: %s %s\n%!"
-        tail_msg (Tty.spinner());
+      (** This should only happen during the transition from old-world to
+      * new-world.
+      *
+      * In the monitor-typechecker split role world, this should never happen
+      * because if a monitor already exists, it readily accepts connections even
+      * when the typechecker hasn't finished initializing and if one doesn't
+      * exist then the client starts one and waits until the typechecker is
+      * finished before attempting a connection. *)
+      if Tty.spinner_used () then Tty.print_clear_line stderr;
+      Tty.eprintf "hh_server is busy: %s %s\n%!" tail_msg
+        (Tty.spinner());
       HackEventLogger.client_connect_once_busy start_time;
       connect env (Option.map retries (fun x -> x - 1)) start_time tail_env
     | CCS.Build_id_mismatch ->
@@ -242,17 +243,16 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
           connect env retries start_time tail_env
         end else raise Exit_status.(Exit_with Build_id_mismatch)
     | CCS.Server_initializing ->
+      if Tty.spinner_used () then Tty.print_clear_line stderr;
       Printf.eprintf
         "hh_server still initializing; this can take some time.%!";
       if env.retry_if_init then begin
-          Printf.eprintf
-            " %s %s%!"
-            tail_msg (Tty.spinner());
-          connect env retries start_time tail_env
-        end else begin
-          Printf.eprintf " Not retrying since --retry-if-init is false.\n%!";
-          raise Exit_status.(Exit_with Server_initializing)
-        end
+        Tty.eprintf " %s %s%!" tail_msg (Tty.spinner());
+        connect env retries start_time tail_env
+      end else begin
+        Printf.eprintf " Not retrying since --retry-if-init is false.\n%!";
+        raise Exit_status.(Exit_with Server_initializing)
+      end
 
 let connect env =
   let link_file = ServerFiles.log_link env.root in

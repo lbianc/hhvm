@@ -40,7 +40,7 @@ let kill_typechecker typechecker =
     | _ ->
       Hh_logger.log
         "Failed to send Sig_build_id_mismatch signal to typechecker. Trying \
-        violently";
+         violently";
       Unix.kill typechecker.pid Sys.sigkill;
   else ()
 
@@ -56,63 +56,53 @@ let rec wait_for_typechecker_exit typechecker start_t =
         Hh_logger.log_duration
           "Typechecker has exited. Time since sigterm: " start_t)
 
-let setup_autokill_typechecker_on_exit () =
-  (** This doesn't work. I don't know why.
-      try Sys.set_signal Sys.sigkill (Sys.Signal_handle (fun _ ->
-      kill_typechecker ()))
-      with
-      | _ ->
-      (Hh_logger.log "Failed to set sigkill handler";
-      ())
-  *)
-  ()
+let setup_handler_for_signals handler signals =
+  List.iter begin fun signal ->
+    Sys.set_signal signal (Sys.Signal_handle handler)
+  end signals
 
-let start_hh_server options typechecker_entry =
-  let log_link = ServerFiles.log_link (ServerArgs.root options) in
-  (try Sys.rename log_link (log_link ^ ".old") with _ -> ());
-  let log_file = ServerFiles.make_link_of_timestamped log_link in
-  Hh_logger.log "About to spawn typechecker daemon. Logs will go to %s\n%!"
-    (if Sys.win32 then log_file else log_link);
+let setup_autokill_typechecker_on_exit typechecker =
+  try
+    setup_handler_for_signals begin fun _ ->
+      Hh_logger.log "Got an exit signal. Killing typechecker and exiting.";
+      kill_typechecker typechecker;
+      Exit_status.exit Exit_status.Interrupted
+    end [Sys.sigint; Sys.sigquit; Sys.sigterm; Sys.sighup];
+  with
+  | _ ->
+    Hh_logger.log "Failed to set signal handler"
+
+let start_hh_server options typechecker_entry log_mode =
+  let log_file =
+    match log_mode with
+    | Daemon.Log_file ->
+      let log_link = ServerFiles.log_link (ServerArgs.root options) in
+      (try Sys.rename log_link (log_link ^ ".old") with _ -> ());
+      let log_file = ServerFiles.make_link_of_timestamped log_link in
+      Hh_logger.log "About to spawn typechecker daemon. Logs will go to %s\n%!"
+        (if Sys.win32 then log_file else log_link);
+      log_file
+    | Daemon.Parent_streams ->
+      Hh_logger.log "About to spawn typechecker daemon. Logs will go here.";
+      ""
+  in
   let start_t = Unix.time () in
   let {Daemon.pid; Daemon.channels} =
-    Daemon.spawn ~channel_mode:`socket ~log_file typechecker_entry options in
+    Daemon.spawn ~channel_mode:`socket ~log_file ~log_mode typechecker_entry
+      options in
   let ic, oc = channels in
-  setup_autokill_typechecker_on_exit ();
-  {
-    pid = pid;
-    in_fd = Daemon.descr_of_in_channel ic;
-    out_fd = Daemon.descr_of_out_channel oc;
-    log_file = log_file;
-    start_t = start_t;
-  }
-
-(**
- * Starts a typechecker server. If one is already running, exits with an error.
-*)
-let maybe_start_hh_server options typechecker_entry =
-  let lock_file = ServerFiles.lock_file (ServerArgs.root options) in
-  (** TODO: Log sucba stats for this. *)
-  if (Lock.check lock_file)
-  then
-    (Hh_logger.log "Typechecker server not running yet. Going to start one.";
-     let typechecker = start_hh_server options typechecker_entry in
-     Hh_logger.log "Just started typechecker server with pid: %d."
-       typechecker.pid;
-     typechecker)
-  else
-    (** Normally, we should never get here because the typechecker's lifetime
-     * is a strict subset of the monitor's lifetime - the monitor is started
-     * before the typechecker, and exits after it detects the typechecker
-     * has exited. The only exception to this is when the user kills the
-     * monitor manually, then the typechecker will live slightly longer
-     * (it will eventually kill itself after f() inishing its work and checks
-     * for liveness of its parent process.) *)
-    (Hh_logger.log "
-      Cannot start typechecker because one is already running. Wait until
-      typechecker exits before starting a new one. Monitor now exiting.
-      ";
-     HackEventLogger.typechecker_already_running ();
-     Exit_status.exit Exit_status.No_server_running)
+  Hh_logger.log "Just started typechecker server with pid: %d." pid;
+  let typechecker =
+    {
+      pid = pid;
+      in_fd = Daemon.descr_of_in_channel ic;
+      out_fd = Daemon.descr_of_out_channel oc;
+      log_file = log_file;
+      log_mode = log_mode;
+      start_t = start_t;
+    } in
+  setup_autokill_typechecker_on_exit typechecker;
+  typechecker
 
 let sleep_and_check socket =
   let ready_socket_l, _, _ = Unix.select [socket] [] [] (1.0) in
@@ -126,8 +116,6 @@ let stop_if_typechecker_dead typechecker =
     Unix.waitpid [Unix.WNOHANG; Unix.WUNTRACED] typechecker.pid in
   (if pid <> 0 then
      (check_exit_status proc_stat typechecker;
-      Hh_logger.log
-        "Typechecker process is stopped. Stopping server monitor too.";
       Exit_status.(exit Ok))
    else
      ())
@@ -266,7 +254,8 @@ let check_and_run_loop (_: ServerArgs.options) typechecker
 (** Main method of the server monitor daemon. The daemon is responsible for
  * listening to socket requests from hh_client, checking Build ID, and relaying
  * requests to the typechecker process. *)
-let monitor_daemon_main (options: ServerArgs.options) typechecker_entry =
+let monitor_daemon_main (options: ServerArgs.options) typechecker_entry
+    typechecker_log_mode =
   if Sys_utils.is_test_mode ()
   then EventLogger.init (Daemon.devnull ()) 0.0
   else HackEventLogger.init_monitor (ServerArgs.root options)
@@ -274,17 +263,18 @@ let monitor_daemon_main (options: ServerArgs.options) typechecker_entry =
   if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let www_root = (ServerArgs.root options) in
   ignore @@ Sys_utils.setsid ();
-  let lock_file = ServerFiles.server_monitor_liveness_lock www_root in
-  if (Lock.grab lock_file) then
-    Hh_logger.log "Starting monitor run loop"
-  else
+  (** Make sure to lock the lockfile before doing *anything*, especially
+   * opening the socket. *)
+  let lock_file = ServerFiles.lock_file www_root in
+  if not (Lock.grab lock_file) then
     (Hh_logger.log "Monitor daemon already running. Killing";
      Exit_status.exit Exit_status.Ok);
   let socket = Socket.init_unix_socket (ServerFiles.socket_file www_root) in
-  let typechecker = maybe_start_hh_server options typechecker_entry in
+  let typechecker = start_hh_server options typechecker_entry
+      typechecker_log_mode in
   while true do
     try check_and_run_loop
-        options typechecker lock_file socket typechecker_entry
+      options typechecker lock_file socket typechecker_entry
     with
     | _ -> ()
   done
@@ -323,7 +313,7 @@ let daemon_entry =
     (fun (
        (options: ServerArgs.options), typechecker_entry)
        ((_ic: char Daemon.in_channel), (_oc: char Daemon.out_channel)) ->
-       monitor_daemon_main options typechecker_entry)
+       monitor_daemon_main options typechecker_entry Daemon.Log_file)
 
 (** Either starts a monitor daemon (which will spawn a typechecker daemon),
  * or just runs the typechecker if detachment not enabled. *)
@@ -334,5 +324,4 @@ let start () =
   then
     Exit_status.exit (daemon_starter options daemon_entry typechecker_entry)
   else
-    ServerMain.daemon_main options (Unix.descr_of_in_channel stdin)
-      (Unix.descr_of_out_channel stdout)
+    monitor_daemon_main options typechecker_entry Daemon.Parent_streams

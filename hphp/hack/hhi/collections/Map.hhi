@@ -448,11 +448,11 @@ final class Map<Tk, Tv> implements MutableMap<Tk, Tv> {
    * If the key is not present, an exception is thrown. If you want to add a
    * value even if a key is not present, use `add()`.
    *
-   * `$map->set($k,$v)` is semantically equivalent to `$map[$k] = $v` (except
-   * that `set()` returns the current `Map`).
+   * Assuming the key is present, `$map->set($k,$v)` is semantically equivalent
+   * to `$map[$k] = $v` (except that `set()` returns the current `Map`).
    *
-   * Future changes made to the current `Map` ARE reflected in the returned,
-   * and vice-versa.
+   * Future changes made to the current `Map` ARE reflected in the returned
+   * `Map`, and vice-versa.
    *
    * @param $k - The key to which we will set the value.
    * @param $v - The value to set.
@@ -616,7 +616,7 @@ final class Map<Tk, Tv> implements MutableMap<Tk, Tv> {
   public function getIterator(): KeyedIterator<Tk, Tv>;
 
   /**
-   * Returns a `Map` containing the key/valur pairs from the specified `array`.
+   * Returns a `Map` containing the key/value pairs from the specified `array`.
    *
    * This function is deprecated. Use `new `Map`($arr)` instead.
    *
@@ -628,7 +628,7 @@ final class Map<Tk, Tv> implements MutableMap<Tk, Tv> {
   public static function fromArray(array<Tk, Tv> $arr): Map<Tk, Tv>;
 
   /**
-   * Creates a `Map` from the given `Traversable`, or an empty `Vector` if
+   * Creates a `Map` from the given `Traversable`, or an empty `Map` if
    * `null` is passed.
    *
    * This is the static method version of the `Map::__construct()` constructor.
