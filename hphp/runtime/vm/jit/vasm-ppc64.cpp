@@ -197,18 +197,32 @@ struct Vgen {
   }
   void emit(const movlk& i) {
     int8_t sh = sizeof(int) * CHAR_BIT;
-    a->rlwinm(rAsm, i.s, 0, 32-sh, 31);
-    a->clrrwi(i.d, i.d, sh);
+    a->rlwinm(rAsm, i.s, 0, 32-sh, 31); // extract lower 32bits
+    a->clrrwi(i.d, i.d, sh); // clear lower 32bits on destination
+    // move lower 32bits to destination and keep the higher 32bits
     a->or_(i.d, i.d, rAsm);
   }
   void emit(const movb& i) {
     int8_t sh = CHAR_BIT;
-    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
-    a->clrrwi(Reg64(i.d), Reg64(i.d), sh);
+    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31); // extract lower byte
+    a->clrrwi(Reg64(i.d), Reg64(i.d), sh); // clear lower byte on destination
+    // move lower byte to destination and keep the other 56 bits
     a->or_(Reg64(i.d), Reg64(i.d), rAsm);
   }
-  void emit(const movzbl& i) { a->ori(Reg64(i.d), Reg64(i.s), 0); }
-  void emit(const movzbq& i) { a->ori(i.d, Reg64(i.s), 0); }
+  void emit(const movzbl& i) {
+    int8_t sh_32 = sizeof(int) * CHAR_BIT;
+    int8_t sh_8 = CHAR_BIT;
+    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
+    // clear lower 32bits on destination
+    a->clrrwi(Reg64(i.d), Reg64(i.d), sh_32);
+    // move lower byte to destination and keep the other 56 bits
+    a->or_(Reg64(i.d), Reg64(i.d), rAsm);
+  }
+  void emit(const movzbq& i) {
+    int8_t sh_8 = CHAR_BIT;
+    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
+    a->mr(i.d, rAsm); // move entire register to reset higher 56bits
+  }
   void emit(const extsb& i) {
     a->extsb(i.d, i.s);
   }
