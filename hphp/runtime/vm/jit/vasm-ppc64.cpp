@@ -136,9 +136,9 @@ struct Vgen {
     a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s)), false);
   }
   void emit(const addl& i) {
-    a->add(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
+    a->addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
   }
-  void emit(const addq& i) { a->add(i.d, i.s0, i.s1, true); }
+  void emit(const addq& i) { a->addo(i.d, i.s0, i.s1, true); }
 
   // Addqi can't be lowered to addq if the destiny is rsp(). To avoid this
   // issue, addqi is the only vasm that it'll be lowered directly by using rAsm
@@ -146,7 +146,7 @@ struct Vgen {
   void emit(const addqi& i) {
     if (i.s0.fits(HPHP::sz::word))  a->li(rAsm, i.s0);
     else                            a->li32(rAsm, i.s0.l());
-    a->add(i.d, i.s1, rAsm, true);
+    a->addo(i.d, i.s1, rAsm, true);
   }
   void emit(const addsd& i) { a->fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) { a->and_(i.d, i.s0, i.s1, true); }
@@ -175,9 +175,9 @@ struct Vgen {
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
   void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s1, i.s0); }
   void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s1, i.s0); }
-  void emit(const incw& i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incl& i) { a->add(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incq& i) { a->add(i.d, i.s, rone(), true); }
+  void emit(const incw& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incl& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incq& i) { a->addo(i.d, i.s, rone(), true); }
   void emit(const jmpi& i) {
     a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
   }
