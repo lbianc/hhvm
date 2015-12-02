@@ -355,6 +355,7 @@ struct Vgen {
   void emit(const stublogue& i);
   void emit(const stubret& i);
   void emit(const tailcallstub& i);
+  void emit(const callarray& i);
 
 private:
   CodeBlock& frozen() { return text.frozen().code; }
@@ -635,6 +636,10 @@ void Vgen::emit(const callr& i) {
 
 void Vgen::emit(const calls& i) {
   emitSmashableCall(a->code(), i.target);
+}
+
+void Vgen::emit(const callarray& i) {
+  emit(call{i.target, i.args});
 }
 
 /////////////////////////////////////////////////////////////////////////////
