@@ -1155,13 +1155,12 @@ void lowerForPPC64(Vout& v, testl& inst) {
 
 void lowerForPPC64(Vout& v, testbi& inst) {
   Vreg tmp1 = v.makeReg(),
-        tmp2 = v.makeReg(),
-        tmp3 = v.makeReg();
+        tmp2 = v.makeReg();
 
   v << movb{inst.s1, tmp1}; // Extract byte
   // convert testbi to testqi or ldimmq + testq by testqi's lowering
-  if (patchImm(inst.s0, v, tmp3)) v << testq{tmp3, tmp2, inst.sf};
-  else testqi{inst.s0, tmp2, inst.sf}; // perform test operation
+  if (patchImm(inst.s0, v, tmp2)) v << testq{tmp2, tmp1, inst.sf};
+  else v << testqi{inst.s0, tmp1, inst.sf}; // perform test operation
 }
 
 void lowerForPPC64(Vout& v, testli& inst) {
@@ -1241,7 +1240,7 @@ void lowerForPPC64(Vout& v, andbi& inst) {
   // patchImm doesn't need to be called as it should be < 8 bits
   v << andqi{inst.s0, tmp1, tmp2, inst.sf};
   // move only the byte result to the destination, keeping the higher 56bits
-  v << movb{inst.d, tmp2};
+  v << movb{tmp2, inst.d};
 }
 
 void lowerForPPC64(Vout& v, cloadq& inst) {
