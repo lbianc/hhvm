@@ -623,7 +623,10 @@ template<class Func>
 void Vgen::callExtern(Func func) {
   a->mflr(rfuncln());
   a->std(rfuncln(), rsp()[lr_position_on_callstack]);
-  a->stdu(rsp(), rsp()[-min_callstack_size]);
+  // carry the backchain to VM stack around on all vasm calls
+  a->ld(rfuncln(), rsp()[0]);
+  a->std(rfuncln(), rsp()[-min_callstack_size]);
+  a->addi(rsp(), rsp(), -min_callstack_size);
 
   // branch
   func();
