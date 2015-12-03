@@ -140,13 +140,18 @@ struct Vgen {
   }
   void emit(const addq& i) { a->addo(i.d, i.s0, i.s1, true); }
 
-  // Addqi can't be lowered to addq if the destiny is rsp(). To avoid this
-  // issue, addqi is the only vasm that it'll be lowered directly by using rAsm
-  // on its emission.
+  // Addqi and subqi can't be lowered to addq and subq if the destiny is rsp().
+  // To avoid this issue, addqi and subqi are the only vasms that will be
+  // lowered directly by using rAsm on its emission.
   void emit(const addqi& i) {
     if (i.s0.fits(HPHP::sz::word))  a->li(rAsm, i.s0);
     else                            a->li32(rAsm, i.s0.l());
     a->addo(i.d, i.s1, rAsm, true);
+  }
+  void emit(const subqi& i) {
+    if (i.s0.fits(HPHP::sz::word))  a->li(rAsm, i.s0);
+    else                            a->li32(rAsm, i.s0.l());
+    a->subo(i.d, i.s1, rAsm, true);
   }
   void emit(const addsd& i) { a->fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) { a->and_(i.d, i.s0, i.s1, true); }
@@ -889,7 +894,6 @@ X(andli,  andl,  s0, TWO(s1, d))    // could use patchImm
 X(andqi,  andq,  s0, TWO(s1, d))    // could use patchImm
 X(testqi, testq, s0, ONE(s1))
 X(cmpqi,  cmpq,  s0, ONE(s1))
-X(subqi,  subq,  s0, TWO(s1, d))
 
 #undef X
 

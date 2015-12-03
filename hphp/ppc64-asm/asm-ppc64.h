@@ -1803,6 +1803,9 @@ public:
   void sub(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0) {
     subf(rt, rb, ra, rc);
   }
+  void subo(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0) {
+    subfo(rt, rb, ra, rc);
+  }
   void subic()          { not_implemented(); }  //Extended addic Rx,Ry,-value
   void subc()           { not_implemented(); }  //Extended subfc Rx,Rz,Ry
   void cmpdi(const Reg64& ra, Immed imm) {
