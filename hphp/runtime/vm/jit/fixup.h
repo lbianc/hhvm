@@ -102,10 +102,6 @@ namespace HPHP { namespace jit {
  *     then look that IP up in the fixup map again to find a normal
  *     (non-indirect) Fixup record.
  *
- *     PPC64: The TC code has an additional call frame before the C++ frame.
- *     This is necessary in order to handle the backchain and, for that reason,
- *     a different approach is taken when locating these frames on fixup.cpp
- *
  */
 
 //////////////////////////////////////////////////////////////////////
