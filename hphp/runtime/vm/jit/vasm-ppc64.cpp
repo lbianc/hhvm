@@ -161,8 +161,8 @@ struct Vgen {
   void emit(const xxpermdi& i) { a->xxpermdi(i.d, i.s1, i.s0); }
   void emit(const mfvsrd& i) { a->mfvsrd(i.d, i.s); }
   void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
-  void emit(const decl& i) { a->subf(Reg64(i.d), rone(), Reg64(i.s), true); }
-  void emit(const decq& i) { a->subf(i.d, rone(), i.s, true); }
+  void emit(const decl& i) { a->subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(const decq& i) { a->subfo(i.d, rone(), i.s, true); }
   void emit(const imul& i) { a->mulld(i.d, i.s1, i.s0, true); }
   void emit(const srem& i) {
     // remainder as described on divd documentation:
