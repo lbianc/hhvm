@@ -52,6 +52,48 @@ namespace Debug {
 
 using jit::TCA;
 
+#if defined(__powerpc64__)
+typedef enum {
+  R0,
+  SP,
+  TOC,
+  R3,
+  R4,
+  R5,
+  R6,
+  R7,
+  R8,
+  R9,
+  R10,
+  R11,
+  R12,
+  TLS,
+  R14,
+  R15,
+  R16,
+  R17,
+  R18,
+  R19,
+  R20,
+  R21,
+  R22,
+  R23,
+  R24,
+  R25,
+  R26,
+  R27,
+  R28,
+  R29,
+  R30,
+  FP,
+  LR = 65,
+  /* synonyms */
+  RBP = FP,
+  RSP = SP,
+  RIP = LR
+} ppc64_regnum_t;
+
+#else
 typedef enum {
   RAX,
   RDX,
@@ -71,6 +113,8 @@ typedef enum {
   R15,
   RIP
 } x86_64_regnum_t;
+
+#endif
 
 const int DWARF_CODE_ALIGN = 1;
 const int DWARF_DATA_ALIGN = 8;
