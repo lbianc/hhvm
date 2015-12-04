@@ -261,7 +261,7 @@ struct Vgen {
     Reg64 d(i.d);
 
     a->bc(l_true, i.cc);
-    a->xor_(d, d, d, true);   /* set output to 0 */
+    a->xor_(d, d, d, false);   /* set output to 0 */
     a->b(l_end);
 
     l_true.asm_label(*a);
