@@ -626,11 +626,14 @@ void Vgen::emit(const lea& i) {
 
 template<class Func>
 void Vgen::callExtern(Func func) {
+  /*
+   * REMEMBER to update the smashable parameters for call on
+   * smashable-instr-ppc64.h when this function is updated!
+   */
   a->mflr(rfuncln());
   a->std(rfuncln(), rsp()[lr_position_on_callstack]);
   // carry the backchain to VM stack around on all vasm calls
-  a->ld(rfuncln(), rsp()[0]);
-  a->std(rfuncln(), rsp()[-min_callstack_size]);
+  a->std(rbackchain(), rsp()[-min_callstack_size]);
   a->addi(rsp(), rsp(), -min_callstack_size);
 
   // branch

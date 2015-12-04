@@ -201,8 +201,10 @@ ETCH_NAME(enterTCHelper):
 
   // Set firstAR->m_sfp to point to this frame.
   std %r1, 0(ETCH_ARG4)
-  // Set backchain to rvmsp
+  // Set backchain to rvmsp and save it on rbackchain to be used on vasm call
+  // (see abi definition for more details)
   std ETCH_ARG4, -176(%r1)
+  mr ETCH_R_BACKCHAIN, ETCH_ARG4
 
   mflr %r0
   std %r0, 16(%r1)              // LR on parent call frame
