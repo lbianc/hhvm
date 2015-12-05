@@ -233,6 +233,21 @@ TCA emitCallToExit(CodeBlock& cb) {
   ppc64_asm::Assembler a { cb };
   auto const start = a.frontier();
 
+  // temporaries
+  auto stack_value = rfuncln();
+  auto enterTCExit_address = rAsm;
+
+  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+    ppc64_asm::Label ok;
+    a.li64(enterTCExit_address, uintptr_t(enterTCExit));
+    a.ld  (stack_value, rsp()[32]);   // saved on enterTCHelper
+    a.cmpd(enterTCExit_address, stack_value);
+    a.b   (ok);
+    a.trap();
+
+    ok.asm_label(a);
+  }
+
   // Simply go to enterTCExit, no worries about the stack because it's balanced
   a.branchAuto(TCA(enterTCExit));
   return start;
