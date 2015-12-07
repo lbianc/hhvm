@@ -50,7 +50,6 @@ constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
 // CR depending the instruction result and instructions like "addi" (using
 // immediate) does not set the CR.
 constexpr PhysReg rone()       { return ppc64_asm::reg::r27; }
-constexpr PhysReg rbackchain() { return ppc64_asm::reg::r26; }
 
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
