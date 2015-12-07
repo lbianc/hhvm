@@ -632,8 +632,8 @@ void Vgen::callExtern(Func func) {
    */
   a->mflr(rfuncln());
   a->std(rfuncln(), rsp()[lr_position_on_callstack]);
-  // carry the backchain to VM stack around on all vasm calls
-  a->std(rbackchain(), rsp()[-min_callstack_size]);
+  // Set the backchain to go through the VM frames
+  a->std(rvmfp(), rsp()[-min_callstack_size]);
   a->addi(rsp(), rsp(), -min_callstack_size);
 
   // branch
