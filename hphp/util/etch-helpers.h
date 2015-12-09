@@ -97,7 +97,7 @@
 #define ETCH_RET1         %r3
 /* VM Registers must match definition on abi-ppc64.h */
 #define ETCH_V_ONE        1
-#define ETCH_R_ONE        %r27
+#define ETCH_R_ONE        %r28
 #define ETCH_R_VM_FP      %r31
 #define ETCH_R_VM_SP      %r29
 #define ETCH_R_VM_TL      %r30
