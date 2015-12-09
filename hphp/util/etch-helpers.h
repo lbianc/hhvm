@@ -98,7 +98,7 @@
 /* VM Registers must match definition on abi-ppc64.h */
 #define ETCH_V_ONE        1
 #define ETCH_R_ONE        %r27
-#define ETCH_R_VM_FP      %r28
+#define ETCH_R_VM_FP      %r31
 #define ETCH_R_VM_SP      %r29
 #define ETCH_R_VM_TL      %r30
 /* Service Request Registers must match svcreq_args list on abi-ppc64.cpp */

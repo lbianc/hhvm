@@ -36,7 +36,7 @@ namespace ppc64 {
 const Abi& abi(CodeKind kind = CodeKind::Trace);
 
 /* VM registers must match etch-helpers.h definitions! */
-constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r28; }
+constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r31; }
 constexpr PhysReg rvmsp()      { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
 constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
@@ -49,7 +49,7 @@ constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
 // This is necessary for PPC64 since instructions like "inc" must updates the
 // CR depending the instruction result and instructions like "addi" (using
 // immediate) does not set the CR.
-constexpr PhysReg rone()       { return ppc64_asm::reg::r27; }
+constexpr PhysReg rone()       { return ppc64_asm::reg::r28; }
 
 namespace detail {
   const RegSet kVMRegs      = rvmfp() | rvmtl() | rvmsp();
