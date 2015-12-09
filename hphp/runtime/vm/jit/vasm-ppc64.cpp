@@ -132,8 +132,8 @@ struct Vgen {
   void emit(const landingpad& i) {}
 
   // instructions
-  void emit(const absdbl& i) {
-    a->fabs(RegXMM(int(i.d)), RegXMM(int(i.s)), false);
+  void emit(const fabs& i) {
+    a->fabs(i.d, i.s, false);
   }
   void emit(const addl& i) {
     a->addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
@@ -1305,6 +1305,15 @@ void lowerForPPC64(Vout& v, cmpsd& inst) {
   }
   v << cmovq{CC_E, sf, nequal, equal, r64_d};
   v << copy{r64_d, inst.d}; // GP -> FP
+}
+
+void lowerForPPC64(Vout& v, absdbl& inst) {
+  // parameters are in FP format but in Vreg, so first copy it to a VregDbl type
+  auto before_conv = v.makeReg(), after_conv = v.makeReg(); // VregDbl register
+  v << copy{inst.s, before_conv};
+  v << fabs{before_conv, after_conv};
+  // now move it back to Vreg
+  v << copy{after_conv, inst.d};
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
