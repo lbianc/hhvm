@@ -1097,7 +1097,7 @@ void lowerForPPC64(Vout& v, cmpl& inst) {
   v << extsw{tmp1, tmp2};   // Extend word sign
   v << movl{inst.s1, tmp3}; // extract byte from s1
   v << extsw{tmp3, tmp4};   // Extend word sign
-  v << cmpq{tmp3, tmp4, inst.sf}; // Compare the extracted values
+  v << cmpq{tmp2, tmp4, inst.sf}; // Compare the extracted values
 }
 
 // Lower comparison with immediate to cmpqi
