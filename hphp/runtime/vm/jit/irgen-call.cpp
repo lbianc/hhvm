@@ -659,8 +659,9 @@ void fpushActRec(IRGS& env,
                  const StringData* invName) {
   ActRecInfo info;
   info.spOffset = offsetFromIRSP(env, BCSPOffset{-int32_t{kNumActRecCells}});
-  info.numArgs = numArgs;
   info.invName = invName;
+  info.numArgs = numArgs;
+
   gen(
     env,
     SpillFrame,
@@ -1076,6 +1077,18 @@ void emitFPassCW(IRGS& env, int32_t argNum) {
 void emitFCallArray(IRGS& env) {
   auto const data = CallArrayData {
     offsetFromIRSP(env, BCSPOffset{0}),
+    0,
+    bcOff(env),
+    nextBcOff(env),
+    callDestroysLocals(*env.currentNormalizedInstruction, curFunc(env))
+  };
+  gen(env, CallArray, data, sp(env), fp(env));
+}
+
+void emitFCallUnpack(IRGS& env, int32_t numParams) {
+  auto const data = CallArrayData {
+    offsetFromIRSP(env, BCSPOffset{0}),
+    numParams,
     bcOff(env),
     nextBcOff(env),
     callDestroysLocals(*env.currentNormalizedInstruction, curFunc(env))
@@ -1098,6 +1111,8 @@ void emitFCall(IRGS& env, int32_t numParams) {
     curFunc(env)
   );
 
+  auto op = curFunc(env)->unit()->getOp(bcOff(env));
+
   gen(
     env,
     Call,
@@ -1106,7 +1121,8 @@ void emitFCall(IRGS& env, int32_t numParams) {
       static_cast<uint32_t>(numParams),
       returnBcOffset,
       callee,
-      destroyLocals
+      destroyLocals,
+      op == Op::FCallAwait
     },
     sp(env),
     fp(env)

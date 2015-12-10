@@ -313,6 +313,18 @@ public:
   TCA handleBindCall(TCA toSmash, ActRec* calleeFrame, bool isImmutable);
 
   /*
+   * If we suspend an FCallAwait frame we need to suspend the
+   * caller. Returning to the jitted code will automatically take care
+   * of that, but if we're returning in the interpreter, we have to
+   * handle it separately. If the frame we're returning from was the
+   * vmJitCalledFrame(), we have to exit from handleResume (see
+   * comments for jitReturnPre and jitReturnPost). After exiting from
+   * there, there is no correct bytecode to resume at, so we use this
+   * helper to cleanup and continue.
+   */
+  TCA handleFCallAwaitSuspend();
+
+  /*
    * Look up (or create) and return the address of a translation for the
    * current VM location. If no translation can be found or created, this
    * function will interpret until it finds one, possibly throwing exceptions
@@ -431,7 +443,9 @@ bool shouldPGOFunc(const Func& func);
   TPC(interp_one) \
   TPC(max_trans) \
   TPC(enter_tc) \
-  TPC(service_req)
+  TPC(service_req) \
+  TPC(unser_prop_slow) \
+  TPC(unser_prop_fast)
 
 #define TPC(n) tpc_ ## n,
 enum TransPerfCounter {

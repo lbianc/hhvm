@@ -52,6 +52,9 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/apc-file-storage.h"
 #include "hphp/runtime/base/extended-logger.h"
+#ifdef FACEBOOK
+#include "hphp/facebook/runtime/server/thrift-logger.h"
+#endif
 #include "hphp/runtime/base/simple-counter.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/preg.h"
@@ -378,9 +381,11 @@ bool RuntimeOption::AutoTypecheck = true;
 // and store a pointer to it.)
 static bool s_PHP7_master = false;
 bool RuntimeOption::PHP7_DeprecateOldStyleCtors = false;
+bool RuntimeOption::PHP7_EngineExceptions = false;
 bool RuntimeOption::PHP7_IntSemantics = false;
 bool RuntimeOption::PHP7_LTR_assign = false;
 bool RuntimeOption::PHP7_NoHexNumerics = false;
+bool RuntimeOption::PHP7_ScalarTypes = false;
 bool RuntimeOption::PHP7_UVS = false;
 
 int RuntimeOption::GetScannerType() {
@@ -805,33 +810,48 @@ void RuntimeOption::Load(
       }
     ));
 
-    Config::Bind(Logger::LogHeader, ini, config, "Log.Header");
-    if (Config::GetBool(ini, config, "Log.AlwaysPrintStackTraces")) {
-      Logger::SetTheLogger(new ExtendedLogger());
-      ExtendedLogger::EnabledByDefault = true;
-    }
-    Config::Bind(Logger::LogNativeStackTrace, ini, config,
-                 "Log.NativeStackTrace", true);
-    Config::Bind(Logger::MaxMessagesPerRequest, ini,
-                 config, "Log.MaxMessagesPerRequest", -1);
-
-    Config::Bind(Logger::UseSyslog, ini, config, "Log.UseSyslog", false);
-    Config::Bind(Logger::UseLogFile, ini, config, "Log.UseLogFile", true);
-    Config::Bind(Logger::UseCronolog, ini, config, "Log.UseCronolog", false);
-    Config::Bind(Logger::UseRequestLog, ini, config, "Log.UseRequestLog",
-                 false);
-    if (Logger::UseLogFile) {
+#ifdef FACEBOOK
+    if (Config::GetBool(ini, config, "Log.UseThriftLogger", false)) {
+      fprintf(stderr,
+              "WARNING: Log.UseThriftLogger overrides other logger options.\n"
+              "WARNING: Log.UseThriftLogger ignores logger's thread-hook.\n");
+      Logger::UseLogFile = true;
       Config::Bind(LogFile, ini, config, "Log.File");
-      if (!RuntimeOption::ServerExecutionMode()) {
-        LogFile.clear();
-      }
       if (LogFile[0] == '|') Logger::IsPipeOutput = true;
       Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
+      Logger::SetTheLogger(new ThriftLogger());
+#else
+    if (false) {
+#endif
+    } else {
+      Config::Bind(Logger::LogHeader, ini, config, "Log.Header");
+      if (Config::GetBool(ini, config, "Log.AlwaysPrintStackTraces")) {
+        Logger::SetTheLogger(new ExtendedLogger());
+        ExtendedLogger::EnabledByDefault = true;
+      }
+      Config::Bind(Logger::LogNativeStackTrace, ini, config,
+                   "Log.NativeStackTrace", true);
+      Config::Bind(Logger::UseSyslog, ini, config, "Log.UseSyslog", false);
+      Config::Bind(Logger::UseLogFile, ini, config, "Log.UseLogFile", true);
+      Config::Bind(Logger::UseRequestLog, ini, config, "Log.UseRequestLog",
+                   false);
+      Config::Bind(Logger::AlwaysEscapeLog, ini, config, "Log.AlwaysEscapeLog",
+                   true);
+      if (Logger::UseLogFile) {
+        Config::Bind(LogFile, ini, config, "Log.File");
+        if (!RuntimeOption::ServerExecutionMode()) {
+          LogFile.clear();
+        }
+        if (LogFile[0] == '|') Logger::IsPipeOutput = true;
+        Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
+      }
     }
+
+    Config::Bind(Logger::UseCronolog, ini, config, "Log.UseCronolog", false);
+    Config::Bind(Logger::MaxMessagesPerRequest, ini,
+                 config, "Log.MaxMessagesPerRequest", -1);
     Config::Bind(LogFileFlusher::DropCacheChunkSize, ini,
                  config, "Log.DropCacheChunkSize", 1 << 20);
-    Config::Bind(Logger::AlwaysEscapeLog, ini, config, "Log.AlwaysEscapeLog",
-                 true);
     Config::Bind(RuntimeOption::LogHeaderMangle, ini, config,
                  "Log.HeaderMangle", 0);
     Config::Bind(AlwaysLogUnhandledExceptions, ini,
@@ -1188,11 +1208,15 @@ void RuntimeOption::Load(
     Config::Bind(s_PHP7_master, ini, config, "PHP7.all", false);
     Config::Bind(PHP7_DeprecateOldStyleCtors, ini, config,
                  "PHP7.DeprecateOldStyleCtors", s_PHP7_master);
+    Config::Bind(PHP7_EngineExceptions, ini, config, "PHP7.EngineExceptions",
+                 s_PHP7_master);
     Config::Bind(PHP7_IntSemantics, ini, config, "PHP7.IntSemantics",
                  s_PHP7_master);
     Config::Bind(PHP7_LTR_assign, ini, config, "PHP7.LTRAssign",
                  s_PHP7_master);
     Config::Bind(PHP7_NoHexNumerics, ini, config, "PHP7.NoHexNumerics",
+                 s_PHP7_master);
+    Config::Bind(PHP7_ScalarTypes, ini, config, "PHP7.ScalarTypes",
                  s_PHP7_master);
     Config::Bind(PHP7_UVS, ini, config, "PHP7.UVS", s_PHP7_master);
   }

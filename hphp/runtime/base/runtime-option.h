@@ -374,6 +374,8 @@ public:
   static bool PHP7_IntSemantics;
   static bool PHP7_LTR_assign;
   static bool PHP7_NoHexNumerics;
+  static bool PHP7_ScalarTypes;
+  static bool PHP7_EngineExceptions;
   static bool PHP7_UVS;
 
   static int64_t HeapSizeMB;

@@ -229,6 +229,7 @@ bool canDCE(IRInstruction* inst) {
   case PackMagicArgs:
   case LdMBase:
   case MethodExists:
+  case LdTVAux:
     assertx(!inst->isControlFlow());
     return true;
 
@@ -531,10 +532,13 @@ bool canDCE(IRInstruction* inst) {
   case CheckARMagicFlag:
   case LdARNumArgsAndFlags:
   case StARNumArgsAndFlags:
+  case StTVAux:
   case StARInvName:
   case ExitPlaceholder:
   case ThrowOutOfBounds:
   case ThrowInvalidOperation:
+  case ThrowArithmeticError:
+  case ThrowDivisionByZeroError:
   case MapIdx:
   case StMBase:
   case FinishMemberOp:
@@ -881,9 +885,8 @@ void convertToStackInst(IRUnit& unit, IRInstruction& inst) {
       return;
     }
     case LdLocAddr: {
-      auto ty = inst.typeParam().deref().ptr(Ptr::Stk);
       IRSPOffsetData data {locToStkOff(inst)};
-      unit.replace(&inst, LdStkAddr, data, ty, unit.mainSP());
+      unit.replace(&inst, LdStkAddr, data, unit.mainSP());
       return;
     }
     case AssertLoc: {

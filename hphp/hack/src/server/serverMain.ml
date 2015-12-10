@@ -200,7 +200,7 @@ let recheck genv old_env updates =
         (Relative_path.suffix ServerConfig.filename)
         GlobalConfig.program_name;
        (** TODO: Notify the server monitor directly about this. *)
-       exit 4
+       Exit_status.(exit Hhconfig_changed)
     end;
   end;
   let env, total_rechecked = Program.recheck genv old_env to_recheck in
@@ -441,7 +441,9 @@ let save _genv env (kind, fn) =
  * The server monitor will pass client connections to this process
  * via in_fd.
  *)
-let daemon_main options in_fd out_fd =
+let daemon_main options (ic, oc) =
+  let in_fd = Daemon.descr_of_in_channel ic in
+  let out_fd = Daemon.descr_of_out_channel oc in
   (** If the client started the server, it opened an FD before forking,
    * so it can be notified when the server is ready. The FD number was
    * passed in program args. *)
@@ -486,3 +488,6 @@ let daemon_main options in_fd out_fd =
     let env = MainInit.go options waiting_channel
       (fun () -> program_init genv) in
     serve genv env in_fd out_fd
+
+let entry =
+  Daemon.register_entry_point "ServerMain.daemon_main" daemon_main

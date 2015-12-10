@@ -23,6 +23,7 @@
 
 #include "hphp/util/portability.h"
 #include "hphp/util/low-ptr.h"
+#include "hphp/util/alloc.h"
 
 #include <folly/AtomicHashMap.h>
 
@@ -32,7 +33,6 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class Class;
 class Func;
 class String;
 
@@ -78,7 +78,8 @@ struct NamedEntity {
   typedef folly::AtomicHashMap<const StringData*,
                                NamedEntity,
                                string_data_hash,
-                               ahm_string_data_isame> Map;
+                               ahm_string_data_isame,
+                               LowAllocator<char>> Map;
 
   /////////////////////////////////////////////////////////////////////////////
   // Constructors.
@@ -173,17 +174,20 @@ struct NamedEntity {
                           String* normalizedStr = nullptr) FLATTEN;
 
   /*
-   * The global NamedEntity table.
-   *
-   * TODO(#4717225) Get rid of this.
+   * Visitors that traverse the named entity table
    */
-  static Map* table();
+  template<class Fn> static void foreach_class(Fn fn);
+  template<class Fn> static void foreach_cached_class(Fn fn);
+  template<class Fn> static void foreach_cached_func(Fn fn);
 
   /*
    * Size of the global NamedEntity table.
    */
   static size_t tableSize();
 
+private:
+  template<class Fn> static void foreach_name(Fn);
+  static Map* table();
 
   /////////////////////////////////////////////////////////////////////////////
   // Data members.
@@ -201,13 +205,12 @@ private:
 /*
  * Litstr and NamedEntity pair.
  */
-using NamedEntityPair = std::pair<const StringData*, const NamedEntity*>;
+using NamedEntityPair = std::pair<LowStringPtr,LowPtr<const NamedEntity>>;
 
-///////////////////////////////////////////////////////////////////////////////
 }
 
 #define incl_HPHP_VM_NAMED_ENTITY_INL_H_
 #include "hphp/runtime/vm/named-entity-inl.h"
 #undef incl_HPHP_VM_NAMED_ENTITY_INL_H_
 
-#endif // incl_HPHP_VM_NAMED_ENTITY_INL_H_
+#endif

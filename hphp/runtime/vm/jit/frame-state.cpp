@@ -416,18 +416,21 @@ bool FrameStateMgr::update(const IRInstruction* inst) {
       killLocalsForCall(extra->destroyLocals);
       for (auto& st : m_stack) st.frameMaySpanCall = true;
       // Remove tracked state for the actrec and array arg.
-      for (auto i = uint32_t{0}; i < kNumActRecCells + 1; ++i) {
+      uint32_t numCells = kNumActRecCells +
+        (extra->numParams ? extra->numParams : 1);
+      for (auto i = uint32_t{0}; i < numCells; ++i) {
         setStackValue(extra->spOffset + i, nullptr);
       }
       clearStackForCall();
-      setStackType(extra->spOffset + kNumActRecCells, TGen);
-      // A CallArray pops the ActRec, an array arg, and pushes a return value.
+      setStackType(extra->spOffset + numCells - 1, TGen);
+      // A CallArray pops the ActRec, actual args, an array arg, and
+      // pushes a return value.
       if (m_status == Status::Building) {
         assertx(cur().syncedSpLevel == inst->marker().spOff());
       } else {
         cur().syncedSpLevel = inst->marker().spOff();
       }
-      cur().syncedSpLevel -= kNumActRecCells;
+      cur().syncedSpLevel -= numCells - 1;
 
       if (!cur().fpiStack.empty()) {
         cur().fpiStack.pop_front();
@@ -712,6 +715,29 @@ bool FrameStateMgr::update(const IRInstruction* inst) {
 
   case FinishMemberOp:
     cur().mbase.reset();
+    break;
+
+  case VerifyRetFail:
+    if (!func()->unit()->useStrictTypes()) {
+      // In PHP 7 mode scalar types can sometimes coerce; we do this during the
+      // VerifyRetFail call -- we never allow this in HH files.
+      auto const offset = toIRSPOffset(
+        BCSPOffset{0},
+        inst->marker().spOff(),
+        spOffset()
+      );
+      setStackType(offset, TGen);
+    }
+    break;
+
+  case VerifyParamFail:
+    if (!func()->unit()->isHHFile() && !RuntimeOption::EnableHipHopSyntax &&
+        RuntimeOption::PHP7_ScalarTypes) {
+      // In PHP 7 mode scalar types can sometimes coerce; we do this during the
+      // VerifyParamFail call -- we never allow this in HH files.
+      auto id = inst->src(0)->intVal();
+      setLocalType(id, TGen);
+    }
     break;
 
   default:

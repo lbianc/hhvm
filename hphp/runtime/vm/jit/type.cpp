@@ -580,7 +580,7 @@ Type typeFromRAT(RepoAuthType ty) {
     case T::InitUnc:        return TUncountedInit;
     case T::Unc:            return TUncounted;
     case T::InitCell:       return TInitCell;
-    case T::InitGen:        return TInit;
+    case T::InitGen:        return TInitGen;
     case T::Gen:            return TGen;
 
     // TODO(#4205897): option specialized array types
@@ -637,7 +637,7 @@ Type negativeCheckType(Type srcType, Type typeParam) {
   // They may reject some Statics in some situations, where we only guard using
   // the type tag and not by loading the count field.
   auto tmp = srcType - typeParam;
-  if (typeParam.maybe(TStatic)) {
+  if (typeParam.maybe(TPersistent)) {
     if (tmp.maybe(TCountedStr)) tmp |= TStr;
     if (tmp.maybe(TCountedArr)) tmp |= TArr;
   }

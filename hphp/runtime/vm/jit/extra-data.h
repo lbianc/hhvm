@@ -473,6 +473,26 @@ struct FPushCufData : IRExtraData {
   uint32_t iterId;
 };
 
+struct LdTVAuxData : IRExtraData {
+  explicit LdTVAuxData(int32_t v = -1) : valid(v) {}
+
+  std::string show() const {
+    return folly::sformat("{:x}", valid);
+  }
+
+  int32_t valid;
+};
+
+struct StRetValData : IRExtraData {
+  explicit StRetValData(bool w) : wide(w) {}
+
+  std::string show() const {
+    return wide ? "wide" : "narrow";
+  }
+
+  bool wide;
+};
+
 struct ReqBindJmpData : IRExtraData {
   explicit ReqBindJmpData(const SrcKey& target,
                           FPInvOffset invSPOff,
@@ -601,10 +621,12 @@ struct InlineReturnNoFrameData : IRExtraData {
 
 struct CallArrayData : IRExtraData {
   explicit CallArrayData(IRSPOffset spOffset,
+                         int32_t numParams,
                          Offset pcOffset,
                          Offset after,
                          bool destroyLocals)
     : spOffset(spOffset)
+    , numParams(numParams)
     , pc(pcOffset)
     , after(after)
     , destroyLocals(destroyLocals)
@@ -616,6 +638,7 @@ struct CallArrayData : IRExtraData {
   }
 
   IRSPOffset spOffset;    // offset from StkPtr to bottom of call's ActRec+args
+  int32_t numParams;
   Offset pc;     // XXX why isn't this available in the marker?
   Offset after;  // offset from unit m_bc (unlike m_soff in ActRec)
   bool destroyLocals;
@@ -651,12 +674,14 @@ struct CallData : IRExtraData {
                     uint32_t numParams,
                     Offset after,
                     const Func* callee,
-                    bool destroy)
+                    bool destroy,
+                    bool fcallAwait)
     : spOffset(spOffset)
     , numParams(numParams)
     , after(after)
     , callee(callee)
     , destroyLocals(destroy)
+    , fcallAwait(fcallAwait)
   {}
 
   std::string show() const {
@@ -665,7 +690,8 @@ struct CallData : IRExtraData {
       callee
         ? folly::format(",{}", callee->fullName()).str()
         : std::string{},
-      destroyLocals ? ",destroyLocals" : ""
+      destroyLocals ? ",destroyLocals" : "",
+      fcallAwait ? ",fcallAwait" : ""
     );
   }
 
@@ -674,6 +700,7 @@ struct CallData : IRExtraData {
   Offset after;        // m_soff style: offset from func->base()
   const Func* callee;  // nullptr if not statically known
   bool destroyLocals;
+  bool fcallAwait;
 };
 
 struct RetCtrlData : IRExtraData {
@@ -1240,6 +1267,8 @@ X(LdContResumeAddr,             IsAsyncData);
 X(LdContActRec,                 IsAsyncData);
 X(GenericIdx,                   IRSPOffsetData);
 X(DecRef,                       DecRefData);
+X(LdTVAux,                      LdTVAuxData);
+X(StRetVal,                     StRetValData);
 
 #undef X
 

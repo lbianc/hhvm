@@ -596,10 +596,14 @@ TCA emitBindCallStub(CodeBlock& cb) {
   });
 }
 
-TCA emitFCallArrayHelper(CodeBlock& cb) {
+TCA emitFCallArrayHelper(CodeBlock& cb, UniqueStubs& us) {
   align(cb, Alignment::CacheLine, AlignContext::Dead);
 
-  return vwrap2(cb, [] (Vout& v, Vout& vcold) {
+  TCA ret = vwrap(cb, [] (Vout& v) {
+      v << movl{v.cns(0), rarg(2)};
+    });
+
+  us.fcallUnpackHelper = vwrap2(cb, [] (Vout& v, Vout& vcold) {
     // We reach fcallArrayHelper in the same context as a func prologue, so
     // this should really be a phplogue{}---but we don't need the return
     // address in the ActRec until later, and in the event the callee is
@@ -627,9 +631,15 @@ TCA emitFCallArrayHelper(CodeBlock& cb) {
     v << store{pc, rvmtl()[rds::kVmpcOff]};
     v << addq{bc, rarg(1), next, v.makeReg()};
 
-    bool (*helper)(PC) = &doFCallArrayTC;
+    bool (*helper)(PC, int32_t) = &doFCallArrayTC;
     auto const res = v.makeReg();
-    v << simplecall(v, helper, next, res);
+    v << vcall{
+      CallSpec::direct(helper),
+      v.makeVcallArgs({{next, rarg(2)}}),
+      v.makeTuple({res}),
+      Fixup{},
+      DestType::SSA
+    };
 
     v << load{rvmtl()[rds::kVmspOff], rvmsp()};
 
@@ -659,6 +669,8 @@ TCA emitFCallArrayHelper(CodeBlock& cb) {
     // balanced between the call to this stub and the ret from the callee.
     v << jmpr{body};
   });
+
+  return ret;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -716,6 +728,16 @@ TCA emitResumeInterpHelpers(CodeBlock& cb, UniqueStubs& us,
     v << ldimmb{1, rarg(1)};
     v << jmpi{rh.handleResume, RegSet(rarg(1))};
   });
+  us.fcallAwaitSuspendHelper = vwrap(cb, [&] (Vout& v) {
+    v << load{rvmtl()[rds::kVmfpOff], rvmfp()};
+    loadMCG(v, rarg(0));
+
+    auto const handler = reinterpret_cast<TCA>(
+      getMethodPtr(&MCGenerator::handleFCallAwaitSuspend)
+    );
+    v << call{handler, arg_regs(2)};
+    v << jmpi{rh.reenterTC, RegSet()};
+    });
 
   return us.resumeHelperRet;
 }
@@ -854,7 +876,7 @@ void UniqueStubs::emitAll() {
 
   ADD(bindCallStub,           emitBindCallStub<false>(cold));
   ADD(immutableBindCallStub,  emitBindCallStub<true>(cold));
-  ADD(fcallArrayHelper,       emitFCallArrayHelper(hot()));
+  ADD(fcallArrayHelper,       emitFCallArrayHelper(hot(), *this));
 
   ADD(decRefGeneric,  emitDecRefGeneric(cold));
 

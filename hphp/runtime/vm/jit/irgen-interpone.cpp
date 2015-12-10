@@ -503,7 +503,6 @@ void emitBindN(IRGS& env)                     { INTERP }
 void emitUnsetN(IRGS& env)                    { INTERP }
 void emitUnsetG(IRGS& env)                    { INTERP }
 void emitFPassN(IRGS& env, int32_t)           { INTERP }
-void emitFCallUnpack(IRGS& env, int32_t)      { INTERP }
 void emitCufSafeArray(IRGS& env)              { INTERP }
 void emitCufSafeReturn(IRGS& env)             { INTERP }
 void emitIncl(IRGS& env)                      { INTERP }
@@ -518,6 +517,13 @@ void emitDefCls(IRGS& env, int32_t)           { INTERP }
 void emitDefFunc(IRGS& env, int32_t)          { INTERP }
 void emitCatch(IRGS& env)                     { INTERP }
 void emitContGetReturn(IRGS& env)             { INTERP }
+void emitContAssignDelegate(IRGS& env, int32_t)
+                                              { INTERP }
+void emitContEnterDelegate(IRGS& env)         { INTERP }
+void emitYieldFromDelegate(IRGS& env, int32_t, int32_t)
+                                              { INTERP }
+void emitContUnsetDelegate(IRGS& env, int32_t, int32_t)
+                                              { INTERP }
 void emitHighInvalid(IRGS& env)               { std::abort(); }
 
 //////////////////////////////////////////////////////////////////////

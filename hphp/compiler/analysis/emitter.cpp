@@ -66,6 +66,7 @@
 #include "hphp/compiler/expression/static_member_expression.h"
 #include "hphp/compiler/expression/unary_op_expression.h"
 #include "hphp/compiler/expression/yield_expression.h"
+#include "hphp/compiler/expression/yield_from_expression.h"
 #include "hphp/compiler/expression/await_expression.h"
 #include "hphp/compiler/statement/block_statement.h"
 #include "hphp/compiler/statement/break_statement.h"
@@ -98,8 +99,10 @@
 #include "hphp/compiler/statement/trait_prec_statement.h"
 #include "hphp/compiler/statement/trait_alias_statement.h"
 #include "hphp/compiler/statement/typedef_statement.h"
+#include "hphp/compiler/statement/declare_statement.h"
 #include "hphp/compiler/parser/parser.h"
 #include "hphp/hhbbc/hhbbc.h"
+#include "hphp/hhbbc/parallel.h"
 
 #include "hphp/util/trace.h"
 #include "hphp/util/safe-cast.h"
@@ -2333,6 +2336,18 @@ private:
   const std::vector<Id> m_locs;
 };
 
+class UnsetGeneratorDelegateThunklet final : public Thunklet {
+public:
+  explicit UnsetGeneratorDelegateThunklet(Id iterId)
+    : m_id(iterId) {}
+  void emit(Emitter& e) override {
+    e.ContUnsetDelegate(m_id, true);
+    e.Unwind();
+  }
+private:
+  Id m_id;
+};
+
 class FinallyThunklet final : public Thunklet {
 public:
   explicit FinallyThunklet(FinallyStatementPtr finallyStatement,
@@ -2558,6 +2573,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
   const std::string& filename = file->getName();
   m_ue.m_filepath = makeStaticString(filename);
   m_ue.m_isHHFile = file->isHHFile();
+  m_ue.m_useStrictTypes = file->useStrictTypes();
 
   FunctionScopePtr func(file->getPseudoMain());
   if (!func) return;
@@ -2628,6 +2644,26 @@ void EmitterVisitor::visit(FileScopePtr file) {
           if (cNode->getFatalMessage()) {
             notMergeOnly = true;
           }
+          break;
+        }
+        case Construct::KindOfDeclareStatement: {
+          auto ds = static_pointer_cast<DeclareStatement>(s);
+          for (auto& decl : ds->getDeclareMap()) {
+            if (decl.first == "strict_types") {
+              if (ds->getBlock()->getStmts()->getCount()) {
+                emitMakeUnitFatal(e, "strict_types declaration must not use "
+                                  "block mode");
+                break;
+              }
+              if (!RuntimeOption::PHP7_ScalarTypes) {
+                emitMakeUnitFatal(e, "strict_types can only be used when"
+                                  "hhvm.php7.scalar_types = true");
+                break;
+              }
+            }
+          }
+
+          visit(ds->getBlock());
           break;
         }
         case Statement::KindOfTypedefStatement: {
@@ -2952,6 +2988,19 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   case Construct::KindOfTypedefStatement: {
     emitMakeUnitFatal(e, "Type statements are currently only allowed at "
                          "the top-level");
+    return false;
+  }
+
+  case Construct::KindOfDeclareStatement: {
+    auto ds = static_pointer_cast<DeclareStatement>(node);
+    for (auto& decl : ds->getDeclareMap()) {
+      if (decl.first == "strict_types") {
+        emitMakeUnitFatal(e, "strict_types declaration must not use "
+                          "block mode");
+      }
+    }
+
+    visit(ds->getBlock());
     return false;
   }
 
@@ -4868,6 +4917,16 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     assert(m_evalStack.size() == 1);
     return true;
   }
+  case Construct::KindOfYieldFromExpression: {
+    auto yf = static_pointer_cast<YieldFromExpression>(node);
+
+    registerYieldAwait(yf);
+    assert(m_evalStack.size() == 0);
+
+    emitYieldFrom(e, yf->getExpression());
+
+    return true;
+  }
   case Construct::KindOfAwaitExpression: {
     auto await = static_pointer_cast<AwaitExpression>(node);
 
@@ -4890,7 +4949,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
 
     assert(m_evalStack.size() == 1);
 
-    e.Await(m_pendingIters.size());
+    e.Await();
 
     resume.set(e);
     return true;
@@ -4994,7 +5053,7 @@ bool EmitterVisitor::emitInlineGenva(
   e.FCall(1);
   e.UnboxR();
 
-  e.Await(m_pendingIters.size());
+  e.Await();
   // result of AwaitAllWaitHandle does not matter
   emitPop(e);
 
@@ -8832,7 +8891,7 @@ void EmitterVisitor::emitForeachAwaitAs(Emitter& e,
   emitVirtualLocal(iterTempLocal);
   emitCGet(e);
   emitConstMethodCallNoParams(e, "next");
-  e.Await(m_pendingIters.size());
+  e.Await();
   auto const resultTempLocal = emitSetUnnamedL(e);
 
   // Did we finish yet?
@@ -8905,6 +8964,30 @@ void EmitterVisitor::emitForeachAwaitAs(Emitter& e,
   emitVirtualLocal(iterTempLocal);
   emitUnset(e);
   m_curFunc->freeUnnamedLocal(iterTempLocal);
+}
+
+void EmitterVisitor::emitYieldFrom(Emitter& e, ExpressionPtr exp) {
+  Id itId = m_curFunc->allocIterator();
+
+  // Set the delegate to the result of visiting our expression
+  visit(exp);
+  emitConvertToCell(e);
+  e.ContAssignDelegate(itId);
+
+  Offset bDelegateAssigned = m_ue.bcPos();
+
+  // Pass null to ContEnterDelegate initially.
+  e.Null();
+
+  Label loopBeginning(e);
+  e.ContEnterDelegate();
+  e.YieldFromDelegate(itId, loopBeginning);
+  newFaultRegionAndFunclet(bDelegateAssigned, m_ue.bcPos(),
+                           new UnsetGeneratorDelegateThunklet(itId));
+
+  // Now that we're done with it, remove the delegate. This lets us enforce
+  // the invariant that if we have a delegate set, we should be using it.
+  e.ContUnsetDelegate(itId, false);
 }
 
 /**
@@ -10053,6 +10136,7 @@ commitGlobalData(std::unique_ptr<ArrayTypeTable::Builder> arrTable) {
   gd.HardReturnTypeHints      = Option::HardReturnTypeHints;
   gd.UsedHHBBC                = Option::UseHHBBC;
   gd.PHP7_IntSemantics        = RuntimeOption::PHP7_IntSemantics;
+  gd.PHP7_ScalarTypes         = RuntimeOption::PHP7_ScalarTypes;
   gd.AutoprimeGenerators      = RuntimeOption::AutoprimeGenerators;
   gd.HardPrivatePropInference = true;
 

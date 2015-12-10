@@ -132,9 +132,9 @@ const char* getContextName(const Class* ctx) {
 ///////////////////////////////////////////////////////////////////////////////
 
 template<class Then>
-void ifNonStatic(Vout& v, Type ty, Vloc loc, Then then) {
-  if (!ty.maybe(TStatic)) {
-    then(v);
+void ifNonPersistent(Vout& v, Type ty, Vloc loc, Then then) {
+  if (!ty.maybe(TPersistent)) {
+    then(v); // non-persistent check below will always succeed
     return;
   }
 
@@ -157,9 +157,9 @@ void ifRefCountedType(Vout& v, Vout& vtaken, Type ty, Vloc loc, Then then) {
 }
 
 template<class Then>
-void ifRefCountedNonStatic(Vout& v, Type ty, Vloc loc, Then then) {
+void ifRefCountedNonPersistent(Vout& v, Type ty, Vloc loc, Then then) {
   ifRefCountedType(v, v, ty, loc, [&] (Vout& v) {
-    ifNonStatic(v, ty, loc, then);
+    ifNonPersistent(v, ty, loc, then);
   });
 }
 
@@ -458,6 +458,8 @@ CALL_OPCODE(BindNewElem)
 CALL_OPCODE(VectorIsset)
 CALL_OPCODE(PairIsset)
 CALL_OPCODE(ThrowOutOfBounds)
+CALL_OPCODE(ThrowArithmeticError)
+CALL_OPCODE(ThrowDivisionByZeroError)
 
 CALL_OPCODE(InstanceOfIface)
 CALL_OPCODE(InterfaceSupportsArr)
@@ -1701,6 +1703,10 @@ void CodeGenerator::cgLdObjInvoke(IRInstruction* inst) {
 void CodeGenerator::cgStRetVal(IRInstruction* inst) {
   auto  const rFp = srcLoc(inst, 0).reg();
   emitStoreTV(vmain(), rFp[AROFF(m_r)], srcLoc(inst, 1), inst->src(1));
+  if (RuntimeOption::EvalHHIRGenerateAsserts &&
+      inst->extra<StRetValData>()->wide) {
+    vmain() << storeli{0xbadbaad, rFp[AROFF(m_r.m_aux.u_fcallAwaitFlag)]};
+  }
 }
 
 void traceRet(ActRec* fp, Cell* sp, void* rip) {
@@ -2020,7 +2026,7 @@ void CodeGenerator::cgReqRetranslate(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgIncRef(IRInstruction* inst) {
-  // This is redundant with a check in ifRefCountedNonStatic, but we check
+  // This is redundant with a check in ifRefCountedNonPersistent, but we check
   // earlier to avoid emitting profiling code in this case.
   auto const ty = inst->src(0)->type();
   if (!ty.maybe(TCounted)) return;
@@ -2054,7 +2060,7 @@ void CodeGenerator::cgIncRef(IRInstruction* inst) {
       v << incwm{rvmtl()[*profHandle + offsetof(IncRefProfile, tryinc)],
                  v.makeReg()};
     }
-    ifNonStatic(v, ty, loc, [&](Vout& v) {
+    ifNonPersistent(v, ty, loc, [&](Vout& v) {
       emitIncRef(v, loc.reg());
     });
   });
@@ -2238,7 +2244,7 @@ void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                v.makeReg()};
   }
 
-  if (!ty.maybe(TStatic)) {
+  if (!ty.maybe(TPersistent)) {
     auto const sf = emitDecRef(v, base);
     ifThen(v, vcold(), CC_E, sf, destroy, unlikelyDestroy);
     return;
@@ -2312,7 +2318,7 @@ void CodeGenerator::cgDecRefNZ(IRInstruction* inst) {
   emitIncStat(vmain(), Stats::TC_DecRef_NZ);
   emitDecRefTypeStat(vmain(), inst);
   auto const ty = inst->src(0)->type();
-  ifRefCountedNonStatic(
+  ifRefCountedNonPersistent(
     vmain(), ty, srcLoc(inst, 0),
     [&] (Vout& v) {
       auto const base = srcLoc(inst, 0).reg();
@@ -2350,6 +2356,13 @@ void CodeGenerator::cgCufIterSpillFrame(IRInstruction* inst) {
       emitIncRef(v, ctx3);
     });
   }
+
+  auto callerFunc = inst->marker().func();
+  auto unit = callerFunc->unit();
+  auto weakTypesFlag = !callerFunc->isBuiltin() && !unit->useStrictTypes()
+      ? ActRec::Flags::UseWeakTypes
+      : ActRec::Flags::None;
+
   auto name = v.makeReg();
   v << load{fpReg[itOff + CufIter::nameOff()], name};
   auto const sf = v.makeReg();
@@ -2362,13 +2375,17 @@ void CodeGenerator::cgCufIterSpillFrame(IRInstruction* inst) {
     v << store{name, spReg[spOffset + int(AROFF(m_invName))]};
     auto const encoded = ActRec::encodeNumArgsAndFlags(
       safe_cast<int32_t>(nArgs),
-      ActRec::Flags::MagicDispatch
+      static_cast<ActRec::Flags>(ActRec::Flags::MagicDispatch | weakTypesFlag)
     );
     v << storeli{static_cast<int32_t>(encoded),
                  spReg[spOffset + int(AROFF(m_numArgsAndFlags))]};
   }, [&](Vout& v) {
+    auto const encoded = ActRec::encodeNumArgsAndFlags(
+      safe_cast<int32_t>(nArgs),
+      weakTypesFlag
+    );
     v << store{name, spReg[spOffset + int(AROFF(m_invName))]};
-    v << storeli{safe_cast<int32_t>(nArgs),
+    v << storeli{safe_cast<int32_t>(encoded),
                  spReg[spOffset + int(AROFF(m_numArgsAndFlags))]};
   });
 }
@@ -2425,7 +2442,11 @@ void CodeGenerator::cgSpillFrame(IRInstruction* inst) {
     v << store{srcLoc(inst, 1).reg(0), spReg[spOffset + int(AROFF(m_func))]};
   }
 
-  auto flags = ActRec::Flags::None;
+  auto callerFunc = inst->marker().func();
+  auto unit = callerFunc->unit();
+  auto flags = !callerFunc->isBuiltin() && !unit->useStrictTypes()
+      ? ActRec::Flags::UseWeakTypes
+      : ActRec::Flags::None;
   if (magicName) {
     flags = static_cast<ActRec::Flags>(flags | ActRec::Flags::MagicDispatch);
   }
@@ -2593,14 +2614,19 @@ void CodeGenerator::cgCallArray(IRInstruction* inst) {
   auto const extra  = inst->extra<CallArray>();
   auto const pc     = v.cns(extra->pc);
   auto const after  = v.cns(extra->after);
-  auto const target = mcg->tx().uniqueStubs.fcallArrayHelper;
+  auto const target = extra->numParams == 0 ?
+    mcg->tx().uniqueStubs.fcallArrayHelper :
+    mcg->tx().uniqueStubs.fcallUnpackHelper;
   auto const rSP    = srcLoc(inst, 0 /* sp */).reg();
   auto const syncSP = v.makeReg();
   v << lea{rSP[cellsToBytes(extra->spOffset.offset)], syncSP};
   v << syncvmsp{syncSP};
 
   auto done = v.makeBlock();
-  v << vcallarray{target, fcall_array_regs(), v.makeTuple({pc, after}),
+  auto args = extra->numParams == 0 ?
+    v.makeTuple({pc, after}) :
+    v.makeTuple({pc, after, v.cns(extra->numParams)});
+  v << vcallarray{target, fcall_array_regs(), args,
                   {done, m_state.labels[inst->taken()]}};
   m_state.catch_calls[inst->taken()] = CatchCall::PHP;
   v = done;
@@ -2620,12 +2646,16 @@ void CodeGenerator::cgCall(IRInstruction* inst) {
   // instruction pointers.
   constexpr uint64_t kUninitializedRIP = 0xba5eba11acc01ade;
 
-  auto const ar = argc * sizeof(TypedValue);
-  v << store{rFP, rSP[cellsToBytes(extra->spOffset.offset) +
-    ar + AROFF(m_sfp)]};
-  v << storeli{safe_cast<int32_t>(extra->after),
-               rSP[cellsToBytes(extra->spOffset.offset) + ar + AROFF(m_soff)]};
+  auto const arOff =
+    cellsToBytes(extra->spOffset.offset) + argc * sizeof(TypedValue);
 
+  v << store{rFP, rSP[arOff + AROFF(m_sfp)]};
+  v << storeli{safe_cast<int32_t>(extra->after), rSP[arOff + AROFF(m_soff)]};
+  if (extra->fcallAwait) {
+    auto imm = static_cast<int32_t>(
+      ActRec::encodeNumArgsAndFlags(argc, ActRec::Flags::IsFCallAwait));
+    v << storeli{imm, rSP[arOff + AROFF(m_numArgsAndFlags)]};
+  }
   // The sync_sp temporary will be eliminated by vasm-copy.
   auto const sync_sp = v.makeReg();
   v << lea{rSP[cellsToBytes(extra->spOffset.offset)], sync_sp};
@@ -3591,7 +3621,7 @@ void CodeGenerator::cgCheckType(IRInstruction* inst) {
    * situations with strings and arrays that are neither constantly-foldable
    * nor in the emitTypeTest code path.
    *
-   * We currently actually check their static bit here.  Note (importantly)
+   * We currently actually check their persistent bit here. Note (importantly)
    * that this is why toDataType can't return KindOfStaticString for
    * TStaticStr---this code will let an apc string through.  Also note
    * that CheckType<Uncounted> t1:{Null|Str} doesn't get this treatment
@@ -3602,7 +3632,7 @@ void CodeGenerator::cgCheckType(IRInstruction* inst) {
       typeParam <= TUncounted &&
       srcType.subtypeOfAny(TStr, TArr) &&
       srcType.maybe(typeParam)) {
-    assertx(srcType.maybe(TStatic));
+    assertx(srcType.maybe(TPersistent));
     v << cmplim{0, rData[FAST_REFCOUNT_OFFSET], sf};
     doJcc(CC_L, sf);
     doMov();
@@ -4488,17 +4518,29 @@ void CodeGenerator::cgContPreNext(IRInstruction* inst) {
   auto& v           = vmain();
   auto const sf     = v.makeReg();
 
+  // These asserts make sure that the startedCheck work.
   static_assert(uint8_t(BaseGenerator::State::Created) == 0, "used below");
   static_assert(uint8_t(BaseGenerator::State::Started) == 1, "used below");
-  static_assert(uint8_t(BaseGenerator::State::Running) > 1, "");
-  static_assert(uint8_t(BaseGenerator::State::Done) > 1, "");
+  static_assert(uint8_t(BaseGenerator::State::Done) > 3, "");
+  // These asserts ensure that the state transition works. If we're in the
+  // Created state we want to transition to Priming, and if we're in the
+  // Started state we want to transition to Running. By laying out the enum
+  // this way we can avoid the branch and just transition by adding 2 to the
+  // current state.
+  static_assert(uint8_t(BaseGenerator::State::Priming) ==
+                uint8_t(BaseGenerator::State::Created) +  2, "used below");
+  static_assert(uint8_t(BaseGenerator::State::Running) ==
+                uint8_t(BaseGenerator::State::Started) +  2, "used below");
 
   // Take exit if state != 1 (checkStarted) or state > 1 (!checkStarted).
   v << cmpbim{int8_t(BaseGenerator::State::Started), contReg[stateOff], sf};
   emitFwdJcc(v, checkStarted ? CC_NE : CC_A, sf, inst->taken());
 
-  // Set generator state as Running.
-  v << storebi{int8_t(BaseGenerator::State::Running), contReg[stateOff]};
+  // Transition the generator into either the Priming state (if we were just
+  // created) or the Running state (if we were started). Due to the way the
+  // enum is layed out, we can model this by just adding 2.
+  auto const isf = v.makeReg();
+  v << addlim{int8_t(2), contReg[stateOff], isf};
 }
 
 void CodeGenerator::cgContStartedCheck(IRInstruction* inst) {
@@ -5469,16 +5511,22 @@ void CodeGenerator::cgCheckARMagicFlag(IRInstruction* inst) {
   auto const fp = srcLoc(inst, 0).reg();
 
   auto& v = vmain();
-  auto const arflags = v.makeReg();
-  auto const tmp = v.makeReg();
   auto const sf = v.makeReg();
 
   auto const mask = static_cast<int32_t>(ActRec::Flags::MagicDispatch);
 
-  v << loadl{fp[AROFF(m_numArgsAndFlags)], arflags};
-  v << andli{mask, arflags, tmp, v.makeReg()};
-  v << cmpli{mask, tmp, sf};
-  v << jcc{CC_NZ, sf, {label(inst->next()), label(inst->taken())}};
+  if (mask & (mask - 1)) {
+    auto const tmp = v.makeReg();
+    auto const arflags = v.makeReg();
+    // need to test multiple bits
+    v << loadl{fp[AROFF(m_numArgsAndFlags)], arflags};
+    v << andli{mask, arflags, tmp, v.makeReg()};
+    v << cmpli{mask, tmp, sf};
+    v << jcc{CC_NZ, sf, {label(inst->next()), label(inst->taken())}};
+  } else {
+    v << testlim{mask, fp[AROFF(m_numArgsAndFlags)], sf};
+    v << jcc{CC_Z, sf, {label(inst->next()), label(inst->taken())}};
+  }
 }
 
 void CodeGenerator::cgLdARNumArgsAndFlags(IRInstruction* inst) {
@@ -5490,7 +5538,37 @@ void CodeGenerator::cgLdARNumArgsAndFlags(IRInstruction* inst) {
 void CodeGenerator::cgStARNumArgsAndFlags(IRInstruction* inst) {
   auto const fp = srcLoc(inst, 0).reg();
   auto const val = srcLoc(inst, 1).reg();
-  vmain() << storel{val, fp[AROFF(m_numArgsAndFlags)]};
+  auto &v = vmain();
+  auto const tmp = v.makeReg();
+  v << movtql{val, tmp};
+  v << storel{tmp, fp[AROFF(m_numArgsAndFlags)]};
+}
+
+void CodeGenerator::cgLdTVAux(IRInstruction* inst) {
+  auto const extra = inst->extra<LdTVAux>();
+  auto tv = srcLoc(inst, 0).reg();
+  auto dst = dstLoc(inst, 0).reg();
+  auto &v = vmain();
+  v << loadzlq{tv[TVOFF(m_aux)], dst};
+  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+    auto mask = -extra->valid - 1;
+    if (mask) {
+      auto const sf = v.makeReg();
+      v << testqi{mask, dst, sf};
+      ifThen(v, CC_NZ, sf, [](Vout& v) {
+          v << ud2{};
+        });
+    }
+  }
+}
+
+void CodeGenerator::cgStTVAux(IRInstruction* inst) {
+  auto const fp = srcLoc(inst, 0).reg();
+  auto const val = srcLoc(inst, 1).reg();
+  auto &v = vmain();
+  auto const tmp = v.makeReg();
+  v << movtql{val, tmp};
+  v << storel{tmp, fp[AROFF(m_r.m_aux.u_fcallAwaitFlag)]};
 }
 
 void CodeGenerator::cgLdARInvName(IRInstruction* inst) {

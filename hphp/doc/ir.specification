@@ -847,10 +847,9 @@ To string conversions:
   Loads the address of the stack slot given by the pointer in S0 at the offset
   (in cells). T must be a subtype of PtrToStkGen.
 
-| LdLocAddr<T,localId>, D(PtrToFrameGen), S(FramePtr), NF
+| LdLocAddr<localId>, D(PtrToFrameGen), S(FramePtr), NF
 
-  Loads the address of the local slot localId from the frame S0 into D. T must
-  be a subtype of PtrToFrameGen.
+  Loads the address of the local slot localId from the frame S0 into D.
 
 | LdRDSAddr<T,RDSHandle>, DParam, NA, NF
 
@@ -1347,15 +1346,17 @@ To string conversions:
   dead. InlineFrameStart is the caller FP-relative offset of the start of the
   callee frame. Everything below InlineFrameStart is dead.
 
-| CallArray<spOffset,returnOff,after,destroyLocals>, ND,
-|                                                    S(StkPtr) S(FramePtr),
-|                                                    Er
+| CallArray<spOffset,numParams,callOff,after,destroyLocals>,
+|                       ND,
+|                       S(StkPtr) S(FramePtr),
+|                       Er
 
-  Invoke function corresponding to the current FPI with array args. S0+spOffset
-  points to the stack resulting after the ActRec for the function and the array
-  of its arguments is pushed. CallArray pops the array off the stack, pushes
-  the elements of the array as arguments, and invokes the function in the
-  ActRec.
+  Invoke function corresponding to the current FPI with numParams arguments,
+  the last of which is an array of the remaining args. Used for FCallArray (in
+  which case numParams == 1), and FCallUnpack. S0+spOffset points to the stack
+  resulting after the ActRec for the function and numParams arguments have been
+  pushed. CallArray pops the array off the stack, pushes the elements of the
+  array as arguments, and invokes the function in the ActRec.
 
 | Call<offset,numParams,returnOff,funcd,destroyLocals>, ND,
 |                                                       S(StkPtr) S(FramePtr),
@@ -1408,10 +1409,11 @@ To string conversions:
   resumable rather than performing an async function return.  Returns by
   leaving the TC to enterTCHelper.
 
-| StRetVal, ND, S(FramePtr) S(Gen), CRc
+| StRetVal<wide>, ND, S(FramePtr) S(Gen), CRc
 
   Writes the value in S1 to the return value slot on the activation record
   pointed to by S0.
+  If wide is true, can clobber the aux field of the return value slot.
 
 | ReleaseVVAndSkip, ND, S(FramePtr), B
 
@@ -1616,7 +1618,7 @@ To string conversions:
 
   Verify a return type hint.
 
-| VerifyRetFail, ND, S(Gen), Er
+| VerifyRetFail, ND, S(PtrToGen), Er
 
   Failure to verify a return type hint.
 
@@ -2451,6 +2453,14 @@ fields of that struct for holding intermediate values.
 
   Throws an InvalidOperationException with a message indicating S0.
 
+| ThrowArithmeticError, ND, S(Str), Er|T
+
+  Throws an ArithmeticError with a message indicating S0.
+
+| ThrowDivisionByZeroError, ND, S(Str), Er|T
+
+  Throws a DivisionByZeroError with a message indicating S0.
+
 | ProfilePackedArray, ND, S(Arr), NF
 
   Profile type of array S0 (i.e. whether it is packed or ).
@@ -2600,6 +2610,15 @@ fields of that struct for holding intermediate values.
   Call MixedArray::MakePacked() with the value of numArgs() on the ActRec
   pointed to by the frame pointer S0 as the first argument, and the pointer to
   the first parameter in the frame as the second argument.
+
+| LdTVAux<ValidBits>, D(Int), S(PtrToStkGen), NF
+
+  Load the value of m_aux from the Cell pointed to by S0. ValidBits is a mask
+  specifying which bits are allowed to be set. The runtime may ignore it.
+
+| StTVAux, ND, S(FramePtr) S(Int), CRc
+
+  Store S1 to m_aux field of the m_ret field of the frame pointed to by S0.
 
 /* Local Variables: */
 /* fill-column: 79 */
