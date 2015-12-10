@@ -1081,9 +1081,9 @@ void lowerForPPC64(Vout& v, cmpb& inst) {
       tmp4 = v.makeReg();
 
   v << movb{inst.s0, tmp1}; // Extract s0
-  v << extsb {tmp1, tmp2, VregSF(RegSF{0})}; // Extend byte sign
+  v << extsb {tmp1, tmp2};  // Extend byte sign
   v << movb{inst.s1, tmp3}; // Extract s1
-  v << extsb {tmp3, tmp4, VregSF(RegSF{0})}; // Extend byte sign
+  v << extsb {tmp3, tmp4};  // Extend byte sign
   v << cmpq{tmp2, tmp4, inst.sf}; // Compare values
 }
 
@@ -1094,9 +1094,9 @@ void lowerForPPC64(Vout& v, cmpl& inst) {
       tmp4 = v.makeReg();
 
   v << movl{inst.s0, tmp1}; // Extract byte from s0
-  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp1, tmp2};   // Extend word sign
   v << movl{inst.s1, tmp3}; // extract byte from s1
-  v << extsw{tmp3, tmp4, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp3, tmp4};   // Extend word sign
   v << cmpq{tmp3, tmp4, inst.sf}; // Compare the extracted values
 }
 
@@ -1105,7 +1105,7 @@ void lowerForPPC64(Vout& v, cmpbi& inst) {
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
 
   v << movb{inst.s1, tmp1}; // extract s0
-  v << extsb {tmp1, tmp2, VregSF(RegSF{0})}; // extend byte sign
+  v << extsb {tmp1, tmp2};  // extend byte sign
   // compare immed only with the byte extracted
   v << cmpqi{inst.s0, tmp2, inst.sf};
 }
@@ -1115,7 +1115,7 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
 
   v << movl{inst.s1, tmp1}; // Extract s1
-  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp1, tmp2};   // Extend word sign
   // Lowering for cmpqi removed, since movl was emitted, then the empty
   // will always return false
   if (patchImm(inst.s0, v, tmp3)) v << cmpq{tmp3, tmp2, inst.sf};
@@ -1132,8 +1132,8 @@ void lowerForPPC64(Vout& v, subl& inst) {
 
   v << movl{inst.s0, tmp1}; // Extract s0
   v << movl{inst.s1, tmp2}; // Extract s1
-  v << extsw{tmp1, tmp3, VregSF(RegSF{0})}; // Extend word sign
-  v << extsw{tmp2, tmp4, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp1, tmp3};   // Extend word sign
+  v << extsw{tmp2, tmp4};   // Extend word sign
   v << subq{tmp3, tmp4, tmp5, inst.sf}; // subtract
   // Move word to d and do not touch the higher 32bits
   v << movlk{tmp5, Reg64(inst.d)};
@@ -1145,7 +1145,7 @@ void lowerForPPC64(Vout& v, subbi& inst) {
         tmp3 = v.makeReg();
 
   v << movb{inst.s1, tmp1}; // Extract s1
-  v << extsb{tmp1, tmp2, VregSF(RegSF{0})}; // Extend byte sign
+  v << extsb{tmp1, tmp2};   // Extend byte sign
   v << subqi{inst.s0, tmp2, tmp3, inst.sf}; // subtract immediate
   // move byte to destiny and do not touch higher 56bits
   v << movb{tmp3, inst.d};
@@ -1157,7 +1157,7 @@ void lowerForPPC64(Vout& v, subli& inst) {
         tmp3 = v.makeReg();
 
   v << movl{inst.s1, tmp1}; // Extract s1
-  v << extsw{tmp1, tmp2, VregSF(RegSF{0})}; // Extend word sign
+  v << extsw{tmp1, tmp2};   // Extend word sign
   v << subqi{inst.s0, tmp2, tmp3, inst.sf}; // Subtract immediate
   // move word to destiny and do not touch the higher 32bits
   v << movlk{tmp3, Reg64(inst.d)};

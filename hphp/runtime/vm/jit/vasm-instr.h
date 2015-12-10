@@ -253,8 +253,8 @@ struct Vunit;
   O(xorqi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
   /* PPC64 instructions */\
   O(addl, Inone, U(s0) U(s1), D(d) D(sf)) \
-  O(extsb, Inone, UH(s,d), DH(d,s) D(sf))\
-  O(extsw, Inone, UH(s,d), DH(d,s) D(sf))\
+  O(extsb, Inone, UH(s,d), DH(d,s))\
+  O(extsw, Inone, UH(s,d), DH(d,s))\
   O(fabs, Inone, UH(s,d), DH(d,s))\
   O(fcmpo, Inone, U(s0) U(s1), D(sf))\
   O(fcmpu, Inone, U(s0) U(s1), D(sf))\
@@ -943,8 +943,8 @@ struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; };
  */
 struct addl  { Vreg32 s0, s1, d; VregSF sf; };
 // Extend byte sign
-struct extsb { Vreg64 s; Vreg64 d; VregSF sf; };
-struct extsw { Vreg64 s; Vreg64 d; VregSF sf; };
+struct extsb { Vreg64 s; Vreg64 d; };
+struct extsw { Vreg64 s; Vreg64 d; };
 struct fabs { VregDbl s; VregDbl d; };
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };
