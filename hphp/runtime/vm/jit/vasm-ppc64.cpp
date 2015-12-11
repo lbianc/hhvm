@@ -452,7 +452,7 @@ void Vgen::emit(const ldimmq& i) {
 void Vgen::emit(const contenter& i) {
  ppc64_asm::Label stub, end;
  Reg64 fp = i.fp;
- a->ba(end); // jmp in x64
+ a->branchAuto(end, BranchConditions::Always, LinkReg::DoNotTouch);
 
  stub.asm_label(*a);
  // The following two lines are equivalent to popm lower.
@@ -464,7 +464,11 @@ void Vgen::emit(const contenter& i) {
  emit(jmpr{i.target, i.args});
 
  end.asm_label(*a);
- a->bla(stub); // call in x64
+
+ // This is equivalent to vasm 'call'
+ callExtern([&]() {
+   a->branchAuto(stub, BranchConditions::Always, LinkReg::Save);
+ });
 
  emit(unwind{{i.targets[0], i.targets[1]}});
 }
