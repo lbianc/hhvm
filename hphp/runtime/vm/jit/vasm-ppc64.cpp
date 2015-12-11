@@ -968,7 +968,7 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 X(orwim,   orq,  loadw, storew, m, s0)
 X(orqim,   orq,  load,  store,  m, s0)
 X(addqim,  addq, load,  store,  m, s0)
-
+X(addlim,  addl, load,  store,  m, s0)
 #undef X
 
 // Handles MemoryRef arguments and load the data input from memory, but these
