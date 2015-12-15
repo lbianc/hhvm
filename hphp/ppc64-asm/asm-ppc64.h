@@ -2514,10 +2514,8 @@ public:
     }
 
     // TODO(gut): Use a typedef or something to avoid copying code like below:
-    if (LinkReg::Save == lr)
-      a.bcl(bp.bo(), bp.bi(), offset);
-    else
-      a.bc(bp.bo(), bp.bi(), offset);
+    if (LinkReg::Save == lr) a.bcl(bp.bo(), bp.bi(), offset);
+    else                     a.bc (bp.bo(), bp.bi(), offset);
   }
 
   void branchAbsolute(Assembler& a,
@@ -2531,10 +2529,8 @@ public:
     assert(HPHP::jit::deltaFits(address, HPHP::sz::word) && "Address too big");
 
     // TODO(gut): Use a typedef or something to avoid copying code like below:
-    if (LinkReg::Save == lr)
-      a.bcla(bp.bo(), bp.bi(), uint16_t(address));
-    else
-      a.bca(bp.bo(), bp.bi(), uint16_t(address));
+    if (LinkReg::Save == lr) a.bcla(bp.bo(), bp.bi(), uint16_t(address));
+    else                     a.bca (bp.bo(), bp.bi(), uint16_t(address));
   }
 
   void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
@@ -2547,10 +2543,8 @@ public:
     // When branching to another context, r12 need to keep the target address
     // to correctly set r2 (TOC reference).
     a.mtctr(reg::r12);
-    if (LinkReg::Save == lr)
-      a.bcctrl(bp.bo(), bp.bi(), 0);
-    else
-      a.bcctr(bp.bo(), bp.bi(), 0);
+    if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
+    else                     a.bcctr (bp.bo(), bp.bi(), 0);
   }
 
   void asm_label(Assembler& a) {
