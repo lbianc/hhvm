@@ -674,27 +674,49 @@ void Vgen::emit(const callarray& i) {
 /////////////////////////////////////////////////////////////////////////////
 /*
  * Stub function ABI
- */
-/*
- * Unlike X64, the return address is not stored in the stack but on LR. Perform
- * the prologue simply by saving the rvmfp on current stack
+ *
+ * The code below is Call-stub ABI compliant, not PPC64 ABI.
  */
 void Vgen::emit(const stublogue& i) {
+  // Return address
+  auto tmp = rfuncln();
+  a->mflr(tmp);
+  a->std(tmp, rsp()[-8]);
+
+  // rvmfp, if necessary
   if (i.saveframe) {
-    // will not be lowered, but this Vptr doesn't need to be patched, so it's ok
-    emit(store{rvmfp(), rsp()[rvmfp_position_on_callstack]});
+    a->std(rvmfp(), rsp()[-16]);
   }
+
+  // update native stack pointer
+  a->addi(rsp(), rsp(), -16);
 }
 
 void Vgen::emit(const stubret& i) {
+  // update native stack pointer
+  a->addi(rsp(), rsp(), 16);
+
+  // rvmfp, if necessary
   if (i.saveframe) {
-    // will not be lowered, but this Vptr doesn't need to be patched, so it's ok
-    emit(load{rsp()[rvmfp_position_on_callstack], rvmfp()});
+    a->ld(rvmfp(), rsp()[-16]);
   }
+
+  // Return address
+  auto tmp = rfuncln();
+  a->ld(tmp, rsp()[-8]);
+  a->mtlr(tmp);
   emit(ret{});
 }
 
 void Vgen::emit(const tailcallstub& i) {
+  // Return address
+  auto tmp = rfuncln();
+  a->mflr(tmp);
+  a->std(tmp, rsp()[-8]);
+
+  // update native stack pointer
+  a->addi(rsp(), rsp(), -16);
+
   emit(jmpi{i.target, i.args});
 }
 
