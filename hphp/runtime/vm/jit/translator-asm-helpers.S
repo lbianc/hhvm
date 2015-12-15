@@ -213,29 +213,36 @@ ETCH_NAME(enterTCHelper):
   // Save non-volatile registers in order to restore it on Epilogue
   // also takes care of debug information
 
-#define SAVE_REG(reg, pos)              \
+#define SAVE_GP_REG(reg, pos)              \
+  std %r##reg, pos(%r1); CFI3C(offset, reg, pos - 192)
+
+#define SAVE_FP_REG(reg, pos)              \
   std %f##reg, pos(%r1); CFI3C(offset, 32 + reg, pos - 192)
 
-  SAVE_REG(14, 48)   // floating point local variable #1
-  SAVE_REG(15, 56)   // floating point local variable #2
-  SAVE_REG(16, 64)   // floating point local variable #3
-  SAVE_REG(17, 72)   // floating point local variable #4
-  SAVE_REG(18, 80)   // floating point local variable #5
-  SAVE_REG(19, 88)   // floating point local variable #6
-  SAVE_REG(20, 96)   // floating point local variable #7
-  SAVE_REG(21, 104)  // floating point local variable #8
-  SAVE_REG(22, 112)  // floating point local variable #9
-  SAVE_REG(23, 120)  // floating point local variable #10
-  SAVE_REG(24, 128)  // floating point local variable #11
-  SAVE_REG(25, 136)  // floating point local variable #12
-  SAVE_REG(26, 144)  // floating point local variable #13
-  SAVE_REG(27, 152)  // floating point local variable #14
-  SAVE_REG(28, 160)  // floating point local variable #15
-  SAVE_REG(29, 168)  // floating point local variable #16
-  SAVE_REG(30, 176)  // floating point local variable #17
-  SAVE_REG(31, 184)  // floating point local variable #18
+  // as the VM may branch externally and overwrite TOC pointer, save it here
+  SAVE_GP_REG(2, 24)    // TOC pointer
 
-#undef SAVE_REG
+  SAVE_FP_REG(14, 48)   // floating point local variable #1
+  SAVE_FP_REG(15, 56)   // floating point local variable #2
+  SAVE_FP_REG(16, 64)   // floating point local variable #3
+  SAVE_FP_REG(17, 72)   // floating point local variable #4
+  SAVE_FP_REG(18, 80)   // floating point local variable #5
+  SAVE_FP_REG(19, 88)   // floating point local variable #6
+  SAVE_FP_REG(20, 96)   // floating point local variable #7
+  SAVE_FP_REG(21, 104)  // floating point local variable #8
+  SAVE_FP_REG(22, 112)  // floating point local variable #9
+  SAVE_FP_REG(23, 120)  // floating point local variable #10
+  SAVE_FP_REG(24, 128)  // floating point local variable #11
+  SAVE_FP_REG(25, 136)  // floating point local variable #12
+  SAVE_FP_REG(26, 144)  // floating point local variable #13
+  SAVE_FP_REG(27, 152)  // floating point local variable #14
+  SAVE_FP_REG(28, 160)  // floating point local variable #15
+  SAVE_FP_REG(29, 168)  // floating point local variable #16
+  SAVE_FP_REG(30, 176)  // floating point local variable #17
+  SAVE_FP_REG(31, 184)  // floating point local variable #18
+
+#undef SAVE_FP_REG
+#undef SAVE_GP_REG
 
   // Set up special registers used for translated code.
   mr ETCH_R_VM_SP, ETCH_ARG1
@@ -285,6 +292,7 @@ ETCH_NAME(enterTCExit):
 
   // Epilogue
   // Load non-volatile registers saved on Prologue
+  ld %r2,  24(%r1)    // TOC pointer
   ld %f14, 48(%r1)    // floating point local variable #1
   ld %f15, 56(%r1)    // floating point local variable #2
   ld %f16, 64(%r1)    // floating point local variable #3
