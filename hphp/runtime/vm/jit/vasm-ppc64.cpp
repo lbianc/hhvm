@@ -452,20 +452,20 @@ void Vgen::emit(const ldimmq& i) {
 void Vgen::emit(const contenter& i) {
  ppc64_asm::Label stub, end;
  Reg64 fp = i.fp;
- a->branchAuto(end, BranchConditions::Always, LinkReg::DoNotTouch);
 
+ a->branchAuto(end);
  stub.asm_label(*a);
- // The following two lines are equivalent to popm lower.
- // Since we can't call popm lower function here at the
- // moment it seems sufficient.
+
+ // The following two lines are equivalent to
+ // pop(fp[AROFF(m_savedRip)]) on x64.
  // rAsm is a scratch register.
- emit(pop{rAsm});
+ a->mflr(rAsm);
  emit(store{rAsm, fp[AROFF(m_savedRip)]});
- emit(jmpr{i.target, i.args});
+
+ emit(jmpr{i.target,i.args});
 
  end.asm_label(*a);
-
- // This is equivalent to vasm 'call'
+ // This is equivalent to vasm 'call'.
  callExtern([&]() {
    a->branchAuto(stub, BranchConditions::Always, LinkReg::Save);
  });
