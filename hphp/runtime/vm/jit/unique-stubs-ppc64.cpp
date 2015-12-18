@@ -32,6 +32,7 @@
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 #include "hphp/runtime/vm/jit/unwind-ppc64.h"
@@ -271,7 +272,7 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     v << load{rvmtl()[unwinderExnOff()], rarg(0)};
     v << call{TCA(_Unwind_Resume), arg_regs(1)};
   });
-  us.endCatchHelperPast = cb.frontier();
+  us.endCatchHelperPast = cb.frontier() - smashableCallSkipEpilogue();
   vwrap(cb, [] (Vout& v) { v << ud2{}; });
 
   alignJmpTarget(cb);
