@@ -40,8 +40,11 @@ constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r31; }
 constexpr PhysReg rvmsp()      { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
 constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
+// optional in function linkage/used in function prologues
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
+// thread pointer
 constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
+// optional in function linkage/function entry address at global entry point
 constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
 constexpr PhysReg rtoc()       { return ppc64_asm::reg::r2;  }
 
@@ -76,23 +79,8 @@ PhysReg r_svcreq_arg(size_t i);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#if !defined(__powerpc64__)
-  // Don't break compilation. Ideally this file should not be compiled at all
-  // on other architectures.
-  #define m_savedToc _dummyB
-#endif
-
-/* Used on vasm for defining a minimal callstack on call/ret */
-constexpr int min_callstack_size          = AROFF(_dummyB);   // next union
-constexpr int lr_position_on_callstack    = AROFF(m_savedRip);
-constexpr int toc_position_on_callstack   = AROFF(m_savedToc);
-constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
-
-/* Parameters for push/pop and keep stack aligned */
-constexpr int push_pop_position           = 8;
-
 /*
- * Scratch register.
+ * Scratch registers.
  */
 constexpr Reg64 rAsm = ppc64_asm::reg::r11;
 constexpr RegXMM rFasm = ppc64_asm::reg::f15;

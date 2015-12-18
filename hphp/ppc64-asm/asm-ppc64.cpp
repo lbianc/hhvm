@@ -711,6 +711,46 @@ void Assembler::unimplemented(){
   EmitDForm(0, rn(0), rn(0), 0);
 }
 
+// Create prologue when calling
+void Assembler::prologue (const Reg64& rsp,
+                          const Reg64& rtoc,
+                          const Reg64& rfuncln,
+                          const Reg64& rvmfp) {
+  // save caller's return address on caller's frame
+  mflr(rfuncln);
+  std(rfuncln, rsp[lr_position_on_callstack - min_callstack_size]);
+  // Set the backchain to go through the VM frames
+  std(rvmfp, rsp[-2 * min_callstack_size]);
+  addi(rsp, rsp, -2 * min_callstack_size);
+
+  // save TOC value locally
+  std(rtoc, rsp[toc_position_on_callstack]);
+}
+
+// Create epilogue when calling.
+void Assembler::epilogue (const Reg64& rsp,
+                          const Reg64& rtoc,
+                          const Reg64& rfuncln) {
+  // restore this TOC value
+  ld(rtoc, rsp[toc_position_on_callstack]);
+
+  // restore caller's return address
+  addi(rsp, rsp, 2 * min_callstack_size);  // same in landingpad vasm!!!
+  ld(rfuncln, rsp[lr_position_on_callstack - min_callstack_size]);
+  mtlr(rfuncln);
+}
+
+void Assembler::call (const Reg64& rsp,
+                      const Reg64& rtoc,
+                      const Reg64& rfuncln,
+                      const Reg64& rvmfp,
+                      CodeAddress target) {
+
+  prologue(rsp, rtoc, rfuncln, rvmfp);
+  branchAuto(target, BranchConditions::Always, LinkReg::Save);
+  epilogue(rsp, rtoc, rfuncln);
+}
+
 void Assembler::li64 (const Reg64& rt, int64_t imm64) {
   // li64 always emits 5 instructions i.e. 20 bytes of instructions.
   // Assumes that 0 bytes will be missing in the end.

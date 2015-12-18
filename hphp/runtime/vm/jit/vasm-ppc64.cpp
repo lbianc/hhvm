@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | (c) Copyright IBM Corporation 2015                                   |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -50,6 +50,15 @@ using namespace ppc64;
 using namespace ppc64_asm;
 
 namespace {
+
+///////////////////////////////////////////////////////////////////////////////
+
+// rvmfp position on call stack.
+constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
+
+/* Parameters for push/pop and keep stack aligned */
+constexpr int push_pop_position           = 8;
+
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Vgen {
@@ -176,7 +185,7 @@ struct Vgen {
   void emit(const srem& i) {
     // remainder as described on divd documentation:
     a->divd(i.d, i.s0, i.s1);   // i.d = quotient
-    a->mulld(i.d, i.d, i.s1);   // i.d = quotient×divisor
+    a->mulld(i.d, i.d, i.s1);   // i.d = quotient*divisor
     a->subf(i.d, i.d, i.s0);    // i.d = remainder
   }
   void emit(const divint& i) { a->divd(i.d,  i.s0, i.s1, false); }
@@ -645,26 +654,9 @@ void Vgen::callExtern(Func func) {
    * Below there is additionally another "min_callstack_size" so LR save
    * doesn't overwrite the memory of a pushed element.
    */
-  // save caller's return address on caller's frame
-  a->mflr(rfuncln());
-  a->std(rfuncln(), rsp()[lr_position_on_callstack - min_callstack_size]);
-  // Set the backchain to go through the VM frames
-  a->std(rvmfp(), rsp()[-2 * min_callstack_size]);
-  a->addi(rsp(), rsp(), -2 * min_callstack_size);
-
-  // save TOC value locally
-  a->std(rtoc(), rsp()[toc_position_on_callstack]);
-
-  // branch
-  func();
-
-  // restore this TOC value
-  a->ld(rtoc(), rsp()[toc_position_on_callstack]);
-
-  // restore caller's return address
-  a->addi(rsp(), rsp(), 2 * min_callstack_size);  // same in landingpad vasm!!!
-  a->ld(rfuncln(), rsp()[lr_position_on_callstack - min_callstack_size]);
-  a->mtlr(rfuncln());
+  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
+  func(); // branch
+  a->epilogue(rsp(), rtoc(), rfuncln());
 }
 
 void Vgen::emit(const call& i) {
@@ -696,30 +688,26 @@ void Vgen::emit(const callarray& i) {
  * The code below is Call-stub ABI compliant, not PPC64 ABI.
  */
 void Vgen::emit(const stublogue& i) {
-  // Return address
+  // Return address.
   auto tmp = rfuncln();
   a->mflr(tmp);
   a->std(tmp, rsp()[-8]);
 
-  // rvmfp, if necessary
-  if (i.saveframe) {
-    a->std(rvmfp(), rsp()[-16]);
-  }
+  // rvmfp, if necessary.
+  if (i.saveframe) a->std(rvmfp(), rsp()[-16]);
 
-  // update native stack pointer
+  // Update native stack pointer.
   a->addi(rsp(), rsp(), -16);
 }
 
 void Vgen::emit(const stubret& i) {
-  // update native stack pointer
+  // Update native stack pointer.
   a->addi(rsp(), rsp(), 16);
 
-  // rvmfp, if necessary
-  if (i.saveframe) {
-    a->ld(rvmfp(), rsp()[-16]);
-  }
+  // rvmfp, if necessary.
+  if (i.saveframe) a->ld(rvmfp(), rsp()[-16]);
 
-  // Return address
+  // Return address.
   auto tmp = rfuncln();
   a->ld(tmp, rsp()[-8]);
   a->mtlr(tmp);
@@ -727,12 +715,12 @@ void Vgen::emit(const stubret& i) {
 }
 
 void Vgen::emit(const tailcallstub& i) {
-  // Return address
+  // Return address.
   auto tmp = rfuncln();
   a->mflr(tmp);
   a->std(tmp, rsp()[-8]);
 
-  // update native stack pointer
+  // Update native stack pointer.
   a->addi(rsp(), rsp(), -16);
 
   emit(jmpi{i.target, i.args});
@@ -778,14 +766,14 @@ bool patchImm(Immed imm, Vout& v, Vreg& tmpRegister) {
 void patchVptr(Vptr& p, Vout& v) {
   // Map all address modes that Vptr can be so it can be handled.
   enum class AddressModes {
-    kInvalid         = 0,
-    kDisp            = 1, //            Displacement
-    kBase            = 2, //       Base
-    kBase_Disp       = 3, //       Base+Displacement
-    kIndex           = 4, // Index
-    kIndex_Disp      = 5, // Index     +Dispacement
-    kIndex_Base      = 6, // Index+Base
-    kIndex_Base_Disp = 7  // Index+Base+Displacement
+    Invalid        = 0,
+    Disp           = 1, // Displacement
+    Base           = 2, // Base
+    BaseDisp       = 3, // Base+Displacement
+    Index          = 4, // Index
+    IndexDisp      = 5, // Index+Dispacement
+    IndexBase      = 6, // Index+Base
+    IndexBaseDisp  = 7  // Index+Base+Displacement
   };
 
   AddressModes mode = static_cast<AddressModes>(
@@ -809,12 +797,12 @@ void patchVptr(Vptr& p, Vout& v) {
   Vreg disp_reg;
   bool patched_disp = patchImm(Immed(p.disp), v, disp_reg);
   switch (mode) {
-    case AddressModes::kBase:
-    case AddressModes::kIndex_Base:
+    case AddressModes::Base:
+    case AddressModes::IndexBase:
       // ppc64 can handle these address modes. Nothing to do here.
       break;
 
-    case AddressModes::kBase_Disp:
+    case AddressModes::BaseDisp:
       // ppc64 can handle this address mode if displacement < 16bits
       if (patched_disp) {
         // disp is loaded on a register. Change address mode to kBase_Index
@@ -823,13 +811,13 @@ void patchVptr(Vptr& p, Vout& v) {
       }
       break;
 
-    case AddressModes::kIndex:
+    case AddressModes::Index:
         // treat it as kBase to avoid a kIndex_Disp asm handling.
         std::swap(p.base, p.index);
       break;
 
-    case AddressModes::kDisp:
-    case AddressModes::kIndex_Disp:
+    case AddressModes::Disp:
+    case AddressModes::IndexDisp:
       if (patched_disp) {
         // disp is loaded on a register. Change address mode to kBase_Index
         p.base = disp_reg;
@@ -841,7 +829,7 @@ void patchVptr(Vptr& p, Vout& v) {
       }
       break;
 
-    case AddressModes::kIndex_Base_Disp: {
+    case AddressModes::IndexBaseDisp: {
       // This mode is not supported: Displacement will be embedded on Index
       Vreg index_disp_reg = v.makeReg();
       if (patched_disp) {
@@ -854,7 +842,7 @@ void patchVptr(Vptr& p, Vout& v) {
       break;
     }
 
-    case AddressModes::kInvalid:
+    case AddressModes::Invalid:
     default:
       assert(false && "Invalid address mode");
       break;
@@ -887,7 +875,8 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg();                                               \
   Vptr p = inst.attr_addr;                                              \
   patchVptr(p, v);                                                      \
-  v << vasm_imm{inst.attr_data, tmp} << vasm_dst{tmp, p};               \
+  v << vasm_imm{inst.attr_data, tmp};                                   \
+  v << vasm_dst{tmp, p};                                                \
 }
 
 X(storebi, s, storeb, m, ldimmb)
@@ -951,7 +940,8 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg(), tmp2 = v.makeReg();                           \
   Vptr p = inst.attr_addr;                                              \
   patchVptr(p, v);                                                      \
-  v << vasm_load{p, tmp} << vasm_dst{attrs tmp, tmp2, inst.sf};         \
+  v << vasm_load{p, tmp};                                               \
+  v << vasm_dst{attrs tmp, tmp2, inst.sf};                              \
   v << vasm_store{tmp2, p};                                             \
 }
 
@@ -1022,7 +1012,8 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vptr p = inst.attr_addr;                                              \
   patchVptr(p, v);                                                      \
   Vreg tmp = v.makeReg();                                               \
-  v << vasm_load{p, tmp} << vasm_dst{inst.attr, tmp, inst.sf};          \
+  v << vasm_load{p, tmp};                                               \
+  v << vasm_dst{inst.attr, tmp, inst.sf};                               \
 }
 
 X(testqm, testq, load,  s1, s0)

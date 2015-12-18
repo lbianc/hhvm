@@ -74,9 +74,8 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     auto const start = a.frontier();
 
-    a.mflr(rfuncln());
-    a.std(rfuncln(), rsp()[lr_position_on_callstack]);
-    a.stdu(rsp(), rsp()[-min_callstack_size]);
+    // force the backchain to be the same as current LR.
+    a.prologue(rsp(), rtoc(), rfuncln(), rfuncln());
 
     bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
     unsigned char *hook_ptr = (unsigned char *)hook;
@@ -86,22 +85,17 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     auto const HelperReturn = a.frontier();
     us.functionEnterHelperReturn = HelperReturn;
-    a.cmpdi(rret(), 0);
+
+    a.epilogue(rsp(), rtoc(), rfuncln());
+
     ppc64_asm::Label l;
+    a.cmpdi(rret(), 0);
+
     a.branchAuto(l, ppc64_asm::BranchConditions::Equal);
       // indent to improve readability of the block
-      a.addi(rsp(), rsp(), min_callstack_size);
-
-      a.ld(rfuncln(), rsp()[lr_position_on_callstack]);
-      a.mtlr(rfuncln());
       a.blr();
 
     l.asm_label(a);
-      // indent to improve readability of the block
-      a.addi(rsp(), rsp(), min_callstack_size);
-
-      a.ld(rfuncln(), rsp()[lr_position_on_callstack]);
-      a.mtlr(rfuncln());
 
     return start;
 }

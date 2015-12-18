@@ -128,7 +128,7 @@ constexpr PhysReg simd_args[] = {
 };
 
 constexpr PhysReg svcreq_args[] = {
-    reg::r4, reg::r5, reg::r6, reg::r7
+  reg::r4, reg::r5, reg::r6, reg::r7
 };
 
 ///////////////////////////////////////////////////////////////////////////////
