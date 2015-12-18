@@ -33,6 +33,7 @@
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/unwind.h"
 #include "hphp/util/abi-cxx.h"
+#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
 
 // on cygwin in 64 bit/SEH adding frame information needs to be
 // handled with rtladdfunctiontable and rtldeletefunctiontable
@@ -106,6 +107,16 @@ TCA lookup_catch_trace(TCA rip, _Unwind_Exception* exn) {
   if (auto catchTraceOpt = mcg->getCatchTrace(rip)) {
     if (auto catchTrace = *catchTraceOpt) return catchTrace;
 
+#if defined(__powerpc64__)
+    const size_t kCallSize = ppc64::smashableCallLen();
+
+    auto callAddr = rip - kCallSize;
+    TCA helperAddr = nullptr;
+    if (ppc64::isCall(callAddr)) {
+      not_implemented();
+      // TODO: helperAddr = rip + *reinterpret_cast<int32_t*>(callAddr + 1);
+    }
+#else
     // A few of our optimization passes must be aware of every path out of
     // the trace, so throwing through jitted code without a catch block is
     // very bad. This is indicated with a present but nullptr entry in the
@@ -118,6 +129,7 @@ TCA lookup_catch_trace(TCA rip, _Unwind_Exception* exn) {
     if (*callAddr == kCallOpcode) {
       helperAddr = rip + *reinterpret_cast<int32_t*>(callAddr + 1);
     }
+#endif
 
     always_assert_flog(false,
                        "Translated call to {} threw '{}' without "
