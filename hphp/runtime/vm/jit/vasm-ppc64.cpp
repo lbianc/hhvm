@@ -634,16 +634,23 @@ void Vgen::callExtern(Func func) {
    * REMEMBER to update the smashable parameters for call on
    * smashable-instr-ppc64.h when this function is updated!
    */
+  // save caller's return address on caller's frame
   a->mflr(rfuncln());
   a->std(rfuncln(), rsp()[lr_position_on_callstack]);
   // Set the backchain to go through the VM frames
   a->std(rvmfp(), rsp()[-min_callstack_size]);
   a->addi(rsp(), rsp(), -min_callstack_size);
 
+  // save TOC value locally
+  a->std(rtoc(), rsp()[toc_position_on_callstack]);
+
   // branch
   func();
 
-  // pop caller's return address
+  // restore this TOC value
+  a->ld(rtoc(), rsp()[toc_position_on_callstack]);
+
+  // restore caller's return address
   a->addi(rsp(), rsp(), min_callstack_size);
   a->ld(rfuncln(), rsp()[lr_position_on_callstack]);
   a->mtlr(rfuncln());

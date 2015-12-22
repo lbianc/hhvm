@@ -43,6 +43,7 @@ constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
 constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
 constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
+constexpr PhysReg rtoc()       { return ppc64_asm::reg::r2;  }
 
 // rone() returns register 28, which has the value "1" (Initiated in
 // translator-asm-helpers.S).
@@ -78,6 +79,7 @@ PhysReg r_svcreq_arg(size_t i);
 /* Used on vasm for defining a minimal callstack on call/ret */
 constexpr int min_callstack_size          = AROFF(_dummyB);   // next union
 constexpr int lr_position_on_callstack    = AROFF(m_savedRip);
+constexpr int toc_position_on_callstack   = AROFF(m_savedToc);
 constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
 
 /* Parameters for push/pop and keep stack aligned */

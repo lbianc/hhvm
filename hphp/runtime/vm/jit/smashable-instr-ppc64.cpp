@@ -136,7 +136,7 @@ void smashCall(TCA inst, TCA target) {
   if (!isCall(inst))
     always_assert(false && "smashCall has unexpected block");
 
-  a.setFrontier(inst + smashableCallSkip());
+  a.setFrontier(inst + smashableCallSkipPrologue());
 
   a.li64(ppc64_asm::reg::r12, reinterpret_cast<uint64_t>(target));
 }
@@ -183,7 +183,7 @@ TCA smashableCallTarget(TCA inst) {
     return nullptr;
 
   return reinterpret_cast<TCA>(
-      ppc64_asm::Assembler::getLi64(inst + smashableCallSkip()));
+      ppc64_asm::Assembler::getLi64(inst + smashableCallSkipPrologue()));
 }
 
 TCA smashableJmpTarget(TCA inst) {

@@ -43,11 +43,14 @@ constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
-// mflr, std, std, addi, li64 (5 instr), mtctr, bctrl
-constexpr size_t smashableCallLen() { return kStdIns * 11; }
+// mflr, std, std, addi, std, li64 (5 instr), mtctr, bctrl
+constexpr size_t smashableCallLen() { return kStdIns * 12; }
 // prologue of call function until the li64 takes place:
-// skips mflr, std, std, addi
-constexpr uint8_t smashableCallSkip() { return kStdIns * 4; }
+// skips mflr, std, std, addi, std
+constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 5; }
+// epilogue of call function after the return address:
+// skips ld, addi, ld, mtlr
+constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 4; }
 // checks if the @inst is pointing to a call
 inline bool isCall(TCA inst) {
   // a call always begin with a mflr and it's rarely used
