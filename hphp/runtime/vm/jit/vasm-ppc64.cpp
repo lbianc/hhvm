@@ -477,7 +477,7 @@ void Vgen::emit(const syncpoint& i) {
   // As the syncpoint intends to store the return address of the last call vasm,
   // it's necessary to subtract 3 instructions from the callExtern's "epilogue"
   // as mtlr, ld, addi exist before current a->frontier().
-  TCA saved_pc = a->frontier() - 3 * ppc64_asm::Assembler::kBytesPerInstr;
+  TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", saved_pc,
          i.fix.pcOffset, i.fix.spOffset);
   mcg->recordSyncPoint(saved_pc, i.fix);
