@@ -76,6 +76,12 @@ PhysReg r_svcreq_arg(size_t i);
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#if !defined(__powerpc64__)
+  // Don't break compilation. Ideally this file should not be compiled at all
+  // on other architectures.
+  #define m_savedToc _dummyB
+#endif
+
 /* Used on vasm for defining a minimal callstack on call/ret */
 constexpr int min_callstack_size          = AROFF(_dummyB);   // next union
 constexpr int lr_position_on_callstack    = AROFF(m_savedRip);
