@@ -34,17 +34,18 @@ let nice_kill (ic, oc) env =
   Printf.eprintf "Attempting to nicely kill server for %s\n%!" root_s;
   (** Read Server's hello. See also ClientConnect.wait_for_server_hello *)
   let readable, _, _  = Unix.select
-    [Unix.descr_of_in_channel ic] [] [Unix.descr_of_in_channel ic] 1.0 in
+    [Timeout.descr_of_in_channel ic] [] [Timeout.descr_of_in_channel ic] 1.0 in
   (match readable with
   | [_fd] ->
     begin
       (** input_line can timeout. *)
-      let hello_msg = Sys_utils.with_timeout 1
+      let hello_msg = Timeout.with_timeout
+        ~timeout:1
         ~on_timeout: begin fun _ ->
           Printf.eprintf "Server is busy, can't nicely kill";
           raise FailedToKill end
-        ~do_:begin fun () ->
-          input_line ic
+        ~do_:begin fun timeout ->
+          Timeout.input_line ~timeout ic
         end
       in
       match hello_msg with
@@ -78,7 +79,7 @@ let mean_kill env =
   let success =
     try
       List.iter pids ~f:begin fun (pid, reason) ->
-        try Unix.kill pid 9
+        try Sys_utils.terminate_process pid
         with Unix.Unix_error (Unix.ESRCH, "kill", _) ->
           (* no such process *)
           ()
@@ -96,14 +97,15 @@ let mean_kill env =
 
 let do_kill env =
   let root_s = Path.to_string env.root in
-  match ServerUtils.connect_to_monitor env.root with
+  match ServerUtils.connect_to_monitor
+    env.root HhServerMonitorConfig.Program.name with
   | Result.Ok conn ->
       begin
         try nice_kill conn env with FailedToKill ->
           try mean_kill env with FailedToKill ->
             raise Exit_status.(Exit_with Kill_error)
       end
-  | Result.Error SMUtils.Server_missing ->
+  | Result.Error (SMUtils.Server_missing | SMUtils.Server_died) ->
       Printf.eprintf "Error: no server to kill for %s\n%!" root_s
   | Result.Error SMUtils.Build_id_mismatched ->
       Printf.eprintf "Successfully killed server for %s\n%!" root_s

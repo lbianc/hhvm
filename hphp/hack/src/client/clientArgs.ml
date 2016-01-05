@@ -64,7 +64,10 @@ let parse_check_args cmd =
   let autostart = ref true in
   let from = ref "" in
   let version = ref false in
+  let monitor_logname = ref false in
   let logname = ref false in
+  let refactor_mode = ref "" in
+  let refactor_before = ref "" in
 
   (* custom behaviors *)
   let set_from x () = from := x in
@@ -145,8 +148,16 @@ let parse_check_args cmd =
         "";
     "--identify-function", Arg.String (fun x -> set_mode (MODE_IDENTIFY_FUNCTION x) ()),
       " (mode) print the full function name at the position [line:character] of the text on stdin";
-    "--refactor", Arg.Unit (set_mode MODE_REFACTOR),
-      "";
+    "--refactor", Arg.Tuple ([
+        Arg.Symbol (
+          ["Class"; "Function"; "Method"],
+          (fun x -> refactor_mode := x));
+        Arg.String (fun x -> refactor_before := x);
+        Arg.String (fun x ->
+          set_mode (MODE_REFACTOR (!refactor_mode, !refactor_before, x)) ())
+      ]),
+      " (mode) rename a symbol, Usage: --refactor " ^
+      "[\"Class\", \"Function\", \"Method\"] <Current Name> <New Name>";
     "--search", Arg.String (fun x -> set_mode (MODE_SEARCH (x, "")) ()),
       " (mode) fuzzy search symbol definitions";
     "--search-class",
@@ -184,6 +195,8 @@ let parse_check_args cmd =
       " (mode) find all occurrences of lint with the given error code";
     "--version", Arg.Set version,
       " (mode) show version and exit\n";
+    "--monitor-logname", Arg.Set monitor_logname,
+      " (mode) show monitor log filename and exit\n";
     "--logname", Arg.Set logname,
       " (mode) show log filename and exit\n";
     (* Create a checkpoint which can be used to retrieve changed files later *)
@@ -249,9 +262,15 @@ let parse_check_args cmd =
         exit 1;
   in
 
+  if !monitor_logname then begin
+    let monitor_log_link = ServerFiles.monitor_log_link root in
+    Printf.printf "%s\n%!" monitor_log_link;
+    exit 0;
+  end;
+
   if !logname then begin
     let log_link = ServerFiles.log_link root in
-    print_endline log_link;
+    Printf.printf "%s\n%!" log_link;
     exit 0;
   end;
 

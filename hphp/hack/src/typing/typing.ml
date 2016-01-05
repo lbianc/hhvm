@@ -32,6 +32,7 @@ module Unify        = Typing_unify
 module TGen         = Typing_generic
 module SN           = Naming_special_names
 module TAccess      = Typing_taccess
+module TVis         = Typing_visibility
 module TS           = Typing_structure
 module Phase        = Typing_phase
 module TSubst       = Typing_subst
@@ -243,8 +244,7 @@ let make_param_local_ty env param =
     ~var_args:(fun r tv -> r, Tarraykind (AKvec tv))
     env param
 
-let rec fun_decl nenv f =
-  let tcopt = Naming.typechecker_options nenv in
+let rec fun_decl tcopt f =
   let env = Env.empty tcopt (Pos.filename (fst f.f_name)) in
   let env = Env.set_mode env f.f_mode in
   let env = Env.set_root env (Dep.Fun (snd f.f_name)) in
@@ -451,11 +451,11 @@ and check_memoizable env param (pname, ty) =
 (*****************************************************************************)
 (* Now we are actually checking stuff! *)
 (*****************************************************************************)
-and fun_def env nenv _ f =
+and fun_def env _ f =
   (* reset the expression dependent display ids for each function body *)
   Reason.expr_display_id_map := IMap.empty;
   Typing_hooks.dispatch_enter_fun_def_hook f;
-  let nb = Naming.func_body nenv f in
+  let nb = Naming.func_body (Env.get_options env) f in
   NastCheck.fun_ env f nb;
   (* Fresh type environment is actually unnecessary, but I prefer to
    * have a guarantee that we are using a clean typing environment. *)
@@ -2771,12 +2771,13 @@ and class_get ~is_method ~is_const ?(incl_tc=false) env cty (p, mid) cid =
     substs = SMap.empty;
     from_class = Some cid;
   } in
-  class_get_ ~is_method ~is_const ~ety_env ~incl_tc env cty (p, mid)
+  class_get_ ~is_method ~is_const ~ety_env ~incl_tc env cid cty (p, mid)
 
-and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cty (p, mid) =
+and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
+(p, mid) =
   match cty with
   | _, Tabstract (_, Some cty) ->
-      class_get_ ~is_method ~is_const ~ety_env ~incl_tc env cty (p, mid)
+      class_get_ ~is_method ~is_const ~ety_env ~incl_tc env cid cty (p, mid)
   | _, Tclass ((_, c), paraml) ->
       let class_ = Env.get_class env c in
       (match class_ with
@@ -2809,8 +2810,8 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cty (p, mid) =
                 smember_not_found p ~is_const ~is_method class_ mid;
                 env, (Reason.Rnone, Tany)
               | Some {ce_visibility = vis; ce_type = (r, Tfun ft); _} ->
-                check_visibility p env (Reason.to_pos r, vis)
-                                 ety_env.from_class;
+                let p_vis = Reason.to_pos r in
+                TVis.check_class_access p env (p_vis, vis) cid class_;
                 let ety_env =
                   { ety_env with
                     substs = TSubst.make class_.tc_tparams paraml } in
@@ -2822,14 +2823,14 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cty (p, mid) =
                 env, (r, Tfun ft)
               | _ -> assert false)
           | Some { ce_visibility = vis; ce_type = method_; _ } ->
-              check_visibility p env (Reason.to_pos (fst method_), vis)
-                               ety_env.from_class;
-              let ety_env =
-                { ety_env with
-                  substs = TSubst.make class_.tc_tparams paraml } in
-              let env, method_ =
-                Phase.localize ~ety_env env method_ in
-              env, method_)
+            let p_vis = Reason.to_pos (fst method_) in
+            TVis.check_class_access p env (p_vis, vis) cid class_;
+            let ety_env =
+              { ety_env with
+                substs = TSubst.make class_.tc_tparams paraml } in
+            let env, method_ =
+              Phase.localize ~ety_env env method_ in
+            env, method_)
       )
   | _, (Tany | Tabstract _) ->
       (match Env.get_mode env with
@@ -2995,7 +2996,7 @@ and obj_get_ ~is_method ~nullsafe env ty1 cid (p, s as id)
                     env, (Reason.Rnone, Tany), None
                   | Some {ce_visibility = vis; ce_type = (r, Tfun ft); _}  ->
                     let mem_pos = Reason.to_pos r in
-                    check_visibility p env (mem_pos, vis) None;
+                    TVis.check_obj_access p env (mem_pos, vis);
                     (* the return type of __call can depend on the
                      * class params or be this *)
                     let this_ty = k_lhs ety1 in
@@ -3023,7 +3024,7 @@ and obj_get_ ~is_method ~nullsafe env ty1 cid (p, s as id)
                 )
               | Some ({ce_visibility = vis; ce_type = member_; _ } as member_ce) ->
                 let mem_pos = Reason.to_pos (fst member_) in
-                check_visibility p env (mem_pos, vis) None;
+                TVis.check_obj_access p env (mem_pos, vis);
                 let member_ = Typing_enum.member_type env member_ce in
                 let this_ty = k_lhs ety1 in
                 let ety_env = {
@@ -3058,7 +3059,7 @@ and type_could_be_null env ty1 =
 and class_id_for_new p env cid =
   let env, ty = static_class_id p env cid in
   (* Instantiation on an abstract class (e.g. from classname<T>) is via the
-   * base type (to check contructor args), but the actual type `ty` must be
+   * base type (to check constructor args), but the actual type `ty` must be
    * preserved. *)
   match TUtils.get_base_type ty with
     | _, Tclass (sid, _) ->
@@ -3186,7 +3187,7 @@ and static_class_id p env = function
     )
   | CIexpr e ->
       let env, ty = expr env e in
-      let rec resolve_ety = fun ty -> begin
+      let rec resolve_ety ty =
         let env, ty = TUtils.fold_unresolved env ty in
         let _, ty = Env.expand_type env ty in
         match TUtils.get_base_type ty with
@@ -3203,7 +3204,6 @@ and static_class_id p env = function
             if Env.get_mode env = FileInfo.Mstrict
             then Errors.dynamic_class p;
             Reason.Rnone, Tany
-      end
       in env, resolve_ety ty
 
 and call_construct p env class_ params el uel cid =
@@ -3218,7 +3218,7 @@ and call_construct p env class_ params el uel cid =
       then Errors.constructor_no_args p;
       fst (lfold expr env el)
     | Some { ce_visibility = vis; ce_type = m; _ } ->
-      check_visibility p env (Reason.to_pos (fst m), vis) None;
+      TVis.check_obj_access p env (Reason.to_pos (fst m), vis);
       let cid = if cid = CIparent then CIstatic else cid in
       let env, cid_ty = static_class_id p env cid in
       let ety_env = {
@@ -3229,92 +3229,6 @@ and call_construct p env class_ params el uel cid =
       } in
       let env, m = Phase.localize ~ety_env env m in
       fst (call p env m el uel)
-
-and check_visibility p env (p_vis, vis) cid =
-  match is_visible env vis cid with
-  | None -> ()
-  | Some (msg1, msg2) -> Errors.visibility p msg1 p_vis msg2
-
-and is_visible env vis cid =
-  let self_id = Env.get_self_id env in
-  match vis with
-  | Vpublic -> None
-  | Vprivate _ when (Env.is_outside_class env) ->
-    Some ("You cannot access this member", "This member is private")
-  | Vprivate x ->
-    (match cid with
-      | Some CIstatic ->
-          let my_class = Env.get_class env self_id in
-          begin match my_class with
-            | Some {tc_final = true; _} -> None
-            | _ -> Some (
-              ("Private members cannot be accessed with static:: since"
-               ^" a child class may also have an identically"
-               ^" named private member"),
-              "This member is private")
-          end
-      | Some CIparent ->
-          Some (
-            "You cannot access a private member with parent::",
-            "This member is private")
-      | Some CIself -> None
-      | Some (CI (_, called_ci)) when x <> self_id ->
-          (match Env.get_class env called_ci with
-          | Some {tc_kind = Ast.Ctrait; _} ->
-              Some ("You cannot access private members"
-              ^" using the trait's name (did you mean to use self::?)",
-              "This member is private")
-          | _ ->
-            Some ("You cannot access this member", "This member is private"))
-      | Some (CIexpr e) ->
-          let env, ty = expr env e in
-          let _, ty = Env.expand_type env ty in
-          begin match TUtils.get_base_type ty with
-            | _, Tclass ((_, c), _) ->
-                (match Env.get_class env c with
-                | Some {tc_final = true; _} -> None
-                | _ -> Some (
-                  ("Private members cannot be accessed dynamically. "
-                     ^"Did you mean to use 'self::'?"),
-                    "This member is private"))
-            | _, (Tany | Tmixed | Tarraykind _ | Toption _
-              | Tprim _ | Tvar _ | Tfun _ | Tabstract (_, _) | Ttuple _
-              | Tanon (_, _) | Tunresolved _ | Tobject
-              | Tshape _) -> assert false
-          end
-      | None when x <> self_id ->
-        Some ("You cannot access this member", "This member is private")
-      | Some (CI _)
-      | None -> None)
-  | Vprotected x when x = self_id -> None
-  | Vprotected _ when (Env.is_outside_class env) ->
-    Some ("You cannot access this member", "This member is protected")
-  | Vprotected x ->
-    let my_class = Env.get_class env self_id in
-    let their_class = Env.get_class env x in
-    match cid, their_class with
-      | Some CI _, Some {tc_kind = Ast.Ctrait; _} ->
-        Some ("You cannot access protected members"
-        ^" using the trait's name (did you mean to use static:: or self::?)",
-        "This member is protected")
-      | _ -> (
-        match my_class, their_class with
-          | Some my_class, Some their_class ->
-              (* Children can call parent's protected methods and
-               * parents can call children's protected methods (like a
-               * constructor) *)
-              if SSet.mem x my_class.tc_extends
-                || SSet.mem self_id their_class.tc_extends
-                || SSet.mem x my_class.tc_req_ancestors_extends
-                || not my_class.tc_members_fully_known
-              then None
-              else Some (
-                "Cannot access this protected member, you don't extend "^
-                  (Utils.strip_ns x),
-                "This member is protected"
-              )
-            | _, _ -> None
-        )
 
 and check_arity ?(check_min=true) pos pos_def (arity:int) exp_arity =
   let exp_min = (Typing_defs.arity_min exp_arity) in
@@ -3994,8 +3908,8 @@ and check_parent_abstract position parent_type class_type =
       ~is_final position class_type.tc_typeconsts;
   end else ()
 
-and class_def env_up nenv _ c =
-  let c = Naming.class_meth_bodies nenv c in
+and class_def env_up _ c =
+  let c = Naming.class_meth_bodies (Env.get_options env_up) c in
   if not !auto_complete then begin
     NastCheck.class_ env_up c;
     NastInitCheck.class_ env_up c;

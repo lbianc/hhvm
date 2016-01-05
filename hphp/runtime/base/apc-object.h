@@ -57,17 +57,23 @@ struct APCObject {
   static void Delete(APCHandle* handle);
 
   static APCObject* fromHandle(APCHandle* handle) {
-    assert(offsetof(APCObject, m_handle) == 0);
+    assert(handle->checkInvariants() &&
+           handle->kind() == APCKind::SharedObject);
+    static_assert(offsetof(APCObject, m_handle) == 0, "");
     return reinterpret_cast<APCObject*>(handle);
   }
 
   static const APCObject* fromHandle(const APCHandle* handle) {
-    assert(offsetof(APCObject, m_handle) == 0);
+    assert(handle->checkInvariants() &&
+           handle->kind() == APCKind::SharedObject);
+    static_assert(offsetof(APCObject, m_handle) == 0, "");
     return reinterpret_cast<const APCObject*>(handle);
   }
 
   APCHandle* getHandle() { return &m_handle; }
   const APCHandle* getHandle() const { return &m_handle; }
+
+  bool isPersistent() const { return m_persistent; }
 
 private:
   struct Prop {
@@ -105,6 +111,9 @@ private:
   APCHandle m_handle;
   ClassOrName m_cls;
   uint32_t m_propCount;
+  uint8_t m_persistent:1;
+  uint8_t m_no_wakeup:1;
+  uint8_t m_fast_init:1;
 };
 
 //////////////////////////////////////////////////////////////////////

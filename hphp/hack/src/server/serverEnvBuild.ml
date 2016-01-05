@@ -50,16 +50,16 @@ let make_genv options config local_config =
       let wait_until_ready () = () in
       indexer, notifier, wait_until_ready
     | None ->
-      let indexer filter = Find.make_next_files ~name:"root" filter root in
+      let indexer filter = Find.make_next_files ~name:"root" ~filter root in
       let log_link = ServerFiles.dfind_log root in
-      let log_file = ServerFiles.make_link_of_timestamped log_link in
+      let log_file = Sys_utils.make_link_of_timestamped log_link in
       let dfind =
         DfindLib.init ~log_file (GlobalConfig.scuba_table_name, [root]) in
       let notifier () =
         begin try
-          Sys_utils.with_timeout 120
-            ~on_timeout:(fun _ -> Exit_status.(exit Dfind_unresponsive))
-            ~do_:(fun () -> DfindLib.get_changes dfind)
+          Timeout.with_timeout ~timeout:120
+            ~on_timeout:(fun () -> Exit_status.(exit Dfind_unresponsive))
+            ~do_:(fun t -> DfindLib.get_changes ~timeout:t dfind)
         with _ ->
           Exit_status.(exit Dfind_died)
         end
@@ -81,8 +81,7 @@ let make_genv options config local_config =
   }
 
 let make_env config =
-  let nenv = Naming.empty (ServerConfig.typechecker_options config) in
-  { nenv;
+  { tcopt          = ServerConfig.typechecker_options config;
     files_info     = Relative_path.Map.empty;
     errorl         = [];
     failed_parsing = Relative_path.Set.empty;

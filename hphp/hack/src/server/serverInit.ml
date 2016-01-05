@@ -55,7 +55,8 @@ let make_next_files genv : Relative_path.t MultiWorker.nextlist =
   let hhi_root = Hhi.get_hhi_root () in
   let next_files_hhi = compose
     (List.map ~f:(Relative_path.(create Hhi)))
-    (Find.make_next_files ~name:"hhi" FindUtils.is_php hhi_root) in
+    (Find.make_next_files
+       ~name:"hhi" ~filter:FindUtils.is_php hhi_root) in
   fun () ->
     match next_files_hhi () with
     | [] -> next_files_root ()
@@ -120,20 +121,21 @@ let mk_state_future timeout root cmd =
   let start_time = Unix.gettimeofday () in
   Result.try_with @@ fun () ->
   let log_file =
-    ServerFiles.make_link_of_timestamped (ServerFiles.load_log root) in
+    Sys_utils.make_link_of_timestamped (ServerFiles.load_log root) in
   let {Daemon.channels = (ic, _oc); pid} as daemon =
     Daemon.fork ~log_file (load_state root cmd) in
   fun () ->
     Result.join @@ Result.try_with @@ fun () ->
-    Sys_utils.with_timeout timeout
+    Timeout.with_timeout
+      ~timeout
       ~on_timeout:(fun _ ->
         (* Do a best-effort attempt to kill the daemon, since we no longer
          * need its result. The call may fail if e.g. the daemon exited just
          * after the timeout but before the kill signal goes through *)
         (try Daemon.kill daemon with e -> Hh_logger.exc e);
         raise Loader_timeout)
-      ~do_:begin fun () ->
-        Daemon.from_channel ic
+      ~do_:begin fun t ->
+        Daemon.from_channel ~timeout:t ic
         >>| fun (fn, dirty_files, is_cached, end_time) ->
         HackEventLogger.load_mini_worker_end ~is_cached start_time end_time;
         let time_taken = end_time -. start_time in
@@ -186,9 +188,8 @@ let update_files genv files_info t =
 let naming env t =
   let env =
     Relative_path.Map.fold begin fun k v env ->
-      let errorl, failed, nenv = Naming.ndecl_file k v env.nenv in
+      let errorl, failed = NamingGlobal.ndecl_file k v in
       { env with
-        nenv;
         errorl = List.rev_append errorl env.errorl;
         failed_parsing = Relative_path.Set.union env.failed_parsing failed;
       }
@@ -199,7 +200,7 @@ let naming env t =
 let type_decl genv env fast t =
   let bucket_size = genv.local_config.SLC.type_decl_bucket_size in
   let errorl, failed_decl =
-    Typing_decl_service.go ~bucket_size genv.workers env.nenv fast in
+    Typing_decl_service.go ~bucket_size genv.workers env.tcopt fast in
   let hs = SharedMem.heap_size () in
   Hh_logger.log "Heap size: %d" hs;
   Stats.(stats.init_heap_size <- hs);
@@ -216,7 +217,7 @@ let type_check genv env fast t =
   if ServerArgs.ai_mode genv.options = None || not (is_check_mode genv.options)
   then begin
     let count = Relative_path.Map.cardinal fast in
-    let errorl, failed = Typing_check_service.go genv.workers env.nenv fast in
+    let errorl, failed = Typing_check_service.go genv.workers env.tcopt fast in
     HackEventLogger.type_check_end count t;
     let env = { env with
       errorl = List.rev_append errorl env.errorl;
@@ -279,7 +280,7 @@ let ai_check genv files_info env t =
       Exit_status.exit Exit_status.CantRunAI
     end;
     let errorl, failed = Ai.go
-      Typing_check_utils.check_defs genv.workers files_info env.nenv ai_opt in
+      Typing_check_utils.check_defs genv.workers files_info env.tcopt ai_opt in
     let env = { env with
       errorl = List.rev_append errorl env.errorl;
       failed_check = Relative_path.Set.union failed env.failed_check;

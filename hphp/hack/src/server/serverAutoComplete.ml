@@ -12,26 +12,25 @@
 (*****************************************************************************)
 (* Code for auto-completion *)
 (*****************************************************************************)
+open Core
 open Utils
 
-let auto_complete nenv content =
+let auto_complete files_info content =
   AutocompleteService.attach_hooks();
-  let funs, classes = ServerIdeUtils.declare Relative_path.default content in
-  let dummy_pos = Pos.none, Ident.foo in
-  let ifuns =
-    SSet.fold begin fun x (funmap, canon_names) ->
-      SMap.add x dummy_pos funmap, SMap.add (Naming.canon_key x) x canon_names
-    end funs nenv.Naming.ifuns
+  let funs, classes =
+    ServerIdeUtils.declare Relative_path.default content in
+  ServerIdeUtils.fix_file_and_def funs classes;
+  let fun_names, class_names =
+    files_info
+    |> Relative_path.Map.values
+    |> List.fold_left ~f:begin fun (f, c) { FileInfo.funs; classes; _ } ->
+      let add_all ids init =
+        List.fold_left ids ~init ~f:(fun s (_, x) -> SSet.add x s) in
+      add_all funs f, add_all classes c
+    end ~init:(funs, classes)
   in
-  let iclasses =
-    SSet.fold begin fun x (classmap, canon_names) ->
-      SMap.add x dummy_pos classmap, SMap.add (Naming.canon_key x) x canon_names
-    end classes nenv.Naming.iclasses
-  in
-  let nenv = { nenv with Naming.ifuns = ifuns; Naming.iclasses = iclasses } in
-  ServerIdeUtils.fix_file_and_def Relative_path.default content;
-  let fun_names = SMap.keys (fst nenv.Naming.ifuns) in
-  let class_names = SMap.keys (fst nenv.Naming.iclasses) in
+  let fun_names = SSet.elements fun_names in
+  let class_names = SSet.elements class_names in
   let result = AutocompleteService.get_results fun_names class_names in
   ServerIdeUtils.revive funs classes;
   AutocompleteService.detach_hooks();

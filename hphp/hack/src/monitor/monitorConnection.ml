@@ -12,10 +12,13 @@ open ServerMonitorUtils
 
 let server_exists lock_file = not (Lock.check lock_file)
 
+let from_channel_without_buffering tic =
+  Marshal_tools.from_fd_with_preamble (Timeout.descr_of_in_channel tic)
+
 let wait_on_server_restart ic =
   try
     while true do
-      let _ = input_char ic in
+      let _ = Timeout.input_char ic in
       ()
     done
   with
@@ -31,8 +34,10 @@ let send_build_id_ohai oc =
   let _ = Unix.write (Unix.descr_of_out_channel oc) "\n" 0 1 in
   ()
 
+let send_server_name (server_name : string) oc =
+  Marshal_tools.to_fd_with_preamble (Unix.descr_of_out_channel oc) server_name
 
-let establish_connection config =
+let establish_connection ~timeout config =
   let sock_name = Socket.get_path config.socket_file in
   let sockaddr =
     if Sys.win32 then
@@ -42,16 +47,16 @@ let establish_connection config =
       Unix.(ADDR_INET (inet_addr_loopback, port))
     else
       Unix.ADDR_UNIX sock_name in
-  Result.Ok (Unix.open_connection sockaddr)
+  Result.Ok (Timeout.open_connection ~timeout sockaddr)
 
 let get_cstate (ic, oc) =
   try
     send_build_id_ohai oc;
-    let cstate : connection_state = Marshal.from_channel ic in
+    let cstate : connection_state = from_channel_without_buffering ic in
     Result.Ok (ic, oc, cstate)
   with e ->
-    Unix.shutdown_connection ic;
-    close_in_noerr ic;
+    Timeout.shutdown_connection ic;
+    Timeout.close_in_noerr ic;
     raise e
 
 let verify_cstate ic = function
@@ -69,20 +74,24 @@ let verify_cstate ic = function
        * See also: ServerMonitor.client_out_of_date
        *)
       wait_on_server_restart ic;
-      close_in_noerr ic;
+      Timeout.close_in_noerr ic;
       Result.Error Build_id_mismatched
 
 (** Consume sequence of Prehandoff messages. *)
 let consume_prehandoff_messages ic =
-  let open Prehandoff in
-  let m: msg = Marshal.from_channel ic in
+  let module PH = Prehandoff in
+  let m: PH.msg = from_channel_without_buffering ic in
   match m with
-  | Sentinel -> ()
-  | Shutting_down ->
+  | PH.Sentinel -> ()
+  | PH.Server_name_not_found ->
+    Printf.eprintf
+      "Requested server name not found. This is probably a bug in Hack.";
+    raise (Exit_status.Exit_with (Exit_status.Server_name_not_found));
+  | PH.Shutting_down ->
     Printf.eprintf "Last server exited. A new will be started.\n%!";
     wait_on_server_restart ic;
     raise Server_shutting_down
-  | Server_died {status; was_oom} ->
+  | PH.Server_died {PH.status; PH.was_oom} ->
     (match was_oom, status with
     | true, _ ->
       Printf.eprintf "Last server killed by OOM Manager.\n%!";
@@ -94,23 +103,26 @@ let consume_prehandoff_messages ic =
       Printf.eprintf "Last server stopped by signal: %d.\n%!" signal);
     raise Last_server_died
 
-let connect_once config =
+let connect_once config server_name =
   let open Result in
   try
-    Sys_utils.with_timeout 1
+    Timeout.with_timeout
+      ~timeout:1
       ~on_timeout:(fun _ -> raise Exit)
-      ~do_:begin fun () ->
-        establish_connection config >>= fun (ic, oc) ->
+      ~do_:begin fun timeout ->
+        establish_connection ~timeout config >>= fun (ic, oc) ->
         get_cstate (ic, oc)
       end >>= fun (ic, oc, cstate) ->
       verify_cstate ic cstate >>= fun () ->
+      send_server_name server_name oc;
       consume_prehandoff_messages ic;
       Ok (ic, oc)
   with
   | Exit_status.Exit_with _  as e -> raise e
   | Server_shutting_down ->
     Result.Error Server_missing
-  | Last_server_died as e -> raise e
+  | Last_server_died ->
+    Result.Error Server_died
   | _ ->
     if not (server_exists config.lock_file) then Result.Error Server_missing
     else Result.Error Server_busy

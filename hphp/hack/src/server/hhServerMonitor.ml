@@ -19,18 +19,15 @@
       hh_server (detached mode).
 *)
 
+open HhServerMonitorConfig
 module SP = ServerProcess
-
-module Program = struct
-    let name = "hh_server"
-end
 
 let start_hh_server options =
   let log_file, log_mode =
     if ServerArgs.should_detach options then
       let log_link = ServerFiles.log_link (ServerArgs.root options) in
       (try Sys.rename log_link (log_link ^ ".old") with _ -> ());
-      let log_file = ServerFiles.make_link_of_timestamped log_link in
+      let log_file = Sys_utils.make_link_of_timestamped log_link in
       Hh_logger.log "About to spawn typechecker daemon. Logs will go to %s\n%!"
         (if Sys.win32 then log_file else log_link);
       log_file, Daemon.Log_file
@@ -51,7 +48,6 @@ let start_hh_server options =
       in_fd = Daemon.descr_of_in_channel ic;
       out_fd = Daemon.descr_of_out_channel oc;
       log_file = log_file;
-      log_mode = log_mode;
       start_t = start_t;
       last_request_handoff = ref (Unix.time());
     }) in
@@ -65,7 +61,7 @@ let monitor_daemon_main (options: ServerArgs.options) =
   then EventLogger.init (Daemon.devnull ()) 0.0
   else HackEventLogger.init_monitor (ServerArgs.root options)
       (Unix.gettimeofday ());
-  if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
   let www_root = (ServerArgs.root options) in
   ignore @@ Sys_utils.setsid ();
   (** Make sure to lock the lockfile before doing *anything*, especially
@@ -81,7 +77,7 @@ let monitor_daemon_main (options: ServerArgs.options) =
     ServerMonitor.start_monitoring ServerMonitorUtils.({
       socket_file = ServerFiles.socket_file www_root;
       lock_file = ServerFiles.lock_file www_root;
-    }) server_daemon_starter
+    }) [server_daemon_starter]
 
 let daemon_entry =
   Daemon.register_entry_point
@@ -96,9 +92,9 @@ let daemon_entry =
  * isn't running by first checking the liveness lock file.) *)
 let daemon_starter options =
   let root = ServerArgs.root options in
-  let log_link = ServerFiles.server_monitor_log_link root in
+  let log_link = ServerFiles.monitor_log_link root in
   (try Sys.rename log_link (log_link ^ ".old") with _ -> ());
-  let log_file_path = ServerFiles.make_link_of_timestamped log_link in
+  let log_file_path = Sys_utils.make_link_of_timestamped log_link in
   let {Daemon.pid; _} =
     Daemon.spawn ~log_file:log_file_path daemon_entry options in
   Printf.eprintf "Spawned %s (child pid=%d)\n" Program.name pid;

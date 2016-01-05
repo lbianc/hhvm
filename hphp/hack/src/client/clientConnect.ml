@@ -130,7 +130,7 @@ let rec wait_for_server_hello ic env retries start_time tail_env first_call =
   | Some _
   | None -> ();
   let readable, _, _  = Unix.select
-    [Unix.descr_of_in_channel ic] [] [Unix.descr_of_in_channel ic]
+    [Timeout.descr_of_in_channel ic] [] [Timeout.descr_of_in_channel ic]
     (** Select with timeout so that the client gets "hello" message ASAP
      * and doesn't unnecessarily display the busy spinner for 1 second.
      *
@@ -145,7 +145,7 @@ let rec wait_for_server_hello ic env retries start_time tail_env first_call =
       start_time tail_env false
   ) else
     try
-      (match input_line ic with
+      (match Timeout.input_line ic with
       | "Hello" ->
         ()
       | _ ->
@@ -174,11 +174,8 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
     raise Exit_status.(Exit_with Out_of_time)
   end;
   let connect_once_start_t = Unix.time () in
-  let conn = try ServerUtils.connect_to_monitor env.root with
-    | SMUtils.Last_server_died ->
-      Printf.eprintf "Run hh again to spin up a new typechecker.\n%!";
-      Exit_status.exit Exit_status.No_server_running
-  in
+  let conn = ServerUtils.connect_to_monitor env.root
+    HhServerMonitorConfig.Program.name in
   HackEventLogger.client_connect_once connect_once_start_t;
   let _, tail_msg = open_and_get_tail_msg start_time tail_env in
   match conn with
@@ -193,8 +190,11 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
   | Result.Error e ->
     if first_attempt then
       Printf.eprintf
-        "For more detailed logs, try `tail -f $(hh_client --logname)`\n";
+        "For more detailed logs, try `tail -f $(hh_client --monitor-logname) \
+        $(hh_client --logname)`\n";
     match e with
+    | SMUtils.Server_died ->
+      connect env (Option.map retries (fun x -> x - 1)) start_time tail_env
     | SMUtils.Server_missing ->
       if env.autostart then begin
         ClientStart.start_server { ClientStart.

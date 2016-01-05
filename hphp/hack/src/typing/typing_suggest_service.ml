@@ -20,22 +20,6 @@ open Utils
 module Env = Typing_env
 module SN = Naming_special_names
 
-exception Timeout
-let timeout secs f =
-  let old_handler =
-    Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ -> raise Timeout)) in
-  begin try
-    ignore (Unix.alarm secs);
-    f ();
-    ignore (Unix.alarm 0)
-  with Timeout ->
-    ()
-  end;
-  Sys.set_signal Sys.sigalrm old_handler
-
-let timeout secs f =
-  if Sys.win32 then f () (* TODO *) else timeout secs f
-
 module TypingSuggestFastStore = GlobalStorage.Make(struct
   type t = FileInfo.fast
 end)
@@ -61,7 +45,11 @@ let resolve_types acc collated_values =
    * hour on a beefy machine to resolve all the types. *)
   let t = 60 in
   List.iter collated_values begin fun ((fn, line, kind), envl_tyl) ->
-  timeout t begin fun () ->
+  Timeout.with_timeout
+    ~timeout:t
+    ~on_timeout:(fun () -> raise Timeout.Timeout)
+    ~do_:begin fun t ->
+    let open Timeout in
     let env, tyl = List.fold_right ~f:begin fun (env, ty) (env_acc, tyl) ->
       (* This is a pretty hacky environment merge, potentially merging envs from
        * completely separate contexts. It relies on type variables being
@@ -71,6 +59,9 @@ let resolve_types acc collated_values =
        * most up-to-date mappings at the end of the day). And hey, even if this
        * isn't 100% sound, if we screw it up we will just skip a suggestion we
        * otherwise could have made, not the end of the world. *)
+      (* Extra check on Windows to check to see if Timeout is reached.
+         On Linux, nothing is done, see Timeout module. *)
+      check_timeout t;
       let merged_tenv = IMap.union env.Env.tenv env_acc.Env.tenv in
       let merged_subst = IMap.union env.Env.subst env_acc.Env.subst in
       {env_acc with Env.tenv = merged_tenv; Env.subst = merged_subst}, ty::tyl
@@ -102,6 +93,8 @@ let resolve_types acc collated_values =
         let rec guess_super env tyl = function
           | [] -> raise Not_found
           | guess :: guesses ->
+            (* Extra check on Windows to check to see if Timeout is reached. *)
+            check_timeout t;
             try
               Errors.try_ begin fun () ->
                 List.fold_left tyl ~f:(sub guess) ~init:env, guess
@@ -194,23 +187,23 @@ let collate_types fast all_types =
   end;
   tbl
 
-let type_fun nenv fn x =
+let type_fun fn x =
   try
     let tcopt = TypecheckerOptions.permissive in
     let tenv = Env.empty tcopt fn in
     let fun_ = Naming_heap.FunHeap.find_unsafe x in
-    Typing.fun_def tenv nenv x fun_;
+    Typing.fun_def tenv x fun_;
   with Not_found ->
     ()
 
-let type_class nenv fn x =
+let type_class fn x =
   try
     let tcopt = TypecheckerOptions.permissive in
     let tenv = Env.empty tcopt fn in
     let class_ = Naming_heap.ClassHeap.get x in
     (match class_ with
     | None -> ()
-    | Some class_ -> Typing.class_def tenv nenv x class_
+    | Some class_ -> Typing.class_def tenv x class_
     )
   with Not_found ->
     ()
@@ -219,7 +212,7 @@ let keys map = Relative_path.Map.fold (fun x _ y -> x :: y) map []
 
 (* Typecheck a part of the codebase, in order to record the type suggestions in
  * Type_suggest.types. *)
-let suggest_files nenv fast fnl =
+let suggest_files fast fnl =
   SharedMem.invalidate_caches();
   Typing_defs.is_suggest_mode := true;
   Typing_suggest.types := [];
@@ -227,8 +220,8 @@ let suggest_files nenv fast fnl =
   List.iter fnl begin fun fn ->
     let { FileInfo.n_funs; n_classes; _ } =
       Relative_path.Map.find_unsafe fn fast in
-    SSet.iter (type_fun nenv fn) n_funs;
-    SSet.iter (type_class nenv fn) n_classes;
+    SSet.iter (type_fun fn) n_funs;
+    SSet.iter (type_class fn) n_classes;
   end;
   let result = !Typing_suggest.types in
   Typing_defs.is_suggest_mode := false;
@@ -236,18 +229,18 @@ let suggest_files nenv fast fnl =
   Typing_suggest.initialized_members := SMap.empty;
   result
 
-let suggest_files_worker nenv acc fnl =
+let suggest_files_worker acc fnl =
   let fast = TypingSuggestFastStore.load() in
-  let types = suggest_files nenv fast fnl in
+  let types = suggest_files fast fnl in
   List.rev_append types acc
 
-let parallel_suggest_files workers nenv fast =
+let parallel_suggest_files workers fast =
   let fnl = keys fast in
   TypingSuggestFastStore.store fast;
   let result =
     MultiWorker.call
       workers
-      ~job:(suggest_files_worker nenv)
+      ~job:suggest_files_worker
       ~neutral:[]
       ~merge:(List.rev_append)
       ~next:(Bucket.make fnl)
@@ -259,13 +252,13 @@ let parallel_suggest_files workers nenv fast =
 (* Let's go! That's where the action is *)
 (*****************************************************************************)
 
-let go workers nenv fast =
+let go workers fast =
   let trace = !Typing_deps.trace in
   Typing_deps.trace := false;
   let types =
     match workers with
-    | Some _ -> parallel_suggest_files workers nenv fast
-    | None -> suggest_files nenv fast (keys fast) in
+    | Some _ -> parallel_suggest_files workers fast
+    | None -> suggest_files fast (keys fast) in
   let collated = collate_types fast types in
   let resolved =
     match workers with

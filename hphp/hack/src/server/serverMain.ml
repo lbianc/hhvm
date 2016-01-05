@@ -17,8 +17,6 @@ open Utils
 exception State_not_found
 exception Load_state_disabled
 
-let sprintf = Printf.sprintf
-
 type recheck_loop_stats = {
   rechecked_batches : int;
   rechecked_count : int;
@@ -92,15 +90,13 @@ module Program =
       (* Force hhi files to be extracted and their location saved before workers
        * fork, so everyone can know about the same hhi path. *)
       ignore (Hhi.get_hhi_root());
-      if not Sys.win32 then
-        (Sys.set_signal Sys.sigusr1
-          (Sys.Signal_handle Typing.debug_print_last_pos);
-        Sys.set_signal Sys.sigusr2
-          (Sys.Signal_handle (fun _ -> (
-            Hh_logger.log "Got sigusr2 signal. Going to shut down.";
-            Exit_status.exit Exit_status.Server_shutting_down
-          )));
-        )
+      Sys_utils.set_signal Sys.sigusr1
+        (Sys.Signal_handle Typing.debug_print_last_pos);
+      Sys_utils.set_signal Sys.sigusr2
+        (Sys.Signal_handle (fun _ -> (
+             Hh_logger.log "Got sigusr2 signal. Going to shut down.";
+             Exit_status.exit Exit_status.Server_shutting_down
+           )))
 
     let run_once_and_exit genv env =
       ServerError.print_errorl
@@ -236,7 +232,7 @@ let recheck_loop = recheck_loop {
 (** Retrieve channels to client from monitor process. *)
 let get_client_channels parent_in_fd =
   let socket = Libancillary.ancil_recv_fd parent_in_fd in
-  (Unix.in_channel_of_descr socket), (Unix.out_channel_of_descr socket)
+  (Timeout.in_channel_of_descr socket), (Unix.out_channel_of_descr socket)
 
 
 let parent_is_dead () =
@@ -322,18 +318,19 @@ let load genv filename to_recheck =
 let run_load_script genv cmd =
   try
     let t = Unix.gettimeofday () in
-    let cmd =
-      sprintf
-        "%s %s %s"
-        (Filename.quote (Path.to_string cmd))
-        (Filename.quote (Path.to_string (ServerArgs.root genv.options)))
-        (Filename.quote Build_id.build_id_ohai) in
-    Hh_logger.log "Running load script: %s\n%!" cmd;
+    let cmd = Path.to_string cmd in
+    let root_arg =
+      Path.to_string (ServerArgs.root genv.options) in
+    let build_id_arg = Build_id.build_id_ohai in
+    Hh_logger.log
+      "Running load script: %s %s %s\n%!"
+      (Filename.quote cmd)
+      (Filename.quote root_arg)
+      (Filename.quote build_id_arg);
     let state_fn, to_recheck =
-      let do_fn () =
-        let ic = Unix.open_process_in cmd in
+      let reader timeout ic _oc =
         let state_fn =
-          try input_line ic
+          try Timeout.input_line ~timeout ic
           with End_of_file -> raise State_not_found
         in
         if state_fn = "DISABLED" then raise Load_state_disabled;
@@ -341,18 +338,19 @@ let run_load_script genv cmd =
         begin
           try
             while true do
-              to_recheck := input_line ic :: !to_recheck
+              to_recheck := Timeout.input_line ~timeout ic :: !to_recheck
             done
           with End_of_file -> ()
         end;
-        assert (Unix.close_process_in ic = Unix.WEXITED 0);
+        let rc = Timeout.close_process_in ic in
+        assert (rc = Unix.WEXITED 0);
         state_fn, !to_recheck
       in
-      with_timeout
-        (ServerConfig.load_script_timeout genv.config)
+      Timeout.read_process
+        ~timeout:(ServerConfig.load_script_timeout genv.config)
         ~on_timeout:(fun _ -> failwith "Load script timed out")
-        ~do_:do_fn
-    in
+        ~reader
+        cmd [| cmd; root_arg; build_id_arg; |] in
     Hh_logger.log
       "Load state found at %s. %d files to recheck\n%!"
       state_fn (List.length to_recheck);
@@ -452,7 +450,7 @@ let setup_server options =
   (* this is to transform SIGPIPE in an exception. A SIGPIPE can happen when
    * someone C-c the client.
    *)
-  if not Sys.win32 then Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
   PidLog.init (ServerFiles.pids_file root);
   PidLog.log ~reason:"main" (Unix.getpid());
   ServerEnvBuild.make_genv options config local_config

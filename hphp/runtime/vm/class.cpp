@@ -1925,9 +1925,7 @@ void Class::setProperties() {
       if (preProp->attrs() & AttrDeepInit) {
         m_hasDeepInitProps = true;
       }
-      switch (preProp->attrs() & (AttrPublic|AttrProtected|AttrPrivate)) {
-      case AttrPrivate: {
-        // Append a new private property.
+      auto addNewProp = [&] {
         Prop prop;
         prop.name                = preProp->name();
         prop.mangledName         = preProp->mangledName();
@@ -1944,8 +1942,12 @@ void Class::setProperties() {
           prop.idx = slot + m_preClass->numProperties() + traitOffset;
         }
         curPropMap.add(preProp->name(), prop);
-        m_declPropInit.push_back(m_preClass->lookupProp(preProp->name())
-                                 ->val());
+        m_declPropInit.push_back(preProp->val());
+      };
+
+      switch (preProp->attrs() & (AttrPublic|AttrProtected|AttrPrivate)) {
+      case AttrPrivate: {
+        addNewProp();
         break;
       }
       case AttrProtected: {
@@ -1963,32 +1965,14 @@ void Class::setProperties() {
           } else {
             prop.idx = slot + m_preClass->numProperties() + traitOffset;
           }
-          const TypedValue& tv = m_preClass->lookupProp(preProp->name())->val();
+          const TypedValue& tv = preProp->val();
           TypedValueAux& tvaux = m_declPropInit[it2->second];
           tvaux.m_data = tv.m_data;
           tvaux.m_type = tv.m_type;
           copyDeepInitAttr(preProp, &prop);
           break;
         }
-        // Append a new protected property.
-        Prop prop;
-        prop.name                = preProp->name();
-        prop.mangledName         = preProp->mangledName();
-        prop.originalMangledName = preProp->mangledName();
-        prop.attrs               = preProp->attrs();
-        prop.typeConstraint      = preProp->typeConstraint();
-        // This is the first class to declare this property
-        prop.cls                 = this;
-        prop.docComment          = preProp->docComment();
-        prop.repoAuthType        = preProp->repoAuthType();
-        if (slot < traitIdx) {
-          prop.idx = slot;
-        } else {
-          prop.idx = slot + m_preClass->numProperties() + traitOffset;
-        }
-        curPropMap.add(preProp->name(), prop);
-        m_declPropInit.push_back(m_preClass->lookupProp(preProp->name())
-                                 ->val());
+        addNewProp();
         break;
       }
       case AttrPublic: {
@@ -2012,32 +1996,14 @@ void Class::setProperties() {
           } else {
             prop.idx = slot + m_preClass->numProperties() + traitOffset;
           }
-          auto const& tv = m_preClass->lookupProp(preProp->name())->val();
+          auto const& tv = preProp->val();
           TypedValueAux& tvaux = m_declPropInit[it2->second];
           tvaux.m_data = tv.m_data;
           tvaux.m_type = tv.m_type;
           copyDeepInitAttr(preProp, &prop);
           break;
         }
-        // Append a new public property.
-        Prop prop;
-        prop.name                = preProp->name();
-        prop.mangledName         = preProp->mangledName();
-        prop.originalMangledName = preProp->mangledName();
-        prop.attrs               = preProp->attrs();
-        prop.typeConstraint      = preProp->typeConstraint();
-        // This is the first class to declare this property
-        prop.cls                 = this;
-        prop.docComment          = preProp->docComment();
-        prop.repoAuthType        = preProp->repoAuthType();
-        if (slot < traitIdx) {
-          prop.idx = slot;
-        } else {
-          prop.idx = slot + m_preClass->numProperties() + traitOffset;
-        }
-        curPropMap.add(preProp->name(), prop);
-        m_declPropInit.push_back(m_preClass->lookupProp(preProp->name())
-                                 ->val());
+        addNewProp();
         break;
       }
       default: assert(false);
@@ -2082,7 +2048,7 @@ void Class::setProperties() {
       sProp.typeConstraint = preProp->typeConstraint();
       sProp.docComment     = preProp->docComment();
       sProp.cls            = this;
-      sProp.val            = m_preClass->lookupProp(preProp->name())->val();
+      sProp.val            = preProp->val();
       sProp.repoAuthType   = preProp->repoAuthType();
       if (slot < traitIdx) {
         sProp.idx = slot;

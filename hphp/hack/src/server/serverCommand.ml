@@ -26,11 +26,11 @@ exception Read_command_timeout
 (****************************************************************************)
 (* Called by the client *)
 (****************************************************************************)
-let rpc : type a. in_channel * out_channel -> a ServerRpc.t -> a
+let rpc : type a. Timeout.in_channel * out_channel -> a ServerRpc.t -> a
 = fun (ic, oc) cmd ->
   Marshal.to_channel oc (Rpc cmd) [];
   flush oc;
-  Marshal.from_channel ic
+  Timeout.input_value ic
 
 let stream_request oc cmd =
   Marshal.to_channel oc (Stream cmd) [];
@@ -62,18 +62,16 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
       output_string oc "starting\n";
       SharedMem.invalidate_caches();
       let qual_name = if name.[0] = '\\' then name else ("\\"^name) in
-      let nenv = env.ServerEnv.nenv in
       output_string oc "class:\n";
-      let canon_name = Naming.canon_key qual_name in
-      let class_name = (
-        match SMap.get canon_name (snd nenv.Naming.iclasses) with
+      let class_name =
+        match NamingGlobal.GEnv.class_canon_name qual_name with
         | None ->
           let () = output_string oc "Missing from naming env\n" in qual_name
         | Some canon ->
-          let p, _ = SMap.find_unsafe canon (fst nenv.Naming.iclasses) in
+          let p, _ = unsafe_opt @@ NamingGlobal.GEnv.class_id canon in
           let () = output_string oc ((Pos.string (Pos.to_absolute p))^"\n") in
           canon
-      ) in
+      in
       let class_ = Typing_env.Classes.get class_name in
       (match class_ with
       | None -> output_string oc "Missing from typing env\n"
@@ -83,14 +81,14 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
       );
       output_string oc "\nfunction:\n";
       let fun_name =
-      (match SMap.get (Naming.canon_key qual_name) (snd nenv.Naming.ifuns) with
+        match NamingGlobal.GEnv.fun_canon_name qual_name with
         | None ->
           let () = output_string oc "Missing from naming env\n" in qual_name
         | Some canon ->
-          let p, _ = SMap.find_unsafe canon (fst nenv.Naming.ifuns) in
+          let p, _ = unsafe_opt @@ NamingGlobal.GEnv.fun_id canon in
           let () = output_string oc ((Pos.string (Pos.to_absolute p))^"\n") in
           canon
-      ) in
+      in
       let fun_ = Typing_env.Funs.get fun_name in
       (match fun_ with
       | None ->
@@ -100,7 +98,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           output_string oc (fun_str^"\n")
       );
       output_string oc "\nglobal const:\n";
-      (match SMap.get qual_name nenv.Naming.iconsts with
+      (match NamingGlobal.GEnv.gconst_id qual_name with
       | Some (p, _) -> output_string oc (Pos.string (Pos.to_absolute p)^"\n")
       | None -> output_string oc "Missing from naming env\n");
       let gconst_ty = Typing_env.GConsts.get qual_name in
@@ -111,7 +109,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           output_string oc ("ty: "^gconst_str^"\n")
       );
       output_string oc "typedef:\n";
-      (match SMap.get qual_name nenv.Naming.itypedefs with
+      (match NamingGlobal.GEnv.typedef_id qual_name with
       | Some (p, _) -> output_string oc (Pos.string (Pos.to_absolute p)^"\n")
       | None -> output_string oc "Missing from naming env\n");
       let tdef = Typing_env.Typedefs.get qual_name in
@@ -150,13 +148,12 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           )
       end)
 
-let from_channel : type a. in_channel -> a command = Marshal.from_channel
-
 let handle genv env (ic, oc) =
   let msg =
-    Sys_utils.with_timeout 1
+    Timeout.with_timeout
+      ~timeout:1
       ~on_timeout: (fun _ -> raise Read_command_timeout)
-      ~do_: (fun () -> from_channel ic)
+      ~do_: (fun timeout -> Timeout.input_value ~timeout ic)
   in
   match msg with
   | Rpc cmd ->

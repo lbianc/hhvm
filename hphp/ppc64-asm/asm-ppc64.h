@@ -2437,7 +2437,7 @@ private:
 // Branches
 //////////////////////////////////////////////////////////////////////
 
-struct Label : private boost::noncopyable {
+struct Label {
   Label() : m_a(nullptr) , m_address(nullptr) {}
   /* implicit */ Label(CodeAddress predefined) : m_a(nullptr) ,
                                                  m_address(predefined) {}
@@ -2457,6 +2457,9 @@ struct Label : private boost::noncopyable {
       }
     }
   }
+
+  Label(const Label&) = delete;
+  Label& operator=(const Label&) = delete;
 
   void branchOffset(Assembler& a,
                     BranchConditions bc,

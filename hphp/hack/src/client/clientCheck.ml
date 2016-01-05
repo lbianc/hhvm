@@ -21,7 +21,7 @@ let get_list_files conn (args:client_check_env): string list =
   let res = ref [] in
   try
     while true do
-      res := (input_line ic) :: !res
+      res := (Timeout.input_line ic) :: !res
     done;
     assert false
   with End_of_file -> !res
@@ -29,7 +29,7 @@ let get_list_files conn (args:client_check_env): string list =
 let print_all ic =
   try
     while true do
-      Printf.printf "%s\n" (input_line ic);
+      Printf.printf "%s\n" (Timeout.input_line ic);
     done
   with End_of_file -> ()
 
@@ -68,7 +68,7 @@ let main args =
       let ic, oc = conn in
       Cmd.(stream_request oc LIST_MODES);
       begin try
-        while true do print_endline (input_line ic) done;
+        while true do print_endline (Timeout.input_line ic) done;
       with End_of_file -> () end;
       Exit_status.Ok
     | MODE_COLORING file ->
@@ -115,8 +115,8 @@ let main args =
     | MODE_DUMP_AI_INFO files ->
       ClientAiInfo.go conn files expand_path;
       Exit_status.Ok
-    | MODE_REFACTOR ->
-      ClientRefactor.go conn args;
+    | MODE_REFACTOR (ref_mode, before, after) ->
+      ClientRefactor.go conn args ref_mode before after;
       Exit_status.Ok
     | MODE_IDENTIFY_FUNCTION arg ->
       let tpos = Str.split (Str.regexp ":") arg in
@@ -194,8 +194,12 @@ let main args =
     | MODE_STATUS ->
       let error_list = Cmd.rpc conn Rpc.STATUS in
       if args.output_json || args.from <> "" || error_list = []
-      then ServerError.print_errorl args.output_json error_list stdout
-      else List.iter error_list ClientCheckStatus.print_error_color;
+      then begin
+        (* this should really go to stdout but we need to adapt the various
+         * IDE plugins first *)
+        let oc = if args.output_json then stderr else stdout in
+        ServerError.print_errorl args.output_json error_list oc
+      end else List.iter error_list ClientCheckStatus.print_error_color;
       if error_list = [] then Exit_status.Ok else Exit_status.Type_error
     | MODE_SHOW classname ->
       let ic, oc = conn in
