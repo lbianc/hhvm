@@ -25,7 +25,9 @@
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/hh/ext_hh.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
+
 #include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/minstr-helpers.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/unwind-x64.h"
@@ -141,32 +143,6 @@ void setNewElem(TypedValue* base, Cell val) {
 
 void setNewElemArray(TypedValue* base, Cell val) {
   HPHP::SetNewElemArray(base, &val);
-}
-
-TypedValue setOpElem(TypedValue* base, TypedValue key,
-                     Cell val, MInstrState* mis, SetOpOp op) {
-  auto result = HPHP::SetOpElem(mis->tvRef, op, base, key, &val);
-
-  Cell ret;
-  cellDup(*tvToCell(result), ret);
-  return ret;
-}
-
-TypedValue incDecElem(
-  TypedValue* base,
-  TypedValue key,
-  MInstrState* mis,
-  IncDecOp op
-) {
-  TypedValue result;
-  HPHP::IncDecElem(mis->tvRef, op, base, key, result);
-  assertx(result.m_type != KindOfRef);
-  return result;
-}
-
-void bindNewElemIR(TypedValue* base, RefData* val, MInstrState* mis) {
-  auto elem = HPHP::NewElem<true>(mis->tvRef, base);
-  tvBindRef(val, elem);
 }
 
 RefData* boxValue(TypedValue tv) {
@@ -709,15 +685,6 @@ TCA sswitchHelperFast(const StringData* val,
   return dest ? *dest : *def;
 }
 
-// TODO(#2031980): clear these out
-void tv_release_generic(TypedValue* tv) {
-  assertx(vmRegStateIsDirty());
-  assertx(tv->m_type == KindOfString || tv->m_type == KindOfArray ||
-         tv->m_type == KindOfObject || tv->m_type == KindOfResource ||
-         tv->m_type == KindOfRef);
-  g_destructors[typeToDestrIdx(tv->m_type)](tv->m_data.pref);
-}
-
 Cell lookupCnsHelper(const TypedValue* tv,
                      StringData* nm,
                      bool error) {
@@ -1101,7 +1068,7 @@ ObjectData* colAddElemCHelper(ObjectData* coll, TypedValue key,
 
 /*
  * The standard VMRegAnchor treatment won't work for some cases called
- * during function preludes.
+ * during function prologues.
  *
  * The fp sync machinery is fundamentally based on the notion that
  * instruction pointers in the TC are uniquely associated with source
@@ -1144,8 +1111,7 @@ static void sync_regstate_to_caller(ActRec* preLive) {
 NEVER_INLINE
 static void trimExtraArgsMayReenter(ActRec* ar,
                                     TypedValue* tvArgs,
-                                    TypedValue* limit
-                                   ) {
+                                    TypedValue* limit) {
   sync_regstate_to_caller(ar);
   do {
     tvRefcountedDecRef(tvArgs); // may reenter for __destruct
@@ -1190,20 +1156,18 @@ void shuffleExtraArgsVariadic(ActRec* ar) {
   assertx(f->hasVariadicCaptureParam());
   assertx(!(f->attrs() & AttrMayUseVV));
 
-  {
-    auto varArgsArray = Array::attach(MixedArray::MakePacked(numExtra, tvArgs));
-    // write into the last (variadic) param
-    auto tv = reinterpret_cast<TypedValue*>(ar) - numParams - 1;
-    tv->m_type = KindOfArray;
-    tv->m_data.parr = varArgsArray.detach();
-    assertx(tv->m_data.parr->hasExactlyOneRef());
+  auto varArgsArray = Array::attach(PackedArray::MakePacked(numExtra, tvArgs));
+  // write into the last (variadic) param
+  auto tv = reinterpret_cast<TypedValue*>(ar) - numParams - 1;
+  tv->m_type = KindOfArray;
+  tv->m_data.parr = varArgsArray.detach();
+  assertx(tv->m_data.parr->hasExactlyOneRef());
 
-    // no incref is needed, since extra values are being transferred
-    // from the stack to the last local
-    assertx(f->numParams() == (numArgs - numExtra + 1));
-    assertx(f->numParams() == (numParams + 1));
-    ar->setNumArgs(numParams + 1);
-  }
+  // no incref is needed, since extra values are being transferred
+  // from the stack to the last local
+  assertx(f->numParams() == (numArgs - numExtra + 1));
+  assertx(f->numParams() == (numParams + 1));
+  ar->setNumArgs(numParams + 1);
 }
 
 void shuffleExtraArgsVariadicAndVV(ActRec* ar) {
@@ -1211,21 +1175,19 @@ void shuffleExtraArgsVariadicAndVV(ActRec* ar) {
   assertx(f->hasVariadicCaptureParam());
   assertx(f->attrs() & AttrMayUseVV);
 
-  {
-    ar->setExtraArgs(ExtraArgs::allocateCopy(tvArgs, numExtra));
+  ar->setExtraArgs(ExtraArgs::allocateCopy(tvArgs, numExtra));
 
-    auto varArgsArray = Array::attach(MixedArray::MakePacked(numExtra, tvArgs));
-    auto tvIncr = tvArgs; uint32_t i = 0;
-    // an incref is needed to compensate for discarding from the stack
-    for (; i < numExtra; ++i, ++tvIncr) { tvRefcountedIncRef(tvIncr); }
-    // write into the last (variadic) param
-    auto tv = reinterpret_cast<TypedValue*>(ar) - numParams - 1;
-    tv->m_type = KindOfArray;
-    tv->m_data.parr = varArgsArray.detach();
-    assertx(tv->m_data.parr->hasExactlyOneRef());
-    // Before, for each arg: refcount = n + 1 (stack)
-    // After, for each arg: refcount = n + 2 (ExtraArgs, varArgsArray)
-  }
+  auto varArgsArray = Array::attach(PackedArray::MakePacked(numExtra, tvArgs));
+  auto tvIncr = tvArgs; uint32_t i = 0;
+  // an incref is needed to compensate for discarding from the stack
+  for (; i < numExtra; ++i, ++tvIncr) { tvRefcountedIncRef(tvIncr); }
+  // write into the last (variadic) param
+  auto tv = reinterpret_cast<TypedValue*>(ar) - numParams - 1;
+  tv->m_type = KindOfArray;
+  tv->m_data.parr = varArgsArray.detach();
+  assertx(tv->m_data.parr->hasExactlyOneRef());
+  // Before, for each arg: refcount = n + 1 (stack)
+  // After, for each arg: refcount = n + 2 (ExtraArgs, varArgsArray)
 }
 
 #undef SHUFFLE_EXTRA_ARGS_PRELUDE
@@ -1275,6 +1237,14 @@ bool methodExistsHelper(Class* cls, StringData* meth) {
 
 namespace MInstrHelpers {
 
+TypedValue setOpElem(TypedValue* base, TypedValue key,
+                     Cell val, SetOpOp op) {
+  TypedValue localTvRef;
+  auto result = HPHP::SetOpElem(localTvRef, op, base, key, &val);
+
+  return cGetRefShuffle(localTvRef, result);
+}
+
 StringData* stringGetI(StringData* base, uint64_t x) {
   if (LIKELY(x < base->size())) {
     return base->getChar(x);
@@ -1295,22 +1265,56 @@ uint64_t vectorIsset(c_Vector* vec, int64_t index) {
   return result ? !cellIsNull(result) : false;
 }
 
-void bindElemC(TypedValue* base, TypedValue key, RefData* val,
-               MInstrState* mis) {
-  auto elem = HPHP::ElemD<false, true>(mis->tvRef, base, key);
+void bindElemC(TypedValue* base, TypedValue key, RefData* val) {
+  TypedValue localTvRef;
+  auto elem = HPHP::ElemD<false, true>(localTvRef, base, key);
+
+  if (UNLIKELY(elem == &localTvRef)) {
+    // Skip binding a TypedValue that's about to be destroyed and just destroy
+    // it now.
+    tvRefcountedDecRef(localTvRef);
+    return;
+  }
+
   tvBindRef(val, elem);
 }
 
-void setWithRefElemC(TypedValue* base, TypedValue keyTV, TypedValue val,
-                     MInstrState* mis) {
+void setWithRefElemC(TypedValue* base, TypedValue keyTV, TypedValue val) {
+  TypedValue localTvRef;
   auto const keyC = tvToCell(&keyTV);
-  auto elem = HPHP::ElemD<false, false>(mis->tvRef, base, *keyC);
+  auto elem = HPHP::ElemD<false, false>(localTvRef, base, *keyC);
+  // Intentionally leak the old value pointed to by elem, including from magic
+  // methods.
   tvDup(val, *elem);
 }
 
-void setWithRefNewElem(TypedValue* base, TypedValue val, MInstrState* mis) {
-  auto elem = NewElem<false>(mis->tvRef, base);
+void setWithRefNewElem(TypedValue* base, TypedValue val) {
+  TypedValue localTvRef;
+  auto elem = NewElem<false>(localTvRef, base);
+  // Intentionally leak the old value pointed to by elem, including from magic
+  // methods.
   tvDup(val, *elem);
+}
+
+TypedValue incDecElem(TypedValue* base, TypedValue key, IncDecOp op) {
+  TypedValue result;
+  HPHP::IncDecElem(op, base, key, result);
+  assertx(result.m_type != KindOfRef);
+  return result;
+}
+
+void bindNewElem(TypedValue* base, RefData* val) {
+  TypedValue localTvRef;
+  auto elem = HPHP::NewElem<true>(localTvRef, base);
+
+  if (UNLIKELY(elem == &localTvRef)) {
+    // Skip binding a TypedValue that's about to be destroyed and just destroy
+    // it now.
+    tvRefcountedDecRef(localTvRef);
+    return;
+  }
+
+  tvBindRef(val, elem);
 }
 
 }

@@ -51,11 +51,11 @@ let is_digit = function '0' .. '9' -> true | _ -> false
 
 let is_whitespace = function ' ' | '\n' | '\r' | '\t' -> true | _ -> false
 
-type env =
-  { allow_trailing_comma : bool;
-    data : string;
-    mutable pos : int;
-  }
+type env = {
+  allow_trailing_comma : bool;
+  data : string;
+  mutable pos : int;
+}
 
 exception Syntax_error of string
 
@@ -385,4 +385,8 @@ let get_array_exn = function
 
 let get_string_exn = function
   | JSON_String s -> s
+  | _ -> assert false
+
+let get_bool_exn = function
+  | JSON_Bool b -> b
   | _ -> assert false

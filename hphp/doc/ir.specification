@@ -1316,6 +1316,12 @@ To string conversions:
   Load the saved frame pointer from the activation record pointed to by S0 into
   D.
 
+| BeginInlining<offset>, ND, S(StkPtr), NF
+
+  Marks the start of an inlined function whose stack resides offset cells below
+  the SP. It has no effect other than to hint to optimization passes that at the
+  start of the inlined function its stack is dead.
+
 | DefInlineFP<func,retBCOff,retSPOff>, D(FramePtr),
 |                                      S(StkPtr) S(FramePtr),
 |                                      NF
@@ -1357,6 +1363,11 @@ To string conversions:
   resulting after the ActRec for the function and numParams arguments have been
   pushed. CallArray pops the array off the stack, pushes the elements of the
   array as arguments, and invokes the function in the ActRec.
+
+| SyncReturnBC<spOffset,bcOffset>, ND, S(StkPtr) S(FramePtr), NF
+
+  Stores bcOffset into the frame at spOffset from S0 as the return bytecode
+  address and the frame S1 as the return frame.
 
 | Call<offset,numParams,returnOff,funcd,destroyLocals>, ND,
 |                                                       S(StkPtr) S(FramePtr),
@@ -2248,14 +2259,12 @@ fields of that struct for holding intermediate values.
 
   A nullsafe version of CGetProp, returns null if the base S0 is null.
 
-| VGetProp, D(BoxedInitCell),
-|           S(Obj,PtrToGen) S(Cell) S(PtrToMISGen),
-|           MProp|PRc|Er
+| VGetProp, D(BoxedInitCell), S(Obj,PtrToGen) S(Cell), MProp|PRc|Er
 
   Get property with key S1 from base S0 as a reference.
 
 | BindProp, ND,
-|           S(Obj,PtrToGen) S(Cell) S(BoxedCell) S(PtrToMISGen),
+|           S(Obj,PtrToGen) S(Cell) S(BoxedCell),
 |           MProp|Er
 
   Bind property with key S1 in base S0 to the reference in S2.
@@ -2269,7 +2278,7 @@ fields of that struct for holding intermediate values.
   Unset an object property.
 
 | SetOpProp<op>, D(Cell),
-|                S(Obj,PtrToGen) S(Cell) S(Cell) S(PtrToMISGen),
+|                S(Obj,PtrToGen) S(Cell) S(Cell),
 |                MProp|PRc|Er
 
   Set op propery with key S1 in base S0, using S2 as the right hand side.
@@ -2336,11 +2345,11 @@ fields of that struct for holding intermediate values.
 
   Get element with key S1 from S0.
 
-| VGetElem, D(BoxedInitCell), S(PtrToGen) S(Cell) S(PtrToMISGen), MElem|PRc|Er
+| VGetElem, D(BoxedInitCell), S(PtrToGen) S(Cell), MElem|PRc|Er
 
   Get element with key S1 from base S0 as a reference.
 
-| BindElem, ND, S(PtrToGen) S(Cell) S(BoxedCell) S(PtrToMISGen), MElem|Er
+| BindElem, ND, S(PtrToGen) S(Cell) S(BoxedCell), MElem|Er
 
   Bind element with key S1 in base S0 to the reference S2.
 
@@ -2370,9 +2379,7 @@ fields of that struct for holding intermediate values.
   Furthermore, in the case of "invalid offsets", SetElem may throw an
   InvalidSetMException (see discussion above).
 
-| SetWithRefElem, ND,
-|                 S(PtrToGen) S(Gen) S(Gen) S(PtrToMISGen),
-|                 MElem|Er
+| SetWithRefElem, ND, S(PtrToGen) S(Gen) S(Gen), MElem|Er
 
   Set element with key S1 in S0 to S2.
 
@@ -2381,14 +2388,12 @@ fields of that struct for holding intermediate values.
   Unsets the element at key S1 in the base S0.
 
 | SetOpElem<op>, D(Cell),
-|                S(PtrToGen) S(Cell) S(Cell) S(PtrToMISGen),
+|                S(PtrToGen) S(Cell) S(Cell),
 |                MElem|PRc|Er
 
   Set op elem with key S1 in base S0, using S2 as the right hand side.
 
-| IncDecElem, D(Cell),
-|             S(PtrToGen) S(Cell) S(PtrToMISGen),
-|             MElem|PRc|Er
+| IncDecElem, D(Cell), S(PtrToGen) S(Cell), MElem|PRc|Er
 
   Increment/decrement element with key S1 in base S0.
 
@@ -2400,15 +2405,11 @@ fields of that struct for holding intermediate values.
 
   Append the value in S1 to S0, where S0 must be a pointer to an array.
 
-| SetWithRefNewElem, ND,
-|                    S(PtrToGen) S(PtrToGen) S(PtrToMISGen),
-|                    MElem|Er
+| SetWithRefNewElem, ND, S(PtrToGen) S(PtrToGen), MElem|Er
 
   AppendWithRef the value in S1 to S0.
 
-| BindNewElem, ND,
-|              S(PtrToGen) S(BoxedCell) S(PtrToMISGen),
-|              MElem|Er
+| BindNewElem, ND, S(PtrToGen) S(BoxedCell), MElem|Er
 
   Append the reference in S1 to S0.
 
@@ -2607,7 +2608,7 @@ fields of that struct for holding intermediate values.
 
 | PackMagicArgs, D(Arr), S(FramePtr), PRc
 
-  Call MixedArray::MakePacked() with the value of numArgs() on the ActRec
+  Call PackedArray::MakePacked() with the value of numArgs() on the ActRec
   pointed to by the frame pointer S0 as the first argument, and the pointer to
   the first parameter in the frame as the second argument.
 

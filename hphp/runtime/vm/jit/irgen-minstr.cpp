@@ -666,6 +666,17 @@ void checkGenBase(Type baseType) {
   }
 }
 
+/*
+ * This is called in a few places to be consistent with old minstrs, and should
+ * be revisited once they're gone. It probably doesn't make sense to always
+ * guard on an object class when we have one.
+ */
+void specializeObjBase(IRGS& env, SSATmp* base) {
+  if (base && base->isA(TObj) && base->type().clsSpec().cls()) {
+    env.irb->constrainValue(base, TypeConstraint(base->type().clsSpec().cls()));
+  }
+}
+
 //////////////////////////////////////////////////////////////////////
 // Base ops
 
@@ -1696,7 +1707,7 @@ void emitVGetProp(MTS& env) {
       cns(env, makeStaticString(Strings::NULLSAFE_PROP_WRITE_ERROR))
     );
   }
-  env.result = gen(env, VGetProp, env.base.value, key, tvRefPtr(env));
+  env.result = gen(env, VGetProp, env.base.value, key);
 }
 
 void emitIssetProp(MTS& env) {
@@ -1746,8 +1757,8 @@ void emitSetOpProp(MTS& env) {
   SetOpOp op = SetOpOp(env.ni.imm[0].u_OA);
   auto const key = getKey(env);
   auto const value = getValue(env);
-  env.result = gen(env, SetOpProp, SetOpData { op },
-                   env.base.value, key, value, tvRefPtr(env));
+  env.result =
+    gen(env, SetOpProp, SetOpData { op }, env.base.value, key, value);
 }
 
 void emitIncDecProp(MTS& env) {
@@ -1781,7 +1792,7 @@ void emitIncDecProp(MTS& env) {
 void emitBindProp(MTS& env) {
   auto const key = getKey(env);
   auto const box = getValue(env);
-  gen(env, BindProp, env.base.value, key, box, tvRefPtr(env));
+  gen(env, BindProp, env.base.value, key, box);
   env.result = box;
 }
 
@@ -1830,7 +1841,7 @@ void emitCGetElem(MTS& env) {
 
 void emitVGetElem(MTS& env) {
   auto const key = getKey(env);
-  env.result = gen(env, VGetElem, env.base.value, key, tvRefPtr(env));
+  env.result = gen(env, VGetElem, env.base.value, key);
 }
 
 SSATmp* emitIssetElem(IRGS& env, SSATmp* base, SSATmp* key, SimpleOp simpleOp) {
@@ -1882,7 +1893,7 @@ void emitSetWithRefRProp(MTS& env) { emitSetWithRefLProp(env); }
 
 void emitSetWithRefNewElem(MTS& env) {
   auto const val = getValue(env);
-  gen(env, SetWithRefNewElem, env.base.value, val, tvRefPtr(env));
+  gen(env, SetWithRefNewElem, env.base.value, val);
   env.result = nullptr;
 }
 
@@ -1938,7 +1949,7 @@ void emitSetElem(MTS& env) {
 void emitSetWithRefElem(MTS& env) {
   auto const key = getUnconstrainedKey(env);
   auto const val = getValue(env);
-  gen(env, SetWithRefElem, env.base.value, key, val, tvRefPtr(env));
+  gen(env, SetWithRefElem, env.base.value, key, val);
   env.result = nullptr;
 }
 
@@ -1948,20 +1959,19 @@ void emitSetWithRefRElem(MTS& env) { emitSetWithRefElem(env); }
 void emitSetOpElem(MTS& env) {
   auto const op = static_cast<SetOpOp>(env.ni.imm[0].u_OA);
   env.result = gen(env, SetOpElem, SetOpData{op},
-                   env.base.value, getKey(env), getValue(env),
-                   tvRefPtr(env));
+                   env.base.value, getKey(env), getValue(env));
 }
 
 void emitIncDecElem(MTS& env) {
   auto const op = static_cast<IncDecOp>(env.ni.imm[0].u_OA);
   env.result = gen(env, IncDecElem, IncDecData { op },
-                   env.base.value, getKey(env), tvRefPtr(env));
+                   env.base.value, getKey(env));
 }
 
 void emitBindElem(MTS& env) {
   auto const key = getKey(env);
   auto const box = getValue(env);
-  gen(env, BindElem, env.base.value, key, box, tvRefPtr(env));
+  gen(env, BindElem, env.base.value, key, box);
   env.result = box;
 }
 
@@ -2002,15 +2012,14 @@ void emitIncDecNewElem(MTS& env) {
 
 void emitBindNewElem(MTS& env) {
   auto const box = getValue(env);
-  gen(env, BindNewElem, env.base.value, box, tvRefPtr(env));
+  gen(env, BindNewElem, env.base.value, box);
   env.result = box;
 }
 
 void emitFinalMOp(MTS& env) {
   using MemFun = void (*)(MTS&);
 
-  // MSVC needs these to be outside of
-  // the case labels.
+  // MSVC needs these to be outside of the case labels.
   static const MemFun elemOps[] = {
 #define MII(instr, ...) &emit##instr##Elem,
     MINSTRS
@@ -2186,6 +2195,8 @@ void emitMPost(MTS& env) {
             env.op == Op::SetWithRefLM ||
             env.op == Op::SetWithRefRM);
   }
+
+  gen(env, FinishMemberOp);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -2437,6 +2448,8 @@ SSATmp* propImpl(IRGS& env, MOpFlags flags, SSATmp* key, bool nullsafe) {
     base = basePtr;
   }
 
+  specializeObjBase(env, base);
+
   auto const mia = mOpFlagsToAttr(flags);
   auto const propInfo =
     getCurrentPropertyOffset(env, base, base->type(), key->type());
@@ -2521,6 +2534,7 @@ void mFinalImpl(IRGS& env, int32_t nDiscard, SSATmp* result) {
 
 SSATmp* cGetPropImpl(IRGS& env, SSATmp* base, SSATmp* key,
                      MOpFlags flags, bool nullsafe) {
+  specializeObjBase(env, base);
   auto const propInfo =
     getCurrentPropertyOffset(env, base, base->type(), key->type());
   auto const mia = mOpFlagsToAttr(flags);
@@ -2669,6 +2683,8 @@ SSATmp* setPropImpl(IRGS& env, SSATmp* key) {
   } else {
     base = basePtr;
   }
+
+  specializeObjBase(env, base);
 
   auto const mia = MIA_define;
   auto const propInfo =

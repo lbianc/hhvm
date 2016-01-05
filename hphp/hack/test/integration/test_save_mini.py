@@ -43,6 +43,7 @@ load_mini_script = %s
             os.fchmod(f.fileno(), 0o700)
             f.write("echo %s\n" % shlex.quote(json.dumps({
                 'state': self.saved_state_path(),
+                'is_cached': True,
                 'deptable': self.saved_state_path() + '.deptable',
                 'changes': changed_files,
                 })))
@@ -137,7 +138,7 @@ load_mini_script = %s
 
         with open(os.path.join(self.repo_dir, 'hh.conf'), 'a') as f:
             f.write(r"""
-use_watchman_2 = true
+use_watchman = true
 watchman_init_timeout = 1
 """)
 

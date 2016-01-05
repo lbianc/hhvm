@@ -309,6 +309,7 @@ NOOP_OPCODE(HintLocInner)
 NOOP_OPCODE(HintStkInner)
 NOOP_OPCODE(AssertStk)
 NOOP_OPCODE(FinishMemberOp)
+NOOP_OPCODE(BeginInlining)
 
 CALL_OPCODE(AddElemStrKey)
 CALL_OPCODE(AddElemIntKey)
@@ -646,7 +647,7 @@ void CodeGenerator::cgGenericIdx(IRInstruction* inst) {
   auto const spOff = inst->extra<GenericIdx>()->offset.offset;
   auto const sync_sp = v.makeReg();
   v << lea{sp[cellsToBytes(spOff)], sync_sp};
-  emitEagerSyncPoint(v, inst->marker().sk().pc(),
+  emitEagerSyncPoint(v, inst->marker().fixupSk().pc(),
                      rvmtl(), rvmfp(), sync_sp);
   cgCallNative (v, inst);
 }
@@ -1983,7 +1984,7 @@ void CodeGenerator::cgEagerSyncVMRegs(IRInstruction* inst) {
   auto& v = vmain();
   auto const sync_sp = v.makeReg();
   v << lea{srcLoc(inst, 1).reg()[cellsToBytes(spOff)], sync_sp};
-  emitEagerSyncPoint(v, inst->marker().sk().pc(),
+  emitEagerSyncPoint(v, inst->marker().fixupSk().pc(),
                      rvmtl(), srcLoc(inst, 0).reg(), sync_sp);
 }
 
@@ -2457,6 +2458,18 @@ void CodeGenerator::cgSpillFrame(IRInstruction* inst) {
   v << storeli{encoded, spReg[spOffset + int(AROFF(m_numArgsAndFlags))]};
 }
 
+void CodeGenerator::cgSyncReturnBC(IRInstruction* inst) {
+  auto const extra = inst->extra<SyncReturnBC>();
+  auto const spOffset = cellsToBytes(extra->spOffset.offset);
+  auto const bcOffset = extra->bcOffset;
+  auto const spReg = srcLoc(inst, 0).reg();
+  auto const fpReg = srcLoc(inst, 1).reg();
+
+  auto& v = vmain();
+  v << storeli{safe_cast<int32_t>(bcOffset), spReg[spOffset + AROFF(m_soff)]};
+  v << store{fpReg, spReg[spOffset + AROFF(m_sfp)]};
+}
+
 void CodeGenerator::cgStClosureArg(IRInstruction* inst) {
   auto const ptr = srcLoc(inst, 0).reg();
   auto const off = inst->extra<StClosureArg>()->offsetBytes;
@@ -2847,11 +2860,11 @@ void CodeGenerator::cgCallBuiltin(IRInstruction* inst) {
     offsetof(MInstrState, tvBuiltinReturn);
 
   if (FixupMap::eagerRecord(callee)) {
-    auto const rSP       = srcLoc(inst, 1).reg();
-    auto const spOffset  = cellsToBytes(
+    auto const rSP = srcLoc(inst, 1).reg();
+    auto const spOffset = cellsToBytes(
       inst->extra<CallBuiltin>()->spOffset.offset);
-    auto const& marker   = inst->marker();
-    auto const pc        = getUnit(marker)->entry() + marker.bcOff();
+    auto const& marker = inst->marker();
+    auto const pc = marker.fixupSk().unit()->entry() + marker.fixupBcOff();
     auto const synced_sp = v.makeReg();
     v << lea{rSP[spOffset], synced_sp};
     emitEagerSyncPoint(
@@ -3461,7 +3474,7 @@ Fixup CodeGenerator::makeFixup(const BCMarker& marker, SyncOptions sync) {
     break;
   }
 
-  Offset pcOff = marker.bcOff() - marker.func()->base();
+  Offset pcOff = marker.fixupBcOff() - marker.fixupFunc()->base();
   return Fixup{pcOff, stackOff.offset};
 }
 
@@ -5602,7 +5615,7 @@ void CodeGenerator::cgPackMagicArgs(IRInstruction* inst) {
 
   cgCallHelper(
     v,
-    CallSpec::direct(MixedArray::MakePacked),
+    CallSpec::direct(PackedArray::MakePacked),
     callDest(inst),
     SyncOptions::Sync,
     argGroup(inst)
