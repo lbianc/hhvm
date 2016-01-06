@@ -323,7 +323,7 @@ struct Vgen {
     else
       a->cmpdi(i.s0, Immed(0));
   }
-  void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }              // needs SF
+  void emit(const ucomisd& i) { a->dcmpu(i.s1,i.s0); }
   void emit(const ud2& i) { a->trap(); }
   void emit(const xorb& i) {
     a->xor_(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
@@ -398,7 +398,7 @@ void Vgen::emit(const cvtsi2sd& i) {
 
 void Vgen::emit(const cvttsd2siq& i) {
   // As described on ISA page 726, F.2.2
-  a->fctid(rFasm, i.s);
+  a->fctidz(rFasm, i.s);
   emit(copy{rFasm, i.d});
 }
 

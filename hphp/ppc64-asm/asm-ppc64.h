@@ -185,13 +185,14 @@ class BranchParams {
           ret = BranchConditions::GreaterThan;      break;
 
         /*
-         * TODO(gut): Parity on ppc64 is not that easy:
+         * Parity works only for unordered double comparison
+         * Todo: fixed point comparison parity
          * http://stackoverflow.com/q/32319673/5013070
          */
         case HPHP::jit::CC_P:
-          not_implemented(); /*ret = ;*/            break;
+          ret = BranchConditions::Overflow;         break;
         case HPHP::jit::CC_NP:
-          not_implemented(); /*ret = ;*/            break;
+          ret = BranchConditions::NoOverflow;       break;
 
         case HPHP::jit::CC_L:
           ret = BranchConditions::LessThan;         break;
@@ -1088,7 +1089,9 @@ struct Assembler {
   }
   void fctidu()         { not_implemented(); }
   void fctiduz()        { not_implemented(); }
-  void fctidz()         { not_implemented(); }
+  void fctidz(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+	    EmitXForm(63, rn(frt), rn(0), rn(frb), 815, rc);
+  }
   void fctiw()          { not_implemented(); }
   void fctiwu()         { not_implemented(); }
   void fctiwuz()        { not_implemented(); }
