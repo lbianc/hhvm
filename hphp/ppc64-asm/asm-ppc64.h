@@ -1090,7 +1090,7 @@ struct Assembler {
   void fctidu()         { not_implemented(); }
   void fctiduz()        { not_implemented(); }
   void fctidz(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
-	    EmitXForm(63, rn(frt), rn(0), rn(frb), 815, rc);
+    EmitXForm(63, rn(frt), rn(0), rn(frb), 815, rc);
   }
   void fctiw()          { not_implemented(); }
   void fctiwu()         { not_implemented(); }
