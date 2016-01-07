@@ -129,7 +129,11 @@ struct Vgen {
   void emit(const nothrow& i) {
     mcg->registerCatchBlock(a->frontier(), nullptr);
   }
-  void emit(const landingpad& i) {}
+  // After VM frame unwinding, restore the frame pointer correctly as the
+  // callExtern left it with the additional frame.
+  void emit(const landingpad& i) {
+    a->addi(rsp(), rsp(), 2 * min_callstack_size);    // same in callExtern !!!
+  }
 
   // instructions
   void emit(const fabs& i) {
@@ -658,7 +662,7 @@ void Vgen::callExtern(Func func) {
   a->ld(rtoc(), rsp()[toc_position_on_callstack]);
 
   // restore caller's return address
-  a->addi(rsp(), rsp(), 2 * min_callstack_size);
+  a->addi(rsp(), rsp(), 2 * min_callstack_size);  // same in landingpad vasm!!!
   a->ld(rfuncln(), rsp()[lr_position_on_callstack - min_callstack_size]);
   a->mtlr(rfuncln());
 }
