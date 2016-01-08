@@ -923,19 +923,6 @@ void Assembler::li32 (const Reg64& rt, int32_t imm32) {
   }
 }
 
-void Assembler::li32un (const Reg64& rt, uint32_t imm32) {
-  xor_(rt, rt, rt);
-  if ((imm32 >> 16) == 0) {
-    // immediate has only low 16 bits set, use simple load immediate
-    ori(rt, rt, static_cast<int16_t>(imm32));
-    emitNop(kBytesPerInstr); // emit nop for a balanced li32un with 3 instr
-  } else {
-    // immediate has 32 bits set
-    oris(rt, rt, static_cast<int16_t>(imm32 >> 16));
-    ori(rt, rt, static_cast<int16_t>(imm32 & UINT16_MAX));
-  }
-}
-
 int32_t Assembler::getLi32(PPC64Instr* pinstr) {
   // @pinstr should be pointing to the beginning of the li32 block
 

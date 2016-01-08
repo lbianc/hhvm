@@ -1940,9 +1940,6 @@ struct Assembler {
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, int32_t imm32);
 
-  // Auxiliary for loading a 32bits unsigned immediate into a register
-  void li32un (const Reg64& rt, uint32_t imm32);
-
   // Retrieve the target defined by li32 instruction
   static int32_t getLi32(PPC64Instr* pinstr);
   static int32_t getLi32(CodeAddress pinstr) {
