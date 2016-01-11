@@ -51,12 +51,7 @@ extern "C" void __deregister_frame(const void*);
 
 TRACE_SET_MOD(unwind);
 
-namespace HPHP {
-namespace jit {
-
-//rds::Link<UnwindRDS> unwindRdsInfo(rds::kInvalidHandle);
-
-namespace x64 {
+namespace HPHP { namespace jit { namespace x64 {
 
 //////////////////////////////////////////////////////////////////////
 size_t fdeIdx;

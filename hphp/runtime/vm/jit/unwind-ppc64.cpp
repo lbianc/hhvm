@@ -37,7 +37,7 @@
 #include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
 
 
-#if defined(__CYGWIN__) || defined(_MSC_VER)
+#if defined(_MSC_VER)
 void __register_frame(const void*) {}
 void __deregister_frame(const void*) {}
 #else
@@ -51,10 +51,7 @@ extern "C" void __deregister_frame(const void*);
 
 TRACE_SET_MOD(unwind);
 
-namespace HPHP {
-namespace jit {
-
-namespace ppc64 {
+namespace HPHP { namespace jit { namespace ppc64 {
 
 //////////////////////////////////////////////////////////////////////
 

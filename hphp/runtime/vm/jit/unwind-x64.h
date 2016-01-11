@@ -19,9 +19,7 @@
 
 #include "hphp/runtime/vm/jit/unwind-types.h"
 
-namespace HPHP {
-namespace jit {
-namespace x64 {
+namespace HPHP { namespace jit { namespace x64 {
 
 //////////////////////////////////////////////////////////////////////
 
