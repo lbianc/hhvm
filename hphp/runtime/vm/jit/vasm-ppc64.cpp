@@ -1068,6 +1068,13 @@ void lowerForPPC64(Vout& v, loadqp& inst) {
   v << load{p, inst.d};
 }
 
+void lowerForPPC64(Vout& v, pushm& inst) {
+  auto tmp = v.makeReg();
+  patchVptr(inst.s, v);
+  v << load{inst.s, tmp};
+  v << push{tmp};
+}
+
 void lowerForPPC64(Vout& v, popm& inst) {
   auto tmp = v.makeReg();
   patchVptr(inst.d, v);
