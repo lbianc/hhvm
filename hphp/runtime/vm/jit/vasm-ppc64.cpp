@@ -731,14 +731,11 @@ void Vgen::emit(const stubret& i) {
 }
 
 void Vgen::emit(const tailcallstub& i) {
-  // Return address.
-  auto tmp = rfuncln();
-  a->mflr(tmp);
-  a->std(tmp, rsp()[-8]);
+  // Update native stack pointer to ignore the current frame.
+  // the Return Address is already in LR due to stublogue.
+  a->addi(rsp(), rsp(), 16);
 
-  // Update native stack pointer.
-  a->addi(rsp(), rsp(), -16);
-
+  // tail call: perform a jmp instead of a call.
   emit(jmpi{i.target, i.args});
 }
 
