@@ -281,19 +281,6 @@ struct Vgen {
   */
   void emit(const sar& i) { a->srad(i.d, i.s1, i.s0, true); }
   void emit(const sarqi& i) { a->sradi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const setcc& i) {
-    ppc64_asm::Label l_true, l_end;
-    Reg64 d(i.d);
-
-    a->bc(l_true, i.cc);
-    a->xor(d, d, d, false);   /* set output to 0 */
-    a->b(l_end);
-
-    l_true.asm_label(*a);
-    a->li(d, 1);        /* set output to 1 */
-
-    l_end.asm_label(*a);
-  }
   void emit(const shlli& i) {
     a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
   }
@@ -1078,6 +1065,12 @@ void lowerForPPC64(Vout& v, popm& inst) {
   patchVptr(inst.d, v);
   v << pop{tmp};
   v << store{tmp, inst.d};
+}
+
+void lowerForPPC64(Vout& v, setcc& inst) {
+  auto zero = v.makeReg();
+  v << ldimmq{0, zero};
+  v << cmovq{inst.cc, inst.sf, zero, rone(), Vreg64{Reg64(inst.d)}};
 }
 
 void lowerForPPC64(Vout& v, countbytecode& inst) {
