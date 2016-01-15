@@ -47,7 +47,10 @@ struct APCLocalArray;
 struct MemoryManager;
 struct ObjectData;
 struct ResourceData;
-struct ExtendedException;
+
+namespace req {
+struct root_handle;
+}
 
 //////////////////////////////////////////////////////////////////////
 
@@ -872,6 +875,15 @@ struct MemoryManager {
    */
   static void requestShutdown();
 
+  /*
+   * Setup/teardown profiling for current request.  This causes all allocation
+   * requests to be passed through to the underlying memory allocator so that
+   * heap profiling can capture backtraces for individual allocations rather
+   * than slab allocations.
+   */
+  static void setupProfiling();
+  static void teardownProfiling();
+
   /////////////////////////////////////////////////////////////////////////////
 
   /*
@@ -895,16 +907,6 @@ struct MemoryManager {
   template <typename T> req::ptr<T> removeRoot(RootId token);
   template <typename F> void scanRootMaps(F& m) const;
   template <typename F> void scanSweepLists(F& m) const;
-
-  // Opaque type used to allow for quick removal of exception roots. Should be
-  // embedded in ExtendedException.
-  struct ExceptionRootKey {
-    std::size_t m_index = 0;
-  };
-
-  // Add/remove exceptions as GC roots.
-  void addExceptionRoot(ExtendedException* exn);
-  void removeExceptionRoot(ExtendedException* exn);
 
   /*
    * Heap iterator methods.
@@ -937,6 +939,7 @@ private:
   friend void* req::calloc(size_t count, size_t bytes);
   friend void* req::realloc(void* ptr, size_t nbytes);
   friend void  req::free(void* ptr);
+  friend struct req::root_handle; // access m_root_handles
 
   struct FreeList {
     void* maybePop();
@@ -977,6 +980,7 @@ private:
   MemoryManager();
   MemoryManager(const MemoryManager&) = delete;
   MemoryManager& operator=(const MemoryManager&) = delete;
+  ~MemoryManager();
 
 private:
   void storeTail(void* tail, uint32_t tailBytes);
@@ -1002,9 +1006,6 @@ private:
   void refreshStatsHelperStop();
 
   void resetStatsImpl(bool isInternalCall);
-
-  void logAllocation(void*, size_t);
-  void logDeallocation(void*);
 
   void initHole(void* ptr, uint32_t size);
   void initHole();
@@ -1080,7 +1081,7 @@ private:
 
   mutable RootMap<ResourceData>* m_resourceRoots{nullptr};
   mutable RootMap<ObjectData>* m_objectRoots{nullptr};
-  mutable std::vector<ExtendedException*> m_exceptionRoots;
+  mutable std::vector<req::root_handle*> m_root_handles;
 
   bool m_exiting{false};
   bool m_sweeping{false};

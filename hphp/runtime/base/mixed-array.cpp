@@ -294,16 +294,21 @@ Variant MixedArray::CreateVarForUncountedArray(const Variant& source) {
       return source.getInt64();
     case KindOfDouble:
       return source.getDouble();
-    case KindOfStaticString:
-      return Variant{source.getStringData()};
+    case KindOfPersistentString:
+      return Variant{source.getStringData(), Variant::PersistentStrInit{}};
     case KindOfPersistentArray:
       return Variant{source.getArrayData()};
 
     case KindOfString: {
       auto src = source.getStringData();
-      if (src->isStatic()) return Variant{src};
-      if (auto s = lookupStaticString(src)) return Variant{s};
-      return Variant{StringData::MakeUncounted(src->slice())};
+      if (!src->isRefCounted()) {
+        return Variant{src, Variant::PersistentStrInit{}};
+      }
+      if (auto s = lookupStaticString(src)) {
+        return Variant{s, Variant::PersistentStrInit{}};
+      }
+      return Variant{StringData::MakeUncounted(src->slice()),
+                     Variant::PersistentStrInit{}};
     }
 
     case KindOfArray: {

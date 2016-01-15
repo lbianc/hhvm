@@ -182,7 +182,7 @@ void StringBuffer::append(const Variant& v) {
     case KindOfInt64:
       append(cell->m_data.num);
       break;
-    case KindOfStaticString:
+    case KindOfPersistentString:
     case KindOfString:
       append(cell->m_data.pstr);
       break;
@@ -321,13 +321,6 @@ void StringBuffer::growBy(int spaceRequired) {
   auto const s = m_str->bufferSlice();
   m_buffer = s.data();
   m_cap = s.size();
-}
-
-//////////////////////////////////////////////////////////////////////
-
-void StringBufferLimitException::vscan(IMarker& mark) const {
-  FatalErrorException::vscan(mark);
-  mark(m_result);
 }
 
 //////////////////////////////////////////////////////////////////////

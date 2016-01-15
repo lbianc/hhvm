@@ -29,10 +29,11 @@
 #include "hphp/runtime/base/apc-local-array.h"
 #include "hphp/runtime/base/apc-local-array-defs.h"
 #include "hphp/runtime/base/thread-info.h"
-#include "hphp/runtime/vm/globals-array.h"
 #include "hphp/runtime/base/rds-header.h"
 #include "hphp/runtime/base/imarker.h"
 #include "hphp/runtime/base/memory-manager.h"
+#include "hphp/runtime/base/req-root.h"
+#include "hphp/runtime/vm/globals-array.h"
 #include "hphp/runtime/ext/extension-registry.h"
 #include "hphp/runtime/base/request-event-handler.h"
 #include "hphp/runtime/server/server-note.h"
@@ -72,11 +73,12 @@ template<class F> void scanHeader(const Header* h, F& mark) {
     case HeaderKind::Vector:
     case HeaderKind::Map:
     case HeaderKind::Set:
-    case HeaderKind::Pair:
     case HeaderKind::ImmVector:
     case HeaderKind::ImmMap:
     case HeaderKind::ImmSet:
       return h->obj_.scan(mark);
+    case HeaderKind::Pair:
+      return h->pair_.scan(mark);
     case HeaderKind::Resource:
       return h->res_.data()->scan(mark);
     case HeaderKind::Ref:
@@ -157,7 +159,7 @@ template<class F> void scan_ezc_resources(F& mark) {
 #endif
 }
 
-template<class F> void ExtendedException::scan(F& mark) const {
+template<class F> void req::root_handle::scan(F& mark) const {
   ExtMarker<F> bridge(mark);
   vscan(bridge);
 }
@@ -248,7 +250,7 @@ void MemoryManager::scanRootMaps(F& m) const {
       scan(root.second, m);
     }
   }
-  for (const auto& root : m_exceptionRoots) {
+  for (const auto root : m_root_handles) {
     root->scan(m);
   }
 }

@@ -23,12 +23,12 @@
 
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/exceptions.h"
-#include "hphp/runtime/base/memory-profile.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/stack-logger.h"
 #include "hphp/runtime/base/surprise-flags.h"
 #include "hphp/runtime/base/sweepable.h"
 #include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/base/heap-graph.h"
 #include "hphp/runtime/server/http-server.h"
 
@@ -199,32 +199,15 @@ MemoryManager::MemoryManager() {
   m_bypassSlabAlloc = RuntimeOption::DisableSmallAllocator;
 }
 
-void MemoryManager::addExceptionRoot(ExtendedException* exn) {
-  m_exceptionRoots.push_back(exn);
-  // The key is the index into the exception root list (biased by 1).
-  exn->m_key.m_index = m_exceptionRoots.size();
-}
-
-void MemoryManager::removeExceptionRoot(ExtendedException* exn) {
-  // Swap the exception being removed with the last exception in the list (which
-  // might be the same one). This lets us remove from the vector in constant
-  // time.
-  assert(exn->m_key.m_index > 0 &&
-         exn->m_key.m_index <= m_exceptionRoots.size());
-  auto& removed = m_exceptionRoots[exn->m_key.m_index-1];
-  assert(removed == exn);
-  auto& back = m_exceptionRoots.back();
-  assert(back->m_key.m_index == m_exceptionRoots.size());
-  back->m_key = removed->m_key;
-  removed->m_key.m_index = 0;
-  removed = back;
-  m_exceptionRoots.pop_back();
+MemoryManager::~MemoryManager() {
+  for (auto r : m_root_handles) r->invalidate();
 }
 
 void MemoryManager::dropRootMaps() {
   m_objectRoots = nullptr;
   m_resourceRoots = nullptr;
-  m_exceptionRoots = std::vector<ExtendedException*>();
+  for (auto r : m_root_handles) r->invalidate();
+  m_root_handles.clear();
 }
 
 void MemoryManager::deleteRootMaps() {
@@ -236,7 +219,8 @@ void MemoryManager::deleteRootMaps() {
     req::destroy_raw(m_resourceRoots);
     m_resourceRoots = nullptr;
   }
-  m_exceptionRoots = std::vector<ExtendedException*>();
+  for (auto r : m_root_handles) r->invalidate();
+  m_root_handles.clear();
 }
 
 void MemoryManager::resetRuntimeOptions() {
@@ -475,10 +459,6 @@ template void MemoryManager::refreshStatsImpl<true>(MemoryUsageStats& stats);
 template void MemoryManager::refreshStatsImpl<false>(MemoryUsageStats& stats);
 
 void MemoryManager::sweep() {
-  // running a gc-cycle at end of request exposes bugs, but otherwise is
-  // somewhat pointless since we're about to free the heap en-masse.
-  if (debug) collect("before MM::sweep");
-
   assert(!sweeping());
   m_sweeping = true;
   DEBUG_ONLY size_t num_sweepables = 0, num_natives = 0;
@@ -550,7 +530,7 @@ void MemoryManager::flush() {
   m_heap.flush();
   m_apc_arrays = std::vector<APCLocalArray*>();
   m_natives = std::vector<NativeNode*>();
-  m_exceptionRoots = std::vector<ExtendedException*>();
+  m_root_handles = std::vector<req::root_handle*>{};
 }
 
 /*
@@ -849,9 +829,6 @@ NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
     refreshStats();
   }
   storeTail(m_front, (char*)m_limit - (char*)m_front);
-  if (debug && RuntimeOption::EvalCheckHeapOnAlloc && !g_context.isNull()) {
-    setSurpriseFlag(PendingGCFlag); // defer heap check until safepoint
-  }
   auto slab = m_heap.allocSlab(kSlabSize);
   assert((uintptr_t(slab.ptr) & kSmallSizeAlignMask) == 0);
   m_stats.borrow(slab.size);
@@ -1067,14 +1044,6 @@ Sweepable::Sweepable() {
 
 //////////////////////////////////////////////////////////////////////
 
-void MemoryManager::logAllocation(void* p, size_t bytes) {
-  MemoryProfile::logAllocation(p, bytes);
-}
-
-void MemoryManager::logDeallocation(void* p) {
-  MemoryProfile::logDeallocation(p);
-}
-
 void MemoryManager::resetCouldOOM(bool state) {
   clearSurpriseFlag(MemExceededFlag);
   m_couldOOM = state;
@@ -1150,6 +1119,15 @@ void MemoryManager::requestShutdown() {
   MM().m_bypassSlabAlloc = RuntimeOption::DisableSmallAllocator;
   MM().m_memThresholdCallbackPeakUsage = SIZE_MAX;
   profctx = ReqProfContext{};
+}
+
+/* static */ void MemoryManager::setupProfiling() {
+  always_assert(MM().empty());
+  MM().m_bypassSlabAlloc = true;
+}
+
+/* static */ void MemoryManager::teardownProfiling() {
+  MM().m_bypassSlabAlloc = RuntimeOption::DisableSmallAllocator;
 }
 
 void MemoryManager::eagerGCCheck() {

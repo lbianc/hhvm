@@ -764,7 +764,7 @@ CodeGenerator::cgCallHelper(Vout& v, CallSpec call, const CallDest& dstInfo,
   }
 
   Fixup syncFixup;
-  if (RuntimeOption::HHProfServerEnabled || sync != SyncOptions::None) {
+  if (RuntimeOption::HHProfEnabled || sync != SyncOptions::None) {
     // If we are profiling the heap, we always need to sync because regs need
     // to be correct during allocations no matter what
     syncFixup = makeFixup(inst->marker(), sync);
@@ -859,8 +859,8 @@ void CodeGenerator::emitTypeTest(Type type, Loc1 typeSrc, Loc2 dataSrc,
   );
   auto& v = vmain();
   ConditionCode cc;
-  if (type <= TStaticStr) {
-    emitCmpTVType(v, sf, KindOfStaticString, typeSrc);
+  if (type <= TPersistentStr) {
+    emitCmpTVType(v, sf, KindOfPersistentString, typeSrc);
     cc = CC_E;
   } else if (type <= TStr) {
     emitTestTVType(v, sf, KindOfStringBit, typeSrc);
@@ -1018,12 +1018,14 @@ void CodeGenerator::cgIsScalarType(IRInstruction* inst) {
   static_assert(KindOfNull < KindOfBoolean, "fix checks for IsScalar");
   static_assert(KindOfInt64 > KindOfBoolean, "fix checks for IsScalar");
   static_assert(KindOfDouble > KindOfBoolean, "fix checks for IsScalar");
-  static_assert(KindOfStaticString > KindOfBoolean, "fix checks for IsScalar");
+  static_assert(KindOfPersistentString > KindOfBoolean,
+                "fix checks for IsScalar");
   static_assert(KindOfString > KindOfBoolean, "fix checks for IsScalar");
 
   static_assert(KindOfInt64 < KindOfString, "fix checks for IsScalar");
   static_assert(KindOfDouble < KindOfString, "fix checks for IsScalar");
-  static_assert(KindOfStaticString < KindOfString, "fix checks for IsScalar");
+  static_assert(KindOfPersistentString < KindOfString,
+                "fix checks for IsScalar");
   static_assert(KindOfArray > KindOfString, "fix checks for IsScalar");
   static_assert(KindOfObject > KindOfString, "fix checks for IsScalar");
   static_assert(KindOfResource > KindOfString, "fix checks for IsScalar");
@@ -1320,7 +1322,7 @@ void CodeGenerator::cgColIsEmpty(IRInstruction* inst) {
          ty.clsSpec().cls()->isCollectionClass());
   auto& v = vmain();
   auto const sf = v.makeReg();
-  v << cmplim{0, srcLoc(inst, 0).reg()[FAST_COLLECTION_SIZE_OFFSET], sf};
+  v << cmplim{0, srcLoc(inst, 0).reg()[collections::FAST_SIZE_OFFSET], sf};
   v << setcc{CC_E, sf, dstLoc(inst, 0).reg()};
 }
 
@@ -1331,7 +1333,7 @@ void CodeGenerator::cgColIsNEmpty(IRInstruction* inst) {
          ty.clsSpec().cls()->isCollectionClass());
   auto& v = vmain();
   auto const sf = v.makeReg();
-  v << cmplim{0, srcLoc(inst, 0).reg()[FAST_COLLECTION_SIZE_OFFSET], sf};
+  v << cmplim{0, srcLoc(inst, 0).reg()[collections::FAST_SIZE_OFFSET], sf};
   v << setcc{CC_NE, sf, dstLoc(inst, 0).reg()};
 }
 
@@ -1351,7 +1353,7 @@ void CodeGenerator::cgConvObjToBool(IRInstruction* inst) {
         [&] (Vout& v) { // rsrc points to native collection
           auto dst2 = v.makeReg();
           auto const sf = v.makeReg();
-          v << cmplim{0, rsrc[FAST_COLLECTION_SIZE_OFFSET], sf};
+          v << cmplim{0, rsrc[collections::FAST_SIZE_OFFSET], sf};
           v << setcc{CC_NE, sf, dst2}; // true iff size not zero
           return dst2;
         }, [&] (Vout& v) { // rsrc is not a native collection
@@ -3470,7 +3472,7 @@ Fixup CodeGenerator::makeFixup(const BCMarker& marker, SyncOptions sync) {
   case SyncOptions::None:
     // we can get here if we are memory profiling, since we override the
     // normal sync settings and sync anyway
-    always_assert(RuntimeOption::HHProfServerEnabled);
+    always_assert(RuntimeOption::HHProfEnabled);
     break;
   }
 
@@ -3634,12 +3636,10 @@ void CodeGenerator::cgCheckType(IRInstruction* inst) {
    * situations with strings and arrays that are neither constantly-foldable
    * nor in the emitTypeTest code path.
    *
-   * We currently actually check their persistent bit here. Note (importantly)
-   * that this is why toDataType can't return KindOfStaticString for
-   * TStaticStr---this code will let an apc string through.  Also note
-   * that CheckType<Uncounted> t1:{Null|Str} doesn't get this treatment
-   * currently---in the emitTypeTest path above it will only check the type
-   * register.
+   * We currently actually check their persistent bit here, which will let
+   * both static and uncounted strings through. Also note that
+   * CheckType<Uncounted> t1:{Null|Str} doesn't get this treatment currently --
+   * the emitTypeTest path above will only check the type register.
    */
   if (!typeParam.isSpecialized() &&
       typeParam <= TUncounted &&
@@ -5325,7 +5325,7 @@ void CodeGenerator::cgCountCollection(IRInstruction* inst) {
   auto const baseReg = srcLoc(inst, 0).reg();
   auto const dstReg  = dstLoc(inst, 0).reg();
   auto& v = vmain();
-  v << loadzlq{baseReg[FAST_COLLECTION_SIZE_OFFSET], dstReg};
+  v << loadzlq{baseReg[collections::FAST_SIZE_OFFSET], dstReg};
 }
 
 void CodeGenerator::cgLdStrLen(IRInstruction* inst) {

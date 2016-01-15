@@ -34,7 +34,7 @@ ETCH_NAME(enterTCHelper):
   ETCH_GET_ARG5
   ETCH_GET_ARG6
 
-  push ETCH_R_VM_FP
+  push ETCH_VMFP
   CFI2(adjust_cfa_offset, 8) // cfa is now 8 bytes further from rsp than it was before
   CFI3C(offset, rbp, -16)    // Where to find previous value of rbp, relative to cfa
 
@@ -42,9 +42,9 @@ ETCH_NAME(enterTCHelper):
   mov %rsp, (ETCH_ARG4)
 
   // Set up special registers used for translated code.
-  mov ETCH_ARG1, ETCH_R_VM_SP
-  mov ETCH_ARG5, ETCH_R_VM_TL
-  mov ETCH_ARG2, ETCH_R_VM_FP
+  mov ETCH_ARG1, ETCH_VMSP
+  mov ETCH_ARG5, ETCH_VMTL
+  mov ETCH_ARG2, ETCH_VMFP
 
   sub $8, %rsp // align native stack
   CFI2(adjust_cfa_offset, 8)
@@ -64,7 +64,7 @@ ETCH_NAME(enterTCHelper):
   jz ETCH_LABEL(enterTCHelper$callTC)
   push ETCH_NAME_REL(enterTCExit)
   push 0x8(ETCH_ARG6)
-  mov ETCH_ARG6, ETCH_R_VM_FP
+  mov ETCH_ARG6, ETCH_VMFP
   call ETCH_LABEL(enterTCHelper$prologue)
 
   /*
@@ -86,13 +86,13 @@ ETCH_NAME(enterTCExit):
   /*
    * Eager vm-reg save. Must match values in rds-header.h
    */
-  mov ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
-  mov ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+  mov ETCH_VMSP, 0x10(ETCH_VMTL)
+  mov ETCH_VMFP, 0x20(ETCH_VMTL)
   add $8, %rsp
   CFI2(adjust_cfa_offset, -8)
 
   // Epilogue
-  pop ETCH_R_VM_FP
+  pop ETCH_VMFP
   CFI2(restore, rbp)
   CFI2(adjust_cfa_offset, -8)
   ret
@@ -127,8 +127,8 @@ ETCH_NAME(handleSRHelper):
   CFI(startproc)
 
   // Sync vmsp & vmfp
-  mov ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
-  mov ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+  mov ETCH_VMSP, 0x10(ETCH_VMTL)
+  mov ETCH_VMFP, 0x20(ETCH_VMTL)
 
   // Push a ReqInfo struct onto the stack and call handleServiceRequest.
   push ETCH_SVCREQ_ARG4
@@ -150,8 +150,8 @@ ETCH_NAME(handleSRHelper):
 
   // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
   // we interpreted anything. Reload them.
-  mov 0x10(ETCH_R_VM_TL), ETCH_R_VM_SP
-  mov 0x20(ETCH_R_VM_TL), ETCH_R_VM_FP
+  mov 0x10(ETCH_VMTL), ETCH_VMSP
+  mov 0x20(ETCH_VMTL), ETCH_VMFP
 
   jmp *ETCH_RET1
 
@@ -245,9 +245,9 @@ ETCH_NAME(enterTCHelper):
 #undef SAVE_GP_REG
 
   // Set up special registers used for translated code.
-  mr ETCH_R_VM_SP, ETCH_ARG1
-  mr ETCH_R_VM_TL, ETCH_ARG5
-  mr ETCH_R_VM_FP, ETCH_ARG2
+  mr ETCH_VMSP, ETCH_ARG1
+  mr ETCH_VMTL, ETCH_ARG5
+  mr ETCH_VMFP, ETCH_ARG2
 
   // Set up ETCH_R_ONE with value "1" (see abi definition for more details)
   li ETCH_R_ONE, ETCH_V_ONE
@@ -266,7 +266,7 @@ ETCH_NAME(enterTCHelper):
   mtlr %r0
 
   // now manipulate the frame to go to prologue
-  mr ETCH_R_VM_FP, ETCH_ARG6
+  mr ETCH_VMFP, ETCH_ARG6
 
   mr %r12, ETCH_ARG3            // %r12 is the function linkage
   mtctr %r12
@@ -287,8 +287,8 @@ ETCH_NAME(enterTCExit):
   /*
    * Eager vm-reg save. Must match values in rds-header.h
    */
-  std ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
-  std ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+  std ETCH_VMSP, 0x10(ETCH_VMTL)
+  std ETCH_VMFP, 0x20(ETCH_VMTL)
 
   // Epilogue
   // Load non-volatile registers saved on Prologue
@@ -334,8 +334,8 @@ ETCH_NAME(handleSRHelper):
   addi  %r2, %r2,  .TOC.-handleSRHelper@l
 
   // Sync vmsp & vmfp
-  std ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
-  std ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+  std ETCH_VMSP, 0x10(ETCH_VMTL)
+  std ETCH_VMFP, 0x20(ETCH_VMTL)
 
   // Push a ReqInfo struct onto the stack and call handleServiceRequest.
   mflr %r0
@@ -370,8 +370,8 @@ ETCH_NAME(handleSRHelper):
 
   // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
   // we interpreted anything. Reload them.
-  ld ETCH_R_VM_SP, 0x10(ETCH_R_VM_TL)
-  ld ETCH_R_VM_FP, 0x20(ETCH_R_VM_TL)
+  ld ETCH_VMSP, 0x10(ETCH_VMTL)
+  ld ETCH_VMFP, 0x20(ETCH_VMTL)
 
   mtctr ETCH_RET1
   bctr

@@ -108,7 +108,6 @@ public:
   IMM_##typ1, IMM_##typ2, IMM_##typ3
 #define FOUR(typ1, typ2, typ3, typ4) \
   IMM_##typ1, IMM_##typ2, IMM_##typ3, IMM_##typ4
-#define IMM_MA std::vector<unsigned char>
 #define IMM_BLA std::vector<Label*>&
 #define IMM_SLA std::vector<StrOff>&
 #define IMM_ILA std::vector<IterPair>&
@@ -466,8 +465,8 @@ public:
     m_evalStackIsUnknown = false;
   }
   bool evalStackIsUnknown() { return m_evalStackIsUnknown; }
-  void popEvalStack(char symFlavor, int arg = -1, int pos = -1);
-  void popSymbolicLocal(Op opcode, int arg = -1, int pos = -1);
+  void popEvalStack(char symFlavor);
+  void popSymbolicLocal(Op opcode);
   void popEvalStackMMany();
   void popEvalStackMany(int len, char symFlavor);
   void popEvalStackCVMany(int len);
@@ -675,16 +674,38 @@ public:
 
   int scanStackForLocation(int iLast);
 
-  void buildVectorImm(std::vector<unsigned char>& vectorImm,
-                      int iFirst, int iLast, bool allowW,
-                      Emitter& e);
   /*
    * Emit bytecodes for the base and intermediate dims, returning the number of
    * eval stack slots containing member keys that should be consumed by the
    * final operation.
    */
-  size_t emitMOp(int iFirst, int& iLast, bool allowW, bool rhsVal,
-                 Emitter& e, MOpFlags flags);
+  struct MInstrOpts {
+    explicit MInstrOpts(MOpFlags flags)
+      : allowW{flags & MOpFlags::Define}
+      , flags{flags}
+    {}
+
+    explicit MInstrOpts(int32_t paramId)
+      : allowW{true}
+      , fpass{true}
+      , paramId{paramId}
+    {}
+
+    MInstrOpts& rhs() {
+      rhsVal = true;
+      return *this;
+    }
+
+    bool allowW{false};
+    bool rhsVal{false};
+    bool fpass{false};
+    union {
+      MOpFlags flags;
+      int32_t paramId;
+    };
+  };
+
+  size_t emitMOp(int iFirst, int& iLast, Emitter& e, MInstrOpts opts);
   void emitQueryMOp(int iFirst, int iLast, Emitter& e, QueryMOp op);
 
   enum class PassByRefKind {

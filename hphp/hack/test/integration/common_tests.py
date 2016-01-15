@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 import glob
+import json
 import os
 import re
 import shutil
@@ -105,6 +106,7 @@ assume_php = false""")
 
     @classmethod
     def get_server_logs(cls):
+        time.sleep(2)  # wait for logs to be written
         log_file = cls.proc_call([
             hh_client, '--logname', cls.repo_dir])[0].strip()
         with open(log_file) as f:
@@ -145,12 +147,46 @@ assume_php = false""")
         (stdout_data, stderr_data) = proc.communicate(stdin)
         sys.stderr.write(stderr_data)
         sys.stderr.flush()
-        return (stdout_data, stderr_data)
+        retcode = proc.wait()
+        return (stdout_data, stderr_data, retcode)
 
     # Runs `hh_client check` asserting the stdout is equal the expected.
     # Returns stderr.
     def check_cmd(self, expected_output, stdin=None, options=None):
         raise NotImplementedError()
+
+    def check_cmd_and_json_cmd(
+        self,
+        expected_output,
+        expected_json,
+        stdin=None,
+        options=None
+    ):
+        self.check_cmd(expected_output, stdin, options)
+        options.append("--json")
+        self.check_cmd(expected_json, stdin, options)
+
+    # hh should should work with 0 retries.
+    def test_responsiveness(self):
+        self.write_load_config()
+        self.check_cmd(['No errors!'])
+        self.check_cmd(['No errors!'], options=['--retries', '0'])
+
+    def test_json_errors(self):
+        """
+        If you ask for errors in JSON format, you will get them on standard
+        output. Changing this will break the tools that depend on it (like
+        editor plugins), and this test is here to remind you about it.
+        """
+        self.write_load_config()
+
+        stderr = self.check_cmd([], options=["--json"])
+        last_line = stderr.splitlines()[-1]
+        output = json.loads(last_line)
+
+        self.assertEqual(output["errors"], [])
+        self.assertEqual(output["passed"], True)
+        self.assertIn("version", output)
 
     def test_modify_file(self):
         """
@@ -262,30 +298,45 @@ assume_php = false""")
 
         self.write_load_config()
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             'File "{root}foo_3.php", line 9, characters 18-40: some_long_function_name, function'
+            ], [
+            '[{{"name":"some_long_function_name","filename":"{root}foo_3.php","desc":"function","line":9,"char_start":18,"char_end":40,"scope":""}}]'
             ], options=['--search', 'some_lo'])
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             'File "{root}foo_3.php", line 11, characters 13-13: h',
             '1 total results'
+            ], [
+            '[{{"name":"h","filename":"{root}foo_3.php","line":11,"char_start":13,"char_end":13}}]'
             ], options=['--find-refs', 'h'])
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             'File "{root}foo_3.php", line 10, characters 13-21: Foo::__construct',
             '1 total results'
+            ], [
+            '[{{"name":"Foo::__construct","filename":"{root}foo_3.php","line":10,"char_start":13,"char_end":21}}]'
             ], options=['--find-refs', 'Foo::__construct'])
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             'File "{root}foo_3.php", line 10, characters 17-19: Foo::__construct',
             '1 total results'
+            ], [
+            '[{{"name":"Foo::__construct","filename":"{root}foo_3.php","line":10,"char_start":17,"char_end":19}}]'
             ], options=['--find-class-refs', 'Foo'])
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             'string'
+            ], [
+            '{{"type":"string","pos":{{"filename":"{root}foo_3.php","line":3,"char_start":23,"char_end":28}}}}'
             ], options=['--type-at-pos', '{root}foo_3.php:11:13'])
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
+            'some_long_function_name (function(): _)'
+            ], [
+            # test the --json output because the non-json one doesn't contain
+            # the filename, and we are especially interested in testing file
+            # paths
             # the doubled curly braces are because this string gets passed
             # through format()
             '[{{"name":"some_long_function_name",'
@@ -295,21 +346,26 @@ assume_php = false""")
             '"func_details":{{"min_arity":0,"return_type":"_","params":[]}},'
             '"expected_ty":false}}]'
             ],
-            # test the --json output because the non-json one doesn't contain
-            # the filename, and we are especially interested in testing file
-            # paths
-            options=['--auto-complete', '--json'],
+            options=['--auto-complete'],
             stdin='<?hh function f() { some_AUTO332\n')
 
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
+            'Foo::bar'
+            ], [
+            # looks like identify-function doesn't support JSON -
+            # but still be careful changing this, since tools
+            # may just call everything with --json flag and it would
+            # be a breaking change
             'Foo::bar'
             ],
             options=['--identify-function', '1:51'],
             stdin='<?hh class Foo { private function bar() { $this->bar() }}')
 
         os.remove(os.path.join(self.repo_dir, 'foo_2.php'))
-        self.check_cmd([
+        self.check_cmd_and_json_cmd([
             '{root}foo_1.php',
+            ], [
+            '{root}foo_1.php',  # see comment for identify-function
             ], options=['--list-files'])
 
     def test_abnormal_typechecker_exit_message(self):

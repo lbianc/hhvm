@@ -690,7 +690,7 @@ void unserializeVariant(Variant& self, VariableUnserializer* uns,
       assert(str.size() == 8);
       auto sdp = reinterpret_cast<StringData*const*>(&str[0]);
       assert((*sdp)->isStatic());
-      tvMove(make_tv<KindOfStaticString>(*sdp), *self.asTypedValue());
+      tvMove(make_tv<KindOfPersistentString>(*sdp), *self.asTypedValue());
     } else {
       throwUnknownType(type);
     }
@@ -766,7 +766,8 @@ void unserializeVariant(Variant& self, VariableUnserializer* uns,
         // Only unserialize CPP extension types which can actually
         // support it. Otherwise, we risk creating a CPP object
         // without having it initialized completely.
-        if (cls->instanceCtor() && !cls->isCppSerializable()) {
+        if (cls->instanceCtor() && !cls->isCppSerializable() &&
+            !cls->isCollectionClass()) {
           assert(obj.isNull());
           throw_null_pointer_exception();
         } else {

@@ -111,10 +111,9 @@ struct Variant : private TypedValue {
     m_data.pstr = s;
   }
   /* implicit */ Variant(const StaticString &v) noexcept {
-    m_type = KindOfStaticString;
-    StringData *s = v.get();
-    assert(s);
-    m_data.pstr = s;
+    assert(v.get() && !v.get()->isRefCounted());
+    m_type = KindOfPersistentString;
+    m_data.pstr = v.get();
   }
 
   Variant(const Variant& other, WithRefBind) {
@@ -185,16 +184,12 @@ struct Variant : private TypedValue {
     m_type = KindOfPersistentArray;
   }
 
-  // for static strings only
-  enum class StaticStrInit {};
-  explicit Variant(const StringData *v, StaticStrInit) noexcept {
-    if (v) {
-      assert(v->isStatic());
-      m_data.pstr = const_cast<StringData*>(v);
-      m_type = KindOfStaticString;
-    } else {
-      m_type = KindOfNull;
-    }
+  // for persistent strings only
+  enum class PersistentStrInit {};
+  explicit Variant(const StringData *s, PersistentStrInit) noexcept {
+    assert(!s->isRefCounted());
+    m_data.pstr = const_cast<StringData*>(s);
+    m_type = KindOfPersistentString;
   }
 
   // These are prohibited, but declared just to prevent accidentally
@@ -264,7 +259,7 @@ struct Variant : private TypedValue {
     StringData *s = v.get();
     if (LIKELY(s != nullptr)) {
       m_data.pstr = s;
-      m_type = s->isStatic() ? KindOfStaticString : KindOfString;
+      m_type = s->isRefCounted() ? KindOfString : KindOfPersistentString;
       v.detach();
     } else {
       m_type = KindOfNull;
@@ -464,7 +459,7 @@ struct Variant : private TypedValue {
   ALWAYS_INLINE String& asStrRef() {
     assert(isStringType(m_type) && m_data.pstr);
     // The caller is likely going to modify the string, so we have to eagerly
-    // promote KindOfStaticString -> KindOfString.
+    // promote KindOfPersistentString -> KindOfString.
     m_type = KindOfString;
     return *reinterpret_cast<String*>(&m_data.pstr);
   }
@@ -473,7 +468,7 @@ struct Variant : private TypedValue {
     assert(isString());
     assert(m_type == KindOfRef ? m_data.pref->var()->m_data.pstr : m_data.pstr);
     // The caller is likely going to modify the string, so we have to eagerly
-    // promote KindOfStaticString -> KindOfString.
+    // promote KindOfPersistentString -> KindOfString.
     auto tv = LIKELY(isStringType(m_type)) ? this : m_data.pref->tv();
     tv->m_type = KindOfString;
     return *reinterpret_cast<String*>(&tv->m_data.pstr);
@@ -606,7 +601,7 @@ struct Variant : private TypedValue {
       case KindOfResource:
         return true;
       case KindOfDouble:
-      case KindOfStaticString:
+      case KindOfPersistentString:
       case KindOfString:
       case KindOfPersistentArray:
       case KindOfArray:
@@ -925,6 +920,12 @@ struct Variant : private TypedValue {
    */
   Ref* asRef() { PromoteToRef(*this); return this; }
 
+  TypedValue detach() noexcept {
+    auto tv = *asTypedValue();
+    m_type = KindOfNull;
+    return tv;
+  }
+
  private:
   ResourceData* getResourceData() const {
     assert(is(KindOfResource));
@@ -1003,7 +1004,7 @@ struct Variant : private TypedValue {
    */
   Variant(StringData* var, Attach) noexcept {
     if (var) {
-      m_type = var->isStatic() ? KindOfStaticString : KindOfString;
+      m_type = var->isRefCounted() ? KindOfString : KindOfPersistentString;
       m_data.pstr = var;
     } else {
       m_type = KindOfNull;
@@ -1086,7 +1087,7 @@ struct Variant : private TypedValue {
   void set(String&& v) noexcept { steal(v.detach()); }
   void set(Array&& v) noexcept { steal(v.detach()); }
   void set(Object&& v) noexcept { steal(v.detach()); }
-  void set(Resource&& v) noexcept { steal(detach<ResourceData>(std::move(v))); }
+  void set(Resource&& v) noexcept { steal(v.detachHdr()); }
 
   template<typename T>
   void set(const req::ptr<T> &v) noexcept {
@@ -1210,6 +1211,10 @@ struct Variant : private TypedValue {
     setWithRefHelper(v, false);
   }
 
+  template<class F> void scan(F& mark) const {
+    mark(*asTypedValue());
+  }
+
 private:
   bool   toBooleanHelper() const;
   int64_t  toInt64Helper(int base = 10) const;
@@ -1311,10 +1316,9 @@ public:
   explicit VarNR(double  v) { init(KindOfDouble ); m_data.dbl = v;}
 
   explicit VarNR(const StaticString &v) {
-    init(KindOfStaticString);
-    StringData *s = v.get();
-    assert(s);
-    m_data.pstr = s;
+    assert(v.get() && !v.get()->isRefCounted());
+    init(KindOfPersistentString);
+    m_data.pstr = v.get();
   }
 
   explicit VarNR(const String& v);
@@ -1322,8 +1326,8 @@ public:
   explicit VarNR(const Object& v);
   explicit VarNR(StringData *v);
   explicit VarNR(const StringData *v) {
-    assert(v && v->isStatic());
-    init(KindOfStaticString);
+    assert(v && !v->isRefCounted());
+    init(KindOfPersistentString);
     m_data.pstr = const_cast<StringData*>(v);
   }
   explicit VarNR(ArrayData *v);
@@ -1464,7 +1468,7 @@ inline Array& forceToArray(Variant& var) {
 //////////////////////////////////////////////////////////////////////
 
 ALWAYS_INLINE Variant empty_string_variant() {
-  return Variant(staticEmptyString(), Variant::StaticStrInit{});
+  return Variant(staticEmptyString(), Variant::PersistentStrInit{});
 }
 
 template <typename T>

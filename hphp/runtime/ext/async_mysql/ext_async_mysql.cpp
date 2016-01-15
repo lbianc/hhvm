@@ -512,7 +512,7 @@ Object HHVM_METHOD(AsyncMysqlConnection, queryf,
       const Object& obj = arg.asCObjRef();
       if (obj->isCollection() && isVectorCollection(obj->collectionType())) {
         std::vector<am::QueryArgument> out;
-        out.reserve(getCollectionSize(obj.get()));
+        out.reserve(collections::getSize(obj.get()));
         for (ArrayIter listIter(arg); listIter; ++listIter) {
           const Variant& item = listIter.second();
           if (scalarPush(out, item)) {
@@ -608,6 +608,26 @@ String HHVM_METHOD(AsyncMysqlConnection, serverInfo) {
   String ret = "";
   if (data->m_conn && !data->m_closed) {
     ret = data->m_conn->serverInfo();
+  }
+  return ret;
+}
+
+bool HHVM_METHOD(AsyncMysqlConnection, sslSessionReused) {
+  auto* data = Native::data<AsyncMysqlConnection>(this_);
+
+  bool ret = false;
+  if (data->m_conn && !data->m_closed) {
+    ret = data->m_conn->sslSessionReused();
+  }
+  return ret;
+}
+
+bool HHVM_METHOD(AsyncMysqlConnection, isSSL) {
+  auto* data = Native::data<AsyncMysqlConnection>(this_);
+
+  bool ret = false;
+  if (data->m_conn && !data->m_closed) {
+    ret = data->m_conn->isSSL();
   }
   return ret;
 }

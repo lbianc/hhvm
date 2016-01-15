@@ -168,7 +168,8 @@ static TCA emitDecRefHelper(CodeBlock& cb, PhysReg tv, PhysReg type,
       PhysRegSaver prs{v, live};
 
       // The refcount is exactly 1; release the value.
-      v << callm{lookupDestructor(v, type)};
+      // Avoid 'this' pointer overwriting by reserving it as an argument.
+      v << callm{lookupDestructor(v, type), arg_regs(1)};
 
       // Between where %rsp is now and the saved RIP of the call into the
       // freeLocalsHelpers stub, we have all the live regs we pushed, plus the
@@ -278,7 +279,13 @@ TCA emitCallToExit(CodeBlock& cb) {
   // got us into the TC was popped off the RSB by the ret that got us to this
   // stub.
   a.addq(8, rsp());
-  a.jmp(TCA(enterTCExit));
+  if (a.jmpDeltaFits(TCA(enterTCExit))) {
+    a.jmp(TCA(enterTCExit));
+  } else {
+    // can't do a near jmp - use rip-relative addressing
+    auto addr = mcg->allocLiteral((uint64_t)enterTCExit);
+    a.jmp(reg::rip[(intptr_t)addr]);
+  }
 
   // On a backtrace, gdb tries to locate the calling frame at address
   // returnRIP-1. However, for the first VM frame, there is no code at
