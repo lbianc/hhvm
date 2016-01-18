@@ -1856,7 +1856,9 @@ struct Assembler {
   void sldi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
     rldicr(ra, rs, sh, 63-sh, rc);
   }
-  void clrrdi()         { not_implemented(); }  //Extended
+  void clrrdi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
+    rldicr(ra, rs, 0, 63-sh, rc);
+  }
   void clrrwi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
     rlwinm(ra, rs, 0, 0, 31-sh, rc);
   }

@@ -227,7 +227,7 @@ struct Vgen {
   void emit(const movlk& i) {
     int8_t sh = sizeof(int) * CHAR_BIT;
     a->rlwinm(rAsm, i.s, 0, 32-sh, 31); // extract lower 32bits
-    a->clrrwi(i.d, i.d, sh); // clear lower 32bits on destination
+    a->clrrdi(i.d, i.d, sh); // clear lower 32bits on destination
     // move lower 32bits to destination and keep the higher 32bits
     a->or(i.d, i.d, rAsm);
   }
