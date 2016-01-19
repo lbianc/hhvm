@@ -1223,7 +1223,9 @@ struct Assembler {
   void maclhwu()        { not_implemented(); }
   void maclhwuo()       { not_implemented(); }
   void mbar()           { not_implemented(); }
-  void mcrfs()          { not_implemented(); }
+  void mcrfs(uint8_t bf, uint8_t bfa) {
+    EmitXForm(63, (bf << 2), (bfa << 2), 0, 64);
+  }
   void mcrxr()          { not_implemented(); }
   void mfbhrbe()        { not_implemented(); }
   void mfcr(const Reg64& rt) {
@@ -2126,6 +2128,26 @@ protected:
 
       dword(x_formater.instruction);
    }
+
+   void EmitXForm(const uint8_t op,
+                  const uint32_t rt,
+                  const uint32_t ra,
+                  const uint32_t rb,
+                  const uint16_t xop,
+                  const bool rc = 0){
+
+      X_form_t x_formater {
+                            rc,
+                            xop,
+                            static_cast<uint32_t>(rb),
+                            static_cast<uint32_t>(ra),
+                            static_cast<uint32_t>(rt),
+                            op
+                          };
+
+      dword(x_formater.instruction);
+   }
+
 
    void EmitDSForm(const uint8_t op,
                    const RegNumber rt,

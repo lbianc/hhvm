@@ -260,6 +260,7 @@ struct Vunit;
   O(fabs, Inone, UH(s,d), DH(d,s))\
   O(fcmpo, Inone, U(s0) U(s1), D(sf))\
   O(fcmpu, Inone, U(s0) U(s1), D(sf))\
+  O(fctidz, Inone, U(s), D(d) D(sf))\
   O(loadw, Inone, U(s), D(d))\
   O(mfcr, Inone, Un, D(d))\
   O(mflr, Inone, Un, D(d))\
@@ -948,6 +949,7 @@ struct extsw { Vreg64 s; Vreg64 d; };
 struct fabs { VregDbl s; VregDbl d; };
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };
+struct fctidz { VregDbl s; VregDbl d; VregSF sf; };
 struct incw { Vreg16 s, d; VregSF sf; };
 struct ldimmw { Immed s; Vreg16 d; };
 struct loadw { Vptr s; Vreg16 d; };

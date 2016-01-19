@@ -1695,6 +1695,7 @@ O(unpcklpd)
       case Vinstr::loadw:
       case Vinstr::fcmpo:
       case Vinstr::fcmpu:
+      case Vinstr::fctidz:
       case Vinstr::xscvdpsxds:
       case Vinstr::mfcr:
       case Vinstr::mflr:

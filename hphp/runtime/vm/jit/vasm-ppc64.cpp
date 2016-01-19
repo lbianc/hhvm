@@ -204,6 +204,10 @@ struct Vgen {
   void emit(const fcmpu& i) {
     a->fcmpu(i.sf, i.s0, i.s1);
   }
+  void emit(const fctidz& i) {
+    a->fctidz(i.d, i.s, false);
+    a->mcrfs(0,5);
+  }
   void emit(const incw& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const incl& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const incq& i) { a->addo(i.d, i.s, rone(), true); }
@@ -362,7 +366,6 @@ struct Vgen {
   // order to guarantee that the desired vasm is already defined or else it'll
   // fallback to the templated emit function.
   void emit(const cvtsi2sd& i);
-  void emit(const cvttsd2siq& i);
   void emit(const callfaststub& i);
   void emit(const callstub& i);
   void emit(const jcc& i);
@@ -410,12 +413,6 @@ void Vgen::emit(const cvtsi2sd& i) {
   // As described on ISA page 727, F.2.6
   emit(copy{i.s, i.d});
   a->fcfids(i.d, i.d);
-}
-
-void Vgen::emit(const cvttsd2siq& i) {
-  // As described on ISA page 726, F.2.2
-  a->fctidz(rFasm, i.s);
-  emit(copy{rFasm, i.d});
 }
 
 void Vgen::emit(const ldimmb& i) {
@@ -1075,6 +1072,28 @@ void lowerForPPC64(Vout& v, setcc& inst) {
 
 void lowerForPPC64(Vout& v, countbytecode& inst) {
   v << incqm{inst.base[g_bytecodesVasm.handle()], inst.sf};
+}
+
+void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
+  //  In order to fctidz be x64 compliant, it is necessary to return  the value
+  //  0x8000000000000000 when the bit VXCVI is set. See fctidz instruction on
+  //  ISA page 152, 4.6.7
+  auto sfTmp = v.makeReg();
+  auto tmpRaw = v.makeReg();
+  auto tmpInt = v.makeReg();
+  auto tmpReturnError = v.makeReg();
+  Immed64 ErrorVal = 0x8000000000000000;
+
+  // Convert value. If an error occurs, the overflow bit in CR0 is set.
+  v << fctidz{inst.s, tmpRaw, sfTmp};
+  // Load error code.
+  v << ldimmq{ErrorVal, tmpReturnError};
+  // Copy the float register to a general purpose register.
+  v << copy{tmpRaw, tmpInt};
+
+  // If the overflow bit is set, return the ErrorVal. Else, return the
+  // value converted by fctidz.
+  v << cmovq {ConditionCode::CC_O, sfTmp, tmpInt, tmpReturnError, inst.d};
 }
 
 /////////////////////////////////////////////////////////////////////////////

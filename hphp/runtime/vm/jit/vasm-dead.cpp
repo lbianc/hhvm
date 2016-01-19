@@ -78,6 +78,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::fabs:
     case Vinstr::fcmpo:
     case Vinstr::fcmpu:
+    case Vinstr::fctidz:
     case Vinstr::imul:
     case Vinstr::incl:
     case Vinstr::incq:
