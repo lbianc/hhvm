@@ -133,7 +133,9 @@ struct Vgen {
   void emit(const ldimmq& i);
   void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
   void emit(const nothrow& i) {
-    mcg->registerCatchBlock(a->frontier(), nullptr);
+    // save the return address of previous call.
+    TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
+    mcg->registerCatchBlock(saved_pc, nullptr);
   }
   // After VM frame unwinding, restore the frame pointer correctly as the
   // callExtern left it with the additional frame.
