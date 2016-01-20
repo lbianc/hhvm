@@ -29,10 +29,6 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
 
-// allow asserts due to performance constraints
-// comment definition to disable
-//#define PPC64_PERFORMANCE 1
-
 namespace ppc64_asm {
 
 /* using override */ using HPHP::jit::Reg64;
