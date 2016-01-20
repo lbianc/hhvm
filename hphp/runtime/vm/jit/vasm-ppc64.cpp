@@ -188,12 +188,6 @@ struct Vgen {
   void emit(const decl& i) { a->subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(const decq& i) { a->subfo(i.d, rone(), i.s, true); }
   void emit(const imul& i) { a->mulld(i.d, i.s1, i.s0, true); }
-  void emit(const srem& i) {
-    // remainder as described on divd documentation:
-    a->divd(i.d, i.s0, i.s1);   // i.d = quotient
-    a->mulld(i.d, i.d, i.s1);   // i.d = quotient*divisor
-    a->subf(i.d, i.d, i.s0);    // i.d = remainder
-  }
   void emit(const divint& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
@@ -1020,6 +1014,16 @@ X(cmpqm,  cmpq,  load,  s1, s0)
 #undef X
 
 // Other lowers that didn't fit the macros above or are not so numerous.
+void lowerForPPC64(Vout& v ,srem& i) {
+  // remainder as described on divd documentation:
+  auto tmpSf = v.makeReg(), tmpSf2 = v.makeReg();
+  auto quotient = v.makeReg();
+  auto quoxdiv = v.makeReg();
+  v << divint{i.s0, i.s1, quotient};         // i.d = quotient
+  v << imul{quotient, i.s1, quoxdiv, tmpSf}; // i.d = quotient*divisor
+  v << subq{quoxdiv, i.s0, i.d, tmpSf2};     // i.d = remainder
+}
+
 void lowerForPPC64(Vout& v, jmpm& inst) {
   Vptr p = inst.target;
   patchVptr(p, v);
