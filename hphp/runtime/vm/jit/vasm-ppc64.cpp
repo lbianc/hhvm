@@ -53,9 +53,6 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// rvmfp position on call stack.
-constexpr int rvmfp_position_on_callstack = 8;  // CR save area not in use
-
 /* Parameters for push/pop and keep stack aligned */
 constexpr int push_pop_position           = 8;
 
@@ -200,10 +197,8 @@ struct Vgen {
   void emit(const divint& i) { a->divd(i.d,  i.s0, i.s1, false); }
   void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
-  void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s1, i.s0); }
-  void emit(const fcmpu& i) {
-    a->fcmpu(i.sf, i.s0, i.s1);
-  }
+  void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s0, i.s1); }
+  void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s0, i.s1); }
   void emit(const fctidz& i) {
     a->fctidz(i.d, i.s, false);
     a->mcrfs(0,5);
@@ -1524,4 +1519,3 @@ void finishPPC64(Vunit& unit, Vtext& text, const Abi& abi, AsmInfo* asmInfo) {
 
 ///////////////////////////////////////////////////////////////////////////////
 }}
-

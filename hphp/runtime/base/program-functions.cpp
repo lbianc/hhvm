@@ -39,6 +39,7 @@
 #include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/base/thread-safe-setlocale.h"
+#include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/base/zend-math.h"
 #include "hphp/runtime/base/zend-strtod.h"
 #include "hphp/runtime/debugger/debugger.h"
@@ -1510,6 +1511,11 @@ static int execute_program_impl(int argc, char** argv) {
     for (auto& filename : s_config_files) {
       if (boost::filesystem::exists(filename)) {
         Config::ParseConfigFile(filename, ini, config);
+      } else {
+        Logger::Warning(
+          "The configuration file %s does not exist",
+          filename.c_str()
+        );
       }
     }
     // Now, take care of CLI options and then officially load and bind things
@@ -1958,11 +1964,11 @@ void hphp_process_init() {
 
   InitFiniNode::ProcessInit();
   BootTimer::mark("extra_process_init");
-  int64_t save = RuntimeOption::SerializationSizeLimit;
-  RuntimeOption::SerializationSizeLimit = StringData::MaxSize;
-  apc_load(apcExtension::LoadThread);
-  RuntimeOption::SerializationSizeLimit = save;
-  BootTimer::mark("apc_load");
+  {
+    UnlimitSerializationScope unlimit;
+    apc_load(apcExtension::LoadThread);
+    BootTimer::mark("apc_load");
+  }
 
   rds::requestExit();
   BootTimer::mark("rds::requestExit");
@@ -1971,6 +1977,13 @@ void hphp_process_init() {
   context->~ExecutionContext();
   new (context) ExecutionContext();
   BootTimer::mark("ExecutionContext");
+
+  // TODO(9755792): Add real execution mode for snapshot generation.
+  if (apcExtension::PrimeLibraryUpgradeDest != "") {
+    Logger::Info("APC PrimeLibrary upgrade mode completed; exiting.");
+    hphp_process_exit();
+    exit(0);
+  }
 }
 
 static void handle_exception(bool& ret, ExecutionContext* context,
