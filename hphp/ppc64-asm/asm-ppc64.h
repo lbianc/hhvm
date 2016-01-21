@@ -1979,18 +1979,16 @@ struct Assembler {
 
   static void patchBctr(CodeAddress jmp, CodeAddress dest) {
     // Check Label::branchAuto for details
-    HPHP::CodeBlock cb2;
+    HPHP::CodeBlock cb;
 
-#ifndef NDEBUG  // avoid "unused variable 'bctr_addr'" warning on release build
     // skips the li64 and a mtctr instruction
-    CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
+    DEBUG_ONLY CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
     // check for instruction opcode
     assert(((bctr_addr[3] >> 2) & 0x3F) == 19);
-#endif
 
-    // Initialize code block cb2 pointing to li64
-    cb2.init(jmp, kLi64InstrLen, "patched bctr");
-    Assembler b{ cb2 };
+    // Initialize code block cb pointing to li64
+    cb.init(jmp, kLi64InstrLen, "patched bctr");
+    Assembler b{ cb };
     b.li64(reg::r12, ssize_t(dest));
   }
 
