@@ -23,7 +23,7 @@
 
 namespace ppc64_asm {
 
-void Dissasembler::dissasembly(std::ostream& out, uint8_t* instr) {
+void Disassembler::disassembly(std::ostream& out, uint8_t* instr) {
   if (!color_.empty()) {
     out << color_;
   }

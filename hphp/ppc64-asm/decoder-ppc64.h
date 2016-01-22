@@ -1759,7 +1759,7 @@ private:
   #undef RTO
   #undef RTQ
   #undef S
- #undef SH
+  #undef SH
   #undef SH16
   #undef SH6
   #undef SHB
@@ -1807,9 +1807,9 @@ private:
 public:
 
   static Decoder& GetDecoder() {
-   static Decoder dec;
-   decoder= &dec;
-   return *decoder;
+    static Decoder dec;
+    decoder= &dec;
+    return *decoder;
   }
 
   DecoderInfo* decode(uint32_t ip);
