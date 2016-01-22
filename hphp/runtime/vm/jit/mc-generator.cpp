@@ -80,6 +80,7 @@
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/debug-guards.h"
+#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/func-guard.h"
 #include "hphp/runtime/vm/jit/func-prologue.h"
 #include "hphp/runtime/vm/jit/inlining-decider.h"

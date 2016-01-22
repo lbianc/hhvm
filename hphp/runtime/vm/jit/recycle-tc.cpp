@@ -19,6 +19,7 @@
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/treadmill.h"
 
+#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/prof-data.h"

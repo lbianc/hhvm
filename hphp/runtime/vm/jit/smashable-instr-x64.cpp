@@ -17,6 +17,7 @@
 #include "hphp/runtime/vm/jit/smashable-instr-x64.h"
 
 #include "hphp/runtime/vm/jit/align-x64.h"
+#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
 #include "hphp/util/asm-x64.h"
