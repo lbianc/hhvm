@@ -70,7 +70,7 @@ void append_vec(std::vector<char>& v,
 void sync_regstate(_Unwind_Context* context) {
   assertx(tl_regState == VMRegState::DIRTY);
 
-  uintptr_t frameRbp = _Unwind_GetGR(context, Debug::RBP);
+  uintptr_t frameRbp = _Unwind_GetGR(context, Debug::PPC64::RBP);
   uintptr_t frameRip = _Unwind_GetIP(context);
   FTRACE(2, "syncing regstate for rbp: {:#x} rip: {:#x}\n", frameRbp, frameRip);
 
@@ -197,7 +197,7 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
     append_vec<uint8_t>(buffer, 8);
 
     // Return address column (in version 1, this is a single byte).
-    append_vec<uint8_t>(buffer, Debug::LR);
+    append_vec<uint8_t>(buffer, Debug::PPC64::LR);
 
     // Length of the augmentation data.
     const size_t augIdx = buffer.size();
@@ -213,7 +213,7 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
     *static_cast<uint8_t*>(vp) = buffer.size() - augIdx - sizeof(uint8_t);
 
     append_vec<uint8_t>(buffer, DW_CFA_def_cfa);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RSP);
     append_vec<uint8_t>(buffer, 0);
 
     vp = &buffer[0];
@@ -243,13 +243,13 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
 
     // LR is at (*CFA) + 2 * data_align
     append_vec<uint8_t>(buffer, DW_CFA_val_expression);
-    append_vec<uint8_t>(buffer, Debug::RIP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RIP);
     // Reserve space for block length.
     const size_t ripIdx = buffer.size();
     append_vec<uint8_t>(buffer, 0);
     // the following expression gets the return address based on the last frame.
     append_vec<uint8_t>(buffer, DW_OP_bregx);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RSP);
     append_vec<uint8_t>(buffer, 0);
     append_vec<uint8_t>(buffer, DW_OP_deref);   // previous frame
     append_vec<uint8_t>(buffer, DW_OP_consts);
@@ -263,17 +263,17 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
 
     // TOC is at CFA + 3 * data_align
     append_vec<uint8_t>(buffer, DW_CFA_offset_extended_sf);
-    append_vec<uint8_t>(buffer, Debug::TOC);
+    append_vec<uint8_t>(buffer, Debug::PPC64::TOC);
     append_vec<uint8_t>(buffer, 3);
 
     // updates RBP to point to previous RSP
     append_vec<uint8_t>(buffer, DW_CFA_val_expression);
-    append_vec<uint8_t>(buffer, Debug::RBP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RBP);
     // Reserve space for block length.
     const size_t rbpIdx = buffer.size();
     append_vec<uint8_t>(buffer, 0);
     append_vec<uint8_t>(buffer, DW_OP_bregx);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RSP);
     append_vec<uint8_t>(buffer, 0);
     append_vec<uint8_t>(buffer, DW_OP_deref);   // previous frame
     // Fixup the length field for this block. Again length doesn't include the
@@ -283,11 +283,11 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
 
     // follow the backchain
     append_vec<uint8_t>(buffer, DW_CFA_offset_extended_sf);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RSP);
     append_vec<uint8_t>(buffer, 0);
 
     append_vec<uint8_t>(buffer, DW_CFA_def_cfa_register);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::PPC64::RSP);
 
     // Fixup the length field for this FDE.  Again length doesn't
     // include the length field itself.

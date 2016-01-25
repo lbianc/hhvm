@@ -132,6 +132,11 @@ void DwarfBuf::dwarf_cfa_sfp(uint8_t reg, int offset, int scale) {
 
 void DwarfBuf::dwarf_cfa_unwind_rsp() {
   byte(DW_CFA_val_expression);
+  #if defined(__powerpc64__)
+   using namespace PPC64;
+  #else
+   using namespace X64;
+  #endif
   byte(RSP);
   /* instruction sequence of length 2 */
   byte(2);

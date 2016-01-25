@@ -69,7 +69,7 @@ void append_vec(std::vector<char>& v,
 void sync_regstate(_Unwind_Context* context) {
   assertx(tl_regState == VMRegState::DIRTY);
 
-  uintptr_t frameRbp = _Unwind_GetGR(context, Debug::RBP);
+  uintptr_t frameRbp = _Unwind_GetGR(context, Debug::X64::RBP);
   uintptr_t frameRip = _Unwind_GetIP(context);
   FTRACE(2, "syncing regstate for rbp: {:#x} rip: {:#x}\n", frameRbp, frameRip);
 
@@ -199,7 +199,7 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
     append_vec<uint8_t>(buffer, 8); // Multiplies offsets below.
 
     // Return address column (in version 1, this is a single byte).
-    append_vec<uint8_t>(buffer, Debug::RIP);
+    append_vec<uint8_t>(buffer, Debug::X64::RIP);
 
     // Length of the augmentation data.
     const size_t augIdx = buffer.size();
@@ -223,15 +223,15 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
      */
     // Previous FP (CFA) is at rbp + 16.
     append_vec<uint8_t>(buffer, DW_CFA_def_cfa);
-    append_vec<uint8_t>(buffer, Debug::RBP);
+    append_vec<uint8_t>(buffer, Debug::X64::RBP);
     append_vec<uint8_t>(buffer, 16);
     // rip is at CFA - 1 * data_align.
     append_vec<uint8_t>(buffer, DW_CFA_offset_extended_sf);
-    append_vec<uint8_t>(buffer, Debug::RIP);
+    append_vec<uint8_t>(buffer, Debug::X64::RIP);
     append_vec<uint8_t>(buffer, -1u & 0x7f);
     // rbp is at CFA - 2 * data_align.
     append_vec<uint8_t>(buffer, DW_CFA_offset_extended_sf);
-    append_vec<uint8_t>(buffer, Debug::RBP);
+    append_vec<uint8_t>(buffer, Debug::X64::RBP);
     append_vec<uint8_t>(buffer, -2u & 0x7f);
     /*
      * Leave rsp unchanged.
@@ -241,7 +241,7 @@ UnwindInfoHandle register_unwind_region(unsigned char* startAddr, size_t size) {
      * changes to use rsp this code must change.
      */
     append_vec<uint8_t>(buffer, DW_CFA_same_value);
-    append_vec<uint8_t>(buffer, Debug::RSP);
+    append_vec<uint8_t>(buffer, Debug::X64::RSP);
 
     // Fixup the length field.  Note that it doesn't include the space
     // for itself.
