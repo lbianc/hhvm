@@ -13,6 +13,10 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
+#ifndef incl_HPHP_UTIL_DECODED_INSTR_X64_H_
+#define incl_HPHP_UTIL_DECODED_INSTR_X64_H_
+
 #include "hphp/util/asm-x64.h"
 
 #include <folly/Format.h>
@@ -106,3 +110,5 @@ private:
 
 
 }}}
+
+#endif

@@ -13,13 +13,17 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
+#ifndef incl_HPHP_PPC64_ASM_DECODED_INSTR_PPC64_H_
+#define incl_HPHP_PPC64_ASM_DECODED_INSTR_PPC64_H_
+
 #include "hphp/util/asm-x64.h"
 
 #include <folly/Format.h>
 
 #include "hphp/util/safe-cast.h"
 
-namespace HPHP { namespace jit { namespace ppc64 {
+namespace ppc64_asm {
 
 struct DecodedInstruction {
   explicit DecodedInstruction(uint8_t* ip) { decode(ip); }
@@ -41,7 +45,7 @@ struct DecodedInstruction {
   bool isCall() const;
   bool isJmp() const;
   bool isLea() const;
-  ConditionCode jccCondCode() const;
+  HPHP::jit::ConditionCode jccCondCode() const;
   bool shrinkBranch();
   void widenBranch();
   uint8_t getModRm() const;
@@ -95,5 +99,6 @@ private:
   uint8_t       m_offSz;
 };
 
+}
 
-}}}
+#endif

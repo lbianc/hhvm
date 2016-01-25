@@ -20,7 +20,6 @@
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
-#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
@@ -29,6 +28,7 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
 #include "hphp/util/data-block.h"
+#include "hphp/util/decoded-instr.h"
 #include "hphp/util/trace.h"
 
 #include "hphp/vixl/a64/macro-assembler-a64.h"

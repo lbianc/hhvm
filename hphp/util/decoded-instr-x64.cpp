@@ -14,7 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/vm/jit/decoded-instr-x64.h"
+#include "hphp/util/decoded-instr-x64.h"
 
 #include "hphp/util/asm-x64.h"
 

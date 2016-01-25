@@ -24,7 +24,6 @@
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/align-x64.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
-#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/llvm-locrecs.h"
 #include "hphp/runtime/vm/jit/llvm-stack-maps.h"
@@ -44,6 +43,7 @@
 
 #include "hphp/util/abi-cxx.h"
 #include "hphp/util/assertions.h"
+#include "hphp/util/decoded-instr.h"
 #include "hphp/util/disasm.h"
 
 #ifdef USE_LLVM

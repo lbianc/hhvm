@@ -13,14 +13,14 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#include "hphp/runtime/vm/jit/relocation.h"
 
 #include "hphp/runtime/vm/jit/align-ppc64.h"
 #include "hphp/runtime/vm/jit/asm-info.h"
-#include "hphp/runtime/vm/jit/decoded-instr.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/relocation.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
+#include "hphp/util/decoded-instr.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
 

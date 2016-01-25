@@ -19,15 +19,15 @@
 
 #include "hphp/runtime/base/arch.h"
 
-#include "hphp/runtime/vm/jit/decoded-instr-x64.h"
-#include "hphp/runtime/vm/jit/decoded-instr-ppc64.h"
+#include "hphp/util/decoded-instr-x64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 
 namespace HPHP { namespace jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 #if defined(__powerpc64__)
-using DecodedInstruction = ppc64::DecodedInstruction;
+using DecodedInstruction = ppc64_asm::DecodedInstruction;
 #else
 using DecodedInstruction = x64::DecodedInstruction;
 #endif

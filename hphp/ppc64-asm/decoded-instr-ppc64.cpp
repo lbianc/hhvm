@@ -14,7 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/vm/jit/decoded-instr-ppc64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 
@@ -22,7 +22,7 @@
 
 #include "hphp/util/safe-cast.h"
 
-namespace HPHP { namespace jit { namespace ppc64 {
+namespace ppc64_asm {
 
 using namespace ppc64_asm;
 
@@ -31,8 +31,8 @@ void DecodedInstruction::decode(uint8_t* ip) {
   m_flagsVal = 0;
   m_map_select = 0;
   m_xtra_op = 0;
-  m_immSz = sz::nosize;
-  m_offSz = sz::nosize;
+  m_immSz = HPHP::sz::nosize;
+  m_offSz = HPHP::sz::nosize;
 
   ip += m_offSz + m_immSz;
   m_size = ip - m_ip;
@@ -217,7 +217,7 @@ bool DecodedInstruction::isLea() const {
 #endif
 }
 
-ConditionCode DecodedInstruction::jccCondCode() const {
+HPHP::jit::ConditionCode DecodedInstruction::jccCondCode() const {
 #if 0 // TODO(gut)
   if (m_map_select == 0) {
     assert((m_opcode & 0xf0) == 0x70); // 8-bit jcc
@@ -227,7 +227,7 @@ ConditionCode DecodedInstruction::jccCondCode() const {
   }
   return static_cast<ConditionCode>(m_opcode & 0x0f);
 #else
-  return CC_None;
+  return HPHP::jit::CC_None;
 #endif
 }
 
@@ -295,4 +295,4 @@ uint8_t DecodedInstruction::getModRm() const {
 #endif
 }
 
-}}}
+}
