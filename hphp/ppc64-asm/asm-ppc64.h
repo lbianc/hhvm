@@ -216,17 +216,7 @@ class BranchParams {
     /*
      * Get the BranchParams from an emitted conditional branch
      */
-    BranchParams(PPC64Instr instr) {
-      // first, guarantee that is a conditional branch
-      if (((instr >> 26) == 16) || ((instr >> 26) == 19)) {
-        // bc, bclr, bcctr, bctar
-        m_bo = (BranchParams::BO)((instr >> 21) & 0x1F);
-        m_bi = (BranchParams::BI)((instr >> 16) & 0x1F);
-      } else {
-        assert(false && "Not a valid conditional branch instruction");
-        // also possible: defineBoBi(BranchConditions::Always);
-      }
-    }
+    BranchParams(PPC64Instr instr);
 
     ~BranchParams() {}
 
@@ -1847,8 +1837,8 @@ struct Assembler {
   void srdi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
     rldicl(ra, rs, 64-sh, sh, rc);
   }
-  void clrldi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
-    rldicl(ra, rs, 0, sh, rc);
+  void clrldi(const Reg64& ra, const Reg64& rs, int8_t mb, bool rc = 0) {
+    rldicl(ra, rs, 0, mb, rc);
   }
   void extldi()         { not_implemented(); }  //Extended
   void sldi(const Reg64& ra, const Reg64& rs, int8_t sh, bool rc = 0) {
@@ -1965,32 +1955,8 @@ struct Assembler {
   //Can be used to generate or force a unimplemented opcode exception
   void unimplemented();
 
-  static void patchBc(CodeAddress jmp, CodeAddress dest) {
-    // Opcode located at the 6 most significant bits
-    assert(((jmp[3] >> 2) & 0x3F) == 16);  // B-Form
-    ssize_t diff = dest - jmp;
-    assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
-        "Patching offset is too big");
-    int16_t* BD = (int16_t*)(jmp);    // target address location in instruction
-
-    // Keep AA and LK values
-    *BD = static_cast<int16_t>(diff & 0xFFFC) | ((*BD) & 0x3);
-  }
-
-  static void patchBctr(CodeAddress jmp, CodeAddress dest) {
-    // Check Label::branchAuto for details
-    HPHP::CodeBlock cb;
-
-    // skips the li64 and a mtctr instruction
-    DEBUG_ONLY CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
-    // check for instruction opcode
-    assert(((bctr_addr[3] >> 2) & 0x3F) == 19);
-
-    // Initialize code block cb pointing to li64
-    cb.init(jmp, kLi64InstrLen, "patched bctr");
-    Assembler b{ cb };
-    b.li64(reg::r12, ssize_t(dest));
-  }
+  static void patchBc(CodeAddress jmp, CodeAddress dest);
+  static void patchBctr(CodeAddress jmp, CodeAddress dest);
 
   void emitNop(int nbytes) {
     assert((nbytes % 4 == 0) && "This arch supports only 4 bytes alignment");

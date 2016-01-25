@@ -14,7 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
+
 #include "hphp/ppc64-asm/decoded-instr-ppc64.h"
+#include "hphp/ppc64-asm/decoder-ppc64.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 
@@ -164,22 +167,13 @@ bool DecodedInstruction::setImmediate(int64_t value) {
 }
 
 bool DecodedInstruction::isNop() const {
-#if 0 // TODO(gut)
-  PPC64Instr instr = *reinterpret_cast<PPC64Instr*>(m_ip);
-  D_form_t d_formater {0, 0, 0, 24 }; // check Assembler::ori
-  return instr == d_formater.instruction;
-#else
-  return true;
-#endif
+  return Decoder::GetDecoder().decode(m_ip)->isNop();
 }
 
 bool DecodedInstruction::isBranch(bool allowCond /* = true */) const {
-  // from patchBctr:
-  // It has to skip 6 instructions: li64 (5 instructions) and mtctr
-  CodeAddress bctr_addr = m_ip + Assembler::kBytesPerInstr * 6;
-  // Opcode located at the 6 most significant bits
-  if (((bctr_addr[3] >> 2) & 0x3F) != 19) return false; // from bctr
-  return true;
+  // skip the preparation instructions that are not actually the branch.
+  auto branch_instr = m_ip + HPHP::jit::ppc64::smashableJccSkip();
+  return Decoder::GetDecoder().decode(branch_instr)->isBranch(allowCond);
 }
 
 bool DecodedInstruction::isCall() const {
@@ -194,18 +188,8 @@ bool DecodedInstruction::isCall() const {
 }
 
 bool DecodedInstruction::isJmp() const {
-  // if it's conditional, it's not a jmp
-
-  // from patchBctr:
-  // It has to skip 6 instructions: li64 (5 instructions) and mtctr
-  PPC64Instr bctr_instr = *(m_ip + Assembler::kBytesPerInstr * 6);
-
-  // grabs binary code for bctr and bctrl
-  BranchParams bp(BranchConditions::Always);
-  XL_form_t bctr = {0, 528, 0, bp.bi(), bp.bo(), 19};
-  XL_form_t bctrl = {1, 528, 0, bp.bi(), bp.bo(), 19};
-
-  return bctr_instr == bctr.instruction || bctr_instr == bctrl.instruction;
+  // if it's conditional branch, it's not a jmp
+  return isBranch(false);
 }
 
 bool DecodedInstruction::isLea() const {
@@ -215,6 +199,10 @@ bool DecodedInstruction::isLea() const {
 #else
   return false;
 #endif
+}
+
+bool DecodedInstruction::isClearSignBit() const {
+  return Decoder::GetDecoder().decode(m_ip)->isClearSignBit();
 }
 
 HPHP::jit::ConditionCode DecodedInstruction::jccCondCode() const {

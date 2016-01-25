@@ -45,6 +45,7 @@ struct DecodedInstruction {
   bool isCall() const;
   bool isJmp() const;
   bool isLea() const;
+  bool isClearSignBit() const;
   HPHP::jit::ConditionCode jccCondCode() const;
   bool shrinkBranch();
   void widenBranch();

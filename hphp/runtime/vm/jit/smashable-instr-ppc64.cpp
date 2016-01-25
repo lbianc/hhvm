@@ -20,9 +20,12 @@
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/util/data-block.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
+
+using ppc64_asm::PPC64Instr;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -179,11 +182,10 @@ TCA smashableJmpTarget(TCA inst) {
 }
 
 TCA smashableJccTarget(TCA inst) {
-  // from patchBctr:
-  // It has to skip 6 instructions: li64 (5 instructions) and mtctr
-  CodeAddress bctr_addr = inst + kStdIns * 6;
-  // Opcode located at the 6 most significant bits
-  if (((bctr_addr[3] >> 2) & 0x3F) != 19) return nullptr; // from bctr
+  auto branch_instr = *reinterpret_cast<PPC64Instr*>(inst + smashableJccSkip());
+  if (!ppc64_asm::Decoder::GetDecoder().decode(branch_instr)->isBranch(true)) {
+    return nullptr;
+  }
 
   return reinterpret_cast<TCA>(ppc64_asm::Assembler::getLi64(inst));
 }
@@ -191,7 +193,7 @@ TCA smashableJccTarget(TCA inst) {
 ConditionCode smashableJccCond(TCA inst) {
   // skip to the branch instruction in order to get its condition
   ppc64_asm::BranchParams bp(
-      *reinterpret_cast<ppc64_asm::PPC64Instr*>(inst + smashableJccSkip()));
+      *reinterpret_cast<PPC64Instr*>(inst + smashableJccSkip()));
   return bp;
 }
 

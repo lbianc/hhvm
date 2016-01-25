@@ -15,8 +15,41 @@
 */
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/ppc64-asm/decoder-ppc64.h"
 
 namespace ppc64_asm {
+
+BranchParams::BranchParams(PPC64Instr instr) {
+  DecoderInfo* dinfo = Decoder::GetDecoder().decode(instr);
+  switch (dinfo->opcode_name()) {
+    case OpcodeNames::op_bc:
+    case OpcodeNames::op_bca:
+    case OpcodeNames::op_bcl:
+    case OpcodeNames::op_bcla:
+    case OpcodeNames::op_bclr:
+      assert(dinfo->form() == Form::kB);
+      B_form_t bform;
+      bform.instruction = dinfo->instruction_image();
+      m_bo = BranchParams::BO(bform.BO);
+      m_bi = BranchParams::BI(bform.BI);
+      break;
+    case OpcodeNames::op_bcctr:
+    case OpcodeNames::op_bcctrl:
+    case OpcodeNames::op_bclrl:
+    case OpcodeNames::op_bctar:
+    case OpcodeNames::op_bctarl:
+      assert(dinfo->form() == Form::kXL);
+      XL_form_t xlform;
+      xlform.instruction = dinfo->instruction_image();
+      m_bo = BranchParams::BO(xlform.BT);
+      m_bi = BranchParams::BI(xlform.BA);
+      break;
+    default:
+      assert(false && "Not a valid conditional branch instruction");
+      // also possible: defineBoBi(BranchConditions::Always);
+      break;
+  }
+}
 
 /*
  * Macro definition for EmitXOForm functions
@@ -711,6 +744,88 @@ void Assembler::unimplemented(){
   EmitDForm(0, rn(0), rn(0), 0);
 }
 
+void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
+  // Used for a relative branch
+  ssize_t diff = dest - jmp;
+  ssize_t abs = dest - static_cast<CodeAddress>(0);
+  PPC64Instr* instr = reinterpret_cast<PPC64Instr*>(jmp);
+
+  DecoderInfo* dinfo = Decoder::GetDecoder().decode(*instr);
+  OpcodeNames opn = dinfo->opcode_name();
+  switch (opn) {
+    case OpcodeNames::op_b:
+    case OpcodeNames::op_bl:
+    case OpcodeNames::op_ba:
+      // TODO(gut): actually the immediate can be as big as 26 bits
+      assert(dinfo->form() == Form::kI);
+      I_form_t iform;
+      iform.instruction = dinfo->instruction_image();
+      if (opn == OpcodeNames::op_ba) {
+        // absolute branch
+        assert(HPHP::jit::deltaFits(abs, HPHP::sz::word) &&
+            "Patching address is too big");
+        // address is 4 bytes aligned and it optimizes these 2 bits.
+        iform.LI = static_cast<uint32_t>(abs >> 2);
+      } else {
+        // relative branch
+        assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
+            "Patching offset is too big");
+        // address is 4 bytes aligned and it optimizes these 2 bits.
+        iform.LI = static_cast<uint32_t>(diff >> 2);
+      }
+      *instr = iform.instruction;
+      break;
+    case OpcodeNames::op_bc:
+    case OpcodeNames::op_bca:
+    case OpcodeNames::op_bcl:
+    case OpcodeNames::op_bcla:
+    case OpcodeNames::op_bclr:
+      assert(dinfo->form() == Form::kB);
+      B_form_t bform;
+      bform.instruction = dinfo->instruction_image();
+      if ((opn == OpcodeNames::op_bca) && (opn == OpcodeNames::op_bcla)) {
+        // absolute branch
+        assert(HPHP::jit::deltaFits(abs, HPHP::sz::word) &&
+            "Patching address is too big");
+        // address is 4 bytes aligned and it optimizes these 2 bits.
+        bform.BD = static_cast<uint32_t>(abs >> 2);
+      } else {
+        // relative branch
+        assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
+            "Patching offset is too big");
+        // address is 4 bytes aligned and it optimizes these 2 bits.
+        bform.BD = static_cast<uint32_t>(diff >> 2);
+      }
+      *instr = bform.instruction;
+      break;
+    default:
+      assert(false && "tried to patch not-expected-branch instruction");
+      break;
+  }
+}
+
+void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
+
+#if DEBUG
+  // skips the li64 and a mtctr instruction
+  CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
+
+  // check for instruction opcode
+  DecoderInfo* dinfo = Decoder::GetDecoder().decode(bctr_addr);
+  OpcodeNames opn = dinfo->opcode_name();
+  if ((opn != OpcodeNames::op_bcctr) && (opn != OpcodeNames::op_bcctrl)) {
+      assert(false && "tried to patch not-expected-branch instruction");
+      return;
+  }
+#endif
+
+  // Initialize code block cb pointing to li64
+  HPHP::CodeBlock cb;
+  cb.init(jmp, kLi64InstrLen, "patched bctr");
+  Assembler b{ cb };
+  b.li64(reg::r12, ssize_t(dest));
+}
+
 // Create prologue when calling
 void Assembler::prologue (const Reg64& rsp,
                           const Reg64& rtoc,
@@ -813,27 +928,18 @@ int64_t Assembler::getLi64(PPC64Instr* pinstr) {
   //
   // It's easier to know how many 16bits of data the immediate uses
   // by counting how many nops there are inside of the code
-
   uint8_t nops = [&]() {
-    // TODO(gut) use Decoder, but for now, do it hardcoded
-    auto isNop = [&](PPC64Instr instr) -> bool {
-      D_form_t d_formater {0, 0, 0, 24 }; // check Assembler::ori
-      return instr == d_formater.instruction;
-    };
-
     uint8_t nNops = 0;
     for (PPC64Instr* i = pinstr; i < pinstr + kLi64InstrLen/kBytesPerInstr;
         i++) {
-      nNops += isNop(*i) ? 1 : 0;
+      if (Decoder::GetDecoder().decode(*i)->isNop()) nNops++;
     }
     return nNops;
   }();
 
   // TODO(gut) use Decoder, but for now, do it hardcoded
-  auto hasClearSignBit = [&](PPC64Instr* instr) -> bool {
-    bool op = (*instr >> 26) == 30;         // check opcode
-    bool xop = ((*instr >> 2) & 0x7) == 0;  // check extended opcode
-    return op && xop;
+  auto hasClearSignBit = [&](PPC64Instr* i) -> bool {
+    return Decoder::GetDecoder().decode(*i)->isClearSignBit();
   };
 
   // TODO(gut) use Decoder, but for now, do it hardcoded
