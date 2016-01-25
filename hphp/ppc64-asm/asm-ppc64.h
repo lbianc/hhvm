@@ -1248,7 +1248,7 @@ struct Assembler {
   void mtdcr()          { not_implemented(); }
   void mtdcrux()        { not_implemented(); }
   void mtdcrx ()        { not_implemented(); }
-  void mtfsb0()         { not_implemented(); }
+  void mtfsb0(uint8_t bt) { EmitXForm(63, bt, 0 , 0, 70); }
   void mtfsb1()         { not_implemented(); }
   void mtfsf()          { not_implemented(); }
   void mtfsfi()         { not_implemented(); }

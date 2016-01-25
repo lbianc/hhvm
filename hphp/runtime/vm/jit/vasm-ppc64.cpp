@@ -196,6 +196,7 @@ struct Vgen {
   void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s0, i.s1); }
   void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s0, i.s1); }
   void emit(const fctidz& i) {
+    a->mtfsb0(23); // clear VXCVI
     a->fctidz(i.d, i.s, false);
     a->mcrfs(0,5);
   }
