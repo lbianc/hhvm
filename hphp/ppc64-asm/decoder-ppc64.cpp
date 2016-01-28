@@ -23,67 +23,44 @@ namespace ppc64_asm {
 
 Decoder* Decoder::decoder = nullptr;
 
-std::string DecoderInfo::toString(){
+std::string DecoderInfo::toString() {
+  if (m_form == Form::kInvalid) return ".long " + std::to_string(m_image);
+  if (isNop())                  return "nop";
 
-  std::string instr;
-
-  if (form_ == Form::kInvalid) {
-    return ".long " + std::to_string(instr_image_);
-  }
-  if (isNop()) {
-    return "nop";
-  }
-
-  instr = mnemonic();
-  instr += " ";
+  // Output string
+  std::string instr = m_mnemonic + " ";
 
   bool hasParen = false;
-  for (auto i = 0; i < operand_size_; i++) {
-     int s = operand_list_[i].operandShift();
-     auto op = (instr_image_ & operand_list_[i].mask_);
-     op = op >> s;
+  for (auto oper : m_operands) {
+    auto op = (m_image & oper.m_mask) >> oper.operandShift();
+    if (oper.m_flags & PPC_OPERAND_GPR)   { instr += "r"; }
+    if (oper.m_flags & PPC_OPERAND_GPR_0) { if (op != 0) instr += "r"; }
+    if (oper.m_flags & PPC_OPERAND_FPR)   { instr += "f"; }
+    if (oper.m_flags & PPC_OPERAND_VR)    { instr += "vs"; }
+    if (oper.m_flags & PPC_OPERAND_SIGNED) {
+      int32_t n = static_cast<int32_t>(op);
+      if (n < 0) instr += "-";
+      instr += std::to_string(n);
+    } else {
+      instr += std::to_string(op);
+    }
 
-     if (operand_list_[i].flags_ & PPC_OPERAND_GPR) {
-        instr += "r";
-     }
-     if (operand_list_[i].flags_ & PPC_OPERAND_GPR_0) {
-       if (op != 0) {
-         instr += "r";
-       }
-     }
-     if (operand_list_[i].flags_ & PPC_OPERAND_FPR) {
-       instr += "f";
-     }
-     if (operand_list_[i].flags_ & PPC_OPERAND_VR) {
-      instr += "v";
-     }
-     if (operand_list_[i].flags_ & PPC_OPERAND_SIGNED) {
-       int32_t n = static_cast<int32_t>(op);
-       if (n < 0) {
-         instr += "-";
-       }
-       instr += std::to_string(n);
-     } else {
-       instr += std::to_string(op);
-     }
-     if (i+1 < operand_size_) {
-       hasParen = (operand_list_[i].flags_ & PPC_OPERAND_PAREN);
-       (hasParen && (i+1 == 2)) ? instr += "(" : instr += ",";
-     } else {
-       if (hasParen) {
-         instr += ")";
-         hasParen = false;
-       }
-     }
+    // Sticky boolean: doesn't clear after set
+    hasParen |= (oper.m_flags & PPC_OPERAND_PAREN);
+    instr += hasParen ? "(" : ",";
   }
+  // remove the "(" or "," at the end. It should not be there.
+  instr.pop_back();
+  // close that parentheses now.
+  if (hasParen) instr += ")";
   return instr;
 }
 
 bool DecoderInfo::isNop() const {
   // no-op is a mnemonic of ori 0,0,0
-  if ((form_ == Form::kD) && (opn_ == OpcodeNames::op_ori)) {
+  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_ori)) {
     D_form_t dform;
-    dform.instruction = instr_image_;
+    dform.instruction = m_image;
     if ((!dform.D) && (!dform.RA) && (!dform.RT)) {
       // no-op
       return true;
@@ -106,7 +83,7 @@ bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
   // (based on the branch instructions defined on this Decoder)
   constexpr uint32_t uncondition_bo = 0x14;
 
-  switch (opn_) {
+  switch (m_opn) {
     case OpcodeNames::op_b:
     case OpcodeNames::op_ba:
     case OpcodeNames::op_bl:
@@ -120,9 +97,9 @@ bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
       if (!allowCond) {
         // checking if the condition is "always branch", then it counts as an
         // unconditional branch
-        assert(form_ == Form::kB);
+        assert(m_form == Form::kB);
         B_form_t bform;
-        bform.instruction = instr_image_;
+        bform.instruction = m_image;
         return ((bform.BO & uncondition_bo) == uncondition_bo);
       }
       return true;
@@ -135,9 +112,9 @@ bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
       if (!allowCond) {
         // checking if the condition is "always branch", then it counts as an
         // unconditional branch
-        assert(form_ == Form::kXL);
+        assert(m_form == Form::kXL);
         XL_form_t xlform;
-        xlform.instruction = instr_image_;
+        xlform.instruction = m_image;
         return ((xlform.BT & uncondition_bo) == uncondition_bo);
       }
       return true;
@@ -150,9 +127,9 @@ bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
 
 bool DecoderInfo::isClearSignBit() const {
   // clrldi is a mnemonic to rldicl when
-  if (opn_ == OpcodeNames::op_rldicl) {
+  if (m_opn == OpcodeNames::op_rldicl) {
     MD_form_t instr_md;
-    instr_md.instruction = instr_image_;
+    instr_md.instruction = m_image;
     if ((instr_md.SH == 0) && (instr_md.sh == 0)) {
       // it's the clrldi mnemonic!
       switch (instr_md.MB) {

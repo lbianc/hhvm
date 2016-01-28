@@ -27,8 +27,6 @@
 
 namespace ppc64_asm {
 
-using namespace ppc64_asm;
-
 void DecodedInstruction::decode(uint8_t* ip) {
   m_ip = ip;
   m_flagsVal = 0;

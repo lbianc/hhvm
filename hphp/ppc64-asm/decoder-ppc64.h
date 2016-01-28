@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <deque>
 #include <boost/noncopyable.hpp>
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
@@ -70,23 +71,23 @@ const PPC64Instr DecoderList[] = {
  * if a immediate will be print as a signed or unsigned value.
 */
 struct Operands {
-  PPC64Instr mask_;
-  PPC64Instr flags_;
+  PPC64Instr m_mask;
+  PPC64Instr m_flags;
 
   Operands(PPC64Instr mask, PPC64Instr flags)
-  : mask_(mask)
-  , flags_(flags)
+  : m_mask(mask)
+  , m_flags(flags)
   {}
   Operands()
-  : mask_(0)
-  , flags_(0)
+  : m_mask(0)
+  , m_flags(0)
   {}
 
   // calculates operand mask shift factor
   int operandShift() {
     int s = 32;
-    if (mask_) {
-      PPC64Instr n = mask_;
+    if (m_mask) {
+      PPC64Instr n = m_mask;
       n = (n ^ (n - 1)) >> 1;
       for (s = 0; n; s++) {
          n >>=1;
@@ -134,7 +135,7 @@ struct Operands {
 #define DGM       DCM
 #define DM        { 0xc0, 0x0 }
 #define DQ        { 0xfff0, 0x0 }
-#define DS        { 0xfffc, 0x0 }
+#define DS        { 0xfffc, PPC_OPERAND_PAREN | PPC_OPERAND_SIGNED }
 #define DUI       { 0x3e00000, 0x0 }
 #define DUIS      { 0x1ff800, PPC_OPERAND_SIGNED }
 #define E         { 0x8000, 0x0 }
@@ -1611,69 +1612,64 @@ enum class OpcodeNames {
 constexpr size_t kTotalOpcodes = static_cast<size_t>(OpcodeNames::op_last);
 
 struct DecoderInfo {
-private:
-  OpcodeNames opn_;
-  PPC64Instr opcode_data;
-  Form form_;
-  std::string mnemonic_;
-  PPC64Instr operand_size_;
-  PPC64Instr instr_image_;
-  Operands* operand_list_;
-  DecoderInfo* next_;
-
-public:
-  DecoderInfo(OpcodeNames opn, PPC64Instr op, Form form, std::string mn,
-    std::initializer_list<Operands> oper)
-  : opn_(opn)
-  , opcode_data(op)
-  , form_(form)
-  , mnemonic_(mn)
-  , operand_size_(oper.size())
-  , instr_image_(0x0)
-  , next_(nullptr) {
-    operand_list_ = new Operands[oper.size()];
-    for(auto i = oper.begin(); i != oper.end(); i++)
-       operand_list_[i - oper.begin()] = *i;
+  DecoderInfo(OpcodeNames opn, PPC64Instr op, Form form,
+      std::string mnemonic, std::initializer_list<Operands> oper)
+  : m_opn(opn)
+  , m_op(op)
+  , m_form(form)
+  , m_mnemonic(mnemonic)
+  , m_image(0x0) {
+    // pushing it in reverse order
+    for (auto it = oper.begin(); it != oper.end(); it++) {
+      m_operands.push_back(*it);
+    }
   }
 
-  ~DecoderInfo(){
-    delete next_;
-    next_ = nullptr;
-  }
+  ~DecoderInfo() {}
 
   DecoderInfo() = delete;
-  void next(DecoderInfo* i) { next_ = i;}
-  DecoderInfo* next() { return next_; }
 
-  inline Form form() const { return form_; }
-  inline OpcodeNames opcode_name() const { return opn_; }
-  inline PPC64Instr opcode() const { return opcode_data; }
-  inline std::string mnemonic() const { return mnemonic_; }
+  inline Form form() const { return m_form; }
+  inline OpcodeNames opcode_name() const { return m_opn; }
+  inline PPC64Instr opcode() const { return m_op; }
+  inline std::string mnemonic() const { return m_mnemonic; }
   std::string toString();
 
-  PPC64Instr instruction_image() const { return instr_image_; }
-  void instruction_image(PPC64Instr i) { instr_image_ = i; }
+  PPC64Instr instruction_image() const { return m_image; }
+  void instruction_image(PPC64Instr i) { m_image = i; }
 
   inline bool operator==(const DecoderInfo& i) {
-    return (i.form() == form_ &&
-            i.opcode() == opcode_data &&
-            i.mnemonic() == mnemonic_);
+    return (i.form() == m_form &&
+            i.opcode() == m_op &&
+            i.mnemonic() == m_mnemonic);
   }
 
   inline bool operator!=(const DecoderInfo& i) {
-    return (i.form() != form_ ||
-            i.opcode() != opcode_data ||
-            i.mnemonic() != mnemonic_);
+    return (i.form() != m_form ||
+            i.opcode() != m_op ||
+            i.mnemonic() != m_mnemonic);
   }
 
   bool isNop() const;
   bool isBranch(bool allowCond = true) const;
   bool isClearSignBit() const;
+
+private:
+  // opcode enumeration identifier
+  OpcodeNames m_opn;
+  // the opcode part of the instruction
+  PPC64Instr m_op;
+  // points out which -Form the instruction is
+  Form m_form;
+  // the mnemonic string of the instruction
+  std::string m_mnemonic;
+  // the complete instruction, as used to decode
+  PPC64Instr m_image;
+  // operands list
+  std::deque<Operands> m_operands;
 };
 
 class Decoder : private boost::noncopyable {
-private:
-
   DecoderInfo **decoder_table;
   DecoderInfo **opcode_index_table;
   static Decoder* decoder;
@@ -1687,15 +1683,7 @@ private:
         index = (index + 1) % kDecoderSize;
     }
 
-    if (decoder_table[index] != nullptr && *decoder_table[index] != dinfo) {
-        // in some architectures instructions can share the same opcode or
-        // decoder info. Rhe meaning of the instruction will depends on
-        // processor mode or execution mode
-        decoder_table[index]->next(new DecoderInfo(dinfo));
-    } else {
-      delete decoder_table[index];
-      decoder_table[index] = new DecoderInfo(dinfo);
-    }
+    decoder_table[index] = new DecoderInfo(dinfo);
 
     opcode_index_table[static_cast<PPC64Instr>(dinfo.opcode_name())] =
       decoder_table[index];
@@ -1743,7 +1731,6 @@ private:
   }
 
 public:
-
   static Decoder& GetDecoder() {
     static Decoder dec;
     decoder= &dec;

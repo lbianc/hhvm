@@ -52,7 +52,7 @@ constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 5; }
 // skips ld, addi, ld, mtlr
 constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 4; }
 
-// li64 + mtctr + bccrt
+// li64 + mtctr + bcctr
 constexpr size_t smashableJccLen()  { return kStdIns * 7; }
 // to analyse the cc, it has to skip the li64 + mtctr
 constexpr size_t smashableJccSkip() { return kStdIns * 6; }
