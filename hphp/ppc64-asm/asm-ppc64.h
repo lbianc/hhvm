@@ -583,6 +583,9 @@ struct Assembler {
   void lfs(const RegXMM& frt, MemoryRef m) {
     EmitDForm(48, rn(frt), rn(m.r.base), m.r.disp);
   }
+  void lxvd2x(const RegXMM& Xt, const MemoryRef& m) {
+    EmitXX1Form(31, rn(Xt), rn(m.r.base), rn(m.r.index), 844, 0);
+  }
   void lxvw4x(const RegXMM& Xt, const MemoryRef& m) {
     EmitXX1Form(31, rn(Xt), rn(m.r.base), rn(m.r.index), 780, 0);
   }

@@ -211,7 +211,35 @@ struct Vgen {
     a->bctr();
   }
   void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
-  void emit(const loadups& i) { a->lxvw4x(i.d,i.s); }
+  // TODO: this vasm must be lowered.
+  void emit(const loadups& i) {
+    Vptr p = i.s;
+    Vptr tmp(p);
+    switch(p.scale){
+      case 8:
+        tmp.index = rfuncln();
+        a->sldi(tmp.index, p.index, 3);
+        break;
+      case 4:
+        tmp.index = rfuncln();
+        a->sldi(tmp.index, p.index, 2);
+        break;
+      case 2:
+        tmp.index = rfuncln();
+        a->sldi(tmp.index, p.index, 1);
+        break;
+      default:
+        break;
+    }
+    if(p.disp != 0) {
+      tmp.base = rAsm;
+      a->li64(tmp.base, static_cast<int64_t>(p.disp));
+      a->add(tmp.base, p.base, tmp.base);
+      a->lxvd2x(i.d, tmp);
+    } else {
+      a->lxvd2x(i.d, p);
+    }
+  }
   void emit(const mfcr& i) { a->mfcr(i.d); }
   void emit(const mflr& i) { a->mflr(i.d); }
   void emit(const mtlr& i) { a->mtlr(i.s); }
@@ -894,7 +922,6 @@ X(loadl,    s, s, d);
 X(loadzbl,  s, s, d);
 X(loadzbq,  s, s, d);
 X(loadzlq,  s, s, d);
-X(loadups,  s, s, d);
 X(lea,      s, s, d);
 
 #undef X
