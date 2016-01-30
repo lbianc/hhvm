@@ -147,7 +147,7 @@ void FixupMap::fixupWorkSimulated(ExecutionContext* ec) const {
   always_assert(false);
 }
 
-#if __powerpc64__
+#if defined(__powerpc64__)
 /*
  * Tail call elimination needs to be disabled in order to have a valid frame
  * pointer in fixupWork.
