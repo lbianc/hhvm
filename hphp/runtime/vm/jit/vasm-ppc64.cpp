@@ -1383,9 +1383,10 @@ void lowerForPPC64(Vout& v, cmpsd& inst) {
   auto r64_d = v.makeReg(); // auxiliary for GP -> FP conversion
 
   // assume standard ComparisonPred as eq_ord
-  Vreg equal = rone();
+  Vreg equal = v.makeReg();;
   Vreg nequal = v.makeReg();
-  v << ldimmb{0, nequal};
+  v << ldimmq{0, nequal};
+  v << ldimmq{0xffffffffffffffff,equal};
 
   switch (inst.pred) {
   case ComparisonPred::eq_ord: { // scope for the zero variable initialization
