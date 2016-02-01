@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -169,7 +169,7 @@ struct AsyncFuncImpl {
     return s_finiFunc;
   }
 
-  void setNoInit() { m_noInit = true; }
+  void setNoInitFini() { m_noInitFini = true; }
 private:
   Synchronizable m_stopMonitor;
 
@@ -185,7 +185,7 @@ private:
   Exception* m_exception; // exception was thrown and thread was terminated
   int m_node;
   bool m_stopped;
-  bool m_noInit;
+  bool m_noInitFini;
 
   /**
    * Called by ThreadFunc() to delegate the work.

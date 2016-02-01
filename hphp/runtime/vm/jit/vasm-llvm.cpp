@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -303,7 +303,7 @@ void reportLLVMError(void* data, const std::string& err, bool gen_crash_diag) {
 
 InitFiniNode llvmInit(
   []() { llvm::install_fatal_error_handler(reportLLVMError); },
-  InitFiniNode::When::ProcessInit);
+  InitFiniNode::When::ProcessInit, "llvm");
 
 InitFiniNode llvmExit(llvm::remove_fatal_error_handler,
                       InitFiniNode::When::ProcessExit);
@@ -1672,6 +1672,7 @@ O(unpcklpd)
       case Vinstr::tailcallstub:
       case Vinstr::callfaststub:
       case Vinstr::phplogue:
+      case Vinstr::stubtophp:
       case Vinstr::tailcallphp:
       case Vinstr::callarray:
       case Vinstr::nothrow:
@@ -2078,7 +2079,7 @@ std::vector<llvm::Value*> LLVMEmitter::makePhysRegArgs(RegSet argRegs) {
     auto reg = kHHVMCCRegs[i];
     if (argRegs.contains(reg)) {
       ret.emplace_back(value(reg));
-      passed.add(reg);
+      passed |= reg;
       lastSet = i;
     } else {
       ret.emplace_back(m_int64Undef);

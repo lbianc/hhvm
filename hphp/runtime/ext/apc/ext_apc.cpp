@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -606,7 +606,7 @@ void apc_load(int thread) {
     for (int i = 0; i < count; i++) {
       jobs.push_back(std::make_shared<ApcLoadJob>(handle, i));
     }
-    JobDispatcher<ApcLoadJob, ApcLoadWorker>(jobs, thread).run();
+    JobDispatcher<ApcLoadJob, ApcLoadWorker>(std::move(jobs), thread).run();
   }
 
   apc_store().primeDone();

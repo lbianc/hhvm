@@ -35,6 +35,7 @@
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/dataflow-worklist.h"
+#include "hphp/util/trace.h"
 
 #include <boost/dynamic_bitset.hpp>
 #include <boost/range/adaptor/reversed.hpp>
@@ -57,6 +58,8 @@ namespace {
 
 size_t s_counter;
 
+DEBUG_ONLY constexpr auto kHintLevel = 5;
+
 /*
  * Vreg discriminator.
  */
@@ -78,9 +81,19 @@ template<class T> bool is_wide(const T&) { return false; }
  * A Use refers to the position where an interval is used or defined.
  */
 struct Use {
+  /*
+   * Constraint imposed on the Vreg at this use.
+   */
   Constraint kind;
+  /*
+   * Position of this use or def.
+   */
   unsigned pos;
-  Vreg hint; // if valid, try to use same physical register as hint.
+  /*
+   * If valid, try to assign the same physical register here as `hint' was
+   * assigned at `pos'.
+   */
+  Vreg hint;
 };
 
 /*
@@ -136,7 +149,7 @@ struct Variable;
 struct Interval {
   explicit Interval(Variable* var) : var(var) {}
 
-  std::string toString();
+  std::string toString() const;
 
   /*
    * Endpoints.  Intervals are [closed, open), just like LiveRanges.
@@ -239,8 +252,10 @@ struct Variable {
   bool fixed() const { return vreg.isPhys(); }
 
   /*
-   * Return the subinterval which has a use at `pos', else nullptr.
+   * Return the subinterval which covers or has a use at `pos', else nullptr if
+   * no subinterval does.
    */
+  Interval* ivlAt(unsigned pos);
   Interval* ivlAtUse(unsigned pos);
 
 public:
@@ -258,9 +273,13 @@ public:
   // registers, and Vregs are SSA, a value's assigned slot never changes.
   int slot{kInvalidSpillSlot};
 
-  // Position of the variable's single def instruction; invalid for physical
-  // registers.
-  unsigned def_pos;
+  // Position of, and block containing, the variable's single def instruction;
+  // invalid for physical registers.
+  unsigned def_pos{kMaxPos};
+  Vlabel def_block;
+
+  // Copy of the Vreg's def instruction.
+  Vinstr def_inst;
 };
 
 /*
@@ -293,8 +312,8 @@ struct VxlsContext {
         tmp = ppc64_asm::reg::v29;
         break;
     }
-    this->abi.simdUnreserved.remove(tmp);
-    this->abi.simdReserved.add(tmp);
+    this->abi.simdUnreserved -= tmp;
+    this->abi.simdReserved |= tmp;
     assertx(!abi.gpUnreserved.contains(sp));
     assertx(!abi.gpUnreserved.contains(tmp));
   }
@@ -446,6 +465,14 @@ void Variable::destroy(Variable* var) {
   free(var);
 }
 
+Interval* Variable::ivlAt(unsigned pos) {
+  for (auto ivl = this->ivl(); ivl; ivl = ivl->next) {
+    if (pos < ivl->start()) return nullptr;
+    if (ivl->covers(pos)) return ivl;
+  }
+  return nullptr;
+}
+
 Interval* Variable::ivlAtUse(unsigned pos) {
   for (auto ivl = this->ivl(); ivl; ivl = ivl->next) {
     if (pos < ivl->start()) return nullptr;
@@ -517,11 +544,11 @@ Interval* Variable::ivlAtUse(unsigned pos) {
 /*
  * Printing utilities.
  */
-void dumpVariables(const jit::vector<Variable*>& variables,
-                   unsigned num_spills);
 void printVariables(const char* caption,
                     const Vunit& unit, const VxlsContext& ctx,
                     const jit::vector<Variable*>& variables);
+void dumpVariables(const jit::vector<Variable*>& variables,
+                   unsigned num_spills);
 
 /*
  * The ID of the block enclosing `pos'.
@@ -585,7 +612,8 @@ jit::vector<LiveRange> computePositions(Vunit& unit,
       code.insert(code.begin(), nop{});
       code.front().origin = origin;
     }
-    auto start = pos;
+    auto const start = pos;
+
     for (auto& inst : unit.blocks[b].code) {
       inst.pos = pos;
       pos += 2;
@@ -828,10 +856,12 @@ void addRange(Interval* ivl, LiveRange r) {
  */
 struct DefVisitor {
   DefVisitor(const Vunit& unit, jit::vector<Variable*>& variables,
-             LiveSet& live, unsigned pos)
-    : m_variables(variables)
-    , m_tuples(unit.tuples)
+             LiveSet& live, Vlabel b, const Vinstr& inst, unsigned pos)
+    : m_unit(unit)
+    , m_variables(variables)
     , m_live(live)
+    , m_block(b)
+    , m_inst(inst)
     , m_pos(pos)
   {}
 
@@ -842,11 +872,11 @@ struct DefVisitor {
   template<class R> void across(R) {}
 
   void def(Vtuple defs) {
-    for (auto r : m_tuples[defs]) def(r);
+    for (auto r : m_unit.tuples[defs]) def(r);
   }
   void defHint(Vtuple def_tuple, Vtuple hint_tuple) {
-    auto& defs = m_tuples[def_tuple];
-    auto& hints = m_tuples[hint_tuple];
+    auto& defs = m_unit.tuples[def_tuple];
+    auto& hints = m_unit.tuples[hint_tuple];
     for (int i = 0; i < defs.size(); i++) {
       def(defs[i], Constraint::Any, hints[i]);
     }
@@ -881,24 +911,28 @@ private:
       var->ivl()->uses.push_back(Use{kind, m_pos, hint});
       var->wide |= wide;
       var->def_pos = m_pos;
+      var->def_block = m_block;
+      var->def_inst = m_inst;
     }
   }
 
 private:
+  const Vunit& m_unit;
   jit::vector<Variable*>& m_variables;
-  const jit::vector<VregList>& m_tuples;
   LiveSet& m_live;
+  Vlabel m_block;
+  const Vinstr& m_inst;
   unsigned m_pos;
 };
 
 struct UseVisitor {
   UseVisitor(const Vunit& unit, jit::vector<Variable*>& variables,
              LiveSet& live, const Vinstr& inst, LiveRange range)
-    : m_variables(variables)
-    , m_tuples(unit.tuples)
+    : m_unit(unit)
+    , m_variables(variables)
     , m_live(live)
-    , m_range(range)
     , m_inst(inst)
+    , m_range(range)
   {}
 
   // Skip immediates and defs.
@@ -915,10 +949,10 @@ struct UseVisitor {
     use(r, constraint(r), m_range.end);
   }
   void use(RegSet regs) { regs.forEach([&](Vreg r) { use(r); }); }
-  void use(Vtuple uses) { for (auto r : m_tuples[uses]) use(r); }
+  void use(Vtuple uses) { for (auto r : m_unit.tuples[uses]) use(r); }
   void useHint(Vtuple src_tuple, Vtuple hint_tuple) {
-    auto& uses = m_tuples[src_tuple];
-    auto& hints = m_tuples[hint_tuple];
+    auto& uses = m_unit.tuples[src_tuple];
+    auto& hints = m_unit.tuples[hint_tuple];
     for (int i = 0, n = uses.size(); i < n; i++) {
       useHint(uses[i], hints[i]);
     }
@@ -964,11 +998,11 @@ private:
   }
 
 private:
+  const Vunit& m_unit;
   jit::vector<Variable*>& m_variables;
-  const jit::vector<VregList>& m_tuples;
   LiveSet& m_live;
-  const LiveRange m_range;
   const Vinstr& m_inst;
+  const LiveRange m_range;
 };
 
 /*
@@ -1005,7 +1039,7 @@ jit::vector<Variable*> buildIntervals(const Vunit& unit,
       RegSet implicit_uses, implicit_across, implicit_defs;
       getEffects(ctx.abi, inst, implicit_uses, implicit_across, implicit_defs);
 
-      DefVisitor dv(unit, variables, live, pos);
+      DefVisitor dv(unit, variables, live, b, inst, pos);
       visitOperands(inst, dv);
       dv.def(implicit_defs);
 
@@ -1023,6 +1057,7 @@ jit::vector<Variable*> buildIntervals(const Vunit& unit,
   for (auto& c : unit.constToReg) {
     if (auto var = variables[c.second]) {
       var->ivl()->ranges.back().start = 0;
+      var->def_pos = 0;
       var->constant = true;
       var->val = c.first;
     }
@@ -1062,7 +1097,6 @@ jit::vector<Variable*> buildIntervals(const Vunit& unit,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Register allocation.
 
 /*
  * A map from PhysReg number to position.
@@ -1070,19 +1104,111 @@ jit::vector<Variable*> buildIntervals(const Vunit& unit,
 using PosVec = PhysReg::Map<unsigned>;
 
 /*
- * Find the PhysReg with the highest position in `posns'.
+ * Between `r1' and `r2', choose the one whose position in `pos_vec' is closest
+ * to but still after (or at) `pos'.
+ *
+ * If neither has a position after `pos', choose the higher one.
  */
-PhysReg find_farthest(const PosVec& posns) {
-  unsigned max = 0;
-  PhysReg r1 = *posns.begin();
-  for (auto r : posns) {
-    if (posns[r] > max) {
-      r1 = r;
-      max = posns[r];
+PhysReg choose_closest_after(unsigned pos, const PosVec& pos_vec,
+                             PhysReg r1, PhysReg r2) {
+  if (r1 == InvalidReg) return r2;
+  if (r2 == InvalidReg) return r1;
+
+  if (pos_vec[r1] >= pos) {
+    if (pos <= pos_vec[r2] && pos_vec[r2] < pos_vec[r1]) {
+      return r2;
+    }
+  } else {
+    if (pos_vec[r2] > pos_vec[r1]) {
+      return r2;
     }
   }
   return r1;
 }
+
+/*
+ * Like choose_closest_after(), but iterates through `pos_vec'.
+ */
+PhysReg find_closest_after(unsigned pos, const PosVec& pos_vec) {
+  auto ret = *pos_vec.begin();
+  for (auto const r : pos_vec) {
+    ret = choose_closest_after(pos, pos_vec, ret, r);
+  }
+  return ret;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Hints.
+
+/*
+ * Try to return the physical register that would coalesce `ivl' with its
+ * hinted source.
+ */
+PhysReg tryCoalesce(const jit::vector<Variable*>& variables,
+                    const Interval* ivl) {
+  assertx(ivl == ivl->leader());
+  assertx(!ivl->uses.empty());
+
+  auto const& def = ivl->uses.front();
+  assertx(def.pos == ivl->var->def_pos);
+
+  if (!def.hint.isValid()) return InvalidReg;
+  auto const hint_var = variables[def.hint];
+
+  for (auto hvl = hint_var->ivl(); hvl; hvl = hvl->next) {
+    if (def.pos == hvl->end()) return hvl->reg;
+  }
+  return InvalidReg;
+}
+
+/*
+ * Choose an appropriate hint for the (sub-)interval `ivl'.
+ *
+ * The register allocator passes us constraints via `free_until' and `allow'.
+ * We use the `free_until' vector to choose a hint that most tightly covers the
+ * lifetime of `ivl'; we use `allow' to ensure that our hint satisfies
+ * constraints.
+ */
+PhysReg chooseHint(const jit::vector<Variable*>& variables,
+                   const Interval* ivl,
+                   const PosVec& free_until, RegSet allow) {
+  if (!RuntimeOption::EvalHHIREnablePreColoring &&
+      !RuntimeOption::EvalHHIREnableCoalescing) return InvalidReg;
+
+  auto hint = InvalidReg;
+
+  // If `ivl' contains its def, try a coalescing hint.
+  if (ivl == ivl->leader()) {
+    hint = tryCoalesce(variables, ivl);
+  }
+  // If we have one, return it.
+  if (hint != InvalidReg) {
+    if (allow.contains(hint)) {
+      FTRACE(kHintLevel, "hinting {} for %{} @ {}\n",
+             show(hint), size_t(ivl->var->vreg), ivl->start());
+      return hint;
+    }
+    FTRACE(kHintLevel, "  found mismatched hint for %{} @ {}\n",
+           size_t(ivl->var->vreg), ivl->uses.front().pos);
+  }
+
+  // Crawl through our uses and look for a physical hint.
+  for (auto const& u : ivl->uses) {
+    if (!u.hint.isValid() ||
+        !u.hint.isPhys() ||
+        !allow.contains(u.hint)) continue;
+    hint = choose_closest_after(ivl->end(), free_until, hint, u.hint);
+  }
+
+  if (hint != InvalidReg) {
+    FTRACE(kHintLevel, "physical hint {} for %{} @ {}\n",
+           show(hint), size_t(ivl->var->vreg), ivl->start());
+  }
+  return hint;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Register allocation.
 
 /*
  * Information about spills generated by register allocation.
@@ -1120,7 +1246,6 @@ private:
 
   unsigned nearestSplitBefore(unsigned pos);
   unsigned constrain(Interval*, RegSet&);
-  PhysReg findHint(Interval* current, const PosVec& free_until, RegSet allow);
 
   void update(Interval*);
   void allocate(Interval*);
@@ -1349,56 +1474,6 @@ unsigned Vxls::constrain(Interval* ivl, RegSet& allow) {
 }
 
 /*
- * Return the first hint from all the uses in this interval that is available
- * for the lifetime of `current', else the hint which is available furthest
- * into the future.
- *
- * Skips uses that don't have any hint, or have an unusable hint.
- */
-PhysReg Vxls::findHint(Interval* current, const PosVec& free_until,
-                       RegSet allow) {
-  if (!RuntimeOption::EvalHHIREnablePreColoring &&
-      !RuntimeOption::EvalHHIREnableCoalescing) return InvalidReg;
-
-  // Search `var' for a subinterval that ends at `pos' and return its assigned
-  // register.
-  auto const find_end = [&] (Variable* var, unsigned pos) -> PhysReg {
-    for (auto ivl = var->ivl(); ivl; ivl = ivl->next) {
-      if (pos == ivl->end() && ivl->reg != InvalidReg) return ivl->reg;
-    }
-    return InvalidReg;
-  };
-
-  auto ret = InvalidReg;
-
-  for (auto const u : current->uses) {
-    if (!u.hint.isValid()) continue;
-    auto hint_var = variables[u.hint];
-
-    PhysReg hint;
-    if (hint_var->fixed()) {
-      hint = hint_var->ivl()->reg;
-    } else if (u.pos == current->var->def_pos) {
-      // this is a def, so u.hint is a src
-      hint = find_end(hint_var, u.pos);
-    }
-    if (hint == InvalidReg) continue;
-    if (!allow.contains(hint)) continue;
-
-    // Just use this hint if it's free far enough into the future; else try to
-    // find a hint that we can use for the longest.
-    if (free_until[hint] >= current->end()) {
-      return hint;
-    }
-    if (ret == InvalidReg ||
-        free_until[ret] < free_until[hint]) {
-      ret = hint;
-    }
-  }
-  return ret;
-}
-
-/*
  * Return the next intersection point between `current' and `other', or kMaxPos
  * if they never intersect.
  *
@@ -1495,14 +1570,15 @@ void Vxls::allocate(Interval* current) {
   }
 
   // Try to get a hinted register.
-  auto const hint = findHint(current, free_until, allow);
+  auto const hint = chooseHint(variables, current, free_until, allow);
   if (hint != InvalidReg && free_until[hint] >= current->end()) {
     return assignReg(current, hint);
   }
 
-  // Use the register that's available until furthest in the future if it's
-  // free across all of `current'.
-  auto r = find_farthest(free_until);
+  // Find the register whose availability most tightly covers the lifetime of
+  // `current' and use it.  If there is no such register, just find the one
+  // with the longest availability.
+  auto r = find_closest_after(current->end(), free_until);
   auto const pos = free_until[r];
   if (pos >= current->end()) {
     return assignReg(current, r);
@@ -1598,9 +1674,10 @@ void Vxls::allocBlocked(Interval* current) {
     }
   }
 
-  // Choose the best victim register(s) to spill---the one with the farthest
-  // first-use.
-  auto r = find_farthest(used);
+  // Choose the best victim register(s) to spill---the one with first-use
+  // after, but closest to, the lifetime of `current'; or the one with farthest
+  // first-use if no such register exists.
+  auto r = find_closest_after(current->end(), used);
 
   // If all other registers are used by their owning intervals before the first
   // register-use of `current', then we have to spill `current'.
@@ -2608,7 +2685,7 @@ void allocateSpillSpace(Vunit& unit, const VxlsContext& ctx,
 ///////////////////////////////////////////////////////////////////////////////
 // Printing.
 
-std::string Interval::toString() {
+std::string Interval::toString() const {
   std::ostringstream out;
   auto delim = "";
   if (reg != InvalidReg) {
@@ -2623,13 +2700,13 @@ std::string Interval::toString() {
   }
   delim = "";
   out << " [";
-  for (auto& r : ranges) {
+  for (auto const& r : ranges) {
     out << delim << folly::format("{}-{}", r.start, r.end);
     delim = ",";
   }
   out << ") {";
   delim = "";
-  for (auto& u : uses) {
+  for (auto const& u : uses) {
     if (u.pos == var->def_pos) {
       if (u.hint.isValid()) {
         out << delim << "@" << u.pos << "=" << show(u.hint);
@@ -2757,6 +2834,58 @@ DEBUG_ONLY void printVariables(const char* caption,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+struct XLSStats {
+  size_t instrs{0};
+  size_t moves{0};
+  size_t loads{0};
+  size_t spills{0};
+  size_t consts{0};
+  size_t total_copies{0};
+};
+
+DEBUG_ONLY void dumpStats(const Vunit& unit,
+                          const ResolutionPlan& resolution) {
+  XLSStats stats;
+
+  for (auto const& blk : unit.blocks) {
+    stats.instrs += blk.code.size();
+  }
+  for (auto const& kv : resolution.spills) {
+    auto const& spills = kv.second;
+    for (auto const r : spills) {
+      if (spills[r]) ++stats.spills;
+    }
+  }
+
+  auto const count_copies = [&] (const CopyPlan& plan) {
+    for_each_copy(plan, [&] (PhysReg, const Interval*) {
+      ++stats.moves;
+    });
+    for_each_load(plan, [&] (PhysReg, const Interval* ivl) {
+      ++(ivl->spilled() ? stats.loads : stats.consts);
+    });
+  };
+  for (auto const& kv : resolution.copies) count_copies(kv.second);
+  for (auto const& kv : resolution.edge_copies) count_copies(kv.second);
+
+  stats.total_copies = stats.moves + stats.loads + stats.spills;
+
+  FTRACE_MOD(
+    Trace::xls_stats, 1,
+    "XLS stats:\n"
+    "  instrs: {}\n"
+    "  moves:  {}\n"
+    "  loads:  {}\n"
+    "  spills: {}\n"
+    "  consts: {}\n"
+    "  total copies: {}\n",
+    stats.instrs, stats.moves, stats.loads, stats.spills,
+    stats.consts, stats.total_copies
+  );
+}
+
+///////////////////////////////////////////////////////////////////////////////
 }
 
 void allocateRegisters(Vunit& unit, const Abi& abi) {
@@ -2794,6 +2923,7 @@ void allocateRegisters(Vunit& unit, const Abi& abi) {
   allocateSpillSpace(unit, ctx, spill_info);
 
   printUnit(kVasmRegAllocLevel, "after vasm-xls", unit);
+  ONTRACE_MOD(Trace::xls_stats, 1, dumpStats(unit, resolution));
 
   // Free the variable metadata.
   for (auto var : variables) {

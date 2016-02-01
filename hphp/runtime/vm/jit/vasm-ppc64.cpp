@@ -383,6 +383,7 @@ struct Vgen {
   void emit(const callr& i);
   void emit(const calls& i);
   void emit(const stublogue& i);
+//  void emit(const stubtophp& i);
   void emit(const stubret& i);
   void emit(const tailcallstub& i);
   void emit(const callarray& i);
@@ -1392,6 +1393,11 @@ void lowerForPPC64(Vout& v, absdbl& inst) {
   v << fabs{before_conv, after_conv};
   // now move it back to Vreg
   v << copy{after_conv, inst.d};
+}
+
+void lowerForPPC64(Vout& v, stubtophp& inst) {
+  v << addqi{8, reg::rsp, reg::rsp, v.makeReg()};
+  v << popm{inst.fp[AROFF(m_savedRip)]};
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {

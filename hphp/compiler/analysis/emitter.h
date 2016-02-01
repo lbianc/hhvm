@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -122,6 +122,7 @@ public:
 #define IMM_BA Label&
 #define IMM_OA(type) type
 #define IMM_VSA std::vector<std::string>&
+#define IMM_KA MemberKey
 #define O(name, imm, pop, push, flags) void name(imm);
   OPCODES
 #undef O
@@ -145,6 +146,7 @@ public:
 #undef IMM_BA
 #undef IMM_OA
 #undef IMM_VSA
+#undef IMM_KA
 
 private:
   ConstructPtr m_node;
@@ -623,6 +625,16 @@ private:
     int defI;
   };
 
+  void allocPipeLocal(Id pipeVar) { m_pipeVars.emplace(pipeVar); }
+  void releasePipeLocal(Id pipeVar) {
+    assert(!m_pipeVars.empty() && m_pipeVars.top() == pipeVar);
+    m_pipeVars.pop();
+  }
+  folly::Optional<Id> getPipeLocal() {
+    if (m_pipeVars.empty()) return folly::none;
+    return m_pipeVars.top();
+  }
+
 private:
   static constexpr size_t kMinStringSwitchCases = 8;
 
@@ -667,6 +679,8 @@ private:
   // Unnamed local variables used by the "finally router" logic
   Id m_stateLocal;
   Id m_retLocal;
+  // stack of nested unnamed pipe variables
+  std::stack<Id> m_pipeVars;
 
 public:
   bool checkIfStackEmpty(const char* forInstruction) const;
@@ -705,6 +719,7 @@ public:
     };
   };
 
+  MemberKey symToMemberKey(Emitter& e, int i, bool allowW);
   size_t emitMOp(int iFirst, int& iLast, Emitter& e, MInstrOpts opts);
   void emitQueryMOp(int iFirst, int iLast, Emitter& e, QueryMOp op);
 
