@@ -432,7 +432,7 @@ private:
 void Vgen::emit(const cvtsi2sd& i) {
   // As described on ISA page 727, F.2.6
   emit(copy{i.s, i.d});
-  a->fcfids(i.d, i.d);
+  a->fcfid(i.d, i.d);
 }
 
 void Vgen::emit(const ldimmb& i) {

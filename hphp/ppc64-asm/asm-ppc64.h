@@ -1068,7 +1068,10 @@ struct Assembler {
     EmitXForm(63, rn(frt), rn(0), rn(frb), 264, rc);
   }
   void fadds()          { not_implemented(); }
-  void fcfid()          { not_implemented(); }
+  void fcfid(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
+    EmitXForm(63, rn(frt), rn(0), rn(frb), 846, rc);
+  }
+
   void fcfids(const RegXMM& frt, const RegXMM& frb, bool rc = 0) {
     EmitXForm(59, rn(frt), rn(0), rn(frb), 846, rc);
   }
