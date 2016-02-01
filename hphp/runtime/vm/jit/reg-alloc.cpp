@@ -227,9 +227,9 @@ void getEffects(const Abi& abi, const Vinstr& i,
       defs = abi.all() - (abi.calleeSaved | rvmfp());
 
       switch (arch()) {
-      case Arch::ARM: defs.add(PhysReg(arm::rLinkReg)); break;
-      case Arch::X64: break;
-      case Arch::PPC64: break;
+        case Arch::ARM: defs.add(PhysReg(arm::rLinkReg)); break;
+        case Arch::X64: break;
+        case Arch::PPC64: break;
       }
       break;
 
@@ -240,9 +240,9 @@ void getEffects(const Abi& abi, const Vinstr& i,
     case Vinstr::callphp:
       defs = abi.all();
       switch (arch()) {
-      case Arch::ARM: break;
-      case Arch::X64: defs.remove(rvmtl()); break;
-      case Arch::PPC64: break;
+        case Arch::ARM: break;
+        case Arch::X64: defs.remove(rvmtl()); break;
+        case Arch::PPC64: break;
       }
       break;
 
@@ -250,9 +250,9 @@ void getEffects(const Abi& abi, const Vinstr& i,
     case Vinstr::contenter:
       defs = abi.all() - RegSet(rvmfp());
       switch (arch()) {
-      case Arch::ARM: break;
-      case Arch::X64: defs.remove(rvmtl()); break;
-      case Arch::PPC64: break;
+        case Arch::ARM: break;
+        case Arch::X64: defs.remove(rvmtl()); break;
+        case Arch::PPC64: break;
       }
       break;
 
