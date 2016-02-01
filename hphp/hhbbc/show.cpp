@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -31,6 +31,8 @@
 #include "hphp/hhbbc/type-system.h"
 #include "hphp/hhbbc/index.h"
 #include "hphp/hhbbc/func-util.h"
+
+#include "hphp/util/text-util.h"
 
 namespace HPHP { namespace HHBBC {
 
@@ -307,6 +309,30 @@ std::string show(const Bytecode& bc) {
     ret += ">";
   };
 
+  auto append_mkey = [&](MKey mkey) {
+    ret += memberCodeString(mkey.mcode);
+
+    switch (mkey.mcode) {
+      case MEL: case MPL:
+        folly::toAppend(':', local_string(mkey.local), &ret);
+        break;
+      case MEC: case MPC:
+        folly::toAppend(':', mkey.idx, &ret);
+        break;
+      case MEI:
+        folly::toAppend(':', mkey.int64, &ret);
+        break;
+      case MET: case MPT: case MQT:
+        folly::toAppend(
+          ":\"", escapeStringForCPP(mkey.litstr->data(), mkey.litstr->size()),
+          '"', &ret
+        );
+        break;
+      case MW:
+        break;
+    }
+  };
+
 #define IMM_BLA(n)     ret += " "; append_switch(data.targets);
 #define IMM_SLA(n)     ret += " "; append_sswitch(data.targets);
 #define IMM_ILA(n)     ret += " "; append_itertab(data.iterTab);
@@ -322,6 +348,7 @@ std::string show(const Bytecode& bc) {
 #define IMM_OA_IMPL(n) folly::toAppend(" ", subopToName(data.subop##n), &ret);
 #define IMM_OA(type)   IMM_OA_IMPL
 #define IMM_VSA(n)     ret += " "; append_vsa(data.keys);
+#define IMM_KA(n)      ret += " "; append_mkey(data.mkey);
 
 #define IMM_NA
 #define IMM_ONE(x)           IMM_##x(1)
@@ -357,6 +384,7 @@ std::string show(const Bytecode& bc) {
 #undef IMM_BA
 #undef IMM_OA_IMPL
 #undef IMM_OA
+#undef IMM_KA
 
 #undef IMM_NA
 #undef IMM_ONE

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -553,7 +553,7 @@ const StaticString
   s_from_xml("from_xml");
 
 static encodeMapPtr soap_create_typemap_impl(sdl *sdl, Array &ht) {
-  encodeMapPtr typemap(new encodeMap());
+  auto typemap = std::make_shared<encodeMap>();
   for (ArrayIter iter(ht); iter; ++iter) {
     Variant tmp = iter.second();
     if (!tmp.isArray()) {
@@ -588,7 +588,7 @@ static encodeMapPtr soap_create_typemap_impl(sdl *sdl, Array &ht) {
         enc = get_encoder_ex(sdl, type_name.data());
       }
 
-      new_enc = encodePtr(new encode());
+      new_enc = std::make_shared<encode>();
       if (enc) {
         new_enc->details.type = enc->details.type;
         new_enc->details.ns = enc->details.ns;
@@ -1856,7 +1856,7 @@ static void send_soap_server_fault(
     send_soap_server_fault(
       std::shared_ptr<sdlFunction>(), create_soap_fault(e), nullptr);
   } else {
-    throw create_soap_fault(e); // assuming we are in "catch"
+    throw_object(create_soap_fault(e)); // assuming we are in "catch"
   }
 }
 
@@ -2021,7 +2021,7 @@ void HHVM_METHOD(SoapServer, __construct,
   }
 
   } catch (Exception &e) {
-    throw create_soap_fault(e);
+    throw_object(create_soap_fault(e));
   }
 }
 
@@ -2317,7 +2317,7 @@ void HHVM_METHOD(SoapServer, handle,
       send_soap_server_fault(function, e, nullptr);
       return;
     }
-    throw e;
+    throw_object(e);
   } catch (Exception &e) {
     send_soap_server_fault(function, e, nullptr);
     return;
@@ -2537,7 +2537,7 @@ void HHVM_METHOD(SoapClient, __construct,
   }
 
   } catch (Exception &e) {
-    throw create_soap_fault(e);
+    throw_object(create_soap_fault(e));
   }
 }
 
@@ -2635,7 +2635,7 @@ Variant HHVM_METHOD(SoapClient, __soapcall,
         }
       } catch (Exception &e) {
         xmlFreeDoc(request);
-        throw create_soap_fault(e);
+        throw_object(create_soap_fault(e));
       }
       xmlFreeDoc(request);
 
@@ -2679,7 +2679,7 @@ Variant HHVM_METHOD(SoapClient, __soapcall,
                          data->m_soap_version, 0, response);
       } catch (Exception &e) {
         xmlFreeDoc(request);
-        throw create_soap_fault(e);
+        throw_object(create_soap_fault(e));
       }
       xmlFreeDoc(request);
       if (ret && response.isString()) {

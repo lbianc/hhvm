@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -101,8 +101,7 @@ Object createObject(const String& obj_typename, int nargs = 0,
 }
 
 void throw_tprotocolexception(const String& what, long errorcode) {
-  Object ex = createObject(s_TProtocolException, 2, what, errorcode);
-  throw ex;
+  throw_object(createObject(s_TProtocolException, 2, what, errorcode));
 }
 
 Variant binary_deserialize(int8_t thrift_typeID, PHPInputTransport& transport,
@@ -663,7 +662,7 @@ Object HHVM_FUNCTION(thrift_protocol_read_binary,
     Object ex = createObject(s_TApplicationException);
     Variant spec(get_tspec(ex->getVMClass()));
     binary_deserialize_spec(ex, transport, spec.toArray());
-    throw ex;
+    throw_object(ex);
   }
 
   Object ret_val = createObject(obj_typename);

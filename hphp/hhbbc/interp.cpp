@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -700,13 +700,15 @@ void in(ISS& env, const bc::CGetL3& op) {
   push(env, t1);
 }
 
-void in(ISS& env, const bc::CGetN&) {
+namespace {
+
+template <typename Op> void common_cgetn(ISS& env) {
   auto const t1 = topC(env);
   auto const v1 = tv(t1);
   if (v1 && v1->m_type == KindOfPersistentString) {
     if (auto const loc = findLocal(env, v1->m_data.pstr)) {
       return reduce(env, bc::PopC {},
-                         bc::CGetL { loc });
+                         Op { loc });
     }
   }
   readUnknownLocals(env);
@@ -714,9 +716,10 @@ void in(ISS& env, const bc::CGetN&) {
   push(env, TInitCell);
 }
 
-void in(ISS& env, const bc::CGetQuietN&) {
-  in(env, *static_cast<const bc::CGetQuietN*>(nullptr));
 }
+
+void in(ISS& env, const bc::CGetN&) { common_cgetn<bc::CGetL>(env); }
+void in(ISS& env, const bc::CGetQuietN&) { common_cgetn<bc::CGetQuietL>(env); }
 
 void in(ISS& env, const bc::CGetG&) { popC(env); push(env, TInitCell); }
 void in(ISS& env, const bc::CGetQuietG&) { popC(env); push(env, TInitCell); }

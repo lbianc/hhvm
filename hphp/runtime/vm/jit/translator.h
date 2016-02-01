@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -509,6 +509,7 @@ enum Operands {
   MBase           = 1 << 18, // member operation base
   IdxA            = 1 << 19, // consume 1 A at idx imm[0].u_IVA, preserving an
                              // optional C on top of it
+  MKey            = 1 << 20, // member lookup key
   StackTop2 = Stack1 | Stack2,
   StackTop3 = Stack1 | Stack2 | Stack3,
 };

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -19,7 +19,6 @@
 #include "hphp/runtime/ext/std/ext_std_variable.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/variable-unserializer.h"
-#include "hphp/system/constants.h"
 #include "hphp/util/lock.h"
 #include "hphp/util/alloc.h"
 #include <folly/String.h>

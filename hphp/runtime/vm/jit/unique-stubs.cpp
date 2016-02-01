@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -654,10 +654,10 @@ TCA emitFCallArrayHelper(CodeBlock& cb, UniqueStubs& us) {
     });
     v << load{rvmtl()[rds::kVmfpOff], rvmfp()};
 
-    // If true was returned, we're calling the callee, so manually undo the
+    // If true was returned, we're calling the callee, so undo the stublogue{}
+    // and convert to a phplogue{}.
     // stublogue{}, and simulate the work of a phplogue{}.
-    v << addqi{8, rsp(), rsp(), v.makeReg()};
-    v << popm{rvmfp()[AROFF(m_savedRip)]};
+    v << stubtophp{rvmfp()};
 
     auto const callee = v.makeReg();
     auto const body = v.makeReg();

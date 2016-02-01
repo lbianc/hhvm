@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -84,13 +84,13 @@ class SoapData final : public RequestEventHandler {
     sdlPtr sdl;
     time_t time;
   };
-  typedef hphp_string_hash_map<std::shared_ptr<sdlCacheBucket>,sdlCacheBucket>
-          sdlCache;
+  using sdlCache =
+        hphp_string_hash_map<std::shared_ptr<sdlCacheBucket>,sdlCacheBucket>;
 
 public:
   SoapData();
 
-  sdl *get_sdl(const char *uri, long cache_wsdl, HttpClient *http = NULL);
+  sdl *get_sdl(const char *uri, long cache_wsdl, HttpClient *http = nullptr);
   encodeMap *register_typemap(encodeMapPtr typemap);
   void register_encoding(xmlCharEncodingHandlerPtr encoding);
 

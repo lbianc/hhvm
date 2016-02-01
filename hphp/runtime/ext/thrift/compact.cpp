@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -534,7 +534,7 @@ class CompactReader {
         Object exn = create_object(s_TApplicationException, Array());
         Array spec(get_tspec(exn->getVMClass()));
         readStruct(exn, spec);
-        throw exn;
+        throw_object(exn);
       } else {
         thrift_error("Invalid response type", ERR_INVALID_DATA);
       }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -70,7 +70,6 @@
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/treadmill.h"
 
-#include "hphp/system/constants.h"
 
 #include "hphp/util/abi-cxx.h"
 #include "hphp/util/boot_timer.h"
@@ -1946,6 +1945,15 @@ void hphp_process_init() {
   BootTimer::mark("xmlInitParser");
 
   g_context.getCheck();
+  InitFiniNode::ProcessPreInit();
+  // TODO(9795696): Race in thread map may trigger spurious logging at
+  // thread exit, so for now, only spawn threads if we're a server.
+  const uint32_t maxWorkers = RuntimeOption::ServerExecutionMode() ? 3 : 0;
+  InitFiniNode::ProcessInitConcurrentStart(maxWorkers);
+  SCOPE_EXIT {
+    InitFiniNode::ProcessInitConcurrentWaitForEnd();
+    BootTimer::mark("extra_process_init_concurrent_wait");
+  };
   g_vmProcessInit();
   BootTimer::mark("g_vmProcessInit");
 
@@ -1966,7 +1974,13 @@ void hphp_process_init() {
   BootTimer::mark("extra_process_init");
   {
     UnlimitSerializationScope unlimit;
-    apc_load(apcExtension::LoadThread);
+    // TODO(9755792): Add real execution mode for snapshot generation.
+    if (apcExtension::PrimeLibraryUpgradeDest != "") {
+      Timer timer(Timer::WallTime, "optimizeApcPrime");
+      apc_load(apcExtension::LoadThread);
+    } else {
+      apc_load(apcExtension::LoadThread);
+    }
     BootTimer::mark("apc_load");
   }
 
