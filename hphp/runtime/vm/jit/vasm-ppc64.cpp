@@ -411,7 +411,6 @@ struct Vgen {
   void emit(const callr& i);
   void emit(const calls& i);
   void emit(const stublogue& i);
-//  void emit(const stubtophp& i);
   void emit(const stubret& i);
   void emit(const tailcallstub& i);
   void emit(const callarray& i);
@@ -705,40 +704,25 @@ void Vgen::emit(const callarray& i) {
 /////////////////////////////////////////////////////////////////////////////
 /*
  * Stub function ABI
- *
- * The code below is Call-stub ABI compliant, not PPC64 ABI.
  */
 void Vgen::emit(const stublogue& i) {
-  // Return address.
-  auto tmp = rfuncln();
-  a->mflr(tmp);
-  a->std(tmp, rsp()[-8]);
-
-  // rvmfp, if necessary.
-  if (i.saveframe) a->std(rvmfp(), rsp()[-16]);
-
-  // Update native stack pointer.
-  a->addi(rsp(), rsp(), -16);
+  // rvmfp is always saved on stack at rsp()[0]
+  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
 }
 
 void Vgen::emit(const stubret& i) {
-  // Update native stack pointer.
-  a->addi(rsp(), rsp(), 16);
+  a->epilogue(rsp(), rtoc(), rfuncln());
 
   // rvmfp, if necessary.
-  if (i.saveframe) a->ld(rvmfp(), rsp()[-16]);
+  if (i.saveframe) a->ld(rvmfp(), rsp()[0]);
 
-  // Return address.
-  auto tmp = rfuncln();
-  a->ld(tmp, rsp()[-8]);
-  a->mtlr(tmp);
   emit(ret{});
 }
 
 void Vgen::emit(const tailcallstub& i) {
   // Update native stack pointer to ignore the current frame.
   // the Return Address is already in LR due to stublogue.
-  a->addi(rsp(), rsp(), 16);
+  a->addi(rsp(), rsp(), 2 * min_callstack_size);  // same in landingpad vasm!!!
 
   // tail call: perform a jmp instead of a call.
   emit(jmpi{i.target, i.args});
@@ -1149,6 +1133,17 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
   v << jmpr{inst.target, inst.args};
 }
 
+void lowerForPPC64(Vout& v, stubtophp& inst) {
+  Vreg ret_address = v.makeReg();
+  // remove the frame created by stub, but correctly grab the return address on
+  // stub caller's frame (2 frames used, as considered on landingpad
+  v << lea{rsp()[2 * min_callstack_size], rsp()}; // same in landingpad vasm!!!
+  v << load{rsp()[AROFF(m_savedRip) - min_callstack_size], ret_address};
+
+  // store this return address as expected on phplogue
+  v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
+}
+
 /////////////////////////////////////////////////////////////////////////////
 
 // Lower movs to copy
@@ -1414,11 +1409,6 @@ void lowerForPPC64(Vout& v, absdbl& inst) {
   v << fabs{before_conv, after_conv};
   // now move it back to Vreg
   v << copy{after_conv, inst.d};
-}
-
-void lowerForPPC64(Vout& v, stubtophp& inst) {
-  v << addqi{8, reg::rsp, reg::rsp, v.makeReg()};
-  v << popm{inst.fp[AROFF(m_savedRip)]};
 }
 
 void lower_vcallarray(Vunit& unit, Vlabel b) {
