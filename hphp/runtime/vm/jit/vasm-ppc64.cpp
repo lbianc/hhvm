@@ -992,7 +992,6 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 }
 
 X(cmpbim,  cmpl,  cmpli,  loadb, s1, s0)
-X(cmplim,  cmpl,  cmpli,  loadl, s1, s0)
 X(cmpqim,  cmpq,  cmpqi,  load,  s1, s0)
 X(testbim, testq, testqi, loadb, s1, s0)
 X(testwim, testq, testqi, loadw, s1, s0)
@@ -1218,6 +1217,22 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
   // will always return false
   if (patchImm(inst.s0, v, tmp3)) v << cmpq{tmp3, tmp2, inst.sf};
   else v << cmpqi{inst.s0, tmp2, inst.sf};
+}
+
+// cmplim not lowered due to callfaststub on emitDecRefWork
+// (it can't allocate temporary register through v.makeReg())
+void lowerForPPC64(Vout& v, cmplim& inst) {
+  Vptr p = inst.s1;
+  patchVptr(p, v);
+
+  // this temp reg is always needed. Use one of our scratches.
+  Vreg tmp2 = Vreg32(PhysReg(rAsm));
+  v << loadl{p, tmp2};
+
+  // This temp reg is not always needed. It's also not used by emitDecRefWork
+  Vreg tmp;
+  if (patchImm(inst.s0, v, tmp)) v << cmpl {tmp,     tmp2, inst.sf};
+  else                           v << cmpli{inst.s0, tmp2, inst.sf};
 }
 
 // Lower subtraction to subq
