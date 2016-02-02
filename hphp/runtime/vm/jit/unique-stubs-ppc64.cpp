@@ -76,10 +76,9 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     v << copy{rvmfp(), ar};
 
-    // Increase sp of 16 byte on top of Stub ABI so that it matches the
-    // architecture's minimal call frame structure according to ABI
-    // as a unwind can happen and the stub frame must follow the ActRec
-    // structure.
+    // Increase sp of 16 to make frame the same size of ActRet.
+    // In this specific unique stub function, a unwind can happen and the stub
+    // frame must follow the ActRet structure.
     v << addqi{-16, rsp(), rsp(), v.makeReg()};
 
     // Fully set up the call frame for the stub.  We can't skip this like we do
@@ -90,7 +89,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     // Load return address from stublogue.
     v << load{rsp()[8], retAddr};
-    // Place the addr in the same position that can be found as an ActRec.
+    // Place the addr in the same position that can be found as an ActRet.
     v << store{retAddr, rsp()[16]};
 
     v << copy{rsp(), rvmfp()};
@@ -144,9 +143,9 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     // Values related with the stub frame are now out of the stack, and need to
     // be placed in the right position, as stubret expects.
-    v << load{rsp()[-8], sp};  // Load sp from ActRec frame form.
+    v << load{rsp()[-8], sp};  // Load sp from ActRet frame form.
     v << store{sp, rsp()[8]};  // Store sp to stub frame form.
-    v << load{rsp()[-16], fp}; // Load fp from ActRec frame form.
+    v << load{rsp()[-16], fp}; // Load fp from ActRet frame form.
     v << store{fp, rsp()[0]};  // Store fp to stub frame form.
 
     // Restore rvmfp() and return to the callee's func prologue.
