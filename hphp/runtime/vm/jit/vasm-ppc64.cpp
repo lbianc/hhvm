@@ -138,9 +138,9 @@ struct Vgen {
     mcg->registerCatchBlock(saved_pc, nullptr);
   }
   // After VM frame unwinding, restore the frame pointer correctly as the
-  // callExtern left it with the additional frame.
+  // call left it with the additional frame.
   void emit(const landingpad& i) {
-    a->addi(rsp(), rsp(), 2 * min_callstack_size);    // same in callExtern !!!
+    a->popFrame(rsp());
   }
 
   // instructions
@@ -381,7 +381,6 @@ struct Vgen {
     a->xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
   }
 
-
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
   // fallback to the templated emit function.
@@ -404,15 +403,13 @@ struct Vgen {
   void emit(const lea&);
   void emit(const contenter&);
 
-  // auxiliary for emit(call) and emit(callr)
-  template<class Func>
-  void callExtern(Func func);
   void emit(const call& i);
   void emit(const callr& i);
   void emit(const calls& i);
   void emit(const stublogue& i);
   void emit(const stubret& i);
   void emit(const tailcallstub& i);
+  void emit(const stubtophp& i);
   void emit(const callarray& i);
 
 private:
@@ -483,33 +480,27 @@ void Vgen::emit(const ldimmq& i) {
 }
 
 void Vgen::emit(const contenter& i) {
- ppc64_asm::Label stub, end;
- Reg64 fp = i.fp;
+  ppc64_asm::Label stub, end;
+  Reg64 fp = i.fp;
 
- a->branchAuto(end);
- stub.asm_label(*a);
+  a->b(end);
+  stub.asm_label(*a);
+    // The following two lines are equivalent to
+    // pop(fp[AROFF(m_savedRip)]) on x64.
+    // rAsm is a scratch register.
+    a->mflr(rAsm);
+    emit(store{rAsm, fp[AROFF(m_savedRip)]});
+    emit(jmpr{i.target,i.args});
 
- // The following two lines are equivalent to
- // pop(fp[AROFF(m_savedRip)]) on x64.
- // rAsm is a scratch register.
- a->mflr(rAsm);
- emit(store{rAsm, fp[AROFF(m_savedRip)]});
-
- emit(jmpr{i.target,i.args});
-
- end.asm_label(*a);
- // This is equivalent to vasm 'call'.
- callExtern([&]() {
-   a->branchAuto(stub, BranchConditions::Always, LinkReg::Save);
- });
-
- emit(unwind{{i.targets[0], i.targets[1]}});
+  end.asm_label(*a);
+    a->call(rsp(), rtoc(), rfuncln(), rvmfp(), stub);
+    emit(unwind{{i.targets[0], i.targets[1]}});
 }
 
 void Vgen::emit(const syncpoint& i) {
-  // As the syncpoint intends to store the return address of the last call vasm,
-  // it's necessary to subtract 3 instructions from the callExtern's "epilogue"
-  // as mtlr, ld, addi exist before current a->frontier().
+  // As the syncpoint intends to store the return address of the last call
+  // vasm, it's necessary to subtract instructions from the call's "epilogue"
+  // in order to adjust the a->frontier() reference.
   TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", saved_pc,
          i.fix.pcOffset, i.fix.spOffset);
@@ -550,7 +541,7 @@ void Vgen::emit(const callfaststub& i) {
 }
 void Vgen::emit(const unwind& i) {
   // As the catch intends to store the return address of the last call vasm,
-  // it's necessary to subtract instructions from the callExtern's "epilogue" in
+  // it's necessary to subtract instructions from the call's "epilogue" in
   // order to match the expected return address as stored in the caller's frame
   TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
   catches.push_back({saved_pc, i.targets[1]});
@@ -665,32 +656,18 @@ void Vgen::emit(const lea& i) {
   }
 }
 
-template<class Func>
-void Vgen::callExtern(Func func) {
-  /*
-   * REMEMBER to update the smashable parameters for call on
-   * smashable-instr-ppc64.h when this function is updated!
-   *
-   * Below there is additionally another "min_callstack_size" so LR save
-   * doesn't overwrite the memory of a pushed element.
-   */
-  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
-  func(); // branch
-  a->epilogue(rsp(), rtoc(), rfuncln());
-}
-
 void Vgen::emit(const call& i) {
-  callExtern([&]() {
-      a->branchAuto(i.target, BranchConditions::Always, LinkReg::Save);
-  });
+  a->call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target);
 }
 
 void Vgen::emit(const callr& i) {
-  callExtern([&]() {
-      a->mr(rfuncentry(), i.target);
-      a->mtctr(rfuncentry());
-      a->bctrl();
-  });
+  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
+
+  a->mr(rfuncentry(), i.target);
+  a->mtctr(rfuncentry());
+  a->bctrl();
+
+  a->epilogue(rsp(), rtoc(), rfuncln());
 }
 
 void Vgen::emit(const calls& i) {
@@ -722,10 +699,19 @@ void Vgen::emit(const stubret& i) {
 void Vgen::emit(const tailcallstub& i) {
   // Update native stack pointer to ignore the current frame.
   // the Return Address is already in LR due to stublogue.
-  a->addi(rsp(), rsp(), 2 * min_callstack_size);  // same in landingpad vasm!!!
+  a->popFrame(rsp());
 
   // tail call: perform a jmp instead of a call.
   emit(jmpi{i.target, i.args});
+}
+
+void Vgen::emit(const stubtophp& i) {
+  // pop this frame created by stub
+  a->popFrame(rsp());
+
+  // grab the return address and store this return address for phplogue
+  a->ld(rAsm, rsp()[AROFF(m_savedRip)]);
+  a->std(rAsm, i.fp[AROFF(m_savedRip)]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1131,17 +1117,6 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
   v << load{inst.fp[AROFF(m_savedRip)], new_return};
   v << mtlr{new_return};
   v << jmpr{inst.target, inst.args};
-}
-
-void lowerForPPC64(Vout& v, stubtophp& inst) {
-  Vreg ret_address = v.makeReg();
-  // remove the frame created by stub, but correctly grab the return address on
-  // stub caller's frame (2 frames used, as considered on landingpad
-  v << lea{rsp()[2 * min_callstack_size], rsp()}; // same in landingpad vasm!!!
-  v << load{rsp()[AROFF(m_savedRip) - min_callstack_size], ret_address};
-
-  // store this return address as expected on phplogue
-  v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
 }
 
 /////////////////////////////////////////////////////////////////////////////

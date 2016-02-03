@@ -41,10 +41,10 @@ const RegSet kGPCalleeSaved =
   reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25 | reg::r26 | reg::r27;
 
   // r1 is used as rsp
-  // r28 is used as rone (value 1)
   // r29 is used as rvmsp
   // r30 is used as rvmtl
   // r31 is used as rvmfp
+  // r28 is used as rone
 
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 

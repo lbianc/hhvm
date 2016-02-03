@@ -1904,22 +1904,35 @@ struct Assembler {
   }
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64 (const Reg64& rt, int64_t imm64);
+  void li64(const Reg64& rt, int64_t imm64);
+
+  // Create a new frame on call stack
+  void pushFrame(const Reg64& rsp, const Reg64& rvmfp);
+
+  // Destroy a new frame on call stack
+  void popFrame(const Reg64& rsp);
 
   // Create prologue when calling.
-  void prologue (const Reg64& rsp,
-                 const Reg64& rtoc,
-                 const Reg64& rfuncln,
-                 const Reg64& rvmfp);
+  void prologue(const Reg64& rsp,
+                const Reg64& rtoc,
+                const Reg64& rfuncln,
+                const Reg64& rvmfp);
 
   // Create epilogue when calling.
-  void epilogue (const Reg64& rsp, const Reg64& rtoc, const Reg64& rfuncln);
+  void epilogue(const Reg64& rsp,
+                const Reg64& rtoc,
+                const Reg64& rfuncln);
 
-  void call (const Reg64& rsp,
-             const Reg64& rtoc,
-             const Reg64& rfuncln,
-             const Reg64& rvmfp,
-             CodeAddress target);
+  template <typename T>
+  void call(const Reg64& rsp,
+            const Reg64& rtoc,
+            const Reg64& rfuncln,
+            const Reg64& rvmfp,
+            T& target) {
+    prologue(rsp, rtoc, rfuncln, rvmfp);
+    branchAuto(target, BranchConditions::Always, LinkReg::Save);
+    epilogue(rsp, rtoc, rfuncln);
+  }
 
   // checks if the @inst is pointing to a call
   static inline bool isCall(HPHP::jit::TCA inst) {

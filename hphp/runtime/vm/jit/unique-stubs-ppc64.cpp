@@ -80,7 +80,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // in other stubs because we need the return IP for this frame in the %rbp
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
-    v << stublogue{true};     // adds 64 bytes onto the stack
+    v << stublogue{true};     // adds 32 bytes onto the stack
 
     // keep the savedRip on the stublogue frame
     v << load{ar[AROFF(m_savedRip)], savedRip};
@@ -120,8 +120,8 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       v << pop{rtoc()};
 
       // Drop our call frame; the stublogue{} instruction guarantees that this
-      // is exactly 64 bytes.
-      v << lea{rsp()[64], rsp()};
+      // is exactly 32 bytes.
+      v << lea{rsp()[32], rsp()};
 
       // Sync vmsp and return to the caller.  This unbalances the return stack
       // buffer, but if we're intercepting, we probably don't care.

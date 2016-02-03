@@ -181,34 +181,18 @@ ETCH_NAME(enterTCHelper):
   // Prologue
   CFI(startproc)                // set debug information
 
-  // PIC code setup
-    // As this function is not called with $r12 pointing out to this function,
-    // it's forbidden to set it. Why is the linker pointing out incorrectly?
-  // addis %r2, %r12, .TOC.-enterTCHelper@ha
-  // addi  %r2, %r2,  .TOC.-enterTCHelper@l
-
-  /*
-   * Manipulating the call stack in order to use the pthread memory section.
-   *
-   *                          pointer value : pointed value
-   * -----------------------------------------------------------
-   * current sp:              0x7fffffffcb90: 0x00007fffffffcbb0
-   * current vmFirstAR():     0x7fffe187ffc0: 0x0000000000000000
-   *
-   * sp should be:            0x7fffffffcb70: 0x00007fffe187ffc0
-   * vmFirstAR() should be:   0x7fffe187ffc0: 0x00007fffffffcb90
-   */
+  // set the backchain through the VM call stack
+  mflr %r0
+  std %r0, 16(%r1)              // LR on parent call frame
+  CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
 
   // Set firstAR->m_sfp to point to this frame.
   std %r1, 0(ETCH_ARG4)
   // Set backchain to rvmfp
   std ETCH_ARG4, -192(%r1)
 
-  mflr %r0
-  std %r0, 16(%r1)              // LR on parent call frame
   la %r1, -192(%r1)             // backchain was taken care above on -192(%r1)
   CFI2(adjust_cfa_offset, 192)  // debug information about stack pointer change
-  CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
 
   // Save non-volatile registers in order to restore it on Epilogue
   // also takes care of debug information

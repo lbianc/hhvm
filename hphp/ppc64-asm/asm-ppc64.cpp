@@ -826,19 +826,28 @@ void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
   b.li64(reg::r12, ssize_t(dest));
 }
 
+// Create a new frame on call stack
+void Assembler::pushFrame(const Reg64& rsp, const Reg64& rvmfp) {
+  std(rvmfp, rsp[-min_callstack_size]);
+  addi(rsp, rsp, -min_callstack_size);
+}
+
+// Destroy a new frame on call stack
+void Assembler::popFrame(const Reg64& rsp) {
+  addi(rsp, rsp, min_callstack_size);
+}
+
 // Create prologue when calling
 void Assembler::prologue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln,
                           const Reg64& rvmfp) {
-  // save caller's return address on caller's frame
+  // save return address on caller's frame (ABI)
   mflr(rfuncln);
-  std(rfuncln, rsp[lr_position_on_callstack - min_callstack_size]);
-  // Set the backchain to go through the VM frames
-  std(rvmfp, rsp[-2 * min_callstack_size]);
-  addi(rsp, rsp, -2 * min_callstack_size);
+  std(rfuncln, rsp[lr_position_on_callstack]);
 
-  // save TOC value locally
+  // save TOC value on this frame
+  pushFrame(rsp, rvmfp);
   std(rtoc, rsp[toc_position_on_callstack]);
 }
 
@@ -846,24 +855,13 @@ void Assembler::prologue (const Reg64& rsp,
 void Assembler::epilogue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln) {
-  // restore this TOC value
+  // restore TOC value on this frame
   ld(rtoc, rsp[toc_position_on_callstack]);
 
-  // restore caller's return address
-  addi(rsp, rsp, 2 * min_callstack_size);  // same in landingpad vasm!!!
-  ld(rfuncln, rsp[lr_position_on_callstack - min_callstack_size]);
+  // restore return address from previous frame
+  popFrame(rsp);
+  ld(rfuncln, rsp[lr_position_on_callstack]);
   mtlr(rfuncln);
-}
-
-void Assembler::call (const Reg64& rsp,
-                      const Reg64& rtoc,
-                      const Reg64& rfuncln,
-                      const Reg64& rvmfp,
-                      CodeAddress target) {
-
-  prologue(rsp, rtoc, rfuncln, rvmfp);
-  branchAuto(target, BranchConditions::Always, LinkReg::Save);
-  epilogue(rsp, rtoc, rfuncln);
 }
 
 void Assembler::li64 (const Reg64& rt, int64_t imm64) {

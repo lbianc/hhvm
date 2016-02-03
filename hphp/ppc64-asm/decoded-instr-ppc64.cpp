@@ -175,14 +175,9 @@ bool DecodedInstruction::isBranch(bool allowCond /* = true */) const {
 }
 
 bool DecodedInstruction::isCall() const {
-#if 0 // TODO(gut)
-  if (m_map_select != 0) return false;
-  if (m_opcode == 0xe8) return true;
-  if (m_opcode != 0xff) return false;
-  return ((getModRm() >> 3) & 0x6) == 2;
-#else
-  return false;
-#endif
+  // skip the preparation instructions that are not actually the branch.
+  auto branch_instr = m_ip + HPHP::jit::ppc64::smashableCallSkip();
+  return Decoder::GetDecoder().decode(branch_instr)->isBranch(false);
 }
 
 bool DecodedInstruction::isJmp() const {
