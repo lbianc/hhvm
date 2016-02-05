@@ -72,6 +72,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
   auto const start = vwrap(cb, [&] (Vout& v) {
     auto const ar = v.makeReg();
+    auto const savedRip = v.makeReg();
 
     v << copy{rvmfp(), ar};
 
@@ -80,16 +81,21 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
     v << stublogue{true};     // adds 64 bytes onto the stack
-    v << copy{rsp(), rvmfp()};
+
+    // keep the savedRip on the stublogue frame
+    v << load{ar[AROFF(m_savedRip)], savedRip};
+    v << store{savedRip, rsp()[AROFF(m_savedRip)]};
 
     // When we call the event hook, it might tell us to skip the callee
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
     v << pushm{ar[AROFF(m_savedToc)]};
-    v << pushm{ar[AROFF(m_savedRip)]};
+    v << push{savedRip};
     v << push{rfuncln()};            // reserved. It doesn't matter
     v << pushm{ar[AROFF(m_sfp)]};
+
+    v << copy{rsp(), rvmfp()};
 
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 

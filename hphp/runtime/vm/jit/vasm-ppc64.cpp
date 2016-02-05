@@ -550,8 +550,8 @@ void Vgen::emit(const callfaststub& i) {
 }
 void Vgen::emit(const unwind& i) {
   // As the catch intends to store the return address of the last call vasm,
-  // it's necessary to subtract 3 instructions from the callExtern's "epilogue"
-  // as mtlr, ld, addi exist before current a->frontier().
+  // it's necessary to subtract instructions from the callExtern's "epilogue" in
+  // order to match the expected return address as stored in the caller's frame
   TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
   catches.push_back({saved_pc, i.targets[1]});
   emit(jmp{i.targets[0]});
