@@ -25,6 +25,7 @@
 #include "hphp/util/data-block.h"
 #include "hphp/runtime/vm/jit/types.h"
 
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
@@ -1936,9 +1937,8 @@ struct Assembler {
 
   // checks if the @inst is pointing to a call
   static inline bool isCall(HPHP::jit::TCA inst) {
-    // a call always begin with a mflr and it's rarely used elsewhere: good tag
-    return ((((inst[3] >> 2) & 0x3F) == 31) &&                          // OPCD
-      ((((inst[1] & 0x3) << 7) | ((inst[0] >> 1) & 0xFF)) == 339));     // XO
+    DecodedInstruction di(inst);
+    return di.isCall();
   }
 
   // Retrieve the target defined by li64 instruction

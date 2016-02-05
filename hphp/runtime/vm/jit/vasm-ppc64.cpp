@@ -204,7 +204,7 @@ struct Vgen {
   void emit(const incl& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const incq& i) { a->addo(i.d, i.s, rone(), true); }
   void emit(const jmpi& i) {
-    a->branchAuto(i.target, BranchConditions::Always, LinkReg::DoNotTouch);
+    a->branchAuto(i.target);
   }
   void emit(const jmpr& i) {
     a->mtctr(i.target);
