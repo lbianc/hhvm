@@ -195,6 +195,7 @@ struct Vgen {
   void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
   void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s0, i.s1); }
   void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s0, i.s1); }
+  void emit(const ucomisd& i);
   void emit(const fctidz& i) {
     a->mtfsb0(23); // clear VXCVI
     a->fctidz(i.d, i.s, false);
@@ -433,6 +434,16 @@ void Vgen::emit(const cvtsi2sd& i) {
   // As described on ISA page 727, F.2.6
   emit(copy{i.s, i.d});
   a->fcfid(i.d, i.d);
+}
+
+void Vgen::emit(const ucomisd& i) {
+  ppc64_asm::Label notNAN;
+  emit(fcmpu{i.s0, i.s1, i.sf});
+  a->branchAuto(notNAN, BranchConditions::CR0_NoOverflow);
+  // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
+  a->li64(rAsm, 0x90000000);
+  a->mtcrf(0x80, rAsm);
+  notNAN.asm_label(*a);
 }
 
 void Vgen::emit(const ldimmb& i) {
@@ -1150,10 +1161,6 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
 /////////////////////////////////////////////////////////////////////////////
 
 // Lower movs to copy
-// X64's ucomisd is exactly PPC64's fcmpu, which is already implemented
-void lowerForPPC64(Vout& v, ucomisd& inst) {
-  v << fcmpu{inst.s0, inst.s1, inst.sf};
-}
 void lowerForPPC64(Vout& v, movtqb& inst) { v << copy{inst.s, inst.d}; }
 void lowerForPPC64(Vout& v, movtql& inst) { v << copy{inst.s, inst.d}; }
 
