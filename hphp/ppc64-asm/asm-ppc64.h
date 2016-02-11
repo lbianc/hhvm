@@ -82,8 +82,7 @@ enum class BranchConditions {
 
 #undef BRANCHES
 
-class BranchParams {
-  public:
+struct BranchParams {
     /* BO and BI parameter mapping related to BranchConditions */
     enum class BO {
       CRNotSet              = 4,

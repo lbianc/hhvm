@@ -165,8 +165,7 @@ struct CompactRequestData final : RequestEventHandler {
 };
 IMPLEMENT_STATIC_REQUEST_LOCAL(CompactRequestData, s_compact_request_data);
 
-class CompactWriter {
-  public:
+struct CompactWriter {
     explicit CompactWriter(PHPOutputTransport *transport) :
       transport(transport),
       version(VERSION),
@@ -496,8 +495,7 @@ class CompactWriter {
     }
 };
 
-class CompactReader {
-  public:
+struct CompactReader {
     explicit CompactReader(const Object& _transportobj) :
       transport(_transportobj),
       version(VERSION),
@@ -559,6 +557,10 @@ class CompactReader {
             readComplete = true;
             Variant fieldValue = readField(fieldSpec, fieldType);
             dest->o_set(fieldName, fieldValue, dest->getClassName());
+            bool isUnion = spec.rvalAt(s_union).toBoolean();
+            if (isUnion) {
+              dest->o_set(s__type, Variant(fieldNum), dest->getClassName());
+            }
           }
         }
 
@@ -595,6 +597,13 @@ class CompactReader {
             prop[i].name != fields[i].name ||
             !typesAreCompatible(fieldType, fields[i].type)) {
           return readStructSlow(dest, spec, fieldNum, fieldType);
+        }
+        if (fields[i].isUnion) {
+          if (s__type.equal(prop[numFields].name)) {
+            tvAsVariant(&objProp[numFields]) = Variant(fieldNum);
+          } else {
+            return readStructSlow(dest, spec, fieldNum, fieldType);
+          }
         }
         ArrNR fieldSpec(fields[i].spec);
         tvAsVariant(&objProp[i]) = readField(fieldSpec.asArray(), fieldType);

@@ -50,36 +50,6 @@ void DwarfBuf::byte(uint8_t c) {
   m_buf.push_back(c);
 }
 
-void DwarfBuf::byte(int off, uint8_t c) {
-  assert((size_t)off < m_buf.size());
-  m_buf[off] = c;
-}
-
-void DwarfBuf::word(uint16_t w) {
-  byte(w & 0xff);
-  byte((w >> 8) & 0xff);
-}
-
-void DwarfBuf::word(int off, uint16_t w) {
-  byte(off, (w & 0xff));
-  byte(off + 1, ((w >> 8) & 0xff));
-}
-
-void DwarfBuf::dword(uint32_t d) {
-  word(d & 0xffff);
-  word((d >> 16) & 0xffff);
-}
-
-void DwarfBuf::dword(int off, uint32_t d) {
-  word(off, (d & 0xffff));
-  word(off + 2, ((d >> 16) & 0xffff));
-}
-
-void DwarfBuf::qword(uint64_t q) {
-  dword(q & 0xffffffff);
-  dword((q >> 32) & 0xfffffffff);
-}
-
 void DwarfBuf::clear() {
   m_buf.clear();
 }
@@ -161,9 +131,9 @@ void DwarfBuf::dwarf_cfa_def_cfa(uint8_t reg, uint8_t offset) {
   byte(offset);
 }
 
-void DwarfBuf::dwarf_cfa_offset(uint8_t reg, uint8_t offset) {
-  byte(DW_CFA_offset | reg);
-  byte(offset);
+void DwarfBuf::dwarf_cfa_same_value(uint8_t reg) {
+  byte(DW_CFA_same_value);
+  byte(reg);
 }
 
 void DwarfBuf::dwarf_cfa_offset_extended_sf(uint8_t reg, int8_t offset) {

@@ -48,7 +48,7 @@ IRMetadataUpdater::IRMetadataUpdater(const Venv& env, AsmInfo* asm_info)
   }
   if (mcg->tx().isTransDBEnabled() ||
       RuntimeOption::EvalJitUseVtuneAPI) {
-    m_bcmap = &mcg->cgFixups().m_bcMap;
+    m_bcmap = &mcg->cgFixups().bcMap;
   }
 }
 
@@ -138,14 +138,14 @@ bool is_empty_catch(const Vblock& block) {
   return block.code.size() == 2 &&
          block.code[0].op == Vinstr::landingpad &&
          block.code[1].op == Vinstr::jmpi &&
-         block.code[1].jmpi_.target == mcg->tx().uniqueStubs.endCatchHelper;
+         block.code[1].jmpi_.target == mcg->ustubs().endCatchHelper;
 }
 
 void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
   bool const is_empty = is_empty_catch(env.unit.blocks[p.target]);
 
   auto const catch_target = is_empty
-    ? mcg->tx().uniqueStubs.endCatchHelper
+    ? mcg->ustubs().endCatchHelper
     : env.addrs[p.target];
   assertx(catch_target);
 
@@ -157,14 +157,14 @@ void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
 bool emit(Venv& env, const bindjmp& i) {
   auto const jmp = emitSmashableJmp(*env.cb, env.cb->frontier());
   env.stubs.push_back({jmp, nullptr, i});
-  mcg->setJmpTransID(jmp);
+  mcg->setJmpTransID(jmp, env.unit.transKind);
   return true;
 }
 
 bool emit(Venv& env, const bindjcc& i) {
   auto const jcc = emitSmashableJcc(*env.cb, env.cb->frontier(), i.cc);
   env.stubs.push_back({nullptr, jcc, i});
-  mcg->setJmpTransID(jcc);
+  mcg->setJmpTransID(jcc, env.unit.transKind);
   return true;
 }
 
@@ -174,15 +174,15 @@ bool emit(Venv& env, const bindjcc1st& i) {
 
   env.stubs.push_back({jcc_jmp.second, jcc_jmp.first, i});
 
-  mcg->setJmpTransID(jcc_jmp.first);
-  mcg->setJmpTransID(jcc_jmp.second);
+  mcg->setJmpTransID(jcc_jmp.first, env.unit.transKind);
+  mcg->setJmpTransID(jcc_jmp.second, env.unit.transKind);
   return true;
 }
 
 bool emit(Venv& env, const bindaddr& i) {
   env.stubs.push_back({nullptr, nullptr, i});
-  mcg->setJmpTransID(TCA(i.addr));
-  mcg->cgFixups().m_codePointers.insert(i.addr);
+  mcg->setJmpTransID(TCA(i.addr), env.unit.transKind);
+  mcg->cgFixups().codePointers.insert(i.addr);
   return true;
 }
 

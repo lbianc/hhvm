@@ -9,15 +9,14 @@
 namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
 
-class Header;
+struct Header;
 
 namespace collections {
 void deepCopy(TypedValue*);
-class PairIterator;
+struct PairIterator;
 }
 
-class c_Pair : public ObjectData {
- public:
+struct c_Pair : ObjectData {
   DECLARE_COLLECTIONS_CLASS(Pair);
 
   enum class NoInit {};
@@ -169,10 +168,10 @@ class c_Pair : public ObjectData {
   friend void collections::deepCopy(TypedValue*);
   friend class collections::PairIterator;
   friend class collections::CollectionsExtension;
-  friend class c_Vector;
-  friend class BaseVector;
-  friend class BaseMap;
-  friend class ArrayIter;
+  friend struct c_Vector;
+  friend struct BaseVector;
+  friend struct BaseMap;
+  friend struct ArrayIter;
 
   static void compileTimeAssertions() {
     // For performance, all native collection classes have their m_size field

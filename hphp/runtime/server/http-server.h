@@ -24,9 +24,8 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class HttpServer : public Synchronizable, public TakeoverListener,
-                   public Server::ServerEventListener {
-public:
+struct HttpServer : Synchronizable, TakeoverListener,
+                    Server::ServerEventListener {
   static std::shared_ptr<HttpServer> Server;
   static time_t StartTime;
 
@@ -70,7 +69,6 @@ private:
   ServerPtr m_pageServer;
   ServerPtr m_adminServer;
   std::vector<std::unique_ptr<SatelliteServer>> m_satellites;
-  std::vector<std::unique_ptr<SatelliteServer>> m_danglings;
   AsyncFunc<HttpServer> m_watchDog;
 
   bool startServer(bool pageServer);

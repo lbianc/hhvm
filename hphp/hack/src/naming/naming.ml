@@ -32,7 +32,6 @@ module GEnv = NamingGlobal.GEnv
  * replaced by identifiers.
  *)
 type positioned_ident = (Pos.t * Ident.t)
-type map = positioned_ident SMap.t
 
 (* <T as A>, A is a type constraint *)
 type type_constraint = (Ast.constraint_kind * Ast.hint) option
@@ -65,8 +64,8 @@ type genv = {
   current_cls: (Ast.id * Ast.class_kind) option;
 
   (* Normally we don't need to add dependencies at this stage, but there
-   * are edge cases when we do.  *)
-  droot: Typing_deps.Dep.variant option;
+   * are edge cases when we do. *)
+  droot: Typing_deps.Dep.variant;
 
   (* Namespace environment, e.g., what namespace we're in and what use
    * declarations are in play. *)
@@ -81,69 +80,111 @@ type unbound_mode =
   | UBMErr
   | UBMFunc of ((Pos.t * string) -> positioned_ident)
 
-(* The local environment *)
-type lenv = {
-
-  (* The set of locals *)
-  locals: map ref;
-
-  (* The set of constants *)
-  consts: map ref;
-
-  (* We keep all the locals, even if we are in a different scope
-   * to provide better error messages.
-   * if you write:
-   * if(...) {
-   *   $x = ...;
-   * }
-   * Technically, passed this point, $x is unbound.
-   * But it is much better to keep it somewhere, so that you can
-   * say it is bound, but in a different scope.
-   *)
-  all_locals: Pos.t SMap.t ref;
-
-  (* Some statements can define new variables afterwards, e.g.,
-   * if (...) {
-   *    $x = ...;
-   * } else {
-   *    $x = ...;
-   * }
-   * We need to give $x the same name in both branches, but we don't want
-   * $x to actually be a local until after the if block. So we stash it here,
-   * to indicate a name has been pre-allocated, but that the variable isn't
-   * actually defined yet.
-   *)
-  pending_locals: map ref;
-
-  (* Tag controlling what we do when we encounter an unbound name.
-   * This is used when processing a lambda expression body that has
-   * an automatic use list.
-   *
-   * See expr_lambda for details.
-   *)
-  unbound_mode: unbound_mode;
-
-  (* The presence of an "UNSAFE" in the function body changes the
-   * verifiability of the function's return type, since the unsafe
-   * block could return. For the sanity of the typechecker, we flatten
-   * this out, but need to track if we've seen an "UNSAFE" in order to
-   * do so. *)
-  has_unsafe: bool ref;
-}
-
-(*****************************************************************************)
-(* Empty (initial) environments *)
-(*****************************************************************************)
-
 (* The primitives to manipulate the naming environment *)
-module Env = struct
+module Env : sig
 
-  let empty_local() = {
+  type all_locals
+  type lenv
+
+  val empty_local : unbound_mode -> lenv
+  val make_class_genv :
+    TypecheckerOptions.t ->
+    type_constraint SMap.t ->
+    FileInfo.mode ->
+    Ast.id list -> Ast.id * Ast.class_kind -> Namespace_env.env -> genv
+  val make_class_env :
+    TypecheckerOptions.t ->
+    type_constraint SMap.t -> Ast.class_ -> genv * lenv
+  val make_typedef_env :
+    TypecheckerOptions.t ->
+    type_constraint SMap.t -> Ast.typedef -> genv * lenv
+  val make_fun_genv :
+    TypecheckerOptions.t ->
+    type_constraint SMap.t ->
+    FileInfo.mode -> string -> Namespace_env.env -> genv
+  val make_fun_decl_genv :
+    TypecheckerOptions.t ->
+    type_constraint SMap.t -> Ast.fun_ -> genv
+  val make_const_env : TypecheckerOptions.t -> Ast.gconst -> genv * lenv
+
+  val has_unsafe : genv * lenv -> bool
+  val set_unsafe : genv * lenv -> bool -> unit
+
+  val add_lvar : genv * lenv -> Ast.id -> positioned_ident -> unit
+  val new_lvar : genv * lenv -> Ast.id -> positioned_ident
+  val new_pending_lvar : genv * lenv -> Ast.id -> unit
+  val promote_pending : genv * lenv -> unit
+  val lvar : genv * lenv -> Ast.id -> positioned_ident
+  val global_const : genv * lenv -> Ast.id -> Ast.id
+  val class_name : genv * lenv -> Ast.id -> Ast.id
+  val fun_id : genv * lenv -> Ast.id -> Ast.id
+  val new_const : genv * lenv -> Ast.id -> Ast.id
+
+  val scope : genv * lenv -> (genv * lenv -> 'a) -> 'a
+  val scope_all : genv * lenv -> (genv * lenv -> 'a) -> all_locals * 'a
+  val extend_all_locals : genv * lenv -> all_locals -> unit
+
+end = struct
+
+  type map = positioned_ident SMap.t
+  type all_locals = Pos.t SMap.t
+
+  (* The local environment *)
+  type lenv = {
+
+    (* The set of locals *)
+    locals: map ref;
+
+    (* The set of constants *)
+    consts: map ref;
+
+    (* We keep all the locals, even if we are in a different scope
+     * to provide better error messages.
+     * if you write:
+     * if(...) {
+     *   $x = ...;
+     * }
+     * Technically, passed this point, $x is unbound.
+     * But it is much better to keep it somewhere, so that you can
+     * say it is bound, but in a different scope.
+     *)
+    all_locals: all_locals ref;
+
+    (* Some statements can define new variables afterwards, e.g.,
+     * if (...) {
+     *    $x = ...;
+     * } else {
+     *    $x = ...;
+     * }
+     * We need to give $x the same name in both branches, but we don't want
+     * $x to actually be a local until after the if block. So we stash it here,
+     * to indicate a name has been pre-allocated, but that the variable isn't
+     * actually defined yet.
+     *)
+    pending_locals: map ref;
+
+    (* Tag controlling what we do when we encounter an unbound name.
+     * This is used when processing a lambda expression body that has
+     * an automatic use list.
+     *
+     * See expr_lambda for details.
+     *)
+    unbound_mode: unbound_mode;
+
+    (* The presence of an "UNSAFE" in the function body changes the
+     * verifiability of the function's return type, since the unsafe
+     * block could return. For the sanity of the typechecker, we flatten
+     * this out, but need to track if we've seen an "UNSAFE" in order to
+     * do so. *)
+    has_unsafe: bool ref;
+  }
+
+  let empty_local unbound_mode = {
     locals     = ref SMap.empty;
     consts     = ref SMap.empty;
     all_locals = ref SMap.empty;
     pending_locals = ref SMap.empty;
-    unbound_mode = UBMErr;
+    unbound_mode;
     has_unsafe = ref false;
   }
 
@@ -156,15 +197,15 @@ module Env = struct
     type_params   = params;
     type_paraml   = tparams;
     current_cls   = Some (cid, ckind);
-    droot         = Some (Typing_deps.Dep.Class (snd cid));
+    droot         = Typing_deps.Dep.Class (snd cid);
     namespace;
   }
 
-  let make_class_env nenv params c =
+  let make_class_env tcopt params c =
     let tparams = List.map c.c_tparams (fun (_, x, _) -> x) in
-    let genv = make_class_genv nenv params c.c_mode
+    let genv = make_class_genv tcopt params c.c_mode
       tparams (c.c_name, c.c_kind) c.c_namespace in
-    let lenv = empty_local () in
+    let lenv = empty_local UBMErr in
     let env  = genv, lenv in
     env
 
@@ -176,13 +217,13 @@ module Env = struct
     type_params   = cstrs;
     type_paraml   = List.map tdef.t_tparams (fun (_, x, _) -> x);
     current_cls   = None;
-    droot         = None;
+    droot         = Typing_deps.Dep.Class (snd tdef.t_id);
     namespace     = tdef.t_namespace;
   }
 
   let make_typedef_env genv cstrs tdef =
     let genv = make_typedef_genv genv cstrs tdef in
-    let lenv = empty_local () in
+    let lenv = empty_local UBMErr in
     let env  = genv, lenv in
     env
 
@@ -194,7 +235,7 @@ module Env = struct
     type_params   = params;
     type_paraml   = [];
     current_cls   = None;
-    droot         = Some (Typing_deps.Dep.Fun f_name);
+    droot         = Typing_deps.Dep.Fun f_name;
     namespace     = f_namespace;
   }
 
@@ -209,15 +250,19 @@ module Env = struct
     type_params   = SMap.empty;
     type_paraml   = [];
     current_cls   = None;
-    droot         = Some (Typing_deps.Dep.GConst (snd cst.cst_name));
+    droot         = Typing_deps.Dep.GConst (snd cst.cst_name);
     namespace     = cst.cst_namespace;
   }
 
   let make_const_env nenv cst =
     let genv = make_const_genv nenv cst in
-    let lenv = empty_local () in
+    let lenv = empty_local UBMErr in
     let env  = genv, lenv in
     env
+
+  let has_unsafe (_genv, lenv) = !(lenv.has_unsafe)
+  let set_unsafe (_genv, lenv) x =
+    lenv.has_unsafe := x
 
   let new_var env (p, x) =
     if SMap.mem x !env
@@ -448,9 +493,9 @@ module Env = struct
       | FileInfo.Mstrict -> raise exn
       | FileInfo.Mpartial | FileInfo.Mdecl -> x
 
-(* Scope, keep the locals, go and name the body, and leave the
- * local environment intact
- *)
+  (* Scope, keep the locals, go and name the body, and leave the
+   * local environment intact
+   *)
   let scope env f =
     let genv, lenv = env in
     let lenv_copy = !(lenv.locals) in
@@ -459,6 +504,17 @@ module Env = struct
     lenv.locals := lenv_copy;
     lenv.pending_locals := lenv_pending_copy;
     res
+
+  let scope_all env f =
+    let genv, lenv = env in
+    let lenv_all_locals_copy = !(lenv.all_locals) in
+    let res = scope env f in
+    let lenv_all_locals = !(lenv.all_locals) in
+    lenv.all_locals := lenv_all_locals_copy;
+    lenv_all_locals, res
+
+  let extend_all_locals (_genv, lenv) more_locals =
+    lenv.all_locals := SMap.union more_locals !(lenv.all_locals)
 
 end
 
@@ -648,7 +704,7 @@ and hint_id ~forbid_this ~allow_retonly env is_static_var (p, x as id) hl =
         Errors.tparam_with_tparam p x;
         N.Habstr (x, get_constraint env x)
     | _ ->
-       let name = Env.class_name env id in
+        let name = Env.class_name env id in
         N.Happly (name, hintl ~forbid_this ~allow_retonly:true env hl)
   end
 
@@ -1225,11 +1281,11 @@ and typeconst env t =
        c_tconst_type = type_;
      })
 
-and func_body_had_unsafe env = !((snd env).has_unsafe)
+and func_body_had_unsafe env = Env.has_unsafe env
 
 and method_ genv m =
   let genv = extend_params genv m.m_tparams in
-  let env = genv, Env.empty_local() in
+  let env = genv, Env.empty_local UBMErr in
   (* Cannot use 'this' if it is a public instance method *)
   let variadicity, paraml = fun_paraml env m.m_params in
   let name = Env.new_const env m.m_name in
@@ -1328,8 +1384,7 @@ and uselist_lambda f =
   in
   let tcopt = TypecheckerOptions.permissive in
   let genv = Env.make_fun_decl_genv tcopt SMap.empty f in
-  let lenv = Env.empty_local () in
-  let lenv = { lenv with unbound_mode = UBMFunc handle_unbound } in
+  let lenv = Env.empty_local @@ UBMFunc handle_unbound in
   let env = genv, lenv in
   ignore (expr_lambda env f);
   List.dedup !to_capture
@@ -1337,7 +1392,7 @@ and uselist_lambda f =
 and fun_ nenv f =
   let tparams = make_constraints f.f_tparams in
   let genv = Env.make_fun_decl_genv nenv tparams f in
-  let lenv = Env.empty_local () in
+  let lenv = Env.empty_local UBMErr in
   let env = genv, lenv in
   let h = Option.map f.f_ret (hint ~allow_retonly:true env) in
   let variadicity, paraml = fun_paraml env f.f_params in
@@ -1374,7 +1429,7 @@ and fun_ nenv f =
 
 and cut_and_flatten ?(replacement=Noop) env = function
   | [] -> []
-  | Unsafe :: _ -> (snd env).has_unsafe := true ; [replacement]
+  | Unsafe :: _ -> Env.set_unsafe env true; [replacement]
   | Block b :: rest ->
       (cut_and_flatten ~replacement env b) @
         (cut_and_flatten ~replacement env rest)
@@ -1434,12 +1489,10 @@ and if_stmt env st e b1 b2 =
   SMap.iter (fun x p -> Env.new_pending_lvar env (p, x)) vars;
   let result = Env.scope env (
   fun env ->
-    let _, lenv = env in
-    let all_locals_copy = !(lenv.all_locals) in
     let all1, b1 = branch env b1 in
     let all2, b2 = branch env b2 in
-    let all_locals = SMap.union all1 all2 in
-    lenv.all_locals := SMap.union all_locals all_locals_copy;
+    Env.extend_all_locals env all2;
+    Env.extend_all_locals env all1;
     N.If (e, b1, b2)
  ) in
  Env.promote_pending env;
@@ -1468,28 +1521,21 @@ and switch_stmt env st e cl =
   let nsenv = (fst env).namespace in
   let _, vars = Naming_ast_helpers.GetLocals.stmt (nsenv, SMap.empty) st in
   SMap.iter (fun x p -> Env.new_pending_lvar env (p, x)) vars;
-  let result = Env.scope env (
-  fun env ->
-    let _, lenv = env in
-    let all_locals_copy = !(lenv.all_locals) in
-    let all_locals, cl = casel env cl in
-    lenv.all_locals := SMap.union all_locals all_locals_copy;
+  let result = Env.scope env begin fun env ->
+    let all_locals_l, cl = casel env cl in
+    List.iter all_locals_l (Env.extend_all_locals env);
     N.Switch (e, cl)
- ) in
- Env.promote_pending env;
- result
+  end in
+  Env.promote_pending env;
+  result
 
 and foreach_stmt env e aw ae b =
   let e = expr env e in
-  Env.scope env (
-  fun env ->
-    let _, lenv = env in
-    let all_locals_copy = !(lenv.all_locals) in
+  Env.scope env begin fun env ->
     let ae = as_expr env aw ae in
-    let all_locals, b = branch env b in
-    lenv.all_locals := SMap.union all_locals all_locals_copy;
+    let b = block env b in
     N.Foreach (e, ae, b)
- )
+  end
 
 and as_expr env aw = function
   | As_v ev ->
@@ -1524,17 +1570,14 @@ and try_stmt env st b cl fb =
   let result = Env.scope env (
   fun env ->
     let genv, lenv = env in
-    let all_locals_copy = !(lenv.all_locals) in
     (* isolate finally from the rest of the try-catch: if the first
      * statement of the try is an uncaught exception, finally will
      * still be executed *)
-    let all_finally, fb = branch (genv, lenv) fb in
-    lenv.all_locals := all_locals_copy;
-    let all_locals_copy = !(lenv.all_locals) in
-    let all1, b = branch ({ genv with in_try = true}, lenv) b in
-    let all_locals, cl = catchl env cl in
-    let all_locals = SMap.union all1 all_locals in
-    lenv.all_locals := SMap.union all_locals all_locals_copy;
+    let all_finally, fb = branch env fb in
+    let all_locals_b, b = branch ({genv with in_try = true}, lenv) b in
+    let all_locals_cl, cl = catchl env cl in
+    List.iter all_locals_cl (Env.extend_all_locals env);
+    Env.extend_all_locals env all_locals_b;
     N.Try (b, cl, fb)
   ) in
   Env.promote_pending env;
@@ -1551,16 +1594,9 @@ and block ?(new_scope=true) env stl =
 
 and branch env stmt_l =
   let stmt_l = cut_and_flatten env stmt_l in
-  let genv, lenv = env in
-  let lenv_copy = !(lenv.locals) in
-  let lenv_all_locals_copy = !(lenv.all_locals) in
-  let lenv_pending_copy = !(lenv.pending_locals) in
-  let res = List.map stmt_l (stmt env) in
-  lenv.locals := lenv_copy;
-  let lenv_all_locals = !(lenv.all_locals) in
-  lenv.all_locals := lenv_all_locals_copy;
-  lenv.pending_locals := lenv_pending_copy;
-  lenv_all_locals, res
+  Env.scope_all env begin fun env ->
+    List.map stmt_l (stmt env)
+  end
 
 and static_varl env l = List.map l (static_var env)
 and static_var env = function
@@ -1887,7 +1923,7 @@ and expr_ env = function
       let idl = List.filter idl
         (function (_, x) -> (x <> SN.SpecialIdents.this)) in
       let idl' = List.map idl (Env.lvar env) in
-      let env = (fst env, Env.empty_local ()) in
+      let env = (fst env, Env.empty_local UBMErr) in
       List.iter2_exn idl idl' (Env.add_lvar env);
       let f = expr_lambda env f in
       N.Efun (f, idl')
@@ -1903,8 +1939,7 @@ and expr_ env = function
         to_capture := cap :: !to_capture;
         cap
       in
-      let lenv = Env.empty_local () in
-      let lenv = { lenv with unbound_mode = UBMFunc handle_unbound } in
+      let lenv = Env.empty_local @@ UBMFunc handle_unbound in
       let env = (fst env, lenv) in
       let f = expr_lambda env f in
       N.Efun (f, !to_capture)
@@ -1925,9 +1960,9 @@ and expr_ env = function
 
 and expr_lambda env f =
   let h = Option.map f.f_ret (hint ~allow_retonly:true env) in
-  let previous_unsafe = !((snd env).has_unsafe) in
+  let previous_unsafe = Env.has_unsafe env in
   (* save unsafe and yield state *)
-  (snd env).has_unsafe := false;
+  Env.set_unsafe env false;
   let variadicity, paraml = fun_paraml env f.f_params in
   let f_kind = f.f_fun_kind in
   (* The bodies of lambdas go through naming in the containing local
@@ -1935,7 +1970,7 @@ and expr_lambda env f =
   let body_nast = block env f.f_body in
   let unsafe = func_body_had_unsafe env in
   (* restore unsafe state *)
-  (snd env).has_unsafe := previous_unsafe;
+  Env.set_unsafe env previous_unsafe;
   let body = N.NamedBody {
     N.fnb_unsafe = unsafe;
     fnb_nast = body_nast;
@@ -1973,29 +2008,26 @@ and make_class_id env (p, x as cid) =
     | _ -> N.CI (Env.class_name env cid)
 
 and casel env l =
-  List.map_env SMap.empty l (case env)
+  List.map_env [] l (case env)
 
 and case env acc = function
   | Default b ->
     let b = cut_and_flatten ~replacement:Fallthrough env b in
     let all_locals, b = branch env b in
-    let acc = SMap.union all_locals acc in
-    acc, N.Default b
+    all_locals :: acc, N.Default b
   | Case (e, b) ->
     let e = expr env e in
     let b = cut_and_flatten ~replacement:Fallthrough env b in
     let all_locals, b = branch env b in
-    let acc = SMap.union all_locals acc in
-    acc, N.Case (e, b)
+    all_locals :: acc, N.Case (e, b)
 
-and catchl env l = List.map_env SMap.empty l (catch env)
+and catchl env l = List.map_env [] l (catch env)
 and catch env acc (x1, x2, b) =
   Env.scope env (
   fun env ->
     let x2 = Env.new_lvar env x2 in
     let all_locals, b = branch env b in
-    let acc = SMap.union all_locals acc in
-    acc, (Env.class_name env x1, x2, b)
+    all_locals :: acc, (Env.class_name env x1, x2, b)
   )
 
 and afield env = function
@@ -2033,7 +2065,7 @@ let func_body nenv f =
       let genv = Env.make_fun_genv nenv
         SMap.empty f.N.f_mode (snd f.N.f_name) fub_namespace in
       let genv = extend_params genv fub_tparams in
-      let lenv = Env.empty_local () in
+      let lenv = Env.empty_local UBMErr in
       let env = genv, lenv in
       (* Reuse the ids issued by the naming pass over the params
        * in the declaration *)
@@ -2060,7 +2092,7 @@ let meth_body genv m =
     | N.UnnamedBody {N.fub_ast; N.fub_tparams; N.fub_namespace; _} ->
       let genv = {genv with namespace = fub_namespace} in
       let genv = extend_params genv fub_tparams in
-      let env = genv, Env.empty_local() in
+      let env = genv, Env.empty_local UBMErr in
 
       (* Reuse the ids issued by the naming pass over the params
        * in the declaration *)

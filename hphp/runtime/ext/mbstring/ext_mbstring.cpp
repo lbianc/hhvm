@@ -4183,8 +4183,8 @@ bool HHVM_FUNCTION(mb_send_mail,
   }
 
   struct {
-    int cnt_type:1;
-    int cnt_trans_enc:1;
+    unsigned int cnt_type:1;
+    unsigned int cnt_trans_enc:1;
   } suppressed_hdrs = { 0, 0 };
 
   static const StaticString s_CONTENT_TYPE("CONTENT-TYPE");
@@ -4401,8 +4401,7 @@ bool HHVM_FUNCTION(mb_send_mail,
   return ret;
 }
 
-static class mbstringExtension final : public Extension {
-  public:
+static struct mbstringExtension final : Extension {
   mbstringExtension() : Extension("mbstring", NO_EXTENSION_VERSION_YET) {}
 
   void moduleInit() override {

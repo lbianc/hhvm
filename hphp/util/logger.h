@@ -28,11 +28,10 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class StackTrace;
+struct StackTrace;
 class Exception;
 
-class Logger {
-public:
+struct Logger {
   enum LogLevelType {
     LogNone,
     LogError,
@@ -108,8 +107,7 @@ public:
   static void ResetPid();
 
 protected:
-  class ThreadData {
-  public:
+  struct ThreadData {
     int request{0};
     int message{0};
     LogFileFlusher flusher;

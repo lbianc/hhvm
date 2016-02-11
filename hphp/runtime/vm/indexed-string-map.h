@@ -138,7 +138,8 @@ private:
  * up, and then pass it to IndexedStringMap::create.
  */
 template<class T, bool CaseSensitive, class Index, Index InvalidIndex>
-class IndexedStringMap<T,CaseSensitive,Index,InvalidIndex>::Builder {
+struct IndexedStringMap<T,CaseSensitive,Index,InvalidIndex>::Builder {
+private:
   using EqObject = typename std::conditional<
     CaseSensitive,
     string_data_same,
@@ -241,7 +242,7 @@ public:
   }
 
 private:
-  friend class IndexedStringMap;
+  friend struct IndexedStringMap;
   std::vector<T> m_list;
   Map m_map;
 };

@@ -33,9 +33,8 @@ namespace HPHP {
  * preserves the keys of the original map. If one of the wait handles failed,
  * the exception is propagated by failure.
  */
-class c_Map;
-class c_GenMapWaitHandle final : public c_WaitableWaitHandle {
- public:
+struct c_Map;
+struct c_GenMapWaitHandle final : c_WaitableWaitHandle {
   WAITHANDLE_CLASSOF(GenMapWaitHandle);
   WAITHANDLE_DTOR(GenMapWaitHandle);
 

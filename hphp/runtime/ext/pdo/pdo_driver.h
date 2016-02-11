@@ -25,9 +25,9 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 class PDOConnection;
-class PDODriver;
-class PDOResource;
-class PDOStatement;
+struct PDODriver;
+struct PDOResource;
+struct PDOStatement;
 
 using sp_PDOConnection = std::shared_ptr<PDOConnection>;
 using sp_PDOStatement = req::ptr<PDOStatement>;
@@ -466,8 +466,7 @@ public:
 ///////////////////////////////////////////////////////////////////////////////
 
 /* describes a column */
-class PDOColumn : public ResourceData {
-public:
+struct PDOColumn : ResourceData {
   DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(PDOColumn);
   PDOColumn();
   ~PDOColumn();
@@ -487,8 +486,7 @@ public:
 ///////////////////////////////////////////////////////////////////////////////
 
 /* describes a bound parameter */
-class PDOBoundParam : public SweepableResourceData {
-public:
+struct PDOBoundParam : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(PDOBoundParam);
   PDOBoundParam();
   ~PDOBoundParam();

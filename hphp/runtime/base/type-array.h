@@ -28,8 +28,8 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 // forward declaration
-class ArrayIter;
-class VariableUnserializer;
+struct ArrayIter;
+struct VariableUnserializer;
 
 #define ACCESSPARAMS_DECL AccessFlags::Type flags = AccessFlags::None
 
@@ -42,7 +42,8 @@ class VariableUnserializer;
  * type of ArrayData to accomplish the task. This "upgrade" is called
  * escalation.
  */
-class Array {
+struct Array {
+private:
   using Ptr = req::ptr<ArrayData>;
   using NoIncRef = Ptr::NoIncRef;
   using NonNull = Ptr::NonNull;

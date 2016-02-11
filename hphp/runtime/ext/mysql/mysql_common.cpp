@@ -55,8 +55,7 @@ namespace HPHP {
 const StaticString
   s_mysqli_result("mysqli_result");
 
-class MySQLStaticInitializer {
-public:
+struct MySQLStaticInitializer {
   MySQLStaticInitializer() {
     mysql_library_init(0, NULL, NULL);
   }
@@ -1415,7 +1414,7 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
       if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLTableStats) {
         MySqlStats::Record(verb, rconn->m_xaction_count, table);
         if (verb == "update") {
-          preg_match("([^\\s,]+)\\s*=\\s*([^\\s,]+)[\\+\\-]",
+          preg_match("/([^\\s,]+)\\s*=\\s*([^\\s,]+)[\\+\\-]/",
                      q, &matches);
           marray = matches.toArray();
           size = marray.size();

@@ -34,13 +34,13 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class AccessLogFileData;
+struct AccessLogFileData;
 struct VirtualHost;
 struct IpBlockMap;
 struct SatelliteServerInfo;
 struct FilesMatch;
 struct Hdf;
-class IniSettingMap;
+struct IniSettingMap;
 
 constexpr int kDefaultInitialStaticStringTableSize = 500000;
 
@@ -48,8 +48,7 @@ constexpr int kDefaultInitialStaticStringTableSize = 500000;
  * Configurable options set from command line or configurable file at startup
  * time.
  */
-class RuntimeOption {
-public:
+struct RuntimeOption {
   static void Load(
     IniSettingMap &ini, Hdf& config,
     const std::vector<std::string>& iniClis = std::vector<std::string>(),
@@ -499,6 +498,7 @@ public:
   F(uint32_t, HHIRInliningMaxDepth,    4)                               \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 6)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \
+  F(bool, HHIRPartialInlineFrameOpts,  true)                            \
   F(bool, HHIRInlineSingletons,        true)                            \
   F(std::string, InlineRegionMode,     "both")                          \
   F(bool, HHIRGenerateAsserts,         debug)                           \
@@ -520,8 +520,6 @@ public:
   F(bool,     JitPGO,                  pgoDefault())                    \
   F(string,   JitPGORegionSelector,    pgoRegionSelectorDefault())      \
   F(uint64_t, JitPGOThreshold,         pgoThresholdDefault())           \
-  F(bool,     JitPGOHotOnly,           false)                           \
-  F(bool,     JitPGOCFGHotFuncOnly,    false)                           \
   F(bool,     JitPGOUsePostConditions, true)                            \
   F(uint32_t, JitUnlikelyDecRefPercent,10)                              \
   F(uint32_t, JitPGOReleaseVVMinPercent, 10)                            \

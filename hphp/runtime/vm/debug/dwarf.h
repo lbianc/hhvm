@@ -18,18 +18,12 @@
 #define HPHP_DWARF_H_
 
 #include "hphp/runtime/vm/jit/translator.h"
+#include "hphp/util/eh-frame.h"
 
 #include <folly/Optional.h>
 
 #include <string>
 #include <vector>
-
-#ifndef _MSC_VER
-#include <libdwarf.h>
-#include <dwarf.h>
-#else
-#include "hphp/runtime/vm/debug/dwarf-msvc.h"
-#endif
 
 namespace HPHP { namespace Debug {
 
@@ -117,11 +111,7 @@ extern int g_dwarfCallback(
   Dwarf_Unsigned flags, Dwarf_Unsigned link, Dwarf_Unsigned info,
   Dwarf_Unsigned *sect_name_index, Dwarf_Ptr handle, int *error);
 
-class TCRange {
-  TCA m_start, m_end;
-  bool m_isAcold;
-  void V() const { assert(isValid()); }
- public:
+struct TCRange {
   TCRange() : m_start(nullptr), m_end(nullptr), m_isAcold(false) {
     assert(!isValid());
   }
@@ -152,32 +142,29 @@ class TCRange {
     m_end = newEnd;
     V();
   }
+
+private:
+  void V() const { assert(isValid()); }
+
+private:
+  TCA m_start, m_end;
+  bool m_isAcold;
 };
 
 struct DwarfBuf {
-  std::vector<uint8_t> m_buf;
-
   void byte(uint8_t c);
-  void byte(int off, uint8_t c);
-  void word(uint16_t w);
-  void word(int off, uint16_t w);
-  void dword(uint32_t d);
-  void dword(int off, uint32_t d);
-  void qword(uint64_t q);
+
   void clear();
   int size();
   uint8_t *getBuf();
   void print();
-  void dwarf_op_const4s(int x);
-  void dwarf_op_deref_size(uint8_t size);
-  void dwarf_sfp_expr(int offset, int scale);
-  void dwarf_cfa_sfp(uint8_t reg, int offset, int scale);
-  void dwarf_cfa_unwind_rsp();
-  void dwarf_cfa_set_loc(uint64_t addr);
-  void dwarf_cfa_same_value(uint8_t reg);
+
   void dwarf_cfa_def_cfa(uint8_t reg, uint8_t offset);
-  void dwarf_cfa_offset(uint8_t reg, uint8_t offset);
+  void dwarf_cfa_same_value(uint8_t reg);
   void dwarf_cfa_offset_extended_sf(uint8_t reg, int8_t offset);
+
+private:
+  std::vector<uint8_t> m_buf;
 };
 
 struct LineEntry {

@@ -28,11 +28,10 @@
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-class LogWriter;
+struct LogWriter;
 enum class LogChannel {CRONOLOG, THREADLOCAL, REGULAR};
 
-class AccessLogFileData {
-public:
+struct AccessLogFileData {
   AccessLogFileData() {}
   AccessLogFileData(const std::string& fil,
                     const std::string& lnk,
@@ -53,10 +52,8 @@ private:
 };
 
 
-class AccessLog {
-public:
-  class ThreadData {
-  public:
+struct AccessLog {
+  struct ThreadData {
     ThreadData() : log(nullptr) {}
     FILE *log;
     int64_t startTime;
@@ -78,8 +75,8 @@ public:
   bool setThreadLog(const char *file);
   void clearThreadLog();
   void onNewRequest();
+  void flushAllWriters();
 private:
-
   bool m_initialized;
   Mutex m_lock;
   GetThreadDataFunc m_fGetThreadData;
@@ -88,8 +85,7 @@ private:
 };
 
 
-class LogWriter {
-public:
+struct LogWriter {
   explicit LogWriter(LogChannel chan)
     : m_channel(chan)
   {}
@@ -97,6 +93,7 @@ public:
   virtual void init(const std::string& username,
                     AccessLog::GetThreadDataFunc fn) = 0;
   virtual void write(Transport* transport, const VirtualHost* vhost) = 0;
+  virtual void flush() {}
 protected:
   const LogChannel m_channel;
   FILE* m_filelog{nullptr};

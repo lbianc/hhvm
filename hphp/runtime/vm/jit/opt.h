@@ -32,6 +32,7 @@ struct FrameStateMgr;
 /*
  * The main optimization passes.
  */
+void optimizeInlineReturns(IRUnit&);
 void optimizeRefcounts(IRUnit&);
 void optimizePredictions(IRUnit&);
 void hoistTypeChecks(IRUnit&);
@@ -51,7 +52,7 @@ void insertAsserts(IRUnit&);
 /*
  * Run all the optimization passes.
  */
-void optimize(IRUnit& unit, IRBuilder& builder, TransKind kind);
+void optimize(IRUnit& unit, TransKind kind);
 
 //////////////////////////////////////////////////////////////////////
 

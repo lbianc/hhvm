@@ -27,13 +27,11 @@ namespace HPHP {
 
 struct SatelliteServerInfo;
 
-class SatelliteServer {
-public:
+struct SatelliteServer {
   enum class Type {
     Unknown,
 
     KindOfInternalPageServer,  // handles restricted URLs
-    KindOfDanglingPageServer,  // handles old version requests during shutdown
     KindOfRPCServer,           // invokes one PHP function and returns JSON
     KindOfXboxServer,          // handles internal xbox tasks
   };
@@ -59,14 +57,12 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
 
-class SatelliteServerInfo {
-public:
+struct SatelliteServerInfo {
   /**
    * These are regular expressions of URLs that are not allowed on main server.
    * These are collected from all internal page servers.
    */
   static std::set<std::string> InternalURLs;
-  static int DanglingServerPort;
 
   /**
    * Check whether a requested path should be allowed on the main server.

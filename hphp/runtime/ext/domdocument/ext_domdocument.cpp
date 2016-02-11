@@ -1523,7 +1523,7 @@ struct DOMPropHandler: Native::BasePropHandler {
 
   static Variant setProp(const Object& this_,
                          const String& name,
-                         Variant& value) {
+                         const Variant& value) {
     Derived::map.setter(name)(this_, value);
     return true;
   }
@@ -2121,6 +2121,25 @@ Variant HHVM_METHOD(DOMNode, appendChild,
   }
   dom_reconcile_ns(nodep->doc, new_child);
   return create_node_object(new_child, data->doc());
+}
+
+DOMNode& DOMNode::operator=(const DOMNode& copy) {
+  if (auto copyNode = copy.nodep()) {
+    auto newNode = xmlDocCopyNode(copyNode, copyNode->doc, true /* deep */);
+    setNode(newNode);
+    if (auto d = copy.doc()) {
+      setDoc(std::move(d));
+    }
+    return *this;
+  }
+
+  if (m_node) {
+    assert(m_node->getCache() &&
+           Native::data<DOMNode>(m_node->getCache()) == this);
+    m_node->clearCache();
+    m_node = nullptr;
+  }
+  return *this;
 }
 
 Variant HHVM_METHOD(DOMNode, cloneNode,
@@ -5828,8 +5847,7 @@ Variant HHVM_FUNCTION(dom_import_simplexml,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class DOMDocumentExtension final : public Extension {
-public:
+struct DOMDocumentExtension final : Extension {
   DOMDocumentExtension() : Extension("domdocument") {}
   void moduleInit() override {
     HHVM_ME(DOMNode, appendChild);

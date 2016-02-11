@@ -25,11 +25,10 @@
 
 namespace HPHP {
 
-class CacheSaver;
-class MmapFile;
+struct CacheSaver;
+struct MmapFile;
 
-class CacheData {
- public:
+struct CacheData {
   CacheData();
   ~CacheData();
 

@@ -91,7 +91,7 @@ let add_grand_parents_or_traits parent_pos class_nast acc parent_type =
   env, extends, parent_type.tc_members_fully_known && is_complete, is_trait
 
 let get_class_parent_or_trait class_nast (env, parents, is_complete, is_trait) hint =
-  let parent_pos, parent, _ = TUtils.unwrap_class_or_interface_hint hint in
+  let parent_pos, parent, _ = TUtils.unwrap_class_hint hint in
   let parents = SSet.add parent parents in
   let parent_type = Env.get_class_dep env parent in
   match parent_type with
@@ -154,7 +154,7 @@ let merge_single_req env subst inc_req_ty existing_req_opt
 let merge_parent_class_reqs class_nast impls
     (env, req_ancestors, req_ancestors_extends) parent_hint =
   let parent_pos, parent_name, parent_params =
-    TUtils.unwrap_class_or_interface_hint parent_hint in
+    TUtils.unwrap_class_hint parent_hint in
   let env, parent_params = List.map_env env parent_params Typing_hint.hint in
   let parent_type = Env.get_class_dep env parent_name in
 
@@ -200,8 +200,7 @@ let merge_parent_class_reqs class_nast impls
 
 let declared_class_req class_nast impls (env, requirements, req_extends) hint =
   let env, req_ty = Typing_hint.hint env hint in
-  let req_pos, req_name, req_params =
-    TUtils.unwrap_class_or_interface_hint hint in
+  let req_pos, req_name, req_params = TUtils.unwrap_class_hint hint in
   let env, _ = List.map_env env req_params Typing_hint.hint in
   let req_type = Env.get_class_dep env req_name in
 
@@ -370,10 +369,9 @@ and class_is_abstract c =
 and class_decl tcopt c =
   let is_abstract = class_is_abstract c in
   let cls_pos, cls_name = c.c_name in
-  let env = Typing_env.empty tcopt (Pos.filename cls_pos) in
-  let env = Env.set_mode env c.c_mode in
   let class_dep = Dep.Class cls_name in
-  let env = Env.set_root env class_dep in
+  let env = Env.empty tcopt (Pos.filename cls_pos) (Some class_dep) in
+  let env = Env.set_mode env c.c_mode in
   let env, inherited = Typing_inherit.make env c in
   let props = inherited.Typing_inherit.ih_props in
   let env, props =
@@ -494,12 +492,12 @@ and class_decl tcopt c =
     end
   else ();
   SMap.iter begin fun x _ ->
-    Typing_deps.add_idep (Some class_dep) (Dep.Class x)
+    Typing_deps.add_idep class_dep (Dep.Class x)
   end impl;
   Env.add_class (snd c.c_name) tc
 
 and get_implements (env: Env.env) ht =
-  let _r, (_p, c), paraml = Typing_hint.open_class_hint ht in
+  let _r, (_p, c), paraml = TUtils.unwrap_class_type ht in
   let class_ = Env.get_class_dep env c in
   match class_ with
   | None ->
@@ -744,7 +742,7 @@ and typeconst_decl c (env, acc, acc2) {
       env, acc, acc2
 
 and method_decl env m =
-  let env, arity_min, params = Typing.make_params env true 0 m.m_params in
+  let env, arity_min, params = Typing.make_params env m.m_params in
   let env, ret = match m.m_ret with
     | None -> env, Typing.ret_from_fun_kind (fst m.m_name) m.m_fun_kind
     | Some ret -> Typing_hint.hint env ret in
@@ -832,9 +830,9 @@ and type_typedef_naming_and_decl tcopt tdef =
     t_user_attributes = _;
   } as decl = Naming.typedef tcopt tdef in
   let filename = Pos.filename td_pos in
-  let env = Typing_env.empty tcopt filename in
-  let env = Typing_env.set_mode env tdef.Ast.t_mode in
-  let env = Env.set_root env (Typing_deps.Dep.Class tid) in
+  let dep = Typing_deps.Dep.Class tid in
+  let env = Env.empty tcopt filename (Some dep) in
+  let env = Env.set_mode env tdef.Ast.t_mode in
   let env, td_tparams = List.map_env env params Typing.type_param in
   let env, td_type = Typing_hint.hint env concrete_type in
   let _env, td_constraint = opt Typing_hint.hint env tcstr in
@@ -876,8 +874,7 @@ let name_and_declare_types_program tcopt prog =
     | Ast.Typedef typedef ->
       type_typedef_decl_if_missing tcopt typedef
     | Ast.Stmt _ -> ()
-    | Ast.Constant cst ->
-        iconst_decl tcopt cst
+    | Ast.Constant cst -> iconst_decl tcopt cst
   end
 
 let make_env tcopt fn =

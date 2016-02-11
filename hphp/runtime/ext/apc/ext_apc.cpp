@@ -543,22 +543,24 @@ static PFUNC_APC_LOAD apc_load_func(void *handle, const char *name) {
 #endif
 }
 
-class ApcLoadJob {
-public:
+struct ApcLoadJob {
   ApcLoadJob(void *handle, int index) : m_handle(handle), m_index(index) {}
   void *m_handle; int m_index;
 };
 
-class ApcLoadWorker {
-public:
-  void onThreadEnter() {}
+struct ApcLoadWorker {
+  void onThreadEnter() {
+    g_context.getCheck();
+  }
   void doJob(std::shared_ptr<ApcLoadJob> job) {
     char func_name[128];
     MemoryManager::SuppressOOM so(MM());
     snprintf(func_name, sizeof(func_name), "_apc_load_%d", job->m_index);
     apc_load_func(job->m_handle, func_name)();
   }
-  void onThreadExit() {}
+  void onThreadExit() {
+    hphp_memory_cleanup();
+  }
 };
 
 static size_t s_const_map_size = 0;

@@ -29,9 +29,9 @@ namespace HPHP {
 
 #ifndef NO_HARDWARE_COUNTERS
 
-class InstructionCounter;
-class LoadCounter;
-class StoreCounter;
+struct InstructionCounter;
+struct LoadCounter;
+struct StoreCounter;
 
 struct PerfTable {
   const char* name;
@@ -39,10 +39,9 @@ struct PerfTable {
   uint64_t config;
 };
 
-class HardwareCounterImpl;
+struct HardwareCounterImpl;
 
-class HardwareCounter {
-public:
+struct HardwareCounter {
   HardwareCounter();
   ~HardwareCounter();
 
@@ -85,8 +84,7 @@ private:
  * static values, so it doesn't even need to worry about thread safety
  * for the one static instance of itself.
  */
-class HardwareCounter {
-public:
+struct HardwareCounter {
   HardwareCounter() : m_countersSet(false) { }
   ~HardwareCounter() { }
 

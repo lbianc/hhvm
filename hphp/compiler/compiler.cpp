@@ -107,8 +107,7 @@ struct CompilerOptions {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class AsyncFileCacheSaver : public AsyncFunc<AsyncFileCacheSaver> {
-public:
+struct AsyncFileCacheSaver : AsyncFunc<AsyncFileCacheSaver> {
   AsyncFileCacheSaver(Package *package, const char *name)
       : AsyncFunc<AsyncFileCacheSaver>(this, &AsyncFileCacheSaver::saveCache),
         m_package(package), m_name(name) {
@@ -186,10 +185,6 @@ int compiler_main(int argc, char **argv) {
     return ret;
   } catch (Exception &e) {
     Logger::Error("Exception: %s\n", e.getMessage().c_str());
-  } catch (const FailedAssertion& fa) {
-    fa.print();
-    StackTraceNoHeap::AddExtraLogging("Assertion failure", fa.summary);
-    abort();
   } catch (std::exception &e) {
     Logger::Error("std::exception: %s\n", e.what());
   } catch (...) {

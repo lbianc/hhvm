@@ -8,19 +8,14 @@
  *
  *)
 
-open Core
-
-let rec test_process_data =
+let test_process_data =
   ServerProcess.{
     pid = 2758734;
     name = "hh_server";
     start_t = 0.0;
     in_fd = Unix.stdin;
     out_fd = Unix.stdout;
-    log_file = "";
     last_request_handoff = ref 0.0;
-    starter = (fun () -> test_process_data);
-    retries = 0;
   }
 
 let test_dmesg_parser () =
@@ -34,14 +29,5 @@ let tests = [
   "test_dmesg_parser", test_dmesg_parser;
 ]
 
-let run (name, f) =
-  Printf.printf "Running %s ... %!" name;
-  let result = f () in
-  (if result
-  then Printf.printf "ok\n%!"
-  else Printf.printf "fail\n%!");
-  result
-
-
 let () =
-  exit (if List.for_all tests run then 0 else 1)
+  Unit_test.run_all tests

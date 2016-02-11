@@ -107,15 +107,15 @@ let unbound_name env (pos, name)=
 (*****************************************************************************)
 
 let gconst_decl tcopt cst =
-   let env = Env.empty tcopt (Pos.filename (fst cst.cst_name)) in
-   let env = Env.set_mode env cst.cst_mode in
-   let env = Env.set_root env (Dep.GConst (snd cst.cst_name)) in
-   let _, hint_ty =
-     match cst.cst_type with
-     | None -> env, (Reason.Rnone, Tany)
-     | Some h -> Typing_hint.hint env h
-   in
-   Env.GConsts.add (snd cst.cst_name) hint_ty
+  let dep = Dep.GConst (snd cst.cst_name) in
+  let env = Env.empty tcopt (Pos.filename (fst cst.cst_name)) (Some dep) in
+  let env = Env.set_mode env cst.cst_mode in
+  let _, hint_ty =
+    match cst.cst_type with
+    | None -> env, (Reason.Rnone, Tany)
+    | Some h -> Typing_hint.hint env h
+  in
+  Env.GConsts.add (snd cst.cst_name) hint_ty
 
 (*****************************************************************************)
 (* Handling function/method arguments *)
@@ -245,9 +245,9 @@ let make_param_local_ty env param =
     env param
 
 let rec fun_decl tcopt f =
-  let env = Env.empty tcopt (Pos.filename (fst f.f_name)) in
+  let dep = Dep.Fun (snd f.f_name) in
+  let env = Env.empty tcopt (Pos.filename (fst f.f_name)) (Some dep) in
   let env = Env.set_mode env f.f_mode in
-  let env = Env.set_root env (Dep.Fun (snd f.f_name)) in
   let _, ft = fun_decl_in_env env f in
   Env.add_fun (snd f.f_name) ft;
   ()
@@ -267,8 +267,7 @@ and ret_from_fun_kind pos kind =
     | Ast.FSync -> ty_any
 
 and fun_decl_in_env env f =
-  let mandatory_init = true in
-  let env, arity_min, params = make_params env mandatory_init 0 f.f_params in
+  let env, arity_min, params = make_params env f.f_params in
   let env, ret_ty = match f.f_ret with
     | None -> env, ret_from_fun_kind (fst f.f_name) f.f_fun_kind
     | Some ty -> Typing_hint.hint env ty in
@@ -323,13 +322,16 @@ and make_param env mandatory arity param =
   let arity = if mandatory then arity + 1 else arity in
   env, arity, mandatory, ty
 
-and make_params env mandatory arity paraml =
-  match paraml with
-  | [] -> env, arity, []
-  | param :: rl ->
-      let env, arity, mandatory, ty = make_param env mandatory arity param in
-      let env, arity, rest = make_params env mandatory arity rl in
-      env, arity, ty :: rest
+and make_params env paraml =
+  let rec loop env mandatory arity paraml =
+    match paraml with
+    | [] -> env, arity, []
+    | param :: rl ->
+        let env, arity, mandatory, ty = make_param env mandatory arity param in
+        let env, arity, rest = loop env mandatory arity rl in
+        env, arity, ty :: rest
+  in
+  loop env true 0 paraml
 
 (* In strict mode, we force you to give a type declaration on a parameter *)
 (* But the type checker is nice: it makes a suggestion :-) *)
@@ -451,11 +453,13 @@ and check_memoizable env param (pname, ty) =
 (*****************************************************************************)
 (* Now we are actually checking stuff! *)
 (*****************************************************************************)
-and fun_def env _ f =
+and fun_def tcopt _ f =
   (* reset the expression dependent display ids for each function body *)
   Reason.expr_display_id_map := IMap.empty;
   Typing_hooks.dispatch_enter_fun_def_hook f;
-  let nb = Naming.func_body (Env.get_options env) f in
+  let nb = Naming.func_body tcopt f in
+  let dep = Typing_deps.Dep.Fun (snd f.f_name) in
+  let env = Env.empty tcopt (Pos.filename (fst f.f_name)) (Some dep) in
   NastCheck.fun_ env f nb;
   (* Fresh type environment is actually unnecessary, but I prefer to
    * have a guarantee that we are using a clean typing environment. *)
@@ -463,7 +467,6 @@ and fun_def env _ f =
     fun env_up ->
       let env = { env_up with Env.lenv = Env.empty_local } in
       let env = Env.set_mode env f.f_mode in
-      let env = Env.set_root env (Dep.Fun (snd f.f_name)) in
       let env, hret =
         match f.f_ret with
           | None -> env, (Reason.Rwitness (fst f.f_name), Tany)
@@ -635,7 +638,7 @@ and stmt env = function
         end
       end in
       let env =
-        if NastVisitor.HasContinue.block b
+        if Nast_visitor.HasContinue.block b
         then LEnv.fully_integrate env parent_lenv
         else
           let env = LEnv.integrate env parent_lenv env.Env.lenv in
@@ -1195,13 +1198,13 @@ and expr_
           env, (r, ty)
         | (r, Tfun _), Vprivate _ ->
           Errors.private_class_meth (Reason.to_pos r) p;
-            env, (r, Tany)
+          env, (r, Tany)
         | (r, Tfun _), Vprotected _ ->
           Errors.protected_class_meth (Reason.to_pos r) p;
-            env, (r, Tany)
-        | _, _ ->
-          (* If this assert fails, we have a method which isn't callable. *)
-          assert false
+          env, (r, Tany)
+        | (r, _), _ ->
+          Errors.internal_error p "We have a method which isn't callable";
+          env, (r, Tany)
         )
       )
     )
@@ -1284,7 +1287,7 @@ and expr_
     when Env.is_strict env && (bop = Ast.EQeqeq || bop = Ast.Diff2) ->
       let _, ty = raw_expr in_cond env e in
       if not in_cond
-      then TypingEqualityCheck.assert_nullable p bop env ty;
+      then Typing_equality_check.assert_nullable p bop env ty;
       env, (Reason.Rcomp p, Tprim Tbool)
   | Binop (bop, e1, e2) ->
       let env, ty1 = raw_expr in_cond env e1 in
@@ -1831,14 +1834,14 @@ and assign p env e1 ty2 =
               env, (r, Tany)
           )
       | r, (Ttuple _ | Tarraykind (AKtuple _) as tuple) ->
+          let p1 = fst e1 in
+          let p2 = Reason.to_pos r in
           let tyl = match tuple with
             | Ttuple tyl -> tyl
             | Tarraykind (AKtuple fields) -> List.rev (IMap.values fields)
-            | _ -> assert false in
+            | _ -> Errors.internal_error p2 "Unexpected tuple type"; [] in
           let size1 = List.length el in
           let size2 = List.length tyl in
-          let p1 = fst e1 in
-          let p2 = Reason.to_pos r in
           if size1 <> size2
           then begin
             Errors.tuple_arity p2 size2 p1 size1;
@@ -1955,7 +1958,9 @@ and yield_field_key env = function
   | Nast.AFvalue (p, _) ->
       env, (match Env.get_fn_kind env with
         | Ast.FSync
-        | Ast.FAsync -> assert false
+        | Ast.FAsync ->
+            Errors.internal_error p "yield found in non-generator";
+            Reason.Rnone, Tany
         | Ast.FGenerator ->
             (Reason.Rwitness p, Tprim Tint)
         | Ast.FAsyncGenerator ->
@@ -2930,7 +2935,7 @@ and obj_get_ ~is_method ~nullsafe env ty1 cid (p, s as id)
            * we encountered (position + visibility), to be able to
            * special case inst_meth.
            *)
-          let vis = TUtils.min_vis_opt vis vis' in
+          let vis = TVis.min_vis_opt vis vis' in
           (env, vis), ty
         end in
       let env, method_ = TUtils.in_var env (fst ety1, Tunresolved (tyl)) in
@@ -3554,9 +3559,9 @@ and binop in_cond p env bop p1 ty1 p2 ty2 =
       env, (Reason.Rcomp p, Tprim Tbool)
   | Ast.EQeqeq | Ast.Diff2 ->
       if not in_cond
-      then TypingEqualityCheck.assert_nontrivial p bop env ty1 ty2;
+      then Typing_equality_check.assert_nontrivial p bop env ty1 ty2;
       env, (Reason.Rcomp p, Tprim Tbool)
-  | Ast.Lt | Ast.Lte  | Ast.Gt  | Ast.Gte  ->
+  | Ast.Lt | Ast.Lte | Ast.Gt | Ast.Gte ->
       let ty_num = (Reason.Rcomp p, Tprim Nast.Tnum) in
       let ty_string = (Reason.Rcomp p, Tprim Nast.Tstring) in
       let ty_datetime =
@@ -3577,7 +3582,7 @@ and binop in_cond p env bop p1 ty1 p2 ty2 =
   | Ast.AMpamp
   | Ast.BArbar ->
       env, (Reason.Rlogic_ret p, Tprim Tbool)
-  | Ast.Amp  | Ast.Bar  | Ast.Ltlt  | Ast.Gtgt ->
+  | Ast.Amp | Ast.Bar | Ast.Ltlt | Ast.Gtgt ->
       let env = Type.sub_type p Reason.URnone env (Reason.Rbitwise p1, Tprim Tint) ty1 in
       let env = Type.sub_type p Reason.URnone env (Reason.Rbitwise p2, Tprim Tint) ty2 in
       env, (Reason.Rbitwise_ret p, Tprim Tint)
@@ -3862,7 +3867,7 @@ and string2 env idl =
  * to check that the arguments provided are consistent with the constraints on
  * the type parameters. *)
 and check_implements_tparaml (env: Env.env) ht =
-  let _r, (p, c), paraml = Typing_hint.open_class_hint ht in
+  let _r, (p, c), paraml = TUtils.unwrap_class_type ht in
   let class_ = Env.get_class_dep env c in
   match class_ with
   | None ->
@@ -3926,20 +3931,22 @@ and check_parent_abstract position parent_type class_type =
       ~is_final position class_type.tc_typeconsts;
   end else ()
 
-and class_def env_up _ c =
-  let c = Naming.class_meth_bodies (Env.get_options env_up) c in
+and class_def tcopt _ c =
+  let filename = Pos.filename (fst c.Nast.c_name) in
+  let dep = Dep.Class (snd c.c_name) in
+  let env = Env.empty tcopt filename (Some dep) in
+  let c = Naming.class_meth_bodies tcopt c in
   if not !auto_complete then begin
-    NastCheck.class_ env_up c;
-    NastInitCheck.class_ env_up c;
+    NastCheck.class_ env c;
+    NastInitCheck.class_ env c;
   end;
-  let env_tmp = Env.set_root env_up (Dep.Class (snd c.c_name)) in
-  let tc = Env.get_class env_tmp (snd c.c_name) in
+  let tc = Env.get_class env (snd c.c_name) in
   match tc with
   | None ->
       (* This can happen if there was an error during the declaration
        * of the class. *)
       ()
-  | Some tc -> class_def_ env_up c tc
+  | Some tc -> class_def_ env c tc
 
 and get_self_from_c env c =
   let _, tparams = List.map_env env (fst c.c_tparams) type_param in
@@ -3949,11 +3956,10 @@ and get_self_from_c env c =
   let ret = Reason.Rwitness (fst c.c_name), Tapply (c.c_name, tparams) in
   ret
 
-and class_def_ env_up c tc =
+and class_def_ env c tc =
   Typing_hooks.dispatch_enter_class_def_hook c tc;
-  let env = Env.set_self_id env_up (snd c.c_name) in
+  let env = Env.set_self_id env (snd c.c_name) in
   let env = Env.set_mode env c.c_mode in
-  let env = Env.set_root env (Dep.Class (snd c.c_name)) in
   let pc, _ = c.c_name in
   let env, impl = List.map_env
     env (c.c_extends @ c.c_implements @ c.c_uses) Typing_hint.hint in
@@ -3986,18 +3992,19 @@ and class_def_ env_up c tc =
     | Ast.Cinterface -> Errors.interface_final (fst c.c_name)
     | Ast.Cabstract -> ()
     | Ast.Ctrait -> Errors.trait_final (fst c.c_name)
-    | Ast.Cenum -> (* the parser won't let enums be final *) assert false
+    | Ast.Cenum ->
+      Errors.internal_error pc "The parser should not parse final on enums"
     | Ast.Cnormal -> ()
   end;
   List.iter impl (class_implements_type env c);
-  List.iter c.c_vars (class_var_def env false c);
+  List.iter c.c_vars (class_var_def env ~is_static:false c);
   List.iter c.c_methods (method_def env);
   List.iter c.c_typeconsts (typeconst_def env);
   let const_types = List.map c.c_consts (class_const_def env) in
   let env = Typing_enum.enum_class_check env tc c.c_consts const_types in
   class_constr_def env c;
   let env = Env.set_static env in
-  List.iter c.c_static_vars (class_var_def env true c);
+  List.iter c.c_static_vars (class_var_def env ~is_static:true c);
   List.iter c.c_static_methods (method_def env);
   Typing_hooks.dispatch_exit_class_def_hook c tc
 
@@ -4076,7 +4083,7 @@ and class_implements_type env c1 ctype2 =
   Typing_extends.check_implements env ctype2 ctype1;
   ()
 
-and class_var_def env is_static c cv =
+and class_var_def env ~is_static c cv =
   let env, ty =
     match cv.cv_expr with
     | None -> env, Env.fresh_type()
@@ -4156,35 +4163,45 @@ and method_def env m =
     | Some _ -> ();
   Typing_hooks.dispatch_exit_method_def_hook m
 
-and typedef_def env_up tid typedef =
-  NastCheck.typedef env_up typedef;
+and typedef_def tid typedef =
+  let filename = Pos.filename (fst typedef.t_kind) in
+  let dep = Typing_deps.Dep.Class tid in
+  let env =
+    Typing_env.empty TypecheckerOptions.permissive filename (Some dep) in
+  (* Mode for typedefs themselves doesn't really matter right now, but
+   * they can expand hints, so make it loose so that the typedef doesn't
+   * fail. (The hint will get re-checked with the proper mode anyways.)
+   * Ideally the typedef would carry the right mode with it, but it's a
+   * slightly larger change than I want to deal with right now. *)
+  let env = Typing_env.set_mode env FileInfo.Mdecl in
+  NastCheck.typedef env typedef;
   let {
     t_tparams = _;
     t_constraint = tcstr;
     t_kind = hint;
     t_user_attributes = _;
   } = typedef in
-  ignore (Typing_hint.hint_locl ~ensure_instantiable:true env_up hint);
-  ignore (Option.map tcstr (Typing_hint.check_instantiable env_up));
-  begin match Env.get_typedef env_up tid with
+  ignore (Typing_hint.hint_locl ~ensure_instantiable:true env hint);
+  ignore (Option.map tcstr (Typing_hint.check_instantiable env));
+  begin match Env.get_typedef env tid with
     | Some {td_constraint = Some cstr; td_type; td_pos; _} ->
       let _env =
-        Typing_ops.sub_type_decl td_pos Reason.URnewtype_cstr env_up cstr
+        Typing_ops.sub_type_decl td_pos Reason.URnewtype_cstr env cstr
           td_type in
       ()
     | _ -> ()
   end;
   match hint with
   | pos, Hshape fdm ->
-    ignore (check_shape_keys_validity env_up pos (ShapeMap.keys fdm))
+    ignore (check_shape_keys_validity env pos (ShapeMap.keys fdm))
   | _ -> ()
 
 (* Calls the method of a class, but allows the f callback to override the
  * return value type *)
 and overload_function p env class_id method_id el uel f =
   let env, ty = static_class_id p env class_id in
-  let env, fty = class_get ~is_method:true ~is_const:false env ty
-  method_id class_id in
+  let env, fty =
+    class_get ~is_method:true ~is_const:false env ty method_id class_id in
   (* call the function as declared to validate arity and input types,
      but ignore the result and overwrite with custom one *)
    let (env, res), has_error = Errors.try_with_error

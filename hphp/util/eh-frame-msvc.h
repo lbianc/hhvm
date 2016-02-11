@@ -14,40 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_UNWIND_MSVC_H_
-#define incl_HPHP_JIT_UNWIND_MSVC_H_
+#ifndef HPHP_DWARF_MSVC_H_
+#define HPHP_DWARF_MSVC_H_
 
-#include "hphp/util/assertions.h"
+// We don't have libdwarf, so stub it out.
+using Dwarf_Ptr = void*;
+using Dwarf_Unsigned = uint32_t;
 
-/*
- * MSVC doesn't have unwind.h, so when we need it, we instead include these
- * garbage stubs to convince MSVC to compile without freaking out.
- */
-struct _Unwind_Exception {
-  uint64_t exception_class;
-};
+#define DW_CFA_set_loc 0
 
-#define _URC_CONTINUE_UNWIND 0
-#define _URC_INSTALL_CONTEXT 0
-#define _URC_HANDLER_FOUND 0
-using _Unwind_Reason_Code = int;
+#define DW_CFA_def_cfa 0
 
-#define _UA_HANDLER_FRAME 0
-#define _UA_CLEANUP_PHASE 0
-#define _UA_SEARCH_PHASE 0
-using _Unwind_Action = int;
+#define DW_CFA_same_value 0
+#define DW_CFA_offset 0
+#define DW_CFA_offset_extended_sf 0
 
-using _Unwind_Context = void;
-
-inline uintptr_t _Unwind_GetGR(_Unwind_Context*, int) {
-  always_assert(false);
-  return 0;
-}
-inline uintptr_t _Unwind_GetIP(_Unwind_Context*) {
-  always_assert(false);
-  return 0;
-}
-inline void _Unwind_Resume() { always_assert(false); }
-inline void _Unwind_SetIP(_Unwind_Context*, uint64_t) { always_assert(false); }
+#define DW_EH_PE_absptr 0
 
 #endif

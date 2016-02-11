@@ -115,6 +115,7 @@
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/translator.h"
+#include "hphp/runtime/vm/jit/unwind-itanium.h"
 
 
 namespace HPHP {
@@ -136,8 +137,10 @@ using jit::TCA;
 #define IOP_ARGS        PC& pc
 #if DEBUG
 #define OPTBLD_INLINE
+#define OPTBLD_FLT_INLINE
 #else
-#define OPTBLD_INLINE ALWAYS_INLINE
+#define OPTBLD_INLINE       ALWAYS_INLINE
+#define OPTBLD_FLT_INLINE   INLINE_FLATTEN
 #endif
 TRACE_SET_MOD(bcinterp);
 
@@ -145,7 +148,7 @@ TRACE_SET_MOD(bcinterp);
 // ActRec.
 bool isReturnHelper(void* address) {
   auto tcAddr = reinterpret_cast<jit::TCA>(address);
-  auto& u = mcg->tx().uniqueStubs;
+  auto& u = mcg->ustubs();
   return tcAddr == u.retHelper ||
          tcAddr == u.genRetHelper ||
          tcAddr == u.asyncGenRetHelper ||
@@ -155,7 +158,7 @@ bool isReturnHelper(void* address) {
 
 bool isDebuggerReturnHelper(void* address) {
   auto tcAddr = reinterpret_cast<jit::TCA>(address);
-  auto& u = mcg->tx().uniqueStubs;
+  auto& u = mcg->ustubs();
   return tcAddr == u.debuggerRetHelper ||
          tcAddr == u.debuggerGenRetHelper ||
          tcAddr == u.debuggerAsyncGenRetHelper;
@@ -2524,7 +2527,7 @@ bool ExecutionContext::evalUnit(Unit* unit, PC& pc, int funcType) {
   ar->m_func = func;
   ar->initNumArgs(0);
   assert(vmfp());
-  ar->setReturn(vmfp(), pc, mcg->tx().uniqueStubs.retHelper);
+  ar->setReturn(vmfp(), pc, mcg->ustubs().retHelper);
   pushLocalsAndIterators(func);
   assert(vmfp()->func()->attrs() & AttrMayUseVV);
   if (!vmfp()->hasVarEnv()) {
@@ -2619,10 +2622,7 @@ void ExecutionContext::enqueueAPCHandle(APCHandle* handle, size_t size) {
 
 // Treadmill solution for the SharedVariant memory management
 namespace {
-class FreedAPCHandle {
-  size_t m_memSize;
-  std::vector<APCHandle*> m_apcHandles;
-public:
+struct FreedAPCHandle {
   explicit FreedAPCHandle(std::vector<APCHandle*>&& shandles, size_t size)
     : m_memSize(size), m_apcHandles(std::move(shandles))
   {}
@@ -2632,6 +2632,9 @@ public:
     }
     APCStats::getAPCStats().removePendingDelete(m_memSize);
   }
+private:
+  size_t m_memSize;
+  std::vector<APCHandle*> m_apcHandles;
 };
 }
 
@@ -2904,7 +2907,7 @@ void unwindPreventReturnToTC(ActRec* ar) {
 
   if (isReturnHelper(savedRip)) return;
 
-  auto& ustubs = mcg->tx().uniqueStubs;
+  auto& ustubs = mcg->ustubs();
   if (ar->resumed()) {
     // async functions use callToExit stub
     assert(ar->func()->isGenerator());
@@ -2928,7 +2931,7 @@ void debuggerPreventReturnToTC(ActRec* ar) {
   // unwinder can find it when needed.
   jit::pushDebuggerCatch(ar);
 
-  auto& ustubs = mcg->tx().uniqueStubs;
+  auto& ustubs = mcg->ustubs();
   if (ar->resumed()) {
     // async functions use callToExit stub
     assert(ar->func()->isGenerator());
@@ -3474,7 +3477,7 @@ OPTBLD_INLINE void iopClsCnsD(IOP_ARGS) {
   cellDup(clsCns, *c1);
 }
 
-OPTBLD_INLINE void iopConcat(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopConcat(IOP_ARGS) {
   auto const c1 = vmStack().topC();
   auto const c2 = vmStack().indC(1);
   auto const s2 = cellAsVariant(*c2).toString();
@@ -4091,7 +4094,7 @@ OPTBLD_INLINE JitReturn jitReturnPre(ActRec* fp) {
     // interpreter. callToExit is special: it's a return helper but we don't
     // treat it like one in here in order to simplify some things higher up in
     // the pipeline.
-    if (reinterpret_cast<TCA>(savedRip) != mcg->tx().uniqueStubs.callToExit) {
+    if (reinterpret_cast<TCA>(savedRip) != mcg->ustubs().callToExit) {
       savedRip = 0;
     }
   } else if (!RID().getJit()) {
@@ -4154,7 +4157,7 @@ OPTBLD_INLINE TCA jitReturnPost(JitReturn retInfo) {
   // live VM frame in %rbp.
   if (vmJitCalledFrame() == retInfo.fp) {
     FTRACE(1, "Returning from frame {}; resuming", vmJitCalledFrame());
-    return mcg->tx().uniqueStubs.resumeHelper;
+    return mcg->ustubs().resumeHelper;
   }
 
   return nullptr;
@@ -4305,7 +4308,7 @@ OPTBLD_INLINE void cgetl_body(ActRec* fp,
   }
 }
 
-OPTBLD_INLINE void iopCGetL(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopCGetL(IOP_ARGS) {
   auto local = decode_la(pc);
   Cell* to = vmStack().allocC();
   TypedValue* fr = frame_local(vmfp(), local);
@@ -4819,7 +4822,7 @@ OPTBLD_INLINE void iopFPassM(IOP_ARGS) {
   vGetMImpl(pc, nDiscard);
 }
 
-OPTBLD_INLINE void iopSetM(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopSetM(IOP_ARGS) {
   auto const nDiscard = decode_iva(pc);
   auto const mk = decode_member_key(pc, liveUnit());
 
@@ -5024,7 +5027,7 @@ OPTBLD_INLINE void iopIssetS(IOP_ARGS) {
   ss.output->m_type = KindOfBoolean;
 }
 
-OPTBLD_INLINE void iopIssetL(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopIssetL(IOP_ARGS) {
   auto local = decode_la(pc);
   TypedValue* tv = frame_local(vmfp(), local);
   bool ret = is_not_null(tvAsCVarRef(tv));
@@ -5069,7 +5072,7 @@ OPTBLD_INLINE void iopIsTypeC(IOP_ARGS) {
   topTv->m_type = KindOfBoolean;
 }
 
-OPTBLD_INLINE void iopAssertRATL(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopAssertRATL(IOP_ARGS) {
   auto localId = decode_la(pc);
   if (debug) {
     auto const rat = decodeRAT(vmfp()->m_func->unit(), pc);
@@ -5561,7 +5564,7 @@ OPTBLD_INLINE void iopFPushFunc(IOP_ARGS) {
   raise_error(Strings::FUNCTION_NAME_MUST_BE_STRING);
 }
 
-OPTBLD_INLINE void iopFPushFuncD(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopFPushFuncD(IOP_ARGS) {
   auto numArgs = decode_iva(pc);
   auto id = decode<Id>(pc);
   const NamedEntityPair nep =
@@ -6086,11 +6089,11 @@ OPTBLD_INLINE void iopFCall(IOP_ARGS) {
   UNUSED auto numArgs = decode_iva(pc);
   assert(numArgs == ar->numArgs());
   checkStack(vmStack(), ar->m_func, 0);
-  ar->setReturn(vmfp(), pc, mcg->tx().uniqueStubs.retHelper);
+  ar->setReturn(vmfp(), pc, mcg->ustubs().retHelper);
   doFCall(ar, pc);
 }
 
-OPTBLD_INLINE void iopFCallD(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopFCallD(IOP_ARGS) {
   auto const ar = arFromInstr(pc - encoded_op_size(Op::FCallD));
   UNUSED auto numArgs = decode_iva(pc);
   UNUSED auto clsName = decode_litstr(pc);
@@ -6101,7 +6104,7 @@ OPTBLD_INLINE void iopFCallD(IOP_ARGS) {
   }
   assert(numArgs == ar->numArgs());
   checkStack(vmStack(), ar->m_func, 0);
-  ar->setReturn(vmfp(), pc, mcg->tx().uniqueStubs.retHelper);
+  ar->setReturn(vmfp(), pc, mcg->ustubs().retHelper);
   doFCall(ar, pc);
 }
 
@@ -6117,12 +6120,12 @@ OPTBLD_INLINE void iopFCallAwait(IOP_ARGS) {
   }
   assert(numArgs == ar->numArgs());
   checkStack(vmStack(), ar->m_func, 0);
-  ar->setReturn(vmfp(), pc, mcg->tx().uniqueStubs.retHelper);
+  ar->setReturn(vmfp(), pc, mcg->ustubs().retHelper);
   ar->setFCallAwait();
   doFCall(ar, pc);
 }
 
-OPTBLD_INLINE void iopFCallBuiltin(IOP_ARGS) {
+OPTBLD_FLT_INLINE void iopFCallBuiltin(IOP_ARGS) {
   auto numArgs = decode_iva(pc);
   auto numNonDefault = decode_iva(pc);
   auto id = decode<Id>(pc);
@@ -6208,7 +6211,7 @@ static bool doFCallArray(PC& pc, int numStackValues,
     TRACE(3, "FCallArray: pc %p func %p base %d\n", vmpc(),
           vmfp()->unit()->entry(),
           int(vmfp()->m_func->base()));
-    ar->setReturn(vmfp(), pc, mcg->tx().uniqueStubs.retHelper);
+    ar->setReturn(vmfp(), pc, mcg->ustubs().retHelper);
 
     auto prepResult = prepareArrayArgs(ar, args, vmStack(), numStackValues,
                                        /* ref param checks */ true, nullptr);
@@ -6491,7 +6494,7 @@ OPTBLD_INLINE void iopCIterFree(IOP_ARGS) {
   it->cfree();
 }
 
-OPTBLD_INLINE void inclOp(PC& pc, InclOpFlags flags) {
+OPTBLD_INLINE void inclOp(PC& pc, InclOpFlags flags, const char* opName) {
   Cell* c1 = vmStack().topC();
   auto path = String::attach(prepareKey(*c1));
   bool initial;
@@ -6525,9 +6528,9 @@ OPTBLD_INLINE void inclOp(PC& pc, InclOpFlags flags) {
   vmStack().popC();
   if (unit == nullptr) {
     if (flags & InclOpFlags::Fatal) {
-      raise_error("File not found: %s", path.data());
+      raise_error("%s(%s): File not found", opName, path.data());
     } else {
-      raise_warning("File not found: %s", path.data());
+      raise_warning("%s(%s): File not found", opName, path.data());
     }
     vmStack().pushBool(false);
     return;
@@ -6542,23 +6545,27 @@ OPTBLD_INLINE void inclOp(PC& pc, InclOpFlags flags) {
 }
 
 OPTBLD_INLINE void iopIncl(IOP_ARGS) {
-  inclOp(pc, InclOpFlags::Default);
+  inclOp(pc, InclOpFlags::Default, "include");
 }
 
 OPTBLD_INLINE void iopInclOnce(IOP_ARGS) {
-  inclOp(pc, InclOpFlags::Once);
+  inclOp(pc, InclOpFlags::Once, "include_once");
 }
 
 OPTBLD_INLINE void iopReq(IOP_ARGS) {
-  inclOp(pc, InclOpFlags::Fatal);
+  inclOp(pc, InclOpFlags::Fatal, "require");
 }
 
 OPTBLD_INLINE void iopReqOnce(IOP_ARGS) {
-  inclOp(pc, InclOpFlags::Fatal | InclOpFlags::Once);
+  inclOp(pc, InclOpFlags::Fatal | InclOpFlags::Once, "require_once");
 }
 
 OPTBLD_INLINE void iopReqDoc(IOP_ARGS) {
-  inclOp(pc, InclOpFlags::Fatal | InclOpFlags::Once | InclOpFlags::DocRoot);
+  inclOp(
+    pc,
+    InclOpFlags::Fatal | InclOpFlags::Once | InclOpFlags::DocRoot,
+    "require_once"
+  );
 }
 
 OPTBLD_INLINE void iopEval(IOP_ARGS) {
@@ -6898,8 +6905,8 @@ OPTBLD_INLINE void moveProgramCounterIntoGenerator(PC &pc, BaseGenerator* gen) {
   assert(gen->isRunning());
   ActRec* genAR = gen->actRec();
   genAR->setReturn(vmfp(), pc, genAR->func()->isAsync() ?
-    mcg->tx().uniqueStubs.asyncGenRetHelper :
-    mcg->tx().uniqueStubs.genRetHelper);
+    mcg->ustubs().asyncGenRetHelper :
+    mcg->ustubs().genRetHelper);
 
   vmfp() = genAR;
 
@@ -7363,9 +7370,7 @@ OPTBLD_INLINE TCA iopAwait(IOP_ARGS) {
     }
 
     if (UNLIKELY(wh == nullptr)) {
-      Object e(SystemLib::AllocBadMethodCallExceptionObject(
-        "Await on a non-WaitHandle"));
-      throw e;
+      SystemLib::throwBadMethodCallExceptionObject("Await on a non-WaitHandle");
     }
   }
 
@@ -7406,7 +7411,7 @@ TCA suspendStack(PC &pc) {
     auto retIp = jitReturnPost(jitReturn);
     if (!suspendOuter) return retIp;
     if (retIp) {
-      auto const& us = mcg->tx().uniqueStubs;
+      auto const& us = mcg->ustubs();
       if (retIp == us.resumeHelper) retIp = us.fcallAwaitSuspendHelper;
       return retIp;
     }
@@ -7420,7 +7425,7 @@ OPTBLD_INLINE void iopWHResult(IOP_ARGS) {
   // the failure condition is likely since we punt to this opcode
   // in the JIT when the state is failed.
   if (wh->isFailed()) {
-    throw Object{wh->getException()};
+    throw_object(Object{wh->getException()});
   }
   if (wh->isSucceeded()) {
     cellSet(wh->getResult(), *vmStack().topC());
@@ -7760,20 +7765,14 @@ TCA dispatchImpl() {
     if (breakOnCtlFlow) {                                     \
       isCtlFlow = instrIsControlFlow(Op::name);               \
     }                                                         \
-    if (UNLIKELY(!pc)) {                                      \
-      op = Op::name;                                          \
-      assert(op == OpRetC || op == OpRetV ||                  \
-             op == OpAwait || op == OpCreateCont ||           \
-             op == OpYield || op == OpYieldK ||               \
-             op == OpYieldFromDelegate ||                     \
-             op == OpNativeImpl);                             \
+    if (instrCanHalt(Op::name) && UNLIKELY(!pc)) {            \
       vmfp() = nullptr;                                       \
       /* We returned from the top VM frame in this nesting level. This means
        * m_savedRip in our ActRec must have been callToExit, which should've
        * been returned by jitReturnPost(), whether or not we were called from
        * the TC. We only actually return callToExit to our caller if that
        * caller is dispatchBB(). */                           \
-      assert(retAddr == mcg->tx().uniqueStubs.callToExit);    \
+      assert(retAddr == mcg->ustubs().callToExit);    \
       return breakOnCtlFlow ? retAddr : nullptr;              \
     }                                                         \
     assert(isCtlFlow || !retAddr);                            \
@@ -7833,7 +7832,7 @@ OPTBLD_INLINE TCA switchModeForDebugger(TCA retAddr) {
       // that will throw the execution from a safe place.
       FTRACE(1, "Want to throw VMSwitchMode but retAddr = {}, "
              "overriding with throwSwitchMode stub.\n", retAddr);
-      return mcg->tx().uniqueStubs.throwSwitchMode;
+      return mcg->ustubs().throwSwitchMode;
     } else {
       throw VMSwitchMode();
     }

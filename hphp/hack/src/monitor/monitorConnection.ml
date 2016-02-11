@@ -53,10 +53,10 @@ let establish_connection ~timeout config =
     else
       Unix.ADDR_UNIX sock_name in
   try Result.Ok (Timeout.open_connection ~timeout sockaddr) with
-    | Unix.Unix_error (Unix.ECONNREFUSED, _, _)
-    | Unix.Unix_error (Unix.ENOENT, _, _) ->
-      if not (server_exists config.lock_file) then Result.Error Server_missing
-      else Result.Error Server_busy
+  | Unix.Unix_error (Unix.ECONNREFUSED, _, _)
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    if not (server_exists config.lock_file) then Result.Error Server_missing
+    else Result.Error Server_busy
 
 let get_cstate config (ic, oc) =
   try
@@ -97,10 +97,6 @@ let consume_prehandoff_messages ic oc =
     Printf.eprintf
       "Requested server name not found. This is probably a bug in Hack.";
     raise (Exit_status.Exit_with (Exit_status.Server_name_not_found));
-  | PH.Shutting_down ->
-    Printf.eprintf "Last server exited. A new will be started.\n%!";
-    wait_on_server_restart ic;
-    Result.Error Server_missing
   | PH.Server_died {PH.status; PH.was_oom} ->
     (match was_oom, status with
     | true, _ ->
@@ -111,6 +107,7 @@ let consume_prehandoff_messages ic oc =
       Printf.eprintf "Last server killed by signal: %d.\n%!" signal
     | false, Unix.WSTOPPED signal ->
       Printf.eprintf "Last server stopped by signal: %d.\n%!" signal);
+    wait_on_server_restart ic;
     Result.Error Server_died
 
 let connect_to_monitor config =

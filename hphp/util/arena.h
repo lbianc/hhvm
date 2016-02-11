@@ -45,15 +45,13 @@ namespace HPHP {
  * The Arena typedef is for convenience when you want a default
  * configuration.  Use ArenaImpl if you want something specific.
  */
-template<size_t kChunkBytes> class ArenaImpl;
+template<size_t kChunkBytes> struct ArenaImpl;
 typedef ArenaImpl<4096> Arena;
 
 //////////////////////////////////////////////////////////////////////
 
 template<size_t kChunkBytes>
-class ArenaImpl {
-  static const size_t kMinBytes = 8;
-
+struct ArenaImpl {
  public:
   ArenaImpl();
   ~ArenaImpl();
@@ -102,6 +100,8 @@ class ArenaImpl {
     uint32_t index;
     uint32_t offset;
   };
+
+  static const size_t kMinBytes = 8;
 
  private:
   void* allocSlow(size_t nbytes);

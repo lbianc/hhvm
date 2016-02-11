@@ -37,49 +37,22 @@ let empty_recheck_loop_stats = {
 module MainInit : sig
   val go:
     ServerArgs.options ->
-    out_channel option ->
     (unit -> env) ->    (* init function to run while we have init lock *)
     env
 end = struct
-  let wakeup_client oc msg =
-    Option.iter oc begin fun oc ->
-      try
-        output_string oc (msg ^ "\n");
-        flush oc
-      with
-      (* The client went away *)
-      | Sys_error ("Broken pipe") -> ()
-      | e ->
-          Printf.eprintf "wakeup_client: %s\n%!" (Printexc.to_string e)
-    end
-
-  let close_waiting_channel oc =
-    Option.iter oc begin fun oc ->
-      try close_out oc
-      with
-      (* The client went away *)
-      | Sys_error ("Broken pipe") -> ()
-      | e ->
-          Printf.eprintf "close_waiting_channel: %s\n%!" (Printexc.to_string e)
-    end
-
   (* This code is only executed when the options --check is NOT present *)
-  let go options (waiting_channel: out_channel option) init_fun =
+  let go options init_fun =
     let root = ServerArgs.root options in
     let t = Unix.gettimeofday () in
     Hh_logger.log "Initializing Server (This might take some time)";
-    wakeup_client waiting_channel "starting";
     (* note: we only run periodical tasks on the root, not extras *)
     ServerIdle.init root;
     let init_id = Random_id.short_string () in
     Hh_logger.log "Init id: %s" init_id;
     let env = HackEventLogger.with_id ~stage:`Init init_id init_fun in
     Hh_logger.log "Server is READY";
-    (** TODO: Send "ready" signal to the monitor. *)
-    wakeup_client waiting_channel "ready";
     let t' = Unix.gettimeofday () in
     Hh_logger.log "Took %f seconds to initialize." (t' -. t);
-    close_waiting_channel waiting_channel;
     env
 end
 
@@ -234,19 +207,12 @@ let get_client_channels parent_in_fd =
   let socket = Libancillary.ancil_recv_fd parent_in_fd in
   (Timeout.in_channel_of_descr socket), (Unix.out_channel_of_descr socket)
 
-
-let parent_is_dead () =
-  (** Cross-platform compatible way; parent PID becomes 1 when parent dies. *)
-  Unix.getppid() = 1
-
 let serve genv env in_fd _ =
   let env = ref env in
   let last_stats = ref empty_recheck_loop_stats in
   let recheck_id = ref (Random_id.short_string ()) in
   while true do
-    if parent_is_dead () then
-      (Hh_logger.log "Typechecker's parent has died; exiting.\n";
-       Exit_status.exit Exit_status.Lost_parent_monitor);
+    ServerMonitorUtils.exit_if_parent_dead ();
     let has_client = sleep_and_check in_fd in
     let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
     if not has_client && not has_parsing_hook
@@ -436,16 +402,23 @@ let setup_server options =
   Gc.set {gc_control with Gc.max_overhead = 200};
   Relative_path.set_path_prefix Relative_path.Root root;
   let config = ServerConfig.(load filename options) in
-  let {ServerLocalConfig.cpu_priority; io_priority; _} as local_config =
-    ServerLocalConfig.load () in
+  let {ServerLocalConfig.
+    cpu_priority;
+    io_priority;
+    enable_on_nfs;
+    _
+  } as local_config = ServerLocalConfig.load () in
   if Sys_utils.is_test_mode ()
   then EventLogger.init (Daemon.devnull ()) 0.0
   else HackEventLogger.init root (Unix.gettimeofday ());
-  Option.iter
-    (ServerArgs.waiting_client options)
-    ~f:(fun handle ->
-        let fd = Handle.wrap_handle handle in
-        Unix.set_close_on_exec fd);
+
+  let root_s = Path.to_string root in
+  if Sys_utils.is_nfs root_s && not enable_on_nfs then begin
+    Hh_logger.log "Refusing to run on %s: root is on NFS!" root_s;
+    HackEventLogger.nfs_root ();
+    Exit_status.(exit Nfs_root);
+  end;
+
   Program.preinit ();
   Sys_utils.set_priorities ~cpu_priority ~io_priority;
   SharedMem.init (ServerConfig.sharedmem_config config);
@@ -478,15 +451,7 @@ let daemon_main options (ic, oc) =
     Exit_status.(exit Input_error));
   let in_fd = Daemon.descr_of_in_channel ic in
   let out_fd = Daemon.descr_of_out_channel oc in
-  (** If the client started the server, it opened an FD before forking,
-   * so it can be notified when the server is ready. The FD number was
-   * passed in program args. *)
-  let waiting_channel =
-    Option.map
-      (ServerArgs.waiting_client options)
-      ~f:Handle.to_out_channel in
-  let env = MainInit.go options waiting_channel
-    (fun () -> program_init genv) in
+  let env = MainInit.go options (fun () -> program_init genv) in
   serve genv env in_fd out_fd
 
 let entry =

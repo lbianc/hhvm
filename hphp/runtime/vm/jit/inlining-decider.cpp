@@ -489,8 +489,7 @@ RegionDescPtr selectCalleeTracelet(const Func* callee,
   }
 
   // Produce a tracelet for the callee.
-  return selectTracelet(ctx, maxBCInstrs, false /* profiling */,
-                        true /* inlining */);
+  return selectTracelet(ctx, TransKind::Live, maxBCInstrs, true /* inlining */);
 }
 
 TransID findTransIDForCallee(const Func* callee, const int numArgs,
@@ -502,8 +501,9 @@ TransID findTransIDForCallee(const Func* callee, const int numArgs,
 
   auto const offset = callee->getEntryForNumArgs(numArgs);
   for (auto const id : idvec) {
-    if (profData->transStartBcOff(id) != offset) continue;
-    auto const region = profData->transRegion(id);
+    auto const rec = profData->transRec(id);
+    if (rec->startBcOff() != offset) continue;
+    auto const region = rec->region();
 
     auto const isvalid = [&] () {
       for (auto const& typeloc : region->entry()->typePreConditions()) {

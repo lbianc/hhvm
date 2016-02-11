@@ -24,10 +24,9 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class Transport;
+struct Transport;
 
-class SourceRootInfo {
-public:
+struct SourceRootInfo {
   explicit SourceRootInfo(Transport* transport);
   SourceRootInfo(const std::string &user, const std::string &sandbox);
   void createFromUserConfig();

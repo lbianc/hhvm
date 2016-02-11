@@ -40,8 +40,8 @@ IMPLEMENT_THREAD_LOCAL(ReadlineVars, s_readline);
 
 }
 
-static Variant HHVM_FUNCTION(readline, const String& prompt) {
-  auto result = readline(prompt.data());
+static Variant HHVM_FUNCTION(readline, const Variant& prompt /* = null */) {
+  auto result = readline(prompt.isString() ? prompt.toString().data() : nullptr);
   if (result == nullptr) {
     return false;
   } else {
@@ -266,8 +266,7 @@ static bool HHVM_FUNCTION(readline_write_history,
   }
 }
 
-static class ReadlineExtension final : public Extension {
-  public:
+static struct ReadlineExtension final : Extension {
     ReadlineExtension() : Extension("readline") {}
     void moduleInit() override {
 #ifdef USE_EDITLINE

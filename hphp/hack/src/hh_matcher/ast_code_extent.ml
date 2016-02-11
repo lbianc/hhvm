@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  *
  *)
-open Utils
+
 open Sys_utils
 
 let format_file_pos (pos : File_pos.t) : string =
@@ -504,7 +504,7 @@ let update_to_enclosing
 
 class range_find_visitor rel_file content =
 object (this)
-  inherit [range_accum] AstVisitor.ast_visitor as super
+  inherit [range_accum] Ast_visitor.ast_visitor as super
 
   val file = rel_file;
   val lexbuf = Lexing.from_string (content);

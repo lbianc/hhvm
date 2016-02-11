@@ -59,7 +59,7 @@ void removeExitPlaceholders(IRUnit& unit) {
 
 }
 
-void optimize(IRUnit& unit, IRBuilder& irBuilder, TransKind kind) {
+void optimize(IRUnit& unit, TransKind kind) {
   Timer timer(Timer::optimize);
 
   assertx(checkEverything(unit));
@@ -91,6 +91,10 @@ void optimize(IRUnit& unit, IRBuilder& irBuilder, TransKind kind) {
 
   if (kind != TransKind::Profile && RuntimeOption::EvalHHIRMemoryOpts) {
     doPass(unit, optimizeStores, DCE::Full);
+  }
+
+  if (RuntimeOption::EvalHHIRPartialInlineFrameOpts) {
+    doPass(unit, optimizeInlineReturns, DCE::Full);
   }
 
   doPass(unit, optimizePhis, DCE::Full);

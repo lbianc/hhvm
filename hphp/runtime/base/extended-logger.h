@@ -23,10 +23,9 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class Array;
+struct Array;
 
-class ExtendedLogger : public Logger {
-public:
+struct ExtendedLogger : Logger {
   static bool EnabledByDefault;
 
   // These logging functions will also print stacktrace at end of each message.
