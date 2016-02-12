@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -25,10 +25,10 @@ namespace HPHP {
 bool isReturnHelper(void* address);
 
 inline void ActRec::setReturnVMExit() {
-  assert(isReturnHelper(jit::mcg->tx().uniqueStubs.callToExit));
+  assert(isReturnHelper(jit::mcg->ustubs().callToExit));
   m_sfp = nullptr;
   m_savedRip =
-    reinterpret_cast<uintptr_t>(jit::mcg->tx().uniqueStubs.callToExit);
+    reinterpret_cast<uintptr_t>(jit::mcg->ustubs().callToExit);
   m_soff = 0;
 }
 

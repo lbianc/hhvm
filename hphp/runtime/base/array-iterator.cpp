@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -1308,8 +1308,7 @@ template int64_t new_iter_array_key<true>(Iter* dest, ArrayData* ad,
                                           TypedValue* valOut,
                                           TypedValue* keyOut);
 
-class FreeObj {
- public:
+struct FreeObj {
   FreeObj() : m_obj(0) {}
   void operator=(ObjectData* obj) { m_obj = obj; }
   ~FreeObj() { if (UNLIKELY(m_obj != nullptr)) decRefObj(m_obj); }

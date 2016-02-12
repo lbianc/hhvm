@@ -33,7 +33,11 @@ module Dep :
 module DepSet : module type of Set.Make (Dep)
 
 val trace : bool ref
-val add_idep : Dep.variant option -> Dep.variant -> unit
+
+val debug_trace : bool ref
+val dump_deps : out_channel -> unit
+
+val add_idep : Dep.variant -> Dep.variant -> unit
 val get_ideps_from_hash : Dep.t -> DepSet.t
 val get_ideps : Dep.variant -> DepSet.t
 val get_bazooka : Dep.variant -> DepSet.t

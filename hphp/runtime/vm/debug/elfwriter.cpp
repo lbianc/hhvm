@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -33,6 +33,12 @@ using namespace HPHP::jit;
 
 namespace HPHP {
 namespace Debug {
+
+#if defined(__powerpc64__)
+  using namespace ppc64;
+#else
+  using namespace x64;
+#endif
 
 TRACE_SET_MOD(debuginfo);
 static const uint8_t CFA_OFFSET = 16;
@@ -410,11 +416,6 @@ bool ElfWriter::addFrameInfo(DwarfChunk* d) {
   DwarfBuf& b = d->m_buf;
   b.clear();
   /* Define common set of rules for unwinding frames in the VM stack*/
-  #if defined(__powerpc64__)
-   using namespace PPC64;
-  #else
-   using namespace X64;
-  #endif
   /* Frame pointer (CFA) for previous frame is in RBP + 16 */
   b.dwarf_cfa_def_cfa(RBP, CFA_OFFSET);
   /* Previous RIP is at CFA - 1 . DWARF_DATA_ALIGN (8) */

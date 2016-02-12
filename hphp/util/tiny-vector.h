@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -60,7 +60,7 @@ namespace HPHP {
  */
 template<class T, size_t InternalSize = 1, size_t MinHeapCapacity = 0>
 struct TinyVector {
-  struct const_iterator;
+  class const_iterator;
 
 #ifndef __INTEL_COMPILER
   static_assert(boost::has_trivial_destructor<T>::value,

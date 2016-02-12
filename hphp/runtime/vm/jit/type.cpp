@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,7 +28,7 @@
 #include "hphp/runtime/vm/jit/minstr-effects.h"
 
 #include "hphp/util/abi-cxx.h"
-#include "hphp/util/text-util.cpp"
+#include "hphp/util/text-util.h"
 #include "hphp/util/trace.h"
 
 #include <boost/algorithm/string/trim.hpp>

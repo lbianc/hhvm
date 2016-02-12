@@ -9,7 +9,6 @@
  *)
 
 open Core
-open Utils
 
 (*****************************************************************************)
 (* Error. *)
@@ -28,14 +27,14 @@ let report_error exn =
   ()
 
 let oldify_funs names =
-  Naming_heap.FunIdHeap.oldify_batch names;
+  Naming_heap.FunPosHeap.oldify_batch names;
   Naming_heap.FunCanonHeap.oldify_batch @@ canon_set names;
   Naming_heap.FunHeap.oldify_batch names;
   Typing_env.Funs.oldify_batch names;
   ()
 
 let oldify_classes names =
-  Naming_heap.ClassIdHeap.oldify_batch names;
+  Naming_heap.ClassPosHeap.oldify_batch names;
   Naming_heap.ClassCanonHeap.oldify_batch @@ canon_set names;
   Naming_heap.ClassHeap.oldify_batch names;
   Typing_env.Classes.oldify_batch names;
@@ -44,12 +43,12 @@ let oldify_classes names =
 let revive funs classes =
   Naming_heap.FunHeap.revive_batch funs;
   Typing_env.Funs.revive_batch funs;
-  Naming_heap.FunIdHeap.revive_batch funs;
+  Naming_heap.FunPosHeap.revive_batch funs;
   Naming_heap.FunCanonHeap.revive_batch @@ canon_set funs;
 
   Naming_heap.ClassHeap.revive_batch classes;
   Typing_env.Classes.revive_batch classes;
-  Naming_heap.ClassIdHeap.revive_batch classes;
+  Naming_heap.ClassPosHeap.revive_batch classes;
   Naming_heap.ClassCanonHeap.revive_batch @@ canon_set classes
 
 let declare path content =
@@ -98,20 +97,12 @@ let fix_file_and_def funs classes = try
     let tcopt = TypecheckerOptions.permissive in
     Errors.ignore_ begin fun () ->
       SSet.iter begin fun name ->
-        match Naming_heap.FunHeap.get name with
-        | None -> ()
-        | Some f ->
-          let filename = Pos.filename (fst f.Nast.f_name) in
-          let tenv = Typing_env.empty tcopt filename in
-          Typing.fun_def tenv (snd f.Nast.f_name) f
+        Option.iter (Naming_heap.FunHeap.get name)
+          (fun f -> Typing.fun_def tcopt (snd f.Nast.f_name) f)
       end funs;
       SSet.iter begin fun name ->
-        match Naming_heap.ClassHeap.get name with
-        | None -> ()
-        | Some c ->
-          let filename = Pos.filename (fst c.Nast.c_name) in
-          let tenv = Typing_env.empty tcopt filename in
-          Typing.class_def tenv (snd c.Nast.c_name) c
+        Option.iter (Naming_heap.ClassHeap.get name)
+          (fun c -> Typing.class_def tcopt (snd c.Nast.c_name) c)
       end classes;
     end
   with e ->

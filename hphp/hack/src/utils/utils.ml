@@ -31,117 +31,7 @@ let dn s =
     flush stdout;
   end
 
-module String = struct
-  include String
-  let to_string x = x
-end
-
-module type MapSig = sig
-  type +'a t
-  type key
-
-  val empty: 'a t
-  val singleton: key -> 'a -> 'a t
-  val fold: (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b
-  val exists: (key -> 'a -> bool) -> 'a t -> bool
-  val for_all: (key -> 'a -> bool) -> 'a t -> bool
-  val mem: key -> 'a t -> bool
-  val add: key -> 'a -> 'a t -> 'a t
-  val get: key -> 'a t -> 'a option
-  val iter: (key -> 'a -> unit) -> 'a t -> unit
-  val remove: key -> 'a t -> 'a t
-  val map: ('a -> 'b) -> 'a t -> 'b t
-  val mapi: (key -> 'a -> 'b) -> 'a t -> 'b t
-  val find_unsafe: key -> 'a t -> 'a
-  val is_empty: 'a t -> bool
-  val union: 'a t -> 'a t -> 'a t
-  val partition: (key -> 'a -> bool) -> 'a t -> 'a t * 'a t
-  val cardinal : 'a t -> int
-  val compare: 'a t -> 'a t -> int
-  val equal: 'a t -> 'a t -> bool
-  val filter: (key -> 'a -> bool) -> 'a t -> 'a t
-  val merge : (key -> 'a option -> 'b option -> 'c option)
-    -> 'a t -> 'b t -> 'c t
-  val choose : 'a t -> key * 'a
-  val split: key -> 'a t -> 'a t * 'a option * 'a t
-  val keys: 'a t -> key list
-  val values: 'a t -> 'a list
-  val min_binding : 'a t -> key * 'a
-
-  val map_env: ('c -> 'a -> 'c * 'b) -> 'c -> 'a t -> 'c * 'b t
-  val elements: 'a t -> (key * 'a) list
-end
-
-module MyMap: functor (Ord: Map.OrderedType)
--> MapSig with type key = Ord.t
-= functor (Ord: Map.OrderedType) -> struct
-    include Map.Make(Ord)
-    let get x t =
-      try Some (find x t) with Not_found -> None
-
-    let find_unsafe = find
-
-    let union x y =
-      fold add x y
-
-    let cardinal m = fold (fun _ _ acc -> 1 + acc) m 0
-    let compare x y = compare Pervasives.compare x y
-    let equal x y = compare x y = 0
-
-    let filter f m =
-      fold begin fun x y acc ->
-        if f x y then add x y acc else acc
-      end m empty
-
-    let keys m = fold (fun k v acc -> k :: acc) m []
-    let values m = fold (fun k v acc -> v :: acc) m []
-    let elements m = fold (fun k v acc -> (k,v)::acc) m []
-
-    let map_env f env m =
-      fold (
-        fun x y (env, acc) ->
-          let env, y = f env y in
-          env, add x y acc
-      ) m (env, empty)
-
-  end
-
-module SMap = MyMap(String)
-module IMap = MyMap(Ident)
-module ISet = Set.Make(Ident)
-module SSet = Set.Make(String)
-module CSet = Set.Make(Char)
 module Map = struct end
-
-(* HashSet is just a HashTable where the keys are actually the values, and we
- * ignore the actual values inside the HashTable. *)
-module type HashSetSig = sig
-  type 'a t
-
-  val create: int -> 'a t
-  val clear: 'a t -> unit
-  val copy: 'a t -> 'a t
-  val add: 'a t -> 'a -> unit
-  val mem: 'a t -> 'a -> bool
-  val remove: 'a t -> 'a -> unit
-  val iter: ('a -> unit) -> 'a t -> unit
-  val fold: ('a -> 'b -> 'b) -> 'a t -> 'b -> 'b
-  val length: 'a t -> int
-end
-
-module HashSet = (struct
-  type 'a t = ('a, unit) Hashtbl.t
-
-  let create size = Hashtbl.create size
-  let clear set = Hashtbl.clear set
-  let copy set = Hashtbl.copy set
-  let add set x = Hashtbl.replace set x ()
-  let mem set x = Hashtbl.mem set x
-  let remove set x = Hashtbl.remove set x
-  let iter f set = Hashtbl.iter (fun k _ -> f k) set
-  let fold f set acc = Hashtbl.fold (fun k _ acc -> f k acc) set acc
-  let length set = Hashtbl.length set
-end : HashSetSig)
 
 let spf = Printf.sprintf
 let print_endlinef fmt = Printf.ksprintf print_endline fmt
@@ -170,9 +60,6 @@ let imap_inter m1 m2 =
     then IMap.add x y acc
     else acc
  ) m1 IMap.empty
-
-let smap_union m1 m2 = SMap.fold SMap.add m1 m2
-let imap_union m1 m2 = IMap.fold IMap.add m1 m2
 
 let smap_inter_list = function
   | [] -> SMap.empty
@@ -207,8 +94,6 @@ let unsafe_opt_note note = function
   | Some x -> x
 
 let unsafe_opt x = unsafe_opt_note "unsafe_opt got None" x
-
-let liter f env l = List.iter l (f env)
 
 let inter_list = function
   | [] -> SSet.empty

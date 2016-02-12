@@ -91,7 +91,7 @@ let add_grand_parents_or_traits parent_pos class_nast acc parent_type =
   env, extends, parent_type.tc_members_fully_known && is_complete, is_trait
 
 let get_class_parent_or_trait class_nast (env, parents, is_complete, is_trait) hint =
-  let parent_pos, parent, _ = TUtils.unwrap_class_or_interface_hint hint in
+  let parent_pos, parent, _ = TUtils.unwrap_class_hint hint in
   let parents = SSet.add parent parents in
   let parent_type = Env.get_class_dep env parent in
   match parent_type with
@@ -154,7 +154,7 @@ let merge_single_req env subst inc_req_ty existing_req_opt
 let merge_parent_class_reqs class_nast impls
     (env, req_ancestors, req_ancestors_extends) parent_hint =
   let parent_pos, parent_name, parent_params =
-    TUtils.unwrap_class_or_interface_hint parent_hint in
+    TUtils.unwrap_class_hint parent_hint in
   let env, parent_params = List.map_env env parent_params Typing_hint.hint in
   let parent_type = Env.get_class_dep env parent_name in
 
@@ -200,8 +200,7 @@ let merge_parent_class_reqs class_nast impls
 
 let declared_class_req class_nast impls (env, requirements, req_extends) hint =
   let env, req_ty = Typing_hint.hint env hint in
-  let req_pos, req_name, req_params =
-    TUtils.unwrap_class_or_interface_hint hint in
+  let req_pos, req_name, req_params = TUtils.unwrap_class_hint hint in
   let env, _ = List.map_env env req_params Typing_hint.hint in
   let req_type = Env.get_class_dep env req_name in
 
@@ -294,7 +293,6 @@ let ifun_decl tcopt (f: Ast.fun_) =
 type class_env = {
   tcopt: TypecheckerOptions.t;
   stack: SSet.t;
-  all_classes: Relative_path.Set.t SMap.t;
 }
 
 let check_if_cyclic class_env (pos, cid) =
@@ -304,11 +302,7 @@ let check_if_cyclic class_env (pos, cid) =
   then Errors.cyclic_class_def stack pos;
   is_cyclic
 
-let rec class_decl_if_missing_opt class_env = function
-  | None -> ()
-  | Some c -> class_decl_if_missing class_env c
-
-and class_decl_if_missing class_env c =
+let rec class_decl_if_missing class_env c =
   let _, cid as c_name = c.Ast.c_name in
   if check_if_cyclic class_env c_name
   then ()
@@ -354,18 +348,18 @@ and class_parents_decl class_env c =
 
 and class_hint_decl class_env hint =
   match hint with
-    | _, Happly ((_, cid), _)
-    when SMap.mem cid class_env.all_classes &&
-    not (Naming_heap.ClassHeap.mem cid) ->
-      (* We are supposed to redeclare the class *)
-      let files = SMap.find_unsafe cid class_env.all_classes in
-      Relative_path.Set.iter begin fun fn ->
+  | _, Happly ((_, cid), _) ->
+    begin match Naming_heap.ClassPosHeap.get cid with
+      | Some p when not (Naming_heap.ClassHeap.mem cid) ->
+        (* We are supposed to redeclare the class *)
+        let fn = Pos.filename p in
         let class_opt = Parser_heap.find_class_in_file fn cid in
-        class_decl_if_missing_opt class_env class_opt
-      end files
-    | _ ->
-      (* This class lives in PHP land *)
-      ()
+        Option.iter class_opt (class_decl_if_missing class_env)
+      | _ -> ()
+    end
+  | _ ->
+    (* This class lives in PHP land *)
+    ()
 
 and class_is_abstract c =
   match c.c_kind with
@@ -375,10 +369,9 @@ and class_is_abstract c =
 and class_decl tcopt c =
   let is_abstract = class_is_abstract c in
   let cls_pos, cls_name = c.c_name in
-  let env = Typing_env.empty tcopt (Pos.filename cls_pos) in
-  let env = Env.set_mode env c.c_mode in
   let class_dep = Dep.Class cls_name in
-  let env = Env.set_root env class_dep in
+  let env = Env.empty tcopt (Pos.filename cls_pos) (Some class_dep) in
+  let env = Env.set_mode env c.c_mode in
   let env, inherited = Typing_inherit.make env c in
   let props = inherited.Typing_inherit.ih_props in
   let env, props =
@@ -499,12 +492,12 @@ and class_decl tcopt c =
     end
   else ();
   SMap.iter begin fun x _ ->
-    Typing_deps.add_idep (Some class_dep) (Dep.Class x)
+    Typing_deps.add_idep class_dep (Dep.Class x)
   end impl;
   Env.add_class (snd c.c_name) tc
 
 and get_implements (env: Env.env) ht =
-  let _r, (_p, c), paraml = Typing_hint.open_class_hint ht in
+  let _r, (_p, c), paraml = TUtils.unwrap_class_type ht in
   let class_ = Env.get_class_dep env c in
   match class_ with
   | None ->
@@ -749,7 +742,7 @@ and typeconst_decl c (env, acc, acc2) {
       env, acc, acc2
 
 and method_decl env m =
-  let env, arity_min, params = Typing.make_params env true 0 m.m_params in
+  let env, arity_min, params = Typing.make_params env m.m_params in
   let env, ret = match m.m_ret with
     | None -> env, Typing.ret_from_fun_kind (fst m.m_name) m.m_fun_kind
     | Some ret -> Typing_hint.hint env ret in
@@ -829,32 +822,26 @@ let rec type_typedef_decl_if_missing tcopt typedef =
     type_typedef_naming_and_decl tcopt typedef
 
 and type_typedef_naming_and_decl tcopt tdef =
-  let pos, tid = tdef.Ast.t_id in
+  let td_pos, tid = tdef.Ast.t_id in
   let {
     t_tparams = params;
     t_constraint = tcstr;
     t_kind = concrete_type;
     t_user_attributes = _;
   } as decl = Naming.typedef tcopt tdef in
-  let filename = Pos.filename pos in
-  let env = Typing_env.empty tcopt filename in
-  let env = Typing_env.set_mode env tdef.Ast.t_mode in
-  let env = Env.set_root env (Typing_deps.Dep.Class tid) in
-  let env, params = List.map_env env params Typing.type_param in
-  let env, concrete_type = Typing_hint.hint env concrete_type in
-  let _env, tcstr =
-    match tcstr with
-    | None -> env, None
-    | Some constraint_type ->
-      let env, constraint_type = Typing_hint.hint env constraint_type in
-      let sub_type = Typing_ops.sub_type_decl pos Reason.URnewtype_cstr in
-      let env = sub_type env constraint_type concrete_type in
-      env, Some constraint_type
-  in
-  let visibility = match tdef.Ast.t_kind with
-    | Ast.Alias _ -> Typing_heap.Typedef.Public
-    | Ast.NewType _ -> Typing_heap.Typedef.Private in
-  let tdecl = visibility, params, tcstr, concrete_type, pos in
+  let filename = Pos.filename td_pos in
+  let dep = Typing_deps.Dep.Class tid in
+  let env = Env.empty tcopt filename (Some dep) in
+  let env = Env.set_mode env tdef.Ast.t_mode in
+  let env, td_tparams = List.map_env env params Typing.type_param in
+  let env, td_type = Typing_hint.hint env concrete_type in
+  let _env, td_constraint = opt Typing_hint.hint env tcstr in
+  let td_vis = match tdef.Ast.t_kind with
+    | Ast.Alias _ -> Transparent
+    | Ast.NewType _ -> Opaque in
+  let tdecl = {
+    td_vis; td_tparams; td_constraint; td_type; td_pos;
+  } in
   Env.add_typedef tid tdecl;
   Naming_heap.TypedefHeap.add tid decl;
   ()
@@ -872,7 +859,7 @@ let iconst_decl tcopt cst =
 
 (*****************************************************************************)
 
-let name_and_declare_types_program tcopt all_classes prog =
+let name_and_declare_types_program tcopt prog =
   List.iter prog begin fun def ->
     match def with
     | Ast.Namespace _
@@ -882,19 +869,17 @@ let name_and_declare_types_program tcopt all_classes prog =
       let class_env = {
         tcopt;
         stack = SSet.empty;
-        all_classes = all_classes;
       } in
       class_decl_if_missing class_env c
     | Ast.Typedef typedef ->
       type_typedef_decl_if_missing tcopt typedef
     | Ast.Stmt _ -> ()
-    | Ast.Constant cst ->
-        iconst_decl tcopt cst
+    | Ast.Constant cst -> iconst_decl tcopt cst
   end
 
-let make_env tcopt all_classes fn =
+let make_env tcopt fn =
   match Parser_heap.ParserHeap.get fn with
   | None -> ()
   | Some prog ->
       Typing_decl_deps.add prog;
-      name_and_declare_types_program tcopt all_classes prog
+      name_and_declare_types_program tcopt prog

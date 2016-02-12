@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -455,8 +455,7 @@ static const struct pdo_sqlstate_info err_initializer[] = {
   { "XX002",  "Index corrupted" }
 };
 
-class PDOErrorHash : private hphp_const_char_map<const char *> {
-public:
+struct PDOErrorHash : private hphp_const_char_map<const char *> {
   PDOErrorHash() {
     for (unsigned int i = 0;
          i < sizeof(err_initializer)/sizeof(err_initializer[0]); i++) {
@@ -496,7 +495,7 @@ void throw_pdo_exception(const Variant& code, const Variant& info,
   if (!info.isNull()) {
     obj->o_set(s_errorInfo, info, s_PDOException);
   }
-  throw obj;
+  throw_object(obj);
 }
 
 void pdo_raise_impl_error(sp_PDOResource rsrc, PDOStatement* stmt,
@@ -1550,6 +1549,7 @@ static bool HHVM_METHOD(PDO, sqlitecreatefunction, const String& name,
   return conn->createFunction(name, callback, argcount);
 #else
   raise_recoverable_error("PDO::sqliteCreateFunction not implemented");
+  return false;
 #endif
 }
 
@@ -3387,8 +3387,7 @@ static Variant HHVM_METHOD(PDOStatement, __sleep) {
 ///////////////////////////////////////////////////////////////////////////////
 
 
-static class PDOExtension final : public Extension {
-public:
+static struct PDOExtension final : Extension {
   PDOExtension() : Extension("pdo", " 1.0.4dev") {}
 
 #ifdef ENABLE_EXTENSION_PDO_MYSQL

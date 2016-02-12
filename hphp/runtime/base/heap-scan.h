@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -259,9 +259,11 @@ template<class F>
 void ThreadLocalManager::scan(F& mark) const {
   auto list = getList(pthread_getspecific(m_key));
   if (!list) return;
+  // Skip MemoryManager. TODO(9923909): Type-specific scan, cf. NativeData.
+  auto mm = (void*)&MM();
   for (auto p = list->head; p != nullptr;) {
     auto node = static_cast<ThreadLocalNode<void>*>(p);
-    if (node->m_p) mark(node->m_p, node->m_size);
+    if (node->m_p && node->m_p != mm) mark(node->m_p, node->m_size);
     p = node->m_next;
   }
 }
@@ -299,7 +301,7 @@ template<class F> void scanRoots(F& mark) {
     mark(tm, mm - tm);
     mark(mm_end, tm_end - mm_end);
   }
-  // ThreadLocal nodes
+  // ThreadLocal nodes (but skip MemoryManager)
   mark.where("ThreadLocalManager");
   ThreadLocalManager::GetManager().scan(mark);
   // Extension thread locals

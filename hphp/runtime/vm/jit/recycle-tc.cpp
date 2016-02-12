@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -70,17 +70,17 @@ std::unordered_map<const Func*, FuncInfo> s_funcTCData;
 void clearProfCaller(TCA toSmash, const Func* func, int numArgs,
                             bool isGuard) {
   auto data = mcg->tx().profData();
-  auto tid = data->prologueTransId(func, numArgs);
-  if (tid == kInvalidTransID || !data->hasTransRec(tid) ||
-      data->transKind(tid) != TransKind::Proflogue) {
-    return;
-  }
-  auto* pc = data->prologueCallers(tid);
+  auto const tid = data->proflogueTransId(func, numArgs);
+  if (tid == kInvalidTransID) return;
+
+  auto rec = data->transRec(tid);
+  if (!rec || !rec->isProflogue()) return;
+
   if (isGuard) {
-    pc->removeGuardCaller(toSmash);
+    rec->removeGuardCaller(toSmash);
     return;
   }
-  pc->removeMainCaller(toSmash);
+  rec->removeMainCaller(toSmash);
 }
 
 /*
@@ -262,7 +262,7 @@ void reclaimFunction(const Func* func) {
   Trace::Indent _i;
 
   auto& data = it->second;
-  auto& us = mcg->tx().uniqueStubs;
+  auto& us = mcg->ustubs();
 
   ITRACE(1, "Smashing prologues\n");
   func->smashPrologues();

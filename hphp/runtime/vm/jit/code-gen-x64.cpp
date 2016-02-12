@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -68,6 +68,7 @@
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/jit/unwind-itanium.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
@@ -236,7 +237,7 @@ static void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vcold,
   v = done;
   vcold = cold;
 
-  auto const call = CallSpec::stub(mcg->tx().uniqueStubs.functionEnterHelper);
+  auto const call = CallSpec::stub(mcg->ustubs().functionEnterHelper);
   auto const args = v.makeVcallArgs({});
   vcold << vinvoke{call, args, v.makeTuple({}), {done, catchBlock}, fixup};
 }
@@ -600,7 +601,7 @@ void CodeGenerator::cgAssertType(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgLdUnwinderValue(IRInstruction* inst) {
-  emitLoad(inst->dst(), dstLoc(inst, 0), rvmtl()[unwinderTvOff()]);
+  emitLoad(inst->dst(), dstLoc(inst, 0), rvmtl()[unwinderTVOff()]);
 }
 
 void CodeGenerator::cgBeginCatch(IRInstruction* inst) {
@@ -617,7 +618,7 @@ void CodeGenerator::cgBeginCatch(IRInstruction* inst) {
 void CodeGenerator::cgEndCatch(IRInstruction* inst) {
   auto& v = vmain();
   // endCatchHelper only expects rvmtl() and rvmfp() to be live.
-  v << jmpi{mcg->tx().uniqueStubs.endCatchHelper, rvmtl() | rvmfp()};
+  v << jmpi{mcg->ustubs().endCatchHelper, rvmtl() | rvmfp()};
 }
 
 void CodeGenerator::cgUnwindCheckSideExit(IRInstruction* inst) {
@@ -1713,7 +1714,7 @@ void CodeGenerator::cgStRetVal(IRInstruction* inst) {
 }
 
 void traceRet(ActRec* fp, Cell* sp, void* rip) {
-  if (rip == mcg->tx().uniqueStubs.callToExit) {
+  if (rip == mcg->ustubs().callToExit) {
     return;
   }
   checkFrame(fp, sp, /*fullCheck*/ false, 0);
@@ -1891,7 +1892,7 @@ void CodeGenerator::cgLdSSwitchDestSlow(IRInstruction* inst) {
 void CodeGenerator::cgDefInlineFP(IRInstruction* inst) {
   auto const callerSP = srcLoc(inst, 0).reg();
   auto const callerFP = srcLoc(inst, 1).reg();
-  auto const fakeRet  = mcg->tx().uniqueStubs.retInlHelper;
+  auto const fakeRet  = mcg->ustubs().retInlHelper;
   auto const extra    = inst->extra<DefInlineFP>();
   auto const retBCOff = extra->retBCOff;
   auto const offset   = cellsToBytes(extra->spOffset.offset);
@@ -2105,8 +2106,8 @@ void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {
   if (numLocals == 0) return;
 
   auto const target = numLocals > kNumFreeLocalsHelpers
-    ? mcg->tx().uniqueStubs.freeManyLocalsHelper
-    : mcg->tx().uniqueStubs.freeLocalsHelpers[numLocals - 1];
+    ? mcg->ustubs().freeManyLocalsHelper
+    : mcg->ustubs().freeLocalsHelpers[numLocals - 1];
 
   auto const iterReg = v.makeReg();
   v << lea{rFp[localOffset(numLocals - 1)], iterReg};
@@ -2133,7 +2134,7 @@ void CodeGenerator::cgGenericRetDecRefs(IRInstruction* inst) {
 float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
                                        OptDecRefProfile& profile,
                                        Type type) {
-  auto const kind = mcg->tx().mode();
+  auto const kind = m_state.unit.context().kind;
   // Without profiling data, we assume destroy is unlikely.
   if (kind != TransKind::Profile && kind != TransKind::Optimize) return 0.0;
 
@@ -2298,7 +2299,7 @@ void CodeGenerator::cgDecRef(IRInstruction *inst) {
       auto const sf = v.makeReg();
       emitCmpTVType(v, sf, KindOfRefCountThreshold, rType);
       unlikelyIfThen(v, vcold(), CC_NLE, sf, [&](Vout& v) {
-        auto const stub = mcg->tx().uniqueStubs.decRefGeneric;
+        auto const stub = mcg->ustubs().decRefGeneric;
         v << copy2{rData, rType, rarg(0), rarg(1)};
         v << callfaststub{stub, makeFixup(inst->marker()), arg_regs(2)};
       });
@@ -2630,8 +2631,8 @@ void CodeGenerator::cgCallArray(IRInstruction* inst) {
   auto const pc     = v.cns(extra->pc);
   auto const after  = v.cns(extra->after);
   auto const target = extra->numParams == 0 ?
-    mcg->tx().uniqueStubs.fcallArrayHelper :
-    mcg->tx().uniqueStubs.fcallUnpackHelper;
+    mcg->ustubs().fcallArrayHelper :
+    mcg->ustubs().fcallUnpackHelper;
   auto const rSP    = srcLoc(inst, 0 /* sp */).reg();
   auto const syncSP = v.makeReg();
   v << lea{rSP[cellsToBytes(extra->spOffset.offset)], syncSP};
@@ -2682,7 +2683,7 @@ void CodeGenerator::cgCall(IRInstruction* inst) {
     assertx(argc == callee->numLocals() && callee->numIterators() == 0);
     assertx(peek_op(callee->getEntry()) == Op::NativeImpl);
     assertx(instrLen(callee->getEntry()) == callee->past() - callee->base());
-    auto retAddr = (int64_t)mcg->tx().uniqueStubs.retHelper;
+    auto retAddr = (int64_t)mcg->ustubs().retHelper;
     v << store{v.cns(retAddr),
                sync_sp[cellsToBytes(argc) + AROFF(m_savedRip)]};
     if (callee->attrs() & AttrMayUseVV) {
@@ -2720,7 +2721,7 @@ void CodeGenerator::cgCall(IRInstruction* inst) {
   // Emit a smashable call that initially calls a recyclable service request
   // stub.  The stub and the eventual targets take rvmfp() as an argument,
   // pointing to the callee ActRec.
-  auto& us = mcg->tx().uniqueStubs;
+  auto& us = mcg->ustubs();
   auto addr = callee ? us.immutableBindCallStub : us.bindCallStub;
   debug_trashsp(v);
   v << lea{sync_sp[cellsToBytes(argc)], rvmfp()};
@@ -4489,12 +4490,12 @@ void CodeGenerator::cgInterpOneCF(IRInstruction* inst) {
   v << lea{srcLoc(inst, 0).reg()[cellsToBytes(spOff.offset)], adjustedSp};
   v << syncvmsp{adjustedSp};
 
-  assertx(mcg->tx().uniqueStubs.interpOneCFHelpers.count(op));
+  assertx(mcg->ustubs().interpOneCFHelpers.count(op));
 
   // We pass the Offset in the third argument register.  This needs to be a
   // 64-bit mov for now because LLVM exclusively uses i64 types.
   v << ldimmq{pcOff, rarg(2)};
-  v << jmpi{mcg->tx().uniqueStubs.interpOneCFHelpers[op],
+  v << jmpi{mcg->ustubs().interpOneCFHelpers.at(op),
             interp_one_cf_regs()};
 }
 
@@ -4828,7 +4829,7 @@ void CodeGenerator::cgAsyncRetFast(IRInstruction* inst) {
   if (!(retValSrc->isA(TNull))) {
       asyncStubRegs |= rarg(0);
   }
-  auto const stub = mcg->tx().uniqueStubs.asyncRetCtrl;
+  auto const stub = mcg->ustubs().asyncRetCtrl;
   v << jmpi{stub, asyncStubRegs};
 }
 
@@ -5505,7 +5506,7 @@ void CodeGenerator::cgCheckSurpriseAndStack(IRInstruction* inst) {
   v << lea{fp[-cellsToBytes(func->maxStackCells())], needed_top};
   v << cmpqm{needed_top, rvmtl()[rds::kSurpriseFlagsOff], sf};
   unlikelyIfThen(v, vcold(), CC_AE, sf, [&] (Vout& v) {
-    auto const stub = mcg->tx().uniqueStubs.functionSurprisedOrStackOverflow;
+    auto const stub = mcg->ustubs().functionSurprisedOrStackOverflow;
     auto const done = v.makeBlock();
     v << vinvoke{
       CallSpec::stub(stub),

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -30,8 +30,7 @@ namespace HPHP {
  * debugging HTTP requests that cause problems that are hard to debug on live
  * servers.
  */
-class ReplayTransport : public Transport {
-public:
+struct ReplayTransport : Transport {
   ReplayTransport() : m_ini(IniSetting::Map::object), m_code(0) {}
 
   void recordInput(Transport* transport, const char *filename);

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -28,7 +28,6 @@
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
-#include "hphp/runtime/vm/jit/irlower.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/relocation.h"
@@ -250,7 +249,7 @@ void relocateCode(const IRUnit& unit, size_t hhir_count,
                   CodeBlock& cold, CodeBlock& cold_in, CodeAddress cold_start,
                   CodeBlock& frozen, CodeAddress frozen_start,
                   AsmInfo* ai) {
-  auto const& bc_map = mcg->cgFixups().m_bcMap;
+  auto const& bc_map = mcg->cgFixups().bcMap;
   if (!bc_map.empty()) {
     TRACE(1, "bcmaps before relocation\n");
     for (UNUSED auto const& map : bc_map) {
@@ -305,7 +304,7 @@ void relocateCode(const IRUnit& unit, size_t hhir_count,
   }
 
 #ifndef NDEBUG
-  auto& ip = mcg->cgFixups().m_inProgressTailJumps;
+  auto& ip = mcg->cgFixups().inProgressTailJumps;
   for (size_t i = 0; i < ip.size(); ++i) {
     const auto& ib = ip[i];
     assertx(!main.contains(ib.toSmash()));
@@ -376,6 +375,7 @@ void genCodeImpl(IRUnit& unit, CodeKind kind, AsmInfo* ai) {
 
     Vasm vasm;
     auto& vunit = vasm.unit();
+    vunit.transKind = unit.context().kind;
     SCOPE_ASSERT_DETAIL("vasm unit") { return show(vunit); };
 
     IRLS env(unit);

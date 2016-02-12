@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -81,10 +81,6 @@ void truncateMap(Container& c, SrcKey final) {
 
 PGORegionMode pgoRegionMode(const Func& func) {
   auto& s = RuntimeOption::EvalJitPGORegionSelector;
-  if ((s == "wholecfg" || s == "hotcfg") &&
-      RuntimeOption::EvalJitPGOCFGHotFuncOnly && !(func.attrs() & AttrHot)) {
-    return PGORegionMode::Hottrace;
-  }
   if (s == "hottrace") return PGORegionMode::Hottrace;
   if (s == "hotblock") return PGORegionMode::Hotblock;
   if (s == "hotcfg")   return PGORegionMode::HotCFG;
@@ -770,8 +766,9 @@ RegionDescPtr selectRegion(const RegionContext& context,
         case RegionMode::Method:
           return selectMethod(context);
         case RegionMode::Tracelet:
-          return selectTracelet(context, RuntimeOption::EvalJitMaxRegionInstrs,
-                                kind == TransKind::Profile);
+          return selectTracelet(
+            context, kind, RuntimeOption::EvalJitMaxRegionInstrs
+          );
       }
       not_reached();
     } catch (const std::exception& e) {
@@ -796,7 +793,7 @@ RegionDescPtr selectHotRegion(TransID transId,
   assertx(RuntimeOption::EvalJitPGO);
 
   const ProfData* profData = mcg->tx().profData();
-  auto const& func = *(profData->transFunc(transId));
+  auto const& func = *profData->transRec(transId)->func();
   FuncId funcId = func.getFuncId();
   TransCFG cfg(funcId, profData, mcg->tx().getSrcDB(),
                mcg->getJmpToTransIDMap());

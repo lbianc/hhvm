@@ -30,10 +30,14 @@ class CommonSaveStateTests(object):
         cls.tmp_dir = tempfile.mkdtemp()
         cls.hh_tmp_dir = tempfile.mkdtemp()
         cls.saved_state_name = 'foo'
+        hh_server_dir = os.path.dirname(hh_server)
         cls.test_env = dict(os.environ, **{
             'HH_TEST_MODE': '1',
             'HH_TMPDIR': cls.hh_tmp_dir,
-            'PATH': '%s:/bin:/usr/bin' % cls.tmp_dir,
+            'PATH': '%s:%s:/bin:/usr/bin:/usr/local/bin' %
+                (hh_server_dir, cls.tmp_dir),
+            'OCAMLRUNPARAM': 'b',
+            'HH_LOCALCONF_PATH': cls.repo_dir,
             })
 
         with open(os.path.join(init_dir, '.hhconfig'), 'w') as f:
@@ -72,7 +76,6 @@ assume_php = false""")
         """
 
         write_files(cls.files, init_dir)
-        write_files(cls.files, cls.repo_dir)
 
         cls.save_command(init_dir)
 
@@ -84,7 +87,6 @@ assume_php = false""")
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.repo_dir)
         shutil.rmtree(cls.tmp_dir)
         shutil.rmtree(cls.hh_tmp_dir)
 
@@ -95,39 +97,35 @@ assume_php = false""")
     def write_load_config(self, *changed_files):
         raise NotImplementedError()
 
-    @classmethod
-    def start_hh_server(cls):
-        cmd = [hh_server, cls.repo_dir]
+    def start_hh_server(self):
+        cmd = [hh_server, self.repo_dir]
         print(" ".join(cmd), file=sys.stderr)
         return subprocess.Popen(
                 cmd,
                 stderr=subprocess.PIPE,
-                env=cls.test_env)
+                env=self.test_env)
 
-    @classmethod
-    def get_server_logs(cls):
+    def get_server_logs(self):
         time.sleep(2)  # wait for logs to be written
-        log_file = cls.proc_call([
-            hh_client, '--logname', cls.repo_dir])[0].strip()
+        log_file = self.proc_call([
+            hh_client, '--logname', self.repo_dir])[0].strip()
         with open(log_file) as f:
             return f.read()
 
     def setUp(self):
+        if os.path.isdir(self.repo_dir) is False:
+            os.mkdir(self.repo_dir)
         write_files(self.files, self.repo_dir)
 
     def tearDown(self):
-        self.proc_call([
+        (_, _, exit_code) = self.proc_call([
             hh_client,
             'stop',
             self.repo_dir
         ])
+        self.assertEqual(exit_code, 0, msg="Stopping hh_server failed")
 
-        # Monitor polls every second, so can take up to 2 cycles to detect
-        # typechecker exit.
-        time.sleep(2)
-
-        for p in glob.glob(os.path.join(self.repo_dir, '*')):
-            os.remove(p)
+        shutil.rmtree(self.repo_dir)
 
     @classmethod
     def proc_call(cls, args, env=None, stdin=None):
@@ -399,3 +397,50 @@ assume_php = false""")
             time.sleep(1)
             client_error = self.check_cmd(['No errors!'])
             self.assertIn('Last server killed by signal', client_error)
+
+    def test_duplicate_parent(self):
+        """
+        This checks that we handle duplicate parent classes, i.e. when Bar
+        extends Foo and there are two declarations of Foo. We want to make sure
+        that when the duplicate gets removed, we recover correctly by
+        redeclaring Bar with the remaining parent class.
+        """
+        with open(os.path.join(self.repo_dir, 'foo_4.php'), 'w') as f:
+            f.write("""
+            <?hh
+            class Foo { // also declared in foo_3.php in setUpClass
+                public static $x;
+            }
+            """)
+        with open(os.path.join(self.repo_dir, 'foo_5.php'), 'w') as f:
+            f.write("""
+            <?hh
+            class Bar extends Foo {}
+
+            function main(Bar $a) {
+                return $a::$y;
+            }
+            """)
+        self.write_load_config('foo_4.php', 'foo_5.php')
+        self.check_cmd([
+            '{root}foo_4.php:3:19,21: Name already bound: Foo (Naming[2012])',
+            '  {root}foo_3.php:7:15,17: Previous definition is here',
+            '{root}foo_5.php:6:28,29: Could not find class variable $y in type Bar (Typing[4090])',
+            '  {root}foo_5.php:3:19,21: Declaration of Bar is here',
+            ])
+
+        os.remove(os.path.join(self.repo_dir, 'foo_4.php'))
+        self.check_cmd([
+            '{root}foo_5.php:6:28,29: Could not find class variable $y in type Bar (Typing[4090])',
+            '  {root}foo_5.php:3:19,21: Declaration of Bar is here',
+            ])
+
+        with open(os.path.join(self.repo_dir, 'foo_4.php'), 'w') as f:
+            f.write("""
+            <?hh
+            class Foo {
+                public static $y;
+            }
+            """)
+        os.remove(os.path.join(self.repo_dir, 'foo_3.php'))
+        self.check_cmd(['No errors!'])

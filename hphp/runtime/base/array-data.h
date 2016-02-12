@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -35,7 +35,7 @@ namespace HPHP {
 struct String;
 struct TypedValue;
 struct MArrayIter;
-class VariableSerializer;
+struct VariableSerializer;
 
 struct ArrayData {
   // Runtime type tag of possible array types.  This is intentionally
@@ -430,13 +430,13 @@ protected:
   friend struct EmptyArray;
   friend struct MixedArray;
   friend struct StructArray;
-  friend class BaseVector;
-  friend class c_Vector;
-  friend class c_ImmVector;
-  friend class HashCollection;
-  friend class BaseMap;
-  friend class c_Map;
-  friend class c_ImmMap;
+  friend struct BaseVector;
+  friend struct c_Vector;
+  friend struct c_ImmVector;
+  friend struct HashCollection;
+  friend struct BaseMap;
+  friend struct c_Map;
+  friend struct c_ImmMap;
   // The following fields are blocked into unions with qwords so we
   // can combine the stores when initializing arrays.  (gcc won't do
   // this on its own.)

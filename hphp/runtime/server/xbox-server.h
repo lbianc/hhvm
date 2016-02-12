@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -27,13 +27,12 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class Array;
+struct Array;
 struct XboxServerInfo;
-class RPCRequestHandler;
-class XboxTransport;
+struct RPCRequestHandler;
+struct XboxTransport;
 
-class XboxServer {
-public:
+struct XboxServer {
   /**
    * Start or restart xbox server.
    */
@@ -69,8 +68,7 @@ public:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class XboxServerInfo : public SatelliteServerInfo {
-public:
+struct XboxServerInfo : SatelliteServerInfo {
   XboxServerInfo() : SatelliteServerInfo(IniSetting::Map::object, Hdf()) {
     m_type = SatelliteServer::Type::KindOfXboxServer;
     m_name = "xbox";
@@ -92,8 +90,7 @@ public:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class XboxTransport : public Transport, public Synchronizable {
-public:
+struct XboxTransport : Transport, Synchronizable {
   explicit XboxTransport(const String& message, const String& reqInitDoc = "");
 
   timespec getStartTimer() const { return m_queueTime; }

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -760,8 +760,7 @@ bool HHVM_METHOD(SQLite3Result, finalize) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static class SQLite3Extension final : public Extension {
-public:
+static struct SQLite3Extension final : Extension {
   SQLite3Extension() : Extension("sqlite3", "0.7-dev") {}
   void moduleInit() override {
     HHVM_RC_INT(SQLITE3_ASSOC, PHP_SQLITE3_ASSOC);

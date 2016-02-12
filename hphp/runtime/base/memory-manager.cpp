@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -200,6 +200,7 @@ MemoryManager::MemoryManager() {
 }
 
 MemoryManager::~MemoryManager() {
+  // TODO(9879201): Assert empty() once all existing leaks are fixed.
   for (auto r : m_root_handles) r->invalidate();
 }
 
@@ -993,6 +994,14 @@ void* realloc(void* ptr, size_t nbytes) {
     return nullptr;
   }
   return MM().realloc(ptr, nbytes);
+}
+
+char* strndup(const char* str, size_t len) {
+  size_t n = std::min(len, strlen(str));
+  char* ret = reinterpret_cast<char*>(req::malloc(n + 1));
+  memcpy(ret, str, n);
+  ret[n] = 0;
+  return ret;
 }
 
 void free(void* ptr) {

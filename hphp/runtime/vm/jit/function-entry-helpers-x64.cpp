@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -68,7 +68,7 @@ TCA fcallHelper(ActRec* ar) {
   try {
     VMRegAnchor _(ar);
     if (doFCall(ar, vmpc())) {
-      return mcg->tx().uniqueStubs.resumeHelperRet;
+      return mcg->ustubs().resumeHelperRet;
     }
     // We've been asked to skip the function body (fb_intercept).  The vmregs
     // have already been fixed; indicate this with a nullptr return.
@@ -94,7 +94,7 @@ TCA funcBodyHelper(ActRec* fp) {
   auto const func = const_cast<Func*>(fp->m_func);
   auto tca = mcg->getFuncBody(func);
   if (!tca) {
-    tca = mcg->tx().uniqueStubs.resumeHelper;
+    tca = mcg->ustubs().resumeHelper;
   }
 
   tl_regState = VMRegState::DIRTY;

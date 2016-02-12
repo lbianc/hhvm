@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -412,8 +412,8 @@ jit::vector<Vlabel> pgoLayout(const Vunit& unit) {
 
 jit::vector<Vlabel> layoutBlocks(const Vunit& unit) {
   Timer timer(Timer::vasm_layout);
-  return mcg->tx().mode() == TransKind::Optimize ? pgoLayout(unit)
-                                                 : rpoLayout(unit);
+  return unit.transKind == TransKind::Optimize ? pgoLayout(unit)
+                                               : rpoLayout(unit);
 }
 
 } }

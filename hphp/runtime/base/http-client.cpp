@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -30,8 +30,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 //so that curl_global_init() is called ahead of time, avoiding crash
-class StaticInitializer {
-public:
+struct StaticInitializer {
   StaticInitializer() {
     curl_global_init(CURL_GLOBAL_ALL);
     SSLInit::Init();

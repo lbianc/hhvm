@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -257,13 +257,7 @@ namespace StackSym {
 } while (0)
 
 // RAII guard for function creation.
-class FuncFinisher {
-  EmitterVisitor* m_ev;
-  Emitter&        m_e;
-  FuncEmitter*    m_fe;
-  int32_t         m_stackPad;
-
- public:
+struct FuncFinisher {
   FuncFinisher(EmitterVisitor* ev, Emitter& e, FuncEmitter* fe,
                int32_t stackPad = 0)
     : m_ev(ev), m_e(e), m_fe(fe), m_stackPad(stackPad)
@@ -272,14 +266,16 @@ class FuncFinisher {
   ~FuncFinisher() {
     m_ev->finishFunc(m_e, m_fe, m_stackPad);
   }
+
+private:
+  EmitterVisitor* m_ev;
+  Emitter&        m_e;
+  FuncEmitter*    m_fe;
+  int32_t         m_stackPad;
 };
 
 // RAII guard for temporarily overriding an Emitter's location
-class LocationGuard {
-  Emitter& m_e;
-  OptLocation m_loc;
-
-public:
+struct LocationGuard {
   LocationGuard(Emitter& e, const OptLocation& newLoc)
       : m_e(e), m_loc(e.getTempLocation()) {
     if (newLoc) m_e.setTempLocation(newLoc);
@@ -287,6 +283,10 @@ public:
   ~LocationGuard() {
     m_e.setTempLocation(m_loc);
   }
+
+private:
+  Emitter& m_e;
+  OptLocation m_loc;
 };
 
 #define O(name, imm, pop, push, flags)                                  \
@@ -311,7 +311,6 @@ public:
     ITRACE(3, "after: {}\n", m_ev.getEvalStack().pretty());             \
     auto& loc = m_tempLoc ? *m_tempLoc : m_node->getRange();            \
     auto UNUSED pc = m_ue.bc() + curPos;                                \
-    ITRACE(2, "{}: {}\n", curPos, instrToString(pc));                   \
     ITRACE(2, "lines [{},{}] chars [{},{}]\n",                          \
            loc.line0, loc.line1, loc.char0, loc.char1);                 \
     /* Update various other metadata */                                 \
@@ -362,6 +361,7 @@ public:
 #define DEC_BA Label&
 #define DEC_OA(type) type
 #define DEC_VSA std::vector<std::string>&
+#define DEC_KA MemberKey
 
 #define POP_NOV
 #define POP_ONE(t) \
@@ -437,6 +437,7 @@ public:
 #define POP_LA_IMPL(x)
 #define POP_LA_OA(i) POP_LA_IMPL
 #define POP_LA_VSA(i)
+#define POP_LA_KA(i)
 
 #define POP_LA_LA(i) \
   getEmitterVisitor().popSymbolicLocal(opcode)
@@ -616,7 +617,15 @@ public:
 #define IMPL2_OA(type) IMPL_OA(a2)
 #define IMPL3_OA(type) IMPL_OA(a3)
 #define IMPL4_OA(type) IMPL_OA(a4)
+
+#define IMPL_KA(var) encode_member_key(var, getUnitEmitter())
+#define IMPL1_KA IMPL_KA(a1)
+#define IMPL2_KA IMPL_KA(a2)
+#define IMPL3_KA IMPL_KA(a3)
+#define IMPL4_KA IMPL_KA(a4)
+
  OPCODES
+
 #undef O
 #undef ONE
 #undef TWO
@@ -633,6 +642,7 @@ public:
 #undef DEC_AA
 #undef DEC_BA
 #undef DEC_OA
+#undef DEC_KA
 #undef POP_NOV
 #undef POP_ONE
 #undef POP_TWO
@@ -670,6 +680,7 @@ public:
 #undef POP_LA_IMPL
 #undef POP_LA_OA
 #undef POP_LA_LA
+#undef POP_LA_KA
 #undef PUSH_NOV
 #undef PUSH_ONE
 #undef PUSH_TWO
@@ -752,6 +763,11 @@ public:
 #undef IMPL2_OA
 #undef IMPL3_OA
 #undef IMPL4_OA
+#undef IMPL_KA
+#undef IMPL1_KA
+#undef IMPL2_KA
+#undef IMPL3_KA
+#undef IMPL4_KA
 
 static void checkJmpTargetEvalStack(const SymbolicStack& source,
                                     const SymbolicStack& dest) {
@@ -2206,8 +2222,7 @@ bool EmitterVisitor::isJumpTarget(Offset target) {
   return (it != m_jumpTargetEvalStacks.end());
 }
 
-class IterFreeThunklet final : public Thunklet {
-public:
+struct IterFreeThunklet final : Thunklet {
   IterFreeThunklet(Id iterId, bool itRef)
     : m_id(iterId), m_itRef(itRef) {}
   void emit(Emitter& e) override {
@@ -2226,8 +2241,7 @@ private:
 /**
  * A thunklet for the fault region protecting a silenced (@) expression.
  */
-class RestoreErrorReportingThunklet final : public Thunklet {
-public:
+struct RestoreErrorReportingThunklet final : Thunklet {
   explicit RestoreErrorReportingThunklet(Id loc)
     : m_oldLevelLoc(loc) {}
   void emit(Emitter& e) override {
@@ -2238,8 +2252,7 @@ private:
   Id m_oldLevelLoc;
 };
 
-class UnsetUnnamedLocalThunklet final : public Thunklet {
-public:
+struct UnsetUnnamedLocalThunklet final : Thunklet {
   explicit UnsetUnnamedLocalThunklet(Id loc)
     : m_loc(loc) {}
   void emit(Emitter& e) override {
@@ -2251,8 +2264,7 @@ private:
   Id m_loc;
 };
 
-class UnsetUnnamedLocalsThunklet final : public Thunklet {
-public:
+struct UnsetUnnamedLocalsThunklet final : Thunklet {
   explicit UnsetUnnamedLocalsThunklet(std::vector<Id>&& locs)
     : m_locs(std::move(locs)) {}
   void emit(Emitter& e) override {
@@ -2267,8 +2279,7 @@ private:
   const std::vector<Id> m_locs;
 };
 
-class UnsetGeneratorDelegateThunklet final : public Thunklet {
-public:
+struct UnsetGeneratorDelegateThunklet final : Thunklet {
   explicit UnsetGeneratorDelegateThunklet(Id iterId)
     : m_id(iterId) {}
   void emit(Emitter& e) override {
@@ -2279,8 +2290,7 @@ private:
   Id m_id;
 };
 
-class FinallyThunklet final : public Thunklet {
-public:
+struct FinallyThunklet final : Thunklet {
   explicit FinallyThunklet(FinallyStatementPtr finallyStatement,
                            int numLiveIters)
       : m_finallyStatement(finallyStatement), m_numLiveIters(numLiveIters) {}
@@ -3813,6 +3823,16 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       return true;
     }
 
+    if (op == T_PIPE) {
+      Id pipeVar = emitVisitAndSetUnnamedL(e, b->getExp1());
+      allocPipeLocal(pipeVar);
+      visit(b->getExp2());
+      releasePipeLocal(pipeVar);
+      emitPushAndFreeUnnamedL(e, pipeVar, m_ue.bcPos());
+      e.PopC();
+      return true;
+    }
+
     visit(b->getExp1());
     emitConvertToCellOrLoc(e);
     visit(b->getExp2());
@@ -4576,6 +4596,16 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     not_reached();
   }
 
+  case Construct::KindOfPipeVariable: {
+    if (auto pipeVar = getPipeLocal()) {
+      emitVirtualLocal(*pipeVar);
+      return true;
+    }
+
+    throw IncludeTimeFatalException(
+      node, "Pipe variables must occur only in the RHS of pipe expressions");
+  }
+
   case Construct::KindOfSimpleVariable: {
     auto sv = static_pointer_cast<SimpleVariable>(node);
     if (sv->isThis()) {
@@ -5172,65 +5202,10 @@ size_t EmitterVisitor::emitMOp(
   // Emit all intermediate operations, leaving the final operation up to our
   // caller.
   for (auto i = iFirst + 1; i < iLast; ++i) {
-    auto sym = m_evalStack.get(i);
-    auto flavor = StackSym::GetSymFlavor(sym);
-
-    auto doDim = [&](PropElemOp op) {
-      if (flavor == StackSym::L) {
-        if (opts.fpass) {
-          e.FPassDimL(opts.paramId, m_evalStack.getLoc(i), op);
-        } else {
-          e.DimL(m_evalStack.getLoc(i), op, opts.flags);
-        }
-      } else if (flavor == StackSym::I) {
-        if (opts.fpass) {
-          e.FPassDimInt(opts.paramId, m_evalStack.getInt(i), op);
-        } else {
-          e.DimInt(m_evalStack.getInt(i), op, opts.flags);
-        }
-      } else if (flavor == StackSym::T) {
-        if (opts.fpass) {
-          e.FPassDimStr(opts.paramId, m_evalStack.getName(i), op);
-        } else {
-          e.DimStr(m_evalStack.getName(i), op, opts.flags);
-        }
-      } else {
-        if (opts.fpass) {
-          e.FPassDimC(opts.paramId, stackIdx(i), op);
-        } else {
-          e.DimC(stackIdx(i), op, opts.flags);
-        }
-      }
-    };
-
-    switch (StackSym::GetMarker(sym)) {
-      case StackSym::M:
-        always_assert(false); // should only be final stack element
-        break;
-      case StackSym::P:
-        doDim(PropElemOp::Prop);
-        break;
-      case StackSym::Q:
-        doDim(PropElemOp::PropQ);
-        break;
-      case StackSym::E:
-        doDim(PropElemOp::Elem);
-        break;
-      case StackSym::W:
-        if (opts.allowW) {
-          if (opts.fpass) {
-            e.FPassDimNewElem(opts.paramId);
-          } else {
-            e.DimNewElem(opts.flags);
-          }
-        } else {
-          throw IncludeTimeFatalException(e.getNode(),
-                                          "Cannot use [] for reading");
-        }
-        break;
-      case StackSym::S:
-      default:
-        always_assert(false && "Bad intermediate marker");
+    if (opts.fpass) {
+      e.FPassDim(opts.paramId, symToMemberKey(e, i, opts.allowW));
+    } else {
+      e.Dim(opts.flags, symToMemberKey(e, i, opts.allowW));
     }
   }
 
@@ -5241,21 +5216,51 @@ size_t EmitterVisitor::emitMOp(
   return stackCount;
 }
 
-static folly::Optional<PropElemOp> symToPropElem(
-  Emitter& e, char sym, bool allowW
-) {
-  switch (StackSym::GetMarker(sym)) {
-    case StackSym::P:
-      return PropElemOp::Prop;
-    case StackSym::E:
-      return PropElemOp::Elem;
-    case StackSym::Q:
-      return PropElemOp::PropQ;
-    case StackSym::W:
-      if (allowW) return folly::none;
-      throw EmitterVisitor::IncludeTimeFatalException(
-        e.getNode(), "Cannot use [] for reading"
-      );
+MemberKey EmitterVisitor::symToMemberKey(Emitter& e, int i, bool allowW) {
+  auto const sym = m_evalStack.get(i);
+  auto const marker = StackSym::GetMarker(sym);
+  if (marker == StackSym::W) {
+    if (allowW) return MemberKey{};
+
+    throw EmitterVisitor::IncludeTimeFatalException(
+      e.getNode(), "Cannot use [] for reading"
+    );
+  }
+
+  switch (StackSym::GetSymFlavor(sym)) {
+    case StackSym::L: {
+      auto const local = m_evalStack.getLoc(i);
+      switch (marker) {
+        case StackSym::E: return MemberKey{MEL, local};
+        case StackSym::P: return MemberKey{MPL, local};
+        default:          always_assert(false);
+      }
+    }
+    case StackSym::C: {
+      auto const idx =
+        int32_t(m_evalStack.actualSize() - 1 - m_evalStack.getActualPos(i));
+      switch (marker) {
+        case StackSym::E: return MemberKey{MEC, idx};
+        case StackSym::P: return MemberKey{MPC, idx};
+        default:          always_assert(false);
+      }
+    }
+    case StackSym::I: {
+      auto const int64 = m_evalStack.getInt(i);
+      switch (marker) {
+        case StackSym::E: return MemberKey{MEI, int64};
+        default:          always_assert(false);
+      }
+    }
+    case StackSym::T: {
+      auto const str = m_evalStack.getName(i);
+      switch (marker) {
+        case StackSym::E: return MemberKey{MET, str};
+        case StackSym::P: return MemberKey{MPT, str};
+        case StackSym::Q: return MemberKey{MQT, str};
+        default:          always_assert(false);
+      }
+    }
     default:
       always_assert(false);
   }
@@ -5340,22 +5345,7 @@ void EmitterVisitor::emitQueryMOp(int iFirst, int iLast, Emitter& e,
                                   QueryMOp op) {
   auto const flags = getQueryMOpFlags(op);
   auto const stackCount = emitMOp(iFirst, iLast, e, MInstrOpts{flags});
-
-  auto const sym = m_evalStack.get(iLast);
-  if (auto const pe = symToPropElem(e, sym, false)) {
-    switch (StackSym::GetSymFlavor(sym)) {
-      case StackSym::L:
-        return e.QueryML(stackCount, op, *pe, m_evalStack.getLoc(iLast));
-      case StackSym::C:
-        return e.QueryMC(stackCount, op, *pe);
-      case StackSym::I:
-        return e.QueryMInt(stackCount, op, *pe, m_evalStack.getInt(iLast));
-      case StackSym::T:
-        return e.QueryMStr(stackCount, op, *pe, m_evalStack.getName(iLast));
-    }
-  }
-
-  always_assert(false);
+  e.QueryM(stackCount, op, symToMemberKey(e, iLast, false /* allowW */));
 }
 
 void EmitterVisitor::emitCGet(Emitter& e) {
@@ -5456,28 +5446,7 @@ bool EmitterVisitor::emitVGet(Emitter& e, bool skipCells) {
   } else {
     auto const stackCount =
       emitMOp(i, iLast, e, MInstrOpts{MOpFlags::DefineReffy});
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          e.VGetML(stackCount, *pe, m_evalStack.getLoc(iLast));
-          break;
-        case StackSym::C:
-          e.VGetMC(stackCount, *pe);
-          break;
-        case StackSym::I:
-          e.VGetMInt(stackCount, *pe, m_evalStack.getInt(iLast));
-          break;
-        case StackSym::T:
-          e.VGetMStr(stackCount, *pe, m_evalStack.getName(iLast));
-          break;
-        default:
-          always_assert(false);
-      }
-    } else {
-      e.VGetMNewElem(stackCount);
-    }
+    e.VGetM(stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
   return false;
 }
@@ -5768,26 +5737,7 @@ void EmitterVisitor::emitFPass(Emitter& e, int paramId,
     }
   } else {
     auto const stackCount = emitMOp(i, iLast, e, MInstrOpts{paramId});
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.FPassML(paramId, stackCount, *pe,
-                           m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.FPassMC(paramId, stackCount, *pe);
-        case StackSym::I:
-          return e.FPassMInt(paramId, stackCount, *pe,
-                             m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return e.FPassMStr(paramId, stackCount, *pe,
-                             m_evalStack.getName(iLast));
-        default:
-          always_assert(false);
-      }
-    }
-
-    e.FPassMNewElem(paramId, stackCount);
+    e.FPassM(paramId, stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
 
@@ -5907,24 +5857,7 @@ void EmitterVisitor::emitUnset(Emitter& e,
     }
   } else {
     auto const stackCount = emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Unset});
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, false)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.UnsetML(stackCount, *pe, m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.UnsetMC(stackCount, *pe);
-        case StackSym::I:
-          return e.UnsetMInt(stackCount, *pe, m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return e.UnsetMStr(stackCount, *pe, m_evalStack.getName(iLast));
-        default:
-          break;
-      }
-    }
-
-    always_assert(false);
+    e.UnsetM(stackCount, symToMemberKey(e, iLast, false /* allowW */));
   }
 }
 
@@ -5958,24 +5891,7 @@ void EmitterVisitor::emitSet(Emitter& e) {
   } else {
     auto const stackCount =
       emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Define}.rhs());
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.SetML(stackCount, *pe, m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.SetMC(stackCount, *pe);
-        case StackSym::I:
-          return e.SetMInt(stackCount, *pe, m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return e.SetMStr(stackCount, *pe, m_evalStack.getName(iLast));
-        default:
-          always_assert(false);
-      }
-    }
-
-    e.SetMNewElem(stackCount);
+    return e.SetM(stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
 
@@ -6030,25 +5946,7 @@ void EmitterVisitor::emitSetOp(Emitter& e, int tokenOp) {
   } else {
     auto const stackCount =
       emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Define}.rhs());
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.SetOpML(stackCount, *pe, op, m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.SetOpMC(stackCount, *pe, op);
-        case StackSym::I:
-          return e.SetOpMInt(stackCount, *pe, op, m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return
-            e.SetOpMStr(stackCount, *pe, op, m_evalStack.getName(iLast));
-        default:
-          always_assert(false);
-      }
-    }
-
-    e.SetOpMNewElem(stackCount, op);
+    e.SetOpM(stackCount, op, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
 
@@ -6077,24 +5975,7 @@ void EmitterVisitor::emitBind(Emitter& e) {
   } else {
     auto const stackCount =
       emitMOp(i, iLast, e, MInstrOpts{MOpFlags::DefineReffy}.rhs());
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.BindML(stackCount, *pe, m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.BindMC(stackCount, *pe);
-        case StackSym::I:
-          return e.BindMInt(stackCount, *pe, m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return e.BindMStr(stackCount, *pe, m_evalStack.getName(iLast));
-        default:
-          always_assert(false);
-      }
-    }
-
-    e.BindMNewElem(stackCount);
+    e.BindM(stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
 
@@ -6124,25 +6005,7 @@ void EmitterVisitor::emitIncDec(Emitter& e, IncDecOp op) {
   } else {
     auto const stackCount =
       emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Define});
-
-    auto const sym = m_evalStack.get(iLast);
-    if (auto const pe = symToPropElem(e, sym, true)) {
-      switch (StackSym::GetSymFlavor(sym)) {
-        case StackSym::L:
-          return e.IncDecML(stackCount, *pe, op, m_evalStack.getLoc(iLast));
-        case StackSym::C:
-          return e.IncDecMC(stackCount, *pe, op);
-        case StackSym::I:
-          return e.IncDecMInt(stackCount, *pe, op, m_evalStack.getInt(iLast));
-        case StackSym::T:
-          return
-            e.IncDecMStr(stackCount, *pe, op, m_evalStack.getName(iLast));
-        default:
-          always_assert(false);
-      }
-    }
-
-    e.IncDecMNewElem(stackCount, op);
+    e.IncDecM(stackCount, op, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
 
@@ -7234,6 +7097,10 @@ void EmitterVisitor::emitDeprecationWarning(Emitter& e,
 
   // how often to display the warning (1 / rate)
   auto rate = deprArgs.size() > 1 ? deprArgs[1]->getLiteralInteger() : 1;
+  if (rate <= 0) {
+    // deprecation warnings disabled
+    return;
+  }
 
   { // preface the message with the name of the offending function
     auto funcName = funcScope->getScopeName();
@@ -8532,9 +8399,7 @@ void EmitterVisitor::emitClass(Emitter& e,
 
 namespace {
 
-class ForeachIterGuard {
-  EmitterVisitor& m_ev;
- public:
+struct ForeachIterGuard {
   ForeachIterGuard(EmitterVisitor& ev,
                    Id iterId,
                    IterKind kind)
@@ -8545,6 +8410,9 @@ class ForeachIterGuard {
   ~ForeachIterGuard() {
     m_ev.popIterScope();
   }
+
+private:
+  EmitterVisitor& m_ev;
 };
 
 }
@@ -9954,8 +9822,7 @@ static UnitEmitter* emitHHBCVisitor(AnalysisResultPtr ar, FileScopeRawPtr fsp) {
   return ue;
 }
 
-class UEQ : public Synchronizable {
- public:
+struct UEQ : Synchronizable {
   void push(UnitEmitter* ue) {
     assert(ue != nullptr);
     Lock lock(this);

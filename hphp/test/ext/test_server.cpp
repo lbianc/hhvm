@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -251,8 +251,7 @@ void TestServer::KillServer() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class TestServerRequestHandler : public RequestHandler {
-public:
+struct TestServerRequestHandler : RequestHandler {
   explicit TestServerRequestHandler(int timeout) : RequestHandler(timeout) {}
   // implementing RequestHandler
   virtual void handleRequest(Transport *transport) {
@@ -486,8 +485,7 @@ bool TestServer::TestSetCookie() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class TestTransport : public Transport {
-public:
+struct TestTransport : Transport {
   TestTransport() : m_code(0) {}
 
   int m_code;
@@ -650,8 +648,7 @@ bool TestServer::TestTakeoverServer() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class EchoHandler : public RequestHandler {
-public:
+struct EchoHandler : RequestHandler {
   explicit EchoHandler(int timeout) : RequestHandler(timeout) {}
   // implementing RequestHandler
   virtual void handleRequest(Transport *transport) {

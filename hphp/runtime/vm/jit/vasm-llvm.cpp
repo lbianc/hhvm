@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -21,7 +21,6 @@
 
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/align-x64.h"
 #include "hphp/runtime/vm/jit/code-gen-x64.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
@@ -32,7 +31,7 @@
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
-#include "hphp/runtime/vm/jit/unwind.h"
+#include "hphp/runtime/vm/jit/unwind-itanium.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
@@ -303,7 +302,7 @@ void reportLLVMError(void* data, const std::string& err, bool gen_crash_diag) {
 
 InitFiniNode llvmInit(
   []() { llvm::install_fatal_error_handler(reportLLVMError); },
-  InitFiniNode::When::ProcessInit);
+  InitFiniNode::When::ProcessInit, "llvm");
 
 InitFiniNode llvmExit(llvm::remove_fatal_error_handler,
                       InitFiniNode::When::ProcessExit);
@@ -953,11 +952,11 @@ struct LLVMEmitter {
 
         auto const alignment = cc == CC_None ? Alignment::SmashJmp
                                              : Alignment::SmashJcc;
-        mcg->cgFixups().m_alignFixups.emplace(
+        mcg->cgFixups().alignFixups.emplace(
           jmpIp,
           std::make_pair(alignment, AlignContext::Live)
         );
-        mcg->setJmpTransID(jmpIp);
+        mcg->setJmpTransID(jmpIp, m_unit.transKind);
 
         if (found) {
           // If LLVM duplicated the tail call into more than one jmp
@@ -1672,6 +1671,7 @@ O(unpcklpd)
       case Vinstr::tailcallstub:
       case Vinstr::callfaststub:
       case Vinstr::phplogue:
+      case Vinstr::stubtophp:
       case Vinstr::tailcallphp:
       case Vinstr::callarray:
       case Vinstr::nothrow:
@@ -2027,7 +2027,7 @@ void LLVMEmitter::emit(const bindaddr& inst) {
   // do what vasm does here.
 
   auto& frozen = m_text.frozen().code;
-  mcg->setJmpTransID((TCA)inst.addr);
+  mcg->setJmpTransID((TCA)inst.addr, m_unit.transKind);
 
   auto optSPOff = folly::Optional<FPInvOffset>{};
   if (!inst.target.resumed()) optSPOff = inst.spOff;
@@ -2041,8 +2041,8 @@ void LLVMEmitter::emit(const bindaddr& inst) {
     inst.target.toAtomicInt(),
     TransFlags{}.packed
   );
-  mcg->cgFixups().m_codePointers.insert(inst.addr);
-  mcg->setJmpTransID(TCA(inst.addr));
+  mcg->cgFixups().codePointers.insert(inst.addr);
+  mcg->setJmpTransID(TCA(inst.addr), m_unit.transKind);
 }
 
 void LLVMEmitter::emit(const defvmsp& inst) {
@@ -2078,7 +2078,7 @@ std::vector<llvm::Value*> LLVMEmitter::makePhysRegArgs(RegSet argRegs) {
     auto reg = kHHVMCCRegs[i];
     if (argRegs.contains(reg)) {
       ret.emplace_back(value(reg));
-      passed.add(reg);
+      passed |= reg;
       lastSet = i;
     } else {
       ret.emplace_back(m_int64Undef);
@@ -2915,7 +2915,7 @@ void LLVMEmitter::emit(const phpret& inst) {
 
 void LLVMEmitter::emit(const leavetc& inst) {
   auto const exit = reinterpret_cast<intptr_t>(
-    mcg->tx().uniqueStubs.callToExit
+    mcg->ustubs().callToExit
   );
   auto const exit_ptr = m_irb.CreateIntToPtr(
     cns(exit),

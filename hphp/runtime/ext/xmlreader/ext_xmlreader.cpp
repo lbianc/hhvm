@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -546,9 +546,9 @@ struct XMLPropertyAccessor {
   int return_type;
 };
 
-class XMLPropertyAccessorMap :
-      private hphp_const_char_map<XMLPropertyAccessor*> {
-public:
+struct XMLPropertyAccessorMap
+  : private hphp_const_char_map<XMLPropertyAccessor*>
+{
   explicit XMLPropertyAccessorMap(XMLPropertyAccessor* props,
                                   XMLPropertyAccessorMap *base = nullptr) {
     if (base) {
@@ -692,8 +692,7 @@ Variant HHVM_METHOD(XMLReader, expand,
 ///////////////////////////////////////////////////////////////////////////////
 
 const StaticString s_XMLReader("XMLReader");
-static class XMLReaderExtension final : public Extension {
-public:
+static struct XMLReaderExtension final : Extension {
   XMLReaderExtension() : Extension("xmlreader", "0.1") {}
   void moduleInit() override {
     HHVM_RCC_INT(XMLReader, NONE, XML_READER_TYPE_NONE);

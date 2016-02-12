@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -37,7 +37,7 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
 ALWAYS_INLINE bool isPrologueStub(TCA addr) {
-  return addr == mcg->tx().uniqueStubs.fcallHelperThunk;
+  return addr == mcg->ustubs().fcallHelperThunk;
 }
 
 vixl::Register X(Vreg64 r) {
@@ -72,7 +72,7 @@ void emitFuncGuard(const Func* func, CodeBlock& cb) {
   a.  Br    (rAsm);
 
   a.  bind  (&target_data);
-  a.  dc64  (mcg->tx().uniqueStubs.funcPrologueRedispatch);
+  a.  dc64  (mcg->ustubs().funcPrologueRedispatch);
   a.  bind  (&after_data);
 }
 

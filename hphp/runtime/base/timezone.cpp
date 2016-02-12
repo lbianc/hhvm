@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -35,8 +35,7 @@ namespace HPHP {
 IMPLEMENT_RESOURCE_ALLOCATION(TimeZone)
 ///////////////////////////////////////////////////////////////////////////////
 
-class GuessedTimeZone {
-public:
+struct GuessedTimeZone {
   std::string m_tzid;
 
   GuessedTimeZone() {
@@ -64,8 +63,7 @@ static std::atomic<const timelib_tzdb*> s_tzdb_cache { nullptr };
 ///////////////////////////////////////////////////////////////////////////////
 // statics
 
-class TimeZoneData {
-public:
+struct TimeZoneData {
   TimeZoneData() : Database(nullptr) {}
 
   const timelib_tzdb *Database;

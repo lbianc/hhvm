@@ -234,6 +234,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::storewi:
     case Vinstr::stublogue:
     case Vinstr::stubret:
+    case Vinstr::stubtophp:
     case Vinstr::syncpoint:
     case Vinstr::syncvmsp:
     case Vinstr::tailcallphp:

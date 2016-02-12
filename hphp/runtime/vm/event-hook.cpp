@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -357,7 +357,7 @@ void EventHook::onFunctionExit(const ActRec* ar, const TypedValue* retval,
   // side exit in an inlined callee, we short-circuit here in order to skip
   // exit events that could unbalance the call stack.
   if (RuntimeOption::EvalJit &&
-      ((jit::TCA) ar->m_savedRip == jit::mcg->tx().uniqueStubs.retInlHelper)) {
+      ((jit::TCA) ar->m_savedRip == jit::mcg->ustubs().retInlHelper)) {
     return;
   }
 

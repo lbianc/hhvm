@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -138,8 +138,7 @@ struct RequestMemoryExceededException : ResourceExceededException {
 
 //////////////////////////////////////////////////////////////////////
 
-class ExitException : public ExtendedException {
-public:
+struct ExitException : ExtendedException {
   static std::atomic<int> ExitCode; // XXX should not be static
 
   explicit ExitException(int exitCode) {
@@ -148,8 +147,7 @@ public:
   EXCEPTION_COMMON_IMPL(ExitException);
 };
 
-class PhpFileDoesNotExistException : public ExtendedException {
-public:
+struct PhpFileDoesNotExistException : ExtendedException {
   explicit PhpFileDoesNotExistException(const char *file)
     : ExtendedException("File could not be loaded: %s", file) {}
   explicit PhpFileDoesNotExistException(const char *msg, bool empty_file)

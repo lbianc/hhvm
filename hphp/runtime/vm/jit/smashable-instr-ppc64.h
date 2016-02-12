@@ -40,22 +40,26 @@ constexpr size_t smashableMovqLen() { return kStdIns * 5; }
 // li64 + cmpd
 constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
 
+// prologue of call function until the li64 takes place. It skips:
+// mflr, std, std, addi, std
+constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 5; }
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
-// mflr, std, std, addi, std, li64 (5 instr), mtctr, bctrl
-constexpr size_t smashableCallLen() { return kStdIns * 12; }
-// prologue of call function until the li64 takes place:
-// skips mflr, std, std, addi, std
-constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 5; }
-// epilogue of call function after the return address:
-// skips ld, addi, ld, mtlr
+// prologue, li64 (5 instr), mtctr, bctrl
+constexpr size_t smashableCallLen() {
+  return smashableCallSkipPrologue() + kStdIns * 7;
+}
+// to check the bctrl, it has to be on that instruction so don't skip that
+constexpr uint8_t smashableCallSkip() { return smashableCallLen() - kStdIns; }
+// epilogue of call function after the return address. It skips:
+// ld, addi, ld, mtlr
 constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 4; }
 
 // li64 + mtctr + bcctr
 constexpr size_t smashableJccLen()  { return kStdIns * 7; }
-// to analyse the cc, it has to skip the li64 + mtctr
-constexpr size_t smashableJccSkip() { return kStdIns * 6; }
+// to analyse the cc, it has to be on the bcctr that the smashableJccLen skips
+constexpr size_t smashableJccSkip() { return smashableJccLen() - kStdIns; }
 
 // Same length as Jcc
 constexpr size_t smashableJmpLen()  { return smashableJccLen(); }
@@ -80,6 +84,9 @@ TCA smashableCallTarget(TCA inst);
 TCA smashableJmpTarget(TCA inst);
 TCA smashableJccTarget(TCA inst);
 ConditionCode smashableJccCond(TCA inst);
+
+constexpr size_t kSmashMovqImmOff = 0;
+constexpr size_t kSmashCmpqImmOff = 0;
 
 ///////////////////////////////////////////////////////////////////////////////
 

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -441,6 +441,7 @@ void HHProf::finishProfiledRequest() {
     std::string result;
     std::vector<folly::StringPiece> addrs;
     folly::split('+', folly::StringPiece(data, size), addrs);
+    bool phpOnly = (transport->getParam("retain") == "^PHP::");
     // For each address append a line of the form:
     //   <addr>\t<symbol>
     StackTrace::PerfMap pm;
@@ -450,11 +451,14 @@ void HHProf::finishProfiledRequest() {
       }
       std::string sval(addr.data(), addr.size());
       void* pval = (void*)std::stoull(sval, 0, 16);
+      if (phpOnly && !jit::mcg->isValidCodeAddress(jit::TCA(pval))) {
+        continue;
+      }
       std::shared_ptr<StackTrace::Frame> frame = StackTrace::Translate(pval,
                                                                        &pm);
       if (frame->funcname != "TC?") {
         folly::toAppend(addr, "\t", frame->funcname, "\n", &result);
-      } else if (jit::mcg->isValidCodeAddress(jit::TCA(pval))) {
+      } else if (phpOnly || jit::mcg->isValidCodeAddress(jit::TCA(pval))) {
         // Prefix address such that it can be distinguished as residing within
         // an unresolved PHP function.
         folly::toAppend(addr, "\tPHP::", sval, "\n", &result);

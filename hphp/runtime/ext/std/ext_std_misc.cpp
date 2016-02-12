@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -36,7 +36,6 @@
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/type-profile.h"
-#include "hphp/system/constants.h"
 #include "hphp/util/current-executable.h"
 #include "hphp/util/logger.h"
 #ifndef _MSC_VER
@@ -128,6 +127,8 @@ void StandardExtension::threadInitMisc() {
       "display_errors", RuntimeOption::EnableHipHopSyntax ? "stderr" : "1",
       IniSetting::SetAndGet<std::string>(
         [](const std::string& value) {
+          *s_misc_display_errors = value;
+
           if (value == s_1 || value == s_stdout) {
             Logger::SetStandardOut(stdout);
             return true;
@@ -752,7 +753,9 @@ const int UserTokenId_T_SUPER = 436;
 const int UserTokenId_T_SPACESHIP = 437;
 const int UserTokenId_T_COALESCE = 438;
 const int UserTokenId_T_YIELD_FROM = 439;
-const int MaxUserTokenId = 440; // Marker, not a real user token ID
+const int UserTokenId_T_PIPE = 440;
+const int UserTokenId_T_PIPE_VAR = 441;
+const int MaxUserTokenId = 442; // Marker, not a real user token ID
 
 #undef YYTOKENTYPE
 #undef YYTOKEN_MAP

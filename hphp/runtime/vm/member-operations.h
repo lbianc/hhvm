@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,6 +22,7 @@
 #include "hphp/runtime/base/array-data-defs.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/collections.h"
+#include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/tv-conversions.h"
 #include "hphp/runtime/base/type-array.h"
@@ -34,8 +35,7 @@ namespace HPHP {
 
 const StaticString s_storage("storage");
 
-class InvalidSetMException : public std::runtime_error {
- public:
+struct InvalidSetMException : std::runtime_error {
   InvalidSetMException()
     : std::runtime_error("Empty InvalidSetMException")
     , m_tv(make_tv<KindOfNull>())
@@ -50,10 +50,11 @@ class InvalidSetMException : public std::runtime_error {
   ~InvalidSetMException() noexcept {}
 
   const TypedValue& tv() const { return m_tv; };
+
  private:
   /* m_tv will contain a TypedValue with a reference destined for the
    * VM eval stack. */
-  const TypedValue m_tv;
+  req::root<TypedValue> m_tv;
 };
 
 // When MoreWarnings is set to true, the VM will raise more warnings

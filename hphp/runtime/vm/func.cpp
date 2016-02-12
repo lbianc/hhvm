@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -237,7 +237,7 @@ void Func::initPrologues(int numParams) {
     return;
   }
 
-  auto const& stubs = mcg->tx().uniqueStubs;
+  auto const& stubs = mcg->ustubs();
 
   m_funcBody = stubs.funcBodyHelperThunk;
 
@@ -586,7 +586,7 @@ int Func::numPrologues() const {
 }
 
 void Func::resetPrologue(int numParams) {
-  auto const& stubs = mcg->tx().uniqueStubs;
+  auto const& stubs = mcg->ustubs();
   m_prologueTable[numParams] = stubs.fcallHelperThunk;
 }
 

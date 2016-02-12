@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -39,8 +39,7 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class ImapStream : public SweepableResourceData {
-public:
+struct ImapStream : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(ImapStream);
 
   ImapStream(MAILSTREAM *stream, int64_t flag)
@@ -1570,8 +1569,7 @@ static Variant HHVM_FUNCTION(imap_utf8, const String& mime_encoded_text) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static class imapExtension final : public Extension {
-public:
+static struct imapExtension final : Extension {
   imapExtension() : Extension("imap", NO_EXTENSION_VERSION_YET) {}
 
   void moduleInit() override {

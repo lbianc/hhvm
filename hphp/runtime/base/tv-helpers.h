@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -774,13 +774,12 @@ ALWAYS_INLINE bool tvCoerceParamInPlace(TypedValue* tv, DataType DType) {
  * TVCoercionException is thrown to indicate that a parameter could not be
  * coerced when calling an HNI builtin function.
  */
-struct TVCoercionException : public std::runtime_error {
+struct TVCoercionException : std::runtime_error {
   TVCoercionException(const Func* func, int arg_num,
                       DataType actual, DataType expected);
-
   TypedValue tv() const { return m_tv; }
 private:
-  TypedValue m_tv;
+  req::root<TypedValue> m_tv;
 };
 
 // for debugging & instrumentation only! otherwise, stick to the

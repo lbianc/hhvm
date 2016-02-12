@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -159,7 +159,7 @@ void SrcRec::registerFallbackJump(TCA from, ConditionCode cc /* = -1 */) {
 
   // We'll need to know the location of this jump later so we can
   // patch it to new translations added to the chain.
-  mcg->cgFixups().m_inProgressTailJumps.push_back(incoming);
+  mcg->cgFixups().inProgressTailJumps.push_back(incoming);
 }
 
 void SrcRec::newTranslation(TransLoc loc,

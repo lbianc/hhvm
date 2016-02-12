@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -28,12 +28,9 @@
 #include "hphp/runtime/base/thread-info.h"
 #include "hphp/runtime/server/rpc-request-handler.h"
 
-#define DANGLING_HEADER "HPHP_DANGLING"
-
 namespace HPHP {
 
-static class ServerExtension final : public Extension {
-public:
+static struct ServerExtension final : Extension {
   ServerExtension() : Extension("server", NO_EXTENSION_VERSION_YET) {}
   void moduleInit() override {
     HHVM_RC_INT_SAME(PAGELET_NOT_READY);
@@ -68,43 +65,9 @@ int64_t HHVM_FUNCTION(hphp_thread_type) {
   return transport ? static_cast<int64_t>(transport->getThreadType()) : -1;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// dangling server
-
 bool HHVM_FUNCTION(dangling_server_proxy_old_request) {
-  static bool s_detected_dangling_server = true;
-
-  if (!s_detected_dangling_server ||
-      SatelliteServerInfo::DanglingServerPort == 0) {
-    return false;
-  }
-
-  Transport *transport = g_context->getTransport();
-  if (transport == NULL) {
-    return false;
-  }
-  if (!transport->getHeader(DANGLING_HEADER).empty()) {
-    // if we are processing a dangling server request, do not do it again
-    return false;
-  }
-
-  std::string url = "http://localhost:" +
-    folly::to<std::string>(SatelliteServerInfo::DanglingServerPort) +
-    transport->getServerObject();
-
-  int code = 0;
-  std::string error;
-  StringBuffer response;
-  HeaderMap headers;
-  headers[DANGLING_HEADER].push_back("1");
-  if (!HttpProtocol::ProxyRequest(transport, false, url, code, error,
-                                  response, &headers)) {
-    s_detected_dangling_server = false;
-    return false;
-  }
-  transport->setResponse(code, "dangling_server_proxy_old_request");
-  g_context->write(response.detach());
-  return true;
+  // We no longer use dangling server now.
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

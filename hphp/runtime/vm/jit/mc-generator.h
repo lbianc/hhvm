@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -23,6 +23,7 @@
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/code-cache.h"
+#include "hphp/util/eh-frame.h"
 #include "hphp/util/ringbuffer.h"
 
 #include "hphp/runtime/base/repo-auth-type.h"
@@ -38,7 +39,7 @@
 #include "hphp/runtime/vm/jit/fixup.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/translator.h"
-#include "hphp/runtime/vm/jit/unwind.h"
+#include "hphp/runtime/vm/jit/unique-stubs.h"
 
 namespace HPHP { namespace jit {
 
@@ -87,25 +88,25 @@ struct PendingFixup {
 };
 
 struct CodeGenFixups {
-  std::vector<PendingFixup> m_pendingFixups;
-  std::vector<std::pair<CTCA, TCA>> m_pendingCatchTraces;
-  std::vector<std::pair<TCA,TransID>> m_pendingJmpTransIDs;
-  std::vector<TCA> m_reusedStubs;
-  std::set<TCA> m_addressImmediates;
-  std::set<TCA*> m_codePointers;
-  std::vector<TransBCMapping> m_bcMap;
-  std::multimap<TCA,std::pair<Alignment,AlignContext>> m_alignFixups;
-  GrowableVector<IncomingBranch> m_inProgressTailJumps;
-  LiteralMap m_literals;
+  std::vector<PendingFixup> fixups;
+  std::vector<std::pair<CTCA, TCA>> catches;
+  std::vector<std::pair<TCA,TransID>> jmpTransIDs;
+  std::vector<TCA> reusedStubs;
+  std::set<TCA> addressImmediates;
+  std::set<TCA*> codePointers;
+  std::vector<TransBCMapping> bcMap;
+  std::multimap<TCA,std::pair<Alignment,AlignContext>> alignFixups;
+  GrowableVector<IncomingBranch> inProgressTailJumps;
+  LiteralMap literals;
 
-  CodeBlock* m_tletMain{nullptr};
-  CodeBlock* m_tletCold{nullptr};
-  CodeBlock* m_tletFrozen{nullptr};
+  CodeBlock* mainCode{nullptr};
+  CodeBlock* coldCode{nullptr};
+  CodeBlock* frozenCode{nullptr};
 
   void setBlocks(CodeBlock* main, CodeBlock* cold, CodeBlock* frozen) {
-    m_tletMain = main;
-    m_tletCold = cold;
-    m_tletFrozen = frozen;
+    mainCode = main;
+    coldCode = cold;
+    frozenCode = frozen;
   }
 
   void process_only(GrowableVector<IncomingBranch>* inProgressTailBranches);
@@ -125,6 +126,8 @@ struct UsageInfo {
 };
 
 struct TransRelocInfo;
+
+using CatchTraceMap = TreadHashMap<CTCA, TCA, ctca_identity_hash>;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -156,6 +159,7 @@ public:
   /*
    * Accessors.
    */
+  const UniqueStubs& ustubs() const { return m_ustubs; }
   Translator& tx() { return m_tx; }
   FixupMap& fixupMap() { return m_fixupMap; }
   CodeGenFixups& cgFixups() { return m_fixups; }
@@ -218,7 +222,7 @@ public:
   void enterTC(TCA start, ActRec* stashedAR);
  public:
   void enterTC() {
-    enterTC(m_tx.uniqueStubs.resumeHelper, nullptr);
+    enterTC(ustubs().resumeHelper, nullptr);
   }
   void enterTCAtPrologue(ActRec *ar, TCA start) {
     assertx(ar);
@@ -260,7 +264,7 @@ public:
   folly::Optional<TCA> getCatchTrace(CTCA ip) const;
   CatchTraceMap& catchTraceMap() { return m_catchTraceMap; }
   TCA getTranslatedCaller() const;
-  void setJmpTransID(TCA jmp);
+  void setJmpTransID(TCA jmp, TransKind kind);
   bool profileSrcKey(SrcKey sk) const;
   void getPerfCounters(Array& ret);
   bool reachedTranslationLimit(SrcKey, const SrcRec&) const;
@@ -284,9 +288,8 @@ public:
    * in bytes. Note that the code may have been emitted by other threads.
    */
   void codeEmittedThisRequest(size_t& requestEntry, size_t& now) const;
-public:
-  CodeCache code;
 
+public:
   /*
    * This function is called by translated code to handle service requests,
    * which usually involve some kind of jump smashing. The returned address
@@ -348,7 +351,7 @@ private:
                    bool toTake,
                    bool& smashed);
 
-  bool shouldTranslate(const Func*) const;
+  bool shouldTranslate(const Func*, TransKind) const;
   bool shouldTranslateNoSizeLimit(const Func*) const;
 
   TCA getTopTranslation(SrcKey sk) {
@@ -359,6 +362,7 @@ private:
 
   TCA getTranslation(const TranslArgs& args);
   TCA createTranslation(const TranslArgs& args);
+  bool createRetranslateStub(SrcKey sk);
   TCA retranslate(const TranslArgs& args);
   TCA translate(const TranslArgs& args);
   TCA translateWork(const TranslArgs& args);
@@ -391,14 +395,20 @@ private:
   bool dumpTCData();
   void drawCFG(std::ofstream& out) const;
 
+  /////////////////////////////////////////////////////////////////////////////
+
+public:
+  CodeCache code;
+
 private:
-  Translator         m_tx;
+  UniqueStubs m_ustubs;
+  Translator m_tx;
 
   // maps jump addresses to the ID of translation containing them.
   TcaTransIDMap      m_jmpToTransID;
   uint64_t           m_numTrans;
   FixupMap           m_fixupMap;
-  UnwindInfoHandle   m_unwindRegistrar;
+  EHFrameHandle      m_unwindRegistrar;
   CatchTraceMap      m_catchTraceMap;
   Debug::DebugInfo   m_debugInfo;
   FreeStubList       m_freeStubs;

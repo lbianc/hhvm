@@ -9,7 +9,6 @@
  *)
 
 open Core
-open Utils
 
 module Reason = Typing_reason
 module SN = Naming_special_names
@@ -398,6 +397,16 @@ and typeconst_type = {
 and enum_type = {
   te_base       : decl ty;
   te_constraint : decl ty option;
+}
+
+and typedef_visibility = Transparent | Opaque
+
+and typedef_type = {
+  td_pos: Pos.t;
+  td_vis: typedef_visibility;
+  td_tparams: tparam list;
+  td_constraint: decl ty option;
+  td_type: decl ty;
 }
 
 and tparam = Ast.variance * Ast.id * (Ast.constraint_kind * decl ty) option

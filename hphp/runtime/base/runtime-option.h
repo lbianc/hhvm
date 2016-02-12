@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -34,13 +34,13 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class AccessLogFileData;
+struct AccessLogFileData;
 struct VirtualHost;
 struct IpBlockMap;
 struct SatelliteServerInfo;
 struct FilesMatch;
 struct Hdf;
-class IniSettingMap;
+struct IniSettingMap;
 
 constexpr int kDefaultInitialStaticStringTableSize = 500000;
 
@@ -48,8 +48,7 @@ constexpr int kDefaultInitialStaticStringTableSize = 500000;
  * Configurable options set from command line or configurable file at startup
  * time.
  */
-class RuntimeOption {
-public:
+struct RuntimeOption {
   static void Load(
     IniSettingMap &ini, Hdf& config,
     const std::vector<std::string>& iniClis = std::vector<std::string>(),
@@ -92,17 +91,13 @@ public:
 
   static std::string ServerUser; // run server under this user account
 
-  static int  MaxLoopCount;
   static int  MaxSerializedStringSize;
   static bool NoInfiniteRecursionDetection;
-  static bool WarnTooManyArguments;
-  static bool EnableHipHopErrors;
   static bool AssertEmitted;
   static int64_t NoticeFrequency; // output 1 out of NoticeFrequency notices
   static int64_t WarningFrequency;
   static int RaiseDebuggingFrequency;
   static int64_t SerializationSizeLimit;
-  static int64_t StringOffsetLimit;
 
   static std::string AccessLogDefaultFormat;
   static std::map<std::string, AccessLogFileData> AccessLogs;
@@ -152,14 +147,12 @@ public:
   static int64_t ServerMemoryHeadRoom;
   static int64_t RequestMemoryMaxBytes;
   static int64_t ImageMemoryMaxBytes;
-  static int ResponseQueueCount;
   static int ServerGracefulShutdownWait;
   static int ServerDanglingWait;
   static bool ServerHarshShutdown;
   static bool ServerEvilShutdown;
   static bool ServerKillOnSIGTERM;
   static int ServerShutdownListenWait;
-  static int ServerShutdownListenNoWork;
   static std::vector<std::string> ServerNextProtocols;
   static int GzipCompressionLevel;
   static int GzipMaxCompressionLevel;
@@ -187,12 +180,10 @@ public:
   static int Rfc1867Freq;
   static std::string Rfc1867Prefix;
   static std::string Rfc1867Name;
-  static bool LibEventSyncSend;
   static bool ExpiresActive;
   static int ExpiresDefault;
   static std::string DefaultCharsetName;
   static bool ForceServerNameToHeader;
-  static bool EnableCufAsync;
   static bool PathDebug;
   static std::vector<std::shared_ptr<VirtualHost>> VirtualHosts;
   static std::shared_ptr<IpBlockMap> IpBlocks;
@@ -289,19 +280,15 @@ public:
   static int  HttpDefaultTimeout;
   static int  HttpSlowQueryThreshold;
 
-  static bool TranslateLeakStackTrace;
   static bool NativeStackTrace;
-  static bool FullBacktrace;
   static bool ServerErrorMessage;
-  static bool TranslateSource;
   static bool RecordInput;
   static bool ClearInputOnSuccess;
   static std::string ProfilerOutputDir;
   static std::string CoreDumpEmail;
   static bool CoreDumpReport;
+  static std::string CoreDumpReportDirectory;
   static std::string StackTraceFilename;
-  static bool LocalMemcache;
-  static bool MemcacheReadOnly;
   static int StackTraceTimeout;
 
   static bool EnableStats;
@@ -325,7 +312,6 @@ public:
   static int64_t MaxRSSPollingCycle;
   static int64_t DropCacheCycle;
   static int64_t MaxSQLRowCount;
-  static int64_t MaxMemcacheKeyCount;
   static int64_t SocketDefaultTimeout;
   static bool LockCodeMemory;
   static int MaxArrayChain;
@@ -465,11 +451,6 @@ public:
          with Option::HardReturnTypeHints). */                          \
   F(int32_t, CheckReturnTypeHints,     2)                               \
   F(bool, SoftClosureReturnTypeHints,  false)                           \
-  /* HackArrayWarnFrequency:
-     0 - no warnings
-     [1-UINT32_MAX] - raise warning every X times
-  */                                                                    \
-  F(uint32_t, HackArrayWarnFrequency,  0)                               \
   F(bool, AllowScopeBinding,           true)                            \
   F(bool, JitNoGdb,                    true)                            \
   F(bool, SpinOnCrash,                 false)                           \
@@ -517,6 +498,7 @@ public:
   F(uint32_t, HHIRInliningMaxDepth,    4)                               \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 6)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \
+  F(bool, HHIRPartialInlineFrameOpts,  true)                            \
   F(bool, HHIRInlineSingletons,        true)                            \
   F(std::string, InlineRegionMode,     "both")                          \
   F(bool, HHIRGenerateAsserts,         debug)                           \
@@ -538,8 +520,6 @@ public:
   F(bool,     JitPGO,                  pgoDefault())                    \
   F(string,   JitPGORegionSelector,    pgoRegionSelectorDefault())      \
   F(uint64_t, JitPGOThreshold,         pgoThresholdDefault())           \
-  F(bool,     JitPGOHotOnly,           false)                           \
-  F(bool,     JitPGOCFGHotFuncOnly,    false)                           \
   F(bool,     JitPGOUsePostConditions, true)                            \
   F(uint32_t, JitUnlikelyDecRefPercent,10)                              \
   F(uint32_t, JitPGOReleaseVVMinPercent, 10)                            \
@@ -616,6 +596,7 @@ public:
   static bool HHProfActive;
   static bool HHProfAccum;
   static bool HHProfRequest;
+  static bool TrackPerUnitMemory;
 
   // Sandbox options
   static bool SandboxMode;
@@ -671,10 +652,6 @@ public:
   // Xenon options
   static double XenonPeriodSeconds;
   static bool XenonForceAlwaysOn;
-
-  // Convenience switch to turn on/off code alternatives via command-line
-  // Do not commit code guarded by this flag, for evaluation only.
-  static int EnableAlternative;
 };
 static_assert(sizeof(RuntimeOption) == 1, "no instance variables");
 

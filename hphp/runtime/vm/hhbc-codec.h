@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -18,8 +18,12 @@
 #define incl_HPHP_VM_HHBC_CODEC_H_
 
 #include "hphp/runtime/vm/hhbc.h"
+#include "hphp/util/either.h"
 
 namespace HPHP {
+
+struct Unit;
+struct UnitEmitter;
 
 /*
  * This file contains various functions for reading and writing bytecode
@@ -139,6 +143,13 @@ int32_t decodeVariableSizeImm(PC* immPtr) {
 ALWAYS_INLINE int32_t decode_iva(PC& pc) {
   return decodeVariableSizeImm(&pc);
 }
+
+/*
+ * Decode a MemberKey, advancing pc past it.
+ */
+MemberKey decode_member_key(PC& pc, Either<const Unit*, const UnitEmitter*> u);
+
+void encode_member_key(MemberKey mk, UnitEmitter& ue);
 
 //////////////////////////////////////////////////////////////////////
 

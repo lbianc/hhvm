@@ -25,6 +25,7 @@
 #include "hphp/util/data-block.h"
 #include "hphp/runtime/vm/jit/types.h"
 
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
@@ -81,8 +82,7 @@ enum class BranchConditions {
 
 #undef BRANCHES
 
-class BranchParams {
-  public:
+struct BranchParams {
     /* BO and BI parameter mapping related to BranchConditions */
     enum class BO {
       CRNotSet              = 4,
@@ -1906,28 +1906,40 @@ struct Assembler {
   }
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64 (const Reg64& rt, int64_t imm64);
+  void li64(const Reg64& rt, int64_t imm64);
+
+  // Create a new frame on call stack
+  void pushFrame(const Reg64& rsp, const Reg64& rvmfp);
+
+  // Destroy a new frame on call stack
+  void popFrame(const Reg64& rsp);
 
   // Create prologue when calling.
-  void prologue (const Reg64& rsp,
-                 const Reg64& rtoc,
-                 const Reg64& rfuncln,
-                 const Reg64& rvmfp);
+  void prologue(const Reg64& rsp,
+                const Reg64& rtoc,
+                const Reg64& rfuncln,
+                const Reg64& rvmfp);
 
   // Create epilogue when calling.
-  void epilogue (const Reg64& rsp, const Reg64& rtoc, const Reg64& rfuncln);
+  void epilogue(const Reg64& rsp,
+                const Reg64& rtoc,
+                const Reg64& rfuncln);
 
-  void call (const Reg64& rsp,
-             const Reg64& rtoc,
-             const Reg64& rfuncln,
-             const Reg64& rvmfp,
-             CodeAddress target);
+  template <typename T>
+  void call(const Reg64& rsp,
+            const Reg64& rtoc,
+            const Reg64& rfuncln,
+            const Reg64& rvmfp,
+            T& target) {
+    prologue(rsp, rtoc, rfuncln, rvmfp);
+    branchAuto(target, BranchConditions::Always, LinkReg::Save);
+    epilogue(rsp, rtoc, rfuncln);
+  }
 
   // checks if the @inst is pointing to a call
   static inline bool isCall(HPHP::jit::TCA inst) {
-    // a call always begin with a mflr and it's rarely used elsewhere: good tag
-    return ((((inst[3] >> 2) & 0x3F) == 31) &&                          // OPCD
-      ((((inst[1] & 0x3) << 7) | ((inst[0] >> 1) & 0xFF)) == 339));     // XO
+    DecodedInstruction di(inst);
+    return di.isCall();
   }
 
   // Retrieve the target defined by li64 instruction

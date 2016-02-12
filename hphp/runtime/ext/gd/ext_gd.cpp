@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -8175,8 +8175,7 @@ Variant HHVM_FUNCTION(exif_imagetype, const String& filename) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-class ExifExtension final : public Extension {
- public:
+struct ExifExtension final : Extension {
   ExifExtension() : Extension("exif", NO_EXTENSION_VERSION_YET) {}
 
   void moduleInit() override {
@@ -8194,8 +8193,7 @@ class ExifExtension final : public Extension {
 const StaticString
   s_GD_BUNDLED("GD_BUNDLED");
 
-class GdExtension final : public Extension {
- public:
+struct GdExtension final : Extension {
   GdExtension() : Extension("gd", NO_EXTENSION_VERSION_YET) {}
 
   void moduleInit() override {

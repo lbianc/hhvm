@@ -35,7 +35,7 @@
 #include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/unique-stubs.h"
-#include "hphp/runtime/vm/jit/unwind.h"
+#include "hphp/runtime/vm/jit/unwind-itanium.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 
@@ -72,35 +72,30 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
   auto const start = vwrap(cb, [&] (Vout& v) {
     auto const ar = v.makeReg();
-    auto const retAddr = v.makeReg();
+    auto const savedRip = v.makeReg();
 
     v << copy{rvmfp(), ar};
-
-    // Increase sp of 16 byte on top of Stub ABI so that it matches the
-    // architecture's minimal call frame structure according to ABI
-    // as a unwind can happen and the stub frame must follow the ActRec
-    // structure.
-    v << addqi{-16, rsp(), rsp(), v.makeReg()};
 
     // Fully set up the call frame for the stub.  We can't skip this like we do
     // in other stubs because we need the return IP for this frame in the %rbp
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
-    v << stublogue{true};
+    v << stublogue{true};     // adds 32 bytes onto the stack
 
-    // Load return address from stublogue.
-    v << load{rsp()[8], retAddr};
-    // Place the addr in the same position that can be found as an ActRec.
-    v << store{retAddr, rsp()[16]};
-
-    v << copy{rsp(), rvmfp()};
+    // keep the savedRip on the stublogue frame
+    v << load{ar[AROFF(m_savedRip)], savedRip};
+    v << store{savedRip, rsp()[AROFF(m_savedRip)]};
 
     // When we call the event hook, it might tell us to skip the callee
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
-    v << pushm{ar[AROFF(m_savedRip)]};
+    v << pushm{ar[AROFF(m_savedToc)]};
+    v << push{savedRip};
+    v << push{rfuncln()};            // reserved. It doesn't matter
     v << pushm{ar[AROFF(m_sfp)]};
+
+    v << copy{rsp(), rvmfp()};
 
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 
@@ -110,8 +105,6 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
   us.functionEnterHelperReturn = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     auto const sf = v.makeReg();
-    auto const sp = v.makeReg();
-    auto const fp = v.makeReg();
     v << testb{rret(), rret(), sf};
 
     unlikelyIfThen(v, vcold, CC_Z, sf, [&] (Vout& v) {
@@ -122,11 +115,13 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       // site.  We just need to grab the fp/rip of the original frame that we
       // saved earlier, and sync rvmsp().
       v << pop{rvmfp()};
+      v << pop{rfuncln()};  // reserved, it doesn't matter for now
       v << pop{saved_rip};
+      v << pop{rtoc()};
 
       // Drop our call frame; the stublogue{} instruction guarantees that this
-      // is exactly 16 bytes.
-      v << addqi{16, rsp(), rsp(), v.makeReg()};
+      // is exactly 32 bytes.
+      v << lea{rsp()[32], rsp()};
 
       // Sync vmsp and return to the caller.  This unbalances the return stack
       // buffer, but if we're intercepting, we probably don't care.
@@ -135,19 +130,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     });
 
     // Skip past the stuff we saved for the intercept case.
-    v << addqi{16, rsp(), rsp(), v.makeReg()};
-
-    // When returning from the call, the frame can return to the stub format in
-    // order to execute the stubret.
-    // Removing additional 16 added before call function.
-    v << addqi{16, rsp(), rsp(), v.makeReg()};
-
-    // Values related with the stub frame are now out of the stack, and need to
-    // be placed in the right position, as stubret expects.
-    v << load{rsp()[-8], sp};  // Load sp from ActRec frame form.
-    v << store{sp, rsp()[8]};  // Store sp to stub frame form.
-    v << load{rsp()[-16], fp}; // Load fp from ActRec frame form.
-    v << store{fp, rsp()[0]};  // Store fp to stub frame form.
+    v << lea{rsp()[32], rsp()};
 
     // Restore rvmfp() and return to the callee's func prologue.
     v << stubret{RegSet(), true};

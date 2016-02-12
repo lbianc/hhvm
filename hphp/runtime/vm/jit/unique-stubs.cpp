@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -42,6 +42,7 @@
 #include "hphp/runtime/vm/jit/unique-stubs-arm.h"
 #include "hphp/runtime/vm/jit/unique-stubs-x64.h"
 #include "hphp/runtime/vm/jit/unique-stubs-ppc64.h"
+#include "hphp/runtime/vm/jit/unwind-itanium.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
@@ -654,10 +655,10 @@ TCA emitFCallArrayHelper(CodeBlock& cb, UniqueStubs& us) {
     });
     v << load{rvmtl()[rds::kVmfpOff], rvmfp()};
 
-    // If true was returned, we're calling the callee, so manually undo the
+    // If true was returned, we're calling the callee, so undo the stublogue{}
+    // and convert to a phplogue{}.
     // stublogue{}, and simulate the work of a phplogue{}.
-    v << addqi{8, rsp(), rsp(), v.makeReg()};
-    v << popm{rvmfp()[AROFF(m_savedRip)]};
+    v << stubtophp{rvmfp()};
 
     auto const callee = v.makeReg();
     auto const body = v.makeReg();
@@ -925,7 +926,7 @@ TCA UniqueStubs::add(const char* name, TCA start) {
   return start;
 }
 
-std::string UniqueStubs::describe(TCA address) {
+std::string UniqueStubs::describe(TCA address) const {
   auto raw = [address] { return folly::sformat("{}", address); };
   if (m_ranges.empty()) return raw();
 
@@ -953,7 +954,7 @@ void emitInterpReq(Vout& v, SrcKey sk, FPInvOffset spOff) {
     v << lea{rvmfp()[-cellsToBytes(spOff.offset)], rvmsp()};
   }
   v << copy{v.cns(sk.pc()), rarg(0)};
-  v << jmpi{mcg->tx().uniqueStubs.interpHelper, arg_regs(1)};
+  v << jmpi{mcg->ustubs().interpHelper, arg_regs(1)};
 }
 
 ///////////////////////////////////////////////////////////////////////////////

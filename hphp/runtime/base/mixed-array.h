@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,9 +26,9 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
-class ArrayInit;
+struct ArrayInit;
 struct MemoryProfile;
-class Shape;
+struct Shape;
 struct StructArray;
 
 //////////////////////////////////////////////////////////////////////
@@ -328,13 +328,13 @@ private:
   friend struct EmptyArray;
   friend struct PackedArray;
   friend struct StructArray;
-  friend class HashCollection;
-  friend class BaseMap;
-  friend class c_Map;
-  friend class c_ImmMap;
-  friend class BaseSet;
-  friend class c_Set;
-  friend class c_ImmSet;
+  friend struct HashCollection;
+  friend struct BaseMap;
+  friend struct c_Map;
+  friend struct c_ImmMap;
+  friend struct BaseSet;
+  friend struct c_Set;
+  friend struct c_ImmSet;
   friend class c_AwaitAllWaitHandle;
   enum class ClonePacked {};
   enum class CloneMixed {};

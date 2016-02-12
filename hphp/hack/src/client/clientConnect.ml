@@ -168,7 +168,7 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
   end;
   let connect_once_start_t = Unix.time () in
   let conn = ServerUtils.connect_to_monitor env.root
-    HhServerMonitorConfig.Program.name in
+    HhServerMonitorConfig.Program.hh_server in
   HackEventLogger.client_connect_once connect_once_start_t;
   let _, tail_msg = open_and_get_tail_msg start_time tail_env in
   match conn with
@@ -191,14 +191,15 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
         "For more detailed logs, try `tail -f $(hh_client --monitor-logname) \
         $(hh_client --logname)`\n";
     match e with
-    | SMUtils.Server_died ->
+    | SMUtils.Server_died
+    | SMUtils.Monitor_connection_failure ->
       connect env (Option.map retries (fun x -> x - 1)) start_time tail_env
     | SMUtils.Server_missing ->
       if env.autostart then begin
         ClientStart.start_server { ClientStart.
           root = env.root;
-          wait = false;
           no_load = env.no_load;
+          silent = false;
         };
         connect env retries start_time tail_env
       end else begin

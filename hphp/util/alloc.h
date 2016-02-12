@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -199,7 +199,8 @@ void flush_thread_stack();
 /**
  * Like scoped_ptr, but calls free() on destruct
  */
-class ScopedMem {
+struct ScopedMem {
+ private:
   ScopedMem(const ScopedMem&); // disable copying
   ScopedMem& operator=(const ScopedMem&);
  public:

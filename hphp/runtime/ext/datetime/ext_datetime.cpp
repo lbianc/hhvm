@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    | Copyright (c) 1997-2010 The PHP Group                                |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
@@ -20,7 +20,6 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/ini-setting.h"
 #include "hphp/runtime/vm/native-data.h"
-#include "hphp/system/constants.h"
 #include "hphp/system/systemlib.h"
 
 namespace HPHP {
@@ -854,8 +853,7 @@ static const StaticString
 #define DATE_RSS "D, d M Y H:i:s O"
 #define DATE_W3C "Y-m-d\\TH:i:sP"
 
-static class DateTimeExtension final : public Extension {
-public:
+static struct DateTimeExtension final : Extension {
   DateTimeExtension() : Extension("date", get_PHP_VERSION().c_str()) { }
 
   void moduleInit() override {

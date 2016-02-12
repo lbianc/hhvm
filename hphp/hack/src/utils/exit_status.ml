@@ -22,6 +22,7 @@ type t =
   | Server_initializing
   | Type_error
   | Build_id_mismatch
+  | Monitor_connection_failure
   | Unused_server
   | Lock_stolen
   | Lost_parent_monitor
@@ -37,6 +38,10 @@ type t =
   | Hhconfig_changed
   | Server_shutting_down
   | Server_name_not_found
+  | IDE_malformed_request
+  | IDE_no_server
+  | IDE_out_of_retries
+  | Nfs_root
 
 exception Exit_with of t
 
@@ -55,6 +60,7 @@ let ec t = match t with
   | Server_shutting_down -> 1
   | Type_error -> 2
   | Build_id_mismatch -> 9
+  | Monitor_connection_failure -> 9
   | Unused_server -> 5
   | Lock_stolen -> 11
   | Lost_parent_monitor -> 12
@@ -69,6 +75,10 @@ let ec t = match t with
   | Hhconfig_deleted -> 104
   | Hhconfig_changed -> 4
   | Server_name_not_found -> 105
+  | IDE_malformed_request -> 201
+  | IDE_no_server -> 202
+  | IDE_out_of_retries -> 203
+  | Nfs_root -> 204
 
 let exit t =
   let code = ec t in
@@ -89,6 +99,7 @@ let to_string = function
   | Server_shutting_down -> "Server_shutting_down"
   | Type_error -> "Type_error"
   | Build_id_mismatch -> "Build_id_mismatch"
+  | Monitor_connection_failure -> "Monitor_connection_failure"
   | Unused_server -> "Unused_server"
   | Lock_stolen -> "Lock_stolen"
   | Lost_parent_monitor -> "Lost_parent_monitor"
@@ -103,6 +114,10 @@ let to_string = function
   | Hhconfig_deleted -> "Hhconfig_deleted"
   | Hhconfig_changed -> "Hhconfig_changed"
   | Server_name_not_found -> "Server_name_not_found"
+  | IDE_malformed_request -> "IDE_malformed_request"
+  | IDE_no_server -> "IDE_no_server"
+  | IDE_out_of_retries -> "IDE_out_of_retries"
+  | Nfs_root -> "Nfs_root"
 
 let unpack = function
   | Unix.WEXITED n -> "exit", n

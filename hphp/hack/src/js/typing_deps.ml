@@ -21,7 +21,6 @@
  *)
 
 open Core
-open Utils
 
 (* If we're currently adding a dependency. This should be false if we're adding
  * a file we want to typecheck or autocomplete in. It should be true if it's
@@ -67,7 +66,7 @@ module Dep = struct
 end
 
 module DSet = Set.Make(Dep)
-module DMap = MyMap(Dep)
+module DMap = MyMap.Make(Dep)
 
 (*
 let print_deps deps =
@@ -196,8 +195,8 @@ let extends_igraph = Hashtbl.create 23
 
 let add_idep root obj =
   match obj with
-  | (Dep.FunName _ as x)
-  | (Dep.Fun _ as x) -> deps := DSet.add x !deps
+  | Dep.FunName _
+  | Dep.Fun _ as x -> deps := DSet.add x !deps
   | Dep.GConst s
   | Dep.GConstName s
   | Dep.Const (s, _)
@@ -223,7 +222,7 @@ let add_idep root obj =
       if not !is_dep then deps := DSet.add (Dep.Class s) !deps
   | Dep.Extends s ->
       (match root with
-      | Some (Dep.Class root) ->
+      | Dep.Class root ->
           (* We want to remember what needs to be udpated
            * if a super class changes, all the sub_classes
            * have to be updated.

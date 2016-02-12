@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -31,10 +31,10 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
-class Array;
-class VarNR;
-class VariableSerializer;
-class VariableUnserializer;
+struct Array;
+struct VarNR;
+struct VariableSerializer;
+struct VariableUnserializer;
 
 // reserve space for buffer that will be filled in by client.
 enum ReserveStringMode { ReserveString };
@@ -66,7 +66,8 @@ std::string convDblToStrWithPhpFormat(double n);
  * String type wrapping around StringData to implement copy-on-write and
  * literal string handling (to avoid string copying).
  */
-class String {
+struct String {
+private:
   req::ptr<StringData> m_str;
 
 protected:
@@ -513,19 +514,19 @@ struct StringDataHashICompare {
 typedef hphp_hash_set<String, hphp_string_hash, hphp_string_isame> StringISet;
 
 template<typename T>
-class StringIMap :
-  public hphp_hash_map<String, T, hphp_string_hash, hphp_string_isame> { };
+using StringIMap =
+  hphp_hash_map<String, T, hphp_string_hash, hphp_string_isame>;
 
-typedef hphp_hash_set<String, hphp_string_hash, hphp_string_same> StringSet;
+using StringSet = hphp_hash_set<String, hphp_string_hash, hphp_string_same>;
 
 template<typename T>
-class StringMap :
-  public hphp_hash_map<String, T, hphp_string_hash, hphp_string_same> { };
+using StringMap = hphp_hash_map<String, T, hphp_string_hash, hphp_string_same>;
 
 ///////////////////////////////////////////////////////////////////////////////
 // StrNR
 
-class StrNR {
+struct StrNR {
+private:
   StringData *m_px;
 
 public:

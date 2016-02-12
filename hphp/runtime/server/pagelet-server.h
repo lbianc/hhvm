@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -30,11 +30,10 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class PageletTransport;
+struct PageletTransport;
 class PageletServerTaskEvent;
 
-class PageletServer {
-public:
+struct PageletServer {
   static bool Enabled();
   static void Restart();
   static void Stop();
@@ -79,8 +78,7 @@ public:
   static int GetQueuedJobs();
 };
 
-class PageletTransport : public Transport, public Synchronizable {
-public:
+struct PageletTransport : Transport, Synchronizable {
   PageletTransport(
     const String& url, const Array& headers, const String& postData,
     const String& remoteHost,
@@ -154,8 +152,7 @@ private:
   PageletServerTaskEvent *m_event;
 };
 
-class PageletServerTaskEvent final : public AsioExternalThreadEvent {
-public:
+struct PageletServerTaskEvent final : AsioExternalThreadEvent {
 
   ~PageletServerTaskEvent() {
     if (m_job) m_job->decRefCount();

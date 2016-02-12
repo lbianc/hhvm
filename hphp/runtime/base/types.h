@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -23,11 +23,11 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-class String;
+struct String;
 struct StaticString;
-class Array;
+struct Array;
 class Variant;
-class VarNR;
+struct VarNR;
 
 extern const Variant null_variant;      // uninitialized variant
 extern const Variant init_null_variant; // php null
@@ -48,7 +48,7 @@ extern const StaticString array_string; // String("Array")
 extern const StaticString empty_string_ref; // const StaticString&
 extern const Variant empty_string_variant_ref; // const Variant&
 
-class StringData;
+struct StringData;
 using LowStringPtr = LowPtr<const StringData>;
 
 ///////////////////////////////////////////////////////////////////////////////
