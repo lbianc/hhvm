@@ -1185,23 +1185,15 @@ void lowerForPPC64(Vout& v, cmpbi& inst) {
   v << cmpqi{inst.s0, tmp2, inst.sf};
 }
 
-void lowerForPPC64(Vout& v, cmpli& inst) {
-  // convert cmpli to cmpqi or ldimmq + cmpq by cmpqi's lowering
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movl{inst.s1, tmp1}; // Extract s1
-  v << extsw{tmp1, tmp2};   // Extend word sign
-  // Lowering for cmpqi removed, since movl was emitted, then the empty
-  // will always return false
-  if (patchImm(inst.s0, v, tmp3)) v << cmpq{tmp3, tmp2, inst.sf};
-  else v << cmpqi{inst.s0, tmp2, inst.sf};
-}
-
-// cmplim not lowered due to callfaststub on emitDecRefWork
-// (it can't allocate temporary register through v.makeReg())
+/*
+ * cmplim can't be lowered due to callfaststub on emitDecRefWork!
+ * (it can't allocate temporary register through v.makeReg())
+ *
+ * Special handling is done below for cmplim and cmpli
+ */
 void lowerForPPC64(Vout& v, cmplim& inst) {
   Vptr p = inst.s1;
-  patchVptr(p, v);
+  patchVptr(p, v);  // safe for emitDecRefWork
 
   // this temp reg is always needed. Use one of our scratches.
   Vreg tmp2 = Vreg32(PhysReg(rAsm));
@@ -1211,6 +1203,11 @@ void lowerForPPC64(Vout& v, cmplim& inst) {
   Vreg tmp;
   if (patchImm(inst.s0, v, tmp)) v << cmpl {tmp,     tmp2, inst.sf};
   else                           v << cmpli{inst.s0, tmp2, inst.sf};
+}
+void lowerForPPC64(Vout& v, cmpli& inst) {
+  Vreg tmp;
+  if (patchImm(inst.s0, v, tmp)) v << cmpl {tmp,     inst.s1, inst.sf};
+  else                           v << cmpli{inst.s0, inst.s1, inst.sf};
 }
 
 // Lower subtraction to subq
