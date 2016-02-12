@@ -63,7 +63,7 @@ namespace {
 void sync_regstate(_Unwind_Context* context) {
   assertx(tl_regState == VMRegState::DIRTY);
 
-  uintptr_t fp = _Unwind_GetGR(context, dw_reg::RBP);
+  uintptr_t fp = _Unwind_GetGR(context, dw_reg::VMFP);
   uintptr_t ip = _Unwind_GetIP(context);
   FTRACE(2, "syncing regstate for: fp {:#x}, ip {:#x}\n", fp, ip);
 
@@ -332,6 +332,38 @@ EHFrameHandle register_unwind_region(unsigned char* start, size_t size) {
 
   EHFrameWriter ehfw;
 
+#if defined(__powerpc64__)
+
+  // specific PPC64 cie
+  ehfw.begin_cie(dw_reg::LR,
+                 reinterpret_cast<const void*>(tc_unwind_personality));
+
+  // Set native frame pointer as the cfa pointer
+  ehfw.def_cfa(dw_reg::SP, 0);
+  ehfw.def_cfa_offset(0);
+
+  // LR is at (*CFA) - 2 * data_align = (*CFA) + 16
+  ehfw.begin_expression(dw_reg::LR);
+  ehfw.op_bregx(dw_reg::SP, 0);
+  ehfw.op_deref();
+  ehfw.op_consts(16);
+  ehfw.op_plus();
+  ehfw.op_deref();
+  ehfw.end_expression();
+
+  // TOC is at CFA - 3 * data_align = CFA + 24
+  ehfw.offset_extended_sf(dw_reg::TOC, -3);
+
+  // SP and FP follows backchain
+  ehfw.offset_extended_sf(dw_reg::FP, 0);
+  ehfw.offset_extended_sf(dw_reg::SP, 0);
+
+  ehfw.def_cfa_register(dw_reg::SP);
+  ehfw.end_cie();
+
+#else
+
+  // specific X64 cie
   ehfw.begin_cie(dw_reg::RIP,
                  reinterpret_cast<const void*>(tc_unwind_personality));
 
@@ -348,6 +380,8 @@ EHFrameHandle register_unwind_region(unsigned char* start, size_t size) {
   // resuming the unwinder, so its brokenness goes unnoticed.
   ehfw.same_value(dw_reg::RSP);
   ehfw.end_cie();
+
+#endif
 
   // Add a single FDE for the whole TC.
   ehfw.begin_fde(start);

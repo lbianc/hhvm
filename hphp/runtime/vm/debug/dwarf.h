@@ -29,7 +29,7 @@ namespace HPHP { namespace Debug {
 
 using jit::TCA;
 
-namespace PPC64 {
+namespace ppc64 {
 
   typedef enum {
     R0,
@@ -73,7 +73,7 @@ namespace PPC64 {
 
 }
 
-namespace X64 {
+namespace x64 {
 
   typedef enum {
     RAX,

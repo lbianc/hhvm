@@ -69,62 +69,6 @@ void DwarfBuf::print() {
   printf("\n");
 }
 
-void DwarfBuf::dwarf_op_const4s(int x) {
-  byte(DW_OP_const4s);
-  dword(x);
-}
-
-void DwarfBuf::dwarf_op_deref_size(uint8_t size) {
-  byte(DW_OP_deref_size);
-  byte(size);
-}
-
-void DwarfBuf::dwarf_sfp_expr(int offset, int scale) {
-  byte(DW_OP_dup);
-  dwarf_op_const4s(offset);
-  byte(DW_OP_plus);
-  dwarf_op_deref_size(sizeof(uint32_t));
-  dwarf_op_const4s(scale);
-  byte(DW_OP_mul);
-  byte(DW_OP_plus);
-}
-
-void DwarfBuf::dwarf_cfa_sfp(uint8_t reg, int offset, int scale) {
-  DwarfBuf b;
-  byte(DW_CFA_val_expression);
-  byte(reg);
-  b.dwarf_sfp_expr(offset, scale);
-  /* this assumes expression fits in 127 bytes, else we have
-   to LEB128 encode size */
-  byte(b.size());
-  dwarf_sfp_expr(offset, scale);
-}
-
-void DwarfBuf::dwarf_cfa_unwind_rsp() {
-  byte(DW_CFA_val_expression);
-  #if defined(__powerpc64__)
-   using namespace PPC64;
-  #else
-   using namespace X64;
-  #endif
-  byte(RSP);
-  /* instruction sequence of length 2 */
-  byte(2);
-  /* add 8 to RSP (reg 7) */
-  byte(DW_OP_breg7);
-  byte(8);
-}
-
-void DwarfBuf::dwarf_cfa_same_value(uint8_t reg) {
-  byte(DW_CFA_same_value);
-  byte(reg);
-}
-
-void DwarfBuf::dwarf_cfa_set_loc(uint64_t addr) {
-  byte(DW_CFA_set_loc);
-  qword(addr);
-}
-
 void DwarfBuf::dwarf_cfa_def_cfa(uint8_t reg, uint8_t offset) {
   byte(DW_CFA_def_cfa);
   byte(reg);

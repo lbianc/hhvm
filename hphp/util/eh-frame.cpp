@@ -71,13 +71,13 @@ EHFrameHandle EHFrameWriter::register_and_release() {
   auto& vec = *m_buf;
   auto const fde = m_fde;
 
-  if (fde != kInvalidFDE) __register_frame(&vec[fde]);
+  if (fde != kInvalid) __register_frame(&vec[fde]);
 
   return std::shared_ptr<std::vector<uint8_t>>(
     m_buf.release(),
     [fde] (std::vector<uint8_t>* p) {
       SCOPE_EXIT { delete p; };
-      if (fde != kInvalidFDE) __deregister_frame(&((*p)[fde]));
+      if (fde != kInvalid) __deregister_frame(&((*p)[fde]));
     }
   );
 }
@@ -126,7 +126,7 @@ void EHFrameWriter::begin_cie(uint8_t rip, const void* personality) {
 
 void EHFrameWriter::end_cie() {
   assertx(m_buf != nullptr && m_buf->size() != 0);
-  assertx(m_fde == kInvalidFDE);
+  assertx(m_fde == kInvalid);
   auto& vec = *m_buf;
 
   // Patch the length field.  Note that it doesn't count the space for itself.
@@ -136,7 +136,7 @@ void EHFrameWriter::end_cie() {
 
 void EHFrameWriter::begin_fde(CodeAddress start, const uint8_t* cie) {
   assertx(m_buf != nullptr);
-  assertx(m_fde == kInvalidFDE);
+  assertx(m_fde == kInvalid);
   auto& vec = *m_buf;
 
   m_fde = vec.size();
@@ -169,7 +169,7 @@ void EHFrameWriter::begin_fde(CodeAddress start, const uint8_t* cie) {
 
 void EHFrameWriter::end_fde(size_t size) {
   assertx(m_buf != nullptr && m_buf->size() != 0);
-  assertx(m_fde != kInvalidFDE && m_fde < m_buf->size());
+  assertx(m_fde != kInvalid && m_fde < m_buf->size());
   auto& vec = *m_buf;
 
   // Patch the length field.  Note that it doesn't count the space for itself.
@@ -189,12 +189,49 @@ void EHFrameWriter::null_fde() {
   write<uint32_t>(0);
 }
 
+void EHFrameWriter::begin_expression(uint8_t reg) {
+  assertx(m_buf != nullptr);
+  assertx(m_expression == kInvalid);
+
+  write<uint8_t>(DW_CFA_val_expression);
+  write_uleb(reg);
+
+  // Reserve space for the expression length and mark the beginning of the
+  // expression, so that the size can be patched on end_expression()
+  auto& vec = *m_buf;
+  m_expression = vec.size();
+  write<uint8_t>(0);
+}
+
+void EHFrameWriter::end_expression() {
+  assertx(m_buf != nullptr && m_buf->size() != 0);
+  assertx(m_expression != kInvalid && m_expression < m_buf->size());
+  auto& vec = *m_buf;
+
+  // Patch the length field.  Note that it doesn't count the space for itself.
+  auto vp_len = reinterpret_cast<uint8_t*>(&vec[m_expression]);
+  *vp_len = vec.size() - m_expression - sizeof(uint8_t);
+
+  // reset pointer in order to be able to start a new expression next
+  m_expression = kInvalid;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 void EHFrameWriter::def_cfa(uint8_t reg, uint64_t off) {
   write<uint8_t>(DW_CFA_def_cfa);
   write_uleb(reg);
   write_uleb(off);
+}
+
+void EHFrameWriter::def_cfa_offset(uint64_t off) {
+  write<uint8_t>(DW_CFA_def_cfa_offset);
+  write_uleb(off);
+}
+
+void EHFrameWriter::def_cfa_register(uint8_t reg) {
+  write<uint8_t>(DW_CFA_def_cfa_register);
+  write_uleb(reg);
 }
 
 void EHFrameWriter::same_value(uint8_t reg) {
@@ -206,6 +243,24 @@ void EHFrameWriter::offset_extended_sf(uint8_t reg, int64_t off) {
   write<uint8_t>(DW_CFA_offset_extended_sf);
   write_uleb(reg);
   write_sleb(off);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void EHFrameWriter::op_bregx(uint8_t reg, int64_t off) {
+  write<uint8_t>(DW_OP_bregx);
+  write_uleb(reg);
+  write_sleb(off);
+}
+void EHFrameWriter::op_deref() {
+  write<uint8_t>(DW_OP_deref);
+}
+void EHFrameWriter::op_consts(const int64_t c) {
+  write<uint8_t>(DW_OP_consts);
+  write_sleb(c);
+}
+void EHFrameWriter::op_plus() {
+  write<uint8_t>(DW_OP_plus);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

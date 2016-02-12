@@ -40,10 +40,28 @@ namespace HPHP {
 
 namespace dw_reg {
 
+#if defined(__powerpc64__)
+
+enum PPC64Reg : uint8_t {
+  R0,  SP,  TOC, R3,  R4,  R5,  R6,  R7,  R8,  R9,  R10, R11, R12, TLS,
+  R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27,
+  R28, R29, R30, FP,  LR = 65
+};
+
+// architecture-specific VMFP register: use the same name on all of them
+auto const VMFP = FP;
+
+#else
+
 enum X64Reg : uint8_t {
   RAX, RDX, RCX, RBX, RSI, RDI, RBP, RSP,
   R8,  R9,  R10, R11, R12, R13, R14, R15, RIP
 };
+
+// architecture-specific VMFP register: use the same name on all of them
+auto const VMFP = RBP;
+
+#endif
 
 };
 
@@ -129,6 +147,18 @@ struct EHFrameWriter {
    */
   void null_fde();
 
+  /*
+   * Write a DWARF Expression with the following fields:
+   *
+   *  length:         automatic
+   *  operations:     as defined by postfixed op_* calls
+   *
+   * All expressions should be written between the calls to begin_expr() and
+   * end_expr().
+   */
+  void begin_expression(uint8_t reg);
+  void end_expression();
+
   /////////////////////////////////////////////////////////////////////////////
 
   /*
@@ -138,9 +168,24 @@ struct EHFrameWriter {
    * documentation, see: http://dwarfstd.org/doc/DWARF4.pdf
    */
   void def_cfa(uint8_t reg, uint64_t off);
+  void def_cfa_offset(uint64_t off);
+  void def_cfa_register(uint8_t reg);
 
   void same_value(uint8_t reg);
   void offset_extended_sf(uint8_t reg, int64_t off);
+
+  /////////////////////////////////////////////////////////////////////////////
+
+  /*
+   * Write a DWARF call frame expression to the buffer.
+   *
+   * These all emit DW_OP opcodes with the appropriate arguments.  For
+   * documentation, see: http://dwarfstd.org/doc/DWARF4.pdf
+   */
+  void op_bregx(uint8_t reg, int64_t off);
+  void op_deref();
+  void op_consts(const int64_t c);
+  void op_plus();
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -158,7 +203,7 @@ private:
   void write_uleb(uint64_t);
   void write_sleb(int64_t);
 
-  static constexpr size_t kInvalidFDE = -1ull;
+  static constexpr size_t kInvalid = -1ull;
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -166,7 +211,10 @@ private:
   // The managed buffer.
   std::unique_ptr<std::vector<uint8_t>> m_buf{nullptr};
   // Index of the FDE in m_buf; invalid if no FDE was written.
-  size_t m_fde{kInvalidFDE};
+  size_t m_fde{kInvalid};
+  // Index of the DW_CFA_Expression in m_buf; invalid if no expression was
+  // written.
+  size_t m_expression{kInvalid};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
