@@ -151,29 +151,6 @@ struct Vgen {
     a->addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
   }
   void emit(const addq& i) { a->addo(i.d, i.s0, i.s1, true); }
-
-  // Addqi and subqi can't be lowered to addq and subq if the destiny is rsp().
-  // To avoid this issue, addqi and subqi are the only vasms that will be
-  // lowered directly by using rAsm on its emission.
-  //
-  // TODO(gut): move them to lower if rsp() manipulation is exclusively allowed
-  // in lea and not anymore in addqi and subqi
-  void emit(const addqi& i) {
-    if (i.s0.fits(sz::word)) {
-      a->li(rAsm, i.s0);
-    } else {
-      a->li32(rAsm, i.s0.l());
-    }
-    a->addo(i.d, i.s1, rAsm, true);
-  }
-  void emit(const subqi& i) {
-    if (i.s0.fits(sz::word)) {
-      a->li(rAsm, i.s0);
-    } else {
-      a->li32(rAsm, i.s0.l());
-    }
-    a->subo(i.d, i.s1, rAsm, true);
-  }
   void emit(const addsd& i) { a->fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) { a->and(i.d, i.s0, i.s1, true); }
   void emit(const andqi& i) { a->andi(i.d, i.s1, i.s0); } // andi changes CR0
@@ -915,7 +892,7 @@ X(lea,      s, s, d);
 #define ONE_R64(attr_1)         Reg64(inst.attr_1),
 #define TWO_R64(attr_1, attr_2) Reg64(inst.attr_1), Reg64(inst.attr_2),
 
-// If it patches the Immed, replace the vasm for its non-immediate variant
+// Load the Immed to a register in order to be able to use ppc64 CR instructions
 #define X(vasm_src, vasm_dst, attr_imm, attrs)                          \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp;                                                             \
@@ -924,10 +901,22 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 }
 
 X(addli,  addl,  s0, TWO(s1, d))
-X(andli,  andl,  s0, TWO(s1, d))    // could use patchImm
-X(andqi,  andq,  s0, TWO(s1, d))    // could use patchImm
 X(testqi, testq, s0, ONE(s1))
 X(cmpqi,  cmpq,  s0, ONE(s1))
+X(addqi,  addq,  s0, TWO(s1, d))
+X(subqi,  subq,  s0, TWO(s1, d))
+
+#undef X
+
+// If it patches the Immed, replace the vasm for its non-immediate variant
+#define X(vasm_src, vasm_dst_reg, attr_imm, attrs)                      \
+void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
+  Vreg tmp;                                                             \
+  if (patchImm(inst.attr_imm, v, tmp))                                  \
+    v << vasm_dst_reg{tmp, attrs inst.sf};                              \
+}
+
+X(andqi,  andq,  s0, TWO(s1, d))
 
 #undef X
 
@@ -1346,6 +1335,17 @@ void lowerForPPC64(Vout& v, andl& inst) {
   v << movl{inst.s0, tmp1}; // extract s0
   v << movl{inst.s1, tmp2}; // extract s1
   v << andq{tmp1, tmp2, tmp3, inst.sf};
+  v << movlk{tmp3, Reg64(inst.d)}; // Move result keeping the higher 32bits
+}
+
+void lowerForPPC64(Vout& v, andli& inst) {
+  Vreg tmp1, tmp2 = v.makeReg(), tmp3 = v.makeReg();
+
+  v << movl{inst.s1, tmp2}; // extract s1
+  // s0, an immediate, always fits a long size. It doesn't need to be extracted
+  // Perform 16bits immediate or move it to a register.
+  if (patchImm(inst.s0, v, tmp1)) v << andq {tmp1,    tmp2, tmp3, inst.sf};
+  else                            v << andqi{inst.s0, tmp2, tmp3, inst.sf};
   v << movlk{tmp3, Reg64(inst.d)}; // Move result keeping the higher 32bits
 }
 
