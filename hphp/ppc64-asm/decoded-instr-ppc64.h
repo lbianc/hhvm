@@ -28,10 +28,13 @@ namespace ppc64_asm {
 struct DecodedInstruction {
   explicit DecodedInstruction(uint8_t* ip) : m_ip(ip) { }
 
+  size_t size() const;
+  int32_t offset() const;
   bool isNop() const;
   bool isBranch(bool allowCond = true) const;
   bool isCall() const;
   bool isJmp() const;
+  bool isLea() const;
   bool isClearSignBit() const;
   HPHP::jit::ConditionCode jccCondCode() const;
 

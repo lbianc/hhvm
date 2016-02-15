@@ -27,6 +27,16 @@
 
 namespace ppc64_asm {
 
+size_t DecodedInstruction::size() const {
+  not_implemented();
+  return size_t{0};
+}
+
+int32_t DecodedInstruction::offset() const {
+  not_implemented();
+  return 0;
+}
+
 bool DecodedInstruction::isNop() const {
   return Decoder::GetDecoder().decode(m_ip)->isNop();
 }
@@ -46,6 +56,11 @@ bool DecodedInstruction::isCall() const {
 bool DecodedInstruction::isJmp() const {
   // if it's conditional branch, it's not a jmp
   return isBranch(false);
+}
+
+bool DecodedInstruction::isLea() const {
+  not_implemented();
+  return false;
 }
 
 bool DecodedInstruction::isClearSignBit() const {
