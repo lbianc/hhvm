@@ -14,8 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_DECODED_INSTR_H_
-#define incl_HPHP_JIT_DECODED_INSTR_H_
+#ifndef incl_HPHP_UTIL_DECODED_INSTR_H_
+#define incl_HPHP_UTIL_DECODED_INSTR_H_
 
 #include "hphp/runtime/base/arch.h"
 
