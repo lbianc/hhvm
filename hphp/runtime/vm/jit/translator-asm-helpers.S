@@ -323,10 +323,10 @@ ETCH_NAME(handleSRHelper):
 
   // Push a ReqInfo struct onto the stack and call handleServiceRequest.
   mflr %r0
-  std %r0, 16(%r1)    // LR on parent call frame
-  stdu %r1, -80(%r1)  // aligned with Epilogue: addi %r1, %r1, 80
-  CFI2(adjust_cfa_offset, 80)   // debug information about stack pointer change
+  std %r0, 16(%r1)              // LR on parent call frame
   CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
+  stdu %r1, -80(%r1)            // aligned with Epilogue: addi %r1, %r1, 80
+  CFI2(adjust_cfa_offset, 80)   // debug information about stack pointer change
 
   std ETCH_SVCREQ_ARG4, 72(%r1)
   std ETCH_SVCREQ_ARG3, 64(%r1)
