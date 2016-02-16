@@ -14,12 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/util/decoded-instr-x64.h"
-
-#include "hphp/util/asm-x64.h"
-
 #include <folly/Format.h>
 
+#include "hphp/util/asm-x64.h"
+#include "hphp/util/decoded-instr-x64.h"
 #include "hphp/util/safe-cast.h"
 
 namespace HPHP { namespace jit { namespace x64 {

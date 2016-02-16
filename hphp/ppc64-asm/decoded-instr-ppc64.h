@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | (c) Copyright IBM Corporation 2016                                   |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -17,11 +17,9 @@
 #ifndef incl_HPHP_PPC64_ASM_DECODED_INSTR_PPC64_H_
 #define incl_HPHP_PPC64_ASM_DECODED_INSTR_PPC64_H_
 
-#include "hphp/util/asm-x64.h"
-
 #include <folly/Format.h>
 
-#include "hphp/util/safe-cast.h"
+#include "hphp/util/asm-x64.h"
 
 namespace ppc64_asm {
 

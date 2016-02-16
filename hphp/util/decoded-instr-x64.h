@@ -17,11 +17,9 @@
 #ifndef incl_HPHP_UTIL_DECODED_INSTR_X64_H_
 #define incl_HPHP_UTIL_DECODED_INSTR_X64_H_
 
-#include "hphp/util/asm-x64.h"
-
 #include <folly/Format.h>
 
-#include "hphp/util/safe-cast.h"
+#include "hphp/util/asm-x64.h"
 
 namespace HPHP { namespace jit { namespace x64 {
 
