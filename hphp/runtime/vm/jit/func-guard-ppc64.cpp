@@ -34,7 +34,7 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-constexpr auto kFuncGuardLen = 0x38;
+constexpr auto kFuncGuardLen = 0x40;
 
 ALWAYS_INLINE bool isPrologueStub(TCA addr) {
   return addr == mcg->ustubs().fcallHelperThunk;

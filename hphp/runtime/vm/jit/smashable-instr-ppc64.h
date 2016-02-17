@@ -46,9 +46,9 @@ constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 5; }
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
-// prologue, li64 (5 instr), mtctr, bctrl
+// prologue, li64 (5 instr), mtctr, nop, nop, bctrl
 constexpr size_t smashableCallLen() {
-  return smashableCallSkipPrologue() + kStdIns * 7;
+  return smashableCallSkipPrologue() + kStdIns * 9;
 }
 // to check the bctrl, it has to be on that instruction so don't skip that
 constexpr uint8_t smashableCallSkip() { return smashableCallLen() - kStdIns; }
@@ -56,8 +56,8 @@ constexpr uint8_t smashableCallSkip() { return smashableCallLen() - kStdIns; }
 // ld, addi, ld, mtlr
 constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 4; }
 
-// li64 + mtctr + bcctr
-constexpr size_t smashableJccLen()  { return kStdIns * 7; }
+// li64 + mtctr + nop + nop + bcctr
+constexpr size_t smashableJccLen()  { return kStdIns * 9; }
 // to analyse the cc, it has to be on the bcctr that the smashableJccLen skips
 constexpr size_t smashableJccSkip() { return smashableJccLen() - kStdIns; }
 

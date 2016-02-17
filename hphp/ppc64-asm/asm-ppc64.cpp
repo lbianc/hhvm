@@ -807,8 +807,8 @@ void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
 void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
 
 #if DEBUG
-  // skips the li64 and a mtctr instruction
-  CodeAddress bctr_addr = jmp + kLi64InstrLen + 1 * kBytesPerInstr;
+  // skips the li64, 2*nop and a mtctr instruction
+  CodeAddress bctr_addr = jmp + kLi64InstrLen + 3 * kBytesPerInstr;
 
   // check for instruction opcode
   DecoderInfo* dinfo = Decoder::GetDecoder().decode(bctr_addr);

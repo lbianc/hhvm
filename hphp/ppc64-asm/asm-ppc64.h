@@ -2562,6 +2562,13 @@ struct Label {
     // When branching to another context, r12 need to keep the target address
     // to correctly set r2 (TOC reference).
     a.mtctr(reg::r12);
+    if (bc == BranchConditions::Overflow ||
+        bc == BranchConditions::NoOverflow) {
+      a.xor(reg::r0, reg::r0, reg::r0,false);
+      a.mtspr(Assembler::SpecialReg::XER, reg::r0);
+    } else {
+      a.emitNop(2*Assembler::kBytesPerInstr);
+    }
     if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
     else                     a.bcctr (bp.bo(), bp.bi(), 0);
   }
