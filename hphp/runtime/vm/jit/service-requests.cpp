@@ -28,7 +28,6 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
 #include "hphp/util/data-block.h"
-#include "hphp/util/decoded-instr.h"
 #include "hphp/util/trace.h"
 
 #include "hphp/vixl/a64/macro-assembler-a64.h"
@@ -240,7 +239,7 @@ size_t stub_size() {
 FPInvOffset extract_spoff(TCA stub) {
   switch (arch()) {
     case Arch::X64:
-      { DecodedInstruction instr(stub);
+      { HPHP::jit::x64::DecodedInstruction instr(stub);
 
         // If it's not a lea, vasm optimized a lea{rvmfp, rvmsp} to a mov, so
         // the offset was 0.

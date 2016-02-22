@@ -49,7 +49,6 @@
 #include "hphp/util/code-cache.h"
 #include "hphp/util/cycles.h"
 #include "hphp/util/debug.h"
-#include "hphp/util/decoded-instr.h"
 #include "hphp/util/disasm.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/maphuge.h"
@@ -1034,7 +1033,7 @@ MCGenerator::bindJmp(TCA toSmash, SrcKey destSk, ServiceRequest req,
     return tDest;
   }
 
-  DecodedInstruction di(toSmash);
+  x64::DecodedInstruction di(toSmash);
   if (di.isBranch() && !di.isJmp()) {
     auto const target = smashableJccTarget(toSmash);
     assertx(target);

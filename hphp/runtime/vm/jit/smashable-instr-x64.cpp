@@ -21,7 +21,6 @@
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
-#include "hphp/util/decoded-instr.h"
 
 namespace HPHP { namespace jit { namespace x64 {
 

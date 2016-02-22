@@ -19,7 +19,6 @@
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/treadmill.h"
 
-#include "hphp/util/decoded-instr.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
@@ -93,7 +92,7 @@ void clearTCMaps(TCA start, TCA end) {
   auto& catchMap = mcg->catchTraceMap();
   auto& jmpMap = mcg->getJmpToTransIDMap();
   while (start < end) {
-    DecodedInstruction di (start);
+    x64::DecodedInstruction di (start);
     if (di.isBranch()) {
       auto it = jmpMap.find(start);
       if (it != jmpMap.end()) {
