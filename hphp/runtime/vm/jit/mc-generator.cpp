@@ -112,6 +112,8 @@
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/server/source-root-info.h"
 
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
+
 namespace HPHP { namespace jit {
 
 TRACE_SET_MOD(mcg);
@@ -1032,8 +1034,13 @@ MCGenerator::bindJmp(TCA toSmash, SrcKey destSk, ServiceRequest req,
     smashed = true;
     return tDest;
   }
-
+  #if defined(__powerpc64__)
+  ppc64_asm::DecodedInstruction di(toSmash);
+  #elif defined(__x86_64__)
   x64::DecodedInstruction di(toSmash);
+  #else
+  not_implemented();
+  #endif
   if (di.isBranch() && !di.isJmp()) {
     auto const target = smashableJccTarget(toSmash);
     assertx(target);

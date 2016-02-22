@@ -280,7 +280,12 @@ jit::vector<EHInfo> parse_gcc_except_table(const uint8_t* ptr,
       // TODO(#6836929): this has to be removed once we fix the underlying
       // issue with smashable instructions at the start of a section.
       while (42) {
+        #if defined(__x86_64__)
         x64::DecodedInstruction di(rangeBase);
+        #else
+        // LLVM optimizations are specific for x86
+        not_implemented();
+        #endif
         if (!di.isNop()) break;
         rangeBase += di.size();
       }
@@ -890,7 +895,12 @@ struct LLVMEmitter {
       if (it == locRecs.records.end()) continue;
       for (auto const& record : it->second) {
         uint8_t* ip = record.address;
+        #if defined(__x86_64__)
         x64::DecodedInstruction di(ip);
+        #else
+        // LLVM optimizations are specific for x86
+        not_implemented();
+        #endif
         if (di.isCall()) {
           auto afterCall = ip + di.size();
           FTRACE(2, "From afterCall for fixup = {}\n", afterCall);
@@ -905,7 +915,12 @@ struct LLVMEmitter {
                  L body) {
     for (auto& record : records) {
       uint8_t* ip = record.address;
+      #if defined(__x86_64__)
       x64::DecodedInstruction di(ip);
+      #else
+      // LLVM optimizations are specific for x86
+      not_implemented();
+      #endif
       if (di.isBranch()) {
         body(ip, di.isJmp() ? CC_None : di.jccCondCode());
       }
@@ -929,7 +944,12 @@ struct LLVMEmitter {
     // first (depending on whether the target SrcKey is a resumed function),
     // followed by an RIP relative lea of the jump address.
     if (!targetIsResumed) {
-      x64::DecodedInstruction instr(addr);
+      #if defined(__x86_64__)
+      x64::DecodedInstruction di(addr);
+      #else
+      // LLVM optimizations are specific for x86
+      not_implemented();
+      #endif
       addr += instr.size();
     }
     auto const leaIp = addr;
@@ -1028,7 +1048,12 @@ struct LLVMEmitter {
              info.landingPad, info.start, info.end);
       auto found = false;
       for(auto ip = info.start; ip < info.end; ) {
+        #if defined(__x86_64__)
         x64::DecodedInstruction di(ip);
+        #else
+        // LLVM optimizations are specific for x86
+        not_implemented();
+        #endif
         ip += di.size();
         if (di.isCall()) {
           FTRACE(2, "  afterCall: {}\n", ip);
