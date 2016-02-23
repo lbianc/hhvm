@@ -33,8 +33,7 @@ size_t DecodedInstruction::size() const {
 }
 
 int32_t DecodedInstruction::offset() const {
-  not_implemented();
-  return 0;
+  return Decoder::GetDecoder().decode(m_ip)->offset();
 }
 
 bool DecodedInstruction::isNop() const {
