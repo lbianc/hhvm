@@ -58,9 +58,8 @@ bool DecodedInstruction::isJmp() const {
   return isBranch(false);
 }
 
-bool DecodedInstruction::isLea() const {
-  not_implemented();
-  return false;
+bool DecodedInstruction::isSpOffsetInstr() const {
+  return Decoder::GetDecoder().decode(m_ip)->isSpOffsetInstr();
 }
 
 bool DecodedInstruction::isClearSignBit() const {

@@ -32,7 +32,7 @@ struct DecodedInstruction {
   bool isBranch(bool allowCond = true) const;
   bool isCall() const;
   bool isJmp() const;
-  bool isLea() const;
+  bool isSpOffsetInstr() const;
   bool isClearSignBit() const;
   HPHP::jit::ConditionCode jccCondCode() const;
 

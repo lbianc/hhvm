@@ -24,6 +24,8 @@
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
+#include "hphp/util/assertions.h"
+
 namespace ppc64_asm {
 
 // decoder size is the next prime number from the table size
@@ -1653,6 +1655,8 @@ struct DecoderInfo {
   bool isNop() const;
   bool isBranch(bool allowCond = true) const;
   bool isClearSignBit() const;
+  bool isSpOffsetInstr() const;
+  int32_t offset() const;
 
 private:
   // opcode enumeration identifier

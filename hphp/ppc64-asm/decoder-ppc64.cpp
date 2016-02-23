@@ -146,6 +146,35 @@ bool DecoderInfo::isClearSignBit() const {
   return false;
 }
 
+/**
+ * Check if instruction is addi or add, which changes the stack pointer. These
+ * instructions are created by lea, since on PPC64 there is no Lea instruction.
+ */
+bool DecoderInfo::isSpOffsetInstr() const {
+  if (((m_form == Form::kD) && (m_opn == OpcodeNames::op_addi))
+      || ((m_form == Form::kXO) && (m_opn == OpcodeNames::op_add))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Look for the offset from instructions addi or add, which was created by
+ * the lower of the Lea instruction.
+ */
+int32_t DecoderInfo::offset() const {
+  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_addi)) {
+    D_form_t instr_d;
+    instr_d.instruction = m_image;
+    return instr_d.D;
+  } else if ((m_form == Form::kXO) && (m_opn == OpcodeNames::op_add)) {
+    //TODO(lbianc): This code is not achievable with tests. Maybe will never
+    // reach, if the lea has a valid index.
+    not_implemented();
+  }
+  assert(false && "Instruction not expected.");
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 DecoderInfo* Decoder::decode(PPC64Instr instr) {

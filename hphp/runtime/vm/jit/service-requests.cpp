@@ -14,6 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
+
 #include "hphp/runtime/vm/jit/service-requests.h"
 
 #include "hphp/runtime/base/arch.h"
@@ -255,7 +257,13 @@ FPInvOffset extract_spoff(TCA stub) {
       break;
 
     case Arch::PPC64:
-      not_implemented();
+      ppc64_asm::DecodedInstruction instr(stub);
+      if (!instr.isSpOffsetInstr()) {
+        return FPInvOffset{0};
+      } else {
+        auto const offBytes = safe_cast<int32_t>(instr.offset());
+        return FPInvOffset{-(offBytes / int32_t{sizeof(Cell)})};
+      }
       break;
   }
   not_reached();
