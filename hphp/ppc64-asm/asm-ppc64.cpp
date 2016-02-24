@@ -842,11 +842,13 @@ void Assembler::prologue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln,
                           const Reg64& rvmfp) {
-  // save return address on caller's frame (ABI)
+  // save return address on caller's frame (ABI), but on rsp area.
+  // On rvmfp it's forbidden as it's possible that the vm frame already has a
+  // return address assigned (e.g: ActRec::setReturnVMExit)
   mflr(rfuncln);
   std(rfuncln, rsp[lr_position_on_callstack]);
 
-  // save TOC value on this frame
+  // create frame and save TOC on this frame
   pushFrame(rsp, rvmfp);
   std(rtoc, rsp[toc_position_on_callstack]);
 }
@@ -855,10 +857,10 @@ void Assembler::prologue (const Reg64& rsp,
 void Assembler::epilogue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln) {
-  // restore TOC value on this frame
+  // restore TOC from this frame
   ld(rtoc, rsp[toc_position_on_callstack]);
 
-  // restore return address from previous frame
+  // restore return address from previous frame and destroy this frame
   popFrame(rsp);
   ld(rfuncln, rsp[lr_position_on_callstack]);
   mtlr(rfuncln);

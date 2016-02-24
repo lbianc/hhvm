@@ -413,10 +413,12 @@ void Vgen::emit(const cvtsi2sd& i) {
 void Vgen::emit(const ucomisd& i) {
   ppc64_asm::Label notNAN;
   emit(fcmpu{i.s0, i.s1, i.sf});
-  a->branchAuto(notNAN, BranchConditions::CR0_NoOverflow);
-  // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-  a->li64(rAsm, 0x90000000);
-  a->mtcrf(0x80, rAsm);
+  a->bc(notNAN, BranchConditions::CR0_NoOverflow);
+  {
+    // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
+    a->li64(rAsm, 0x90000000);
+    a->mtcrf(0x80, rAsm);
+  }
   notNAN.asm_label(*a);
 }
 
@@ -473,16 +475,19 @@ void Vgen::emit(const contenter& i) {
 
   a->b(end);
   stub.asm_label(*a);
+  {
     // The following two lines are equivalent to
     // pop(fp[AROFF(m_savedRip)]) on x64.
     // rAsm is a scratch register.
     a->mflr(rAsm);
     emit(store{rAsm, fp[AROFF(m_savedRip)]});
     emit(jmpr{i.target,i.args});
-
+  }
   end.asm_label(*a);
+  {
     a->call(rsp(), rtoc(), rfuncln(), rvmfp(), stub);
     emit(unwind{{i.targets[0], i.targets[1]}});
+  }
 }
 
 void Vgen::emit(const syncpoint& i) {
@@ -649,13 +654,7 @@ void Vgen::emit(const call& i) {
 }
 
 void Vgen::emit(const callr& i) {
-  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
-
-  a->mr(rfuncentry(), i.target);
-  a->mtctr(rfuncentry());
-  a->bctrl();
-
-  a->epilogue(rsp(), rtoc(), rfuncln());
+  a->call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target.asReg());
 }
 
 void Vgen::emit(const calls& i) {
@@ -676,10 +675,10 @@ void Vgen::emit(const stublogue& i) {
 }
 
 void Vgen::emit(const stubret& i) {
-  a->epilogue(rsp(), rtoc(), rfuncln());
-
   // rvmfp, if necessary.
   if (i.saveframe) a->ld(rvmfp(), rsp()[0]);
+
+  a->epilogue(rsp(), rtoc(), rfuncln());
 
   emit(ret{});
 }

@@ -1925,6 +1925,7 @@ struct Assembler {
                 const Reg64& rtoc,
                 const Reg64& rfuncln);
 
+  // generic template, for CodeAddress and Label
   template <typename T>
   void call(const Reg64& rsp,
             const Reg64& rtoc,
@@ -1933,6 +1934,19 @@ struct Assembler {
             T& target) {
     prologue(rsp, rtoc, rfuncln, rvmfp);
     branchAuto(target, BranchConditions::Always, LinkReg::Save);
+    epilogue(rsp, rtoc, rfuncln);
+  }
+
+  // specialization of call for Reg64
+  void call(const Reg64& rsp,
+            const Reg64& rtoc,
+            const Reg64& rfuncln,
+            const Reg64& rvmfp,
+            Reg64 target) {
+    prologue(rsp, rtoc, rfuncln, rvmfp);
+    mr(reg::r12, target);
+    mtctr(reg::r12);
+    bctrl();
     epilogue(rsp, rtoc, rfuncln);
   }
 
