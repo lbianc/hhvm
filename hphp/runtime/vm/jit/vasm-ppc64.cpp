@@ -62,8 +62,7 @@ struct Vgen {
   explicit Vgen(Venv& env)
     : env(env)
     , text(env.text)
-    , assem(*env.cb)
-    , a(&assem)
+    , a(*env.cb)
     , current(env.current)
     , next(env.next)
     , jmps(env.jmps)
@@ -86,20 +85,20 @@ struct Vgen {
     if (i.s == i.d) return;
     if (i.s.isGP()) {
       if (i.d.isGP()) {                     // GP => GP
-        a->mr(i.d, i.s);
+        a.mr(i.d, i.s);
       } else {                              // GP => XMM
         assertx(i.d.isSIMD());
-        a->std(i.s, rsp()[-8]);
-        a->lfd(i.d, rsp()[-8]);
+        a.std(i.s, rsp()[-8]);
+        a.lfd(i.d, rsp()[-8]);
       }
     } else {
       assertx(i.s.isSIMD());
       if (i.d.isGP()) {                     // XMM => GP
-        a->stfd(i.s, rsp()[-8]);
-        a->ld(i.d, rsp()[-8]);
+        a.stfd(i.s, rsp()[-8]);
+        a.ld(i.d, rsp()[-8]);
       } else {                              // XMM => XMM
         assertx(i.d.isSIMD());
-        a->fmr(i.d, i.s);
+        a.fmr(i.d, i.s);
       }
     }
   }
@@ -110,88 +109,88 @@ struct Vgen {
     assertx(d0 != d1);
     if (d0 == s1) {
       if (d1 == s0) {
-        a->mr(rAsm, s1);
-        a->mr(d0, s0);
-        a->mr(d1, rAsm);
+        a.mr(rAsm, s1);
+        a.mr(d0, s0);
+        a.mr(d1, rAsm);
       } else {
         // could do this in a simplify pass
-        if (s1 != d1) a->mr(d1, s1); // save s1 first; d1 != s0
-        if (s0 != d0) a->mr(d0, s0);
+        if (s1 != d1) a.mr(d1, s1); // save s1 first; d1 != s0
+        if (s0 != d0) a.mr(d0, s0);
       }
     } else {
       // could do this in a simplify pass
-      if (s0 != d0) a->mr(d0, s0);
-      if (s1 != d1) a->mr(d1, s1);
+      if (s0 != d0) a.mr(d0, s0);
+      if (s1 != d1) a.mr(d1, s1);
     }
   }
   void emit(const fallthru& i) {}
   void emit(const ldimmb& i);
   void emit(const ldimmw& i) {
     // PPC64 specific. i.d is not Vreg but Vreg16, so it can't be a SIMD.
-    a->li(Reg64(i.d), i.s); // should be only 16bits available
+    a.li(Reg64(i.d), i.s); // should be only 16bits available
   }
   void emit(const ldimml& i);
   void emit(const ldimmq& i);
   void emit(const ldimmqs& i) {
-    emitSmashableMovq(a->code(), env.meta, i.s.q(), i.d);
+    emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
   }
   void emit(const nothrow& i) {
     // save the return address of previous call.
-    TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
+    TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
     env.meta.catches.emplace_back(saved_pc, nullptr);
   }
   // After VM frame unwinding, restore the frame pointer correctly as the
   // call left it with the additional frame.
   void emit(const landingpad& i) {
-    a->popFrame(rsp());
+    a.popFrame(rsp());
   }
 
   // instructions
   void emit(const fabs& i) {
-    a->fabs(i.d, i.s, false);
+    a.fabs(i.d, i.s, false);
   }
   void emit(const addl& i) {
-    a->addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
+    a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
   }
-  void emit(const addq& i) { a->addo(i.d, i.s0, i.s1, true); }
-  void emit(const addsd& i) { a->fadd(i.d, i.s0, i.s1); }
-  void emit(const andq& i) { a->and(i.d, i.s0, i.s1, true); }
-  void emit(const andqi& i) { a->andi(i.d, i.s1, i.s0); } // andi changes CR0
-  void emit(const cmpl& i) { a->cmpw(Reg64(i.s1), Reg64(i.s0)); }
-  void emit(const cmpli& i) { a->cmpwi(Reg64(i.s1), i.s0); }
-  void emit(const cmpq& i) { a->cmpd(i.s1, i.s0); }
-  void emit(const cmpqi& i) { a->cmpdi(i.s1, i.s0); }
-  void emit(const xscvdpsxds& i) { a->xscvdpsxds(i.d, i.s); }
-  void emit(const xscvsxddp& i) { a->xscvsxddp(i.d, i.s); }
-  void emit(const xxlxor& i) { a->xxlxor(i.d, i.s1, i.s0); }
-  void emit(const xxpermdi& i) { a->xxpermdi(i.d, i.s1, i.s0); }
-  void emit(const mfvsrd& i) { a->mfvsrd(i.d, i.s); }
-  void emit(const mtvsrd& i) { a->mtvsrd(i.d, i.s); }
-  void emit(const decl& i) { a->subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
-  void emit(const decq& i) { a->subfo(i.d, rone(), i.s, true); }
-  void emit(const imul& i) { a->mulldo(i.d, i.s1, i.s0, true); }
-  void emit(const divint& i) { a->divd(i.d,  i.s0, i.s1, false); }
-  void emit(const mulsd& i) { a->fmul(i.d, i.s1, i.s0); }
-  void emit(const divsd& i) { a->fdiv(i.d, i.s1, i.s0); }
-  void emit(const fcmpo& i) { a->fcmpo(i.sf, i.s0, i.s1); }
-  void emit(const fcmpu& i) { a->fcmpu(i.sf, i.s0, i.s1); }
+  void emit(const addq& i) { a.addo(i.d, i.s0, i.s1, true); }
+  void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
+  void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
+  void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
+  void emit(const cmpl& i) { a.cmpw(Reg64(i.s1), Reg64(i.s0)); }
+  void emit(const cmpli& i) { a.cmpwi(Reg64(i.s1), i.s0); }
+  void emit(const cmpq& i) { a.cmpd(i.s1, i.s0); }
+  void emit(const cmpqi& i) { a.cmpdi(i.s1, i.s0); }
+  void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
+  void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
+  void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
+  void emit(const xxpermdi& i) { a.xxpermdi(i.d, i.s1, i.s0); }
+  void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
+  void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
+  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
+  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
+  void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
+  void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
+  void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
+  void emit(const fcmpo& i) { a.fcmpo(i.sf, i.s0, i.s1); }
+  void emit(const fcmpu& i) { a.fcmpu(i.sf, i.s0, i.s1); }
   void emit(const ucomisd& i);
   void emit(const fctidz& i) {
-    a->mtfsb0(23); // clear VXCVI
-    a->fctidz(i.d, i.s, false);
-    a->mcrfs(0,5);
+    a.mtfsb0(23); // clear VXCVI
+    a.fctidz(i.d, i.s, false);
+    a.mcrfs(0,5);
   }
-  void emit(const incw& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incl& i) { a->addo(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incq& i) { a->addo(i.d, i.s, rone(), true); }
+  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
   void emit(const jmpi& i) {
-    a->branchAuto(i.target);
+    a.branchAuto(i.target);
   }
   void emit(const jmpr& i) {
-    a->mtctr(i.target);
-    a->bctr();
+    a.mtctr(i.target);
+    a.bctr();
   }
-  void emit(const leap& i) { a->li64(i.d, i.s.r.disp); }
+  void emit(const leap& i) { a.li64(i.d, i.s.r.disp); }
   // TODO: this vasm must be lowered.
   void emit(const loadups& i) {
     Vptr p = i.s;
@@ -199,112 +198,112 @@ struct Vgen {
     switch(p.scale){
       case 8:
         tmp.index = rfuncln();
-        a->sldi(tmp.index, p.index, 3);
+        a.sldi(tmp.index, p.index, 3);
         break;
       case 4:
         tmp.index = rfuncln();
-        a->sldi(tmp.index, p.index, 2);
+        a.sldi(tmp.index, p.index, 2);
         break;
       case 2:
         tmp.index = rfuncln();
-        a->sldi(tmp.index, p.index, 1);
+        a.sldi(tmp.index, p.index, 1);
         break;
       default:
         break;
     }
     if(p.disp != 0) {
       tmp.base = rAsm;
-      a->li64(tmp.base, static_cast<int64_t>(p.disp));
-      a->add(tmp.base, p.base, tmp.base);
-      a->lxvd2x(i.d, tmp);
+      a.li64(tmp.base, static_cast<int64_t>(p.disp));
+      a.add(tmp.base, p.base, tmp.base);
+      a.lxvd2x(i.d, tmp);
     } else {
-      a->lxvd2x(i.d, p);
+      a.lxvd2x(i.d, p);
     }
   }
-  void emit(const mfcr& i) { a->mfcr(i.d); }
-  void emit(const mflr& i) { a->mflr(i.d); }
-  void emit(const mtlr& i) { a->mtlr(i.s); }
+  void emit(const mfcr& i) { a.mfcr(i.d); }
+  void emit(const mflr& i) { a.mflr(i.d); }
+  void emit(const mtlr& i) { a.mtlr(i.s); }
   void emit(const movl& i) {
     int8_t sh = sizeof(int) * CHAR_BIT;
-    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
-    a->mr(Reg64(i.d), rAsm);
+    a.rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31);
+    a.mr(Reg64(i.d), rAsm);
   }
   void emit(const movlk& i) {
     int8_t sh = sizeof(int) * CHAR_BIT;
-    a->rlwinm(rAsm, i.s, 0, 32-sh, 31); // extract lower 32bits
-    a->clrrdi(i.d, i.d, sh); // clear lower 32bits on destination
+    a.rlwinm(rAsm, i.s, 0, 32-sh, 31); // extract lower 32bits
+    a.clrrdi(i.d, i.d, sh); // clear lower 32bits on destination
     // move lower 32bits to destination and keep the higher 32bits
-    a->or(i.d, i.d, rAsm);
+    a.or(i.d, i.d, rAsm);
   }
   void emit(const movb& i) {
     int8_t sh = CHAR_BIT;
-    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31); // extract lower byte
-    a->clrrwi(Reg64(i.d), Reg64(i.d), sh); // clear lower byte on destination
+    a.rlwinm(rAsm, Reg64(i.s), 0, 32-sh, 31); // extract lower byte
+    a.clrrwi(Reg64(i.d), Reg64(i.d), sh); // clear lower byte on destination
     // move lower byte to destination and keep the other 56 bits
-    a->or(Reg64(i.d), Reg64(i.d), rAsm);
+    a.or(Reg64(i.d), Reg64(i.d), rAsm);
   }
   void emit(const movzbl& i) {
     int8_t sh_32 = sizeof(int) * CHAR_BIT;
     int8_t sh_8 = CHAR_BIT;
-    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
+    a.rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
     // clear lower 32bits on destination
-    a->clrrwi(Reg64(i.d), Reg64(i.d), sh_32);
+    a.clrrwi(Reg64(i.d), Reg64(i.d), sh_32);
     // move lower byte to destination and keep the other 56 bits
-    a->or(Reg64(i.d), Reg64(i.d), rAsm);
+    a.or(Reg64(i.d), Reg64(i.d), rAsm);
   }
   void emit(const movzbq& i) {
     int8_t sh_8 = CHAR_BIT;
-    a->rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
-    a->mr(i.d, rAsm); // move entire register to reset higher 56bits
+    a.rlwinm(rAsm, Reg64(i.s), 0, 32-sh_8, 31); // extract lower byte
+    a.mr(i.d, rAsm); // move entire register to reset higher 56bits
   }
   void emit(const extsb& i) {
-    a->extsb(i.d, i.s);
+    a.extsb(i.d, i.s);
   }
   void emit(const extsw& i) {
-    a->extsw(i.d, i.s);
+    a.extsw(i.d, i.s);
   }
-  void emit(const neg& i) { a->neg(i.d, i.s, true); }
-  void emit(const nop& i) { a->ori(Reg64(0), Reg64(0), 0); } // no-op form
-  void emit(const not& i) { a->nor(i.d, i.s, i.s, false); }
-  void emit(const orq& i) { a->or(i.d, i.s0, i.s1, true); }
+  void emit(const neg& i) { a.neg(i.d, i.s, true); }
+  void emit(const nop& i) { a.ori(Reg64(0), Reg64(0), 0); } // no-op form
+  void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
+  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
   void emit(const orqi& i) {
     if (i.s0.fits(sz::word)) {
-      a->li(rAsm,i.s0);
+      a.li(rAsm,i.s0);
     } else {
-      a->li32(rAsm,i.s0.l());
+      a.li32(rAsm,i.s0.l());
     }
 
-    a->or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
+    a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
   }
-  void emit(const roundsd& i) { a->xsrdpi(i.d, i.s); }
+  void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
   void emit(const ret& i) {
-    a->blr();
+    a.blr();
   }
   /*Immediate-form logical (unsigned) shift operations are
     obtained by specifying appropriate masks and shift values for
     certain Rotate instructions.
   */
-  void emit(const sar& i) { a->srad(i.d, i.s1, i.s0, true); }
-  void emit(const sarqi& i) { a->sradi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
+  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
   void emit(const shlli& i) {
-    a->slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+    a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
   }
-  void emit(const shl& i) { a->sld(i.d, i.s1, i.s0, true); }
-  void emit(const shlqi& i) { a->sldi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
+  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
   void emit(const shrli& i) {
-    a->srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+    a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
   }
-  void emit(const shrqi& i) { a->srdi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const sqrtsd& i) { a->xssqrtdp(i.d,i.s); }
-  void emit(const storeups& i) { a->stxvw4x(i.s,i.m); }
+  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
+  void emit(const storeups& i) { a.stxvw4x(i.s,i.m); }
 
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
   do {                                                    \
     if (ptr.index.isValid()) {                            \
-      a->instr##x(dst, ptr);                              \
+      a.instr##x(dst, ptr);                              \
     } else {                                              \
-      a->instr   (dst, ptr);                              \
+      a.instr   (dst, ptr);                              \
     }                                                     \
   } while(0)
 
@@ -312,11 +311,11 @@ struct Vgen {
   // have its sign extended after loading except for the 'z' vasm variants
   void emit(const loadw& i) {
     X(lhz,  Reg64(i.d), i.s);
-    a->extsh(Reg64(i.d), Reg64(i.d));
+    a.extsh(Reg64(i.d), Reg64(i.d));
   }
   void emit(const loadl& i) {
     X(lwz,  Reg64(i.d), i.s);
-    a->extsw(Reg64(i.d), Reg64(i.d));
+    a.extsw(Reg64(i.d), Reg64(i.d));
   }
 
   void emit(const loadb& i)   { X(lbz, Reg64(i.d),  i.s); }
@@ -333,33 +332,33 @@ struct Vgen {
 #undef X
 
   /* Subtractions: d = s1 - s0 */
-  void emit(const subq& i) { a->subfo(i.d, i.s0, i.s1, true); }
-  void emit(const subsd& i) { a->fsub(i.d, i.s1, i.s0, false); }
+  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
+  void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const testq& i) {
     // More information on:
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
-      a->and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
+      a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
     } else {
-      a->cmpdi(i.s0, Immed(0));
+      a.cmpdi(i.s0, Immed(0));
     }
   }
-  void emit(const ud2& i) { a->trap(); }
+  void emit(const ud2& i) { a.trap(); }
   void emit(const xorb& i) {
-    a->xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
   void emit(const xorl& i) {
-    a->xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
-  void emit(const xorq& i) { a->xor(i.d, i.s0, i.s1, true); }
+  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
   void emit(const xorqi& i) {
     if (i.s0.fits(sz::word)) {
-      a->li(rAsm, i.s0);
+      a.li(rAsm, i.s0);
     } else {
-      a->li32(rAsm, i.s0.l());
+      a.li32(rAsm, i.s0.l());
     }
 
-    a->xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
+    a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
   }
 
   // The following vasms reemit other vasms. They are implemented afterwards in
@@ -398,8 +397,7 @@ private:
 
   Venv& env;
   Vtext& text;
-  ppc64_asm::Assembler assem;
-  ppc64_asm::Assembler* a;
+  ppc64_asm::Assembler a;
 
   const Vlabel current;
   const Vlabel next;
@@ -411,32 +409,32 @@ private:
 void Vgen::emit(const cvtsi2sd& i) {
   // As described on ISA page 727, F.2.6
   emit(copy{i.s, i.d});
-  a->fcfid(i.d, i.d);
+  a.fcfid(i.d, i.d);
 }
 
 void Vgen::emit(const ucomisd& i) {
   ppc64_asm::Label notNAN;
   emit(fcmpu{i.s0, i.s1, i.sf});
-  a->bc(notNAN, BranchConditions::CR0_NoOverflow);
+  a.bc(notNAN, BranchConditions::CR0_NoOverflow);
   {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-    a->li64(rAsm, 0x90000000);
-    a->mtcrf(0x80, rAsm);
+    a.li64(rAsm, 0x90000000);
+    a.mtcrf(0x80, rAsm);
   }
-  notNAN.asm_label(*a);
+  notNAN.asm_label(a);
 }
 
 void Vgen::emit(const ldimmb& i) {
   if (i.d.isGP()) {
     // This is necessary since x86_64 can load only the byte and do not
     // touch the other bits of destination register
-    a->li(rAsm, i.s); // should be only 8bits available
-    a->clrrwi(i.d, i.d, CHAR_BIT); // Clear lower byte
+    a.li(rAsm, i.s); // should be only 8bits available
+    a.clrrwi(i.d, i.d, CHAR_BIT); // Clear lower byte
     // Place only the byte into the register, keeping the higher 56bits
-    a->or(i.d, i.d, rAsm);
+    a.or(i.d, i.d, rAsm);
   } else {
     assertx(i.d.isSIMD());
-    a->li(rAsm, i.s);
+    a.li(rAsm, i.s);
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
@@ -444,10 +442,10 @@ void Vgen::emit(const ldimmb& i) {
 
 void Vgen::emit(const ldimml& i) {
   if (i.d.isGP()) {
-    a->li32(i.d, i.s.l());
+    a.li32(i.d, i.s.l());
   } else {
     assertx(i.d.isSIMD());
-    a->li32(rAsm, i.s.l());
+    a.li32(rAsm, i.s.l());
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
@@ -457,17 +455,17 @@ void Vgen::emit(const ldimmq& i) {
   auto val = i.s.q();
   if (i.d.isGP()) {
     if (val == 0) {
-      a->xor(i.d, i.d, i.d);
+      a.xor(i.d, i.d, i.d);
       // emit nops to fill a standard li64 instruction block
       // this will be useful on patching and smashable operations
-      a->emitNop(ppc64_asm::Assembler::kLi64InstrLen -
+      a.emitNop(ppc64_asm::Assembler::kLi64InstrLen -
           1 * ppc64_asm::Assembler::kBytesPerInstr);
     } else {
-      a->li64(i.d, val);
+      a.li64(i.d, val);
     }
   } else {
     assertx(i.d.isSIMD());
-    a->li64(rAsm, i.s.q());
+    a.li64(rAsm, i.s.q());
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
@@ -477,19 +475,19 @@ void Vgen::emit(const contenter& i) {
   ppc64_asm::Label stub, end;
   Reg64 fp = i.fp;
 
-  a->b(end);
-  stub.asm_label(*a);
+  a.b(end);
+  stub.asm_label(a);
   {
     // The following two lines are equivalent to
     // pop(fp[AROFF(m_savedRip)]) on x64.
     // rAsm is a scratch register.
-    a->mflr(rAsm);
+    a.mflr(rAsm);
     emit(store{rAsm, fp[AROFF(m_savedRip)]});
     emit(jmpr{i.target,i.args});
   }
-  end.asm_label(*a);
+  end.asm_label(a);
   {
-    a->call(rsp(), rtoc(), rfuncln(), rvmfp(), stub);
+    a.call(rsp(), rtoc(), rfuncln(), rvmfp(), stub);
     emit(unwind{{i.targets[0], i.targets[1]}});
   }
 }
@@ -497,8 +495,8 @@ void Vgen::emit(const contenter& i) {
 void Vgen::emit(const syncpoint& i) {
   // As the syncpoint intends to store the return address of the last call
   // vasm, it's necessary to subtract instructions from the call's "epilogue"
-  // in order to adjust the a->frontier() reference.
-  TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
+  // in order to adjust the a.frontier() reference.
+  TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", saved_pc,
          i.fix.pcOffset, i.fix.spOffset);
   env.meta.fixups.emplace_back(saved_pc, i.fix);
@@ -508,23 +506,23 @@ void Vgen::emit(const syncpoint& i) {
  * Push/pop mechanism is as simple as X64: it stores 8 bytes below the SP.
  */
 void Vgen::emit(const pop& i) {
-  a->ld(i.d, rsp()[0]);                         // popped element
-  a->addi(rsp(), rsp(), push_pop_position);     // recover stack
+  a.ld(i.d, rsp()[0]);                         // popped element
+  a.addi(rsp(), rsp(), push_pop_position);     // recover stack
 }
 void Vgen::emit(const push& i) {
-  a->stdu(i.s, rsp()[-push_pop_position]);      // pushed element
+  a.stdu(i.s, rsp()[-push_pop_position]);      // pushed element
 }
 
 void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
     if (i.s.index.isValid()){
-      a->ldx(i.d, i.s);
+      a.ldx(i.d, i.s);
     } else {
-      a->ld(i.d, i.s);
+      a.ld(i.d, i.s);
     }
   } else {
     assertx(i.d.isSIMD());
-    a->lfd(i.d, i.s);
+    a.lfd(i.d, i.s);
   }
 }
 
@@ -540,16 +538,16 @@ void Vgen::emit(const unwind& i) {
   // As the catch intends to store the return address of the last call vasm,
   // it's necessary to subtract instructions from the call's "epilogue" in
   // order to match the expected return address as stored in the caller's frame
-  TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
+  TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
   catches.push_back({saved_pc, i.targets[1]});
   emit(jmp{i.targets[0]});
 }
 void Vgen::emit(const jmp& i) {
   if (next == i.target) return;
-  jmps.push_back({a->frontier(), i.target});
+  jmps.push_back({a.frontier(), i.target});
 
-  // offset to be determined by a->patchBctr
-  a->branchAuto(a->frontier());
+  // offset to be determined by a.patchBctr
+  a.branchAuto(a.frontier());
 }
 void Vgen::emit(const jcc& i) {
   if (i.targets[1] != i.targets[0]) {
@@ -557,15 +555,15 @@ void Vgen::emit(const jcc& i) {
       return emit(jcc{ccNegate(i.cc), i.sf, {i.targets[1], i.targets[0]}});
     }
     auto taken = i.targets[1];
-    jccs.push_back({a->frontier(), taken});
+    jccs.push_back({a.frontier(), taken});
 
-    // offset to be determined by a->patchBctr
-    a->branchAuto(a->frontier(), i.cc);
+    // offset to be determined by a.patchBctr
+    a.branchAuto(a.frontier(), i.cc);
   }
   emit(jmp{i.targets[0]});
 }
 void Vgen::emit(const jcci& i) {
-  a->branchAuto(i.taken, i.cc);
+  a.branchAuto(i.taken, i.cc);
   emit(jmp{i.target});
 }
 
@@ -579,7 +577,7 @@ void Vgen::emit(const cmovq& i) {
     // invert the true/false parameters, as only the bp.bi field is used
     std::swap(t,f);
   }
-  a->isel(i.d, t, f, (4 * int(i.sf.asReg())) + bp.bi());
+  a.isel(i.d, t, f, (4 * int(i.sf.asReg())) + bp.bi());
 }
 
 void Vgen::patch(Venv& env) {
@@ -603,13 +601,13 @@ void Vgen::pad(CodeBlock& cb) {
 void Vgen::emit(const store& i) {
   if (i.s.isGP()) {
     if (i.d.index.isValid()){
-      a->stdx(i.s, i.d);
+      a.stdx(i.s, i.d);
     } else {
-      a->std(i.s, i.d);
+      a.std(i.s, i.d);
     }
   } else {
     assertx(i.s.isSIMD());
-    a->stfd(i.s, i.d);
+    a.stfd(i.s, i.d);
   }
 }
 
@@ -622,7 +620,7 @@ void Vgen::emit(const mcprep& i) {
    * Class*, so we'll always miss the inline check before it's smashed, and
    * handlePrimeCacheInit can tell it's not been smashed yet
    */
-  auto const mov_addr = emitSmashableMovq(a->code(), env.meta, 0, r64(i.d));
+  auto const mov_addr = emitSmashableMovq(a.code(), env.meta, 0, r64(i.d));
   auto const imm = reinterpret_cast<uint64_t>(mov_addr);
   smashMovq(mov_addr, (imm << 1) | 1);
 
@@ -630,7 +628,7 @@ void Vgen::emit(const mcprep& i) {
 }
 
 void Vgen::emit(const callphp& i) {
-  emitSmashableCall(a->code(), env.meta, i.stub);
+  emitSmashableCall(a.code(), env.meta, i.stub);
   emit(unwind{{i.targets[0], i.targets[1]}});
 }
 
@@ -646,23 +644,23 @@ void Vgen::emit(const lea& i) {
     // don't reuse addq and addqi as they need a SF
     Vptr p = i.s;
     if (p.index.isValid()) {
-      a->add(i.d, p.base, p.index);
+      a.add(i.d, p.base, p.index);
     } else {
-      a->addi(i.d, p.base, p.disp);
+      a.addi(i.d, p.base, p.disp);
     }
   }
 }
 
 void Vgen::emit(const call& i) {
-  a->call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target);
+  a.call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target);
 }
 
 void Vgen::emit(const callr& i) {
-  a->call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target.asReg());
+  a.call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target.asReg());
 }
 
 void Vgen::emit(const calls& i) {
-  emitSmashableCall(a->code(), env.meta, i.target);
+  emitSmashableCall(a.code(), env.meta, i.target);
 }
 
 void Vgen::emit(const callarray& i) {
@@ -675,14 +673,14 @@ void Vgen::emit(const callarray& i) {
  */
 void Vgen::emit(const stublogue& i) {
   // rvmfp is always saved on stack at rsp()[0]
-  a->prologue(rsp(), rtoc(), rfuncln(), rvmfp());
+  a.prologue(rsp(), rtoc(), rfuncln(), rvmfp());
 }
 
 void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
-  if (i.saveframe) a->ld(rvmfp(), rsp()[0]);
+  if (i.saveframe) a.ld(rvmfp(), rsp()[0]);
 
-  a->epilogue(rsp(), rtoc(), rfuncln());
+  a.epilogue(rsp(), rtoc(), rfuncln());
 
   emit(ret{});
 }
@@ -690,7 +688,7 @@ void Vgen::emit(const stubret& i) {
 void Vgen::emit(const tailcallstub& i) {
   // Update native stack pointer to ignore the current frame.
   // the Return Address is already in LR due to stublogue.
-  a->popFrame(rsp());
+  a.popFrame(rsp());
 
   // tail call: perform a jmp instead of a call.
   emit(jmpi{i.target, i.args});
@@ -698,11 +696,11 @@ void Vgen::emit(const tailcallstub& i) {
 
 void Vgen::emit(const stubtophp& i) {
   // pop this frame created by stub
-  a->popFrame(rsp());
+  a.popFrame(rsp());
 
   // grab the return address and store this return address for phplogue
-  a->ld(rAsm, rsp()[AROFF(m_savedRip)]);
-  a->std(rAsm, i.fp[AROFF(m_savedRip)]);
+  a.ld(rAsm, rsp()[AROFF(m_savedRip)]);
+  a.std(rAsm, i.fp[AROFF(m_savedRip)]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
