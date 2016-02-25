@@ -51,7 +51,7 @@ struct TransRelocInfo {
   TCA coldStart;
   TCA coldEnd;
   GrowableVector<IncomingBranch> incomingBranches;
-  CodeGenFixups fixups;
+  CGMeta fixups;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -108,14 +108,13 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
   if (!rel.adjustedAddressAfter(tri.start)) {
     x64::adjustForRelocation(rel, tri.start, tri.end);
     auto coldStart = tri.coldStart;
-    if (&mcg->code.blockFor(coldStart) == &mcg->code.realFrozen()) {
+    if (&mcg->code().blockFor(coldStart) == &mcg->code().frozen()) {
       /*
-       * This is a bit silly. If we were generating code into frozen,
-       * and we also put stubs in frozen, and those stubs are now dead
-       * the code in them isn't valid (we smashed the first few bytes
-       * with a pointer and a size; see FreeStubList::StubNode).
-       * So skip over any of those. Its ok to process the live ones
-       * more than once.
+       * This is a bit silly. If we were generating code into frozen, and we
+       * also put stubs in frozen, and those stubs are now dead the code in
+       * them isn't valid (we smashed the first few bytes with a pointer and a
+       * size; see FreeStubList::StubNode).  So skip over any of those. Its ok
+       * to process the live ones more than once.
        */
       auto it = deadStubs.lower_bound(tri.coldStart);
       while (it != deadStubs.end() && *it < tri.coldEnd) {
@@ -159,7 +158,7 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
 }
 
 void readRelocsIntoVector(TransRelocInfo&& tri, void* data) {
-  if (mcg->code.prof().contains(tri.start)) return;
+  if (mcg->code().prof().contains(tri.start)) return;
   auto v = static_cast<std::vector<TransRelocInfo>*>(data);
   v->emplace_back(std::move(tri));
 }
@@ -181,7 +180,7 @@ struct TransRelocInfoHelper {
   std::vector<IncomingBranch::Opaque> incomingBranches;
   std::vector<uint32_t> addressImmediates;
   std::vector<uint64_t> codePointers;
-  std::vector<std::pair<uint32_t,std::pair<Alignment,AlignContext>>> alignFixups;
+  std::vector<std::pair<uint32_t,std::pair<Alignment,AlignContext>>> alignments;
 
   template<class SerDe> void serde(SerDe& sd) {
     sd
@@ -191,7 +190,7 @@ struct TransRelocInfoHelper {
       (incomingBranches)
       (addressImmediates)
       (codePointers)
-      (alignFixups)
+      (alignments)
       ;
   }
 
@@ -211,16 +210,16 @@ struct TransRelocInfoHelper {
     for (auto& cp : codePointers) {
       tri.fixups.codePointers.insert((TCA*)cp);
     }
-    for (auto v : alignFixups) {
-      tri.fixups.alignFixups.emplace(v.first + code.base(), v.second);
+    for (auto v : alignments) {
+      tri.fixups.alignments.emplace(v.first + code.base(), v.second);
     }
     return tri;
   }
 };
 
 void relocateStubs(TransLoc& loc, TCA frozenStart, TCA frozenEnd,
-                   RelocationInfo& rel, CodeCache& cache,
-                   CodeGenFixups& fixups) {
+                   RelocationInfo& rel, CodeCache::View cache,
+                   CGMeta& fixups) {
   auto const stubSize = svcreq::stub_size();
 
   for (auto addr : fixups.reusedStubs) {
@@ -369,11 +368,14 @@ void liveRelocate(int time) {
     }
   }
 
-  auto& code = mcg->code;
-  CodeCache::Selector cbSel(CodeCache::Selector::Args(code).hot(true));
-  CodeBlock& hot = code.main();
+  CGMeta fixups;
+  auto& hot = mcg->code().view(true /* hot */).main();
+  relocate(relocs, hot, fixups);
 
-  relocate(relocs, hot);
+  // Nothing other than reusedStubs should have data, and those don't need any
+  // processing for liveRelocate().
+  fixups.reusedStubs.clear();
+  always_assert(fixups.empty());
 }
 
 void recordPerfRelocMap(
@@ -381,7 +383,7 @@ void recordPerfRelocMap(
     TCA coldStart, TCA coldEnd,
     SrcKey sk, int argNum,
     const GrowableVector<IncomingBranch> &incomingBranchesIn,
-    CodeGenFixups& fixups) {
+    CGMeta& fixups) {
   String info = perfRelocMapInfo(start, end,
                                  coldStart, coldEnd,
                                  sk, argNum,
@@ -395,7 +397,7 @@ String perfRelocMapInfo(
     TCA coldStart, TCA coldEnd,
     SrcKey sk, int argNum,
     const GrowableVector<IncomingBranch>& incomingBranchesIn,
-    CodeGenFixups& fixups) {
+    CGMeta& fixups) {
   for (auto& stub : fixups.reusedStubs) {
     mcg->getDebugInfo()->recordRelocMap(stub, 0, "NewStub");
   }
@@ -409,7 +411,7 @@ String perfRelocMapInfo(
     trih.incomingBranches.emplace_back(v.getOpaque());
   }
 
-  auto& code = mcg->code;
+  auto& code = mcg->code();
 
   for (auto v : fixups.addressImmediates) {
     trih.addressImmediates.emplace_back(v - code.base());
@@ -419,8 +421,8 @@ String perfRelocMapInfo(
     trih.codePointers.emplace_back((uint64_t)v);
   }
 
-  for (auto v : fixups.alignFixups) {
-    trih.alignFixups.emplace_back(v.first - code.base(), v.second);
+  for (auto v : fixups.alignments) {
+    trih.alignments.emplace_back(v.first - code.base(), v.second);
   }
 
   trih.coldRange = std::make_pair(uint32_t(coldStart - code.base()),
@@ -447,7 +449,8 @@ String perfRelocMapInfo(
   return id + String(" ") + data;
 }
 
-void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest) {
+void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
+              CGMeta& fixups) {
   assert(Translator::WriteLease().amOwner());
   assert(!Func::s_treadmill);
 
@@ -475,7 +478,7 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest) {
 
   RelocationInfo rel;
   size_t num = 0;
-  assert(mcg->cgFixups().alignFixups.empty());
+  assert(fixups.alignments.empty());
   for (size_t sz = relocs.size(); num < sz; num++) {
     auto& reloc = relocs[num];
     if (ignoreEntry(reloc.sk)) continue;
@@ -493,8 +496,8 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest) {
                        (uintptr_t)start, dest.frontier() - start));
     }
   }
-  swap_trick(mcg->cgFixups().alignFixups);
-  assert(mcg->cgFixups().empty());
+  swap_trick(fixups.alignments);
+  assert(fixups.empty());
 
   x64::adjustForRelocation(rel);
 
@@ -573,7 +576,6 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest) {
   readRelocations(relocMap, &liveStubs, postProcess, &param);
 
   // ensure that any reusable stubs are updated for the relocated code
-  CodeGenFixups fixups;
   for (auto stub : liveStubs) {
     FTRACE(1, "Stub: 0x{:08x}\n", (uintptr_t)stub);
     fixups.reusedStubs.emplace_back(stub);
@@ -626,7 +628,7 @@ void readRelocations(
       TransRelocInfoHelper trih;
       blob(trih);
 
-      TransRelocInfo tri(trih.toTRI(mcg->code));
+      TransRelocInfo tri(trih.toTRI(mcg->code()));
       tri.start = reinterpret_cast<TCA>(addr);
       tri.end = reinterpret_cast<TCA>(end);
       x64::findFixups(tri.start, tri.end, tri.fixups);
@@ -638,7 +640,8 @@ void readRelocations(
 
 //////////////////////////////////////////////////////////////////////
 
-bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
+bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
+                            CGMeta& fixups,
                             TCA* adjust /* = nullptr */) {
   auto& mainCode = cache.main();
   auto& coldCode = cache.cold();
@@ -668,7 +671,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
 
     dest.init(mainStartRel, mainSize, "New Main");
     asm_count += x64::relocate(rel, dest, mainStart, loc.mainEnd(),
-                               mcg->cgFixups(), nullptr);
+                               fixups, nullptr);
     mainEndRel = dest.frontier();
 
     mainCode.setFrontier(loc.mainStart());
@@ -682,7 +685,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
 
     dest.init(frozenStartRel + sizeof(uint32_t), frozenSize, "New Frozen");
     asm_count += x64::relocate(rel, dest, frozenStart, loc.frozenEnd(),
-                               mcg->cgFixups(), nullptr);
+                               fixups, nullptr);
     frozenEndRel = dest.frontier();
 
     frozenCode.setFrontier(loc.frozenStart());
@@ -697,7 +700,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
 
       dest.init(coldStartRel + sizeof(uint32_t), coldSize, "New Cold");
       asm_count += x64::relocate(rel, dest, coldStart, loc.coldEnd(),
-                                 mcg->cgFixups(), nullptr);
+                                 fixups, nullptr);
       coldEndRel = dest.frontier();
 
       coldCode.setFrontier(loc.coldStart());
@@ -719,8 +722,8 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
 
   if (asm_count) {
     x64::adjustForRelocation(rel);
-    x64::adjustMetaDataForRelocation(rel, nullptr, mcg->cgFixups());
-    x64::adjustCodeForRelocation(rel, mcg->cgFixups());
+    x64::adjustMetaDataForRelocation(rel, nullptr, fixups);
+    x64::adjustCodeForRelocation(rel, fixups);
   }
 
   if (debug) {
@@ -765,7 +768,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
   }
 
   relocateStubs(loc, frozenStartRel + sizeof(uint32_t), frozenEndRel, relStubs,
-                cache, mcg->cgFixups());
+                cache, fixups);
   return asm_count != 0;
 }
 

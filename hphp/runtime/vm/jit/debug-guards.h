@@ -18,9 +18,15 @@
 
 #include "hphp/runtime/vm/srckey.h"
 
+#include "hphp/util/data-block.h"
+
 namespace HPHP { namespace jit {
+
 struct SrcRec;
-void addDbgGuardImpl(SrcKey sk, SrcRec* srcRec);
+struct CGMeta;
+
+void addDbgGuardImpl(SrcKey sk, SrcRec* srcRec, CodeBlock& cb,
+                     CGMeta& fixup);
 
 }}
 

@@ -176,6 +176,24 @@ void ProxygenTransport::onHeadersComplete(
     });
 
   if (m_method == Transport::Method::POST && m_request->isHTTP1_1()) {
+    // fail fast if the post is too large, but only bother resolving host
+    // if content_length is larger than the minimum setting.
+    auto clen_str = getHeader("Content-Length");
+    auto content_length = strtoll(clen_str.c_str(), nullptr, 10);
+    auto max_post = RuntimeOption::LowestMaxPostSize;
+    if (content_length > max_post) {
+      auto host = headers.getSingleOrEmpty(HTTP_HEADER_HOST);
+      if (auto vhost = VirtualHost::Resolve(host)) {
+        max_post = vhost->getMaxPostSize();
+      }
+    }
+    auto post_too_big = false;
+    if (content_length < 0 || content_length > max_post) {
+      Logger::Warning("POST Content-Length of %lld bytes exceeds "
+                      "the limit of %" PRId64 " bytes",
+                      content_length, max_post);
+      post_too_big = true;
+    }
     const std::string& expectation =
       headers.getSingleOrEmpty(HTTP_HEADER_EXPECT);
     if (!expectation.empty()) {
@@ -184,6 +202,12 @@ void ProxygenTransport::onHeadersComplete(
       if (!boost::iequals(expectation, "100-continue")) {
         response.setStatusCode(417);
         response.setStatusMessage(HTTPMessage::getDefaultReason(417));
+        response.getHeaders().add(HTTP_HEADER_CONNECTION, "close");
+        sendEom = true;
+      } else if (post_too_big) {
+        // got expect 100-continue, but content_length is too big.
+        response.setStatusCode(413 /* Payload Too Large */);
+        response.setStatusMessage(HTTPMessage::getDefaultReason(413));
         response.getHeaders().add(HTTP_HEADER_CONNECTION, "close");
         sendEom = true;
       } else {
@@ -201,6 +225,10 @@ void ProxygenTransport::onHeadersComplete(
         // this object is no longer valid
         return;
       }
+    } else if (post_too_big) {
+      // did not receive "expect" header, but too much post data.
+      sendErrorResponse(413 /* Payload Too Large */);
+      return;
     }
   }
 
@@ -264,7 +292,7 @@ uint16_t ProxygenTransport::getRemotePort() {
   return m_clientAddress.getPort();
 }
 
-const void *ProxygenTransport::getPostData(int &size) {
+const void *ProxygenTransport::getPostData(size_t &size) {
   if (m_sendEnded) {
     size = 0;
     return 0;
@@ -294,7 +322,7 @@ bool ProxygenTransport::hasMorePostData() {
   return result;
 }
 
-const void *ProxygenTransport::getMorePostData(int &size) {
+const void *ProxygenTransport::getMorePostData(size_t &size) {
   if (bufferRequest()) {
     CHECK(m_clientComplete);
     size = 0;
@@ -311,7 +339,7 @@ const void *ProxygenTransport::getMorePostData(int &size) {
     VLOG(4) << "waiting for POST data for maxWait=" << maxWait;
     wait(maxWait);
   }
-  uint32_t oldLength = m_bodyData.chainLength();
+  auto oldLength = m_bodyData.chainLength();
 
   // For chunk encodings, we way receive an EOM with no data, such that
   // hasMorePostData returns true (because client is not yet complete),
@@ -327,6 +355,7 @@ const void *ProxygenTransport::getMorePostData(int &size) {
     data = m_currentBodyBuf->data();
     break;
   }
+  // RequestBodyReadLimit is int64_t and could be -1
   if (oldLength >= RuntimeOption::RequestBodyReadLimit &&
       m_bodyData.chainLength() < RuntimeOption::RequestBodyReadLimit) {
     VLOG(4) << "resuming ingress";
@@ -349,7 +378,7 @@ std::string ProxygenTransport::getHTTPVersion() const {
   return m_request->getVersionString();
 }
 
-int ProxygenTransport::getRequestSize() const {
+size_t ProxygenTransport::getRequestSize() const {
   return m_requestBodyLength; // header length isn't tracked
 }
 

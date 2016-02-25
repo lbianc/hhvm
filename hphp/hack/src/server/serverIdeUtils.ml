@@ -34,8 +34,8 @@ let oldify_funs names =
   ()
 
 let oldify_classes names =
-  Naming_heap.ClassPosHeap.oldify_batch names;
-  Naming_heap.ClassCanonHeap.oldify_batch @@ canon_set names;
+  Naming_heap.TypeIdHeap.oldify_batch names;
+  Naming_heap.TypeCanonHeap.oldify_batch @@ canon_set names;
   Naming_heap.ClassHeap.oldify_batch names;
   Typing_env.Classes.oldify_batch names;
   ()
@@ -48,9 +48,17 @@ let revive funs classes =
 
   Naming_heap.ClassHeap.revive_batch classes;
   Typing_env.Classes.revive_batch classes;
-  Naming_heap.ClassPosHeap.revive_batch classes;
-  Naming_heap.ClassCanonHeap.revive_batch @@ canon_set classes
+  Naming_heap.TypeIdHeap.revive_batch classes;
+  Naming_heap.TypeCanonHeap.revive_batch @@ canon_set classes
 
+(* This will parse, name and declare all functions and classes in content
+ * buffer.
+ *
+ * Naming and declaring will overwrite definitions on shared heap, so before
+ * doing this, the function will also "oldify" them (see functions above and
+ * SharedMem.S.oldify_batch) - after working with local content is done,
+ * original definitions can (and should) be restored using "revive".
+ *)
 let declare path content =
   let tcopt = TypecheckerOptions.permissive in
   Autocomplete.auto_complete := false;
@@ -93,7 +101,7 @@ let declare path content =
     report_error e;
     SSet.empty, SSet.empty
 
-let fix_file_and_def funs classes = try
+let typecheck funs classes = try
     let tcopt = TypecheckerOptions.permissive in
     Errors.ignore_ begin fun () ->
       SSet.iter begin fun name ->
@@ -119,7 +127,7 @@ let check_file_input tcopt files_info fi =
   | ServerUtils.FileContent content ->
       let path = Relative_path.default in
       let funs, classes = declare path content in
-      fix_file_and_def funs classes;
+      typecheck funs classes;
       revive funs classes;
       path
   | ServerUtils.FileName fn ->

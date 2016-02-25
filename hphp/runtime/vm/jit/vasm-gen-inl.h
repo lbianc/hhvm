@@ -14,6 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/jit/cg-meta.h"
+
 #include <algorithm>
 
 namespace HPHP { namespace jit {
@@ -38,7 +40,7 @@ inline Vout::operator Vlabel() const {
 }
 
 inline AreaIndex Vout::area() const {
-  return m_unit.blocks[m_block].area;
+  return m_unit.blocks[m_block].area_idx;
 }
 
 inline Vreg Vout::makeReg() {
@@ -63,4 +65,24 @@ inline Vreg Vout::cns(T v) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+namespace detail {
+
+template<class GenFunc>
+TCA vwrap_impl(CodeBlock& cb, CGMeta* meta, GenFunc gen, CodeKind kind) {
+  CGMeta dummy_meta;
+
+  auto const start = cb.frontier();
+  Vauto vauto { cb, meta ? *meta : dummy_meta, kind };
+  gen(vauto.main(), vauto.cold());
+
+  assertx(dummy_meta.empty());
+
+  return start;
+}
+
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 }}

@@ -150,9 +150,9 @@ public:
   /**
    * POST request's data.
    */
-  virtual const void *getPostData(int &size) = 0;
+  virtual const void *getPostData(size_t &size) = 0;
   virtual bool hasMorePostData() { return false; }
-  virtual const void *getMorePostData(int &size) { size = 0; return nullptr; }
+  virtual const void *getMorePostData(size_t &size) { size = 0;return nullptr; }
   virtual bool getFiles(std::string &files) { return false; }
   /**
    * Is this a GET, POST or anything?
@@ -169,7 +169,7 @@ public:
   /**
    * Get http request size.
    */
-  virtual int getRequestSize() const;
+  virtual size_t getRequestSize() const;
 
   /**
    * Get request header(s).
@@ -214,8 +214,9 @@ public:
    * Set cookie response header.
    */
   bool setCookie(const String& name, const String& value, int64_t expire = 0,
-                 const String& path = "", const String& domain = "", bool secure = false,
-                 bool httponly = false, bool encode_url = true);
+                 const String& path = "", const String& domain = "",
+                 bool secure = false, bool httponly = false,
+                 bool encode_url = true);
 
   /**
    * Add/remove a response header.
@@ -427,8 +428,8 @@ protected:
    * token's start char * addresses in ParamMaps. Therefore, this entire
    * process is very efficient without excessive string copying.
    */
-  typedef hphp_hash_map<const char*, std::vector<const char*>,
-                        cstr_hash, eqstr> ParamMap;
+  using ParamMap = hphp_hash_map<const char*, std::vector<const char*>,
+                                 cstr_hash, eqstr>;
 
   // timers
   timespec m_queueTime;

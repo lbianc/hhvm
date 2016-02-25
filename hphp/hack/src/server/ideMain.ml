@@ -8,17 +8,23 @@
  *
 *)
 
+open IdeJson
+
 type env = {
   client : (in_channel * out_channel) option;
   (* When this is true, we are between points when typechecker process
    * sent us RunIdeCommands and StopIdeCommands, and it's safe to use
    * data from shared heap. *)
   run_ide_commands : bool;
+  (* IDE process's version of ServerEnv.file_info, synchronized periodically
+   * from typechecker process. *)
+  files_info : FileInfo.t Relative_path.Map.t;
 }
 
 let empty_env = {
   client = None;
   run_ide_commands = false;
+  files_info = Relative_path.Map.empty;
 }
 
 let get_ready_channel monitor_ic client typechecker =
@@ -66,22 +72,29 @@ let handle_new_client env parent_ic =
     Hh_logger.log "Rejected a client";
     handle_already_has_client oc; env
 
+let get_call_response env id call =
+  if not env.run_ide_commands then
+    IdeJsonUtils.json_string_of_server_busy id
+  else
+    IdeServerCall.get_call_response id call env.files_info
+
 let handle_client_request env (ic, oc) =
   Hh_logger.log "Handling client request";
   let request = Marshal.from_channel ic in
-  let response = Hh_json.(json_to_string (
-    JSON_Object [
-      ("type", JSON_String "response");
-      ("success", JSON_Bool false);
-      ("message", JSON_String (
-         "Server busy: " ^ (if env.run_ide_commands then "false" else "true") ^
-         ", request: " ^ request
-      ));
-    ]
-  )) in
-  Marshal.to_channel oc response [];
-  flush oc;
-  env
+  match IdeJsonUtils.call_of_string request with
+  | ParsingError e ->
+    Hh_logger.log "Received malformed request: %s" e;
+    env
+  | InvalidCall (id, e) ->
+    let response = IdeJsonUtils.json_string_of_invalid_call id e in
+    Marshal.to_channel oc response [];
+    flush oc;
+    env
+  | Call (id, call) ->
+    let response = get_call_response env id call in
+    Marshal.to_channel oc response [];
+    flush oc;
+    env
 
 let handle_typechecker_message env typechecker_process =
   match IdeProcessPipe.recv typechecker_process with
@@ -90,6 +103,15 @@ let handle_typechecker_message env typechecker_process =
   | IdeProcessMessage.StopIdeCommands ->
     IdeProcessPipe.send typechecker_process IdeProcessMessage.IdeCommandsDone;
     { env with run_ide_commands = false }
+  | IdeProcessMessage.SyncFileInfo updated_files_info ->
+    Hh_logger.log "Received file info updates for %d files"
+      (Relative_path.Map.cardinal updated_files_info);
+    let new_files_info = Relative_path.Map.merge begin fun _ x y ->
+        Option.merge x y (fun _ y -> y)
+      end
+      env.files_info
+      updated_files_info in
+    { env with files_info = new_files_info }
 
 let handle_gone_client env =
   Hh_logger.log "Client went away";
@@ -97,6 +119,7 @@ let handle_gone_client env =
 
 let daemon_main _ (parent_ic, _parent_oc) =
   Printexc.record_backtrace true;
+  SharedMem.enable_local_writes ();
   let parent_in_fd = Daemon.descr_of_in_channel parent_ic in
   let typechecker_process = IdeProcessPipeInit.ide_recv parent_in_fd in
   let env = ref empty_env in

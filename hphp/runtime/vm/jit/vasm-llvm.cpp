@@ -532,7 +532,7 @@ struct VasmAnnotationWriter : llvm::AssemblyAnnotationWriter {
  * optimizing that and emitting machine code from the result.
  */
 struct LLVMEmitter {
-  explicit LLVMEmitter(const Vunit& unit, Vtext& text)
+  explicit LLVMEmitter(const Vunit& unit, Vtext& text, CGMeta& fixups)
     : m_context(llvm::getGlobalContext())
     , m_module(new llvm::Module("", m_context))
     , m_function(llvm::Function::Create(
@@ -551,6 +551,7 @@ struct LLVMEmitter {
     , m_incomingVmSp(unit.blocks.size())
     , m_unit(unit)
     , m_text(text)
+    , m_cgFixups(fixups)
   {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -904,7 +905,7 @@ struct LLVMEmitter {
         if (di.isCall()) {
           auto afterCall = ip + di.size();
           FTRACE(2, "From afterCall for fixup = {}\n", afterCall);
-          mcg->recordSyncPoint(afterCall, fix.fixup);
+          m_cgFixups.fixups.emplace_back(afterCall, fix.fixup);
         }
       }
     }
@@ -971,11 +972,11 @@ struct LLVMEmitter {
 
         auto const alignment = cc == CC_None ? Alignment::SmashJmp
                                              : Alignment::SmashJcc;
-        mcg->cgFixups().alignFixups.emplace(
+        m_cgFixups.alignments.emplace(
           jmpIp,
           std::make_pair(alignment, AlignContext::Live)
         );
-        mcg->setJmpTransID(jmpIp, m_unit.transKind);
+        m_cgFixups.setJmpTransID(jmpIp, m_unit.transKind);
 
         if (found) {
           // If LLVM duplicated the tail call into more than one jmp
@@ -986,7 +987,7 @@ struct LLVMEmitter {
           if (!req.target.resumed()) optSPOff = req.spOff;
           auto newStub = svcreq::emit_ephemeral(
             frozen,
-            mcg->getFreeStub(frozen, &mcg->cgFixups()),
+            mcg->getFreeStub(frozen, &m_cgFixups),
             optSPOff,
             REQ_BIND_JMP,
             jmpIp,
@@ -1029,7 +1030,7 @@ struct LLVMEmitter {
     for (auto& req : m_fallbacks) {
       auto doFallback = [&] (uint8_t* jmpIp, ConditionCode cc) {
         auto destSR = mcg->tx().getSrcRec(req.target);
-        destSR->registerFallbackJump(jmpIp, cc);
+        destSR->registerFallbackJump(jmpIp, cc, m_cgFixups);
       };
       auto it = locRecs.records.find(req.id);
       if (it != locRecs.records.end()) {
@@ -1057,7 +1058,7 @@ struct LLVMEmitter {
         ip += di.size();
         if (di.isCall()) {
           FTRACE(2, "  afterCall: {}\n", ip);
-          mcg->registerCatchBlock(ip, info.landingPad);
+          m_cgFixups.catches.emplace_back(ip, info.landingPad);
           found = true;
         }
       }
@@ -1136,7 +1137,7 @@ struct LLVMEmitter {
     if (m_blocks[l] == nullptr) {
       auto& b = m_unit.blocks[l];
       auto name = folly::to<std::string>('B', size_t(l));
-      if (b.area == AreaIndex::Cold || b.area == AreaIndex::Frozen) {
+      if (b.area_idx == AreaIndex::Cold || b.area_idx == AreaIndex::Frozen) {
         name += ".cold";
       };
 
@@ -1439,6 +1440,7 @@ VASM_OPCODES
 
   const Vunit& m_unit;
   Vtext& m_text;
+  CGMeta& m_cgFixups;
 
   // Faux personality for emitting landingpad.
   llvm::Function* m_personalityFunc;
@@ -1489,7 +1491,7 @@ void LLVMEmitter::emit(const jit::vector<Vlabel>& labels) {
   // Make sure all the llvm blocks are emitted in the order given by
   // layoutBlocks, regardless of which ones we need to use as jump targets
   // first.
-  for (auto label : layoutBlocks(m_unit)) {
+  for (auto label : layoutBlocks(m_unit, m_text)) {
     block(label);
   }
 
@@ -1954,10 +1956,10 @@ void LLVMEmitter::emit(const bindjmp& inst) {
   if (!inst.target.resumed()) optSPOff = inst.spOff;
   auto reqIp = svcreq::emit_ephemeral(
     frozen,
-    mcg->getFreeStub(frozen, &mcg->cgFixups(), &reused),
+    mcg->getFreeStub(frozen, &m_cgFixups, &reused),
     optSPOff,
     REQ_BIND_JMP,
-    mcg->code.base(),
+    m_text.main().code.base(),
     inst.target.toAtomicInt(),
     inst.trflags.packed
   );
@@ -2051,22 +2053,22 @@ void LLVMEmitter::emit(const bindaddr& inst) {
   // do what vasm does here.
 
   auto& frozen = m_text.frozen().code;
-  mcg->setJmpTransID((TCA)inst.addr, m_unit.transKind);
+  m_cgFixups.setJmpTransID((TCA)inst.addr, m_unit.transKind);
 
   auto optSPOff = folly::Optional<FPInvOffset>{};
   if (!inst.target.resumed()) optSPOff = inst.spOff;
 
   *inst.addr = svcreq::emit_ephemeral(
     frozen,
-    mcg->getFreeStub(frozen, &mcg->cgFixups()),
+    mcg->getFreeStub(frozen, &m_cgFixups),
     optSPOff,
     REQ_BIND_ADDR,
     inst.addr,
     inst.target.toAtomicInt(),
     TransFlags{}.packed
   );
-  mcg->cgFixups().codePointers.insert(inst.addr);
-  mcg->setJmpTransID(TCA(inst.addr), m_unit.transKind);
+  m_cgFixups.codePointers.insert(inst.addr);
+  m_cgFixups.setJmpTransID(TCA(inst.addr), m_unit.transKind);
 }
 
 void LLVMEmitter::emit(const defvmsp& inst) {
@@ -3304,13 +3306,13 @@ llvm::Type* LLVMEmitter::ptrIntNType(size_t bits, bool inFS) const {
 
 } // unnamed namespace
 
-void genCodeLLVM(const Vunit& unit, Vtext& text) {
+void genCodeLLVM(const Vunit& unit, Vtext& text, CGMeta& fixups) {
   Timer timer(Timer::llvm);
   FTRACE(2, "\nTrying to emit LLVM IR for Vunit:\n{}\n", show(unit));
 
   try {
     auto const labels = sortBlocks(unit);
-    LLVMEmitter(unit, text).emit(labels);
+    LLVMEmitter(unit, text, fixups).emit(labels);
   } catch (const FailedLLVMCodeGen& e) {
     throw;
   } catch (const std::exception& e) {
@@ -3326,7 +3328,7 @@ void genCodeLLVM(const Vunit& unit, Vtext& text) {
 
 namespace HPHP { namespace jit {
 
-void genCodeLLVM(const Vunit& unit, Vtext& areas) {
+void genCodeLLVM(const Vunit& unit, Vtext& text, CGMeta& fixups) {
   throw FailedLLVMCodeGen("This build does not support the LLVM backend");
 }
 

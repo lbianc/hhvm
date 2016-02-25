@@ -70,18 +70,40 @@ let monitor_daemon_main (options: ServerArgs.options) =
   else HackEventLogger.init_monitor (ServerArgs.root options)
       (Unix.gettimeofday ());
   Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
+
   let www_root = (ServerArgs.root options) in
-  ignore @@ Sys_utils.setsid ();
-  if ServerArgs.check_mode options then
-    ServerMain.run_once options
-  else
+
+  if not (ServerArgs.check_mode options) then begin
     (** Make sure to lock the lockfile before doing *anything*, especially
      * opening the socket. *)
     let lock_file = ServerFiles.lock_file www_root in
     if not (Lock.grab lock_file) then
       (Hh_logger.log "Monitor daemon already running. Killing";
        Exit_status.exit Exit_status.Ok);
+  end;
+
+  ignore @@ Sys_utils.setsid ();
+
+  (* Force hhi files to be extracted and their location saved before workers
+   * fork, so everyone can know about the same hhi path. *)
+  ignore (Hhi.get_hhi_root());
+
+  Relative_path.set_path_prefix Relative_path.Root www_root;
+  let config = ServerConfig.(sharedmem_config (load filename options)) in
+  SharedMem.init config;
+  let first_init = ref true in
+
+  if ServerArgs.check_mode options then
+    ServerMain.run_once options
+  else
     let hh_server_monitor_starter = begin fun () ->
+
+      if !first_init then begin
+        first_init := false
+      end else begin
+        SharedMem.reset ()
+      end;
+
       let typechecker = start_hh_server options in
       let ide = start_ide_server options in
       IdeProcessPipeInit.monitor_make_and_send

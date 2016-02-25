@@ -152,6 +152,7 @@ struct RuntimeOption {
   static bool ServerHarshShutdown;
   static bool ServerEvilShutdown;
   static bool ServerKillOnSIGTERM;
+  static int ServerPreShutdownWait;
   static int ServerShutdownListenWait;
   static std::vector<std::string> ServerNextProtocols;
   static int GzipCompressionLevel;
@@ -171,6 +172,7 @@ struct RuntimeOption {
   static bool EnableEarlyFlush;
   static bool ForceChunkedEncoding;
   static int64_t MaxPostSize;
+  static int64_t LowestMaxPostSize;
   static bool AlwaysPopulateRawPostData;
   static int64_t UploadMaxFileSize;
   static std::string UploadTmpDir;
@@ -192,7 +194,7 @@ struct RuntimeOption {
 
   // If a request has a body over this limit, switch to on-demand reading.
   // -1 for no limit.
-  static int RequestBodyReadLimit;
+  static int64_t RequestBodyReadLimit;
 
   static bool EnableSSL;
   static int SSLPort;
@@ -548,6 +550,7 @@ struct RuntimeOption {
   F(bool, EagerGC,                     false)                           \
   /* only run eager-gc once at each surprise point (much faster) */     \
   F(bool, FilterGCPoints,              true)                            \
+  F(bool, Quarantine,                  false)                           \
   F(bool, DisableSomeRepoAuthNotices,  true)                            \
   F(uint32_t, InitialNamedEntityTableSize,  30000)                      \
   F(uint32_t, InitialStaticStringTableSize,                             \

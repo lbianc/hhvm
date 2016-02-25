@@ -20,9 +20,9 @@
 #include <cstdio>
 #include <vector>
 
-#include "hphp/util/data-block.h"
-#include "hphp/runtime/vm/srckey.h"
+#include "hphp/runtime/vm/jit/code-cache.h"
 #include "hphp/runtime/vm/jit/srcdb.h"
+#include "hphp/runtime/vm/srckey.h"
 
 namespace HPHP {
 
@@ -93,13 +93,13 @@ void recordPerfRelocMap(
   TCA coldStart, TCA coldEnd,
   SrcKey sk, int argNum,
   const GrowableVector<IncomingBranch> &incomingBranches,
-  CodeGenFixups& fixups);
+  CGMeta& fixups);
 String perfRelocMapInfo(
   TCA start, TCA end,
   TCA coldStart, TCA coldEnd,
   SrcKey sk, int argNum,
   const GrowableVector<IncomingBranch> &incomingBranches,
-  CodeGenFixups& fixups);
+  CGMeta& fixups);
 
 struct TransRelocInfo;
 void readRelocations(
@@ -107,7 +107,8 @@ void readRelocations(
   std::set<TCA>* liveStubs,
   void (*callback)(TransRelocInfo&& tri, void* data),
   void* data);
-void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& hot);
+void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& hot,
+              CGMeta& fixups);
 
 /*
  * Relocate a new translation into a free region in the TC and update the
@@ -120,7 +121,8 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& hot);
  *
  * If set *adjust will be updated to its post relocation address.
  */
-bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
+bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
+                            CGMeta& fixups,
                             TCA* adjust = nullptr);
 
 //////////////////////////////////////////////////////////////////////
@@ -131,15 +133,15 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache& cache,
 namespace x64 {
 void adjustForRelocation(RelocationInfo&);
 void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
-void adjustCodeForRelocation(RelocationInfo& rel, CodeGenFixups& fixups);
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
 void adjustMetaDataForRelocation(RelocationInfo& rel,
                                  AsmInfo* asmInfo,
-                                 CodeGenFixups& fixups);
-void findFixups(TCA start, TCA end, CodeGenFixups& fixups);
+                                 CGMeta& fixups);
+void findFixups(TCA start, TCA end, CGMeta& fixups);
 size_t relocate(RelocationInfo& rel,
                 CodeBlock& destBlock,
                 TCA start, TCA end,
-                CodeGenFixups& fixups,
+                CGMeta& fixups,
                 TCA* exitAddr);
 
 }
@@ -147,15 +149,15 @@ size_t relocate(RelocationInfo& rel,
 namespace ppc64 {
 void adjustForRelocation(RelocationInfo&);
 void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
-void adjustCodeForRelocation(RelocationInfo& rel, CodeGenFixups& fixups);
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
 void adjustMetaDataForRelocation(RelocationInfo& rel,
                                  AsmInfo* asmInfo,
-                                 CodeGenFixups& fixups);
-void findFixups(TCA start, TCA end, CodeGenFixups& fixups);
+                                 CGMeta& fixups);
+void findFixups(TCA start, TCA end, CGMeta& fixups);
 size_t relocate(RelocationInfo& rel,
                 CodeBlock& destBlock,
                 TCA start, TCA end,
-                CodeGenFixups& fixups,
+                CGMeta& fixups,
                 TCA* exitAddr);
 }
 

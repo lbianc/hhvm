@@ -60,7 +60,8 @@ constexpr int push_pop_position           = 8;
 
 struct Vgen {
   explicit Vgen(Venv& env)
-    : text(env.text)
+    : env(env)
+    , text(env.text)
     , assem(*env.cb)
     , a(&assem)
     , current(env.current)
@@ -131,11 +132,13 @@ struct Vgen {
   }
   void emit(const ldimml& i);
   void emit(const ldimmq& i);
-  void emit(const ldimmqs& i) { emitSmashableMovq(a->code(), i.s.q(), i.d); }
+  void emit(const ldimmqs& i) {
+    emitSmashableMovq(a->code(), env.meta, i.s.q(), i.d);
+  }
   void emit(const nothrow& i) {
     // save the return address of previous call.
     TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
-    mcg->registerCatchBlock(saved_pc, nullptr);
+    env.meta.catches.emplace_back(saved_pc, nullptr);
   }
   // After VM frame unwinding, restore the frame pointer correctly as the
   // call left it with the additional frame.
@@ -393,6 +396,7 @@ struct Vgen {
 private:
   CodeBlock& frozen() { return text.frozen().code; }
 
+  Venv& env;
   Vtext& text;
   ppc64_asm::Assembler assem;
   ppc64_asm::Assembler* a;
@@ -497,7 +501,7 @@ void Vgen::emit(const syncpoint& i) {
   TCA saved_pc = a->frontier() - smashableCallSkipEpilogue();
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", saved_pc,
          i.fix.pcOffset, i.fix.spOffset);
-  mcg->recordSyncPoint(saved_pc, i.fix);
+  env.meta.fixups.emplace_back(saved_pc, i.fix);
 }
 
 /*
@@ -618,15 +622,15 @@ void Vgen::emit(const mcprep& i) {
    * Class*, so we'll always miss the inline check before it's smashed, and
    * handlePrimeCacheInit can tell it's not been smashed yet
    */
-  auto const mov_addr = emitSmashableMovq(a->code(), 0, r64(i.d));
+  auto const mov_addr = emitSmashableMovq(a->code(), env.meta, 0, r64(i.d));
   auto const imm = reinterpret_cast<uint64_t>(mov_addr);
   smashMovq(mov_addr, (imm << 1) | 1);
 
-  mcg->cgFixups().addressImmediates.insert(reinterpret_cast<TCA>(~imm));
+  env.meta.addressImmediates.insert(reinterpret_cast<TCA>(~imm));
 }
 
 void Vgen::emit(const callphp& i) {
-  emitSmashableCall(a->code(), i.stub);
+  emitSmashableCall(a->code(), env.meta, i.stub);
   emit(unwind{{i.targets[0], i.targets[1]}});
 }
 
@@ -658,7 +662,7 @@ void Vgen::emit(const callr& i) {
 }
 
 void Vgen::emit(const calls& i) {
-  emitSmashableCall(a->code(), i.target);
+  emitSmashableCall(a->code(), env.meta, i.target);
 }
 
 void Vgen::emit(const callarray& i) {
@@ -1492,7 +1496,8 @@ void lowerForPPC64(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
-void finishPPC64(Vunit& unit, Vtext& text, const Abi& abi, AsmInfo* asmInfo) {
+void finishPPC64(Vunit& unit, Vtext& text, CGMeta& fixups,
+                 const Abi& abi, AsmInfo* asmInfo) {
   // The Timer instances calculate the time while they are alive, hence the
   // additional scope in order to limit them.
   {
@@ -1530,7 +1535,7 @@ void finishPPC64(Vunit& unit, Vtext& text, const Abi& abi, AsmInfo* asmInfo) {
 
   {
     Timer timer(Timer::vasm_gen);
-    vasm_emit<Vgen>(unit, text, asmInfo);
+    vasm_emit<Vgen>(unit, text, fixups, asmInfo);
   }
 }
 

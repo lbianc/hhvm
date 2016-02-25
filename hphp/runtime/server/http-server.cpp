@@ -225,8 +225,6 @@ HttpServer::~HttpServer() {
 }
 
 void HttpServer::runOrExitProcess() {
-  StartTime = time(0);
-
   auto startupFailure = [] (const std::string& msg) {
     Logger::Error(msg);
     Logger::Error("Shutting down due to failure(s) to bind in "
@@ -245,6 +243,8 @@ void HttpServer::runOrExitProcess() {
     }
     Logger::Info("page server started");
   }
+
+  StartTime = time(nullptr);
 
   if (RuntimeOption::AdminServerPort) {
     if (!startServer(false)) {
@@ -295,13 +295,13 @@ void HttpServer::runOrExitProcess() {
       Logger::Info("page server killed");
       return;
     }
-    Logger::Info("page server stopped");
+    Logger::Info("stopping page server");
   }
 
-  onServerShutdown();
   if (RuntimeOption::ServerPort) {
     m_pageServer->stop();
   }
+  onServerShutdown();
 
   waitForServers();
   m_watchDog.waitForEnd();
@@ -333,9 +333,14 @@ void HttpServer::stop(const char* stopReason) {
   Logger::FlushAll();
   HttpRequestHandler::GetAccessLog().flushAllWriters();
 
-  if (RuntimeOption::ServerGracefulShutdownWait) {
+  int totalWait =
+    RuntimeOption::ServerPreShutdownWait +
+    RuntimeOption::ServerShutdownListenWait +
+    RuntimeOption::ServerGracefulShutdownWait;
+
+  if (totalWait > 0) {
     signal(SIGALRM, exit_on_timeout);
-    alarm(RuntimeOption::ServerGracefulShutdownWait);
+    alarm(totalWait);
   }
 
   Lock lock(this);

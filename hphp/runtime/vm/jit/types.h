@@ -51,8 +51,13 @@ struct ctca_identity_hash {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef hphp_hash_set<TransID> TransIDSet;
-typedef std::vector<TransID>   TransIDVec;
+using TransIDSet = hphp_hash_set<TransID>;
+using TransIDVec = std::vector<TransID>;
+
+using Annotation = std::pair<std::string, std::string>;
+using Annotations = std::vector<Annotation>;
+
+using LiteralMap = hphp_hash_map<uint64_t,const uint64_t*>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -124,7 +129,7 @@ static_assert(sizeof(TransFlags) <= sizeof(uint64_t), "Too many TransFlags!");
  * Different contexts of code generation constrain codegen differently; e.g.,
  * cross-trace code has fewer available registers.
  */
-enum class CodeKind {
+enum class CodeKind : uint8_t {
   /*
    * Normal PHP code in the TC.
    */

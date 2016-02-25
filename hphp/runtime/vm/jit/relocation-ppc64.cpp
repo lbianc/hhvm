@@ -53,7 +53,7 @@ void fixupRanges(AsmInfo* asmInfo, AreaIndex area, RelocationInfo& rel) {
 size_t relocateImpl(RelocationInfo& rel,
                     CodeBlock& destBlock,
                     TCA start, TCA end,
-                    CodeGenFixups& fixups,
+                    CGMeta& fixups,
                     TCA* exitAddr,
                     WideJmpSet& wideJmps) {
   not_implemented();
@@ -74,15 +74,15 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
 
 void adjustMetaDataForRelocation(RelocationInfo& rel,
                                  AsmInfo* asmInfo,
-                                 CodeGenFixups& fixups) {
+                                 CGMeta& meta) {
   not_implemented();
 }
 
-void adjustCodeForRelocation(RelocationInfo& rel, CodeGenFixups& fixups) {
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
   not_implemented();
 }
 
-void findFixups(TCA start, TCA end, CodeGenFixups& fixups) {
+void findFixups(TCA start, TCA end, CGMeta& meta) {
   not_implemented();
 }
 
@@ -90,7 +90,7 @@ void findFixups(TCA start, TCA end, CodeGenFixups& fixups) {
 size_t relocate(RelocationInfo& rel,
                 CodeBlock& destBlock,
                 TCA start, TCA end,
-                CodeGenFixups& fixups,
+                CGMeta& fixups,
                 TCA* exitAddr) {
   return size_t{0};
 }

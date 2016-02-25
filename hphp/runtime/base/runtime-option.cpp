@@ -29,7 +29,6 @@
 
 #include <folly/String.h>
 
-#include "hphp/util/code-cache.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/network.h"
@@ -65,6 +64,8 @@
 #include "hphp/runtime/base/hphp-system.h"
 #include "hphp/runtime/base/zend-url.h"
 #include "hphp/runtime/ext/extension-registry.h"
+
+#include "hphp/runtime/vm/jit/code-cache.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -169,6 +170,7 @@ int RuntimeOption::ServerGracefulShutdownWait = 0;
 bool RuntimeOption::ServerHarshShutdown = true;
 bool RuntimeOption::ServerEvilShutdown = true;
 bool RuntimeOption::ServerKillOnSIGTERM = false;
+int RuntimeOption::ServerPreShutdownWait = 0;
 int RuntimeOption::ServerShutdownListenWait = 0;
 std::vector<std::string> RuntimeOption::ServerNextProtocols;
 int RuntimeOption::GzipCompressionLevel = 3;
@@ -188,6 +190,7 @@ bool RuntimeOption::ImplicitFlush = false;
 bool RuntimeOption::EnableEarlyFlush = true;
 bool RuntimeOption::ForceChunkedEncoding = false;
 int64_t RuntimeOption::MaxPostSize = 100;
+int64_t RuntimeOption::LowestMaxPostSize = LLONG_MAX;
 bool RuntimeOption::AlwaysPopulateRawPostData = false;
 int64_t RuntimeOption::UploadMaxFileSize = 100;
 std::string RuntimeOption::UploadTmpDir = "/tmp";
@@ -203,7 +206,7 @@ std::string RuntimeOption::DefaultCharsetName = "";
 bool RuntimeOption::ForceServerNameToHeader = false;
 bool RuntimeOption::PathDebug = false;
 
-int RuntimeOption::RequestBodyReadLimit = -1;
+int64_t RuntimeOption::RequestBodyReadLimit = -1;
 
 bool RuntimeOption::EnableSSL = false;
 int RuntimeOption::SSLPort = 443;
@@ -676,6 +679,13 @@ static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
           matchHdfPattern(cpu, ini, hdf, "cpu")) {
         messages.emplace_back(folly::sformat(
                                 "Matched tier: {}", hdf.getName()));
+        if (hdf.exists("clear")) {
+          std::vector<std::string> list;
+          hdf["clear"].configGet(list);
+          for (auto const& s : list) {
+            config.remove(s);
+          }
+        }
         config.copy(hdf["overwrite"]);
         // no break here, so we can continue to match more overwrites
       }
@@ -1097,6 +1107,7 @@ void RuntimeOption::Load(
   }
   {
     // CodeCache
+    using jit::CodeCache;
     Config::Bind(CodeCache::AHotSize, ini, config, "Eval.JitAHotSize",
                  ahotDefault());
     Config::Bind(CodeCache::ASize, ini, config, "Eval.JitASize", 60 << 20);
@@ -1265,6 +1276,8 @@ void RuntimeOption::Load(
     Config::Bind(ServerKillOnSIGTERM, ini, config, "Server.KillOnSIGTERM",
                  false);
     Config::Bind(ServerEvilShutdown, ini, config, "Server.EvilShutdown", true);
+    Config::Bind(ServerPreShutdownWait, ini, config,
+                 "Server.PreShutdownWait", 0);
     Config::Bind(ServerShutdownListenWait, ini, config,
                  "Server.ShutdownListenWait", 0);
     Config::Bind(ServerNextProtocols, ini, config, "Server.SSLNextProtocols");
@@ -1442,6 +1455,7 @@ void RuntimeOption::Load(
     // naturally (as specified top to bottom in the file and left to right on
     // the command line.
     Config::Iterate(vh_callback, ini, config, "VirtualHost");
+    LowestMaxPostSize = VirtualHost::GetLowestMaxPostSize();
   }
   {
     // IpBlocks

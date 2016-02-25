@@ -118,18 +118,19 @@ bool emit(Venv& env, const retransopt& i);
 ///////////////////////////////////////////////////////////////////////////////
 
 template<class Vemit>
-void vasm_emit(const Vunit& unit, Vtext& text, AsmInfo* asm_info) {
+void vasm_emit(const Vunit& unit, Vtext& text, CGMeta& fixups,
+               AsmInfo* asm_info) {
   using namespace vasm_detail;
 
-  Venv env { unit, text };
+  Venv env { unit, text, fixups };
   env.addrs.resize(unit.blocks.size());
 
-  auto labels = layoutBlocks(unit);
+  auto labels = layoutBlocks(unit, text);
 
   IRMetadataUpdater irmu(env, asm_info);
 
   auto const area_start = [&] (Vlabel b) {
-    auto area = unit.blocks[b].area;
+    auto area = unit.blocks[b].area_idx;
     return text.area(area).start;
   };
 
@@ -139,7 +140,7 @@ void vasm_emit(const Vunit& unit, Vtext& text, AsmInfo* asm_info) {
     auto b = labels[i];
     auto& block = unit.blocks[b];
 
-    env.cb = &text.area(block.area).code;
+    env.cb = &text.area(block.area_idx).code;
     env.addrs[b] = env.cb->frontier();
 
     { // Compute the next block we will emit into the current area.

@@ -18,6 +18,7 @@
 #define HPHP_UTIL_EH_FRAME_H_
 
 #include "hphp/util/data-block.h"
+#include "hphp/util/dwarf-reg.h"
 
 #include <boost/mpl/identity.hpp>
 #include <folly/Memory.h>
@@ -35,35 +36,6 @@
 #endif
 
 namespace HPHP {
-
-///////////////////////////////////////////////////////////////////////////////
-
-namespace dw_reg {
-
-#if defined(__powerpc64__)
-
-enum PPC64Reg : uint8_t {
-  R0,  SP,  TOC, R3,  R4,  R5,  R6,  R7,  R8,  R9,  R10, R11, R12, TLS,
-  R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27,
-  R28, R29, R30, FP,  LR = 65
-};
-
-// architecture-specific VMFP register: use the same name on all of them
-auto const VMFP = FP;
-
-#else
-
-enum X64Reg : uint8_t {
-  RAX, RDX, RCX, RBX, RSI, RDI, RBP, RSP,
-  R8,  R9,  R10, R11, R12, R13, R14, R15, RIP
-};
-
-// architecture-specific VMFP register: use the same name on all of them
-auto const VMFP = RBP;
-
-#endif
-
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 

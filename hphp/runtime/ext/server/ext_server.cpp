@@ -18,15 +18,16 @@
 
 #include <folly/Conv.h>
 
-#include "hphp/runtime/server/satellite-server.h"
-#include "hphp/runtime/server/pagelet-server.h"
-#include "hphp/runtime/server/xbox-server.h"
-#include "hphp/runtime/server/http-protocol.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/server/http-protocol.h"
+#include "hphp/runtime/server/http-server.h"
+#include "hphp/runtime/server/pagelet-server.h"
 #include "hphp/runtime/server/rpc-request-handler.h"
+#include "hphp/runtime/server/satellite-server.h"
+#include "hphp/runtime/server/xbox-server.h"
 
 namespace HPHP {
 
@@ -55,6 +56,8 @@ static struct ServerExtension final : Extension {
     HHVM_FE(xbox_set_thread_timeout);
     HHVM_FE(xbox_schedule_thread_reset);
     HHVM_FE(xbox_get_thread_time);
+    HHVM_FALIAS(HH\\server_is_stopping, server_is_stopping);
+    HHVM_FALIAS(HH\\server_uptime, server_uptime);
 
     loadSystemlib();
   }
@@ -238,6 +241,25 @@ int64_t HHVM_FUNCTION(xbox_get_thread_time) {
     return time(nullptr) - handler->getLastResetTime();
   }
   throw Exception("Not an xbox worker!");
+}
+
+bool HHVM_FUNCTION(server_is_stopping) {
+  if (HttpServer::Server) {
+    if (auto const server = HttpServer::Server->getPageServer()) {
+      return server->getStatus() == Server::RunStatus::STOPPING;
+    }
+  }
+  // Return false if not running in server mode.
+  return false;
+}
+
+int64_t HHVM_FUNCTION(server_uptime) {
+  // return -1 if server is not yet started, e.g., when not running in
+  // server mode.
+  if (HttpServer::StartTime == 0) return -1;
+  int64_t nSeconds = time(nullptr) - HttpServer::StartTime;
+  if (nSeconds < 0) nSeconds = 0;
+  return nSeconds;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

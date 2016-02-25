@@ -62,7 +62,7 @@ namespace ppc64 {
 ///////////////////////////////////////////////////////////////////////////////
 
 static void alignJmpTarget(CodeBlock& cb) {
-  align(cb, Alignment::JmpTarget, AlignContext::Dead);
+  align(cb, nullptr, Alignment::JmpTarget, AlignContext::Dead);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -207,7 +207,7 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   auto const type = rarg(3);
 
   // This stub is very hot; keep it cache-aligned.
-  align(cb, Alignment::CacheLine, AlignContext::Dead);
+  align(cb, nullptr, Alignment::CacheLine, AlignContext::Dead);
   auto const release = emitDecRefHelper(cb, local, type, local | last);
 
   auto const decref_local = [&] (Vout& v) {

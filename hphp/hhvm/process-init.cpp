@@ -67,7 +67,6 @@ void tweak_variant_dtors();
 void ProcessInit() {
   // Create the global mcg object
   jit::mcg = new jit::MCGenerator();
-  jit::mcg->initUniqueStubs();
 
   // Save the current options, and set things up so that
   // systemlib.php can be read from and stored in the

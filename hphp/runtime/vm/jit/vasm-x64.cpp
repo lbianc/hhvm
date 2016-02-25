@@ -16,7 +16,6 @@
 
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 
-#include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
@@ -55,7 +54,7 @@ namespace {
 
 struct Vgen {
   explicit Vgen(Venv& env)
-    : text(env.text)
+    : env(env)
     , a(*env.cb)
     , current(env.current)
     , next(env.next)
@@ -249,6 +248,7 @@ private:
   void prep(Reg32 s, Reg32 d) { if (s != d) a.movl(s, d); }
   void prep(Reg64 s, Reg64 d) { if (s != d) a.movq(s, d); }
   void prep(RegXMM s, RegXMM d) { if (s != d) a.movdqa(s, d); }
+  void emit_simd_imm(int64_t, Vreg);
 
   template<class Inst> void unary(Inst& i) { prep(i.s, i.d); }
   template<class Inst> void binary(Inst& i) { prep(i.s1, i.d); }
@@ -256,10 +256,10 @@ private:
   template<class Inst> void commute(Inst&);
   template<class Inst> void noncommute(Inst&);
 
-  CodeBlock& frozen() { return text.frozen().code; }
+  CodeBlock& frozen() { return env.text.frozen().code; }
 
 private:
-  Vtext& text;
+  Venv& env;
   X64Assembler a;
 
   const Vlabel current;
@@ -379,11 +379,11 @@ void Vgen::emit(const copy2& i) {
   }
 }
 
-void emit_simd_imm(X64Assembler& a, int64_t val, Vreg d) {
+void Vgen::emit_simd_imm(int64_t val, Vreg d) {
   if (val == 0) {
     a.pxor(d, d); // does not modify flags
   } else {
-    auto addr = mcg->allocLiteral(val);
+    auto addr = mcg->allocLiteral(val, env.meta);
     a.movsd(rip[(intptr_t)addr], d);
   }
 }
@@ -395,7 +395,7 @@ void Vgen::emit(const ldimmb& i) {
     Vreg8 d8 = i.d;
     a.movb(static_cast<int8_t>(val), d8);
   } else {
-    emit_simd_imm(a, val, i.d);
+    emit_simd_imm(val, i.d);
   }
 }
 
@@ -406,7 +406,7 @@ void Vgen::emit(const ldimml& i) {
     Vreg32 d32 = i.d;
     a.movl(val, d32);
   } else {
-    emit_simd_imm(a, uint32_t(val), i.d);
+    emit_simd_imm(uint32_t(val), i.d);
   }
 }
 
@@ -420,12 +420,12 @@ void Vgen::emit(const ldimmq& i) {
       a.emitImmReg(i.s, i.d);
     }
   } else {
-    emit_simd_imm(a, val, i.d);
+    emit_simd_imm(val, i.d);
   }
 }
 
 void Vgen::emit(const ldimmqs& i) {
-  emitSmashableMovq(a.code(), i.s.q(), i.d);
+  emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
 }
 
 void Vgen::emit(const load& i) {
@@ -459,11 +459,11 @@ void Vgen::emit(const mcprep& i) {
    * Class*, so we'll always miss the inline check before it's smashed, and
    * handlePrimeCacheInit can tell it's not been smashed yet
    */
-  auto const mov_addr = emitSmashableMovq(a.code(), 0, r64(i.d));
+  auto const mov_addr = emitSmashableMovq(a.code(), env.meta, 0, r64(i.d));
   auto const imm = reinterpret_cast<uint64_t>(mov_addr);
   smashMovq(mov_addr, (imm << 1) | 1);
 
-  mcg->cgFixups().addressImmediates.insert(reinterpret_cast<TCA>(~imm));
+  env.meta.addressImmediates.insert(reinterpret_cast<TCA>(~imm));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -477,13 +477,13 @@ void Vgen::emit(const call& i) {
     // assumes the data section is near the current code section.  Since
     // this sequence is directly in-line, rip-relative like this is
     // more compact than loading a 64-bit immediate.
-    auto addr = mcg->allocLiteral((uint64_t)i.target);
+    auto addr = mcg->allocLiteral((uint64_t)i.target, env.meta);
     a.call(rip[(intptr_t)addr]);
   }
 }
 
 void Vgen::emit(const calls& i) {
-  emitSmashableCall(a.code(), i.target);
+  emitSmashableCall(a.code(), env.meta, i.target);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -522,7 +522,7 @@ void Vgen::emit(const phpret& i) {
 }
 
 void Vgen::emit(const callphp& i) {
-  emitSmashableCall(a.code(), i.stub);
+  emitSmashableCall(a.code(), env.meta, i.stub);
   emit(unwind{{i.targets[0], i.targets[1]}});
 }
 
@@ -553,13 +553,13 @@ void Vgen::emit(const contenter& i) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void Vgen::emit(const nothrow& i) {
-  mcg->registerCatchBlock(a.frontier(), nullptr);
+  env.meta.catches.emplace_back(a.frontier(), nullptr);
 }
 
 void Vgen::emit(const syncpoint& i) {
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", a.frontier(),
          i.fix.pcOffset, i.fix.spOffset);
-  mcg->recordSyncPoint(a.frontier(), i.fix);
+  env.meta.fixups.emplace_back(a.frontier(), i.fix);
 }
 
 void Vgen::emit(const unwind& i) {
@@ -644,7 +644,7 @@ void Vgen::emit(const jmpi& i) {
     a.jmp(i.target);
   } else {
     // can't do a near jmp - use rip-relative addressing
-    auto addr = mcg->allocLiteral((uint64_t)i.target);
+    auto addr = mcg->allocLiteral((uint64_t)i.target, env.meta);
     a.jmp(rip[(intptr_t)addr]);
   }
 }
@@ -904,9 +904,10 @@ void optimizeX64(Vunit& unit, const Abi& abi) {
   }
 }
 
-void emitX64(const Vunit& unit, Vtext& text, AsmInfo* asmInfo) {
+void emitX64(const Vunit& unit, Vtext& text, CGMeta& fixups,
+             AsmInfo* asmInfo) {
   Timer timer(Timer::vasm_gen);
-  vasm_emit<Vgen>(unit, text, asmInfo);
+  vasm_emit<Vgen>(unit, text, fixups, asmInfo);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

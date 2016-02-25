@@ -31,6 +31,13 @@ val default_config : config
 val init: config -> unit
 
 (*****************************************************************************)
+(* Resets the initialized and used memory to the state right after
+ * initialization.
+ *)
+(*****************************************************************************)
+val reset: unit -> unit
+
+(*****************************************************************************)
 (* The shared memory garbage collector. It must be called every time we
  * free data (cf hh_shared.c for the underlying C implementation).
  *)
@@ -47,17 +54,13 @@ val collect: [ `gentle | `aggressive ] -> unit
 val init_done: unit -> unit
 
 (*****************************************************************************)
-(* Serializes the shared memory and writes it to a file *)
+(* Serializes the dependency table and writes it to a file *)
 (*****************************************************************************)
-val save: string -> unit
-
 val save_dep_table: string -> unit
 
 (*****************************************************************************)
-(* Loads the shared memory by reading from a file *)
+(* Loads the dependency table by reading from a file *)
 (*****************************************************************************)
-val load: string -> unit
-
 val load_dep_table: string -> unit
 
 (*****************************************************************************)
@@ -84,6 +87,16 @@ val hash_stats : unit -> table_stats
 
 val invalidate_caches: unit -> unit
 
+(* With local writes enabled, data written will not be stored in global shared
+ * memory, but in a local (to the process) hashtable.
+ * When reading previously written data, local version will be returned. Reading
+ * data that was not locally written will return version from shared memory.
+ *
+ * This is useful when non-master process needs to call a function that
+ * has a side effect of writing to shared memory that we don't want to
+ * persist outside of this process, and factoring out the side effect is
+ * too annoying. *)
+val enable_local_writes: unit -> unit
 (*****************************************************************************)
 (* The signature of a shared memory hashtable.
  * To create one: SharedMem.NoCache(struct type = my_type_of_value end).

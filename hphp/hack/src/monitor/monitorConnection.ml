@@ -112,13 +112,21 @@ let consume_prehandoff_messages ic oc =
 
 let connect_to_monitor config =
   let open Result in
-  Timeout.with_timeout
-    ~timeout:1
-    ~on_timeout:(fun _ -> raise Exit)
-    ~do_:begin fun timeout ->
-      establish_connection ~timeout config >>= fun (ic, oc) ->
-      get_cstate config (ic, oc)
-    end
+  try
+    Timeout.with_timeout
+      ~timeout:1
+      ~on_timeout:(fun _ -> raise Timeout.Timeout)
+      ~do_:begin fun timeout ->
+        establish_connection ~timeout config >>= fun (ic, oc) ->
+        get_cstate config (ic, oc)
+      end
+  with
+  | Timeout.Timeout ->
+    (* It looks like the socket is not always immediately released after
+     * process dies, and subsequent calls to it hang *)
+    HackEventLogger.client_connect_to_monitor_timeout ();
+    if not (server_exists config.lock_file) then Result.Error Server_missing
+    else Result.Error ServerMonitorUtils.Server_busy
 
 let connect_and_shut_down config =
   let open Result in

@@ -198,30 +198,11 @@ let merge_parent_class_reqs class_nast impls
           env, req_ancestors, req_ancestors_extends
         | Ast.Cenum -> assert false
 
-let declared_class_req class_nast impls (env, requirements, req_extends) hint =
+let declared_class_req (env, requirements, req_extends) hint =
   let env, req_ty = Typing_hint.hint env hint in
   let req_pos, req_name, req_params = TUtils.unwrap_class_hint hint in
   let env, _ = List.map_env env req_params Typing_hint.hint in
   let req_type = Env.get_class_dep env req_name in
-
-  (* for concrete classes, check required ancestors against actual
-   * ancestors; for traits and interfaces, the required extends classes
-   * are only going to be present in the ancestors of
-   * implementing/using classes, so there's nothing to do *)
-  let env = match class_nast.c_kind with
-    | Ast.Ctrait | Ast.Cinterface | Ast.Cenum -> env
-    | Ast.Cnormal | Ast.Cabstract ->
-      (match SMap.get req_name impls with
-        | None ->
-          Errors.unsatisfied_req req_pos req_name req_pos; env
-        | Some impl_ty ->
-          (* Due to checking of incompatibility when accumulating
-           * requirements, subtype violations in this case might not
-           * actually be possible *)
-          Typing_ops.sub_type_decl req_pos Reason.URclass_req env req_ty impl_ty
-      )
-  in
-
   let req_extends = SSet.add req_name req_extends in
   match req_type with
     | None -> (* The class lives in PHP : error?? *)
@@ -234,8 +215,7 @@ let declared_class_req class_nast impls (env, requirements, req_extends) hint =
        * going to be this class's <T> *)
       let subst = Inst.make_subst [] [] in
       let ex_ty_opt = SMap.get req_name requirements in
-      let env, merged = merge_single_req env subst
-        req_ty ex_ty_opt req_pos in
+      let env, merged = merge_single_req env subst req_ty ex_ty_opt req_pos in
       let requirements = SMap.add req_name merged requirements in
 
       let req_extends = SSet.union parent_type.tc_extends req_extends in
@@ -252,10 +232,9 @@ let get_class_requirements env class_nast impls =
   let req_ancestors_extends = SSet.empty in
   let acc = (env, req_ancestors, req_ancestors_extends) in
   let acc =
-    List.fold_left ~f:(declared_class_req class_nast impls)
-      ~init:acc class_nast.c_req_extends in
+    List.fold_left ~f:declared_class_req ~init:acc class_nast.c_req_extends in
   let acc =
-    List.fold_left ~f:(declared_class_req class_nast impls)
+    List.fold_left ~f:declared_class_req
       ~init:acc class_nast.c_req_implements in
   let acc =
     List.fold_left ~f:(merge_parent_class_reqs class_nast impls)
@@ -349,8 +328,8 @@ and class_parents_decl class_env c =
 and class_hint_decl class_env hint =
   match hint with
   | _, Happly ((_, cid), _) ->
-    begin match Naming_heap.ClassPosHeap.get cid with
-      | Some p when not (Naming_heap.ClassHeap.mem cid) ->
+    begin match Naming_heap.TypeIdHeap.get cid with
+      | Some (p, `Class) when not (Naming_heap.ClassHeap.mem cid) ->
         (* We are supposed to redeclare the class *)
         let fn = Pos.filename p in
         let class_opt = Parser_heap.find_class_in_file fn cid in
@@ -750,8 +729,7 @@ and method_decl env m =
     | FVvariadicArg param ->
       assert param.param_is_variadic;
       assert (param.param_expr = None);
-      let r = Reason.Rvar_param (fst param.param_id) in
-      let env, (p_name, p_ty) = Typing.make_param_ty env r param in
+      let env, (p_name, p_ty) = Typing.make_param_ty env param in
       env, Fvariadic (arity_min, (p_name, p_ty))
     | FVellipsis    -> env, Fellipsis arity_min
     | FVnonVariadic -> env, Fstandard (arity_min, List.length m.m_params)
@@ -881,5 +859,4 @@ let make_env tcopt fn =
   match Parser_heap.ParserHeap.get fn with
   | None -> ()
   | Some prog ->
-      Typing_decl_deps.add prog;
-      name_and_declare_types_program tcopt prog
+    name_and_declare_types_program tcopt prog

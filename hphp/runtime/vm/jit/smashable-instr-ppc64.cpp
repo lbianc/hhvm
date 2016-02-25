@@ -32,7 +32,8 @@ using ppc64_asm::PPC64Instr;
 
 #define EMIT_BODY(cb, inst, Inst, ...)  \
   ([&] {                                \
-    align(cb, Alignment::Smash##Inst,   \
+    align(cb, &fixups,                  \
+          Alignment::Smash##Inst,       \
           AlignContext::Live);          \
     auto const start = cb.frontier();   \
     ppc64_asm::Assembler a { cb };      \
@@ -40,12 +41,14 @@ using ppc64_asm::PPC64Instr;
     return start;                       \
   }())
 
-TCA emitSmashableMovq(CodeBlock& cb, uint64_t imm, PhysReg d) {
+TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
+                      PhysReg d) {
   return EMIT_BODY(cb, li64, Movq, d, imm);
 }
 
-TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
-  align(cb, Alignment::SmashCmpq, AlignContext::Live);
+TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
+                      PhysReg r, int8_t disp) {
+  align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
 
   auto const start = cb.frontier();
   ppc64_asm::Assembler a { cb };
@@ -59,26 +62,28 @@ TCA emitSmashableCmpq(CodeBlock& cb, int32_t imm, PhysReg r, int8_t disp) {
   return start;
 }
 
-TCA emitSmashableCall(CodeBlock& cb, TCA target) {
-  align(cb, Alignment::SmashCmpq, AlignContext::Live);
+TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
+  align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
 
   return EMIT_BODY(cb, call, Call, rsp(), rtoc(), rfuncln(), rvmfp(), target);
 }
 
-TCA emitSmashableJmp(CodeBlock& cb, TCA target) {
+TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
   return EMIT_BODY(cb, branchAuto, Jmp, target);
 }
 
-TCA emitSmashableJcc(CodeBlock& cb, TCA target, ConditionCode cc) {
+TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
+                     ConditionCode cc) {
   assertx(cc != CC_None);
   return EMIT_BODY(cb, branchAuto, Jcc, target, cc);
 }
 
 std::pair<TCA,TCA>
-emitSmashableJccAndJmp(CodeBlock& cb, TCA target, ConditionCode cc) {
+emitSmashableJccAndJmp(CodeBlock& cb, CGMeta& fixups, TCA target,
+                       ConditionCode cc) {
   assertx(cc != CC_None);
 
-  align(cb, Alignment::SmashJccAndJmp, AlignContext::Live);
+  align(cb, &fixups, Alignment::SmashJccAndJmp, AlignContext::Live);
 
   ppc64_asm::Assembler a { cb };
   auto const jcc = cb.frontier();
@@ -110,7 +115,7 @@ void smashMovq(TCA inst, uint64_t imm) {
 void smashCmpq(TCA inst, uint32_t imm) {
   always_assert(is_aligned(inst, Alignment::SmashCmpq));
 
-  auto& cb = mcg->code.blockFor(inst);
+  auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
 
@@ -121,7 +126,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
 }
 
 void smashCall(TCA inst, TCA target) {
-  auto& cb = mcg->code.blockFor(inst);
+  auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
 
@@ -137,7 +142,7 @@ void smashCall(TCA inst, TCA target) {
 void smashJmp(TCA inst, TCA target) {
   always_assert(is_aligned(inst, Alignment::SmashJmp));
 
-  auto& cb = mcg->code.blockFor(inst);
+  auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   ppc64_asm::Assembler a { cb };
 
@@ -154,7 +159,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   if (cc == CC_None) {
     ppc64_asm::Assembler::patchBctr(inst, target);
   } else {
-    auto& cb = mcg->code.blockFor(inst);
+    auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };
     ppc64_asm::Assembler a { cb };
     a.branchAuto(target, cc);

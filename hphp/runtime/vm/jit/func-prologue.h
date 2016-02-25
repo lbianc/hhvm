@@ -18,6 +18,7 @@
 #define incl_HPHP_JIT_FUNC_PROLOGUE_H
 
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/jit/code-cache.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include <cstdint>
@@ -26,6 +27,7 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+struct CGMeta;
 struct Func;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,7 +49,8 @@ namespace jit {
  * A func prologue does a large portion of the work of an interpreted FCall;
  * the rest of it is handled by the Call instruction.
  */
-TCA genFuncPrologue(TransID transID, TransKind kind, Func* func, int argc);
+TCA genFuncPrologue(TransID transID, TransKind kind, Func* func, int argc,
+                    CodeCache::View code, CGMeta& fixups);
 
 /*
  * Emit a func body dispatch entry point to the TC.
@@ -55,7 +58,8 @@ TCA genFuncPrologue(TransID transID, TransKind kind, Func* func, int argc);
  * This entry point calls DV init funclets for any un-passed parameters, and
  * then performs a bindjmp to the function's actual entry point translation.
  */
-TCA genFuncBodyDispatch(Func* func, const DVFuncletsVec& dvs);
+TCA genFuncBodyDispatch(Func* func, const DVFuncletsVec& dvs,
+                        CodeCache::View code);
 
 ///////////////////////////////////////////////////////////////////////////////
 
