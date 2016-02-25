@@ -136,8 +136,10 @@ struct EHFrameWriter {
   /*
    * Write a DWARF call frame instruction to the buffer.
    *
-   * These all emit DW_CFA opcodes with the appropriate arguments.  For
-   * documentation, see: http://dwarfstd.org/doc/DWARF4.pdf
+   * These all emit DW_CFA opcodes with the appropriate arguments.
+   *
+   * For documentation, see Chapter "6.4.2 Call Frame Instructions" on:
+   * http://dwarfstd.org/doc/DWARF4.pdf
    */
   void def_cfa(uint8_t reg, uint64_t off);
   void def_cfa_offset(uint64_t off);
@@ -149,10 +151,12 @@ struct EHFrameWriter {
   /////////////////////////////////////////////////////////////////////////////
 
   /*
-   * Write a DWARF call frame expression to the buffer.
+   * Write a DWARF expression to the buffer.
    *
-   * These all emit DW_OP opcodes with the appropriate arguments.  For
-   * documentation, see: http://dwarfstd.org/doc/DWARF4.pdf
+   * All functions below emit DW_OP opcodes with the appropriate arguments.
+   *
+   * For documentation, see Chapter "2.5 DWARF Expressions" on:
+   * http://dwarfstd.org/doc/DWARF4.pdf
    */
   void op_bregx(uint8_t reg, int64_t off);
   void op_deref();
