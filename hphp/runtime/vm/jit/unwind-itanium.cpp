@@ -332,7 +332,6 @@ void write_tc_cie(EHFrameWriter& ehfw) {
 
   // Set native frame pointer as the cfa pointer
   ehfw.def_cfa(dw_reg::SP, 0);
-  ehfw.def_cfa_offset(0);
 
   // IP (aka LR) is at (*CFA) - 2 * data_align = (*CFA) + 16
   ehfw.begin_expression(dw_reg::IP);
@@ -349,8 +348,6 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   // SP and FP follows backchain
   ehfw.offset_extended_sf(dw_reg::FP, 0);
   ehfw.offset_extended_sf(dw_reg::SP, 0);
-
-  ehfw.def_cfa_register(dw_reg::SP);
 
 #else // specific X64 cie
 
