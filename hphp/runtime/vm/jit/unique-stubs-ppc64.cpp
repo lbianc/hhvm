@@ -90,10 +90,17 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
+
+    // The frame pointer located in the memory (ar[AROFF(m_sfp)]) is an address
+    // higher that the real top of the stack, then any store on the stack will
+    // overwride the data. To solva that, the ar[AROFF(m_sfp)] is saved before
+    // the frame to be loaded when returning.
+    v << pushm{ar[AROFF(m_sfp)]};    // Hide the frame pointer
+    v << pushm{ar[AROFF(m_sfp)]};    // Heep it (keep aligned)
     v << pushm{ar[AROFF(m_savedToc)]};
     v << push{savedRip};
-    v << push{rfuncln()};            // reserved. It doesn't matter
-    v << pushm{ar[AROFF(m_sfp)]};
+    v << push{rfuncln()};            // Reserved. It doesn't matter.
+    v << push{rvmfp()};              // Save the real top of the stack.
 
     v << copy{rsp(), rvmfp()};
 
@@ -115,9 +122,11 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       // site.  We just need to grab the fp/rip of the original frame that we
       // saved earlier, and sync rvmsp().
       v << pop{rvmfp()};
-      v << pop{rfuncln()};  // reserved, it doesn't matter for now
+      v << pop{rfuncln()};  // Reserved, it doesn't matter for now.
       v << pop{saved_rip};
       v << pop{rtoc()};
+      v << pop{rvmfp()};    // Restore saved fp.
+      v << pop{rvmfp()};    // Restore saved fp used to align the stack.
 
       // Drop our call frame; the stublogue{} instruction guarantees that this
       // is exactly 32 bytes.
@@ -130,7 +139,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     });
 
     // Skip past the stuff we saved for the intercept case.
-    v << lea{rsp()[32], rsp()};
+    v << lea{rsp()[48], rsp()};
 
     // Restore rvmfp() and return to the callee's func prologue.
     v << stubret{RegSet(), true};
