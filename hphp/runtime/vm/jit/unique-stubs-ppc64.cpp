@@ -143,7 +143,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
     // Restore rvmfp() and return to the callee's func prologue.
     v << stubret{RegSet(), true};
-  });
+  }) - smashableCallSkipEpilogue(); // grab return address of call above
 
   return start;
 }
