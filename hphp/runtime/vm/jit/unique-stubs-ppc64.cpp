@@ -77,7 +77,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     v << copy{rvmfp(), ar};
 
     // Fully set up the call frame for the stub.  We can't skip this like we do
-    // in other stubs because we need the return IP for this frame in the %rbp
+    // in other stubs because we need the return IP for this frame in the vmfp
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
     v << stublogue{true};     // adds 32 bytes onto the stack
@@ -90,20 +90,12 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
-
-    // The frame pointer located in the memory (ar[AROFF(m_sfp)]) is an address
-    // higher that the real top of the stack, then any store on the stack will
-    // overwride the data. To solva that, the ar[AROFF(m_sfp)] is saved before
-    // the frame to be loaded when returning.
-    v << pushm{ar[AROFF(m_sfp)]};    // Hide the frame pointer
-    v << pushm{ar[AROFF(m_sfp)]};    // Heep it (keep aligned)
     v << pushm{ar[AROFF(m_savedToc)]};
     v << push{savedRip};
-    v << push{rfuncln()};            // Reserved. It doesn't matter.
-    v << push{rvmfp()};              // Save the real top of the stack.
+    v << pushm{ar[AROFF(m_sfp)]};   // Reserved, used to hide the frame pointer
+    v << push{rvmfp()};             // Save the real top of the stack.
 
     v << copy{rsp(), rvmfp()};
-
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 
     bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
@@ -121,12 +113,10 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       // callee's frame, so we're ready to continue from the original call
       // site.  We just need to grab the fp/rip of the original frame that we
       // saved earlier, and sync rvmsp().
-      v << pop{rvmfp()};
-      v << pop{rfuncln()};  // Reserved, it doesn't matter for now.
+      v << pop{rfuncln()};  // Discard. It was used only for the vmfp backchain
+      v << pop{rvmfp()};    // Reserved, used to save the fp previously
       v << pop{saved_rip};
       v << pop{rtoc()};
-      v << pop{rvmfp()};    // Restore saved fp.
-      v << pop{rvmfp()};    // Restore saved fp used to align the stack.
 
       // Drop our call frame; the stublogue{} instruction guarantees that this
       // is exactly 32 bytes.
@@ -139,11 +129,14 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     });
 
     // Skip past the stuff we saved for the intercept case.
-    v << lea{rsp()[48], rsp()};
+    v << lea{rsp()[32], rsp()}; // saved frame
 
     // Restore rvmfp() and return to the callee's func prologue.
-    v << stubret{RegSet(), true};
-  }) - smashableCallSkipEpilogue(); // grab return address of call above
+    v << stubret{RegSet(), true}; // removes 32 bytes from the stack
+  });
+
+  // set it to the return address of emitFunctionEnterHelper's call
+  us.functionEnterHelperReturn -= smashableCallSkipEpilogue();
 
   return start;
 }
