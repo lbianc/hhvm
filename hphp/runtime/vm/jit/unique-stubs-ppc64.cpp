@@ -324,11 +324,20 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
 
   return vwrap(cb, [&] (Vout& v) {
     auto const done1 = v.makeBlock();
+    auto const sf = v.makeReg();
     auto const sf1 = v.makeReg();
 
     v << cmpqim{0, udrspo, sf1};
     v << jcci{CC_NE, sf1, done1, debuggerReturn};
     v = done1;
+
+    // TODO(lbianc): This condition fixed some tests, which rvmfp() is not
+    // correct. These tests must be better analyzed to find out if this
+    // behavior is coming from another error.
+    v << cmpq{rvmfp(), rsp(), sf};
+    ifThen(v, CC_E, sf, [&] (Vout& v) {
+      v << load{rsp()[0], rvmfp()};
+    });
 
     // Normal end catch situation: call back to tc_unwind_resume, which returns
     // the catch trace (or null) in $r3, and the new vmfp in $r4.
