@@ -175,6 +175,7 @@ int32_t DecoderInfo::offset() const {
     not_implemented();
   }
   assert(false && "Instruction not expected.");
+  return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
