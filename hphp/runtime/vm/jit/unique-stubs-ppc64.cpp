@@ -154,9 +154,9 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
  * The `saved' register should be a callee-saved GP register that the helper
  * can use to preserve `tv' across native calls.
  */
-static TCA emitDecRefHelper(CodeBlock& cb, PhysReg tv, PhysReg type,
+static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv, PhysReg type,
                             RegSet live) {
-  return vwrap(cb, [&] (Vout& v) {
+  return vwrap(cb, fixups, [&] (Vout& v) {
     // We use the first argument register for the TV data because we may pass
     // it to the release routine.  It's not live when we enter the helper.
     auto const data = rarg(0);
@@ -189,10 +189,11 @@ static TCA emitDecRefHelper(CodeBlock& cb, PhysReg tv, PhysReg type,
       // Avoid 'this' pointer overwriting by reserving it as an argument.
       v << callm{lookupDestructor(v, type), arg_regs(1)};
 
-      // Between where rsp is now and the saved RIP of the call into the
-      // freeLocalsHelpers stub, we have all the live regs we pushed, plus the
-      // saved RIP of the call from the stub to this helper.
-      v << syncpoint{makeIndirectFixup(prs.dwordsPushed() + 1)};
+      // Between where r1 is now and the saved RIP of the call into the
+      // freeLocalsHelpers stub, we have all the live regs we pushed, plus two
+      // entire frames.
+      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 8);
+      v << syncpoint{fixup};
       // fallthru
     });
 
@@ -207,10 +208,11 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   auto const local = rarg(1);
   auto const last = rarg(2);
   auto const type = rarg(3);
+  CGMeta fixups;
 
   // This stub is very hot; keep it cache-aligned.
-  align(cb, nullptr, Alignment::CacheLine, AlignContext::Dead);
-  auto const release = emitDecRefHelper(cb, local, type, local | last);
+  align(cb, &fixups, Alignment::CacheLine, AlignContext::Dead);
+  auto const release = emitDecRefHelper(cb, fixups, local, type, local | last);
 
   auto const decref_local = [&] (Vout& v) {
     auto const sf = v.makeReg();
@@ -233,7 +235,7 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
 
   alignJmpTarget(cb);
 
-  us.freeManyLocalsHelper = vwrap(cb, [&] (Vout& v) {
+  us.freeManyLocalsHelper = vwrap(cb, fixups, [&] (Vout& v) {
     // We always unroll the final `kNumFreeLocalsHelpers' decrefs, so only loop
     // until we hit that point.
     v << lea{rvmfp()[localOffset(kNumFreeLocalsHelpers - 1)], last};
@@ -258,7 +260,7 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   }
 
   // All the stub entrypoints share the same ret.
-  vwrap(cb, [] (Vout& v) { v << ret{}; });
+  vwrap(cb, fixups, [] (Vout& v) { v << ret{}; });
 
   // This stub is hot, so make sure to keep it small.
 #if 0
@@ -268,6 +270,7 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
                 (cb.frontier() - release <= 4 * cache_line_size()));
 #endif
 
+  fixups.process(nullptr);
   return release;
 }
 
