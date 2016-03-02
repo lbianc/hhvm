@@ -163,19 +163,13 @@ bool DecoderInfo::isSpOffsetInstr() const {
  * the lower of the Lea instruction.
  */
 int32_t DecoderInfo::offset() const {
-  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_addi)) {
-    D_form_t instr_d;
-    instr_d.instruction = m_image;
-    // As the instruction is know (addi) the immediate is a signed number of
-    // 16bits, so to consider the sign, it must be casted to int16_t.
-    return static_cast<int16_t>(instr_d.D);
-  } else if ((m_form == Form::kXO) && (m_opn == OpcodeNames::op_add)) {
-    //TODO(lbianc): This code is not achievable with tests. Maybe will never
-    // reach, if the lea has a valid index.
-    not_implemented();
-  }
-  assert(false && "Instruction not expected.");
-  return 0;
+  assert(((m_form == Form::kD) && (m_opn == OpcodeNames::op_addi))
+    && "Instruction not expected.");
+  D_form_t instr_d;
+  instr_d.instruction = m_image;
+  // As the instruction is know (addi) the immediate is a signed number of
+  // 16bits, so to consider the sign, it must be casted to int16_t.
+  return static_cast<int16_t>(instr_d.D);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
