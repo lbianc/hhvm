@@ -818,6 +818,13 @@ void lowerForPPC64(Vout& v, Inst& inst) {}
  * Using macro to commonlize vasms lowering
  */
 
+// Auxiliary macros to handle vasms with different attributes
+#define NONE
+#define ONE(attr_1)             inst.attr_1,
+#define TWO(attr_1, attr_2)     inst.attr_1, inst.attr_2,
+#define ONE_R64(attr_1)         Reg64(inst.attr_1),
+#define TWO_R64(attr_1, attr_2) Reg64(inst.attr_1), Reg64(inst.attr_2),
+
 // Patches the Vptr, retrieve the immediate and emmit a related direct vasm
 #define X(vasm_src, attr_data, vasm_dst, attr_addr, vasm_imm)           \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
@@ -857,13 +864,6 @@ X(loadzlq,  s, s, d);
 X(lea,      s, s, d);
 
 #undef X
-
-// Auxiliary macros to handle vasms with different attributes
-#define NONE
-#define ONE(attr_1)             inst.attr_1,
-#define TWO(attr_1, attr_2)     inst.attr_1, inst.attr_2,
-#define ONE_R64(attr_1)         Reg64(inst.attr_1),
-#define TWO_R64(attr_1, attr_2) Reg64(inst.attr_1), Reg64(inst.attr_2),
 
 // Load the Immed to a register in order to be able to use ppc64 CR instructions
 #define X(vasm_src, vasm_dst, attr_imm, attrs)                          \
@@ -913,12 +913,6 @@ X(decqm, decq, load,  store,  m, NONE)
 X(addlm, addl, loadw, storew, m, ONE(s0))
 
 #undef X
-
-#undef NONE
-#undef ONE
-#undef TWO
-#undef ONE_R64
-#undef TWO_R64
 
 // Also deals with MemoryRef vasms like above but these ones have Immed data
 // too. Load data and emit a new vasm depending if the Immed fits a direct
@@ -1004,123 +998,52 @@ X(cmpqm,  cmpq,  load,  s1, s0)
  * only the first emitted vasm is not lowered on "lowerForPPC64(Vunit&)"
  */
 
-// Lower byte to quadword variant, but use only the lowest 8 bits
-void lowerForPPC64(Vout& v, cmpb& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
-
-  v << movb{inst.s0, tmp1};
-  v << movb{inst.s1, tmp2};
-  v << cmpq{tmp1, tmp2, inst.sf};
-}
-void lowerForPPC64(Vout& v, testb& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
-
-  v << movb{inst.s0, tmp1};
-  v << movb{inst.s1, tmp2};
-  v << testq{tmp1, tmp2, inst.sf};
-}
-void lowerForPPC64(Vout& v, testl& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
-
-  v << movl{inst.s0, tmp1};
-  v << movl{inst.s1, tmp2};
-  v << testq{tmp1, tmp2, inst.sf};
-}
-void lowerForPPC64(Vout& v, subl& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movl{inst.s0, tmp1};
-  v << movl{inst.s1, tmp2};
-  v << subq{tmp1, tmp2, tmp3, inst.sf};
-  v << movl{tmp3, inst.d};
-}
-void lowerForPPC64(Vout& v, xorb& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movb{inst.s0, tmp1};
-  v << movb{inst.s1, tmp2};
-  v << xorq{tmp1, tmp2, tmp3, inst.sf};
-  v << movb{tmp3, inst.d};
-}
-void lowerForPPC64(Vout& v, xorl& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movl{inst.s0, tmp1};
-  v << movl{inst.s1, tmp2};
-  v << xorq{tmp1, tmp2, tmp3, inst.sf};
-  v << movl{tmp3, inst.d};
-}
-void lowerForPPC64(Vout& v, andb& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movb{inst.s0, tmp1};
-  v << movb{inst.s1, tmp2};
-  v << andq{tmp1, tmp2, tmp3, inst.sf};
-  v << movb{tmp3, inst.d};
-}
-void lowerForPPC64(Vout& v, andl& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movl{inst.s0, tmp1};
-  v << movl{inst.s1, tmp2};
-  v << andq{tmp1, tmp2, tmp3, inst.sf};
-  v << movl{tmp3, inst.d};
+// Lower byte/long to quadword variant, but extract only the bits needed
+// through the vasm_filter macro argument
+#define X(vasm_src, vasm_filter, vasm_dst, attr_dest)                   \
+void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
+  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();                          \
+  v << vasm_filter{inst.s0, tmp1};                                      \
+  v << vasm_filter{inst.s1, tmp2};                                      \
+  v << vasm_dst{tmp1, tmp2, attr_dest inst.sf};                         \
 }
 
-// Lower cmpbi to cmpqi, but use only the lowest 8 bits
-void lowerForPPC64(Vout& v, cmpbi& inst) {
-  Vreg tmp = v.makeReg();
+X(cmpb,  movb, cmpq,  NONE)
+X(testb, movb, testq, NONE)
+X(testl, movl, testq, NONE)
+X(subl,  movl, subq,  ONE_R64(d))
+X(xorb,  movb, xorq,  ONE_R64(d))
+X(xorl,  movl, xorq,  ONE_R64(d))
+X(andb,  movb, andq,  ONE_R64(d))
+X(andl,  movl, andq,  ONE_R64(d))
 
-  v << movb{inst.s1, tmp};
-  v << cmpqi{inst.s0, tmp, inst.sf};
-}
-void lowerForPPC64(Vout& v, subbi& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
+#undef X
 
-  v << movb{inst.s1, tmp1};
-  v << subqi{inst.s0, tmp1, tmp2, inst.sf};
-  v << movb{tmp2, inst.d};
+// Lower byte/long to quadword variant with immediate. As above, only extract
+// the bits needed through the vasm_filter macro argument
+#define X(vasm_src, vasm_filter, vasm_dst, attr_dest)                   \
+void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
+  Vreg tmp = v.makeReg();                                               \
+  v << vasm_filter{inst.s1, tmp};                                       \
+  v << vasm_dst{inst.s0, tmp, attr_dest inst.sf};                       \
 }
-void lowerForPPC64(Vout& v, subli& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
 
-  v << movl{inst.s1, tmp1};
-  v << subqi{inst.s0, tmp1, tmp2, inst.sf};
-  v << movl{tmp2, inst.d};
-}
-void lowerForPPC64(Vout& v, testbi& inst) {
-  Vreg tmp1 = v.makeReg();
+X(cmpbi,  movb, cmpqi,  NONE)
+X(testbi, movb, testqi, NONE)
+X(testli, movl, testqi, NONE)
+X(subbi,  movb, subqi,  ONE_R64(d))
+X(subli,  movl, subqi,  ONE_R64(d))
+X(xorbi,  movb, xorqi,  ONE_R64(d))
+X(andbi,  movb, andqi,  ONE_R64(d))
+X(andli,  movl, andqi,  ONE_R64(d))
 
-  v << movb{inst.s1, tmp1};
-  v << testqi{inst.s0, tmp1, inst.sf};
-}
-void lowerForPPC64(Vout& v, testli& inst) {
-  Vreg tmp1 = v.makeReg();
+#undef X
 
-  v << movl{inst.s1, tmp1};
-  v << testqi{inst.s0, tmp1, inst.sf};
-}
-void lowerForPPC64(Vout& v, xorbi& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
-
-  v << movb {inst.s1, tmp1};
-  v << xorqi {inst.s0, tmp1, tmp2, inst.sf};
-  v << movb{tmp2, inst.d};
-}
-void lowerForPPC64(Vout& v, andli& inst) {
-  Vreg tmp1, tmp2 = v.makeReg(), tmp3 = v.makeReg();
-
-  v << movl{inst.s1, tmp2};
-  v << andqi{inst.s0, tmp2, tmp3, inst.sf};
-  v << movl{tmp3, inst.d};
-}
-void lowerForPPC64(Vout& v, andbi& inst) {
-  Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();
-
-  v << movb{inst.s1, tmp1};
-  v << andqi{inst.s0, tmp1, tmp2, inst.sf};
-  v << movb{tmp2, inst.d};
-}
+#undef NONE
+#undef ONE
+#undef TWO
+#undef ONE_R64
+#undef TWO_R64
 
 /////////////////////////////////////////////////////////////////////////////
 /*
