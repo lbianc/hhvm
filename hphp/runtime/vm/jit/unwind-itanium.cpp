@@ -328,7 +328,22 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.begin_cie(dw_reg::IP,
                  reinterpret_cast<const void*>(tc_unwind_personality));
 
-#if defined(__powerpc64__)
+#if defined(__x86_64__)
+
+  // The part of the ActRec that mirrors the native frame record is the first
+  // sixteen bytes.  In particular, the "top" of the record is 16 bytes after
+  // rvmfp(), and the saved fp and return addr are as usual.
+  ehfw.def_cfa(dw_reg::FP, 16);
+  ehfw.offset_extended_sf(dw_reg::IP, 1);
+  ehfw.offset_extended_sf(dw_reg::FP, 2);
+
+  // This is an artifact of a time when we did not spill registers onto the
+  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
+  // personality routine skips all the way back to native frames before
+  // resuming the unwinder, so its brokenness goes unnoticed.
+  ehfw.same_value(dw_reg::SP);
+
+#elif defined(__powerpc64__)
 
   // Set native frame pointer as the cfa pointer
   ehfw.def_cfa(dw_reg::SP, 0);
@@ -349,20 +364,9 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.offset_extended_sf(dw_reg::FP, 0);
   ehfw.offset_extended_sf(dw_reg::SP, 0);
 
-#else // specific X64 cie
+#else
 
-  // The part of the ActRec that mirrors the native frame record is the first
-  // sixteen bytes.  In particular, the "top" of the record is 16 bytes after
-  // rvmfp(), and the saved fp and return addr are as usual.
-  ehfw.def_cfa(dw_reg::FP, 16);
-  ehfw.offset_extended_sf(dw_reg::IP, 1);
-  ehfw.offset_extended_sf(dw_reg::FP, 2);
-
-  // This is an artifact of a time when we did not spill registers onto the
-  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
-  // personality routine skips all the way back to native frames before
-  // resuming the unwinder, so its brokenness goes unnoticed.
-  ehfw.same_value(dw_reg::SP);
+  not_implemented();
 
 #endif
 
