@@ -13,8 +13,8 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/bytecode-defs.h"
 
 #include <algorithm>
 #include <string>
@@ -32,6 +32,7 @@
 #include <folly/String.h>
 
 #include "hphp/util/debug.h"
+#include "hphp/util/portability.h"
 #include "hphp/util/ringbuffer.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/trace.h"
@@ -90,6 +91,8 @@
 #include "hphp/runtime/server/rpc-request-handler.h"
 #include "hphp/runtime/server/source-root-info.h"
 
+#include "hphp/runtime/vm/act-rec.h"
+#include "hphp/runtime/vm/act-rec-defs.h"
 #include "hphp/runtime/vm/debug/debug.h"
 #include "hphp/runtime/vm/debugger-hook.h"
 #include "hphp/runtime/vm/event-hook.h"
@@ -112,6 +115,7 @@
 #include "hphp/runtime/vm/unwind.h"
 
 #include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/perf-counters.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/translator.h"
@@ -143,54 +147,6 @@ using jit::TCA;
 #define OPTBLD_FLT_INLINE   INLINE_FLATTEN
 #endif
 TRACE_SET_MOD(bcinterp);
-
-// Identifies the set of return helpers that we may set m_savedRip to in an
-// ActRec.
-bool isReturnHelper(void* address) {
-  auto tcAddr = reinterpret_cast<jit::TCA>(address);
-  auto& u = mcg->ustubs();
-  return tcAddr == u.retHelper ||
-         tcAddr == u.genRetHelper ||
-         tcAddr == u.asyncGenRetHelper ||
-         tcAddr == u.retInlHelper ||
-         tcAddr == u.callToExit;
-}
-
-bool isDebuggerReturnHelper(void* address) {
-  auto tcAddr = reinterpret_cast<jit::TCA>(address);
-  auto& u = mcg->ustubs();
-  return tcAddr == u.debuggerRetHelper ||
-         tcAddr == u.debuggerGenRetHelper ||
-         tcAddr == u.debuggerAsyncGenRetHelper;
-}
-
-ActRec* ActRec::sfp() const {
-  // Native frame? (used by enterTCHelper)
-  if (UNLIKELY(((uintptr_t)m_sfp - s_stackLimit) < s_stackSize)) {
-    return nullptr;
-  }
-
-  return m_sfp;
-}
-
-void ActRec::setReturn(ActRec* fp, PC pc, void* retAddr) {
-  assert(fp->func()->contains(pc));
-  assert(isReturnHelper(retAddr));
-  m_sfp = fp;
-  m_savedRip = reinterpret_cast<uintptr_t>(retAddr);
-  m_soff = Offset(pc - fp->func()->getEntry());
-}
-
-void ActRec::setJitReturn(void* addr) {
-  FTRACE(1, "Replace m_savedRip in fp {}, {:#x} -> {}, func {}\n",
-         this, m_savedRip, addr, m_func->fullName()->data());
-  m_savedRip = reinterpret_cast<uintptr_t>(addr);
-}
-
-bool
-ActRec::skipFrame() const {
-  return m_func && m_func->isSkipFrame();
-}
 
 bool isVMFrame(const ActRec* ar) {
   assert(ar);
@@ -281,7 +237,7 @@ template<class T> T decode(PC& pc) {
   return v;
 }
 
-inline StringData* decode_litstr(PC& pc) {
+inline const StringData* decode_litstr(PC& pc) {
   auto id = decode<Id>(pc);
   return vmfp()->m_func->unit()->lookupLitstrId(id);
 }
@@ -2057,7 +2013,7 @@ static void prepareFuncEntry(ActRec *ar, PC& pc, StackArgsState stk) {
 
 void ExecutionContext::syncGdbState() {
   if (RuntimeOption::EvalJit && !RuntimeOption::EvalJitNoGdb) {
-    mcg->getDebugInfo()->debugSync();
+    mcg->debugInfo()->debugSync();
   }
 }
 
@@ -2929,7 +2885,7 @@ void debuggerPreventReturnToTC(ActRec* ar) {
   // We're going to smash the return address. Before we do, save the catch
   // block attached to the call in a side table so the return helpers and
   // unwinder can find it when needed.
-  jit::pushDebuggerCatch(ar);
+  jit::stashDebuggerCatch(ar);
 
   auto& ustubs = mcg->ustubs();
   if (ar->resumed()) {
@@ -3208,20 +3164,20 @@ OPTBLD_INLINE void iopFalse(IOP_ARGS) {
 }
 
 OPTBLD_INLINE void iopFile(IOP_ARGS) {
-  const StringData* s = vmfp()->m_func->unit()->filepath();
-  vmStack().pushStaticString(const_cast<StringData*>(s));
+  auto s = vmfp()->m_func->unit()->filepath();
+  vmStack().pushStaticString(s);
 }
 
 OPTBLD_INLINE void iopDir(IOP_ARGS) {
-  const StringData* s = vmfp()->m_func->unit()->dirpath();
-  vmStack().pushStaticString(const_cast<StringData*>(s));
+  auto s = vmfp()->m_func->unit()->dirpath();
+  vmStack().pushStaticString(s);
 }
 
 OPTBLD_INLINE void iopNameA(IOP_ARGS) {
   auto const cls  = vmStack().topA();
   auto const name = cls->name();
   vmStack().popA();
-  vmStack().pushStaticString(const_cast<StringData*>(name));
+  vmStack().pushStaticString(name);
 }
 
 OPTBLD_INLINE void iopInt(IOP_ARGS) {
@@ -3263,6 +3219,11 @@ OPTBLD_INLINE void iopNewMixedArray(IOP_ARGS) {
   }
 }
 
+OPTBLD_INLINE void iopNewDictArray(IOP_ARGS) {
+  auto capacity = decode_iva(pc);
+  vmStack().pushArrayNoRc(MixedArray::MakeReserveDict(capacity));
+}
+
 OPTBLD_INLINE void iopNewLikeArrayL(IOP_ARGS) {
   auto local = decode_la(pc);
   auto capacity = decode_iva(pc);
@@ -3291,7 +3252,7 @@ OPTBLD_INLINE void iopNewStructArray(IOP_ARGS) {
   auto n = decode<uint32_t>(pc); // number of keys and elements
   assert(n > 0 && n <= StructArray::MaxMakeSize);
 
-  req::vector<StringData*> names;
+  req::vector<const StringData*> names;
   names.reserve(n);
 
   for (size_t i = 0; i < n; ++i) {
@@ -4122,7 +4083,7 @@ OPTBLD_INLINE TCA jitReturnPost(JitReturn retInfo) {
       // the approprate catch trace.
       jit::g_unwind_rds->debuggerReturnSP = vmsp();
       jit::g_unwind_rds->debuggerReturnOff = retInfo.soff;
-      return jit::popDebuggerCatch(retInfo.fp);
+      return jit::unstashDebuggerCatch(retInfo.fp);
     }
 
     // This frame was called by translated code so we can't interpret out of
@@ -4268,11 +4229,10 @@ OPTBLD_INLINE void iopThrow(IOP_ARGS) {
       !c1->m_data.pobj->instanceof(SystemLib::s_ThrowableClass)) {
     raise_error("Exceptions must implement the Throwable interface.");
   }
-
-  Object obj(c1->m_data.pobj);
-  vmStack().popC();
+  auto obj = Object::attach(c1->m_data.pobj);
+  vmStack().discard();
   DEBUGGER_ATTACHED_ONLY(phpDebuggerExceptionThrownHook(obj.get()));
-  throw obj;
+  throw_object_inl(std::move(obj));
 }
 
 OPTBLD_INLINE void iopAGetC(IOP_ARGS) {
@@ -5700,7 +5660,7 @@ OPTBLD_INLINE void iopFPushObjMethodD(IOP_ARGS) {
   Class* cls = obj->getVMClass();
   // We handle decReffing obj in fPushObjMethodImpl
   vmStack().discard();
-  fPushObjMethodImpl(cls, name, obj, numArgs);
+  fPushObjMethodImpl(cls, const_cast<StringData*>(name), obj, numArgs);
 }
 
 template<bool forwarding>
@@ -5776,7 +5736,7 @@ OPTBLD_INLINE void iopFPushClsMethodD(IOP_ARGS) {
     raise_error(Strings::UNKNOWN_CLASS, nep.first->data());
   }
   ObjectData* obj = vmfp()->hasThis() ? vmfp()->getThis() : nullptr;
-  pushClsMethodImpl<false>(cls, name, obj, numArgs);
+  pushClsMethodImpl<false>(cls, const_cast<StringData*>(name), obj, numArgs);
 }
 
 OPTBLD_INLINE void iopFPushClsMethodF(IOP_ARGS) {
@@ -6688,7 +6648,7 @@ OPTBLD_INLINE void iopInitThisLoc(IOP_ARGS) {
   }
 }
 
-static inline RefData* lookupStatic(StringData* name,
+static inline RefData* lookupStatic(const StringData* name,
                                     const ActRec* fp,
                                     bool& inited) {
   auto const func = fp->m_func;
@@ -7378,14 +7338,13 @@ OPTBLD_INLINE TCA iopAwait(IOP_ARGS) {
       SystemLib::throwBadMethodCallExceptionObject("Await on a non-WaitHandle");
     }
   }
-
+  if (LIKELY(wh->isFailed())) {
+    throw_object_inl(Object(wh->getException()));
+  }
   if (wh->isSucceeded()) {
     cellSet(wh->getResult(), *vmStack().topC());
     return nullptr;
-  } else if (UNLIKELY(wh->isFailed())) {
-    throw Object(wh->getException());
   }
-
   return suspendStack(pc);
 }
 
@@ -7573,10 +7532,19 @@ void DumpCurUnit(int skip) {
 // callable from gdb
 void PrintTCCallerInfo() {
   VMRegAnchor _;
-  ActRec* fp = vmfp();
-  Unit* u = fp->m_func->unit();
-  fprintf(stderr, "Called from TC address %p\n",
-          mcg->getTranslatedCaller());
+
+  auto const u = vmfp()->m_func->unit();
+  auto const rip = []() -> jit::TCA {
+    DECLARE_FRAME_POINTER(reg_fp);
+    // NB: We can't directly mutate the register-mapped `reg_fp'.
+    for (ActRec* fp = reg_fp; fp; fp = fp->m_sfp) {
+      auto const rip = jit::TCA(fp->m_savedRip);
+      if (mcg->code().isValidCodeAddress(rip)) return rip;
+    }
+    return nullptr;
+  }();
+
+  fprintf(stderr, "Called from TC address %p\n", rip);
   std::cerr << u->filepath()->data() << ':'
             << u->getLineNumber(u->offsetOf(vmpc())) << '\n';
 }

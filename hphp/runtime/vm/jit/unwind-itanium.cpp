@@ -299,7 +299,7 @@ TCUnwindInfo tc_unwind_resume(ActRec* fp) {
       // If this frame had its return address smashed by the debugger, the real
       // catch trace is saved in a side table.
       assertx(catchTrace == nullptr);
-      catchTrace = popDebuggerCatch(fp);
+      catchTrace = unstashDebuggerCatch(fp);
     }
     unwindPreventReturnToTC(fp);
     if (fp->m_savedRip != reinterpret_cast<uint64_t>(savedRip)) {
@@ -334,8 +334,8 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.def_cfa(dw_reg::SP, 0);
 
   // IP (aka LR) is at (*CFA) - 2 * data_align = (*CFA) + 16
-  ehfw.begin_expression(dw_reg::IP);
-  ehfw.op_bregx(dw_reg::SP, 0);
+  ehfw.begin_val_expression(dw_reg::IP);
+  ehfw.op_breg(dw_reg::SP, 0);
   ehfw.op_deref();
   ehfw.op_consts(16);
   ehfw.op_plus();

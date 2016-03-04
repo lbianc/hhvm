@@ -38,8 +38,7 @@ void CGMeta::process(
   clear();
 }
 
-void
-CGMeta::process_only(
+void CGMeta::process_only(
   GrowableVector<IncomingBranch>* inProgressTailBranches) {
   for (auto const& pair : fixups) {
     assertx(mcg->code().isValidCodeAddress(pair.first));
@@ -58,7 +57,7 @@ CGMeta::process_only(
   catches.clear();
 
   for (auto const& elm : jmpTransIDs) {
-    mcg->getJmpToTransIDMap()[elm.first] = elm.second;
+    mcg->jmpToTransIDMap()[elm.first] = elm.second;
   }
   jmpTransIDs.clear();
 
@@ -71,7 +70,7 @@ CGMeta::process_only(
   assertx(inProgressTailJumps.empty());
 
   for (auto& stub : reusedStubs) {
-    mcg->getDebugInfo()->recordRelocMap(stub, nullptr, "NewStub");
+    mcg->debugInfo()->recordRelocMap(stub, nullptr, "NewStub");
   }
   reusedStubs.clear();
 }
@@ -87,7 +86,6 @@ void CGMeta::clear() {
   alignments.clear();
   inProgressTailJumps.clear();
   literals.clear();
-  annotations.clear();
 }
 
 bool CGMeta::empty() const {
@@ -101,8 +99,7 @@ bool CGMeta::empty() const {
     bcMap.empty() &&
     alignments.empty() &&
     inProgressTailJumps.empty() &&
-    literals.empty() &&
-    annotations.empty();
+    literals.empty();
 }
 
 }}

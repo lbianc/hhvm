@@ -61,6 +61,7 @@
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/stack-offsets-defs.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
+#include "hphp/runtime/vm/jit/stack-overflow.h"
 #include "hphp/runtime/vm/jit/target-cache.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
 #include "hphp/runtime/vm/jit/timer.h"
@@ -412,6 +413,7 @@ CALL_OPCODE(AFWHPrepareChild)
 CALL_OPCODE(ABCUnblock)
 CALL_OPCODE(NewArray)
 CALL_OPCODE(NewMixedArray)
+CALL_OPCODE(NewDictArray)
 CALL_OPCODE(NewLikeArray)
 CALL_OPCODE(AllocPackedArray)
 CALL_OPCODE(Clone)
@@ -2163,6 +2165,29 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
   return 0.0;
 }
 
+static CallSpec getDtorCallSpec(DataType type) {
+  switch (type) {
+    case KindOfString:
+      return CallSpec::method(&StringData::release);
+    case KindOfArray:
+      return CallSpec::method(&ArrayData::release);
+    case KindOfObject:
+      return CallSpec::method(
+        RuntimeOption::EnableObjDestructCall
+          ? &ObjectData::release
+          : &ObjectData::releaseNoObjDestructCheck
+      );
+    case KindOfResource:
+      return CallSpec::method(&ResourceHdr::release);
+    case KindOfRef:
+      return CallSpec::method(&RefData::release);
+    DT_UNCOUNTED_CASE:
+    case KindOfClass:
+      break;
+  }
+  not_reached();
+}
+
 static CallSpec makeDtorCall(Type ty, Vloc loc, ArgGroup& args) {
   // LLVM backend doesn't support CallSpec::Array
   auto const llvm = mcg->useLLVM();
@@ -2188,7 +2213,7 @@ static CallSpec makeDtorCall(Type ty, Vloc loc, ArgGroup& args) {
     }
   }
 
-  return ty.isKnownDataType() ? mcg->getDtorCall(ty.toDataType())
+  return ty.isKnownDataType() ? getDtorCallSpec(ty.toDataType())
                               : CallSpec::destruct(loc.reg(1));
 }
 
@@ -4131,10 +4156,11 @@ void CodeGenerator::cgLookupCnsU(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgAKExistsArr(IRInstruction* inst) {
+  auto const arrTy = inst->src(0)->type();
   auto const keyTy = inst->src(1)->type();
   auto& v = vmain();
 
-  auto const keyInfo = checkStrictlyInteger(keyTy);
+  auto const keyInfo = checkStrictlyInteger(arrTy, keyTy);
   auto const target =
     keyInfo.checkForInt ? CallSpec::direct(ak_exist_string) :
     keyInfo.type == KeyType::Int ? CallSpec::array(&g_array_funcs.existsInt)
@@ -5096,7 +5122,7 @@ void CodeGenerator::cgNewStructArray(IRInstruction* inst) {
   StringData** table = mcg->allocData<StringData*>(sizeof(StringData*),
                                                       data->numKeys);
   memcpy(table, data->keys, data->numKeys * sizeof(*data->keys));
-  MixedArray* (*f)(uint32_t, StringData**, const TypedValue*) =
+  MixedArray* (*f)(uint32_t, const StringData* const*, const TypedValue*) =
     &MixedArray::MakeStruct;
   cgCallHelper(
     vmain(),

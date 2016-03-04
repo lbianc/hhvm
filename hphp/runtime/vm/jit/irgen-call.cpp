@@ -15,6 +15,8 @@
 */
 #include "hphp/runtime/vm/jit/irgen-call.h"
 
+#include "hphp/runtime/base/stats.h"
+
 #include "hphp/runtime/vm/jit/func-effects.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
@@ -547,7 +549,7 @@ SSATmp* clsMethodCtx(IRGS& env, const Func* callee, const Class* cls) {
   if (mustBeStatic) {
     return ldCls(env, cns(env, cls->name()));
   }
-  if (env.irb->thisAvailable()) {
+  if (env.irb->fs().thisAvailable()) {
     // might not be a static call and $this is available, so we know it's
     // definitely not static
     assertx(curClass(env));

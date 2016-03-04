@@ -82,7 +82,7 @@
 #include "hphp/util/light-process.h"
 #endif
 #include "hphp/util/process.h"
-#include "hphp/util/repo-schema.h"
+#include "hphp/util/build-info.h"
 #include "hphp/util/service-data.h"
 #include "hphp/util/shm-counter.h"
 #include "hphp/util/stack-trace.h"
@@ -692,7 +692,7 @@ void execute_command_line_end(int xhprof, bool coverage, const char *program) {
   if (RuntimeOption::EvalDumpTC ||
       RuntimeOption::EvalDumpIR ||
       RuntimeOption::EvalDumpRegion) {
-    HPHP::jit::tc_dump();
+    if (jit::mcg) jit::mcg->dumpTC();
   }
   if (xhprof) {
     Variant profileData = HHVM_FN(xhprof_disable)();
@@ -1446,8 +1446,8 @@ static int execute_program_impl(int argc, char** argv) {
     cout << "HipHop VM";
     cout << " " << HHVM_VERSION;
     cout << " (" << (debug ? "dbg" : "rel") << ")\n";
-    cout << "Compiler: " << kCompilerId << "\n";
-    cout << "Repo schema: " << kRepoSchemaId << "\n";
+    cout << "Compiler: " << compilerId() << "\n";
+    cout << "Repo schema: " << repoSchemaId() << "\n";
     return 0;
   }
   if (vm.count("modules")) {
@@ -1459,12 +1459,12 @@ static int execute_program_impl(int argc, char** argv) {
     return 0;
   }
   if (vm.count("compiler-id")) {
-    cout << kCompilerId << "\n";
+    cout << compilerId() << "\n";
     return 0;
   }
 
   if (vm.count("repo-schema")) {
-    cout << kRepoSchemaId << "\n";
+    cout << repoSchemaId() << "\n";
     return 0;
   }
 
@@ -1815,19 +1815,8 @@ std::string get_systemlib(std::string* hhas,
   embedded_data desc;
   if (!get_embedded_data(section.c_str(), &desc, filename)) return "";
 
-#if (defined(__CYGWIN__) || defined(__MINGW__) || defined(_MSC_VER))
-  auto const ret = systemlib_split(std::string(
-                                     (const char*)LockResource(desc.m_handle),
-                                     desc.m_len), hhas);
-#else
-  std::ifstream ifs(desc.m_filename);
-  if (!ifs.good()) return "";
-  ifs.seekg(desc.m_start, std::ios::beg);
-  std::unique_ptr<char[]> data(new char[desc.m_len]);
-  ifs.read(data.get(), desc.m_len);
-  auto const ret = systemlib_split(std::string(data.get(), desc.m_len), hhas);
-#endif
-  return ret;
+  auto const data = read_embedded_data(desc);
+  return systemlib_split(data, hhas);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2085,10 +2074,7 @@ void hphp_session_init() {
 }
 
 ExecutionContext *hphp_context_init() {
-  ExecutionContext *context = g_context.getNoCheck();
-  context->obStart();
-  context->obProtect(true);
-  return context;
+  return g_context.getNoCheck();
 }
 
 bool hphp_invoke_simple(const std::string& filename, bool warmupOnly) {

@@ -1238,6 +1238,10 @@ To string conversions:
 
   Allocate a new array in mixed mode with the expected capacity S0.
 
+| NewDictArray, D(Arr), C(Int), PRc
+
+  Allocate a new array in dict mode with the expected capacity S0.
+
 | NewLikeArray, D(Arr), S(Arr) C(Int), PRc
 
   Allocate a new array in the same mode as S0 and with expected capacity S1,
@@ -2310,13 +2314,13 @@ fields of that struct for holding intermediate values.
 
 | ElemArrayW, D(PtrToMembGen), S(Arr) S(Int,Str), Er
 
-| ElemArrayD, D(PtrToElemGen), S(PtrToGen) S(Int,Str), MElem|Er
+| ElemArrayD<T>, D(PtrToElemGen), S(PtrToGen) S(Int,Str), MElem|Er
 
-| ElemArrayU, D(PtrToMembGen), S(PtrToGen) S(Int,Str), MElem|Er
+| ElemArrayU<T>, D(PtrToMembGen), S(PtrToGen) S(Int,Str), MElem|Er
 
   Similar to ElemX, but the base S0 is an array and the key S1 is an int/str.
   ElemArrayW is for Warn member instrs, ElemArrayD is for Define member instrs,
-  and ElemArrayU is for Unset.
+  and ElemArrayU is for Unset. T is the type of the base array.
 
   ElemArrayD takes a PtrToGen for its base operand, but it expects it to be a
   PtrToArr or PtrToBoxedArr.

@@ -668,8 +668,9 @@ static Variant str_replace(const Variant& search, const Variant& replace, const 
         continue;
       }
 
-      String replaced = str_replace(search, replace, iter.second().toString(),
-                                    c, caseSensitive);
+      auto const replaced = str_replace(
+        search, replace, iter.second().toString(), c, caseSensitive
+      ).toString();
       ret.set(iter.first(), replaced);
       count += c;
     }
@@ -2005,7 +2006,7 @@ bool strtr_slow(const Array& arr, StringBuffer& result, String& key,
   memcpy(key.mutableData(), s + pos, maxlen);
   for (int len = maxlen; len >= minlen; len--) {
     key.setSize(len);
-    auto const& var = arr->get(key.toKey());
+    auto const& var = arr->get(arr.convertKey(key));
     if (&var != &null_variant) {
       String replace = var.toString();
       if (!replace.empty()) {
@@ -2021,14 +2022,12 @@ bool strtr_slow(const Array& arr, StringBuffer& result, String& key,
 Variant strtr_fast(const String& str, const Array& arr,
                    int minlen, int maxlen) {
   using PatternMask = uint64_t[256];
-  auto mask = static_cast<PatternMask*>(
-    req::calloc(maxlen, sizeof(PatternMask))
-  );
+  auto mask = req::calloc_raw_array<PatternMask>(maxlen);
   SCOPE_EXIT { req::free(mask); };
 
   int pattern_id = 0;
   for (ArrayIter iter(arr); iter; ++iter, pattern_id++) {
-    String search = iter.first();
+    auto const search = iter.first().toString();
     auto slice = search.slice();
 
     for (auto i = 0; i < slice.size(); i++) {
@@ -2099,8 +2098,8 @@ Variant HHVM_FUNCTION(strtr,
   }
 
   for (ArrayIter iter(arr); iter; ++iter) {
-    String search = iter.first();
-    int len = search.size();
+    auto const search = iter.first().toString();
+    auto const len = search.size();
     if (len < 1) return false;
     if (maxlen < len) maxlen = len;
     if (minlen == -1 || minlen > len) minlen = len;

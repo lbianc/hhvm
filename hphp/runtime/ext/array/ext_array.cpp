@@ -300,7 +300,7 @@ bool HHVM_FUNCTION(array_key_exists,
     case KindOfString: {
       int64_t n = 0;
       StringData *sd = cell->m_data.pstr;
-      if (sd->isStrictlyInteger(n)) {
+      if (ad->convertKey(sd, n)) {
         return ad->exists(n);
       }
       return ad->exists(StrNR(sd));
@@ -2648,7 +2648,7 @@ Variant HHVM_FUNCTION(hphp_array_idx,
   if (!key.isNull()) {
     if (LIKELY(search.isArray())) {
       ArrayData *arr = search.getArrayData();
-      VarNR index = key.toKey();
+      VarNR index = key.toKey(arr->useWeakKeys());
       if (!index.isNull()) {
         const Variant& ret = arr->get(index, false);
         return (&ret != &null_variant) ? ret : def;
@@ -2733,6 +2733,11 @@ TypedValue* HHVM_FN(array_multisort)(ActRec* ar) {
   data.push_back(sd);
 
   return arReturn(ar, Array::MultiSort(data, true));
+}
+
+// __SystemLib\\dict
+Array HHVM_FUNCTION(__SystemLib_dict, const Array& arr) {
+  return Array::ConvertToDict(arr);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2866,6 +2871,7 @@ struct ArrayExtension final : Extension {
     HHVM_FE(i18n_loc_get_error_code);
     HHVM_FE(hphp_array_idx);
     HHVM_FE(array_multisort);
+    HHVM_FALIAS(__SystemLib\\dict, __SystemLib_dict);
 
     loadSystemlib();
   }

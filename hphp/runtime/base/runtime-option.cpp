@@ -29,6 +29,7 @@
 
 #include <folly/String.h>
 
+#include "hphp/util/build-info.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/network.h"
@@ -173,6 +174,7 @@ bool RuntimeOption::ServerKillOnSIGTERM = false;
 int RuntimeOption::ServerPreShutdownWait = 0;
 int RuntimeOption::ServerShutdownListenWait = 0;
 std::vector<std::string> RuntimeOption::ServerNextProtocols;
+bool RuntimeOption::ServerEnableH2C = false;
 int RuntimeOption::GzipCompressionLevel = 3;
 int RuntimeOption::GzipMaxCompressionLevel = 9;
 std::string RuntimeOption::ForceCompressionURL;
@@ -429,7 +431,7 @@ static inline std::string pgoRegionSelectorDefault() {
 
 static inline bool evalJitDefault() {
 // Disable JIT for PPC64 - Port under development
-#if defined(__CYGWIN__) || defined(_MSC_VER) || defined(__powerpc64__)
+#if defined(__CYGWIN__) || defined(_MSC_VER)
   return false;
 #else
   return true;
@@ -1281,6 +1283,7 @@ void RuntimeOption::Load(
     Config::Bind(ServerShutdownListenWait, ini, config,
                  "Server.ShutdownListenWait", 0);
     Config::Bind(ServerNextProtocols, ini, config, "Server.SSLNextProtocols");
+    Config::Bind(ServerEnableH2C, ini, config, "Server.EnableH2C");
     Config::Bind(GzipCompressionLevel, ini, config,
                  "Server.GzipCompressionLevel", 3);
     Config::Bind(GzipMaxCompressionLevel, ini, config,
@@ -1781,7 +1784,7 @@ void RuntimeOption::Load(
                    "hphp.compiler_id",
                    IniSetting::SetAndGet<std::string>(
                      [](const std::string& value) { return false; },
-                     []() { return getHphpCompilerId(); }
+                     []() { return compilerId().begin(); }
                    ));
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_NONE,
                    "hphp.compiler_version",

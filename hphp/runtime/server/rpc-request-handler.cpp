@@ -64,13 +64,20 @@ RPCRequestHandler::~RPCRequestHandler() {
 void RPCRequestHandler::initState() {
   hphp_session_init();
   bool isServer = RuntimeOption::ServerExecutionMode();
+  m_context = hphp_context_init();
   if (isServer) {
-    m_context = hphp_context_init();
+    m_context->obStart(uninit_null(),
+                       0,
+                       OBFlags::Default | OBFlags::OutputDisabled);
+    m_context->obProtect(true);
   } else {
     // In command line mode, we want the xbox workers to
     // output to STDOUT
-    m_context = g_context.getNoCheck();
     m_context->obSetImplicitFlush(true);
+    m_context->obStart(uninit_null(),
+                       0,
+                       OBFlags::Default | OBFlags::WriteToStdout);
+    m_context->obProtect(true);
   }
   m_lastReset = time(0);
 
@@ -368,7 +375,8 @@ bool RPCRequestHandler::executePHPFunction(Transport *transport,
           response =
             HHVM_FN(json_encode)(
               make_map_array(s_output, m_context->obDetachContents(),
-                             s_return, HHVM_FN(json_encode)(funcRet)));
+                             s_return, HHVM_FN(json_encode)(funcRet))
+            ).toString();
           break;
         case 3: response = f_serialize(funcRet); break;
       }

@@ -155,6 +155,7 @@ struct RuntimeOption {
   static int ServerPreShutdownWait;
   static int ServerShutdownListenWait;
   static std::vector<std::string> ServerNextProtocols;
+  static bool ServerEnableH2C;
   static int GzipCompressionLevel;
   static int GzipMaxCompressionLevel;
   static std::string ForceCompressionURL;
@@ -500,7 +501,7 @@ struct RuntimeOption {
   F(uint32_t, HHIRInliningMaxDepth,    4)                               \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 6)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \
-  F(bool, HHIRPartialInlineFrameOpts,  true)                            \
+  F(bool, HHIRPartialInlineFrameOpts,  false)                           \
   F(bool, HHIRInlineSingletons,        true)                            \
   F(std::string, InlineRegionMode,     "both")                          \
   F(bool, HHIRGenerateAsserts,         debug)                           \

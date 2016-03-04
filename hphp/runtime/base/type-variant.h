@@ -753,12 +753,20 @@ struct Variant : private TypedValue {
     if (m_type == KindOfDouble) return m_data.dbl;
     return toDoubleHelper();
   }
-  String toString() const {
+
+  String toString() const& {
+    if (isStringType(m_type)) return String{m_data.pstr};
+    return toStringHelper();
+  }
+
+  String toString() && {
     if (isStringType(m_type)) {
-      return String{m_data.pstr};
+      m_type = KindOfNull;
+      return String::attach(m_data.pstr);
     }
     return toStringHelper();
   }
+
   Array toArray() const {
     if (isArrayType(m_type)) return Array(m_data.parr);
     return toArrayHelper();
@@ -803,7 +811,13 @@ struct Variant : private TypedValue {
   bool canBeValidKey() const {
     return !isArrayType(getType()) && getType() != KindOfObject;
   }
-  VarNR toKey() const;
+
+  /*
+   * Convert to a valid key or throw an exception. If convertStrKeys is true
+   * int-like string keys will be converted to int keys.
+   */
+  VarNR toKey(bool convertStrKeys) const;
+
   /* Creating a temporary Array, String, or Object with no ref-counting and
    * no type checking, use it only when we have checked the variant type and
    * we are sure the internal data will have a reference until the temporary
@@ -1302,6 +1316,13 @@ private:
 // VarNR
 
 struct VarNR : private TypedValueAux {
+  static VarNR MakeKey(const String& s) {
+    if (s.empty()) return VarNR(staticEmptyString());
+    int64_t n;
+    if (s.get()->isStrictlyInteger(n)) return VarNR(n);
+    return VarNR(s);
+  }
+
   // Use to hold variant that do not need ref-counting
   explicit VarNR(bool    v) { init(KindOfBoolean); m_data.num = (v?1:0);}
   explicit VarNR(int     v) { init(KindOfInt64  ); m_data.num = v;}
@@ -1486,6 +1507,59 @@ inline bool is_null(const Variant& v) {
 template <typename T>
 inline bool isa_non_null(const Variant& v) {
   return v.isa<T>();
+}
+
+// Defined here to avoid introducing a dependency cycle between type-variant
+// and type-array
+ALWAYS_INLINE VarNR Array::convertKey(const Variant& k) const {
+  return k.toKey(useWeakKeys());
+}
+
+inline VarNR Variant::toKey(bool convertKeys) const {
+  if (isStringType(m_type)) {
+    int64_t n;
+    if (m_data.pstr->isStrictlyInteger(n) && convertKeys) {
+      return VarNR(n);
+    }
+    return VarNR(m_data.pstr);
+  }
+  if (LIKELY(m_type == KindOfInt64)) {
+    return VarNR(m_data.num);
+  }
+  if (m_type == KindOfRef) {
+    return m_data.pref->var()->toKey(convertKeys);
+  }
+
+  if (!convertKeys) {
+    throwInvalidArrayKeyException(this);
+  }
+
+  switch (m_type) {
+  case KindOfUninit:
+  case KindOfNull:
+    return VarNR(staticEmptyString());
+
+  case KindOfBoolean:
+    return VarNR(m_data.num);
+
+  case KindOfDouble:
+  case KindOfResource:
+    return VarNR(toInt64());
+
+  case KindOfPersistentArray:
+  case KindOfArray:
+  case KindOfObject:
+    raise_warning("Invalid operand type was used: Invalid type used as key");
+    return null_varNR;
+
+  case KindOfRef:
+  case KindOfPersistentString:
+  case KindOfString:
+  case KindOfInt64:
+  case KindOfClass:
+    break;
+  }
+  not_reached();
 }
 
 //////////////////////////////////////////////////////////////////////

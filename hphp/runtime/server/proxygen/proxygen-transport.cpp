@@ -599,7 +599,6 @@ void ProxygenTransport::sendImpl(const void *data, int size, int code,
   }
 
   if (chunked) {
-    assert(m_method != Method::HEAD);
     /*
      * Chunked replies are sent async, so there is no way to know the
      * time it took to flush the response, but tracking the bytes sent is
@@ -643,7 +642,7 @@ int64_t ProxygenTransport::pushResource(const char *host, const char *path,
 
   for (ArrayIter iter(headers); iter; ++iter) {
     Variant key = iter.first();
-    String header = iter.second();
+    auto header = iter.second().toString();
     if (key.isString() && !key.toString().empty()) {
       pushMsg.getHeaders().add(key.toString().data(), header.data());
     } else {

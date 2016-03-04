@@ -16,14 +16,29 @@
 
 #include "hphp/runtime/vm/jit/translator-runtime.h"
 
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/autoload-handler.h"
+#include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/collections.h"
+#include "hphp/runtime/base/execution-context.h"
+#include "hphp/runtime/base/object-data.h"
 #include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/stats.h"
+#include "hphp/runtime/base/string-data.h"
+#include "hphp/runtime/base/tv-helpers.h"
+#include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/base/zend-functions.h"
-#include "hphp/runtime/ext/std/ext_std_closure.h"
+#include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/member-operations.h"
+#include "hphp/runtime/vm/minstr-state.h"
+#include "hphp/runtime/vm/type-constraint.h"
+#include "hphp/runtime/vm/unit-util.h"
+#include "hphp/runtime/vm/unwind.h"
+
 #include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/hh/ext_hh.h"
+#include "hphp/runtime/ext/std/ext_std_closure.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 
 #include "hphp/runtime/vm/jit/mc-generator.h"
@@ -31,11 +46,8 @@
 #include "hphp/runtime/vm/jit/target-profile.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/unwind-itanium.h"
-#include "hphp/runtime/vm/member-operations.h"
-#include "hphp/runtime/vm/minstr-state.h"
-#include "hphp/runtime/vm/type-constraint.h"
-#include "hphp/runtime/vm/unit-util.h"
-#include "hphp/runtime/vm/unwind.h"
+
+#include "hphp/util/portability.h"
 
 namespace HPHP {
 
@@ -47,7 +59,7 @@ const StaticString s_staticPrefix("86static_");
 
 // Defined here so it can be inlined below.
 RefData* lookupStaticFromClosure(ObjectData* closure,
-                                 StringData* name,
+                                 const StringData* name,
                                  bool& inited) {
   assertx(closure->instanceof(c_Closure::classof()));
   auto str = String::attach(
@@ -105,7 +117,7 @@ ArrayData* addElemStringKeyHelper(ArrayData* ad,
   // set will decRef any old value that may have been overwritten
   // if appropriate
   int64_t intkey;
-  ArrayData* retval = UNLIKELY(key->isStrictlyInteger(intkey)) ?
+  ArrayData* retval = UNLIKELY(ad->convertKey(key, intkey)) ?
                   ad->set(intkey, tvAsCVarRef(&value), copy) :
                   ad->set(key, tvAsCVarRef(&value), copy);
   // TODO Task #1970153: It would be great if there were set()
@@ -499,7 +511,7 @@ RefData* closureStaticLocInit(StringData* name, ActRec* fp, TypedValue val) {
 ALWAYS_INLINE
 static bool ak_exist_string_impl(ArrayData* arr, StringData* key) {
   int64_t n;
-  if (key->isStrictlyInteger(n)) {
+  if (arr->convertKey(key, n)) {
     return arr->exists(n);
   }
   return arr->exists(key);
@@ -547,7 +559,7 @@ TypedValue arrayIdxS(ArrayData* a, StringData* key, TypedValue def) {
 
 TypedValue arrayIdxSi(ArrayData* a, StringData* key, TypedValue def) {
   int64_t i;
-  return UNLIKELY(key->isStrictlyInteger(i)) ?
+  return UNLIKELY(a->convertKey(key, i)) ?
          getDefaultIfNullCell(a->nvGet(i), def) :
          getDefaultIfNullCell(a->nvGet(key), def);
 }
@@ -1233,6 +1245,35 @@ void throwSwitchMode() {
 bool methodExistsHelper(Class* cls, StringData* meth) {
   assertx(isNormalClass(cls) && !isAbstract(cls));
   return cls->lookupMethod(meth) != nullptr;
+}
+
+int64_t decodeCufIterHelper(Iter* it, TypedValue func) {
+  DECLARE_FRAME_POINTER(fp);
+
+  ObjectData* obj = nullptr;
+  Class* cls = nullptr;
+  StringData* invName = nullptr;
+
+  auto ar = fp->m_sfp;
+  if (LIKELY(ar->func()->isBuiltin())) {
+    ar = g_context->getOuterVMFrame(ar);
+  }
+  auto const f = vm_decode_function(tvAsVariant(&func),
+                                    ar, false,
+                                    obj, cls, invName,
+                                    false);
+  if (UNLIKELY(!f)) return false;
+
+  auto& cit = it->cuf();
+  cit.setFunc(f);
+  if (obj) {
+    cit.setCtx(obj);
+    obj->incRefCount();
+  } else {
+    cit.setCtx(cls);
+  }
+  cit.setName(invName);
+  return true;
 }
 
 namespace MInstrHelpers {

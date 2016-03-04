@@ -233,7 +233,7 @@ std::string getNodesConnectionName(
   int to
 ) {
   // For non Ambiguous pointers, try to drill down and resolve the edge name
-  if (from != -1 && to != -1 && g.ptrs[ptr].kind != HeapGraph::Ambiguous) {
+  if (from != -1 && to != -1 && g.ptrs[ptr].ptr_kind != HeapGraph::Ambiguous) {
     auto h = g.nodes[from].h;
     auto th = g.nodes[to].h;
     const void* target_ptr = &th->obj_;
@@ -244,6 +244,7 @@ std::string getNodesConnectionName(
       // Known generalized cases that don't really need pointer kind
       case HeaderKind::Struct: // Not implemented yet
       case HeaderKind::Mixed:
+      case HeaderKind::Dict:
         return "ArrayKeyValue";
 
       // Obvious cases that do not need pointer type
@@ -293,19 +294,10 @@ std::string getNodesConnectionName(
         break;
     }
   } else if (from == -1 && to != -1) {
-    auto seat = g.ptrs[ptr].seat;
-    std::string conn_name;
-
-    if (seat != nullptr) {
-      conn_name = std::string(seat);
-    }
-
-    if (!conn_name.empty()) {
-      return conn_name;
-    }
+    return root_kind_names[(unsigned)g.ptrs[ptr].root_kind];
   }
 
-  return getEdgeKindName(g.ptrs[ptr].kind);
+  return getEdgeKindName(g.ptrs[ptr].ptr_kind);
 }
 
 void heapgraphCallback(Array fields, const Variant& callback) {
@@ -345,10 +337,10 @@ Array createPhpEdge(HeapGraphContextPtr hgptr, int index) {
 
   auto ptr_arr = make_map_array(
     s_index, Variant(index),
-    s_kind, Variant(getEdgeKindName(ptr.kind)),
+    s_kind, Variant(getEdgeKindName(ptr.ptr_kind)),
     s_from, Variant(ptr.from),
     s_to, Variant(ptr.to),
-    s_seat, (ptr.seat == nullptr ? init_null() : Variant(ptr.seat)),
+    s_seat, Variant(root_kind_names[(unsigned)ptr.root_kind]),
     s_name, Variant(cptr.edgename)
   );
 
@@ -506,7 +498,7 @@ Array HHVM_FUNCTION(heapgraph_node_out_edges,
   if (!hgptr) return empty_array();
   if (index < 0 || index >= (hgptr->hg.nodes.size())) return empty_array();
   Array result;
-  hgptr->hg.eachSuccPtr(index, [&](int ptr) {
+  hgptr->hg.eachOutPtr(index, [&](int ptr) {
     result.append(createPhpEdge(hgptr, ptr));
   });
   return result;
@@ -520,7 +512,7 @@ Array HHVM_FUNCTION(heapgraph_node_in_edges,
   if (!hgptr) return empty_array();
   if (index < 0 || index >= (hgptr->hg.nodes.size())) return empty_array();
   Array result;
-  hgptr->hg.eachPredPtr(index, [&](int ptr) {
+  hgptr->hg.eachInPtr(index, [&](int ptr) {
     result.append(createPhpEdge(hgptr, ptr));
   });
   return result;

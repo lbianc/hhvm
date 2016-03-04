@@ -20,17 +20,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "hphp/runtime/ext/std/ext_std_file.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/plain-file.h"
+#include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/runtime/base/request-local.h"
+#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-printf.h"
 #include "hphp/runtime/base/zend-string.h"
-#include "hphp/runtime/base/request-local.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/runtime/ext/std/ext_std_file.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 
 #include "hphp/runtime/ext/gd/libgd/gd.h"
@@ -1378,7 +1378,7 @@ static int php_get_xbm(const req::ptr<File>& stream, struct gfxinfo **result) {
   if (!stream->rewind()) {
     return 0;
   }
-  while (!(fline=HHVM_FN(fgets)(Resource(stream), 0)).empty()) {
+  while (!(fline = HHVM_FN(fgets)(Resource(stream), 0).toString()).empty()) {
     iname = (char *)IM_MALLOC(fline.size() + 1);
     CHECK_ALLOC_R(iname, (fline.size() + 1), 0);
     if (sscanf(fline.c_str(), "#define %s %d", iname, &value) == 2) {
@@ -2773,8 +2773,8 @@ static Variant php_imagettftext_common(int mode, int extended,
   if (mode == TTFTEXT_BBOX) {
     ptsize = arg1.toDouble();
     angle = arg2.toDouble();
-    fontname = arg3;
-    str = arg4;
+    fontname = arg3.toString();
+    str = arg4.toString();
     extrainfo = arg5;
   } else {
     Resource image = arg1.toResource();
@@ -2783,8 +2783,8 @@ static Variant php_imagettftext_common(int mode, int extended,
     x = toInt64(arg4);
     y = toInt64(arg5);
     col = toInt64(arg6);
-    fontname = arg7;
-    str = arg8;
+    fontname = arg7.toString();
+    str = arg8.toString();
     extrainfo = arg9;
     im = get_valid_image_resource(image);
     if (!im) return false;
@@ -4521,7 +4521,8 @@ const StaticString s_size("size");
 
 Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
     const String& jpeg_file_name, int64_t spool /* = 0 */) {
-  char psheader[] = "\xFF\xED\0\0Photoshop 3.0\x008BIM\x04\x04\0\0\0\0";
+  char psheader[] = "\xFF\xED\0\0Photoshop 3.0\08BIM\x04\x04\0\0\0";
+  static_assert(sizeof(psheader) == 28, "psheader must be 28 bytes");
   unsigned int iptcdata_len = iptcdata.length();
   unsigned int marker, inx;
   unsigned char *spoolbuf = nullptr, *poi = nullptr;
@@ -4533,10 +4534,24 @@ Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
     raise_warning("failed to open file: %s", jpeg_file_name.c_str());
     return false;
   }
+
   if (spool < 2) {
-    Array stat = HHVM_FN(fstat)(Resource(file)).toArray();
-    int st_size = stat[s_size].toInt32();
-    size_t malloc_size = iptcdata_len + sizeof(psheader) + st_size + 1024 + 1;
+    auto stat = HHVM_FN(fstat)(Resource(file));
+    // TODO(t7561579) until we can properly handle non-file streams here, don't
+    // pretend we can and crash.
+    if (!stat.isArray()) {
+      raise_warning("unable to stat input");
+      return false;
+    }
+
+    auto& stat_arr = stat.toCArrRef();
+    auto st_size = stat_arr[s_size].toInt64();
+    if (st_size < 0) {
+      raise_warning("unsupported stream type");
+      return false;
+    }
+
+    auto malloc_size = iptcdata_len + sizeof(psheader) + st_size + 1024 + 1;
     poi = spoolbuf = (unsigned char *)IM_MALLOC(malloc_size);
     CHECK_ALLOC_R(poi, malloc_size, false);
     memset(poi, 0, malloc_size);
@@ -4589,11 +4604,11 @@ Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
         iptcdata_len++; /* make the length even */
       }
 
-      psheader[2] = (iptcdata_len+28)>>8;
-      psheader[3] = (iptcdata_len+28)&0xff;
+      psheader[2] = (iptcdata_len + sizeof(psheader)) >> 8;
+      psheader[3] = (iptcdata_len + sizeof(psheader)) & 0xff;
 
-      for (inx = 0; inx < 28; inx++) {
-        php_iptc_put1(file, spool, psheader[inx], poi?&poi:0);
+      for (inx = 0; inx < sizeof(psheader); inx++) {
+        php_iptc_put1(file, spool, psheader[inx], poi ? &poi : 0);
       }
 
       php_iptc_put1(file, spool, (unsigned char)(iptcdata_len>>8),
@@ -6613,15 +6628,19 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
           if (length<byte_count-1) {
             /* When there are any characters after the first NUL */
             PHP_STRDUP(ImageInfo->CopyrightPhotographer, value_ptr);
-            PHP_STRDUP(ImageInfo->CopyrightEditor, value_ptr+length+1);
+            PHP_STRNDUP(
+              ImageInfo->CopyrightEditor,
+              value_ptr + length + 1,
+              byte_count - length - 1
+            );
             if (ImageInfo->Copyright) IM_FREE(ImageInfo->Copyright);
             php_vspprintf(&ImageInfo->Copyright, 0, "%s, %s",
-                          value_ptr, value_ptr+length+1);
+                          value_ptr, ImageInfo->CopyrightEditor);
             /* format = TAG_FMT_UNDEFINED; this musn't be ASCII         */
             /* but we are not supposed to change this                   */
             /* keep in mind that image_info does not store editor value */
           } else {
-            PHP_STRDUP(ImageInfo->Copyright, value_ptr);
+            PHP_STRNDUP(ImageInfo->Copyright, value_ptr, byte_count);
           }
         }
         break;
@@ -6737,10 +6756,10 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
         break;
 
       case TAG_MAKE:
-        PHP_STRDUP(ImageInfo->make, value_ptr);
+        PHP_STRNDUP(ImageInfo->make, value_ptr, byte_count);
         break;
       case TAG_MODEL:
-        PHP_STRDUP(ImageInfo->model, value_ptr);
+        PHP_STRNDUP(ImageInfo->model, value_ptr, byte_count);
         break;
 
       case TAG_MAKER_NOTE:

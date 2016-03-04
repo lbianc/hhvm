@@ -71,6 +71,7 @@ public:
   }
 
   static Array Create(const Variant& key, const Variant& value);
+  static Array ConvertToDict(const Array& arr);
 
 public:
   Array() {}
@@ -146,6 +147,17 @@ public:
     return !m_arr;
   }
   Array values() const;
+
+  bool useWeakKeys() const {
+    // If array isn't set we may implicitly create a mixed array. We never
+    // implicitly create a dict array
+    return !m_arr || m_arr->useWeakKeys();
+  }
+
+  /*
+   * Converts k to a valid key for this array type
+   */
+  VarNR convertKey(const Variant& k) const;
 
   /*
    * Operators

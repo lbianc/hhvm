@@ -2229,10 +2229,6 @@ CodeBlock& codeBlockChoose(CodeAddress addr, CodeBlock& a, Blocks&... as) {
 
 //////////////////////////////////////////////////////////////////////
 
-#undef TRACEMOD
-#undef logical_const
-#undef CCS
-
 namespace x64 {
 
 struct DecodedInstruction {
@@ -2318,6 +2314,9 @@ private:
   uint8_t       m_offSz;
 };
 
+#undef TRACEMOD
+#undef logical_const
+#undef CCS
 
 }}}
 

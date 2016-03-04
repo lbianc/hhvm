@@ -1362,7 +1362,7 @@ Array HashCollection::t_toarray() {
         ai.set((int64_t)e->ikey, tvAsCVarRef(&e->data));
       } else {
         assert(e->hasStrKey());
-        ai.set(String(StrNR(e->skey)).toKey(), tvAsCVarRef(&e->data));
+        ai.set(VarNR::MakeKey(String(StrNR(e->skey))), tvAsCVarRef(&e->data));
       }
     }
     Array arr = ai.toArray();
@@ -2361,7 +2361,7 @@ BaseMap::php_takeWhile(const Variant& fn) {
         throw_collection_modified();
       }
     }
-    if (!b) continue;
+    if (!b) break;
     e = iter_elm(pos);
     if (e->hasIntKey()) {
       map->set(e->ikey, &e->data);
@@ -3808,7 +3808,7 @@ BaseSet::php_takeWhile(const Variant& fn) {
         throw_collection_modified();
       }
     }
-    if (!b) continue;
+    if (!b) break;
     e = &data()[i];
     if (e->hasIntKey()) {
       set->addRaw(e->data.m_data.num);

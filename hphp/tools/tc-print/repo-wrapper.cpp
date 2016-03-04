@@ -19,7 +19,7 @@
 
 #include "hphp/hhvm/process-init.h"
 #include "hphp/util/hdf.h"
-#include "hphp/util/repo-schema.h"
+#include "hphp/util/build-info.h"
 #include "hphp/compiler/option.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/program-functions.h"
@@ -31,10 +31,13 @@ namespace HPHP { namespace jit {
 
 RepoWrapper::RepoWrapper(const char* repoSchema,
                          const std::string& configFile) {
-  kRepoSchemaId = repoSchema;
+  if (setenv("HHVM_RUNTIME_REPO_SCHEMA", repoSchema, 1 /* overwrite */)) {
+    fprintf(stderr, "Could not set repo schema");
+    exit(EXIT_FAILURE);
+  }
 
   printf("# Config file: %s\n", configFile.c_str());
-  printf("# Repo schema: %s\n", kRepoSchemaId);
+  printf("# Repo schema: %s\n", repoSchemaId().begin());
 
   register_process_init();
   initialize_repo();

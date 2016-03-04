@@ -31,7 +31,6 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
-struct Array;
 struct VarNR;
 struct VariableSerializer;
 struct VariableUnserializer;
@@ -142,7 +141,10 @@ public:
 
   String(const String& str) : m_str(str.m_str) { }
   /* implicit */ String(const StaticString& str);
-  /* implicit */ String(char) = delete; // prevent unintentional promotion
+
+  /* Prevent unintentional promotion. */
+  /* implicit */ String(char) = delete;
+  /* implicit */ String(Variant&&) = delete;
 
   // Disable this---otherwise this would generally implicitly create a
   // Variant(bool) and then call String(Variant&&) ...
@@ -150,7 +152,7 @@ public:
 
   // Move ctor
   /* implicit */ String(String&& str) noexcept : m_str(std::move(str.m_str)) {}
-  /* implicit */ String(Variant&& src);
+
   // Move assign
   String& operator=(String&& src) {
     m_str = std::move(src.m_str);
@@ -161,8 +163,8 @@ public:
     return *this;
   }
 
-  // Move assign from Variant
-  String& operator=(Variant&& src);
+  String& operator=(const Variant&) = delete;
+  String& operator=(Variant&&) = delete;
 
   /* implicit */ String(const std::string &s)
   : m_str(StringData::Make(s.data(), s.size(), CopyString), NoIncRef{}) { }
@@ -300,7 +302,6 @@ public:
   }
   String& operator=(const StaticString& v);
   String& operator=(const char* v);
-  String& operator=(const Variant& v);
   String& operator=(const std::string &s);
   // These should be members, but g++ doesn't yet support the rvalue
   // reference notation on lhs (http://goo.gl/LuCTo).
@@ -336,18 +337,20 @@ public:
   bool operator <= (const char* v) const = delete;
   bool operator >  (const char* v) const = delete;
   bool operator <  (const char* v) const = delete;
+
   bool operator == (const String& v) const;
   bool operator != (const String& v) const;
   bool operator >= (const String& v) const = delete;
   bool operator <= (const String& v) const = delete;
   bool operator >  (const String& v) const;
   bool operator <  (const String& v) const;
-  bool operator == (const Variant& v) const;
-  bool operator != (const Variant& v) const;
+
+  bool operator == (const Variant& v) const = delete;
+  bool operator != (const Variant& v) const = delete;
   bool operator >= (const Variant& v) const = delete;
   bool operator <= (const Variant& v) const = delete;
-  bool operator >  (const Variant& v) const;
-  bool operator <  (const Variant& v) const;
+  bool operator >  (const Variant& v) const = delete;
+  bool operator <  (const Variant& v) const = delete;
 
   /**
    * Type conversions
@@ -358,7 +361,6 @@ public:
   int    toInt32  () const { return m_str ? m_str->toInt32  () : 0;}
   int64_t toInt64 () const { return m_str ? m_str->toInt64  () : 0;}
   double toDouble () const { return m_str ? m_str->toDouble () : 0;}
-  VarNR  toKey   () const;
   std::string toCppString() const { return std::string(c_str(), size()); }
 
   /**
@@ -367,27 +369,30 @@ public:
   bool same (const char* v2) const = delete;
   bool same (const StringData *v2) const;
   bool same (const String& v2) const;
-  bool same (const Array& v2) const;
-  bool same (const Object& v2) const;
-  bool same (const Resource& v2) const;
+  bool same (const Array& v2) const = delete;
+  bool same (const Object& v2) const = delete;
+  bool same (const Resource& v2) const = delete;
+
   bool equal(const char* v2) const = delete;
   bool equal(const StringData *v2) const;
   bool equal(const String& v2) const;
-  bool equal(const Array& v2) const;
-  bool equal(const Object& v2) const;
-  bool equal(const Resource& v2) const;
+  bool equal(const Array& v2) const = delete;
+  bool equal(const Object& v2) const = delete;
+  bool equal(const Resource& v2) const = delete;
+
   bool less (const char* v2) const = delete;
   bool less (const StringData *v2) const;
   bool less (const String& v2) const;
-  bool less (const Array& v2) const;
-  bool less (const Object& v2) const;
-  bool less (const Resource& v2) const;
+  bool less (const Array& v2) const = delete;
+  bool less (const Object& v2) const = delete;
+  bool less (const Resource& v2) const = delete;
+
   bool more (const char* v2) const = delete;
   bool more (const StringData *v2) const;
   bool more (const String& v2) const;
-  bool more (const Array& v2) const;
-  bool more (const Object& v2) const;
-  bool more (const Resource& v2) const;
+  bool more (const Array& v2) const = delete;
+  bool more (const Object& v2) const = delete;
+  bool more (const Resource& v2) const = delete;
 
   int compare(const char* v2) const;
   int compare(const String& v2) const;
@@ -409,9 +414,10 @@ public:
     return rvalAtImpl(key ? key->toInt32() : 0);
   }
   String rvalAt(const String& key) const { return rvalAtImpl(key.toInt32());}
-  String rvalAt(const Array& key) const;
-  String rvalAt(const Object& key) const;
-  String rvalAt(const Variant& key) const;
+
+  String rvalAt(const Array& key) const = delete;
+  String rvalAt(const Object& key) const = delete;
+  String rvalAt(const Variant& key) const = delete;
 
   /**
    * Returns one character at specified position.
