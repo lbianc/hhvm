@@ -974,7 +974,7 @@ struct Func {
   /*
    * Intercept hook flag.
    */
-  char& maybeIntercepted() const;
+  int8_t& maybeIntercepted() const;
 
   /*
    * Access to the global vector of funcs.  This maps FuncID's back to Func*'s.
@@ -1232,7 +1232,7 @@ private:
   };
   // Atomically-accessed intercept flag.  -1, 0, or 1.
   // TODO(#1114385) intercept should work via invalidation.
-  mutable char m_maybeIntercepted;
+  mutable int8_t m_maybeIntercepted;
   mutable ClonedFlag m_cloned;
   bool m_isPreFunc : 1;
   bool m_hasPrivateAncestor : 1;
