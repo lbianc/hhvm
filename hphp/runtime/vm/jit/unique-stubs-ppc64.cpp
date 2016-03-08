@@ -174,11 +174,10 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv, PhysReg t
         // Declm instruction (for PPC64) is lowered and uses additional
         // registers.
         {
-          PhysRegSaver prs{v, live};
           // The refcount is greater than 1; decref it.
           v << declm{data[FAST_REFCOUNT_OFFSET], v.makeReg()};
         }
-        v << ret{};
+        v << ret{live};
       });
 
       // Note that the stack is aligned since we called to this helper from an
