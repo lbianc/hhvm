@@ -181,6 +181,10 @@ struct ArgGroup {
     ArgDesc arg(s, m_locs[s]);
     if (isFP) {
       push_SIMDarg(arg);
+#if defined(__powerpc64__)
+      // PPC64 ABIv2 compliant: reserve the aligned GP if FP is used
+      push_arg(arg);    // TODO(gut): make it a dummy
+#endif
     } else {
       push_arg(arg);
     }
