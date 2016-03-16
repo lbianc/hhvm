@@ -252,15 +252,11 @@ ETCH_NAME(enterTCHelper):
   // now manipulate the frame to go to prologue
   mr ETCH_VMFP, ETCH_ARG6
 
-  mr %r12, ETCH_ARG3            // %r12 is the function linkage
-  mtctr %r12
-  bctr                          // no 'l' so it returns to stashedAR->m_savedRip
-
 ETCH_LABEL(enterTCHelper$callTC):
   // go to requested code
   mr %r12, ETCH_ARG3            // %r12 is the function linkage
   mtctr %r12
-  bctrl                         // mind the 'l' at the end for returning
+  bctr                          // no 'l' so it returns to stashedAR->m_savedRip
 
   /*
    * enterTCExit is never called directly; this exists to give the jit
