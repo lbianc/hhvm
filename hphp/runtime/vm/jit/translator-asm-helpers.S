@@ -260,7 +260,7 @@ ETCH_LABEL(enterTCHelper$callTC):
   // go to requested code
   mr %r12, ETCH_ARG3            // %r12 is the function linkage
   mtctr %r12
-  bctrl                         // mind the 'l' at the end so for returning
+  bctrl                         // mind the 'l' at the end for returning
 
   /*
    * enterTCExit is never called directly; this exists to give the jit
