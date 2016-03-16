@@ -827,9 +827,8 @@ void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
 }
 
 // Create a new frame on call stack
-void Assembler::pushFrame(const Reg64& rsp, const Reg64& rvmfp) {
-  std(rvmfp, rsp[-min_callstack_size]);
-  addi(rsp, rsp, -min_callstack_size);
+void Assembler::pushFrame(const Reg64& rsp, const Reg64& rbackchain) {
+  stdu(rbackchain, rsp[-min_callstack_size]);
 }
 
 // Destroy a new frame on call stack
