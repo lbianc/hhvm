@@ -197,33 +197,33 @@ ETCH_NAME(enterTCHelper):
   // Save non-volatile registers in order to restore it on Epilogue
   // also takes care of debug information
 
-#define SAVE_GP_REG(reg, pos)              \
+#define SAVE_GP_REG(reg, pos)   \
   std %r##reg, pos(%r1); CFI3C(offset, reg, pos - 192)
 
-#define SAVE_FP_REG(reg, pos)              \
+#define SAVE_FP_REG(reg, pos)   \
   std %f##reg, pos(%r1); CFI3C(offset, 32 + reg, pos - 192)
 
   // as the VM may branch externally and overwrite TOC pointer, save it here
-  SAVE_GP_REG(2, 24)    // TOC pointer
+  SAVE_GP_REG(2, 24)            // TOC pointer
 
-  SAVE_FP_REG(14, 48)   // floating point local variable #1
-  SAVE_FP_REG(15, 56)   // floating point local variable #2
-  SAVE_FP_REG(16, 64)   // floating point local variable #3
-  SAVE_FP_REG(17, 72)   // floating point local variable #4
-  SAVE_FP_REG(18, 80)   // floating point local variable #5
-  SAVE_FP_REG(19, 88)   // floating point local variable #6
-  SAVE_FP_REG(20, 96)   // floating point local variable #7
-  SAVE_FP_REG(21, 104)  // floating point local variable #8
-  SAVE_FP_REG(22, 112)  // floating point local variable #9
-  SAVE_FP_REG(23, 120)  // floating point local variable #10
-  SAVE_FP_REG(24, 128)  // floating point local variable #11
-  SAVE_FP_REG(25, 136)  // floating point local variable #12
-  SAVE_FP_REG(26, 144)  // floating point local variable #13
-  SAVE_FP_REG(27, 152)  // floating point local variable #14
-  SAVE_FP_REG(28, 160)  // floating point local variable #15
-  SAVE_FP_REG(29, 168)  // floating point local variable #16
-  SAVE_FP_REG(30, 176)  // floating point local variable #17
-  SAVE_FP_REG(31, 184)  // floating point local variable #18
+  SAVE_FP_REG(14, 48)           // floating point local variable #1
+  SAVE_FP_REG(15, 56)           // floating point local variable #2
+  SAVE_FP_REG(16, 64)           // floating point local variable #3
+  SAVE_FP_REG(17, 72)           // floating point local variable #4
+  SAVE_FP_REG(18, 80)           // floating point local variable #5
+  SAVE_FP_REG(19, 88)           // floating point local variable #6
+  SAVE_FP_REG(20, 96)           // floating point local variable #7
+  SAVE_FP_REG(21, 104)          // floating point local variable #8
+  SAVE_FP_REG(22, 112)          // floating point local variable #9
+  SAVE_FP_REG(23, 120)          // floating point local variable #10
+  SAVE_FP_REG(24, 128)          // floating point local variable #11
+  SAVE_FP_REG(25, 136)          // floating point local variable #12
+  SAVE_FP_REG(26, 144)          // floating point local variable #13
+  SAVE_FP_REG(27, 152)          // floating point local variable #14
+  SAVE_FP_REG(28, 160)          // floating point local variable #15
+  SAVE_FP_REG(29, 168)          // floating point local variable #16
+  SAVE_FP_REG(30, 176)          // floating point local variable #17
+  SAVE_FP_REG(31, 184)          // floating point local variable #18
 
 #undef SAVE_FP_REG
 #undef SAVE_GP_REG
@@ -258,9 +258,9 @@ ETCH_NAME(enterTCHelper):
 
 ETCH_LABEL(enterTCHelper$callTC):
   // go to requested code
-  mr %r12, ETCH_ARG3  // %r12 is the function linkage
+  mr %r12, ETCH_ARG3            // %r12 is the function linkage
   mtctr %r12
-  bctrl               // mind the 'l' at the end so that it returns here later
+  bctrl                         // mind the 'l' at the end so for returning
 
   /*
    * enterTCExit is never called directly; this exists to give the jit
@@ -276,25 +276,25 @@ ETCH_NAME(enterTCExit):
 
   // Epilogue
   // Load non-volatile registers saved on Prologue
-  ld %r2,  24(%r1)    // TOC pointer
-  ld %f14, 48(%r1)    // floating point local variable #1
-  ld %f15, 56(%r1)    // floating point local variable #2
-  ld %f16, 64(%r1)    // floating point local variable #3
-  ld %f17, 72(%r1)    // floating point local variable #4
-  ld %f18, 80(%r1)    // floating point local variable #5
-  ld %f19, 88(%r1)    // floating point local variable #6
-  ld %f20, 96(%r1)    // floating point local variable #7
-  ld %f21, 104(%r1)   // floating point local variable #8
-  ld %f22, 112(%r1)   // floating point local variable #9
-  ld %f23, 120(%r1)   // floating point local variable #10
-  ld %f24, 128(%r1)   // floating point local variable #11
-  ld %f25, 136(%r1)   // floating point local variable #12
-  ld %f26, 144(%r1)   // floating point local variable #13
-  ld %f27, 152(%r1)   // floating point local variable #14
-  ld %f28, 160(%r1)   // floating point local variable #15
-  ld %f29, 168(%r1)   // floating point local variable #16
-  ld %f30, 176(%r1)   // floating point local variable #17
-  ld %f31, 184(%r1)   // floating point local variable #18
+  ld %r2,  24(%r1)              // TOC pointer
+  ld %f14, 48(%r1)              // floating point local variable #1
+  ld %f15, 56(%r1)              // floating point local variable #2
+  ld %f16, 64(%r1)              // floating point local variable #3
+  ld %f17, 72(%r1)              // floating point local variable #4
+  ld %f18, 80(%r1)              // floating point local variable #5
+  ld %f19, 88(%r1)              // floating point local variable #6
+  ld %f20, 96(%r1)              // floating point local variable #7
+  ld %f21, 104(%r1)             // floating point local variable #8
+  ld %f22, 112(%r1)             // floating point local variable #9
+  ld %f23, 120(%r1)             // floating point local variable #10
+  ld %f24, 128(%r1)             // floating point local variable #11
+  ld %f25, 136(%r1)             // floating point local variable #12
+  ld %f26, 144(%r1)             // floating point local variable #13
+  ld %f27, 152(%r1)             // floating point local variable #14
+  ld %f28, 160(%r1)             // floating point local variable #15
+  ld %f29, 168(%r1)             // floating point local variable #16
+  ld %f30, 176(%r1)             // floating point local variable #17
+  ld %f31, 184(%r1)             // floating point local variable #18
 
   addi %r1, %r1, 192            // aligned with Prologue: std %r1, -192(%r1)
   CFI2(adjust_cfa_offset, -192) // debug information about stack pointer change
