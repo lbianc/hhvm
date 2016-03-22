@@ -97,6 +97,7 @@
 #define ETCH_VMFP         %r31
 #define ETCH_VMSP         %r29
 #define ETCH_VMTL         %r30
+#define ETCH_SP           %r27
 /* Service Request Registers must match svcreq_args list on abi-ppc64.cpp */
 #define ETCH_SVCREQ_REQ   %r3
 #define ETCH_SVCREQ_STUB  %r8

@@ -188,6 +188,8 @@ ETCH_NAME(enterTCHelper):
 
   // Set firstAR->m_sfp to point to this frame.
   std %r1, 0(ETCH_ARG4)
+  // Set TOC on that VM frame
+  std %r2, 24(ETCH_ARG4)
   // Set backchain to rvmfp
   std ETCH_ARG4, -192(%r1)
 
@@ -232,6 +234,7 @@ ETCH_NAME(enterTCHelper):
   mr ETCH_VMSP, ETCH_ARG1
   mr ETCH_VMTL, ETCH_ARG5
   mr ETCH_VMFP, ETCH_ARG2
+  mr ETCH_SP, %r1               // using r1 as frame pointer
 
   // Set up ETCH_R_ONE with value "1" (see abi definition for more details)
   li ETCH_R_ONE, ETCH_V_ONE
@@ -243,7 +246,7 @@ ETCH_NAME(enterTCHelper):
   // there via a callphp{} by setting return addresses, the callee frame
   // pointer, then jumping to the prologue.
   ld  %r0, enterTCExit@got(%r2)
-  std %r0, 32(%r1)              // being checked on emitCallToExit unique stub
+  std %r0, 32(ETCH_SP)          // being checked on emitCallToExit unique stub
 
   // set return address (LR)
   ld %r0, 16(ETCH_ARG6)         // m_savedRip of the stashedAR's call frame
@@ -269,6 +272,8 @@ ETCH_NAME(enterTCExit):
    */
   std ETCH_VMSP, 0x10(ETCH_VMTL)
   std ETCH_VMFP, 0x20(ETCH_VMTL)
+
+  mr %r1, ETCH_SP               // restore r1 value
 
   // Epilogue
   // Load non-volatile registers saved on Prologue
@@ -318,11 +323,12 @@ ETCH_NAME(handleSRHelper):
   std ETCH_VMFP, 0x20(ETCH_VMTL)
 
   // Push a ReqInfo struct onto the stack and call handleServiceRequest.
+  std ETCH_VMFP, -96(ETCH_SP)   // set backchain to VM frame
+  addi %r1, ETCH_SP, -96        // allocate space for frame + LR
+  CFI2(adjust_cfa_offset, 96)   // debug information about stack pointer change
   mflr %r0
-  std %r0, 16(%r1)              // LR on parent call frame
-  CFI3C(offset, 65, 16)         // LR is register #65 in DWARF format
-  stdu %r1, -80(%r1)            // aligned with Epilogue: addi %r1, %r1, 80
-  CFI2(adjust_cfa_offset, 80)   // debug information about stack pointer change
+  std %r0, 80(%r1)              // LR saved locally on this frame
+  CFI3C(offset, 65, 80)         // LR is register #65 in DWARF format
 
   std ETCH_SVCREQ_ARG4, 72(%r1)
   std ETCH_SVCREQ_ARG3, 64(%r1)
@@ -338,15 +344,17 @@ ETCH_NAME(handleSRHelper):
     // address of the ReqInfo structure
   addi ETCH_ARG2, %r1, 32
 
+  std %r2, 24(%r1)              // save TOC
   ld   %r12, MCGenerator_handleServiceRequest@got(%r2)
   mtctr %r12
   bctrl
+  ld %r2, 24(%r1)               // restore TOC
 
   // Pop the ReqInfo struct off the stack.
-  addi %r1, %r1, 80   // aligned with Prologue: stdu %r1, -80(%r1)
-  CFI2(adjust_cfa_offset, -80)
-  ld %r0, 16(%r1)
+  ld %r0, 80(%r1)               // restore LR
   mtlr %r0
+  addi ETCH_SP, %r1, 96         // aligned with Prologue: addi %r1, ETCH_SP, -96
+  CFI2(adjust_cfa_offset, -96)
 
   // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
   // we interpreted anything. Reload them.

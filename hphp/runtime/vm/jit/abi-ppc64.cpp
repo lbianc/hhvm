@@ -38,9 +38,9 @@ const RegSet kGPCallerSaved =
 
 const RegSet kGPCalleeSaved =
   reg::r14 | reg::r15 | reg::r16 | reg::r17 | reg::r18 | reg::r19 | reg::r20 |
-  reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25 | reg::r26 | reg::r27;
+  reg::r21 | reg::r22 | reg::r23 | reg::r24 | reg::r25 | reg::r26;
 
-  // r1 is used as rsp
+  // r27 is used as rsp
   // r29 is used as rvmsp
   // r30 is used as rvmtl
   // r31 is used as rvmfp
@@ -49,7 +49,7 @@ const RegSet kGPCalleeSaved =
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
 const RegSet kGPReserved =
-  reg::r2 | rsp() | rvmfp() | rvmtl() | rvmsp() | rAsm |
+  reg::r2 | rsp() | rvmfp() | rvmtl() | rvmsp() | rAsm | reg::r1 |
   rfuncln() | rfuncentry() | rthreadptr() | rone() | r_svcreq_stub();
   // Reserve the r2 TOC register to avoid changing it
 

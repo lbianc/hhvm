@@ -45,8 +45,8 @@ constexpr size_t smashableMovqLen() { return kStdIns * 5; }
 constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
 
 // prologue of call function until the li64 takes place. It skips:
-// mflr, std, stdu, std
-constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 4; }
+// mflr, stdu, stdu, std, addi, std
+constexpr uint8_t smashableCallSkipPrologue() { return kStdIns * 6; }
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
@@ -57,8 +57,8 @@ constexpr size_t smashableCallLen() {
 // to check the bctrl, it has to be on that instruction so don't skip that
 constexpr uint8_t smashableCallSkip() { return smashableCallLen() - kStdIns; }
 // epilogue of call function after the return address. It skips:
-// ld, addi, ld, mtlr
-constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 4; }
+// ld, ld, mtlr, ld, addi
+constexpr uint8_t smashableCallSkipEpilogue() { return kStdIns * 5; }
 
 // li64 + mtctr + nop + nop + bcctr
 constexpr size_t smashableJccLen()  { return kStdIns * 9; }

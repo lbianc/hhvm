@@ -72,7 +72,6 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
 
   auto const start = vwrap(cb, [&] (Vout& v) {
     auto const ar = v.makeReg();
-    auto const savedRip = v.makeReg();
 
     v << copy{rvmfp(), ar};
 
@@ -80,22 +79,27 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // in other stubs because we need the return IP for this frame in the vmfp
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
-    v << stublogue{true};     // adds 32 bytes onto the stack
 
-    // keep the savedRip on the stublogue frame
-    v << load{ar[AROFF(m_savedRip)], savedRip};
-    v << store{savedRip, rsp()[AROFF(m_savedRip)]};
+    // kind of a stublogue
+    v << mflr{rfuncln()};
+    v << push{rtoc()};
+    v << push{rfuncln()};    // desired fixup
+    v << lea{rsp()[-8], rsp()};
+    v << push{rvmfp()};
+
+    v << copy{rsp(), rvmfp()};
 
     // When we call the event hook, it might tell us to skip the callee
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
+    auto const savedRip = v.makeReg();
     v << pushm{ar[AROFF(m_savedToc)]};
+    v << load{ar[AROFF(m_savedRip)], savedRip};
     v << push{savedRip};
     v << pushm{ar[AROFF(m_sfp)]};   // Reserved, used to hide the frame pointer
     v << push{rvmfp()};             // Save the real top of the stack.
 
-    v << copy{rsp(), rvmfp()};
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 
     bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
@@ -118,8 +122,7 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       v << pop{saved_rip};
       v << pop{rtoc()};
 
-      // Drop our call frame; the stublogue{} instruction guarantees that this
-      // is exactly 32 bytes.
+      // Drop our call frame
       v << lea{rsp()[32], rsp()};
 
       // Sync vmsp and return to the caller.  This unbalances the return stack
@@ -132,7 +135,14 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     v << lea{rsp()[32], rsp()}; // saved frame
 
     // Restore rvmfp() and return to the callee's func prologue.
-    v << stubret{RegSet(), true}; // removes 32 bytes from the stack
+    // kind of stubret
+    v << pop{rvmfp()};
+    v << lea{rsp()[8], rsp()};
+    v << pop{rfuncln()}; // savedRip
+    v << pop{rtoc()};
+
+    v << mtlr{rfuncln()};
+    v << ret{RegSet()};
   });
 
   // set it to the return address of emitFunctionEnterHelper's call
@@ -189,9 +199,9 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv, PhysReg t
       v << callm{lookupDestructor(v, type), arg_regs(1)};
 
       // Between where r1 is now and the saved RIP of the call into the
-      // freeLocalsHelpers stub, we have all the live regs we pushed, plus two
-      // entire frames.
-      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 8);
+      // freeLocalsHelpers stub, we have all the live regs we pushed, plus one
+      // entire frame.
+      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 4);
       v << syncpoint{fixup};
       // fallthru
     });
@@ -336,9 +346,9 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     // TODO(lbianc): This condition fixed some tests, which rvmfp() is not
     // correct. These tests must be better analyzed to find out if this
     // behavior is coming from another error.
-    v << cmpq{rvmfp(), rsp(), sf};
+    v << cmpq{rvmfp(), ppc64_asm::reg::r1, sf};
     ifThen(v, CC_E, sf, [&] (Vout& v) {
-      v << load{rsp()[0], rvmfp()};
+      v << load{rvmfp()[0], rvmfp()};
     });
 
     // Normal end catch situation: call back to tc_unwind_resume, which returns

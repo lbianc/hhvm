@@ -614,17 +614,16 @@ void Vgen::emit(const callarray& i) {
  * Stub function ABI
  */
 void Vgen::emit(const stublogue& i) {
-  // rvmfp is always saved on stack at rsp()[0]
-  a.prologue(rsp(), rtoc(), rfuncln(), rvmfp());
+  // rvmfp is always saved on stack after call at rsp()[0]
+  if (i.saveframe) a.stdu(rvmfp(), rsp()[-16]);
+  else a.addi(rsp(), rsp(), -16);
 }
 
 void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
   if (i.saveframe) a.ld(rvmfp(), rsp()[0]);
-
-  a.epilogue(rsp(), rtoc(), rfuncln());
-
-  emit(ret{});
+  a.popFrame(rsp());
+  a.blr();    // return
 }
 
 void Vgen::emit(const tailcallstub& i) {
@@ -637,12 +636,14 @@ void Vgen::emit(const tailcallstub& i) {
 }
 
 void Vgen::emit(const stubtophp& i) {
+  // grab the return address and store this return address for phplogue
+  a.ld(rAsm, rsp()[-16]);
+  a.std(rAsm, i.fp[AROFF(m_savedRip)]);
+  a.ld(rAsm, rsp()[-8]);
+  a.std(rAsm, i.fp[AROFF(m_savedToc)]);
+
   // pop this frame created by stub
   a.popFrame(rsp());
-
-  // grab the return address and store this return address for phplogue
-  a.ld(rAsm, rsp()[AROFF(m_savedRip)]);
-  a.std(rAsm, i.fp[AROFF(m_savedRip)]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1020,13 +1021,16 @@ X(andli,  movl, andqi,  ONE_R64(d))
  * PHP function ABI
  */
 void lowerForPPC64(Vout& v, phplogue& inst) {
+  // store basic info on vm frame
   Vreg ret_address = v.makeReg();
   v << mflr{ret_address};
   v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
+  v << store{rtoc(), inst.fp[AROFF(m_savedToc)]};
 }
 
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
+  v << load{inst.fp[AROFF(m_savedToc)], rtoc()};
   v << load{inst.fp[AROFF(m_savedRip)], tmp};
   if (!inst.noframe) {
     v << load{inst.fp[AROFF(m_sfp)], inst.d};

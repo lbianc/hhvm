@@ -826,14 +826,9 @@ void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
   b.li64(reg::r12, ssize_t(dest));
 }
 
-// Create a new frame on call stack
-void Assembler::pushFrame(const Reg64& rsp, const Reg64& rbackchain) {
-  stdu(rbackchain, rsp[-min_callstack_size]);
-}
-
 // Destroy a new frame on call stack
 void Assembler::popFrame(const Reg64& rsp) {
-  addi(rsp, rsp, min_callstack_size);
+  addi(rsp, rsp, 16);
 }
 
 // Create prologue when calling
@@ -841,28 +836,48 @@ void Assembler::prologue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln,
                           const Reg64& rvmfp) {
-  // save return address on caller's frame (ABI), but on rsp area.
-  // On rvmfp it's forbidden as it's possible that the vm frame already has a
-  // return address assigned (e.g: ActRec::setReturnVMExit)
+  // Get return address.
   mflr(rfuncln);
-  std(rfuncln, rsp[lr_position_on_callstack]);
 
-  // create frame and save TOC on this frame
-  pushFrame(rsp, rvmfp);
-  std(rtoc, rsp[toc_position_on_callstack]);
+  // Push LR and TOC
+  stdu(rtoc, rsp[-8]);          // this toc will never be overwritten.
+  stdu(rfuncln, rsp[-8]);
+
+  // The following toc is needed for unwind purposes at 24(r1) but might be
+  // overwritten (see epilogue below)
+
+  // Allocate frame and save the rvmfp as backchain.
+  addi(reg::r1, rsp, -32);
+  std(rtoc, reg::r1[toc_position_on_callstack]);
+  std(rvmfp, reg::r1[0]);
 }
 
-// Create epilogue when calling.
 void Assembler::epilogue (const Reg64& rsp,
                           const Reg64& rtoc,
                           const Reg64& rfuncln) {
-  // restore TOC from this frame
-  ld(rtoc, rsp[toc_position_on_callstack]);
+  // The following TOC pointer recover may not be valid, as the called function
+  // might have pushed something onto the stack, thus overwriting the toc
+  // value. However, due to the specific code found below on _Unwind_Resume's
+  // prologue, this instruction needs to be directly after the branch,
+  // otherwise the TOC will be overwritten with another one on _Unwind_Resume's
+  // context:
+  //
+  // mflr    r11                // get the return address pointer
+  // lwz     r11,0(r11)         // read the instruction (4 bytes)
+  // xoris   r11,r11,59457      // validate if it's a load toc: "ld 2, 24(1)"
+  // cmplwi  r11,24
+  // beq     +8                 // skips next store if the load toc exists
+  // std     r2,3384(r1)
+  //
+  ld(reg::r2, reg::r1[24]);     // DON'T REMOVE THIS. See above
 
-  // restore return address from previous frame and destroy this frame
-  popFrame(rsp);
-  ld(rfuncln, rsp[lr_position_on_callstack]);
+  // Recover return address and toc properly.
+  ld(rfuncln, rsp[0]);
   mtlr(rfuncln);
+  ld(rtoc, rsp[8]);
+
+  // Dealloc return address saved area.
+  addi(rsp, rsp, 16);
 }
 
 void Assembler::li64 (const Reg64& rt, int64_t imm64) {

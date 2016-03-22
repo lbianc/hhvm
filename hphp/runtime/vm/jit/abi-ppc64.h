@@ -39,7 +39,7 @@ const Abi& abi(CodeKind kind = CodeKind::Trace);
 constexpr PhysReg rvmfp()      { return ppc64_asm::reg::r31; }
 constexpr PhysReg rvmsp()      { return ppc64_asm::reg::r29; }
 constexpr PhysReg rvmtl()      { return ppc64_asm::reg::r30; }
-constexpr PhysReg rsp()        { return ppc64_asm::reg::r1;  }
+constexpr PhysReg rsp()        { return ppc64_asm::reg::r27; }
 
 // optional in function linkage/used in function prologues
 constexpr PhysReg rfuncln()    { return ppc64_asm::reg::r0;  }
