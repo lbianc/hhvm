@@ -2894,15 +2894,9 @@ void allocateSpillSpace(Vunit& unit, const VxlsContext& ctx,
   Timer t(Timer::vasm_xls_spill);
   always_assert(ctx.abi.canSpill);
 
-#if defined(__powerpc64__)
-  // Make sure we always allocate spill space in multiples of 32 bytes, to keep
-  // callstack sane
-  while (spi.used_spill_slots % 4) spi.used_spill_slots++;
-#else
   // Make sure we always allocate spill space in multiples of 16 bytes, to keep
   // alignment straightforward.
   if (spi.used_spill_slots % 2) spi.used_spill_slots++;
-#endif
   FTRACE(1, "Allocating {} spill slots\n", spi.used_spill_slots);
 
   auto const spillSize = safe_cast<int32_t>(slotOffset(spi.used_spill_slots));
