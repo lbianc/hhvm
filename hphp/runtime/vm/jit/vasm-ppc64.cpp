@@ -123,14 +123,9 @@ struct Vgen {
       if (s1 != d1) a.mr(d1, s1);
     }
   }
-  void emit(const fallthru& i) {}
-  void emit(const ldimmb& i);
-  void emit(const ldimmw& i) {
-    // PPC64 specific. i.d is not Vreg but Vreg16, so it can't be a SIMD.
-    a.li(Reg64(i.d), i.s); // should be only 16bits available
+  void emit(const addl& i) {
+    a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
   }
-  void emit(const ldimml& i);
-  void emit(const ldimmq& i);
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
   }
@@ -139,19 +134,8 @@ struct Vgen {
     TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
     env.meta.catches.emplace_back(saved_pc, nullptr);
   }
-  // After VM frame unwinding, restore the frame pointer correctly as the
-  // call left it with the additional frame.
-  void emit(const landingpad& i) {
-    a.popFrame(rsp());
-  }
 
   // instructions
-  void emit(const fabs& i) {
-    a.fabs(i.d, i.s, false);
-  }
-  void emit(const addl& i) {
-    a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
-  }
   void emit(const addq& i) { a.addo(i.d, i.s0, i.s1, true); }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
@@ -160,37 +144,65 @@ struct Vgen {
   void emit(const cmpli& i) { a.cmpwi(Reg64(i.s1), i.s0); }
   void emit(const cmpq& i) { a.cmpd(i.s1, i.s0); }
   void emit(const cmpqi& i) { a.cmpdi(i.s1, i.s0); }
+  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
+  void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
+  void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
+  void emit(const extsb& i) { a.extsb(i.d, i.s); }
+  void emit(const extsw& i) { a.extsw(i.d, i.s); }
+  void emit(const fabs& i) { a.fabs(i.d, i.s, false); }
+  void emit(const fallthru& i) {}
+  void emit(const fcmpo& i) { a.fcmpo(i.sf, i.s0, i.s1); }
+  void emit(const fcmpu& i) { a.fcmpu(i.sf, i.s0, i.s1); }
+  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
+  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
+  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const jmpi& i) { a.branchAuto(i.target); }
+  void emit(const jmpr& i) { a.mtctr(i.target); a.bctr(); }
+  // After VM frame unwinding, restore the frame pointer correctly as the
+  // call left it with the additional frame.
+  void emit(const landingpad& i) { a.popFrame(rsp()); }
+  void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
+  void emit(const leap& i) { a.li64(i.d, i.s.r.disp); }
+  void emit(const mfcr& i) { a.mfcr(i.d); }
+  void emit(const mflr& i) { a.mflr(i.d); }
+  void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
+  void emit(const mtlr& i) { a.mtlr(i.s); }
+  void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
+  void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
+  void emit(const neg& i) { a.neg(i.d, i.s, true); }
+  void emit(const nop& i) { a.ori(Reg64(0), Reg64(0), 0); } // no-op form
+  void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
+  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
+  void emit(const ret& i) { a.blr(); }
+  void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
+  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
+  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
+  void emit(const shlli& i) { a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);}
+  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shrli& i) { a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);}
+  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
+  void emit(const storeups& i) { a.stxvw4x(i.s,i.m); }
+  // Subtractions: d = s1 - s0
+  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
+  void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
+  void emit(const ud2& i) { a.trap(); }
+  void emit(const xorb& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
+  void emit(const xorl& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
+  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
   void emit(const xxpermdi& i) { a.xxpermdi(i.d, i.s1, i.s0); }
-  void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
-  void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
-  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
-  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
-  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
-  void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
-  void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
-  void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
-  void emit(const fcmpo& i) { a.fcmpo(i.sf, i.s0, i.s1); }
-  void emit(const fcmpu& i) { a.fcmpu(i.sf, i.s0, i.s1); }
-  void emit(const ucomisd& i);
+
   void emit(const fctidz& i) {
     a.mtfsb0(23); // clear VXCVI
     a.fctidz(i.d, i.s, false);
     a.mcrfs(0,5);
   }
-  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
-  void emit(const jmpi& i) {
-    a.branchAuto(i.target);
-  }
-  void emit(const jmpr& i) {
-    a.mtctr(i.target);
-    a.bctr();
-  }
-  void emit(const leap& i) { a.li64(i.d, i.s.r.disp); }
   // TODO: this vasm must be lowered.
   void emit(const loadups& i) {
     Vptr p = i.s;
@@ -220,9 +232,6 @@ struct Vgen {
       a.lxvd2x(i.d, p);
     }
   }
-  void emit(const mfcr& i) { a.mfcr(i.d); }
-  void emit(const mflr& i) { a.mflr(i.d); }
-  void emit(const mtlr& i) { a.mtlr(i.s); }
   void emit(const movl& i) {
     int8_t sh = sizeof(int) * CHAR_BIT;
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lowest 32 bits
@@ -233,16 +242,6 @@ struct Vgen {
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lower byte
     a.extsb(Reg64(i.d), Reg64(i.d));                // extend sign
   }
-  void emit(const extsb& i) {
-    a.extsb(i.d, i.s);
-  }
-  void emit(const extsw& i) {
-    a.extsw(i.d, i.s);
-  }
-  void emit(const neg& i) { a.neg(i.d, i.s, true); }
-  void emit(const nop& i) { a.ori(Reg64(0), Reg64(0), 0); } // no-op form
-  void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
-  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
   void emit(const orqi& i) {
     if (i.s0.fits(sz::word)) {
       a.li(rAsm,i.s0);
@@ -252,27 +251,6 @@ struct Vgen {
 
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
   }
-  void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
-  void emit(const ret& i) {
-    a.blr();
-  }
-  /*Immediate-form logical (unsigned) shift operations are
-    obtained by specifying appropriate masks and shift values for
-    certain Rotate instructions.
-  */
-  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
-  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const shlli& i) {
-    a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-  }
-  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
-  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const shrli& i) {
-    a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-  }
-  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
-  void emit(const storeups& i) { a.stxvw4x(i.s,i.m); }
 
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -308,9 +286,6 @@ struct Vgen {
 
 #undef X
 
-  /* Subtractions: d = s1 - s0 */
-  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
-  void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const testq& i) {
     // More information on:
     // https://goo.gl/F1wrbO
@@ -320,14 +295,6 @@ struct Vgen {
       a.cmpdi(i.s0, Immed(0));
     }
   }
-  void emit(const ud2& i) { a.trap(); }
-  void emit(const xorb& i) {
-    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-  }
-  void emit(const xorl& i) {
-    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-  }
-  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
   void emit(const xorqi& i) {
     if (i.s0.fits(sz::word)) {
       a.li(rAsm, i.s0);
@@ -341,33 +308,36 @@ struct Vgen {
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
   // fallback to the templated emit function.
-  void emit(const cvtsi2sd& i);
+  void emit(const call& i);
+  void emit(const callarray& i);
   void emit(const callfaststub& i);
+  void emit(const callphp&);
+  void emit(const callr& i);
+  void emit(const calls& i);
   void emit(const callstub& i);
+  void emit(const cmovq&);
+  void emit(const contenter&);
+  void emit(const cvtsi2sd& i);
   void emit(const jcc& i);
   void emit(const jcci& i);
   void emit(const jmp& i);
+  void emit(const ldimmb& i);
+  void emit(const ldimml& i);
+  void emit(const ldimmq& i);
+  void emit(const lea&);
+  void emit(const leavetc&);
   void emit(const load& i);
+  void emit(const mcprep&);
   void emit(const pop& i);
   void emit(const push& i);
   void emit(const store& i);
-  void emit(const mcprep&);
-  void emit(const syncpoint& i);
-  void emit(const unwind& i);
-  void emit(const callphp&);
-  void emit(const cmovq&);
-  void emit(const leavetc&);
-  void emit(const lea&);
-  void emit(const contenter&);
-
-  void emit(const call& i);
-  void emit(const callr& i);
-  void emit(const calls& i);
   void emit(const stublogue& i);
   void emit(const stubret& i);
-  void emit(const tailcallstub& i);
   void emit(const stubtophp& i);
-  void emit(const callarray& i);
+  void emit(const syncpoint& i);
+  void emit(const tailcallstub& i);
+  void emit(const ucomisd& i);
+  void emit(const unwind& i);
 
 private:
   CodeBlock& frozen() { return text.frozen().code; }
@@ -1289,7 +1259,6 @@ void lowerForPPC64(Vunit& unit) {
       Vout v(unit, scratch, inst.origin);
 
       switch (inst.op) {
-
         /*
          * Call every lowering and provide only what is necessary:
          * Vout& v : the Vout instance so vasms can be emitted
@@ -1309,7 +1278,6 @@ void lowerForPPC64(Vunit& unit) {
           break;
 
           VASM_OPCODES
-
 #undef O
 
       }
@@ -1334,17 +1302,10 @@ void finishPPC64(Vunit& unit, Vtext& text, CGMeta& fixups,
     fuseBranches(unit);
     optimizeJmps(unit);
     optimizeExits(unit);
-
     lowerForPPC64(unit);
-
     simplify(unit);
 
-#if 0 // TODO(gut): not needed?
-    if (!unit.constToReg.empty()) {
-      foldImms<x64::ImmFolder>(unit);
-    }
-#endif
-    {
+    { // scope for destroying the timer instance earlier
       Timer timer(Timer::vasm_copy);
       optimizeCopies(unit, abi);
     }
@@ -1359,7 +1320,7 @@ void finishPPC64(Vunit& unit, Vtext& text, CGMeta& fixups,
     }
   }
 
-  {
+  { // scope for destroying the timer instance
     Timer timer(Timer::vasm_gen);
     vasm_emit<Vgen>(unit, text, fixups, asmInfo);
   }
