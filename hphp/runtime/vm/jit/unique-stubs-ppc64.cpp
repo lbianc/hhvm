@@ -122,8 +122,8 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       v << pop{saved_rip};
       v << pop{rtoc()};
 
-      // Drop our call frame
-      v << lea{rsp()[32], rsp()};
+      // Drop our call frame plus the pushed info (return addres and TOC).
+      v << lea{rsp()[48], rsp()};
 
       // Sync vmsp and return to the caller.  This unbalances the return stack
       // buffer, but if we're intercepting, we probably don't care.
