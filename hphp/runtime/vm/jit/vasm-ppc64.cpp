@@ -1112,10 +1112,6 @@ void lowerForPPC64(Vout& v, setcc& inst) {
   v << cmovq{inst.cc, inst.sf, zero, rone(), Vreg64{Reg64(inst.d)}};
 }
 
-void lowerForPPC64(Vout& v, countbytecode& inst) {
-  v << incqm{inst.base[g_bytecodesVasm.handle()], inst.sf};
-}
-
 void lowerForPPC64(Vout& v, cvttsd2siq& inst) {
   //  In order to fctidz be x64 compliant, it is necessary to return  the value
   //  0x8000000000000000 when the bit VXCVI is set. See fctidz instruction on

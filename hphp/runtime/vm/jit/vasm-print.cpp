@@ -294,9 +294,6 @@ std::string show(Vconst c) {
     case Vconst::Double:
       str += 'd';
       break;
-    case Vconst::ThreadLocal:
-      str += "tl";
-      break;
   }
   return str;
 }

@@ -121,18 +121,6 @@ Vinstr simplecall(Vout& v, F helper, Vreg arg, Vreg d) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/*
- * Set up any registers we want live going into an LLVM catch block.
- *
- * Return the set of live registers.
- */
-RegSet syncForLLVMCatch(Vout& v) {
-  if (arch() != Arch::X64) return RegSet{};
-  return x64::syncForLLVMCatch(v);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
 TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
   switch (arch()) {
     case Arch::X64:
@@ -399,8 +387,7 @@ void debuggerRetImpl(Vout& v, Vreg ar) {
   auto const ret = v.makeReg();
   v << simplecall(v, unstashDebuggerCatch, ar, ret);
 
-  auto const args = syncForLLVMCatch(v);
-  v << jmpr{ret, args};
+  v << jmpr{ret};
 }
 
 TCA emitInterpRet(CodeBlock& cb) {
@@ -782,8 +769,7 @@ ResumeHelperEntryPoints emitResumeHelpers(CodeBlock& cb) {
 
   rh.reenterTC = vwrap(cb, [] (Vout& v) {
     loadVMRegs(v);
-    auto const args = syncForLLVMCatch(v);
-    v << jmpr{rret(), args};
+    v << jmpr{rret()};
   });
 
   return rh;

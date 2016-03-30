@@ -197,7 +197,6 @@ struct TransLocMaker {
       RegionDescPtr               region  = RegionDescPtr(),
       std::vector<TransBCMapping> bcmap   = std::vector<TransBCMapping>(),
       Annotations&&               annot   = Annotations(),
-      bool                        llvm    = false,
       bool                        hasLoop = false) const {
     auto& cold = cache.cold();
     auto& frozen = cache.frozen();
@@ -220,7 +219,7 @@ struct TransLocMaker {
                     coldStart, coldSize,
                     frozenStart, frozenSize,
                     std::move(region), std::move(bcmap),
-                    std::move(annot), llvm, hasLoop);
+                    std::move(annot), hasLoop);
   }
 
 private:
@@ -1721,12 +1720,6 @@ TCA MCGenerator::translateWork(const TranslArgs& args) {
   assertx(m_tx.getSrcDB().find(sk));
   SrcRec& srcRec = *m_tx.getSrcRec(sk);
 
-  setUseLLVM(
-    RuntimeOption::EvalJitLLVM > 1 ||
-    (RuntimeOption::EvalJitLLVM && args.kind == TransKind::Optimize)
-  );
-  SCOPE_EXIT { setUseLLVM(false); };
-
   auto region = reachedTranslationLimit(sk, srcRec) ? nullptr
                                                     : prepareRegion(args);
   auto const initSpOffset = region ? region->entry()->initialSpOffset()
@@ -1829,8 +1822,7 @@ TCA MCGenerator::translateWork(const TranslArgs& args) {
   }
 
   auto tr = maker.rec(sk, kind, region, fixups.bcMap,
-                      std::move(annotations), useLLVM(),
-                      unit && cfgHasLoop(*unit));
+                      std::move(annotations), unit && cfgHasLoop(*unit));
   m_tx.addTranslation(tr);
   if (RuntimeOption::EvalJitUseVtuneAPI) {
     reportTraceletToVtune(sk.unit(), sk.func(), tr);
@@ -1859,7 +1851,6 @@ TCA MCGenerator::translateWork(const TranslArgs& args) {
 MCGenerator::MCGenerator()
   : m_numTrans(0)
   , m_catchTraceMap(128)
-  , m_useLLVM(false)
 {
   TRACE(1, "MCGenerator@%p startup\n", this);
   mcg = this;
@@ -1876,11 +1867,6 @@ MCGenerator::MCGenerator()
       !RuntimeOption::EvalJit) {
     Trace::traceRelease("TRACE=printir is set but the jit isn't on. "
                         "Did you mean to run with -vEval.Jit=1?\n");
-  }
-  if (Trace::moduleEnabledRelease(Trace::llvm_count, 1) ||
-      RuntimeOption::EvalJitLLVMCounters) {
-    g_bytecodesVasm.bind();
-    g_bytecodesLLVM.bind();
   }
 
   s_jitMaturityCounter = ServiceData::createCounter("jit.maturity");
@@ -1961,15 +1947,6 @@ void MCGenerator::requestExit() {
                           kPerfCounterNames[i], tl_perf_counters[i]);
     }
     Trace::traceRelease("\n");
-  }
-
-  if (Trace::moduleEnabledRelease(Trace::llvm_count, 1)) {
-    auto llvm = *g_bytecodesLLVM;
-    auto total = llvm + *g_bytecodesVasm;
-    Trace::ftraceRelease(
-      "{:9} / {:9} bytecodes ({:6.2f}%) handled by LLVM backend for {}\n",
-      llvm, total, llvm * 100.0 / total, g_context->getRequestUrl(50)
-    );
   }
 
   delete tl_debuggerCatches;
