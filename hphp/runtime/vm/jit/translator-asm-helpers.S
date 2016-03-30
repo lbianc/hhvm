@@ -104,60 +104,6 @@ ETCH_LABEL(enterTCHelper$prologue):
   CFI(endproc)
   ETCH_SIZE(enterTCHelper)
 
-/*
- * handleSRHelper
- *
- * Translated code will jump to this stub to perform all
- * service requests. It calls out to C++ to handle the request, then jumps
- * to the returned address (which may be the callToExit stub).
- *
- * The columns are registers of:
- * X64 ABI / PPC64 ABI
- *   rdi / r3:  ServiceRequest req (r_svcreq_req)
- *   r10 / r8:  TCA stub (r_svcreq_stub)
- *   rsi / r4:  args[0]
- *   rdx / r5:  args[1]
- *   rcx / r6:  args[2]
- *   r8  / r7:  args[3]
- */
-  ETCH_ALIGN16
-  ETCH_SECTION(handleSRHelper)
-  .globl ETCH_NAME(handleSRHelper)
-ETCH_NAME(handleSRHelper):
-  CFI(startproc)
-
-  // Sync vmsp & vmfp
-  mov ETCH_VMSP, 0x10(ETCH_VMTL)
-  mov ETCH_VMFP, 0x20(ETCH_VMTL)
-
-  // Push a ReqInfo struct onto the stack and call handleServiceRequest.
-  push ETCH_SVCREQ_ARG4
-  push ETCH_SVCREQ_ARG3
-  push ETCH_SVCREQ_ARG2
-  push ETCH_SVCREQ_ARG1
-  push ETCH_SVCREQ_STUB
-  push ETCH_SVCREQ_REQ
-  CFI2(adjust_cfa_offset, 0x30)
-
-  // call mcg->handleServiceRequest(%rsp)
-  mov ETCH_NAME(mcg)(%rip), ETCH_ARG1
-  mov %rsp, ETCH_ARG2
-  call MCGenerator_handleServiceRequest
-
-  // Pop the ReqInfo struct off the stack.
-  add $0x30, %rsp
-  CFI2(adjust_cfa_offset, -0x30)
-
-  // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
-  // we interpreted anything. Reload them.
-  mov 0x10(ETCH_VMTL), ETCH_VMSP
-  mov 0x20(ETCH_VMTL), ETCH_VMFP
-
-  jmp *ETCH_RET1
-
-  CFI(endproc)
-  ETCH_SIZE(handleSRHelper)
-
 ///////////////////////////////////////////////////////////////////////////////
 #elif defined(__AARCH64EL__)
   .globl enterTCHelper
@@ -306,65 +252,5 @@ ETCH_NAME(enterTCExit):
   CFI(endproc)
   ETCH_SIZE(enterTCHelper)
 // ==== enterTCHelper ====
-
-// ==== handleSRHelper ====
-  ETCH_ALIGN16
-  ETCH_SECTION(handleSRHelper)
-  .globl ETCH_NAME(handleSRHelper)
-ETCH_NAME(handleSRHelper):
-  CFI(startproc)
-
-  // PIC code setup
-  addis %r2, %r12, .TOC.-handleSRHelper@ha
-  addi  %r2, %r2,  .TOC.-handleSRHelper@l
-
-  // Sync vmsp & vmfp
-  std ETCH_VMSP, 0x10(ETCH_VMTL)
-  std ETCH_VMFP, 0x20(ETCH_VMTL)
-
-  // Push a ReqInfo struct onto the stack and call handleServiceRequest.
-  std ETCH_VMFP, -96(ETCH_SP)   // set backchain to VM frame
-  addi %r1, ETCH_SP, -96        // allocate space for frame + LR
-  CFI2(adjust_cfa_offset, 96)   // debug information about stack pointer change
-  mflr %r0
-  std %r0, 80(%r1)              // LR saved locally on this frame
-  CFI3C(offset, 65, 80)         // LR is register #65 in DWARF format
-
-  std ETCH_SVCREQ_ARG4, 72(%r1)
-  std ETCH_SVCREQ_ARG3, 64(%r1)
-  std ETCH_SVCREQ_ARG2, 56(%r1)
-  std ETCH_SVCREQ_ARG1, 48(%r1)
-  std ETCH_SVCREQ_STUB, 40(%r1)
-  std ETCH_SVCREQ_REQ,  32(%r1)
-
-  // call mcg->handleServiceRequest()
-    // get the address pointed by mcg@got to be the "this" pointer
-  ld   ETCH_ARG1, mcg@got(%r2)
-  ld   ETCH_ARG1, 0(ETCH_ARG1)
-    // address of the ReqInfo structure
-  addi ETCH_ARG2, %r1, 32
-
-  std %r2, 24(%r1)              // save TOC
-  ld   %r12, MCGenerator_handleServiceRequest@got(%r2)
-  mtctr %r12
-  bctrl
-  ld %r2, 24(%r1)               // restore TOC
-
-  // Pop the ReqInfo struct off the stack.
-  ld %r0, 80(%r1)               // restore LR
-  mtlr %r0
-  addi ETCH_SP, %r1, 96         // aligned with Prologue: addi %r1, ETCH_SP, -96
-  CFI2(adjust_cfa_offset, -96)
-
-  // rVmTl was preserved by the callee, but vmsp and vmfp might've changed if
-  // we interpreted anything. Reload them.
-  ld ETCH_VMSP, 0x10(ETCH_VMTL)
-  ld ETCH_VMFP, 0x20(ETCH_VMTL)
-
-  mtctr ETCH_RET1
-  bctr
-
-  CFI(endproc)
-  ETCH_SIZE(handleSRHelper)
 
 #endif
