@@ -1020,17 +1020,16 @@ X(andli,  movl, andqi,  ONE_R64(d))
 /*
  * PHP function ABI
  */
+// phplogue and phpret doesn't save toc as it's saved on call.
 void lowerForPPC64(Vout& v, phplogue& inst) {
   // store basic info on vm frame
   Vreg ret_address = v.makeReg();
   v << mflr{ret_address};
   v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
-  v << store{rtoc(), inst.fp[AROFF(m_savedToc)]};
 }
 
 void lowerForPPC64(Vout& v, phpret& inst) {
   Vreg tmp = v.makeReg();
-  v << load{inst.fp[AROFF(m_savedToc)], rtoc()};
   v << load{inst.fp[AROFF(m_savedRip)], tmp};
   if (!inst.noframe) {
     v << load{inst.fp[AROFF(m_sfp)], inst.d};
