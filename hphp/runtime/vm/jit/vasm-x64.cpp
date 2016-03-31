@@ -480,6 +480,10 @@ void Vgen::emit(const call& i) {
     auto addr = mcg->allocLiteral((uint64_t)i.target, env.meta);
     a.call(rip[(intptr_t)addr]);
   }
+  if (i.watch) {
+    *i.watch = a.frontier();
+    env.meta.watchpoints.push_back(i.watch);
+  }
 }
 
 void Vgen::emit(const calls& i) {
@@ -744,11 +748,12 @@ void lower(Vunit& unit, phplogue& inst, Vlabel b, size_t i) {
   unit.blocks[b].code[i] = popm{inst.fp[AROFF(m_savedRip)]};
 }
 
+void lower(Vunit& unit, loadstubret& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = load{reg::rsp[8], inst.d};
+}
+
 void lower(Vunit& unit, stubtophp& inst, Vlabel b, size_t i) {
-  lower_impl(unit, b, i, [&] (Vout& v) {
-    v << lea{reg::rsp[8], reg::rsp};
-    v << popm{inst.fp[AROFF(m_savedRip)]};
-  });
+  unit.blocks[b].code[i] = lea{reg::rsp[16], reg::rsp};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
