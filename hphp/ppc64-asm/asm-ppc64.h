@@ -45,8 +45,6 @@ namespace ppc64_asm {
 constexpr int min_callstack_size        = 32;
 // Must be the same value of AROFF(m_savedRip).
 constexpr int lr_position_on_callstack  = 16;
-// Must be the same value of AROFF(m_savedToc).
-constexpr int toc_position_on_callstack = 24;
 
 #define BRANCHES(cr) \
   CR##cr##_LessThan,         \

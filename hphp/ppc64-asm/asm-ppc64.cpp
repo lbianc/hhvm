@@ -848,7 +848,7 @@ void Assembler::prologue (const Reg64& rsp,
 
   // Allocate frame and save the rvmfp as backchain.
   addi(reg::r1, rsp, -32);
-  std(rtoc, reg::r1[toc_position_on_callstack]);
+  std(rtoc, reg::r1[24]);
   std(rvmfp, reg::r1[0]);
 }
 
