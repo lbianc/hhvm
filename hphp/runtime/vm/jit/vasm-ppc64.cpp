@@ -327,6 +327,7 @@ struct Vgen {
   void emit(const lea&);
   void emit(const leavetc&);
   void emit(const load& i);
+  void emit(const loadstubret& i);
   void emit(const mcprep&);
   void emit(const pop& i);
   void emit(const push& i);
@@ -635,14 +636,15 @@ void Vgen::emit(const tailcallstub& i) {
   emit(jmpi{i.target, i.args});
 }
 
-void Vgen::emit(const stubtophp& i) {
+void Vgen::emit(const loadstubret& i) {
   // grab the return address and store this return address for phplogue
-  a.ld(rAsm, rsp()[-16]);
-  a.std(rAsm, i.fp[AROFF(m_savedRip)]);
-  a.ld(rAsm, rsp()[-8]);
-  a.std(rAsm, i.fp[AROFF(m_savedToc)]);
+  a.ld(i.d, rsp()[AROFF(m_savedRip)]);
+}
 
-  // pop this frame created by stub
+void Vgen::emit(const stubtophp& i) {
+  // save return address from native frame due to call to the vm frame
+  a.ld(rAsm, rsp()[-16]);
+  a.std(rAsm, rvmfp()[AROFF(m_savedRip)]);
   a.popFrame(rsp());
 }
 
