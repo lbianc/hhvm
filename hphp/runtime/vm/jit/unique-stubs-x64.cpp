@@ -71,7 +71,7 @@ static void alignJmpTarget(CodeBlock& cb) {
 TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
   alignJmpTarget(cb);
 
-  auto const start = vwrap(cb, [&] (Vout& v) {
+  auto const start = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     auto const ar = v.makeReg();
 
     v << copy{rvmfp(), ar};
@@ -93,10 +93,8 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 
     bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
-    v << call{TCA(hook)};
-  });
+    v << call{TCA(hook), arg_regs(0), &us.functionEnterHelperReturn};
 
-  us.functionEnterHelperReturn = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     auto const sf = v.makeReg();
     v << testb{rret(), rret(), sf};
 
@@ -140,14 +138,14 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
  * expects `tv' to be the address of a TypedValue with refcounted type `type'
  * (though it may be static, and we will do nothing in that case).
  *
- * The `saved' register should be a callee-saved GP register that the helper
- * can use to preserve `tv' across native calls.
+ * The `live' registers must be preserved across any native calls (and
+ * generally left untouched).
  */
 static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
                             PhysReg type, RegSet live) {
   return vwrap(cb, fixups, [&] (Vout& v) {
-    // We use the first argument register for the TV data because we may pass
-    // it to the release routine.  It's not live when we enter the helper.
+    // We use the first argument register for the TV data because we might pass
+    // it to the native release call.  It's not live when we enter the helper.
     auto const data = rarg(0);
     v << load{tv[TVOFF(m_data)], data};
 
@@ -160,7 +158,7 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
       ifThen(v, CC_NE, sf, [&] (Vout& v) {
         // The refcount is greater than 1; decref it.
         v << declm{data[FAST_REFCOUNT_OFFSET], v.makeReg()};
-        v << ret{};
+        v << ret{live};
       });
 
       // Note that the stack is aligned since we called to this helper from an
@@ -179,7 +177,7 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
     });
 
     // Either we did a decref, or the value was static.
-    v << ret{};
+    v << ret{live};
   });
 }
 
@@ -307,17 +305,16 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
   });
   svcreq::emit_persistent(cb, folly::none, REQ_POST_DEBUGGER_RET);
 
-  auto const resumeCPPUnwind = vwrap(cb, [] (Vout& v) {
+  auto const resumeCPPUnwind = vwrap(cb, [&] (Vout& v) {
     static_assert(sizeof(tl_regState) == 1,
                   "The following store must match the size of tl_regState.");
     auto const regstate = emitTLSAddr(v, tls_datum(tl_regState));
     v << storebi{static_cast<int32_t>(VMRegState::CLEAN), regstate};
 
     v << load{rvmtl()[unwinderExnOff()], rarg(0)};
-    v << call{TCA(_Unwind_Resume), arg_regs(1)};
+    v << call{TCA(_Unwind_Resume), arg_regs(1), &us.endCatchHelperPast};
+    v << ud2{};
   });
-  us.endCatchHelperPast = cb.frontier();
-  vwrap(cb, [] (Vout& v) { v << ud2{}; });
 
   alignJmpTarget(cb);
 

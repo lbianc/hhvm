@@ -404,11 +404,11 @@ SSATmp* minmax(IRGS& env, const bool is_max) {
     [&] (Block* taken) {
       SSATmp* cmp;
       if (ty1 <= TInt && ty2 <= TInt) {
-        cmp = gen(env, is_max ? GteInt : LteInt, val1, val2);
+        cmp = gen(env, is_max ? GtInt : LtInt, val1, val2);
       } else {
         auto conv1 = (ty1 <= TDbl) ? val1 : gen(env, ConvIntToDbl, val1);
         auto conv2 = (ty2 <= TDbl) ? val2 : gen(env, ConvIntToDbl, val2);
-        cmp = gen(env, is_max ? GteDbl : LteDbl, conv1, conv2);
+        cmp = gen(env, is_max ? GtDbl : LtDbl, conv1, conv2);
       }
       gen(env, JmpZero, taken, cmp);
     },
@@ -1607,6 +1607,16 @@ void emitIdx(IRGS& env) {
   auto const base     = topC(env, BCSPOffset{2}, DataTypeGeneric);
   auto const keyType  = key->type();
   auto const baseType = base->type();
+
+  if (keyType <= TNull || !baseType.maybe(TArr | TObj | TStr)) {
+    auto const def = popC(env, DataTypeGeneric);
+    popC(env, keyType <= TNull ? DataTypeSpecific : DataTypeGeneric);
+    popC(env, keyType <= TNull ? DataTypeGeneric : DataTypeSpecific);
+    push(env, def);
+    decRef(env, base);
+    decRef(env, key);
+    return;
+  }
 
   auto const simple_key =
     keyType <= TInt || keyType <= TStr;
