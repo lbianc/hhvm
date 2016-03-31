@@ -315,6 +315,10 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
   auto const udrspo = rvmtl()[unwinderDebuggerReturnSPOff()];
 
   auto const debuggerReturn = vwrap(cb, [&] (Vout& v) {
+    // Discard return address and TOC added by debug code.
+    // TODO(lbianc): Check from where this info is being pushed to validade
+    // if this solution is the best way.
+    if (!(debug && RuntimeOption::EvalHHIRGenerateAsserts)) v << landingpad{};
     v << load{udrspo, rvmsp()};
     v << storeqi{0, udrspo};
   });
