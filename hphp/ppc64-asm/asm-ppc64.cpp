@@ -806,7 +806,7 @@ void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
 
 void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
 
-#if DEBUG
+#ifdef DEBUG
   // skips the li64, 2*nop and a mtctr instruction
   CodeAddress bctr_addr = jmp + kLi64InstrLen + 3 * kBytesPerInstr;
 
