@@ -880,7 +880,7 @@ void Assembler::epilogue (const Reg64& rsp,
   addi(rsp, rsp, 16);
 }
 
-void Assembler::li64 (const Reg64& rt, int64_t imm64) {
+void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
   // li64 always emits 5 instructions i.e. 20 bytes of instructions.
   // Assumes that 0 bytes will be missing in the end.
   uint8_t missing = 0;
@@ -931,10 +931,11 @@ void Assembler::li64 (const Reg64& rt, int64_t imm64) {
     oris(rt, rt, static_cast<int16_t>((imm64 >> 16) & UINT16_MAX));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
   }
-  emitNop(missing);
-
-  // guarantee our math with kLi64InstrLen is working
-  assert(kLi64InstrLen == frontier() - li64StartPos);
+  if(fixedSize){
+    emitNop(missing);
+    // guarantee our math with kLi64InstrLen is working
+    assert(kLi64InstrLen == frontier() - li64StartPos);
+  }
 }
 
 int64_t Assembler::getLi64(PPC64Instr* pinstr) {

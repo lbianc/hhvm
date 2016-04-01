@@ -164,7 +164,7 @@ struct Vgen {
   // call left it with the additional frame.
   void emit(const landingpad& i) { a.popFrame(rsp()); }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
-  void emit(const leap& i) { a.li64(i.d, i.s.r.disp); }
+  void emit(const leap& i) { a.li64(i.d, i.s.r.disp, false); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
   void emit(const mflr& i) { a.mflr(i.d); }
   void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
@@ -225,7 +225,7 @@ struct Vgen {
     }
     if(p.disp != 0) {
       tmp.base = rAsm;
-      a.li64(tmp.base, static_cast<int64_t>(p.disp));
+      a.li64(tmp.base, static_cast<int64_t>(p.disp), false);
       a.add(tmp.base, p.base, tmp.base);
       a.lxvd2x(i.d, tmp);
     } else {
@@ -243,12 +243,7 @@ struct Vgen {
     a.extsb(Reg64(i.d), Reg64(i.d));                // extend sign
   }
   void emit(const orqi& i) {
-    if (i.s0.fits(sz::word)) {
-      a.li(rAsm,i.s0);
-    } else {
-      a.li32(rAsm,i.s0.l());
-    }
-
+    a.li64(rAsm, i.s0.l(), false);
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
   }
 
@@ -296,12 +291,7 @@ struct Vgen {
     }
   }
   void emit(const xorqi& i) {
-    if (i.s0.fits(sz::word)) {
-      a.li(rAsm, i.s0);
-    } else {
-      a.li32(rAsm, i.s0.l());
-    }
-
+    a.li64(rAsm, i.s0.l(), false);
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
   }
 
@@ -366,7 +356,7 @@ void Vgen::emit(const ucomisd& i) {
   a.bc(notNAN, BranchConditions::CR0_NoOverflow);
   {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-    a.li64(rAsm, 0x90000000);
+    a.li64(rAsm, 0x90000000, false);
     a.mtcrf(0x80, rAsm);
   }
   notNAN.asm_label(a);
@@ -1031,12 +1021,15 @@ void lowerForPPC64(Vout& v, phplogue& inst) {
 }
 
 void lowerForPPC64(Vout& v, phpret& inst) {
-  Vreg tmp = v.makeReg();
-  v << load{inst.fp[AROFF(m_savedRip)], tmp};
+  Vreg return_info = v.makeReg();
+  v << load{inst.fp[AROFF(m_savedRip)], return_info};
   if (!inst.noframe) {
     v << load{inst.fp[AROFF(m_sfp)], inst.d};
   }
-  v << jmpr{tmp};
+
+  // for balancing the link stack (branch predictor), this should perform blr
+  v << mtlr{return_info};
+  v << ret{RegSet()};
 }
 
 /*

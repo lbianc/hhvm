@@ -1904,7 +1904,7 @@ struct Assembler {
   }
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64(const Reg64& rt, int64_t imm64);
+  void li64(const Reg64& rt, int64_t imm64, bool fixedSize = true);
 
   // Destroy a new frame on call stack
   void popFrame(const Reg64& rsp);
