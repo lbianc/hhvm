@@ -30,24 +30,24 @@ let oldify_funs names =
   Naming_heap.FunPosHeap.oldify_batch names;
   Naming_heap.FunCanonHeap.oldify_batch @@ canon_set names;
   Naming_heap.FunHeap.oldify_batch names;
-  Typing_env.Funs.oldify_batch names;
+  Typing_heap.Funs.oldify_batch names;
   ()
 
 let oldify_classes names =
   Naming_heap.TypeIdHeap.oldify_batch names;
   Naming_heap.TypeCanonHeap.oldify_batch @@ canon_set names;
   Naming_heap.ClassHeap.oldify_batch names;
-  Typing_env.Classes.oldify_batch names;
+  Typing_heap.Classes.oldify_batch names;
   ()
 
 let revive funs classes =
   Naming_heap.FunHeap.revive_batch funs;
-  Typing_env.Funs.revive_batch funs;
+  Typing_heap.Funs.revive_batch funs;
   Naming_heap.FunPosHeap.revive_batch funs;
   Naming_heap.FunCanonHeap.revive_batch @@ canon_set funs;
 
   Naming_heap.ClassHeap.revive_batch classes;
-  Typing_env.Classes.revive_batch classes;
+  Typing_heap.Classes.revive_batch classes;
   Naming_heap.TypeIdHeap.revive_batch classes;
   Naming_heap.TypeCanonHeap.revive_batch @@ canon_set classes
 
@@ -88,11 +88,11 @@ let declare path content =
         | Ast.Fun f ->
             let f = Naming.fun_ tcopt f in
             Naming_heap.FunHeap.add (snd f.Nast.f_name) f;
-            Typing_decl.fun_decl f;
+            Decl.fun_decl f;
         | Ast.Class c ->
             let c = Naming.class_ tcopt c in
             Naming_heap.ClassHeap.add (snd c.Nast.c_name) c;
-            Typing_decl.class_decl tcopt c;
+            Decl.class_decl tcopt c;
         | _ -> ()
       end;
       !declared_funs, !declared_classes
@@ -116,10 +116,10 @@ let typecheck funs classes = try
   with e ->
     report_error e
 
-let recheck tcopt fileinfo_l =
+let recheck tcopt filetuple_l =
   SharedMem.invalidate_caches();
-  List.iter fileinfo_l begin fun defs ->
-    ignore @@ Typing_check_utils.check_defs tcopt defs
+  List.iter filetuple_l begin fun (fn, defs) ->
+    ignore @@ Typing_check_utils.check_defs tcopt fn defs
   end
 
 let check_file_input tcopt files_info fi =
@@ -133,6 +133,6 @@ let check_file_input tcopt files_info fi =
   | ServerUtils.FileName fn ->
       let path = Relative_path.create Relative_path.Root fn in
       let () = match Relative_path.Map.get path files_info with
-      | Some fileinfo -> recheck tcopt [fileinfo]
+      | Some fileinfo -> recheck tcopt [(path, fileinfo)]
       | None -> () in
       path

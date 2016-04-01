@@ -44,7 +44,10 @@ struct Counter {
 };
 
 struct Marker {
-  explicit Marker() {}
+  explicit Marker()
+    : rds_{folly::Range<const char*>((char*)rds::header(),
+                                     RuntimeOption::EvalJitTargetCacheSize)}
+  {}
   void init();
   void trace();
   void sweep();
@@ -161,7 +164,7 @@ private:
 };
 
 // mark the object at p, return true if first time.
-bool Marker::mark(const void* p, GCBits marks) {
+inline bool Marker::mark(const void* p, GCBits marks) {
   assert(p && ptrs_.isHeader(p));
   auto h = static_cast<const Header*>(p);
   assert(h->kind() <= HeaderKind::BigMalloc &&
@@ -370,8 +373,6 @@ Marker::operator()(const void* start, size_t len) {
 
 // initially parse the heap to find valid objects and initialize metadata.
 NEVER_INLINE void Marker::init() {
-  rds_ = folly::Range<const char*>((char*)rds::header(),
-                                   RuntimeOption::EvalJitTargetCacheSize);
   MM().forEachHeader([&](Header* h) {
     if (h->kind() == HeaderKind::Free) return;
     h->hdr_.marks = GCBits::Unmarked;
@@ -503,7 +504,7 @@ DEBUG_ONLY bool check_sweep_header(const Header* h) {
 NEVER_INLINE void Marker::sweep() {
   Counter marked, ambig, freed;
   auto& mm = MM();
-  const bool use_quarantine = debug && RuntimeOption::EvalQuarantine;
+  const bool use_quarantine = RuntimeOption::EvalQuarantine;
   if (use_quarantine) mm.beginQuarantine();
   SCOPE_EXIT { if (use_quarantine) mm.endQuarantine(); };
   ptrs_.iterate([&](const Header* hdr, size_t h_size) {
@@ -516,9 +517,6 @@ NEVER_INLINE void Marker::sweep() {
     // when freeing objects below, do not run their destructors! we don't
     // want to execute cascading decrefs or anything. the normal release()
     // methods of refcounted classes aren't usable because they run dtors.
-    // also, if freeing the current object causes other objects to be freed,
-    // then must initialize the FreeNode header on them, in order to continue
-    // parsing. For now, defer freeing those kinds of objects to after parsing.
     auto h = const_cast<Header*>(hdr);
     switch (h->kind()) {
       case HeaderKind::Packed:
@@ -565,6 +563,7 @@ NEVER_INLINE void Marker::sweep() {
       case HeaderKind::SmallMalloc:
       case HeaderKind::BigMalloc:
         // Don't free malloc-ed allocations even if they're not reachable.
+        // NativeData types might leak these
         break;
       case HeaderKind::Free:
         // should not be in ptrmap; fall through to assert
@@ -575,12 +574,9 @@ NEVER_INLINE void Marker::sweep() {
         break;
     }
   });
-  if (freed.count > 1) {
-    TRACE(1, "sweep tot %lu(%lu) mk %lu(%lu) amb %lu(%lu) free %lu(%lu)\n",
-          total_.count, total_.bytes,
-          marked.count, marked.bytes,
-          ambig.count, ambig.bytes,
-          freed.count, freed.bytes);
+  if (freed.count > 1 && Trace::moduleEnabledRelease(Trace::gc, 1)) {
+    Trace::traceRelease("gc total %lu marked %lu ambig %lu free %lu\n",
+                        total_.bytes, marked.bytes, ambig.bytes, freed.bytes);
   }
 }
 
@@ -636,6 +632,12 @@ void MemoryManager::resetEagerGC() {
 void MemoryManager::checkEagerGC() {
   if (RuntimeOption::EvalEagerGC && rds::header()) {
     t_eager_gc = true;
+    setSurpriseFlag(PendingGCFlag);
+  }
+}
+
+void MemoryManager::checkGC() {
+  if (RuntimeOption::EvalEnableGC && rds::header()) {
     setSurpriseFlag(PendingGCFlag);
   }
 }

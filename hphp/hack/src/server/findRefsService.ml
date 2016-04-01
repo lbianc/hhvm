@@ -47,8 +47,7 @@ let attach_hooks results_acc target_classes target_fun =
   match target_classes, target_fun with
     | Some classes, Some method_name ->
       let process_method_id =
-        process_method_id results_acc classes method_name
-      in
+        process_method_id results_acc classes method_name in
       Typing_hooks.attach_cmethod_hook process_method_id;
       Typing_hooks.attach_smethod_hook process_method_id;
       Typing_hooks.attach_constructor_hook
@@ -56,14 +55,15 @@ let attach_hooks results_acc target_classes target_fun =
     | None, Some fun_name ->
       Typing_hooks.attach_fun_id_hook (process_fun_id results_acc fun_name)
     | Some classes, None ->
-      Typing_hooks.attach_class_id_hook (process_class_id results_acc classes)
+      Decl_hooks.attach_class_id_hook (process_class_id results_acc classes)
     | _ -> assert false
 
 let detach_hooks () =
+  Decl_hooks.remove_all_hooks ();
   Typing_hooks.remove_all_hooks ()
 
 let check_if_extends_class target_class_name class_name acc =
-  let class_ = Typing_env.Classes.get class_name in
+  let class_ = Typing_heap.Classes.get class_name in
   match class_ with
   | None -> acc
   | Some { Typing_defs.tc_ancestors = imps; _ }
@@ -90,7 +90,7 @@ let get_child_classes_files workers files_info class_name =
     let cid = snd class_.Nast.c_name in
     let cid_hash = Typing_deps.Dep.make (Typing_deps.Dep.Class cid) in
     let extend_deps =
-      Typing_compare.get_extend_deps cid_hash
+      Decl_compare.get_extend_deps cid_hash
         (Typing_deps.DepSet.singleton cid_hash)
     in
     Typing_deps.get_files extend_deps
@@ -176,7 +176,7 @@ let find_references workers target_classes target_method include_defs
     files_info files =
   let fileinfo_l = Relative_path.Set.fold (fun fn acc ->
     match Relative_path.Map.get fn files_info with
-    | Some fi -> fi :: acc
+    | Some fi -> (fn, fi) :: acc
     | None -> acc) files [] in
   let results =
     if List.length fileinfo_l < 10 then

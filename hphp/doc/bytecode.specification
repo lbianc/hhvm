@@ -1464,7 +1464,7 @@ JmpNZ <rel offset>    [C]  ->  []
   Jump if not zero. Conditionally transfers control to the location specified
   by %1 if (bool)$1 != (bool)0.
 
-Switch <offset vector> <base> <bounded>    [C]  ->  []
+Switch <bounded> <base> <offset vector>    [C]  ->  []
 
   Switch over integer case values. If bounded == SwitchKind::Unbounded, the
   implementation will assume that $1 is an integer in the range [0,
@@ -3822,13 +3822,13 @@ CIterFree <iterator id>    []  ->  []
 
   Cuf iterator free. This instruction frees the specified iterator variable.
 
-IterBreak <iter-vec> <rel offset>   []  ->  []
+IterBreak <rel offset> <iter-vec>    []  ->  []
 
-  Iterator break. Frees vectors in %1 in left to right order then transfers
-  control to the location specified by %2. Surprise checks are performed before
+  Iterator break. Frees vectors in %2 in left to right order then transfers
+  control to the location specified by %1. Surprise checks are performed before
   iterators are freed so that in the event of an exception iterators are not
   double freed. Note that as with normal jumps surprise checks will only be
-  performed if %2 is non-positive.
+  performed if %1 is non-positive.
 
 
 12. Include, eval, and define instructions
