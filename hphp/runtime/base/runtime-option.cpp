@@ -95,8 +95,16 @@ bool RuntimeOption::EvalAuthoritativeMode = false;
 bool RuntimeOption::IntsOverflowToInts = false;
 bool RuntimeOption::AutoprimeGenerators = true;
 
+#ifdef FACEBOOK
+bool RuntimeOption::UseThriftLogger = false;
+#endif
+std::map<std::string, ErrorLogFileData> RuntimeOption::ErrorLogs = {
+  {Logger::DEFAULT, ErrorLogFileData()},
+};
+// these hold the DEFAULT logger
 std::string RuntimeOption::LogFile;
 std::string RuntimeOption::LogFileSymLink;
+
 int RuntimeOption::LogHeaderMangle = 0;
 bool RuntimeOption::AlwaysLogUnhandledExceptions =
   RuntimeOption::EnableHipHopSyntax;
@@ -151,6 +159,7 @@ bool RuntimeOption::ServerStatCache = false;
 bool RuntimeOption::ServerFixPathInfo = false;
 bool RuntimeOption::ServerAddVaryEncoding = true;
 std::vector<std::string> RuntimeOption::ServerWarmupRequests;
+std::string RuntimeOption::ServerCleanupRequest;
 boost::container::flat_set<std::string>
 RuntimeOption::ServerHighPriorityEndPoints;
 bool RuntimeOption::ServerExitOnBindFail;
@@ -171,10 +180,17 @@ int RuntimeOption::ServerGracefulShutdownWait = 0;
 bool RuntimeOption::ServerHarshShutdown = true;
 bool RuntimeOption::ServerEvilShutdown = true;
 bool RuntimeOption::ServerKillOnSIGTERM = false;
+bool RuntimeOption::ServerKillOnTimeout = true;
 int RuntimeOption::ServerPreShutdownWait = 0;
 int RuntimeOption::ServerShutdownListenWait = 0;
+int RuntimeOption::ServerShutdownEOMWait = 0;
 std::vector<std::string> RuntimeOption::ServerNextProtocols;
 bool RuntimeOption::ServerEnableH2C = false;
+int RuntimeOption::BrotliCompressionEnabled = 1;
+int RuntimeOption::BrotliChunkedCompressionEnabled = -1;
+int RuntimeOption::BrotliCompressionMode = 0;
+int RuntimeOption::BrotliCompressionQuality = 11;
+int RuntimeOption::BrotliCompressionLgWindowSize = 22;
 int RuntimeOption::GzipCompressionLevel = 3;
 int RuntimeOption::GzipMaxCompressionLevel = 9;
 std::string RuntimeOption::ForceCompressionURL;
@@ -510,6 +526,8 @@ bool RuntimeOption::RepoDebugInfo = true;
 // Missing: RuntimeOption::RepoAuthoritative's physical location is
 // perf-sensitive.
 bool RuntimeOption::RepoPreload;
+int64_t RuntimeOption::RepoLocalReadaheadRate = 0;
+bool RuntimeOption::RepoLocalReadaheadConcurrent = false;
 
 bool RuntimeOption::HHProfEnabled = false;
 bool RuntimeOption::HHProfActive = false;
@@ -787,43 +805,57 @@ void RuntimeOption::Load(
       }
     ));
 
+    Config::Bind(Logger::UseLogFile, ini, config, "Log.UseLogFile", true);
+    Config::Bind(LogFile, ini, config, "Log.File");
+    Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
 #ifdef FACEBOOK
-    if (Config::GetBool(ini, config, "Log.UseThriftLogger", false)) {
+    Config::Bind(UseThriftLogger, ini, config, "Log.UseThriftLogger");
+    if (UseThriftLogger) {
       fprintf(stderr,
               "WARNING: Log.UseThriftLogger overrides other logger options.\n"
               "WARNING: Log.UseThriftLogger ignores logger's thread-hook.\n");
       Logger::UseLogFile = true;
-      Config::Bind(LogFile, ini, config, "Log.File");
-      if (LogFile[0] == '|') Logger::IsPipeOutput = true;
-      Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
-      Logger::SetTheLogger(new ThriftLogger());
+      // replace default logger with thrift-logger
+      RuntimeOption::ErrorLogs[Logger::DEFAULT] =
+          ErrorLogFileData(LogFile, LogFileSymLink);
+      Logger::SetTheLogger(Logger::DEFAULT, new ThriftLogger());
+      // mirror thrift log in plain text
+      if (Config::GetBool(ini, config, "Log.TextMirror.Enable", false)) {
+        auto logFile = Config::GetString(ini, config, "Log.TextMirror.File",
+                                         "", false);
+        auto symLink = Config::GetString(ini, config, "Log.TextMirror.SymLink",
+                                         "", false);
+        RuntimeOption::ErrorLogs["TextMirror"] =
+            ErrorLogFileData(logFile, symLink);
+        if (Config::GetBool(ini, config, "Log.AlwaysPrintStackTraces")) {
+          Logger::SetTheLogger("TextMirror", new ExtendedLogger());
+          ExtendedLogger::EnabledByDefault = true;
+        } else {
+          Logger::SetTheLogger("TextMirror", new Logger());
+        }
+      }
 #else
     if (false) {
 #endif
     } else {
-      Config::Bind(Logger::LogHeader, ini, config, "Log.Header");
-      if (Config::GetBool(ini, config, "Log.AlwaysPrintStackTraces")) {
-        Logger::SetTheLogger(new ExtendedLogger());
-        ExtendedLogger::EnabledByDefault = true;
+      if (Logger::UseLogFile && RuntimeOption::ServerExecutionMode()) {
+        RuntimeOption::ErrorLogs[Logger::DEFAULT] =
+            ErrorLogFileData(LogFile, LogFileSymLink);
       }
-      Config::Bind(Logger::LogNativeStackTrace, ini, config,
-                   "Log.NativeStackTrace", true);
-      Config::Bind(Logger::UseSyslog, ini, config, "Log.UseSyslog", false);
-      Config::Bind(Logger::UseLogFile, ini, config, "Log.UseLogFile", true);
-      Config::Bind(Logger::UseRequestLog, ini, config, "Log.UseRequestLog",
-                   false);
-      Config::Bind(Logger::AlwaysEscapeLog, ini, config, "Log.AlwaysEscapeLog",
-                   true);
-      if (Logger::UseLogFile) {
-        Config::Bind(LogFile, ini, config, "Log.File");
-        if (!RuntimeOption::ServerExecutionMode()) {
-          LogFile.clear();
-        }
-        if (LogFile[0] == '|') Logger::IsPipeOutput = true;
-        Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
+      if (Config::GetBool(ini, config, "Log.AlwaysPrintStackTraces")) {
+        Logger::SetTheLogger(Logger::DEFAULT, new ExtendedLogger());
+        ExtendedLogger::EnabledByDefault = true;
       }
     }
 
+    Config::Bind(Logger::LogHeader, ini, config, "Log.Header");
+    Config::Bind(Logger::LogNativeStackTrace, ini, config,
+                 "Log.NativeStackTrace", true);
+    Config::Bind(Logger::UseSyslog, ini, config, "Log.UseSyslog", false);
+    Config::Bind(Logger::UseRequestLog, ini, config, "Log.UseRequestLog",
+                 false);
+    Config::Bind(Logger::AlwaysEscapeLog, ini, config, "Log.AlwaysEscapeLog",
+                 true);
     Config::Bind(Logger::UseCronolog, ini, config, "Log.UseCronolog", false);
     Config::Bind(Logger::MaxMessagesPerRequest, ini,
                  config, "Log.MaxMessagesPerRequest", -1);
@@ -990,6 +1022,10 @@ void RuntimeOption::Load(
     Config::Bind(RepoDebugInfo, ini, config, "Repo.DebugInfo", true);
     Config::Bind(RepoAuthoritative, ini, config, "Repo.Authoritative", false);
     Config::Bind(RepoPreload, ini, config, "Repo.Preload", false);
+    Config::Bind(RepoLocalReadaheadRate, ini, config,
+                 "Repo.LocalReadaheadRate", 0);
+    Config::Bind(RepoLocalReadaheadConcurrent, ini, config,
+                 "Repo.LocalReadaheadConcurrent", false);
   }
 
   {
@@ -1244,6 +1280,7 @@ void RuntimeOption::Load(
     Config::Bind(ServerAddVaryEncoding, ini, config, "Server.AddVaryEncoding",
                  ServerAddVaryEncoding);
     Config::Bind(ServerWarmupRequests, ini, config, "Server.WarmupRequests");
+    Config::Bind(ServerCleanupRequest, ini, config, "Server.CleanupRequest");
     Config::Bind(ServerHighPriorityEndPoints, ini, config,
                  "Server.HighPriorityEndPoints");
     Config::Bind(ServerExitOnBindFail, ini, config, "Server.ExitOnBindFail",
@@ -1265,13 +1302,27 @@ void RuntimeOption::Load(
                  true);
     Config::Bind(ServerKillOnSIGTERM, ini, config, "Server.KillOnSIGTERM",
                  false);
+    Config::Bind(ServerKillOnTimeout, ini, config, "Server.KillOnTimeout",
+                 true);
     Config::Bind(ServerEvilShutdown, ini, config, "Server.EvilShutdown", true);
     Config::Bind(ServerPreShutdownWait, ini, config,
                  "Server.PreShutdownWait", 0);
     Config::Bind(ServerShutdownListenWait, ini, config,
                  "Server.ShutdownListenWait", 0);
+    Config::Bind(ServerShutdownEOMWait, ini, config,
+                 "Server.ShutdownEOMWait", 0);
     Config::Bind(ServerNextProtocols, ini, config, "Server.SSLNextProtocols");
     Config::Bind(ServerEnableH2C, ini, config, "Server.EnableH2C");
+    Config::Bind(BrotliCompressionEnabled, ini, config,
+                 "Server.BrotliCompressionEnabled", 1);
+    Config::Bind(BrotliChunkedCompressionEnabled, ini, config,
+                 "Server.BrotliChunkedCompressionEnabled", -1);
+    Config::Bind(BrotliCompressionLgWindowSize, ini, config,
+                 "Server.BrotliCompressionLgWindowSize", 22);
+    Config::Bind(BrotliCompressionMode, ini, config,
+                 "Server.BrotliCompressionMode", 0);
+    Config::Bind(BrotliCompressionQuality, ini, config,
+                 "Server.BrotliCompressionQuality", 11);
     Config::Bind(GzipCompressionLevel, ini, config,
                  "Server.GzipCompressionLevel", 3);
     Config::Bind(GzipMaxCompressionLevel, ini, config,

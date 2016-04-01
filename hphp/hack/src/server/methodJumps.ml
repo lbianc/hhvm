@@ -9,6 +9,9 @@
  *)
 
 open Core
+open Reordered_argument_collections
+open Typing_defs
+module Reason = Typing_reason
 
 type result = {
   orig_name: string;
@@ -23,22 +26,25 @@ type result = {
 let add_ns name =
   if name.[0] = '\\' then name else "\\" ^ name
 
-let get_overridden_methods origin_class or_mthds dest_class is_child acc =
-  let dest_class =
-    Naming_heap.ClassHeap.find_unsafe dest_class in
+let get_overridden_methods origin_class or_mthds dest_class acc =
+  let dest_class = Typing_heap.Classes.find_unsafe dest_class in
 
   (* Check if each destination method exists in the origin *)
-  List.fold_left dest_class.Nast.c_methods ~init:acc ~f:begin fun acc de_mthd ->
-    let or_mthd = SMap.get (snd de_mthd.Nast.m_name) or_mthds in
+  SMap.fold dest_class.tc_methods ~init:acc ~f:begin fun m_name de_mthd acc ->
+    (* Filter out inherited methods *)
+    if de_mthd.ce_origin <> dest_class.tc_name then acc else
+    let or_mthd = SMap.get or_mthds m_name in
     match or_mthd with
-    | Some or_mthd -> {
-          orig_name = snd or_mthd.Nast.m_name;
-          orig_pos = Pos.to_absolute (fst or_mthd.Nast.m_name);
-          dest_name = snd de_mthd.Nast.m_name;
-          dest_pos = Pos.to_absolute (fst de_mthd.Nast.m_name);
-          orig_p_name = origin_class;
-          dest_p_name = snd dest_class.Nast.c_name;
-        } :: acc
+    | Some or_mthd when or_mthd.ce_origin = origin_class ->
+      {
+        orig_name = m_name;
+        orig_pos = Pos.to_absolute (Reason.to_pos (fst or_mthd.ce_type));
+        dest_name = m_name;
+        dest_pos = Pos.to_absolute (Reason.to_pos (fst de_mthd.ce_type));
+        orig_p_name = origin_class;
+        dest_p_name = dest_class.tc_name;
+      } :: acc
+    | Some _
     | None -> acc
   end
 
@@ -52,7 +58,6 @@ let check_if_extends_class_and_find_methods target_class_name mthds
         let acc = get_overridden_methods
                       target_class_name mthds
                       class_name
-                      true
                       acc in {
           orig_name = target_class_name;
           orig_pos = Pos.to_absolute target_class_pos;
@@ -66,7 +71,7 @@ let check_if_extends_class_and_find_methods target_class_name mthds
 let filter_extended_classes target_class_name mthds target_class_pos
       acc classes =
   List.fold_left classes ~init:acc ~f:begin fun acc cid ->
-   check_if_extends_class_and_find_methods
+    check_if_extends_class_and_find_methods
       target_class_name
       mthds
       target_class_pos
@@ -102,35 +107,27 @@ let find_extended_classes_in_files_parallel workers target_class_name mthds
         target_class_name mthds target_class_pos [] classes
 
 (* Find child classes *)
-let get_child_classes_and_methods cls mthds env genv acc =
+let get_child_classes_and_methods cls files_info workers acc =
   let files = FindRefsService.get_child_classes_files
-      genv.ServerEnv.workers
-      env.ServerEnv.files_info
-      cls.Typing_defs.tc_name in
+    workers files_info cls.tc_name in
   find_extended_classes_in_files_parallel
-      genv.ServerEnv.workers
-      cls.Typing_defs.tc_name
-      mthds
-      cls.Typing_defs.tc_pos
-      env.ServerEnv.files_info
-      files
+    workers cls.tc_name cls.tc_methods cls.tc_pos files_info files
 
 (* Find ancestor classes *)
-let get_ancestor_classes_and_methods cls mthds acc =
+let get_ancestor_classes_and_methods cls acc =
   let class_ = Typing_heap.Classes.get cls.Typing_defs.tc_name in
   match class_ with
   | None -> []
   | Some cls ->
-      SMap.fold begin fun k v acc ->
+      SMap.fold cls.Typing_defs.tc_ancestors ~init:acc ~f:begin fun k v acc ->
         let class_ = Typing_heap.Classes.get k in
         match class_ with
         | None -> acc
         | Some c ->
             let acc = get_overridden_methods
                           cls.Typing_defs.tc_name
-                          mthds
+                          cls.tc_methods
                           c.Typing_defs.tc_name
-                          false
                           acc in {
               orig_name = Utils.strip_ns cls.Typing_defs.tc_name;
               orig_pos = Pos.to_absolute cls.Typing_defs.tc_pos;
@@ -139,25 +136,17 @@ let get_ancestor_classes_and_methods cls mthds acc =
               orig_p_name = "";
               dest_p_name = "";
             } :: acc
-      end cls.Typing_defs.tc_ancestors acc
-
-let build_method_smap cls =
-  let cls =
-    Naming_heap.ClassHeap.find_unsafe cls in
-
-  List.fold_left cls.Nast.c_methods ~init:SMap.empty ~f:begin fun acc or_mthd ->
-    SMap.add (snd or_mthd.Nast.m_name) or_mthd acc
-  end
+      end
 
 (*  Returns a list of the ancestor or child
  *  classes and methods for a given class
  *)
-let get_inheritance class_ find_children env genv =
+let get_inheritance class_ ~find_children files_info workers =
   let class_ = add_ns class_ in
   let class_ = Typing_heap.Classes.get class_ in
   match class_ with
   | None -> []
   | Some c ->
-    let mthds = build_method_smap c.Typing_defs.tc_name in
-    if find_children then get_child_classes_and_methods c mthds env genv []
-    else get_ancestor_classes_and_methods c mthds []
+    if find_children then
+      get_child_classes_and_methods c files_info workers []
+    else get_ancestor_classes_and_methods c []

@@ -1532,18 +1532,25 @@ void implMapIdx(IRGS& env) {
   decRef(env, def);
 }
 
+const StaticString s_idx("hh\\idx");
+
 void implGenericIdx(IRGS& env) {
-  auto const stkptr = sp(env);
-  auto const spOff = IRSPOffsetData { offsetFromIRSP(env, BCSPOffset{0}) };
   auto const def = popC(env, DataTypeSpecific);
   auto const key = popC(env, DataTypeSpecific);
-  auto const arr = popC(env, DataTypeSpecific);
-  push(env, gen(env, GenericIdx, spOff, arr, key, def, stkptr));
-  decRef(env, arr);
-  decRef(env, key);
-  decRef(env, def);
+  auto const base = popC(env, DataTypeSpecific);
+
+  SSATmp* const args[] = { base, key, def };
+
+  static auto func = Unit::lookupFunc(s_idx.get());
+  assert(func && func->numParams() == 3);
+
+  emitDirectCall(env, func, 3, args);
 }
 
+/*
+ * Return the TypeConstraint that should be used to constrain baseType for an
+ * Idx bytecode.
+ */
 TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
                                  bool& useCollection, bool& useMap) {
   if (baseType < TObj && baseType.clsSpec()) {
@@ -1584,11 +1591,6 @@ TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
 
 //////////////////////////////////////////////////////////////////////
 
-}
-
-TypeConstraint idxBaseConstraint(Type baseType, Type keyType) {
-  bool collection, map;
-  return idxBaseConstraint(baseType, keyType, collection, map);
 }
 
 void emitArrayIdx(IRGS& env) {

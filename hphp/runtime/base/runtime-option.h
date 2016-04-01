@@ -35,6 +35,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct AccessLogFileData;
+struct ErrorLogFileData;
 struct VirtualHost;
 struct IpBlockMap;
 struct SatelliteServerInfo;
@@ -76,8 +77,13 @@ struct RuntimeOption {
   static std::string InstanceId;
   static std::string PidFile;
 
+#ifdef FACEBOOK
+  static bool UseThriftLogger;
+#endif
+  static std::map<std::string, ErrorLogFileData> ErrorLogs;
   static std::string LogFile;
   static std::string LogFileSymLink;
+
   static int LogHeaderMangle;
   static bool AlwaysEscapeLog;
   static bool AlwaysLogUnhandledExceptions;
@@ -132,6 +138,7 @@ struct RuntimeOption {
   static bool ServerFixPathInfo;
   static bool ServerAddVaryEncoding;
   static std::vector<std::string> ServerWarmupRequests;
+  static std::string ServerCleanupRequest;
   static boost::container::flat_set<std::string> ServerHighPriorityEndPoints;
   static bool ServerExitOnBindFail;
   static int PageletServerThreadCount;
@@ -152,10 +159,18 @@ struct RuntimeOption {
   static bool ServerHarshShutdown;
   static bool ServerEvilShutdown;
   static bool ServerKillOnSIGTERM;
+  static bool ServerKillOnTimeout;
   static int ServerPreShutdownWait;
   static int ServerShutdownListenWait;
+  static int ServerShutdownEOMWait;
   static std::vector<std::string> ServerNextProtocols;
   static bool ServerEnableH2C;
+  static int BrotliCompressionEnabled;
+  static int BrotliChunkedCompressionEnabled;
+  static int BrotliCompressionMode;
+  // Base 2 logarithm of the sliding window size. Range is 10-24.
+  static int BrotliCompressionLgWindowSize;
+  static int BrotliCompressionQuality;
   static int GzipCompressionLevel;
   static int GzipMaxCompressionLevel;
   static std::string ForceCompressionURL;
@@ -573,6 +588,8 @@ public:
   static bool RepoDebugInfo;
   static bool RepoAuthoritative;
   static bool RepoPreload;
+  static int64_t RepoLocalReadaheadRate;
+  static bool RepoLocalReadaheadConcurrent;
 
   // pprof/hhprof options
   static bool HHProfEnabled;

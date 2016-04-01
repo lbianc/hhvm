@@ -23,6 +23,7 @@ type mode =
   | Color
   | Coverage
   | Dump_symbol_info
+  | Dump_inheritance
   | Errors
   | Lint
   | Suggest
@@ -184,7 +185,8 @@ let builtins =
   "const string __FUNCTION__ = '';\n"^
   "const string __METHOD__ = '';\n"^
   "const string __NAMESPACE__ = '';\n"^
-  "interface Indexish<+Tk, +Tv> extends KeyedContainer<Tk, Tv> {}\n"
+  "interface Indexish<+Tk, +Tv> extends KeyedContainer<Tk, Tv> {}\n"^
+  "abstract final class dict<+Tk as arraykey, +Tv> implements Indexish<Tk, Tv> {}\n"
 
 (*****************************************************************************)
 (* Helpers *)
@@ -239,6 +241,9 @@ let parse_options () =
     "--dump-deps",
       Arg.Unit (set_mode Dump_deps),
       "Print dependencies";
+    "--dump-inheritance",
+      Arg.Unit (set_mode Dump_inheritance),
+      "Print inheritance";
   ] in
   let options = Arg.align options in
   Arg.parse options (fun fn -> fn_ref := Some fn) usage;
@@ -378,7 +383,7 @@ let handle_mode mode filename tcopt files_contents files_info errors =
       let lint_errors =
         Relative_path.Map.fold begin fun fn content lint_errors ->
           lint_errors @ fst (Lint.do_ begin fun () ->
-            Linting_service.lint fn content
+            Linting_service.lint tcopt fn content
           end)
         end files_contents [] in
       if lint_errors <> []
@@ -396,6 +401,29 @@ let handle_mode mode filename tcopt files_contents files_info errors =
       ignore @@ Typing_check_utils.check_defs tcopt fn fileinfo
     end files_info;
     Typing_deps.dump_deps stdout
+  | Dump_inheritance ->
+    Typing_deps.update_files files_info;
+    Relative_path.Map.iter begin fun fn fileinfo ->
+      if fn = builtins_filename then () else begin
+        List.iter fileinfo.FileInfo.classes begin fun (_p, class_) ->
+          Printf.printf "Ancestors of %s and their overridden methods:\n"
+            class_;
+          let ancestors = MethodJumps.get_inheritance
+            class_ ~find_children:false files_info None in
+          ClientMethodJumps.print_readable ancestors ~find_children:false;
+          Printf.printf "\n";
+        end;
+        Printf.printf "\n";
+        List.iter fileinfo.FileInfo.classes begin fun (_p, class_) ->
+          Printf.printf "Children of %s and the methods they override:\n"
+            class_;
+          let children = MethodJumps.get_inheritance
+            class_ ~find_children:true files_info None in
+          ClientMethodJumps.print_readable children ~find_children:true;
+          Printf.printf "\n";
+        end;
+      end
+    end files_info;
   | Suggest
   | Errors ->
       let errors = Relative_path.Map.fold begin fun fn fileinfo errors ->

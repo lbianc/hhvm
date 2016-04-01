@@ -11,6 +11,7 @@
 open Core
 open ServerEnv
 open ServerCheckUtils
+open Reordered_argument_collections
 open Utils
 
 open Result.Export
@@ -244,6 +245,8 @@ let type_check genv env fast t =
   then begin
     let count = Relative_path.Map.cardinal fast in
     let errorl, failed = Typing_check_service.go genv.workers env.tcopt fast in
+    let hs = SharedMem.heap_size () in
+    Hh_logger.log "Heap size: %d" hs;
     HackEventLogger.type_check_end count t;
     let env = { env with
       errorl = List.rev_append errorl env.errorl;
@@ -264,11 +267,11 @@ let get_dirty_fast old_fast fast dirty =
 
 let get_all_deps {FileInfo.n_funs; n_classes; n_types; n_consts} =
   let add_deps_of_sset dep_ctor sset depset =
-    SSet.fold begin fun n acc ->
+    SSet.fold sset ~init:depset ~f:begin fun n acc ->
       let dep = dep_ctor n in
       let deps = Typing_deps.get_bazooka dep in
       DepSet.union deps acc
-    end sset depset
+    end
   in
   let deps = add_deps_of_sset (fun n -> Dep.Fun n) n_funs DepSet.empty in
   let deps = add_deps_of_sset (fun n -> Dep.FunName n) n_funs deps in
@@ -328,7 +331,7 @@ let print_hash_stats () =
 
 let get_build_targets () =
   let targets =
-    List.map (BuildMain.get_all_targets ()) (Relative_path.(concat Root)) in
+    List.map (BuildMain.get_live_targets ()) (Relative_path.(concat Root)) in
   Relative_path.set_of_list targets
 
 (* entry point *)
@@ -366,8 +369,8 @@ let init ?load_mini_script genv =
     genv.wait_until_ready ();
     let root = Path.to_string root in
     let updates = genv.notifier () in
-    let updates = SSet.filter (fun p ->
-      str_starts_with p root && ServerEnv.file_filter p) updates in
+    let updates = SSet.filter updates (fun p ->
+      str_starts_with p root && ServerEnv.file_filter p) in
     let changed_while_parsing = Relative_path.(relativize_set Root updates) in
     (* Build targets are untracked by version control, so we must always
      * recheck them. While we could query hg / git for the untracked files,

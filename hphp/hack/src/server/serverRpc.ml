@@ -18,7 +18,8 @@ type _ t =
   | INFER_TYPE : ServerUtils.file_input * int * int -> ServerInferType.result t
   | COVERAGE_LEVELS : ServerUtils.file_input -> ServerColorFile.result t
   | AUTOCOMPLETE : string -> AutocompleteService.result t
-  | IDENTIFY_FUNCTION : string * int * int -> string t
+  | IDENTIFY_FUNCTION : string * int * int ->
+      IdentifySymbolService.find_symbol_result option t
   | OUTLINE : string -> (Pos.absolute * string * string) list t
   | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
   | FIND_REFS : FindRefsService.action -> FindRefsService.result t
@@ -52,7 +53,8 @@ let handle : type a. genv -> env -> a t -> a =
     | OUTLINE content ->
         FileOutline.outline content
     | METHOD_JUMP (class_, find_children) ->
-        MethodJumps.get_inheritance class_ find_children env genv
+      MethodJumps.get_inheritance class_ ~find_children env.files_info
+        genv.workers
     | FIND_REFS find_refs_action ->
         if ServerArgs.ai_mode genv.options = None then
           ServerFindRefs.go find_refs_action genv env
@@ -68,8 +70,8 @@ let handle : type a. genv -> env -> a t -> a =
         ServerArgumentInfo.go contents line col
     | SEARCH (query, type_) -> ServerSearch.go query type_
     | COVERAGE_COUNTS path -> ServerCoverageMetric.go path genv env
-    | LINT fnl -> ServerLint.go genv fnl
-    | LINT_ALL code -> ServerLint.lint_all genv code
+    | LINT fnl -> ServerLint.go genv env fnl
+    | LINT_ALL code -> ServerLint.lint_all genv env code
     | CREATE_CHECKPOINT x -> ServerCheckpoint.create_checkpoint x
     | RETRIEVE_CHECKPOINT x -> ServerCheckpoint.retrieve_checkpoint x
     | DELETE_CHECKPOINT x -> ServerCheckpoint.delete_checkpoint x

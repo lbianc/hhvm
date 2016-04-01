@@ -115,7 +115,7 @@ const Unit* curUnit(const Env& env) {
 }
 
 FPInvOffset curSpOffset(const Env& env) {
-  return irgen::logicalStackDepth(env.irgs);
+  return env.irgs.irb->fs().syncedSpLevel();
 }
 
 bool irBlockReachable(Env& env, Block* block) {
@@ -139,7 +139,7 @@ bool irBlockReachable(Env& env, Block* block) {
  */
 bool consumeInput(Env& env, int i, const InputInfo& ii) {
   if (ii.dontGuard) return true;
-  auto const type = irgen::predictedTypeFromLocation(env.irgs, ii.loc);
+  auto const type = irgen::predictedType(env.irgs, ii.loc);
 
   if (env.profiling && type <= TBoxedCell &&
       (env.region->blocks().size() > 1 || !env.region->entry()->empty())) {
@@ -363,12 +363,13 @@ void visitGuards(IRUnit& unit, F func) {
            * BCSPOffset is optional but should --always-- be set for CheckStk
            * instructions that appear within the guards for a translation.
            */
-          auto bcSpOffset = inst.extra<RelOffsetData>()->bcSpOffset;
+          auto const bcSPOff = inst.extra<RelOffsetData>()->bcSpOffset;
           assertx(inst.extra<RelOffsetData>()->hasBcSpOffset);
 
-          auto offsetFromFp = inst.marker().spOff() - bcSpOffset;
+          auto const offsetFromFP =
+            bcSPOff.to<FPInvOffset>(inst.marker().spOff());
           func(&inst,
-               L::Stack{offsetFromFp},
+               L::Stack{offsetFromFP},
                inst.typeParam(),
                inst.is(HintStkInner));
           break;
@@ -487,7 +488,7 @@ RegionDescPtr form_region(Env& env) {
       irgen::assertTypeLocation(env.irgs, lt.location, t);
       env.curBlock->addPreCondition({lt.location, t, DataTypeGeneric});
     } else {
-      irgen::checkTypeLocation(env.irgs, lt.location, t, env.ctx.bcOffset,
+      irgen::checkType(env.irgs, lt.location, t, env.ctx.bcOffset,
                                true /* outerOnly */);
     }
   }

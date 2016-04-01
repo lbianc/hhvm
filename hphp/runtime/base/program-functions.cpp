@@ -103,6 +103,7 @@
 #include <signal.h>
 #include <libxml/parser.h>
 
+#include <chrono>
 #include <exception>
 #include <fstream>
 #include <iterator>
@@ -886,6 +887,37 @@ static void set_execution_mode(folly::StringPiece mode) {
   }
 }
 
+/* Reads a file into the OS page cache, with rate limiting. */
+static bool readahead_rate(const char* path, int64_t mbPerSec) {
+  int ret = open(path, O_RDONLY);
+  if (ret < 0) return false;
+  const int fd = ret;
+  SCOPE_EXIT { close(fd); };
+
+  constexpr size_t kReadaheadBytes = 1 << 20;
+  std::unique_ptr<char[]> buf(new char[kReadaheadBytes]);
+  int64_t total = 0;
+  auto startTime = std::chrono::steady_clock::now();
+  do {
+    ret = read(fd, buf.get(), kReadaheadBytes);
+    if (ret > 0) {
+      total += ret;
+      // Unit math: bytes / (MB / seconds) = microseconds
+      auto endTime = startTime + std::chrono::microseconds(total / mbPerSec);
+      auto sleepT = endTime - std::chrono::steady_clock::now();
+      // Don't sleep too frequently.
+      if (sleepT >= std::chrono::seconds(1)) {
+        Logger::Info(folly::sformat(
+          "readahead sleeping {}ms after total {}b",
+          std::chrono::duration_cast<std::chrono::milliseconds>(sleepT).count(),
+          total));
+        /* sleep override */ std::this_thread::sleep_for(sleepT);
+      }
+    }
+  } while (ret > 0);
+  return ret == 0;
+}
+
 static int start_server(const std::string &username, int xhprof) {
   InitFiniNode::ServerPreInit();
   BootTimer::start();
@@ -914,7 +946,9 @@ static int start_server(const std::string &username, int xhprof) {
 #if !defined(SKIP_USER_CHANGE)
   if (!username.empty()) {
     if (Logger::UseCronolog) {
-      Cronolog::changeOwner(username, RuntimeOption::LogFileSymLink);
+      for (const auto& el : RuntimeOption::ErrorLogs) {
+        Cronolog::changeOwner(username, el.second.symLink);
+      }
     }
     Capability::ChangeUnixUser(username);
     LightProcess::ChangeUser(username);
@@ -928,6 +962,26 @@ static int start_server(const std::string &username, int xhprof) {
 
   if (xhprof) {
     HHVM_FN(xhprof_enable)(xhprof, uninit_null().toArray());
+  }
+
+  std::unique_ptr<std::thread> readaheadThread;
+
+  if (RuntimeOption::RepoLocalReadaheadRate > 0 &&
+      !RuntimeOption::RepoLocalPath.empty()) {
+    readaheadThread = folly::make_unique<std::thread>([&] {
+        BootTimer::Block timer("Readahead Repo");
+        auto path = RuntimeOption::RepoLocalPath.c_str();
+        Logger::Info("readahead %s", path);
+        const auto mbPerSec = RuntimeOption::RepoLocalReadaheadRate;
+        if (!readahead_rate(path, mbPerSec)) {
+          Logger::Error("readahead failed: %s", strerror(errno));
+        }
+      });
+    if (!RuntimeOption::RepoLocalReadaheadConcurrent) {
+      // TODO(10152762): Run this concurrently with non-disk warmup.
+      readaheadThread->join();
+      readaheadThread.reset();
+    }
   }
 
   if (RuntimeOption::RepoPreload) {
@@ -979,6 +1033,11 @@ static int start_server(const std::string &username, int xhprof) {
     }
   }
   BootTimer::mark("warmup");
+
+  if (readaheadThread.get()) {
+    readaheadThread->join();
+    readaheadThread.reset();
+  }
 
   if (RuntimeOption::EvalEnableNuma) {
 #ifdef USE_JEMALLOC
@@ -1073,45 +1132,46 @@ int execute_program(int argc, char **argv) {
   return ret_code;
 }
 
-/* -1 - cannot open file
- * 0  - no need to open file
- * 1 - fopen
- * 2 - popen
- */
-static int open_server_log_file() {
-  if (!RuntimeOption::LogFile.empty()) {
-    if (Logger::UseCronolog) {
-      if (strchr(RuntimeOption::LogFile.c_str(), '%')) {
-        Logger::cronOutput.m_template = RuntimeOption::LogFile;
-        Logger::cronOutput.setPeriodicity();
-        Logger::cronOutput.m_linkName = RuntimeOption::LogFileSymLink;
-        return 0;
+static bool open_server_log_files() {
+  bool openedLog = false;
+  for (const auto& el : RuntimeOption::ErrorLogs) {
+    bool ok = true;
+    const auto& name    = el.first;
+    const auto& errlog = el.second;
+    if (!errlog.logFile.empty()) {
+      if (errlog.isPipeOutput()) {
+        auto output = popen(errlog.logFile.substr(1).c_str(), "w");
+        ok = (output != nullptr);
+        Logger::SetOutput(name, output, true);
+      } else if (Logger::UseCronolog && errlog.hasTemplate()) {
+        auto cronoLog = Logger::CronoOutput(name);
+        always_assert(cronoLog);
+        cronoLog->m_template = errlog.logFile;
+        cronoLog->setPeriodicity();
+        cronoLog->m_linkName = errlog.symLink;
       } else {
-        Logger::Output = fopen(RuntimeOption::LogFile.c_str(), "a");
-        if (Logger::Output) return 1;
+        auto output = fopen(errlog.logFile.c_str(), "a");
+        ok = (output != nullptr);
+        Logger::SetOutput(name, output, false);
       }
-    } else {
-      if (Logger::IsPipeOutput) {
-        Logger::Output = popen(RuntimeOption::LogFile.substr(1).c_str(), "w");
-        if (Logger::Output) return 2;
-      } else {
-        Logger::Output = fopen(RuntimeOption::LogFile.c_str(), "a");
-        if (Logger::Output) return 1;
-      }
+      if (!ok) Logger::Error("Can't open log file: %s", errlog.logFile.c_str());
+      openedLog |= ok;
     }
-    Logger::Error("Cannot open log file: %s", RuntimeOption::LogFile.c_str());
-    return -1;
   }
-  return 0;
+  return openedLog;
 }
 
-static void close_server_log_file(int kind) {
-  if (kind == 1) {
-    fclose(Logger::Output);
-  } else if (kind == 2) {
-    pclose(Logger::Output);
-  } else {
-    always_assert(!Logger::Output);
+static void close_server_log_files() {
+  for (const auto& el : RuntimeOption::ErrorLogs) {
+    const auto& logNameAndPipe = Logger::GetOutput(el.first);
+    const auto& errlog = el.second;
+    if (logNameAndPipe.second) {
+      pclose(logNameAndPipe.first);
+    } else if (Logger::UseCronolog && errlog.hasTemplate()) {
+      always_assert(!logNameAndPipe.first);
+    } else {
+      fclose(logNameAndPipe.first);
+    }
   }
 }
 
@@ -1556,15 +1616,14 @@ static int execute_program_impl(int argc, char** argv) {
   MM().resetRuntimeOptions();
 
   if (po.mode == "daemon") {
-    if (RuntimeOption::LogFile.empty()) {
+    if (!open_server_log_files()) {
       Logger::Error("Log file not specified under daemon mode.\n\n");
     }
-    int ret = open_server_log_file();
     Process::Daemonize();
-    close_server_log_file(ret);
+    close_server_log_files();
   }
 
-  open_server_log_file();
+  open_server_log_files();
   if (RuntimeOption::ServerExecutionMode()) {
     for (auto const& m : messages) {
       Logger::Info(m);
@@ -1599,7 +1658,13 @@ static int execute_program_impl(int argc, char** argv) {
     Logger::LogLevel = Logger::LogInfo;
     Logger::UseCronolog = false;
     Logger::UseLogFile = true;
-    Logger::SetNewOutput(nullptr);
+    // we're linting, reset whatever logger settings and write once to stdout
+    Logger::ClearThreadLog();
+    for (auto& el : RuntimeOption::ErrorLogs) {
+      const auto& name = el.first;
+      Logger::SetTheLogger(name, nullptr);
+    }
+    Logger::SetTheLogger(Logger::DEFAULT, new Logger());
 
     if (po.isTempFile) {
       tempFile = po.lint;

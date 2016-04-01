@@ -9,6 +9,8 @@
  *)
 
 open Core
+open Reordered_argument_collections
+open Typing_defs
 
 type action = Ai.ServerFindRefs.action =
   | Class of string
@@ -24,7 +26,7 @@ let process_fun_id results_acc target_fun id =
 let process_method_id results_acc target_classes target_method
     class_ id _ _ ~is_method =
   let class_name = class_.Typing_defs.tc_name in
-  if target_method = (snd id) && (SSet.mem class_name target_classes)
+  if target_method = (snd id) && (SSet.mem target_classes class_name)
   then
     results_acc :=
       Pos.Map.add (fst id) (class_name ^ "::" ^ (snd id)) !results_acc
@@ -35,7 +37,7 @@ let process_constructor results_acc target_classes target_method class_ _ p =
     () () ~is_method:true
 
 let process_class_id results_acc target_classes cid mid_option =
-   if (SSet.mem (snd cid) target_classes)
+   if (SSet.mem target_classes (snd cid))
    then begin
      let class_name = match mid_option with
      | None -> snd cid
@@ -67,7 +69,7 @@ let check_if_extends_class target_class_name class_name acc =
   match class_ with
   | None -> acc
   | Some { Typing_defs.tc_ancestors = imps; _ }
-      when SMap.mem target_class_name imps -> SSet.add class_name acc
+      when SMap.mem target_class_name imps -> SSet.add acc class_name
   | _ -> acc
 
 let find_child_classes target_class_name files_info files =
@@ -84,11 +86,11 @@ let find_child_classes target_class_name files_info files =
   end files SSet.empty
 
 let get_child_classes_files workers files_info class_name =
-  match Naming_heap.ClassHeap.get class_name with
+  match Typing_heap.Classes.get class_name with
   | Some class_ ->
     (* Find the files that contain classes that extend class_ *)
-    let cid = snd class_.Nast.c_name in
-    let cid_hash = Typing_deps.Dep.make (Typing_deps.Dep.Class cid) in
+    let cid_hash =
+      Typing_deps.Dep.make (Typing_deps.Dep.Class class_.tc_name) in
     let extend_deps =
       Decl_compare.get_extend_deps cid_hash
         (Typing_deps.DepSet.singleton cid_hash)
@@ -98,25 +100,24 @@ let get_child_classes_files workers files_info class_name =
     Relative_path.Set.empty
 
 let get_deps_set classes =
-  SSet.fold (fun class_name acc ->
-    match Naming_heap.ClassHeap.get class_name with
+  SSet.fold classes ~f:begin fun class_name acc ->
+    match Typing_heap.Classes.get class_name with
     | Some class_ ->
         (* Get all files with dependencies on this class *)
-        let fn = Pos.filename (fst class_.Nast.c_name) in
-        let cid = snd class_.Nast.c_name in
-        let dep = Typing_deps.Dep.Class cid in
+        let fn = Pos.filename class_.tc_pos in
+        let dep = Typing_deps.Dep.Class class_.tc_name in
         let bazooka = Typing_deps.get_bazooka dep in
         let files = Typing_deps.get_files bazooka in
         let files = Relative_path.Set.add fn files in
         Relative_path.Set.union files acc
-    | _ -> acc) classes Relative_path.Set.empty
+    | _ -> acc
+  end ~init:Relative_path.Set.empty
 
 let get_deps_set_function f_name =
   try
-    let fun_ = Naming_heap.FunHeap.find_unsafe f_name in
-    let fn = Pos.filename (fst fun_.Nast.f_name) in
-    let fid = snd fun_.Nast.f_name in
-    let dep = Typing_deps.Dep.Fun fid in
+    let fun_ = Typing_heap.Funs.find_unsafe f_name in
+    let fn = Pos.filename fun_.ft_pos in
+    let dep = Typing_deps.Dep.Fun f_name in
     let bazooka = Typing_deps.get_bazooka dep in
     let files = Typing_deps.get_files bazooka in
     Relative_path.Set.add fn files
@@ -143,33 +144,31 @@ let parallel_find_refs workers fileinfo_l target_classes target_method =
 let get_definitions target_classes target_method =
   match target_classes, target_method with
   | Some classes, Some method_name ->
-      SSet.fold begin fun class_name acc ->
-        match Naming_heap.ClassHeap.get class_name with
-        | Some class_ ->
-            let methods = class_.Nast.c_methods @ class_.Nast.c_static_methods in
-            List.fold_left methods ~init:acc ~f:begin fun acc method_ ->
-              let mid = method_.Nast.m_name in
-              if (snd mid) = method_name then ((snd mid), (fst mid)) :: acc
-              else acc
-            end
-        | None -> acc
-      end classes []
+    SSet.fold classes ~init:[] ~f:begin fun class_name acc ->
+      match Typing_heap.Classes.get class_name with
+      | Some class_ ->
+        let add_meth meths acc = match SMap.get meths method_name with
+          | Some meth when meth.ce_origin = class_.tc_name ->
+            let pos = Reason.to_pos (fst meth.ce_type) in
+            (method_name, pos) :: acc
+          | _ -> acc
+        in
+        let acc = add_meth class_.tc_methods acc in
+        let acc = add_meth class_.tc_smethods acc in
+        acc
+      | None -> acc
+    end
   | Some classes, None ->
-      SSet.fold begin fun class_name acc ->
-        match Naming_heap.ClassHeap.get class_name with
-        | Some class_ ->
-            let cid = class_.Nast.c_name in
-            ((snd cid), (fst cid)) :: acc
-        | None -> acc
-      end classes []
+    SSet.fold classes ~init:[] ~f:begin fun class_name acc ->
+      match Typing_heap.Classes.get class_name with
+      | Some class_ -> (class_name, class_.tc_pos) :: acc
+      | None -> acc
+    end
   | None, Some fun_name ->
-      begin
-        match Naming_heap.FunHeap.get fun_name with
-        | Some fun_ ->
-            let fid = fun_.Nast.f_name in
-            [(snd fid), (fst fid)]
-        | None -> []
-      end
+    begin match Typing_heap.Funs.get fun_name with
+      | Some fun_ -> [fun_name, fun_.ft_pos]
+      | None -> []
+    end
   | None, None -> []
 
 let find_references workers target_classes target_method include_defs

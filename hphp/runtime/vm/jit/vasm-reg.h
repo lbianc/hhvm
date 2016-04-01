@@ -175,6 +175,8 @@ private:
   unsigned rn;
 };
 
+///////////////////////////////////////////////////////////////////////////////
+
 using Vreg64  = Vr<Reg64>;
 using Vreg32  = Vr<Reg32>;
 using Vreg16  = Vr<Reg16>;
@@ -196,6 +198,39 @@ struct Vreg128 : Vr<RegXMM> {
 };
 
 inline Reg64 r64(Vreg64 r) { return r; }
+
+/*
+ * Vreg width constraint (or flags).
+ *
+ * Guaranteed to be a bitfield, which users of Width can do with as they
+ * please.
+ */
+enum class Width : uint8_t {
+  Byte  = 1,
+  Word  = 1 << 1,
+  Long  = 1 << 2,
+  Quad  = 1 << 3,
+  Octa  = 1 << 4,
+  Dbl   = 1 << 5,
+  Flags = 1 << 6,
+  // X-or-narrower widths.
+  WordN = Byte | Word,
+  LongN = Byte | Word | Long,
+  QuadN = Byte | Word | Long | Quad,
+  // Any non-flags register.
+  Any   = Byte | Word | Long | Quad | Octa | Dbl
+};
+
+inline Width width(Vreg)    { return Width::Any; }
+inline Width width(Vreg8)   { return Width::Byte; }
+inline Width width(Vreg16)  { return Width::Word; }
+inline Width width(Vreg32)  { return Width::Long; }
+inline Width width(Vreg64)  { return Width::Quad; }
+inline Width width(Vreg128) { return Width::Octa; }
+inline Width width(VregDbl) { return Width::Dbl; }
+inline Width width(VregSF)  { return Width::Flags; }
+
+std::string show(Width w);
 
 ///////////////////////////////////////////////////////////////////////////////
 

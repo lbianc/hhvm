@@ -306,7 +306,7 @@ and check_param env param (_, ty) =
 (*****************************************************************************)
 (* Now we are actually checking stuff! *)
 (*****************************************************************************)
-and fun_def tcopt _ f =
+and fun_def tcopt f =
   (* reset the expression dependent display ids for each function body *)
   Reason.expr_display_id_map := IMap.empty;
   Typing_hooks.dispatch_enter_fun_def_hook f;
@@ -2401,7 +2401,8 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
       env, ty
   | Tclass ((_, cn) as id, argl)
       when cn = SN.Collections.cMap
-      || cn = SN.Collections.cStableMap ->
+      || cn = SN.Collections.cStableMap
+      || cn = SN.Collections.cDict ->
       let (k, v) = match argl with
         | [k; v] -> (k, v)
         | _ ->
@@ -2663,27 +2664,35 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
       (match class_ with
       | None -> env, (Reason.Rnone, Tany)
       | Some class_ ->
-          let smethod =
-            if is_const
-            then (if incl_tc
-                  then Env.get_const env class_ mid
-                  else (match Env.get_typeconst env class_ mid with
-                        | Some _ ->
-                          Errors.illegal_typeconst_direct_access p;
-                          None
-                        | None ->
-                          Env.get_const env class_ mid))
-            else Env.get_static_member is_method env class_ mid in
-          if !Typing_defs.accumulate_method_calls then
-            Typing_defs.accumulate_method_calls_result :=
-                (p, (class_.tc_name^"::"^mid)) ::
-                    !Typing_defs.accumulate_method_calls_result;
-          Typing_hooks.dispatch_smethod_hook
-            class_ (p, mid) env ety_env.from_class ~is_method;
-          (match smethod with
-          | None when not is_method ->
+        if !Typing_defs.accumulate_method_calls then
+          Typing_defs.accumulate_method_calls_result :=
+              (p, (class_.tc_name^"::"^mid)) ::
+                  !Typing_defs.accumulate_method_calls_result;
+        Typing_hooks.dispatch_smethod_hook
+          class_ (p, mid) env ety_env.from_class ~is_method;
+        let ety_env =
+          { ety_env with
+            substs = Subst.make class_.tc_tparams paraml } in
+        if is_const then begin
+          let const =
+            if incl_tc then Env.get_const env class_ mid else
+            match Env.get_typeconst env class_ mid with
+            | Some _ ->
+              Errors.illegal_typeconst_direct_access p;
+              None
+            | None ->
+              Env.get_const env class_ mid
+          in
+          match const with
+          | None ->
             smember_not_found p ~is_const ~is_method class_ mid;
             env, (Reason.Rnone, Tany)
+          | Some { cc_type; _ } ->
+            let env, cc_type = Phase.localize ~ety_env env cc_type in
+            env, cc_type
+        end else begin
+          let smethod = Env.get_static_member is_method env class_ mid in
+          match smethod with
           | None ->
             (match Env.get_static_member is_method env class_ SN.Members.__callStatic with
               | None ->
@@ -2692,9 +2701,6 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
               | Some {ce_visibility = vis; ce_type = (r, Tfun ft); _} ->
                 let p_vis = Reason.to_pos r in
                 TVis.check_class_access p env (p_vis, vis) cid class_;
-                let ety_env =
-                  { ety_env with
-                    substs = Subst.make class_.tc_tparams paraml } in
                 let env, ft = Phase.localize_ft ~ety_env env ft in
                 let ft = { ft with
                   ft_arity = Fellipsis 0;
@@ -2705,12 +2711,10 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
           | Some { ce_visibility = vis; ce_type = method_; _ } ->
             let p_vis = Reason.to_pos (fst method_) in
             TVis.check_class_access p env (p_vis, vis) cid class_;
-            let ety_env =
-              { ety_env with
-                substs = Subst.make class_.tc_tparams paraml } in
             let env, method_ =
               Phase.localize ~ety_env env method_ in
-            env, method_)
+            env, method_
+        end
       )
   | _, (Tabstract (_, None) | Tmixed | Tarraykind _ | Toption _
         | Tprim _ | Tvar _ | Tfun _ | Ttuple _ | Tanon (_, _) | Tobject
@@ -3491,7 +3495,8 @@ and non_null ?expanded:(expanded=ISet.empty) env ty =
       env, ty
 
 and condition_var_non_null env = function
-  | _, Lvar (_, x) ->
+  | _, Lvar (_, x)
+  | _, Dollardollar (_, x) ->
       let env, x_ty = Env.get_local env x in
       let env, x_ty = Env.expand_type env x_ty in
       let env, x_ty = non_null env x_ty in
@@ -3802,7 +3807,7 @@ and check_parent_abstract position parent_type class_type =
       ~is_final position class_type.tc_typeconsts;
   end else ()
 
-and class_def tcopt _ c =
+and class_def tcopt c =
   let filename = Pos.filename (fst c.Nast.c_name) in
   let dep = Dep.Class (snd c.c_name) in
   let env = Env.empty tcopt filename (Some dep) in
@@ -3907,9 +3912,9 @@ and check_extend_abstract_typeconst ~is_final p smap =
   end smap
 
 and check_extend_abstract_const ~is_final p smap =
-  SMap.iter begin fun x ce ->
-    match ce.ce_type with
-    | r, Tgeneric _ when not ce.ce_synthesized ->
+  SMap.iter begin fun x cc ->
+    match cc.cc_type with
+    | r, Tgeneric _ when not cc.cc_synthesized ->
       Errors.implement_abstract ~is_final p (Reason.to_pos r) "constant" x
     | _, (Tany | Tmixed | Tarray (_, _) | Toption _ | Tprim _ | Tfun _
           | Tapply (_, _) | Ttuple _ | Tshape _ | Taccess (_, _) | Tthis

@@ -11,6 +11,7 @@
 open Core
 open ServerEnv
 open ServerUtils
+open Reordered_argument_collections
 open Utils
 
 type recheck_loop_stats = {
@@ -82,7 +83,7 @@ module Program =
       let root = Path.to_string @@ ServerArgs.root genv.options in
       (* Because of symlinks, we can have updates from files that aren't in
        * the .hhconfig directory *)
-      let updates = SSet.filter (fun p -> str_starts_with p root) updates in
+      let updates = SSet.filter updates (fun p -> str_starts_with p root) in
       Relative_path.(relativize_set Root updates)
 
     let recheck genv old_env typecheck_updates =
@@ -109,8 +110,7 @@ let sleep_and_check in_fd =
 
 let handle_connection_ genv env ic oc =
   try
-    output_string oc "Hello\n";
-    flush oc;
+    ServerCommand.say_hello oc;
     ServerCommand.handle genv env (ic, oc)
   with
   | Sys_error("Broken pipe") | ServerCommand.Read_command_timeout ->
@@ -191,12 +191,12 @@ let get_client_channels parent_in_fd =
 
 let ide_typechecker_init_done ide_process =
   Option.iter ide_process begin fun x ->
-    IdeProcessPipe.send x IdeProcessMessage.TypecheckerInitDone;
+    IdeProcessPipe.send x IdeProcessMessage.Typechecker_init_done;
   end
 
 let ide_sync_files_info ide_process files_info =
   Option.iter ide_process begin fun x ->
-    IdeProcessPipe.send x (IdeProcessMessage.SyncFileInfo files_info);
+    IdeProcessPipe.send x (IdeProcessMessage.Sync_file_info files_info);
   end
 
 let ide_update_files_info ide_process files_info updated_files_info =
@@ -208,7 +208,7 @@ let ide_update_files_info ide_process files_info updated_files_info =
       end
       updated_files_info
       Relative_path.Map.empty in
-    IdeProcessPipe.send x (IdeProcessMessage.SyncFileInfo updated_files_info);
+    IdeProcessPipe.send x (IdeProcessMessage.Sync_file_info updated_files_info);
   end
 
 let ide_update_error_list ide_process new_error_list old_error_list =
@@ -225,7 +225,7 @@ let ide_update_error_list ide_process new_error_list old_error_list =
 
   Option.iter ide_process begin fun x ->
     if not (cheap_equals new_error_list old_error_list) then
-      IdeProcessPipe.send x (IdeProcessMessage.SyncErrorList new_error_list);
+      IdeProcessPipe.send x (IdeProcessMessage.Sync_error_list new_error_list);
   end
 
 let rec ide_recv_messages_loop ide_process genv env =
@@ -234,9 +234,9 @@ let rec ide_recv_messages_loop ide_process genv env =
   | [], _, _ -> ()
   | _ ->
     match IdeProcessPipe.recv ide_process with
-    | IdeProcessMessage.FindRefsCall (id, action) ->
+    | IdeProcessMessage.Find_refs_call (id, action) ->
         let res = ServerFindRefs.go action genv env in
-        let msg = IdeProcessMessage.FindRefsResponse (id, res) in
+        let msg = IdeProcessMessage.Find_refs_response (id, res) in
         IdeProcessPipe.send ide_process msg;
         ide_recv_messages_loop ide_process genv env
 
