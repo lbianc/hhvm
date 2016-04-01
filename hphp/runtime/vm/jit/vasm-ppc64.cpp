@@ -1052,6 +1052,7 @@ void lowerForPPC64(Vout& v, movtql& inst) { v << copy{inst.s, inst.d}; }
 // Lower all movzb* to movb as ppc64 always sign extend the unused bits of reg.
 void lowerForPPC64(Vout& v, movzbl& i)    { v << movb{i.s, Reg8(i.d)}; }
 void lowerForPPC64(Vout& v, movzbq& i)    { v << movb{i.s, Reg8(i.d)}; }
+void lowerForPPC64(Vout& v, movzlq& i)    { v << movl{i.s, Reg32(i.d)}; }
 
 void lowerForPPC64(Vout& v, srem& i) {
   // remainder as described on divd documentation:
@@ -1151,6 +1152,13 @@ void lowerForPPC64(Vout& v, cmpli& inst) {
   Vreg tmp;
   if (patchImm(inst.s0, v, tmp)) v << cmpl {tmp,     inst.s1, inst.sf};
   else                           v << cmpli{inst.s0, inst.s1, inst.sf};
+}
+
+void lowerForPPC64(Vout& v, cmovb& inst) {
+  auto t_64 = v.makeReg(), f_64 = v.makeReg();
+  v << movb{inst.f, f_64};
+  v << movb{inst.t, t_64};
+  v << cmovq{inst.cc, inst.sf, f_64, t_64, Reg64(inst.d)};
 }
 
 void lowerForPPC64(Vout& v, cloadq& inst) {
