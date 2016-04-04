@@ -40,20 +40,12 @@
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/util/data-block.h"
 
 namespace HPHP { namespace jit {
 
-///////////////////////////////////////////////////////////////////////////////
-
 TRACE_SET_MOD(ustubs);
-
-extern "C" void enterTCHelper(Cell* vm_sp,
-                              ActRec* vm_fp,
-                              TCA start,
-                              ActRec* firstAR,
-                              void* targetCacheBase,
-                              ActRec* stashedAR);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -70,7 +62,7 @@ static void alignJmpTarget(CodeBlock& cb) {
 TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
   alignJmpTarget(cb);
 
-  auto const start = vwrap(cb, [&] (Vout& v) {
+  auto const start = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     auto const ar = v.makeReg();
 
     v << copy{rvmfp(), ar};
@@ -79,34 +71,21 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     // in other stubs because we need the return IP for this frame in the vmfp
     // chain, in order to find the proper fixup for the VMRegAnchor in the
     // intercept handler.
-
-    // kind of a stublogue
-    v << mflr{rfuncln()};
-    v << push{rtoc()};
-    v << push{rfuncln()};    // desired fixup
-    v << lea{rsp()[-8], rsp()};
-    v << push{rvmfp()};
-
+    v << stublogue{true};
     v << copy{rsp(), rvmfp()};
 
     // When we call the event hook, it might tell us to skip the callee
     // (because of fb_intercept).  If that happens, we need to return to the
     // caller, but the handler will have already popped the callee's frame.
     // So, we need to save these values for later.
-    auto const savedRip = v.makeReg();
-    v << pushm{ar[AROFF(m_savedToc)]};
-    v << load{ar[AROFF(m_savedRip)], savedRip};
-    v << push{savedRip};
-    v << pushm{ar[AROFF(m_sfp)]};   // Reserved, used to hide the frame pointer
-    v << push{rvmfp()};             // Save the real top of the stack.
+    v << pushm{ar[AROFF(m_savedRip)]};
+    v << pushm{ar[AROFF(m_sfp)]};
 
     v << copy2{ar, v.cns(EventHook::NormalFunc), rarg(0), rarg(1)};
 
     bool (*hook)(const ActRec*, int) = &EventHook::onFunctionCall;
-    v << call{TCA(hook)};
-  });
+    v << call{TCA(hook), arg_regs(0), &us.functionEnterHelperReturn};
 
-  us.functionEnterHelperReturn = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     auto const sf = v.makeReg();
     v << testb{rret(), rret(), sf};
 
@@ -117,13 +96,12 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       // callee's frame, so we're ready to continue from the original call
       // site.  We just need to grab the fp/rip of the original frame that we
       // saved earlier, and sync rvmsp().
-      v << pop{rfuncln()};  // Discard. It was used only for the vmfp backchain
-      v << pop{rvmfp()};    // Reserved, used to save the fp previously
+      v << pop{rvmfp()};
       v << pop{saved_rip};
-      v << pop{rtoc()};
 
-      // Drop our call frame plus the pushed info (return addres and TOC).
-      v << lea{rsp()[48], rsp()};
+      // Drop our call frame; the stublogue{} instruction guarantees that this
+      // is exactly ppc64_asm::min_callstack_size bytes.
+      v << lea{rsp()[ppc64_asm::min_callstack_size], rsp()};
 
       // Sync vmsp and return to the caller.  This unbalances the return stack
       // buffer, but if we're intercepting, we probably don't care.
@@ -132,21 +110,11 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
     });
 
     // Skip past the stuff we saved for the intercept case.
-    v << lea{rsp()[32], rsp()}; // saved frame
+    v << lea{rsp()[16], rsp()};
 
     // Restore rvmfp() and return to the callee's func prologue.
-    // kind of stubret
-    v << pop{rvmfp()};
-    v << lea{rsp()[8], rsp()};
-    v << pop{rfuncln()}; // savedRip
-    v << pop{rtoc()};
-
-    v << mtlr{rfuncln()};
-    v << ret{RegSet()};
+    v << stubret{RegSet(), true};
   });
-
-  // set it to the return address of emitFunctionEnterHelper's call
-  us.functionEnterHelperReturn -= smashableCallSkipEpilogue();
 
   return start;
 }
@@ -161,14 +129,14 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
  * expects `tv' to be the address of a TypedValue with refcounted type `type'
  * (though it may be static, and we will do nothing in that case).
  *
- * The `saved' register should be a callee-saved GP register that the helper
- * can use to preserve `tv' across native calls.
+ * The `live' registers must be preserved across any native calls (and
+ * generally left untouched).
  */
-static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv, PhysReg type,
-                            RegSet live) {
+static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
+                            PhysReg type, RegSet live) {
   return vwrap(cb, fixups, [&] (Vout& v) {
-    // We use the first argument register for the TV data because we may pass
-    // it to the release routine.  It's not live when we enter the helper.
+    // We use the first argument register for the TV data because we might pass
+    // it to the native release call. It's not live when we enter the helper.
     auto const data = rarg(0);
     v << load{tv[TVOFF(m_data)], data};
 
@@ -179,35 +147,41 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv, PhysReg t
       // The refcount is positive, so the value is refcounted.  We need to
       // either decref or release.
       ifThen(v, CC_NE, sf, [&] (Vout& v) {
-        // This new scope is needed for saving the registers used as parameters,
-        // just like the "PhysRegSaver prs{v, live};" below.
-        // Declm instruction (for PPC64) is lowered and uses additional
-        // registers.
-        {
-          // The refcount is greater than 1; decref it.
-          v << declm{data[FAST_REFCOUNT_OFFSET], v.makeReg()};
-        }
+        // The refcount is greater than 1; decref it.
+        v << declm{data[FAST_REFCOUNT_OFFSET], v.makeReg()};
         v << ret{live};
       });
 
-      // Note that the stack is aligned since we called to this helper from an
-      // stack-unaligned stub.
       PhysRegSaver prs{v, live};
+
+      auto const dword_size = sizeof(int64_t);
+
+      // saving return value on the stack, but keeping it 16-byte aligned
+      v << mflr{rfuncln()};
+      v << lea {rsp()[-2 * dword_size], rsp()};
+      v << store{rfuncln(), rsp()[0]};
 
       // The refcount is exactly 1; release the value.
       // Avoid 'this' pointer overwriting by reserving it as an argument.
       v << callm{lookupDestructor(v, type), arg_regs(1)};
 
       // Between where r1 is now and the saved RIP of the call into the
-      // freeLocalsHelpers stub, we have all the live regs we pushed, plus one
-      // entire frame.
-      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 4);
+      // freeLocalsHelpers stub, we have all the live regs we pushed, plus the
+      // stack size reserved for the LR saved right above and the LR offset in
+      // the frame.
+      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 2 +
+          ppc64_asm::lr_position_on_callstack / dword_size);
       v << syncpoint{fixup};
       // fallthru
+
+      // restore the return value from the stack
+      v << load{rsp()[0], rfuncln()};
+      v << lea {rsp()[2 * dword_size], rsp()};
+      v << mtlr{rfuncln()};
     });
 
     // Either we did a decref, or the value was static.
-    v << ret{};
+    v << ret{live};
   });
 }
 
@@ -226,14 +200,25 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   auto const decref_local = [&] (Vout& v) {
     auto const sf = v.makeReg();
 
-    // We can't use emitLoadTVType() here because it does a byte load, and we
-    // need to sign-extend since we use `type' as a 32-bit array index to the
-    // destructor table.
+    // We can't do a byte load here---we have to sign-extend since we use
+    // `type' as a 32-bit array index to the destructor table.
     v << loadzbl{local[TVOFF(m_type)], type};
     emitCmpTVType(v, sf, KindOfRefCountThreshold, type);
 
     ifThen(v, CC_G, sf, [&] (Vout& v) {
+      auto const dword_size = sizeof(int64_t);
+
+      // saving return value on the stack, but keeping it 16-byte aligned
+      v << mflr{rfuncln()};
+      v << lea {rsp()[-2 * dword_size], rsp()};
+      v << store{rfuncln(), rsp()[0]};
+
       v << call{release, arg_regs(3)};
+
+      // restore the return value from the stack
+      v << load{rsp()[0], rfuncln()};
+      v << lea {rsp()[2 * dword_size], rsp()};
+      v << mtlr{rfuncln()};
     });
   };
 
@@ -285,29 +270,31 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-extern "C" void enterTCExit();
+void assert_tc_saved_rip(void* saved_lr_pointer) {
+  // saved on enterTCHelper
+  auto const saved_lr = *reinterpret_cast<uint8_t**>(saved_lr_pointer);
+  auto const branch_block = saved_lr; // next instruction after resumetc's callr
+  auto const branch_instr = branch_block + smashableJccSkip();
+  auto const jmp_target = TCA(ppc64_asm::Assembler::getLi64(branch_block));
 
-TCA emitCallToExit(CodeBlock& cb) {
+  ppc64_asm::DecodedInstruction di(branch_instr);
+  auto const exittc = mcg->ustubs().enterTCExit;
+  always_assert(saved_lr == exittc || (di.isJmp() && jmp_target == exittc));
+}
+
+TCA emitCallToExit(CodeBlock& cb, const UniqueStubs& us) {
   ppc64_asm::Assembler a { cb };
   auto const start = a.frontier();
 
-  // temporaries
-  auto stack_value = rfuncln();
-  auto enterTCExit_address = rAsm;
-
   if (RuntimeOption::EvalHHIRGenerateAsserts) {
-    ppc64_asm::Label ok;
-    a.li64(enterTCExit_address, uintptr_t(enterTCExit));
-    a.ld  (stack_value, rsp()[32]);   // saved on enterTCHelper
-    a.cmpd(enterTCExit_address, stack_value);
-    a.b   (ok);
-    a.trap();
-
-    ok.asm_label(a);
+    vwrap(cb, [&] (Vout& v) {
+      v << lea{rsp()[AROFF(m_savedRip)], rarg(0)};
+      v << call{TCA(assert_tc_saved_rip), RegSet(rarg(0))};
+    });
   }
 
   // Simply go to enterTCExit, no worries about the stack because it's balanced
-  a.branchAuto(TCA(enterTCExit));
+  a.branchAuto(TCA(mcg->ustubs().enterTCExit));
   return start;
 }
 
@@ -324,17 +311,16 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
   });
   svcreq::emit_persistent(cb, folly::none, REQ_POST_DEBUGGER_RET);
 
-  auto const resumeCPPUnwind = vwrap(cb, [] (Vout& v) {
+  auto const resumeCPPUnwind = vwrap(cb, [&] (Vout& v) {
     static_assert(sizeof(tl_regState) == 1,
                   "The following store must match the size of tl_regState.");
     auto const regstate = emitTLSAddr(v, tls_datum(tl_regState));
     v << storebi{static_cast<int32_t>(VMRegState::CLEAN), regstate};
 
     v << load{rvmtl()[unwinderExnOff()], rarg(0)};
-    v << call{TCA(_Unwind_Resume), arg_regs(1)};
+    v << call{TCA(_Unwind_Resume), arg_regs(1), &us.endCatchHelperPast};
+    v << ud2{};
   });
-  us.endCatchHelperPast = cb.frontier() - smashableCallSkipEpilogue();
-  vwrap(cb, [] (Vout& v) { v << ud2{}; });
 
   alignJmpTarget(cb);
 
@@ -368,7 +354,6 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
     v << jcci{CC_Z, sf2, done2, resumeCPPUnwind};
     v = done2;
 
-    // We need to do a syncForLLVMCatch(), but vmfp is already in $r4.
     v << jmpr{ppc64_asm::reg::r3};
   });
 }
@@ -380,8 +365,8 @@ void enterTCImpl(TCA start, ActRec* stashedAR) {
   // register (aside from %rbp), since enterTCHelper does not save them.
   CALLEE_SAVED_BARRIER();
   auto& regs = vmRegsUnsafe();
-  jit::enterTCHelper(regs.stack.top(), regs.fp, start,
-                     vmFirstAR(), rds::tl_base, stashedAR);
+  mcg->ustubs().enterTCHelper(regs.stack.top(), regs.fp, start,
+                              vmFirstAR(), rds::tl_base, stashedAR);
   CALLEE_SAVED_BARRIER();
 }
 

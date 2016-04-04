@@ -130,8 +130,8 @@ struct Vgen {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
   }
   void emit(const nothrow& i) {
-    // save the return address of previous call.
-    TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
+    // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
+    TCA saved_pc = a.frontier() - call_skip_bytes_for_ret;
     env.meta.catches.emplace_back(saved_pc, nullptr);
   }
 
@@ -151,7 +151,7 @@ struct Vgen {
   void emit(const extsb& i) { a.extsb(i.d, i.s); }
   void emit(const extsw& i) { a.extsw(i.d, i.s); }
   void emit(const fabs& i) { a.fabs(i.d, i.s, false); }
-  void emit(const fallthru& i) {}
+  void emit(const fallthru&) {}
   void emit(const fcmpo& i) { a.fcmpo(i.sf, i.s0, i.s1); }
   void emit(const fcmpu& i) { a.fcmpu(i.sf, i.s0, i.s1); }
   void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
@@ -159,10 +159,7 @@ struct Vgen {
   void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
   void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
-  void emit(const jmpr& i) { a.mtctr(i.target); a.bctr(); }
-  // After VM frame unwinding, restore the frame pointer correctly as the
-  // call left it with the additional frame.
-  void emit(const landingpad& i) { a.popFrame(rsp()); }
+  void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
   void emit(const leap& i) { a.li64(i.d, i.s.r.disp, false); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
@@ -172,7 +169,7 @@ struct Vgen {
   void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
   void emit(const neg& i) { a.neg(i.d, i.s, true); }
-  void emit(const nop& i) { a.ori(Reg64(0), Reg64(0), 0); } // no-op form
+  void emit(const nop& i) { a.nop(); }
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
   void emit(const ret& i) { a.blr(); }
@@ -189,7 +186,7 @@ struct Vgen {
   // Subtractions: d = s1 - s0
   void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
-  void emit(const ud2& i) { a.trap(); }
+  void emit(const ud2&) { a.trap(); }
   void emit(const xorb& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
   void emit(const xorl& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
   void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
@@ -305,12 +302,14 @@ struct Vgen {
   void emit(const callr& i);
   void emit(const calls& i);
   void emit(const callstub& i);
+  void emit(const calltc& i);
   void emit(const cmovq&);
   void emit(const contenter&);
   void emit(const cvtsi2sd& i);
   void emit(const jcc& i);
   void emit(const jcci& i);
   void emit(const jmp& i);
+  void emit(const jmpr& i);
   void emit(const ldimmb& i);
   void emit(const ldimml& i);
   void emit(const ldimmq& i);
@@ -391,8 +390,7 @@ void Vgen::emit(const ldimmq& i) {
       a.xor(i.d, i.d, i.d);
       // emit nops to fill a standard li64 instruction block
       // this will be useful on patching and smashable operations
-      a.emitNop(ppc64_asm::Assembler::kLi64InstrLen -
-          1 * ppc64_asm::Assembler::kBytesPerInstr);
+      a.emitNop(Assembler::kLi64InstrLen - 1 * instr_size_in_bytes);
     } else {
       a.li64(i.d, val);
     }
@@ -415,21 +413,20 @@ void Vgen::emit(const contenter& i) {
     // pop(fp[AROFF(m_savedRip)]) on x64.
     // rAsm is a scratch register.
     a.mflr(rAsm);
-    emit(store{rAsm, fp[AROFF(m_savedRip)]});
+    a.std(rAsm, fp[AROFF(m_savedRip)]);
+
     emit(jmpr{i.target,i.args});
   }
   end.asm_label(a);
   {
-    a.call(rsp(), rtoc(), rfuncln(), rvmfp(), stub);
+    a.call(stub);
     emit(unwind{{i.targets[0], i.targets[1]}});
   }
 }
 
 void Vgen::emit(const syncpoint& i) {
-  // As the syncpoint intends to store the return address of the last call
-  // vasm, it's necessary to subtract instructions from the call's "epilogue"
-  // in order to adjust the a.frontier() reference.
-  TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
+  // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
+  TCA saved_pc = a.frontier() - call_skip_bytes_for_ret;
   FTRACE(5, "IR recordSyncPoint: {} {} {}\n", saved_pc,
          i.fix.pcOffset, i.fix.spOffset);
   env.meta.fixups.emplace_back(saved_pc, i.fix);
@@ -460,18 +457,16 @@ void Vgen::emit(const load& i) {
 }
 
 void Vgen::emit(const callstub& i) {
-  emit(call{i.target, i.args});
+  a.call(i.target);
 }
 
 void Vgen::emit(const callfaststub& i) {
-  emit(call{i.target, i.args});
+  a.call(i.target);
   emit(syncpoint{i.fix});
 }
 void Vgen::emit(const unwind& i) {
-  // As the catch intends to store the return address of the last call vasm,
-  // it's necessary to subtract instructions from the call's "epilogue" in
-  // order to match the expected return address as stored in the caller's frame
-  TCA saved_pc = a.frontier() - smashableCallSkipEpilogue();
+  // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
+  TCA saved_pc = a.frontier() - call_skip_bytes_for_ret;
   catches.push_back({saved_pc, i.targets[1]});
   emit(jmp{i.targets[0]});
 }
@@ -481,6 +476,11 @@ void Vgen::emit(const jmp& i) {
 
   // offset to be determined by a.patchBctr
   a.branchAuto(a.frontier());
+}
+void Vgen::emit(const jmpr& i) {
+  a.mr(reg::r12, i.target.asReg());
+  a.mtctr(reg::r12);
+  a.bctr();
 }
 void Vgen::emit(const jcc& i) {
   if (i.targets[1] != i.targets[0]) {
@@ -516,11 +516,11 @@ void Vgen::emit(const cmovq& i) {
 void Vgen::patch(Venv& env) {
   for (auto& p : env.jmps) {
     assertx(env.addrs[p.target]);
-    ppc64_asm::Assembler::patchBctr(p.instr, env.addrs[p.target]);
+    Assembler::patchBctr(p.instr, env.addrs[p.target]);
   }
   for (auto& p : env.jccs) {
     assertx(env.addrs[p.target]);
-    ppc64_asm::Assembler::patchBctr(p.instr, env.addrs[p.target]);
+    Assembler::patchBctr(p.instr, env.addrs[p.target]);
   }
   assertx(env.bccs.empty());
 }
@@ -569,6 +569,25 @@ void Vgen::emit(const leavetc&) {
   emit(ret{});
 }
 
+void Vgen::emit(const calltc& i) {
+  // Dummy call for branch predictor's sake:
+  // the link stack would be wrong otherwise and mispredictions would occur
+  a.bl(instr_size_in_bytes);  // jump to next instruction
+
+  // this will be verified by emitCallToExit
+  a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
+  a.std(rAsm, rsp()[AROFF(m_savedRip)]);
+
+  // keep the return address as initialized by the vm frame
+  a.ld(rfuncln(), i.fp[AROFF(m_savedRip)]);
+  a.mtlr(rfuncln());
+
+  // and jump. When it returns, it'll be to enterTCExit
+  a.mr(reg::r12, i.target.asReg());
+  a.mtctr(reg::r12);
+  a.bctr();
+}
+
 void Vgen::emit(const lea& i) {
   // could do this in a simplify pass
   if (i.s.disp == 0 && i.s.base.isValid() && !i.s.index.isValid()) {
@@ -585,19 +604,39 @@ void Vgen::emit(const lea& i) {
 }
 
 void Vgen::emit(const call& i) {
-  a.call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target);
+  // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  // TOC save/restore is required by ABI for external functions.
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
+  a.call(i.target, true);
+  if (i.watch) {
+    // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
+    *i.watch = a.frontier() - call_skip_bytes_for_ret;
+    env.meta.watchpoints.push_back(i.watch);
+  }
 }
 
 void Vgen::emit(const callr& i) {
-  a.call(rsp(), rtoc(), rfuncln(), rvmfp(), i.target.asReg());
+  // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  // TOC save/restore is required by ABI for external functions.
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
+  a.call(i.target.asReg(), true);
 }
 
 void Vgen::emit(const calls& i) {
+  // calls is used to call c++ function like handlePrimeCacheInit so setup the
+  // r1 pointer to a valid frame in order to allow LR save by callee's
+  // prologue.
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   emitSmashableCall(a.code(), env.meta, i.target);
 }
 
 void Vgen::emit(const callarray& i) {
-  emit(call{i.target, i.args});
+  a.call(i.target);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -605,24 +644,34 @@ void Vgen::emit(const callarray& i) {
  * Stub function ABI
  */
 void Vgen::emit(const stublogue& i) {
-  // rvmfp is always saved on stack after call at rsp()[0]
-  if (i.saveframe) a.stdu(rvmfp(), rsp()[-16]);
-  else a.addi(rsp(), rsp(), -16);
+  // Save a complete frame
+  if (i.saveframe) a.stdu(rvmfp(), rsp()[-min_callstack_size]);
+  else a.addi(rsp(), rsp(), -min_callstack_size);
+
+  // save return address on this frame, just like phplogue does
+  a.mflr(rfuncln());
+  a.std(rfuncln(), rsp()[AROFF(m_savedRip)]);
 }
 
 void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
-  if (i.saveframe) a.ld(rvmfp(), rsp()[0]);
-  a.popFrame(rsp());
-  a.blr();    // return
+  if (i.saveframe) a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
+
+  // restore return address.
+  a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
+  a.mtlr(rfuncln());
+
+  // pop this frame as created by stublogue and return
+  a.addi(rsp(), rsp(), min_callstack_size);
+  a.blr();
 }
 
 void Vgen::emit(const tailcallstub& i) {
-  // Update native stack pointer to ignore the current frame.
-  // the Return Address is already in LR due to stublogue.
-  a.popFrame(rsp());
-
-  // tail call: perform a jmp instead of a call.
+  // tail call: perform a jmp instead of a call. Use current return address on
+  // frame and undo stublogue allocation.
+  a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
+  a.mtlr(rfuncln());
+  a.addi(rsp(), rsp(), -min_callstack_size);
   emit(jmpi{i.target, i.args});
 }
 
@@ -632,10 +681,11 @@ void Vgen::emit(const loadstubret& i) {
 }
 
 void Vgen::emit(const stubtophp& i) {
-  // save return address from native frame due to call to the vm frame
-  a.ld(rAsm, rsp()[-16]);
-  a.std(rAsm, rvmfp()[AROFF(m_savedRip)]);
-  a.popFrame(rsp());
+  // reset the return address from native frame due to call to the vm frame
+  a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
+  a.mtlr(rfuncln());
+  // pop this frame as created by stublogue
+  a.addi(rsp(), rsp(), min_callstack_size);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1015,20 +1065,16 @@ X(andli,  movl, andqi,  ONE_R64(d))
 // phplogue and phpret doesn't save toc as it's saved on call.
 void lowerForPPC64(Vout& v, phplogue& inst) {
   // store basic info on vm frame
-  Vreg ret_address = v.makeReg();
-  v << mflr{ret_address};
-  v << store{ret_address, inst.fp[AROFF(m_savedRip)]};
+  v << mflr{rfuncln()};
+  v << store{rfuncln(), inst.fp[AROFF(m_savedRip)]};
 }
 
 void lowerForPPC64(Vout& v, phpret& inst) {
-  Vreg return_info = v.makeReg();
-  v << load{inst.fp[AROFF(m_savedRip)], return_info};
-  if (!inst.noframe) {
-    v << load{inst.fp[AROFF(m_sfp)], inst.d};
-  }
+  v << load{inst.fp[AROFF(m_savedRip)], rfuncln()};
+  if (!inst.noframe) v << load{inst.fp[AROFF(m_sfp)], inst.d};
 
   // for balancing the link stack (branch predictor), this should perform blr
-  v << mtlr{return_info};
+  v << mtlr{rfuncln()};
   v << ret{RegSet()};
 }
 
@@ -1037,9 +1083,8 @@ void lowerForPPC64(Vout& v, phpret& inst) {
  * contents as prior to the call.
  */
 void lowerForPPC64(Vout& v, tailcallphp& inst) {
-  Vreg new_return = v.makeReg();
-  v << load{inst.fp[AROFF(m_savedRip)], new_return};
-  v << mtlr{new_return};
+  v << load{inst.fp[AROFF(m_savedRip)], rfuncln()};
+  v << mtlr{rfuncln()};
   v << jmpr{inst.target, inst.args};
 }
 
@@ -1099,6 +1144,14 @@ void lowerForPPC64(Vout& v, popm& inst) {
   patchVptr(inst.d, v);
   v << pop{tmp};
   v << store{tmp, inst.d};
+}
+
+void lowerForPPC64(Vout& v, resumetc& inst) {
+  auto const exittc = v.cns(inst.exittc);
+  v << mtlr{exittc};
+  v << store{exittc, rsp()[AROFF(m_savedRip)]};
+  v << callr{inst.target, inst.args};
+  v << jmpi{inst.exittc};
 }
 
 void lowerForPPC64(Vout& v, setcc& inst) {

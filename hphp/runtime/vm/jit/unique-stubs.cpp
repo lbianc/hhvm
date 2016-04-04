@@ -925,7 +925,15 @@ TCA emitEnterTCHelper(CodeBlock& cb, UniqueStubs& us) {
     // Eagerly save VM regs, realign the native stack, then perform a native
     // return.
     storeVMRegs(v);
+#if defined(__x86_64__)
     v << lea{rsp()[8], rsp()};
+#elif defined(__powerpc64__)
+    v << lea{rsp()[8 * 8], rsp()};
+    v << copy{rsp(), ppc64_asm::reg::r1};
+    // corrupt the backchain, but it'll be useless soon as it'll be destroyed.
+    // by doing this the r31 value will be correctly loaded on stubret.
+    v << store{ppc64_asm::reg::r1, rsp()[0]};
+#endif
     v << stubret{RegSet(), true};
   });
 
@@ -943,7 +951,31 @@ TCA emitEnterTCHelper(CodeBlock& cb, UniqueStubs& us) {
   auto const calleeAR = rarg(5);
 #endif
 
-  return vwrap2(cb, [&] (Vout& v, Vout& vcold) {
+  // Used on return: the following code is the enterTCHelper
+  auto const entertc  = cb.frontier();
+
+#if defined(__powerpc64__)
+  ppc64_asm::Assembler a { cb };
+  // PPC64 call doesn't push the return address directly but leave it for the
+  // callee's prologue to save it on caller's frame.
+  a.mflr(ppc64::rfuncln());
+  a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
+
+  // As PPC64 has no native stack pointer rather only a frame pointer, the rsp
+  // needs to be initialized explicitly.
+  // Also grow the native stack as there was no call before. The stublogue will
+  // add 16 bytes further below. Now the remaining 16 bytes for the frame and
+  // an additional 16 bytes will be allocated for saving a few registers.
+  a.addi(rsp(), ppc64_asm::reg::r1, -(8 * 4));
+  // To be restored by stubret on enterTCExit
+  a.std(ppc64_asm::reg::r31, rsp()[8 * 2]);
+  a.std(ppc64::rtoc(), rsp()[8 * 1]);         // 24th on frame after stublogue
+
+  // initialize our rone register
+  a.li(ppc64::rone(), 1);
+#endif
+
+  vwrap2(cb, [&] (Vout& v, Vout& vcold) {
     // Native func prologue.
     v << stublogue{true};
 
@@ -954,15 +986,23 @@ TCA emitEnterTCHelper(CodeBlock& cb, UniqueStubs& us) {
 #endif
 
     // Set up linkage with the top VM frame in this nesting.
+#if defined(__powerpc64__)
+    v << store{ppc64_asm::reg::r1, firstAR[AROFF(m_sfp)]};
+    v << store{ppc64::rtoc(), firstAR[AROFF(m_savedToc)]};
+    v << store{firstAR, rsp()[AROFF(m_sfp)]};
+#else
     v << store{rsp(), firstAR[AROFF(m_sfp)]};
+#endif
 
     // Set up the VM registers.
     v << copy{fp, rvmfp()};
     v << copy{sp, rvmsp()};
     v << copy{tl, rvmtl()};
 
+#if defined(__x86_64__)
     // Unalign the native stack.
     v << lea{rsp()[-8], rsp()};
+#endif
 
     // Check if `calleeAR' was set.
     auto const sf = v.makeReg();
@@ -982,6 +1022,8 @@ TCA emitEnterTCHelper(CodeBlock& cb, UniqueStubs& us) {
     v << copy{calleeAR, rvmfp()};
     v << calltc{start, rvmfp(), us.enterTCExit, vm_regs_with_sp()};
   });
+
+  return entertc;
 }
 
 TCA emitHandleSRHelper(CodeBlock& cb) {
