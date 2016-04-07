@@ -136,10 +136,17 @@ IRMetadataUpdater::block_info() {
 ///////////////////////////////////////////////////////////////////////////////
 
 bool is_empty_catch(const Vblock& block) {
+#if defined(__powerpc64__)
+  // Disabling this optimization for PPC64 temporarily, while the landingpad
+  // instruction removes pushed information in the stack. The call instructions
+  // will be modified to do not change the stack and it can be enabled again.
+  return false;
+#else
   return block.code.size() == 2 &&
          block.code[0].op == Vinstr::landingpad &&
          block.code[1].op == Vinstr::jmpi &&
          block.code[1].jmpi_.target == mcg->ustubs().endCatchHelper;
+#endif
 }
 
 void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
