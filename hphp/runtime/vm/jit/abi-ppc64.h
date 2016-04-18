@@ -66,6 +66,9 @@ constexpr PhysReg rone()       { return ppc64_asm::reg::r28; }
 inline RegSet vm_regs_no_sp()   { return rvmfp() | rvmtl(); }
 inline RegSet vm_regs_with_sp() { return vm_regs_no_sp() | rvmsp(); }
 
+constexpr PhysReg rret_data() { return ppc64_asm::reg::r3; }
+constexpr PhysReg rret_type() { return ppc64_asm::reg::r4; }
+
 PhysReg rret(size_t i = 0);
 PhysReg rret_simd(size_t i);
 

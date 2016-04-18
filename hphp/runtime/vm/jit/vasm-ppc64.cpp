@@ -162,6 +162,7 @@ struct Vgen {
   void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
   void emit(const leap& i) { a.li64(i.d, i.s.r.disp, false); }
+  void emit(const lead& i) { a.li64(i.d, (int64_t)i.s.get(), false); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
   void emit(const mflr& i) { a.mflr(i.d); }
   void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
@@ -329,7 +330,10 @@ struct Vgen {
   void emit(const ucomisd& i);
   void emit(const unwind& i);
 
-  void emit_nop() { not_implemented(); }
+  void emit_nop() {
+    a.addi(rAsm, rAsm, 16);
+    a.addi(rAsm, rAsm, -16);
+  }
 
 private:
   CodeBlock& frozen() { return text.frozen().code; }
@@ -1131,6 +1135,13 @@ void lowerForPPC64(Vout& v, loadqp& inst) {
   // in PPC we don't have anything like a RIP register
   // RIP register uses an absolute displacement address. Load it to a register
   Vptr p(v.cns(inst.s.r.disp), 0); // this Vptr doesn't need patch
+  v << load{p, inst.d};
+}
+
+void lowerForPPC64(Vout& v, loadqd& inst) {
+  // in PPC we don't have anything like a RIP register
+  // RIP register uses an absolute displacement address. Load it to a register
+  Vptr p(v.cns(inst.s.get()), 0); // this Vptr doesn't need patch
   v << load{p, inst.d};
 }
 

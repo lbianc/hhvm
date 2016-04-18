@@ -59,10 +59,10 @@ static void alignJmpTarget(CodeBlock& cb) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
+TCA emitFunctionEnterHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   alignJmpTarget(cb);
 
-  auto const start = vwrap2(cb, [&] (Vout& v, Vout& vcold) {
+  auto const start = vwrap2(cb, data, [&] (Vout& v, Vout& vcold) {
     auto const ar = v.makeReg();
 
     v << copy{rvmfp(), ar};
@@ -103,9 +103,13 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
       // is exactly ppc64_asm::min_callstack_size bytes.
       v << lea{rsp()[ppc64_asm::min_callstack_size], rsp()};
 
-      // Sync vmsp and return to the caller.  This unbalances the return stack
-      // buffer, but if we're intercepting, we probably don't care.
+      // Sync vmsp and the return regs.
       v << load{rvmtl()[rds::kVmspOff], rvmsp()};
+      v << load{rvmsp()[TVOFF(m_data)], rret_data()};
+      v << load{rvmsp()[TVOFF(m_type)], rret_type()};
+
+      // Return to the caller.  This unbalances the return stack buffer, but if
+      // we're intercepting, we probably don't care.
       v << jmpr{saved_rip};
     });
 
@@ -132,11 +136,11 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, UniqueStubs& us) {
  * The `live' registers must be preserved across any native calls (and
  * generally left untouched).
  */
-static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
-                            PhysReg type, RegSet live) {
-  return vwrap(cb, fixups, [&] (Vout& v) {
+static TCA emitDecRefHelper(CodeBlock& cb, DataBlock& data, CGMeta& fixups,
+                            PhysReg tv, PhysReg type, RegSet live) {
+  return vwrap(cb, data, fixups, [&] (Vout& v) {
     // We use the first argument register for the TV data because we might pass
-    // it to the native release call. It's not live when we enter the helper.
+    // it to the native release call.  It's not live when we enter the helper.
     auto const data = rarg(0);
     v << load{tv[TVOFF(m_data)], data};
 
@@ -185,7 +189,7 @@ static TCA emitDecRefHelper(CodeBlock& cb, CGMeta& fixups, PhysReg tv,
   });
 }
 
-TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
+TCA emitFreeLocalsHelpers(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   // The address of the first local is passed in the second argument register.
   // We use the third and fourth as scratch registers.
   auto const local = rarg(1);
@@ -195,7 +199,8 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
 
   // This stub is very hot; keep it cache-aligned.
   align(cb, &fixups, Alignment::CacheLine, AlignContext::Dead);
-  auto const release = emitDecRefHelper(cb, fixups, local, type, local | last);
+  auto const release =
+    emitDecRefHelper(cb, data, fixups, local, type, local | last);
 
   auto const decref_local = [&] (Vout& v) {
     auto const sf = v.makeReg();
@@ -229,7 +234,7 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
 
   alignJmpTarget(cb);
 
-  us.freeManyLocalsHelper = vwrap(cb, fixups, [&] (Vout& v) {
+  us.freeManyLocalsHelper = vwrap(cb, data, fixups, [&] (Vout& v) {
     // We always unroll the final `kNumFreeLocalsHelpers' decrefs, so only loop
     // until we hit that point.
     v << lea{rvmfp()[localOffset(kNumFreeLocalsHelpers - 1)], last};
@@ -247,14 +252,14 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   });
 
   for (auto i = kNumFreeLocalsHelpers - 1; i >= 0; --i) {
-    us.freeLocalsHelpers[i] = vwrap(cb, [&] (Vout& v) {
+    us.freeLocalsHelpers[i] = vwrap(cb, data, [&] (Vout& v) {
       decref_local(v);
       if (i != 0) next_local(v);
     });
   }
 
   // All the stub entrypoints share the same ret.
-  vwrap(cb, fixups, [] (Vout& v) { v << ret{}; });
+  vwrap(cb, data, fixups, [] (Vout& v) { v << ret{}; });
 
   // This stub is hot, so make sure to keep it small.
 #if 0
@@ -282,14 +287,25 @@ void assert_tc_saved_rip(void* saved_lr_pointer) {
   always_assert(saved_lr == exittc || (di.isJmp() && jmp_target == exittc));
 }
 
-TCA emitCallToExit(CodeBlock& cb, const UniqueStubs& us) {
+TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
   ppc64_asm::Assembler a { cb };
   auto const start = a.frontier();
 
   if (RuntimeOption::EvalHHIRGenerateAsserts) {
-    vwrap(cb, [&] (Vout& v) {
-      v << lea{rsp()[AROFF(m_savedRip)], rarg(0)};
+    vwrap(cb, data, [&] (Vout& v) {
+      // Not doing it directly as rret(0) == rarg(0) on ppc64
+      Vreg ret_addr = v.makeReg();
+      v << lea{rsp()[AROFF(m_savedRip)], ret_addr};
+
+      // We need to spill the return registers around the assert call.
+      v << push{rret(0)};
+      v << push{rret(1)};
+
+      v << copy{ret_addr, rarg(0)};
       v << call{TCA(assert_tc_saved_rip), RegSet(rarg(0))};
+
+      v << pop{rret(1)};
+      v << pop{rret(0)};
     });
   }
 
@@ -298,20 +314,16 @@ TCA emitCallToExit(CodeBlock& cb, const UniqueStubs& us) {
   return start;
 }
 
-TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
+TCA emitEndCatchHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   auto const udrspo = rvmtl()[unwinderDebuggerReturnSPOff()];
 
-  auto const debuggerReturn = vwrap(cb, [&] (Vout& v) {
-    // Discard return address and TOC added by debug code.
-    // TODO(lbianc): Check from where this info is being pushed to validade
-    // if this solution is the best way.
-    if (!(debug && RuntimeOption::EvalHHIRGenerateAsserts)) v << landingpad{};
+  auto const debuggerReturn = vwrap(cb, data, [&] (Vout& v) {
     v << load{udrspo, rvmsp()};
     v << storeqi{0, udrspo};
   });
-  svcreq::emit_persistent(cb, folly::none, REQ_POST_DEBUGGER_RET);
+  svcreq::emit_persistent(cb, data, folly::none, REQ_POST_DEBUGGER_RET);
 
-  auto const resumeCPPUnwind = vwrap(cb, [&] (Vout& v) {
+  auto const resumeCPPUnwind = vwrap(cb, data, [&] (Vout& v) {
     static_assert(sizeof(tl_regState) == 1,
                   "The following store must match the size of tl_regState.");
     auto const regstate = emitTLSAddr(v, tls_datum(tl_regState));
@@ -324,7 +336,7 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
 
   alignJmpTarget(cb);
 
-  return vwrap(cb, [&] (Vout& v) {
+  return vwrap(cb, data, [&] (Vout& v) {
     auto const done1 = v.makeBlock();
     auto const sf = v.makeReg();
     auto const sf1 = v.makeReg();
@@ -361,6 +373,13 @@ TCA emitEndCatchHelper(CodeBlock& cb, UniqueStubs& us) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void enterTCImpl(TCA start, ActRec* stashedAR) {
+  static_assert(rvmfp() == ppc64_asm::reg::r31 &&
+                rvmsp() == ppc64_asm::reg::r29 &&
+                rvmtl() == ppc64_asm::reg::r30 &&
+                rret_data() == ppc64_asm::reg::r3 &&
+                rret_type() == ppc64_asm::reg::r4,
+                "enterTCHelper needs to be modified to use the correct ABI");
+
   // We have to force C++ to spill anything that might be in a callee-saved
   // register (aside from %rbp), since enterTCHelper does not save them.
   CALLEE_SAVED_BARRIER();
