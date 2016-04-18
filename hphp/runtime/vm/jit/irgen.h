@@ -13,6 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
 #ifndef incl_HPHP_JIT_IRGEN_H_
 #define incl_HPHP_JIT_IRGEN_H_
 
@@ -27,6 +28,7 @@
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/irgen-state.h"
+#include "hphp/runtime/vm/jit/location.h"
 #include "hphp/runtime/vm/jit/region-selection.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -106,20 +108,17 @@ SSATmp* cns(IRGS& env, Args&&... args) {
 
 /*
  * Type checks and assertions.
- *
- * TODO(#5706706): the stack versions should not be exported, except that
- * RegionDesc::Location::Stack needs some fixes first.
  */
-void checkType(IRGS&, const RegionDesc::Location&, Type,
+void checkType(IRGS&, const Location&, Type,
                Offset dest, bool outerOnly);
-void assertTypeStack(IRGS&, BCSPOffset, Type);
+void assertTypeStack(IRGS&, BCSPRelOffset, Type);
 void assertTypeLocal(IRGS&, uint32_t id, Type);
-void assertTypeLocation(IRGS&, const RegionDesc::Location&, Type);
+void assertTypeLocation(IRGS&, const Location&, Type);
 
 /*
  * Type predictions.
  */
-void predictType(IRGS&, const RegionDesc::Location&, Type);
+void predictType(IRGS&, const Location&, Type);
 
 /*
  * Special type of guards for param-passing reffiness. These checks are needed
@@ -210,25 +209,48 @@ void sealUnit(IRGS&);
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Called when we're starting to inline something.  Returns true iff
- * it succeeds.
+ * Returns whether `env' is currently inlining or not.
  */
-bool beginInlining(IRGS&,
+bool isInlining(const IRGS& env);
+
+/*
+ * Attempt to begin inlining, and return whether or not we succeeded.
+ *
+ * When doing gen-time inlining, we set up a series of IR instructions that
+ * looks like this:
+ *
+ *   fp0  = DefFP
+ *   sp   = DefSP<offset>
+ *
+ *   // ... normal stuff happens ...
+ *
+ *   // FPI region:
+ *     SpillFrame sp, ...
+ *     // ... probably some StStks due to argument expressions
+ *             BeginInlining<offset> sp
+ *     fp2   = DefInlineFP<func,retBC,retSP,off> sp
+ *
+ *         // ... callee body ...
+ *
+ *     InlineReturn fp2
+ *
+ * In DCE we attempt to remove the InlineReturn and DefInlineFP instructions if
+ * they aren't needed.
+ */
+bool beginInlining(IRGS& env,
                    unsigned numParams,
                    const Func* target,
                    Offset returnBcOffset,
-                   Block* returnTarget,
-                   bool multipleReturns);
+                   ReturnTarget returnTarget);
 
 /*
- * Called when all blocks of the inner most inlined frame have been emitted
+ * End the current inlined frame, after all its blocks have been emitted.
+ *
+ * This decrefs locals and $this and pushes the return value onto the caller's
+ * eval stack, in addition to the actual control transfer and bookkeeping done
+ * by implInlineReturn().
  */
 void endInlining(IRGS& env);
-
-/*
- * Returns whether the IRGS is currently inlining or not.
- */
-bool isInlining(const IRGS&);
 
 /*
  * We do two special-case optimizations to partially inline 'singleton'
@@ -253,7 +275,7 @@ void inlSingletonSLoc(IRGS&, const Func*, PC op);
 /*
  * Access the type of the top of the stack.
  */
-Type publicTopType(const IRGS& env, BCSPOffset);
+Type publicTopType(const IRGS& env, BCSPRelOffset);
 
 /*
  * Return the proven or predicted Type for the given location.

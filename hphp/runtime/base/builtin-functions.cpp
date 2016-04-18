@@ -28,7 +28,6 @@
 #include "hphp/runtime/debugger/debugger.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/std/ext_std_closure.h"
-#include "hphp/runtime/ext/collections/ext_collections-idl.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
@@ -553,6 +552,11 @@ void throw_collection_modified() {
 void throw_collection_property_exception() {
   SystemLib::throwInvalidOperationExceptionObject(
     "Cannot access a property on a collection");
+}
+
+void throw_invalid_collection_parameter() {
+  SystemLib::throwInvalidArgumentExceptionObject(
+    "Parameter must be an array or an instance of Traversable");
 }
 
 void throw_invalid_operation_exception(StringData* str) {

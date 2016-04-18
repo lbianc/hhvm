@@ -1207,8 +1207,8 @@ let rec entry ~keep_source_metadata ~no_trailing_commas ~modes
         Parser_hack.program rp content in
       if not (List.mem modes file_mode) then raise PHP;
     end in
-    if errorl <> []
-    then Parsing_error errorl
+    if not (Errors.is_empty errorl)
+    then Parsing_error (Errors.get_error_list errorl)
     else begin
       let lb = Lexing.from_string content in
       let env = empty file lb from to_ keep_source_metadata no_trailing_commas in
@@ -2742,6 +2742,12 @@ and expr_atomic_word env last_tok = function
       expect "(" env;
       right env array_body;
       expect ")" env
+  | "dict" ->
+      out "dict" env;
+      expect (token_to_string Tlb) env;
+      (** Dict body looks exactly like an array body. *)
+      right env array_body;
+      expect (token_to_string Trb) env;
   | "empty" | "unset" | "isset" as v ->
       out v env;
       arg_list ~trailing:false env

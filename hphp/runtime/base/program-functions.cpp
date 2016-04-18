@@ -87,10 +87,12 @@
 #include "hphp/util/shm-counter.h"
 #include "hphp/util/stack-trace.h"
 #include "hphp/util/timer.h"
+#include "hphp/util/type-scan.h"
 
 #include <folly/Range.h>
 #include <folly/Portability.h>
 #include <folly/Singleton.h>
+#include <folly/portability/Environment.h>
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -119,7 +121,6 @@
 
 using namespace boost::program_options;
 using std::cout;
-extern char **environ;
 
 constexpr auto MAX_INPUT_NESTING_LEVEL = 64;
 
@@ -815,7 +816,7 @@ static void pagein_self(void) {
   if (buf == nullptr)
     return;
 
-  BootTimer::Block timer("mapping self");
+  BootStats::Block timer("mapping self");
   fp = fopen("/proc/self/maps", "r");
   if (fp != nullptr) {
     while (!feof(fp)) {
@@ -919,13 +920,15 @@ static bool readahead_rate(const char* path, int64_t mbPerSec) {
 }
 
 static int start_server(const std::string &username, int xhprof) {
+  BootStats::start();
+  HttpServer::ReduceOldServerLoad();
+  HttpServer::CheckMemAndWait();
   InitFiniNode::ServerPreInit();
-  BootTimer::start();
 
   // Before we start the webserver, make sure the entire
   // binary is paged into memory.
   pagein_self();
-  BootTimer::mark("pagein_self");
+  BootStats::mark("pagein_self");
 
   set_execution_mode("server");
   HttpRequestHandler::GetAccessLog().init
@@ -956,6 +959,13 @@ static int start_server(const std::string &username, int xhprof) {
   Capability::SetDumpable();
 #endif
 
+  if (RuntimeOption::ServerInternalWarmupThreads > 0) {
+    HttpServer::CheckMemAndWait();
+    InitFiniNode::WarmupConcurrentStart(
+      RuntimeOption::ServerInternalWarmupThreads);
+  }
+
+  HttpServer::CheckMemAndWait();
   // Create the HttpServer before any warmup requests to properly
   // initialize the process
   HttpServer::Server = std::make_shared<HttpServer>();
@@ -968,8 +978,9 @@ static int start_server(const std::string &username, int xhprof) {
 
   if (RuntimeOption::RepoLocalReadaheadRate > 0 &&
       !RuntimeOption::RepoLocalPath.empty()) {
+    HttpServer::CheckMemAndWait();
     readaheadThread = folly::make_unique<std::thread>([&] {
-        BootTimer::Block timer("Readahead Repo");
+        BootStats::Block timer("Readahead Repo");
         auto path = RuntimeOption::RepoLocalPath.c_str();
         Logger::Info("readahead %s", path);
         const auto mbPerSec = RuntimeOption::RepoLocalReadaheadRate;
@@ -984,8 +995,14 @@ static int start_server(const std::string &username, int xhprof) {
     }
   }
 
+  if (RuntimeOption::ServerInternalWarmupThreads > 0) {
+    BootStats::Block timer("concurrentWaitForEnd");
+    InitFiniNode::WarmupConcurrentWaitForEnd();
+  }
+
   if (RuntimeOption::RepoPreload) {
-    BootTimer::Block timer("Preloading Repo");
+    HttpServer::CheckMemAndWait();
+    BootStats::Block timer("Preloading Repo");
     profileWarmupStart();
     preloadRepo();
     profileWarmupEnd();
@@ -999,12 +1016,13 @@ static int start_server(const std::string &username, int xhprof) {
     SCOPE_EXIT { profileWarmupEnd(); };
     std::map<std::string, int> seen;
     for (auto& file : RuntimeOption::ServerWarmupRequests) {
+      HttpServer::CheckMemAndWait();
       // Take only the last part
       folly::StringPiece f(file);
       auto pos = f.rfind('/');
       std::string str(pos == f.npos ? file : f.subpiece(pos + 1).str());
       auto count = seen[str];
-      BootTimer::Block timer(folly::sformat("warmup:{}:{}", str, count++));
+      BootStats::Block timer(folly::sformat("warmup:{}:{}", str, count++));
       seen[str] = count;
 
       HttpRequestHandler handler(0);
@@ -1032,12 +1050,14 @@ static int start_server(const std::string &username, int xhprof) {
       }
     }
   }
-  BootTimer::mark("warmup");
+  BootStats::mark("warmup");
 
   if (readaheadThread.get()) {
     readaheadThread->join();
     readaheadThread.reset();
   }
+
+  if (RuntimeOption::StopOldServer) HttpServer::StopOldServer();
 
   if (RuntimeOption::EvalEnableNuma) {
 #ifdef USE_JEMALLOC
@@ -1052,9 +1072,10 @@ static int start_server(const std::string &username, int xhprof) {
     }
 #endif
     enable_numa(RuntimeOption::EvalEnableNumaLocal);
-    BootTimer::mark("enable_numa");
+    BootStats::mark("enable_numa");
   }
 
+  HttpServer::CheckMemAndWait(true); // Final wait
   HttpServer::Server->runOrExitProcess();
   HttpServer::Server.reset();
   return 0;
@@ -1647,6 +1668,17 @@ static int execute_program_impl(int argc, char** argv) {
                            inherited_fds);
 #endif
 
+  // We want to do this as early as possible because any allocations before-hand
+  // will get a generic unknown type type-index.
+  if (RuntimeOption::EvalEnableGC && RuntimeOption::EvalEnableGCTypeScan) {
+    try {
+      type_scan::init();
+    } catch (const type_scan::InitException& exn) {
+      Logger::Error("Unable to initialize GC type-scanners: %s", exn.what());
+      exit(HPHP_EXIT_FAILURE);
+    }
+  }
+
   if (!ShmCounters::initialize(true, Logger::Error)) {
     exit(HPHP_EXIT_FAILURE);
   }
@@ -1963,16 +1995,16 @@ void hphp_process_init() {
 #endif
   init_stack_limits(&attr);
   pthread_attr_destroy(&attr);
-  BootTimer::mark("pthread_init");
+  BootStats::mark("pthread_init");
 
   Process::InitProcessStatics();
-  BootTimer::mark("Process::InitProcessStatics");
+  BootStats::mark("Process::InitProcessStatics");
 
   HHProf::Init();
 
   // initialize the tzinfo cache.
   timezone_init();
-  BootTimer::mark("timezone_init");
+  BootStats::mark("timezone_init");
 
   hphp_thread_init();
 
@@ -1984,24 +2016,21 @@ void hphp_process_init() {
 #endif
   // start takes milliseconds, Period is a double in seconds
   Xenon::getInstance().start(1000 * RuntimeOption::XenonPeriodSeconds);
-  BootTimer::mark("xenon");
-
-  ClassInfo::Load();
-  BootTimer::mark("ClassInfo::Load");
+  BootStats::mark("xenon");
 
   // reinitialize pcre table
   pcre_reinit();
-  BootTimer::mark("pcre_reinit");
+  BootStats::mark("pcre_reinit");
 
   // the liboniguruma docs say this isnt needed,
   // but the implementation of init is not
   // thread safe due to bugs
   onig_init();
-  BootTimer::mark("onig_init");
+  BootStats::mark("onig_init");
 
   // simple xml also needs one time init
   xmlInitParser();
-  BootTimer::mark("xmlInitParser");
+  BootStats::mark("xmlInitParser");
 
   g_context.getCheck();
   InitFiniNode::ProcessPreInit();
@@ -2011,26 +2040,26 @@ void hphp_process_init() {
   InitFiniNode::ProcessInitConcurrentStart(maxWorkers);
   SCOPE_EXIT {
     InitFiniNode::ProcessInitConcurrentWaitForEnd();
-    BootTimer::mark("extra_process_init_concurrent_wait");
+    BootStats::mark("extra_process_init_concurrent_wait");
   };
   g_vmProcessInit();
-  BootTimer::mark("g_vmProcessInit");
+  BootStats::mark("g_vmProcessInit");
 
   PageletServer::Restart();
-  BootTimer::mark("PageletServer::Restart");
+  BootStats::mark("PageletServer::Restart");
   XboxServer::Restart();
-  BootTimer::mark("XboxServer::Restart");
+  BootStats::mark("XboxServer::Restart");
   Stream::RegisterCoreWrappers();
-  BootTimer::mark("Stream::RegisterCoreWrappers");
+  BootStats::mark("Stream::RegisterCoreWrappers");
   ExtensionRegistry::moduleInit();
-  BootTimer::mark("ExtensionRegistry::moduleInit");
+  BootStats::mark("ExtensionRegistry::moduleInit");
 
   // Now that constants have been bound we can update options using constants
   // in ini files (e.g., E_ALL) and sync some other options
   update_constants_and_options();
 
   InitFiniNode::ProcessInit();
-  BootTimer::mark("extra_process_init");
+  BootStats::mark("extra_process_init");
   {
     UnlimitSerializationScope unlimit;
     // TODO(9755792): Add real execution mode for snapshot generation.
@@ -2040,16 +2069,16 @@ void hphp_process_init() {
     } else {
       apc_load(apcExtension::LoadThread);
     }
-    BootTimer::mark("apc_load");
+    BootStats::mark("apc_load");
   }
 
   rds::requestExit();
-  BootTimer::mark("rds::requestExit");
+  BootStats::mark("rds::requestExit");
   // Reset the preloaded g_context
   ExecutionContext *context = g_context.getNoCheck();
   context->~ExecutionContext();
   new (context) ExecutionContext();
-  BootTimer::mark("ExecutionContext");
+  BootStats::mark("ExecutionContext");
 
   // TODO(9755792): Add real execution mode for snapshot generation.
   if (apcExtension::PrimeLibraryUpgradeDest != "") {

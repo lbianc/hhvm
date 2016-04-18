@@ -10,9 +10,12 @@
 
 open Utils
 
+module TLazyHeap = Typing_lazy_heap
+
 type 'a command =
   | Rpc of 'a ServerRpc.t
   | Stream of streamed
+  | Debug
 
 and streamed =
   | SHOW of string
@@ -36,6 +39,10 @@ let stream_request oc cmd =
   Marshal.to_channel oc (Stream cmd) [];
   flush oc
 
+let connect_debug oc =
+  Marshal.to_channel oc Debug [];
+  flush oc
+
 (****************************************************************************)
 (* Called by the server *)
 (****************************************************************************)
@@ -45,7 +52,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
       ServerEnv.list_files env oc;
       ServerUtils.shutdown_client (ic, oc)
   | LIST_MODES ->
-      Relative_path.Map.iter begin fun fn fileinfo ->
+      Relative_path.Map.iter env.ServerEnv.files_info begin fun fn fileinfo ->
         match Relative_path.prefix fn with
         | Relative_path.Root ->
           let mode = match fileinfo.FileInfo.file_mode with
@@ -55,7 +62,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
             | Some FileInfo.Mstrict -> "strict" in
           Printf.fprintf oc "%s\t%s\n" mode (Relative_path.to_absolute fn)
         | _ -> ()
-      end env.ServerEnv.files_info;
+      end;
       flush oc;
       ServerUtils.shutdown_client (ic, oc)
   | SHOW name ->
@@ -72,11 +79,11 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           let () = output_string oc ((Pos.string (Pos.to_absolute p))^"\n") in
           canon
       in
-      let class_ = Typing_heap.Classes.get class_name in
+      let class_ = TLazyHeap.get_class env.ServerEnv.tcopt class_name in
       (match class_ with
       | None -> output_string oc "Missing from typing env\n"
       | Some c ->
-          let class_str = Typing_print.class_ c in
+          let class_str = Typing_print.class_ env.ServerEnv.tcopt c in
           output_string oc (class_str^"\n")
       );
       output_string oc "\nfunction:\n";
@@ -89,7 +96,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           let () = output_string oc ((Pos.string (Pos.to_absolute p))^"\n") in
           canon
       in
-      let fun_ = Typing_heap.Funs.get fun_name in
+      let fun_ = TLazyHeap.get_fun env.ServerEnv.tcopt fun_name in
       (match fun_ with
       | None ->
           output_string oc "Missing from typing env\n"
@@ -101,7 +108,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
       (match NamingGlobal.GEnv.gconst_pos qual_name with
       | Some p -> output_string oc (Pos.string (Pos.to_absolute p)^"\n")
       | None -> output_string oc "Missing from naming env\n");
-      let gconst_ty = Typing_heap.GConsts.get qual_name in
+      let gconst_ty = TLazyHeap.get_gconst env.ServerEnv.tcopt qual_name in
       (match gconst_ty with
       | None -> output_string oc "Missing from typing env\n"
       | Some gc ->
@@ -112,7 +119,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
       (match NamingGlobal.GEnv.typedef_pos qual_name with
       | Some p -> output_string oc (Pos.string (Pos.to_absolute p)^"\n")
       | None -> output_string oc "Missing from naming env\n");
-      let tdef = Typing_heap.Typedefs.get qual_name in
+      let tdef = TLazyHeap.get_typedef env.ServerEnv.tcopt qual_name in
       (match tdef with
       | None ->
           output_string oc "Missing from typing env\n"
@@ -167,7 +174,12 @@ let handle genv env (ic, oc) =
   let msg = read_client_msg ic in
   match msg with
   | Rpc cmd ->
+      let t = Unix.gettimeofday () in
       let response = ServerRpc.handle genv env cmd in
+      HackEventLogger.handled_command (ServerRpc.to_string cmd) t;
       send_response_to_client (ic, oc) response;
       if cmd = ServerRpc.KILL then ServerUtils.die_nicely ()
   | Stream cmd -> stream_response genv env (ic, oc) ~cmd
+  | Debug ->
+    genv.ServerEnv.debug_channels <- Some (ic, oc);
+    ServerDebug.say_hello genv

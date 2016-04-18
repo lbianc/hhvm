@@ -208,13 +208,13 @@ let hh_check_syntax fn content =
   error errors
 
 let hh_auto_complete fn =
+  let tcopt = TypecheckerOptions.permissive in
   let fn = Relative_path.create Relative_path.Root fn in
   AutocompleteService.attach_hooks();
   try
     let ast = Parser_heap.ParserHeap.find_unsafe fn in
     Errors.ignore_ begin fun () ->
       List.iter ast begin fun def ->
-        let tcopt = TypecheckerOptions.permissive in
         match def with
         | Ast.Fun f ->
           let f = Naming.fun_ tcopt f in
@@ -234,7 +234,7 @@ let hh_auto_complete fn =
       | Some Autocomplete.Acclass_get -> "class_get"
       | Some Autocomplete.Acprop -> "var"
       | None -> "none" in
-    let result = AutocompleteService.get_results [] [] in
+    let result = AutocompleteService.get_results tcopt SSet.empty SSet.empty in
     let result =
       List.map result AutocompleteService.autocomplete_result_to_json
     in
@@ -252,12 +252,12 @@ let hh_get_method_at_position fn line char =
   Autocomplete.auto_complete := false;
   let fn = Relative_path.create Relative_path.Root fn in
   let result = ref None in
+  let tcopt = TypecheckerOptions.permissive in
   IdentifySymbolService.attach_hooks result line char;
   try
     let ast = Parser_heap.ParserHeap.find_unsafe fn in
     Errors.ignore_ begin fun () ->
       List.iter ast begin fun def ->
-        let tcopt = TypecheckerOptions.permissive in
         match def with
         | Ast.Fun f ->
           let f = Naming.fun_ tcopt f in
@@ -272,10 +272,11 @@ let hh_get_method_at_position fn line char =
     let result =
       match !result with
       | Some res ->
+          let res = IdentifySymbolService.infer_method_position tcopt res in
           let result_type =
             match res.IdentifySymbolService.type_ with
             | IdentifySymbolService.Class -> "class"
-            | IdentifySymbolService.Method -> "method"
+            | IdentifySymbolService.Method _ -> "method"
             | IdentifySymbolService.Function -> "function"
             | IdentifySymbolService.LocalVar -> "local" in
           JSON_Object [ "name",           JSON_String res.IdentifySymbolService.name;

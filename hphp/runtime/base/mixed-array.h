@@ -119,13 +119,19 @@ public:
       }
     }
 
-    static constexpr size_t dataOff() {
+    static constexpr ptrdiff_t keyOff() {
+      return offsetof(Elm, ikey);
+    }
+    static constexpr ptrdiff_t dataOff() {
       return offsetof(Elm, data);
     }
   };
 
-  static constexpr size_t dataOff() {
+  static constexpr ptrdiff_t dataOff() {
     return sizeof(MixedArray);
+  }
+  static constexpr ptrdiff_t usedOff() {
+    return offsetof(MixedArray, m_used);
   }
 
   struct ElmKey {
@@ -371,6 +377,30 @@ public:
   // Safe downcast helpers
   static MixedArray* asMixed(ArrayData* ad);
   static const MixedArray* asMixed(const ArrayData* ad);
+  // Fast iteration
+  template <class F> static void IterateV(MixedArray* arr, F fn) {
+    auto elm = arr->data();
+    arr->incRefCount();
+    SCOPE_EXIT { decRefArr(arr); };
+    for (auto i = arr->m_used; i--; elm++) {
+      if (LIKELY(!elm->isTombstone())) {
+        if (ArrayData::call_helper(fn, &elm->data)) break;
+      }
+    }
+  }
+  template <class F> static void IterateKV(MixedArray* arr, F fn) {
+    auto elm = arr->data();
+    arr->incRefCount();
+    SCOPE_EXIT { decRefArr(arr); };
+    for (auto i = arr->m_used; i--; elm++) {
+      if (LIKELY(!elm->isTombstone())) {
+        TypedValue key;
+        key.m_data.num = elm->ikey;
+        key.m_type = elm->hasIntKey() ? KindOfInt64 : KindOfString;
+        if (ArrayData::call_helper(fn, &key, &elm->data)) break;
+      }
+    }
+  }
 
 private:
   static void getElmKey(const Elm& e, TypedValue* out);
@@ -423,9 +453,12 @@ private:
 
   template <class Hit>
   ssize_t findImpl(size_t h0, Hit) const;
+
+public:
   ssize_t find(int64_t ki) const;
   ssize_t find(const StringData* s, strhash_t h) const;
 
+private:
   // The array should already be sized for the new insertion before
   // calling these methods.
   template <class Hit>

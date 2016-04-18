@@ -25,12 +25,11 @@ struct Func;
 
 namespace jit {
 
-struct IRGS;
 struct SSATmp;
 
-}}
+namespace irgen {
 
-namespace HPHP { namespace jit { namespace irgen {
+struct IRGS;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -43,9 +42,10 @@ void fpushActRec(IRGS& env,
 void emitDirectCall(IRGS& env, Func* callee, int32_t numParams,
                     SSATmp* const* const args);
 
+SSATmp* implFCall(IRGS& env, int32_t numParams);
+
 //////////////////////////////////////////////////////////////////////
 
 }}}
-
 
 #endif

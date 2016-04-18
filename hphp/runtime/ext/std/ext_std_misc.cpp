@@ -21,7 +21,6 @@
 #include "hphp/runtime/base/actrec-args.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/class-info.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/runtime-option.h"
@@ -78,7 +77,7 @@ static String HHVM_FUNCTION(server_warmup_status) {
   }
 
   // Fail if we spent more than 0.5ms in the JIT.
-  auto const jittime = jit::Timer::CounterValue(jit::Timer::translate);
+  auto const jittime = jit::Timer::CounterValue(jit::Timer::mcg_translate);
   auto constexpr kMaxJitTimeNS = 500000;
   if (jittime.total > kMaxJitTimeNS) {
     return folly::format("Spent {}us in the JIT.", jittime.total / 1000).str();

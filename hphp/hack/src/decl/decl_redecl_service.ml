@@ -22,7 +22,7 @@ open Typing_deps
 (*****************************************************************************)
 (* The neutral element of declaration (cf procs/multiWorker.mli) *)
 (*****************************************************************************)
-let otf_neutral =  [], Relative_path.Set.empty
+let otf_neutral =  Errors.empty, Relative_path.Set.empty
 let compute_deps_neutral = DepSet.empty, DepSet.empty
 
 (*****************************************************************************)
@@ -43,23 +43,10 @@ end)
 (* Re-declaring the types in a file *)
 (*****************************************************************************)
 
-let on_the_fly_decl_file tcopt (errors, failed) fn =
-  let decl_errors, () = Errors.do_
-    begin fun () ->
-    (* We start "recording" dependencies.
-     * Whenever we are type-checking or declaring types, the checker
-     * records all the dependencies in a global (cf Typing_deps).
-     * At any given time, all the workers must be aware of all the
-     * dependencies (cf Typing_deps.udpate_dependencies).
-     * The problem is, sending the entire graph every time is too
-     * expensive. So what we do instead, is that we "record" the changes.
-     * If a new dependency shows up, it will end-up in Typing_deps.record_acc.
-     * Sending only the difference is a drastic improvement in perf.
-     *)
-      Decl.make_env tcopt fn
-    end
-  in
-  List.fold_left decl_errors ~f:begin fun (errors, failed) error ->
+(* Returns a list of files that are considered to have failed decl and must
+ * be redeclared every time the typechecker discovers a file change *)
+let get_decl_failures decl_errors fn =
+  List.fold_left decl_errors ~f:begin fun failed error ->
     (* It is important to add the file that is the cause of the failure.
      * What can happen is that during a declaration phase, we realize
      * that a parent class is outdated. When this happens, we redeclare
@@ -67,12 +54,19 @@ let on_the_fly_decl_file tcopt (errors, failed) fn =
      * where the error occurs might be different from the file we
      * are declaring right now.
      *)
-      let file_with_error = Pos.filename (Errors.get_pos error) in
-      assert (file_with_error <> Relative_path.default);
-      let failed = Relative_path.Set.add file_with_error failed in
-      let failed = Relative_path.Set.add fn failed in
-      error :: errors, failed
-    end ~init:(errors, failed)
+    let file_with_error = Pos.filename (Errors.get_pos error) in
+    assert (file_with_error <> Relative_path.default);
+    let failed = Relative_path.Set.add failed file_with_error in
+    let failed = Relative_path.Set.add failed fn in
+    failed
+  end ~init:Relative_path.Set.empty
+
+let on_the_fly_decl_file tcopt (errors, failed) fn =
+  let decl_errors, () = Errors.do_ begin fun () ->
+    Decl.make_env tcopt fn
+  end in
+  let failed' = get_decl_failures (Errors.get_error_list decl_errors) fn in
+  Errors.merge decl_errors errors, Relative_path.Set.union failed failed'
 
 (*****************************************************************************)
 (* Given a set of classes, compare the old and the new type and deduce
@@ -135,7 +129,7 @@ let compute_gconsts_deps old_gconsts (to_redecl, to_recheck) gconsts =
 let redeclare_files tcopt filel =
   List.fold_left filel
     ~f:(on_the_fly_decl_file tcopt)
-    ~init:([], Relative_path.Set.empty)
+    ~init:(Errors.empty, Relative_path.Set.empty)
 
 let otf_decl_files tcopt filel =
   SharedMem.invalidate_caches();
@@ -194,7 +188,7 @@ let load_and_compute_deps _acc filel =
 (*****************************************************************************)
 
 let merge_on_the_fly (errorl1, failed1) (errorl2, failed2) =
-  errorl1 @ errorl2, Relative_path.Set.union failed1 failed2
+  Errors.merge errorl1 errorl2, Relative_path.Set.union failed1 failed2
 
 let merge_compute_deps (to_redecl1, to_recheck1) (to_redecl2, to_recheck2) =
   DepSet.union to_redecl1 to_redecl2, DepSet.union to_recheck1 to_recheck2
@@ -249,9 +243,9 @@ let remove_old_defs { FileInfo.n_funs; n_classes; n_types; n_consts } =
   ()
 
 let get_defs fast =
-  Relative_path.Map.fold begin fun _ names1 names2 ->
+  Relative_path.Map.fold fast ~f:begin fun _ names1 names2 ->
     FileInfo.merge_names names1 names2
-  end fast FileInfo.empty_names
+  end ~init:FileInfo.empty_names
 
 (*****************************************************************************)
 (* The main entry point *)

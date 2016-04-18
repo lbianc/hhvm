@@ -319,20 +319,23 @@ end = struct
   let add_lvar (_, lenv) (_, name) (p, x) =
     lenv.locals := SMap.add name (p, x) !(lenv.locals)
 
-  (* Defines a new local variable *)
+  (* Defines a new local variable.
+     Side effects:
+     1) if the local is not in the local environment then it is added.
+     2) the naming hook callback is invoked.
+     Return value: the given position and deduced/created identifier. *)
   let new_lvar (_, lenv) (p, x) =
     let lcl = SMap.get x !(lenv.locals) in
-    let p, ident =
+    let ident =
       match lcl with
-      | Some lcl -> p, snd lcl
+      | Some lcl -> snd lcl
       | None ->
           let ident = match SMap.get x !(lenv.pending_locals) with
             | Some (_, ident) -> ident
             | None -> Ident.make x in
-          let y = p, ident in
           lenv.all_locals := SMap.add x p !(lenv.all_locals);
-          lenv.locals := SMap.add x y !(lenv.locals);
-          y
+          lenv.locals := SMap.add x (p, ident) !(lenv.locals);
+          ident
     in
     Naming_hooks.dispatch_lvar_hook ident (p, x) !(lenv.locals);
     p, ident
@@ -1705,11 +1708,9 @@ module Make (GetLocals : GetLocals) = struct
             || x = SN.Collections.cSet
             || x = SN.Collections.cImmSet ->
           N.ValCollection (cn, (List.map l (afield_value env cn)))
-        | x when
-            x = SN.Collections.cMap
-            || x = SN.Collections.cImmMap
-            || x = SN.Collections.cStableMap ->
-          N.KeyValCollection (cn, (List.map l (afield_kvalue env cn)))
+        | x when N.is_kvc_kind x ->
+          N.KeyValCollection ((N.get_kvc_kind cn),
+            (List.map l (afield_kvalue env cn)))
         | x when x = SN.Collections.cPair ->
           (match l with
             | [] ->
