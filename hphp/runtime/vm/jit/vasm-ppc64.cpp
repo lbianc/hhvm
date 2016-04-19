@@ -317,6 +317,7 @@ struct Vgen {
   void emit(const lea&);
   void emit(const leavetc&);
   void emit(const load& i);
+  void emit(const loadqd& i);
   void emit(const loadstubret& i);
   void emit(const mcprep&);
   void emit(const pop& i);
@@ -460,6 +461,12 @@ void Vgen::emit(const load& i) {
     assertx(i.d.isSIMD());
     a.lfd(i.d, i.s);
   }
+}
+
+// This function can't be lowered as i.get() may not be bound that early.
+void Vgen::emit(const loadqd& i) {
+  a.li64(rAsm, (int64_t)i.s.get());
+  a.ld(i.d, rAsm[0]);
 }
 
 void Vgen::emit(const callstub& i) {
@@ -1135,13 +1142,6 @@ void lowerForPPC64(Vout& v, loadqp& inst) {
   // in PPC we don't have anything like a RIP register
   // RIP register uses an absolute displacement address. Load it to a register
   Vptr p(v.cns(inst.s.r.disp), 0); // this Vptr doesn't need patch
-  v << load{p, inst.d};
-}
-
-void lowerForPPC64(Vout& v, loadqd& inst) {
-  // in PPC we don't have anything like a RIP register
-  // RIP register uses an absolute displacement address. Load it to a register
-  Vptr p(v.cns(inst.s.get()), 0); // this Vptr doesn't need patch
   v << load{p, inst.d};
 }
 
