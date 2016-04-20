@@ -1160,9 +1160,6 @@ void lowerForPPC64(Vout& v, popm& inst) {
 }
 
 void lowerForPPC64(Vout& v, resumetc& inst) {
-  auto const exittc = v.cns(inst.exittc);
-  v << mtlr{exittc};
-  v << store{exittc, rsp()[AROFF(m_savedRip)]};
   v << callr{inst.target, inst.args};
   v << jmpi{inst.exittc};
 }
