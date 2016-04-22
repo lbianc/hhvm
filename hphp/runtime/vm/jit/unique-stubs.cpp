@@ -965,7 +965,7 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 #if defined(__x86_64__)
     v << lea{rsp()[8], rsp()};
 #elif defined(__powerpc64__)
-    v << lea{rsp()[8 * 8], rsp()};
+    v << lea{rsp()[8 * 6], rsp()};
     v << copy{rsp(), ppc64_asm::reg::r1};
     // corrupt the backchain, but it'll be useless soon as it'll be destroyed.
     // by doing this the r31 value will be correctly loaded on stubret.
@@ -1012,14 +1012,9 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
 
   // As PPC64 has no native stack pointer rather only a frame pointer, the rsp
-  // needs to be initialized explicitly.
-  // Also grow the native stack as there was no call before. The stublogue will
-  // add 16 bytes further below. Now the remaining 16 bytes for the frame and
-  // an additional 16 bytes will be allocated for saving a few registers.
-  a.addi(rsp(), ppc64_asm::reg::r1, -(8 * 4));
-  // To be restored by stubret on enterTCExit
-  a.std(ppc64_asm::reg::r31, rsp()[8 * 2]);
-  a.std(ppc64::rtoc(), rsp()[8 * 1]);         // 24th on frame after stublogue
+  // needs to be initialized explicitly based on the current frame and the
+  // enterTCExit address
+  a.addi(rsp(), ppc64_asm::reg::r1, -(8 * 2));
 
   // initialize our rone register
   a.li(ppc64::rone(), 1);
@@ -1037,9 +1032,8 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 
     // Set up linkage with the top VM frame in this nesting.
 #if defined(__powerpc64__)
-    v << store{ppc64_asm::reg::r1, firstAR[AROFF(m_sfp)]};
-    v << store{ppc64::rtoc(), firstAR[AROFF(m_savedToc)]};
     v << store{firstAR, rsp()[AROFF(m_sfp)]};
+    v << store{ppc64_asm::reg::r1, firstAR[AROFF(m_sfp)]};
 #else
     v << store{rsp(), firstAR[AROFF(m_sfp)]};
 #endif

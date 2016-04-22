@@ -591,7 +591,7 @@ void Vgen::emit(const calltc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[AROFF(m_savedRip)]);
+  a.std(rAsm, rsp()[32]);
 
   // keep the return address as initialized by the vm frame
   a.ld(rfuncln(), i.fp[AROFF(m_savedRip)]);
@@ -1162,6 +1162,8 @@ void lowerForPPC64(Vout& v, popm& inst) {
 }
 
 void lowerForPPC64(Vout& v, resumetc& inst) {
+  // this return address is going to be checked by emitCallToExit
+  v << store{v.cns(inst.exittc), rsp()[32]};
   v << callr{inst.target, inst.args};
   v << jmpi{inst.exittc};
 }
