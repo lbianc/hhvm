@@ -684,7 +684,7 @@ void Vgen::emit(const tailcallstub& i) {
   // frame and undo stublogue allocation.
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
-  a.addi(rsp(), rsp(), -min_callstack_size);
+  a.addi(rsp(), rsp(), min_callstack_size);
   emit(jmpi{i.target, i.args});
 }
 
