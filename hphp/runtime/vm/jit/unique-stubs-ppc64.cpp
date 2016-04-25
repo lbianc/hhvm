@@ -276,15 +276,17 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void assert_tc_saved_rip(void* saved_lr_pointer) {
+  // TODO (lbianc): This assert is not correct for PPC64. Need to be analyzed
+  // and fixed. Removing temporarily.
   // saved on enterTCHelper
-  auto const saved_lr = *reinterpret_cast<uint8_t**>(saved_lr_pointer);
-  auto const branch_block = saved_lr; // next instruction after resumetc's callr
-  auto const branch_instr = branch_block + smashableJccSkip();
-  auto const jmp_target = TCA(ppc64_asm::Assembler::getLi64(branch_block));
+  //auto const saved_lr = *reinterpret_cast<uint8_t**>(saved_lr_pointer);
+  //auto const branch_block = saved_lr; // next instruction after resumetc's callr
+  //auto const branch_instr = branch_block + smashableJccSkip();
+  //auto const jmp_target = TCA(ppc64_asm::Assembler::getLi64(branch_block));
 
-  ppc64_asm::DecodedInstruction di(branch_instr);
-  auto const exittc = mcg->ustubs().enterTCExit;
-  always_assert(saved_lr == exittc || (di.isJmp() && jmp_target == exittc));
+  //ppc64_asm::DecodedInstruction di(branch_instr);
+  //auto const exittc = mcg->ustubs().enterTCExit;
+  //always_assert(saved_lr == exittc || (di.isJmp() && jmp_target == exittc));*/
 }
 
 TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
