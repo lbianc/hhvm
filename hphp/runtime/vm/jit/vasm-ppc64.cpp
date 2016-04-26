@@ -416,6 +416,7 @@ struct Vgen {
   void emit(const mcprep&);
   void emit(const pop& i);
   void emit(const push& i);
+  void emit(const resumetc& i);
   void emit(const store& i);
   void emit(const stublogue& i);
   void emit(const stubret& i);
@@ -686,11 +687,26 @@ void Vgen::emit(const calltc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[32]);
+  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
 
   // keep the return address as initialized by the vm frame
   a.ld(rfuncln(), i.fp[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
+
+  // and jump. When it returns, it'll be to enterTCExit
+  a.mr(reg::r12, i.target.asReg());
+  a.mtctr(reg::r12);
+  a.bctr();
+}
+
+void Vgen::emit(const resumetc& i) {
+  // Dummy call for branch predictor's sake:
+  // the link stack would be wrong otherwise and mispredictions would occur
+  a.bl(instr_size_in_bytes);  // jump to next instruction
+
+  // this will be verified by emitCallToExit
+  a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
+  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
 
   // and jump. When it returns, it'll be to enterTCExit
   a.mr(reg::r12, i.target.asReg());
@@ -715,7 +731,7 @@ void Vgen::emit(const lea& i) {
 
 void Vgen::emit(const call& i) {
   // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
   a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
@@ -729,7 +745,7 @@ void Vgen::emit(const call& i) {
 
 void Vgen::emit(const callr& i) {
   // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
   a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
@@ -740,7 +756,7 @@ void Vgen::emit(const calls& i) {
   // calls is used to call c++ function like handlePrimeCacheInit so setup the
   // r1 pointer to a valid frame in order to allow LR save by callee's
   // prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_callstack_size);
+  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   emitSmashableCall(a.code(), env.meta, i.target);
 }
@@ -755,8 +771,8 @@ void Vgen::emit(const callarray& i) {
  */
 void Vgen::emit(const stublogue& i) {
   // Save a complete frame
-  if (i.saveframe) a.stdu(rvmfp(), rsp()[-min_callstack_size]);
-  else a.addi(rsp(), rsp(), -min_callstack_size);
+  if (i.saveframe) a.stdu(rvmfp(), rsp()[-min_frame_size]);
+  else a.addi(rsp(), rsp(), -min_frame_size);
 
   // save return address on this frame, just like phplogue does
   a.mflr(rfuncln());
@@ -772,7 +788,7 @@ void Vgen::emit(const stubret& i) {
   a.mtlr(rfuncln());
 
   // pop this frame as created by stublogue and return
-  a.addi(rsp(), rsp(), min_callstack_size);
+  a.addi(rsp(), rsp(), min_frame_size);
   a.blr();
 }
 
@@ -781,7 +797,7 @@ void Vgen::emit(const tailcallstub& i) {
   // frame and undo stublogue allocation.
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
-  a.addi(rsp(), rsp(), min_callstack_size);
+  a.addi(rsp(), rsp(), min_frame_size);
   emit(jmpi{i.target, i.args});
 }
 
@@ -795,7 +811,7 @@ void Vgen::emit(const stubtophp& i) {
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
   // pop this frame as created by stublogue
-  a.addi(rsp(), rsp(), min_callstack_size);
+  a.addi(rsp(), rsp(), min_frame_size);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1254,13 +1270,6 @@ void lowerForPPC64(Vout& v, popm& inst) {
   patchVptr(inst.d, v);
   v << pop{tmp};
   v << store{tmp, inst.d};
-}
-
-void lowerForPPC64(Vout& v, resumetc& inst) {
-  // this return address is going to be checked by emitCallToExit
-  v << store{v.cns(inst.exittc), rsp()[32]};
-  v << callr{inst.target, inst.args};
-  v << jmpi{inst.exittc};
 }
 
 void lowerForPPC64(Vout& v, setcc& inst) {

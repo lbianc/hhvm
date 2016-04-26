@@ -100,8 +100,8 @@ TCA emitFunctionEnterHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
       v << pop{saved_rip};
 
       // Drop our call frame; the stublogue{} instruction guarantees that this
-      // is exactly ppc64_asm::min_callstack_size bytes.
-      v << lea{rsp()[ppc64_asm::min_callstack_size], rsp()};
+      // is exactly ppc64_asm::min_frame_size bytes.
+      v << lea{rsp()[ppc64_asm::min_frame_size], rsp()};
 
       // Sync vmsp and the return regs.
       v << load{rvmtl()[rds::kVmspOff], rvmsp()};
@@ -174,7 +174,7 @@ static TCA emitDecRefHelper(CodeBlock& cb, DataBlock& data, CGMeta& fixups,
       // stack size reserved for the LR saved right above and the LR offset in
       // the frame.
       Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 2 +
-          ppc64_asm::lr_position_on_callstack / dword_size);
+          AROFF(m_savedRip) / dword_size);
       v << syncpoint{fixup};
       // fallthru
 
@@ -295,7 +295,7 @@ TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
     vwrap(cb, data, [&] (Vout& v) {
       // Not doing it directly as rret(0) == rarg(0) on ppc64
       Vreg ret_addr = v.makeReg();
-      v << lea{rsp()[32], ret_addr};
+      v << lea{rsp()[ppc64_asm::exittc_position_on_frame], ret_addr};
 
       // We need to spill the return registers around the assert call.
       v << push{rret(0)};

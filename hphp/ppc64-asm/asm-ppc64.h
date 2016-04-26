@@ -47,11 +47,12 @@ namespace ppc64_asm {
  */
 
 // Must be the same value of AROFF(_dummyB).
-constexpr uint8_t min_callstack_size        = 4 * 8;
-// Must be the same value of AROFF(m_savedRip).
-constexpr uint8_t lr_position_on_callstack  = 2 * 8;
-// Must be the same value of AROFF(m_savedToc).
-constexpr uint8_t toc_position_on_callstack = 3 * 8;
+constexpr uint8_t min_frame_size            = 4 * 8;
+// Must be the same value of AROFF(_savedToc).
+constexpr uint8_t toc_position_on_frame     = 3 * 8;
+// exittc offset on our first native frame
+constexpr uint8_t exittc_position_on_frame  = 4 * 8;
+
 // How many bytes a PPC64 instruction length is.
 constexpr uint8_t instr_size_in_bytes       = sizeof(PPC64Instr);
 // Amount of bytes to skip after an Assembler::call to grab the return address.
@@ -1998,7 +1999,7 @@ struct Assembler {
     // Several vasms like nothrow, unwind and syncpoint will skip one
     // instruction after call and use it as expected return address. Use a nop
     // to guarantee this consistency even if toc doesn't need to be saved
-    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_callstack]);
+    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_frame]);
     else          nop();
   }
 
@@ -2011,7 +2012,7 @@ struct Assembler {
     // Several vasms like nothrow, unwind and syncpoint will skip one
     // instruction after call and use it as expected return address. Use a nop
     // to guarantee this consistency even if toc doesn't need to be saved
-    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_callstack]);
+    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_frame]);
     else          nop();
   }
 
