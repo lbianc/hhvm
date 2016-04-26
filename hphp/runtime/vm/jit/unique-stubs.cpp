@@ -964,12 +964,6 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     storeVMRegs(v);
 #if defined(__x86_64__)
     v << lea{rsp()[8], rsp()};
-#elif defined(__powerpc64__)
-    v << lea{rsp()[8 * 6], rsp()};
-    v << copy{rsp(), ppc64_asm::reg::r1};
-    // corrupt the backchain, but it'll be useless soon as it'll be destroyed.
-    // by doing this the r31 value will be correctly loaded on stubret.
-    v << store{ppc64_asm::reg::r1, rsp()[0]};
 #endif
 
     // Store the return value on the top of the eval stack.  Whenever we get to
@@ -1011,10 +1005,9 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   a.mflr(ppc64::rfuncln());
   a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
 
-  // As PPC64 has no native stack pointer rather only a frame pointer, the rsp
-  // needs to be initialized explicitly based on the current frame and the
-  // enterTCExit address
-  a.addi(rsp(), ppc64_asm::reg::r1, -(8 * 2));
+  // As PPC64 has no native stack pointer rather only a frame pointer so the
+  // rsp needs to be initialized explicitly based on the current frame.
+  a.mr(rsp(), ppc64_asm::reg::r1);
 
   // initialize our rone register
   a.li(ppc64::rone(), 1);

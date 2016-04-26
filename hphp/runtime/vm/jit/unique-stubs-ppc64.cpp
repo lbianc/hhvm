@@ -309,7 +309,15 @@ TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
     });
   }
 
-  // Simply go to enterTCExit, no worries about the stack because it's balanced
+  // Reinitialize r1 for the external code found after enterTCExit's stubret
+  a.addi(rsp(), rsp(), ppc64_asm::min_frame_size);
+  a.mr(ppc64_asm::reg::r1, rsp());
+
+  // Corrupt the backchain, but it'll be useless soon as it'll be destroyed.
+  // By doing this, the r31 value will be correctly loaded on stubret.
+  a.std(ppc64_asm::reg::r1, rsp()[0]);
+
+  // Simply go to enterTCExit
   a.branchAuto(TCA(mcg->ustubs().enterTCExit));
   return start;
 }
