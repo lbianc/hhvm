@@ -57,7 +57,7 @@ void emitFuncGuard(const Func* func, CodeBlock& cb, CGMeta& fixups) {
 
   emitSmashableMovq(a.code(), fixups, uint64_t(func), tmp1);
   a.  ld     (tmp2, rvmfp()[AROFF(m_func)]);
-  a.  cmpld  (tmp1, tmp2);
+  a.  cmpd   (tmp1, tmp2);
 
   a.  branchAuto(mcg->ustubs().funcPrologueRedispatch,
                   ppc64_asm::BranchConditions::NotEqual);

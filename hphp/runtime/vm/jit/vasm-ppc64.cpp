@@ -79,6 +79,12 @@ struct Vgen {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
   }
+  void copyCR0toCR1(Assembler a, Reg64 raux)
+  {
+    a.mfcr(raux);
+    a.sradi(raux,raux,4);
+    a.mtocrf(0x40,raux);
+  }
 
   // intrinsics
   void emit(const copy& i) {
@@ -125,6 +131,7 @@ struct Vgen {
   }
   void emit(const addl& i) {
     a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
+    copyCR0toCR1(a, rAsm);
   }
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
@@ -136,28 +143,73 @@ struct Vgen {
   }
 
   // instructions
-  void emit(const addq& i) { a.addo(i.d, i.s0, i.s1, true); }
+  void emit(const addq& i) {
+    a.addo(i.d, i.s0, i.s1, true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
-  void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
-  void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
-  void emit(const cmpl& i) { a.cmpw(Reg64(i.s1), Reg64(i.s0)); }
-  void emit(const cmpli& i) { a.cmpwi(Reg64(i.s1), i.s0); }
-  void emit(const cmpq& i) { a.cmpd(i.s1, i.s0); }
-  void emit(const cmpqi& i) { a.cmpdi(i.s1, i.s0); }
-  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
-  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
+  void emit(const andq& i) {
+    a.and(i.d, i.s0, i.s1, true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const andqi& i) {
+    a.andi(i.d, i.s1, i.s0);
+    copyCR0toCR1(a, rAsm);
+  } // andi changes CR0
+  void emit(const cmpl& i) {
+    a.cmpw(Reg64(i.s1), Reg64(i.s0));
+    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+  }
+  void emit(const cmpli& i) {
+    a.cmpwi(Reg64(i.s1), i.s0);
+    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+  }
+  void emit(const cmpq& i) {
+    a.cmpd(i.s1, i.s0);
+    a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
+  }
+  void emit(const cmpqi& i) {
+    a.cmpdi(i.s1, i.s0);
+    a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
+  }
+  void emit(const decl& i) {
+    a.subfo(Reg64(i.d), rone(), Reg64(i.s), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const decq& i) {
+    a.subfo(i.d, rone(), i.s, true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
   void emit(const extsb& i) { a.extsb(i.d, i.s); }
   void emit(const extsw& i) { a.extsw(i.d, i.s); }
   void emit(const fabs& i) { a.fabs(i.d, i.s, false); }
-  void emit(const fallthru&) {}
-  void emit(const fcmpo& i) { a.fcmpo(i.sf, i.s0, i.s1); }
-  void emit(const fcmpu& i) { a.fcmpu(i.sf, i.s0, i.s1); }
-  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
-  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
-  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
-  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const fallthru& i) {}
+  void emit(const fcmpo& i) {
+    a.fcmpo(i.sf, i.s0, i.s1);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const fcmpu& i) {
+    a.fcmpu(i.sf, i.s0, i.s1);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const imul& i) {
+    a.mulldo(i.d, i.s1, i.s0, true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const incl& i) {
+    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const incq& i) {
+    a.addo(i.d, i.s, rone(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const incw& i) {
+    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
@@ -169,28 +221,67 @@ struct Vgen {
   void emit(const mtlr& i) { a.mtlr(i.s); }
   void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
-  void emit(const neg& i) { a.neg(i.d, i.s, true); }
-  void emit(const nop& i) { a.nop(); }
+  void emit(const neg& i) {
+    a.neg(i.d, i.s, true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const nop& i) { a.nop(); } // no-op form
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
-  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
+  void emit(const orq& i) {
+    a.or(i.d, i.s0, i.s1, true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const ret& i) { a.blr(); }
   void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
-  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
-  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
-  void emit(const shlli& i) { a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);}
-  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
-  void emit(const shrli& i) { a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);}
-  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const sar& i) {
+    a.srad(i.d, i.s1, i.s0, true);
+    copyCR0toCR1(a,rAsm);
+  }
+  void emit(const sarqi& i) {
+    a.sradi(i.d, i.s1, i.s0.b(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const shl& i) {
+    a.sld(i.d, i.s1, i.s0, true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const shlli& i) {
+    a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const shlqi& i) {
+    a.sldi(i.d, i.s1, i.s0.b(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const shrli& i) {
+    a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const shrqi& i) {
+    a.srdi(i.d, i.s1, i.s0.b(), true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
   void emit(const storeups& i) { a.stxvw4x(i.s,i.m); }
   // Subtractions: d = s1 - s0
-  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
+  void emit(const subq& i) {
+    a.subfo(i.d, i.s0, i.s1, true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
-  void emit(const ud2&) { a.trap(); }
-  void emit(const xorb& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
-  void emit(const xorl& i) {a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);}
-  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
+  void emit(const ud2& i) { a.trap(); }
+  void emit(const xorb& i) {
+    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const xorl& i) {
+    a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
+    copyCR0toCR1(a, rAsm);
+  }
+  void emit(const xorq& i) {
+    a.xor(i.d, i.s0, i.s1, true);
+    copyCR0toCR1(a, rAsm);
+  }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
@@ -243,8 +334,8 @@ struct Vgen {
   void emit(const orqi& i) {
     a.li64(rAsm, i.s0.l(), false);
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
+    copyCR0toCR1(a, rAsm);
   }
-
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
   do {                                                    \
@@ -284,13 +375,16 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
+      copyCR0toCR1(a, rAsm);
     } else {
       a.cmpdi(i.s0, Immed(0));
+      a.cmpldi(i.s0, Immed(0));
     }
   }
   void emit(const xorqi& i) {
     a.li64(rAsm, i.s0.l(), false);
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
+    copyCR0toCR1(a, rAsm);
   }
 
   // The following vasms reemit other vasms. They are implemented afterwards in
@@ -362,8 +456,9 @@ void Vgen::emit(const ucomisd& i) {
   a.bc(notNAN, BranchConditions::CR0_NoOverflow);
   {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-    a.li64(rAsm, 0x90000000, false);
-    a.mtcrf(0x80, rAsm);
+    a.li64(rAsm, 0x99000000, false);
+    a.mtcrf(0xC0, rAsm);
+    copyCR0toCR1(a, rAsm);
   }
   notNAN.asm_label(a);
 }

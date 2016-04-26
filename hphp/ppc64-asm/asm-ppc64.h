@@ -82,14 +82,18 @@ enum class BranchConditions {
   Always,
 
   // mnemonics for the common case by using CR0:
-  LessThan          = CR0_LessThan,
-  LessThanEqual     = CR0_LessThanEqual,
-  GreaterThan       = CR0_GreaterThan,
-  GreaterThanEqual  = CR0_GreaterThanEqual,
-  Equal             = CR0_Equal,
-  NotEqual          = CR0_NotEqual,
-  Overflow          = CR0_Overflow,
-  NoOverflow        = CR0_NoOverflow
+  LessThan                    = CR0_LessThan,
+  LessThanEqual               = CR0_LessThanEqual,
+  GreaterThan                 = CR0_GreaterThan,
+  GreaterThanEqual            = CR0_GreaterThanEqual,
+  LessThan_Unsigned           = CR1_LessThan,
+  LessThanEqual_Unsigned      = CR1_LessThanEqual,
+  GreaterThan_Unsigned        = CR1_GreaterThan,
+  GreaterThanEqual_Unsigned   = CR1_GreaterThanEqual,
+  Equal                       = CR0_Equal,
+  NotEqual                    = CR0_NotEqual,
+  Overflow                    = CR0_Overflow,
+  NoOverflow                  = CR0_NoOverflow
 };
 
 #undef BRANCHES
@@ -129,38 +133,68 @@ struct BranchParams {
     };
 
   private:
-#define SWITCHES(cr)                                                    \
-  case BranchConditions::CR##cr##_LessThan:                             \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_LessThan;          break;  \
-  case BranchConditions::CR##cr##_LessThanEqual:                        \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_GreaterThan;       break;  \
-  case BranchConditions::CR##cr##_GreaterThan:                          \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_GreaterThan;       break;  \
-  case BranchConditions::CR##cr##_GreaterThanEqual:                     \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_LessThan;          break;  \
-  case BranchConditions::CR##cr##_Equal:                                \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_Equal;             break;  \
-  case BranchConditions::CR##cr##_NotEqual:                             \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_Equal;             break;  \
-  case BranchConditions::CR##cr##_Overflow:                             \
-    m_bo = BO::CRSet;    m_bi = BI::CR##cr##_SummaryOverflow;   break;  \
-  case BranchConditions::CR##cr##_NoOverflow:                           \
-    m_bo = BO::CRNotSet; m_bi = BI::CR##cr##_SummaryOverflow;   break
 
     /* Constructor auxiliary */
     void defineBoBi(BranchConditions bc) {
       switch (bc) {
-        SWITCHES(0);
-        SWITCHES(1);
-        SWITCHES(2);
-        SWITCHES(3);
-        SWITCHES(4);
-        SWITCHES(5);
-        SWITCHES(6);
-        SWITCHES(7);
-        case BranchConditions::Always:
-          m_bo = BO::Always; m_bi = BI(0); break;
-        default:
+      /* Signed comparison */
+      case BranchConditions::LessThan:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR0_LessThan;
+        break;
+      case BranchConditions::LessThanEqual:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR0_GreaterThan;
+        break;
+      case BranchConditions::GreaterThan:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR0_GreaterThan;
+        break;
+      case BranchConditions::GreaterThanEqual:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR0_LessThan;
+        break;
+
+      /* Unsigned comparison */
+      case BranchConditions::LessThan_Unsigned:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR1_LessThan;
+        break;
+      case BranchConditions::LessThanEqual_Unsigned:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR1_GreaterThan;
+        break;
+      case BranchConditions::GreaterThan_Unsigned:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR1_GreaterThan;
+        break;
+      case BranchConditions::GreaterThanEqual_Unsigned:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR1_LessThan;
+        break;
+
+      case BranchConditions::Equal:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR0_Equal;
+        break;
+      case BranchConditions::NotEqual:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR0_Equal;
+        break;
+      case BranchConditions::Overflow:
+        m_bo = BO::CRSet;
+        m_bi = BI::CR0_SummaryOverflow;
+        break;
+      case BranchConditions::NoOverflow:
+        m_bo = BO::CRNotSet;
+        m_bi = BI::CR0_SummaryOverflow;
+        break;
+      case BranchConditions::Always:
+        m_bo = BO::Always;
+        m_bi = BI(0);
+        break;
+
+      default:
           not_implemented();
       }
     }
@@ -180,25 +214,35 @@ struct BranchParams {
 
       switch (cc) {
         case HPHP::jit::CC_O:
-          ret = BranchConditions::Overflow;         break;
+          ret = BranchConditions::Overflow;
+          break;
         case HPHP::jit::CC_NO:
-          ret = BranchConditions::NoOverflow;       break;
+          ret = BranchConditions::NoOverflow;
+          break;
         case HPHP::jit::CC_B:
-          ret = BranchConditions::LessThan;         break;
+          ret = BranchConditions::LessThan_Unsigned;
+          break;
         case HPHP::jit::CC_AE:
-          ret = BranchConditions::GreaterThanEqual; break;
+          ret = BranchConditions::GreaterThanEqual_Unsigned;
+          break;
         case HPHP::jit::CC_E:
-          ret = BranchConditions::Equal;            break;
+          ret = BranchConditions::Equal;
+          break;
         case HPHP::jit::CC_NE:
-          ret = BranchConditions::NotEqual;         break;
+          ret = BranchConditions::NotEqual;
+          break;
         case HPHP::jit::CC_BE:
-          ret = BranchConditions::LessThanEqual;    break;
+          ret = BranchConditions::LessThanEqual_Unsigned;
+          break;
         case HPHP::jit::CC_A:
-          ret = BranchConditions::GreaterThan;      break;
+          ret = BranchConditions::GreaterThan_Unsigned;
+          break;
         case HPHP::jit::CC_S:
-          ret = BranchConditions::LessThan;         break;
+          ret = BranchConditions::LessThan;
+          break;
         case HPHP::jit::CC_NS:
-          ret = BranchConditions::GreaterThan;      break;
+          ret = BranchConditions::GreaterThan;
+          break;
 
         /*
          * Parity works only for unordered double comparison
@@ -206,21 +250,28 @@ struct BranchParams {
          * http://stackoverflow.com/q/32319673/5013070
          */
         case HPHP::jit::CC_P:
-          ret = BranchConditions::Overflow;         break;
+          ret = BranchConditions::Overflow;
+          break;
         case HPHP::jit::CC_NP:
-          ret = BranchConditions::NoOverflow;       break;
+          ret = BranchConditions::NoOverflow;
+          break;
 
         case HPHP::jit::CC_L:
-          ret = BranchConditions::LessThan;         break;
+          ret = BranchConditions::LessThan;
+          break;
         case HPHP::jit::CC_NL:
-          ret = BranchConditions::GreaterThanEqual; break;
+          ret = BranchConditions::GreaterThanEqual;
+          break;
         case HPHP::jit::CC_NG:
-          ret = BranchConditions::LessThanEqual;    break;
+          ret = BranchConditions::LessThanEqual;
+          break;
         case HPHP::jit::CC_G:
-          ret = BranchConditions::GreaterThan;      break;
+          ret = BranchConditions::GreaterThan;
+          break;
 
         default:
-          not_implemented();                        break;
+          not_implemented();
+          break;
       }
       return ret;
     }
@@ -240,12 +291,20 @@ struct BranchParams {
 
       switch (m_bi) {
         case BI::CR0_LessThan:
-          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_B;  // CC_S, CC_L
-          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_AE; // CC_NL
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_L;  // CC_S
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_NL;
           break;
         case BI::CR0_GreaterThan:
-          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_A;  // CC_NS, CC_G
-          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_BE; // CC_NG
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_G;  // CC_NS
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_NG;
+          break;
+        case BI::CR1_LessThan:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_B;  // CC_S
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_AE;
+          break;
+        case BI::CR1_GreaterThan:
+          if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_A;  // CC_NS
+          else if (m_bo == BO::CRNotSet)  ret = HPHP::jit::CC_BE;
           break;
         case BI::CR0_Equal:
           if (m_bo == BO::CRSet)          ret = HPHP::jit::CC_E;
@@ -472,6 +531,20 @@ struct Assembler {
     PPR      = 896,
     PPR32    = 898
   };
+
+  enum class CR {
+    CR0      = 0,
+    CR1      = 1,
+    CR2      = 2,
+    CR3      = 3,
+    CR4      = 4,
+    CR5      = 5,
+    CR6      = 6,
+    CR7      = 7,
+  };
+
+  // How many bytes a PPC64 instruction length is
+  static const uint8_t kBytesPerInstr = sizeof(PPC64Instr);
 
   // Total ammount of bytes that a li64 function emits
   static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
@@ -770,7 +843,7 @@ struct Assembler {
   void dcmpo()          { not_implemented(); }
   void dcmpoq()         { not_implemented(); }
   void dcmpu(const RegXMM& fra, const RegXMM& frb) {
-    EmitXForm(59, rn(0), rn(fra), rn(frb), 642);
+    EmitXForm(59, rn(0/*1 << 2*/), rn(fra), rn(frb), 642);
   }
   void dcmpuq()         { not_implemented(); }
   void dcread()         { not_implemented(); }
@@ -1251,6 +1324,9 @@ struct Assembler {
   void msgsndp()        { not_implemented(); }
   void mtcrf(uint16_t fxm, const Reg64& ra) {
     EmitXFXForm(31, rn(ra), (fxm << 1), 144);
+  }
+  void mtocrf(uint16_t fxm, const Reg64& rt)          {
+    EmitXFXForm(31, rn(rt), ( ((fxm << 1) & 0x1fe) |0x200), 144);
   }
   void mtdcr()          { not_implemented(); }
   void mtdcrux()        { not_implemented(); }
@@ -1802,21 +1878,21 @@ struct Assembler {
     // TODO(CRField): if other CRs than 0 is used, please change this to 3
     cmp(0, 0, ra, rb);
   }
-  void cmpldi(const Reg64& ra, Immed imm) {
-    cmpli(0, 1, ra, imm);
+  void cmpldi(const Reg64& ra, Immed imm, CR CRnum = CR::CR0) {
+    cmpli(static_cast<uint16_t>(CRnum), 1, ra, imm);
   }
-  void cmplwi(const Reg64& ra, Immed imm) {
+  void cmplwi(const Reg64& ra, Immed imm, CR CRnum = CR::CR0) {
     //Extended cmpli 3,0,Rx,value
     // TODO(CRField): if other CRs than 0 is used, please change this to 3
-    cmpli(0, 0, ra, imm);
+    cmpli(static_cast<uint16_t>(CRnum), 0, ra, imm);
   }
-  void cmpld(const Reg64& ra, const Reg64& rb) {
-    cmpl(0, 1, ra, rb);
+  void cmpld(const Reg64& ra, const Reg64& rb, CR CRnum = CR::CR0) {
+    cmpl(static_cast<uint16_t>(CRnum), 1, ra, rb);
   }
-  void cmplw(const Reg64& ra, const Reg64& rb) {
+  void cmplw(const Reg64& ra, const Reg64& rb, CR CRnum = CR::CR0) {
     //Extended cmpl 3,0,Rx,Ry
     // TODO(CRField): if other CRs than 0 is used, please change this to 3
-    cmpl(0, 0, ra, rb);
+    cmpl(static_cast<uint16_t>(CRnum), 0, ra, rb);
   }
   void twgti()          { not_implemented(); }  //Extended twi 8,Rx,value
   void twllei()         { not_implemented(); }  //Extended twi 6,Rx,value
