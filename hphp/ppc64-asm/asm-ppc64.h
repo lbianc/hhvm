@@ -543,9 +543,6 @@ struct Assembler {
     CR7      = 7,
   };
 
-  // How many bytes a PPC64 instruction length is
-  static const uint8_t kBytesPerInstr = sizeof(PPC64Instr);
-
   // Total ammount of bytes that a li64 function emits
   static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
 
@@ -843,7 +840,7 @@ struct Assembler {
   void dcmpo()          { not_implemented(); }
   void dcmpoq()         { not_implemented(); }
   void dcmpu(const RegXMM& fra, const RegXMM& frb) {
-    EmitXForm(59, rn(0/*1 << 2*/), rn(fra), rn(frb), 642);
+    EmitXForm(59, rn(0), rn(fra), rn(frb), 642);
   }
   void dcmpuq()         { not_implemented(); }
   void dcread()         { not_implemented(); }
