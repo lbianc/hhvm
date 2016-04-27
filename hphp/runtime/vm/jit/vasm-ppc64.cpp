@@ -674,9 +674,9 @@ void Vgen::emit(const callphp& i) {
 }
 
 void Vgen::emit(const leavetc&) {
-  a.ld(rAsm, rsp()[16]);
+  a.ld(rAsm, rsp()[AROFF(m_savedRip)]);
   a.mtlr(rAsm);
-  emit(ret{});
+  a.blr();
 }
 
 void Vgen::emit(const calltc& i) {
