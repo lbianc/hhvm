@@ -202,12 +202,13 @@ bool effectful(Vinstr& inst) {
     case Vinstr::incqm:
     case Vinstr::incqmlock:
     case Vinstr::incwm:
+    case Vinstr::inittc:
     case Vinstr::jcc:
     case Vinstr::jcci:
     case Vinstr::jmp:
+    case Vinstr::jmpi:
     case Vinstr::jmpm:
     case Vinstr::jmpr:
-    case Vinstr::jmpi:
     case Vinstr::landingpad:
     case Vinstr::leavetc:
     case Vinstr::mcprep:

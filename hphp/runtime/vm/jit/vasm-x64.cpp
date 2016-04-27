@@ -108,6 +108,7 @@ struct Vgen {
 
   // vm entry abi
   void emit(const calltc&);
+  void emit(const inittc& i) {}
   void emit(const leavetc&) { a.ret(); }
 
   // exceptions

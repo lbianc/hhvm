@@ -135,6 +135,7 @@ Width width(Vinstr::Opcode op) {
     // vm entry abi
     case Vinstr::calltc:
     case Vinstr::resumetc:
+    case Vinstr::inittc:
     case Vinstr::leavetc:
     // exception intrinsics
     case Vinstr::landingpad:

@@ -112,6 +112,7 @@ struct Vunit;
   /* vm entry intrinsics */\
   O(calltc, Inone, U(target) U(fp) U(args), Dn)\
   O(resumetc, Inone, U(target) U(args), Dn)\
+  O(inittc, Inone, Un, Dn)\
   O(leavetc, Inone, U(args), Dn)\
   /* exception intrinsics */\
   O(landingpad, I(fromPHPCall), Un, Dn)\
@@ -794,6 +795,12 @@ struct calltc { Vreg64 target, fp; TCA exittc; RegSet args; };
  * `exittc' is the address to resume execution at after returning from the TC.
  */
 struct resumetc { Vreg64 target; TCA exittc; RegSet args; };
+
+/*
+ * Architecture specific initialization to be done at the beginning of
+ * enterTCHelper, if needed.
+ */
+struct inittc {};
 
 /*
  * Pop the address of enterTCExit off the stack, and return to it.

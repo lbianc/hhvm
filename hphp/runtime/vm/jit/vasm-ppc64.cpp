@@ -405,6 +405,7 @@ struct Vgen {
   void emit(const jcci& i);
   void emit(const jmp& i);
   void emit(const jmpr& i);
+  void emit(const inittc&);
   void emit(const ldimmb& i);
   void emit(const ldimml& i);
   void emit(const ldimmq& i);
@@ -672,6 +673,20 @@ void Vgen::emit(const mcprep& i) {
 void Vgen::emit(const callphp& i) {
   emitSmashableCall(a.code(), env.meta, i.stub);
   emit(unwind{{i.targets[0], i.targets[1]}});
+}
+
+void Vgen::emit(const inittc&) {
+  // Our call doesn't push the return address directly but leave it for the
+  // callee's prologue to save it on caller's frame.
+  a.mflr(ppc64::rfuncln());
+  a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
+
+  // As PPC64 has no native stack pointer rather only a frame pointer so the
+  // rsp needs to be initialized explicitly based on the current frame.
+  a.mr(rsp(), ppc64_asm::reg::r1);
+
+  // initialize our rone register
+  a.li(ppc64::rone(), 1);
 }
 
 void Vgen::emit(const leavetc&) {

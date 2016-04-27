@@ -998,22 +998,10 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   // Used on return: the following code is the enterTCHelper
   auto const entertc  = cb.frontier();
 
-#if defined(__powerpc64__)
-  ppc64_asm::Assembler a { cb };
-  // PPC64 call doesn't push the return address directly but leave it for the
-  // callee's prologue to save it on caller's frame.
-  a.mflr(ppc64::rfuncln());
-  a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
-
-  // As PPC64 has no native stack pointer rather only a frame pointer so the
-  // rsp needs to be initialized explicitly based on the current frame.
-  a.mr(rsp(), ppc64_asm::reg::r1);
-
-  // initialize our rone register
-  a.li(ppc64::rone(), 1);
-#endif
-
   vwrap2(cb, data, [&] (Vout& v, Vout& vcold) {
+    // Architecture-specific setup to enter on TC.
+    v << inittc{};
+
     // Native func prologue.
     v << stublogue{true};
 
@@ -1025,7 +1013,11 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 
     // Set up linkage with the top VM frame in this nesting.
 #if defined(__powerpc64__)
+    // On ppc64, the linkage from this vmframe is being set now as it's not
+    // dynamic as X64's prologue.
     v << store{firstAR, rsp()[AROFF(m_sfp)]};
+
+    // Using the actual frame pointer r1 which is pointing to a valid frame
     v << store{ppc64_asm::reg::r1, firstAR[AROFF(m_sfp)]};
 #else
     v << store{rsp(), firstAR[AROFF(m_sfp)]};
