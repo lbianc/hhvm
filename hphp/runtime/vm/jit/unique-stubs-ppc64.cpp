@@ -310,7 +310,6 @@ TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
   }
 
   // Reinitialize r1 for the external code found after enterTCExit's stubret
-  a.addi(rsp(), rsp(), ppc64_asm::min_frame_size);
   a.mr(ppc64_asm::reg::r1, rsp());
 
   // r31 should have the same value as caller's r1. Loading it soon on stubret.
@@ -353,14 +352,6 @@ TCA emitEndCatchHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     v << cmpqim{0, udrspo, sf1};
     v << jcci{CC_NE, sf1, done1, debuggerReturn};
     v = done1;
-
-    // TODO(lbianc): This condition fixed some tests, which rvmfp() is not
-    // correct. These tests must be better analyzed to find out if this
-    // behavior is coming from another error.
-    v << cmpq{rvmfp(), ppc64_asm::reg::r1, sf};
-    ifThen(v, CC_E, sf, [&] (Vout& v) {
-      v << load{rvmfp()[0], rvmfp()};
-    });
 
     // Normal end catch situation: call back to tc_unwind_resume, which returns
     // the catch trace (or null) in $r3, and the new vmfp in $r4.

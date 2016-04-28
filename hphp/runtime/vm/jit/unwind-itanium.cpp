@@ -351,24 +351,23 @@ void write_tc_cie(EHFrameWriter& ehfw) {
 
 #elif defined(__powerpc64__)
 
-  // Set native frame pointer as the cfa pointer
-  ehfw.def_cfa(dw_reg::SP, 0);
-
-  // IP (aka LR) is at (*CFA) - 2 * data_align = (*CFA) + 16
-  ehfw.begin_val_expression(dw_reg::IP);
-  ehfw.op_breg(dw_reg::SP, 0);
-  ehfw.op_deref();
-  ehfw.op_consts(16);
-  ehfw.op_plus();
-  ehfw.op_deref();
-  ehfw.end_expression();
-
-  // TOC is at CFA - 3 * data_align = CFA + 24
-  ehfw.offset_extended_sf(static_cast<uint8_t>(dw_reg::ppc64::TOC), -3);
-
   // SP and FP follows backchain
   ehfw.offset_extended_sf(dw_reg::FP, 0);
   ehfw.offset_extended_sf(dw_reg::SP, 0);
+
+  // The part of the ActRec that mirrors the native frame record is the first
+  // sixteen bytes.  In particular, the "top" of the record is 16 bytes after
+  // rvmfp(), and the saved fp and return addr are as usual.
+  ehfw.def_cfa(dw_reg::FP, 32);
+  ehfw.offset_extended_sf(static_cast<uint8_t>(dw_reg::ppc64::TOC), 1);
+  ehfw.offset_extended_sf(dw_reg::IP, 2);
+  ehfw.offset_extended_sf(dw_reg::FP, 4);
+
+  // This is an artifact of a time when we did not spill registers onto the
+  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
+  // personality routine skips all the way back to native frames before
+  // resuming the unwinder, so its brokenness goes unnoticed.
+  ehfw.same_value(dw_reg::SP);
 
 #else
 

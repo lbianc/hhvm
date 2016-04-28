@@ -676,14 +676,10 @@ void Vgen::emit(const callphp& i) {
 }
 
 void Vgen::emit(const inittc&) {
-  // Our call doesn't push the return address directly but leave it for the
-  // callee's prologue to save it on caller's frame.
-  a.mflr(ppc64::rfuncln());
-  a.std(ppc64::rfuncln(), ppc64_asm::reg::r1[AROFF(m_savedRip)]);
-
-  // As PPC64 has no native stack pointer rather only a frame pointer so the
-  // rsp needs to be initialized explicitly based on the current frame.
-  a.mr(rsp(), ppc64_asm::reg::r1);
+  // workaround for avoiding the first useless stublogue: we don't need to
+  // create a frame here. X64 needs it as only the stublogue will complete a
+  // frame.
+  a.addi(rsp(), ppc64_asm::reg::r1, min_frame_size);
 
   // initialize our rone register
   a.li(ppc64::rone(), 1);
