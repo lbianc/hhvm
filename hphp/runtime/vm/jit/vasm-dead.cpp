@@ -94,6 +94,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::lea:
     case Vinstr::leap:
     case Vinstr::lead:
+    case Vinstr::ldarx:
     case Vinstr::load:
     case Vinstr::loadups:
     case Vinstr::loadb:
@@ -231,6 +232,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::resumetc:
     case Vinstr::ret:
     case Vinstr::retransopt:
+    case Vinstr::stdcx:
     case Vinstr::store:
     case Vinstr::storeb:
     case Vinstr::storebi:

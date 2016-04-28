@@ -288,12 +288,14 @@ struct Vunit;
   O(fcmpo, Inone, U(s0) U(s1), D(sf))\
   O(fcmpu, Inone, U(s0) U(s1), D(sf))\
   O(fctidz, Inone, U(s), D(d) D(sf))\
+  O(ldarx, Inone, U(s), D(d))\
   O(mfcr, Inone, Un, D(d))\
   O(mflr, Inone, Un, D(d))\
   O(mfvsrd, Inone, U(s), D(d))\
   O(movlk, Inone, UH(s,d), DH(d,s))\
   O(mtlr, Inone, U(s), Dn)\
   O(mtvsrd, Inone, U(s), D(d))\
+  O(stdcx, Inone, U(s) U(d), Dn)\
   O(xscvdpsxds, Inone, U(s), D(d))\
   O(xscvsxddp, Inone, U(s), D(d))\
   O(xxlxor, Inone, U(s0) U(s1), D(d))\
@@ -1103,6 +1105,7 @@ struct fabs { VregDbl s; VregDbl d; };
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fctidz { VregDbl s; VregDbl d; VregSF sf; };
+struct ldarx { Vptr s; Vreg64 d; };
 struct mfcr { Vreg64 d; };
 struct mflr { Vreg64 d; };
 struct mfvsrd { Vreg128 s; Vreg64 d; };
@@ -1111,6 +1114,7 @@ struct xscvdpsxds { Vreg128 s, d; };
 struct movlk { Vreg64 s, d; };
 struct mtlr { Vreg64 s; };
 struct mtvsrd { Vreg64 s; Vreg128 d; };
+struct stdcx { Vreg64 s; Vptr d; };
 struct xscvsxddp { Vreg128 s, d; };
 struct xxlxor { Vreg128 s0, s1, d; };
 struct xxpermdi { Vreg128 s0, s1, d; };

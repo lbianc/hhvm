@@ -1225,7 +1225,10 @@ struct Assembler {
   void lbdx()           { not_implemented(); }
   void lbepx()          { not_implemented(); }
   void lbzcix()         { not_implemented(); }
-  void ldarx()          { not_implemented(); }
+  //TODO(rcardoso); check default for EH bit
+  void ldarx(const Reg64& rt, MemoryRef m, bool eh = 1) {
+    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 84, eh);
+  }
   void ldcix()          { not_implemented(); }
   void lddx()           { not_implemented(); }
   void ldepx()          { not_implemented(); }
@@ -1383,7 +1386,9 @@ struct Assembler {
   void stbdx()          { not_implemented(); }
   void stbepx()         { not_implemented(); }
   void stdcix()         { not_implemented(); }
-  void stdcx()          { not_implemented(); }
+  void stdcx(const Reg64& rt, MemoryRef m) {
+    EmitXForm(31, rn(rt), rn(m.r.base), rn(m.r.index), 214, 1);
+  }
   void stddx()          { not_implemented(); }
   void stdepx()         { not_implemented(); }
   void stfd(const RegXMM& frt, MemoryRef m) {

@@ -213,6 +213,7 @@ struct Vgen {
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
+  void emit(const ldarx& i) { a.ldarx(i.d, i.s); }
   void emit(const leap& i) { a.li64(i.d, i.s.r.disp, false); }
   void emit(const lead& i) { a.li64(i.d, (int64_t)i.s.get(), false); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
@@ -262,6 +263,9 @@ struct Vgen {
     copyCR0toCR1(a, rAsm);
   }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
+
+  void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
+
   void emit(const storeups& i) { a.stxvw4x(i.s,i.m); }
   // Subtractions: d = s1 - s0
   void emit(const subq& i) {
@@ -404,6 +408,7 @@ struct Vgen {
   void emit(const cmovq&);
   void emit(const contenter&);
   void emit(const cvtsi2sd& i);
+  void emit(const decqmlock& i);
   void emit(const jcc& i);
   void emit(const jcci& i);
   void emit(const jmp& i);
@@ -453,6 +458,20 @@ void Vgen::emit(const cvtsi2sd& i) {
   // As described on ISA page 727, F.2.6
   emit(copy{i.s, i.d});
   a.fcfid(i.d, i.d);
+}
+
+void Vgen::emit(const decqmlock& i) {
+   ppc64_asm::Label loop;
+   loop.asm_label(a);
+   {
+     // Using rfuncln because rAsm scratch register
+     // will be used by decq to save CR0 to CR1
+     emit(ldarx{i.m, rfuncln()});
+     emit(decq{rfuncln(), rfuncln(), i.sf});
+     emit(stdcx{rfuncln(), i.m});
+   }
+   //TODO(racardoso): bne- (missing branch hint)
+   a.bc(loop, BranchConditions::CR0_NotEqual);
 }
 
 void Vgen::emit(const ucomisd& i) {
@@ -1391,6 +1410,20 @@ void lowerForPPC64(Vout& v, absdbl& inst) {
   v << copy{after_conv, inst.d};
 }
 
+void lowerForPPC64(Vout& v, decqmlock& inst) {
+  Vptr p = inst.m;
+  patchVptr(p, v);
+  // decqmlock uses ldarx and stdcx instructions that are X-Form instruction
+  // and support only index+base address mode. In case decqmlock uses base or
+  // base + displacement with displacement less than 16 bits patchVptr will
+  // not work so we need to copy the displacement to index register.
+  if (!p.index.isValid()) {
+    p.index = v.makeReg();
+    v <<  ldimml{Immed(p.disp), p.index};
+  }
+  v << decqmlock{p, inst.sf};
+}
+
 void lower_vcallarray(Vunit& unit, Vlabel b) {
   auto& code = unit.blocks[b].code;
   // vcallarray can only appear at the end of a block.
@@ -1411,7 +1444,6 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}});
   code.back().origin = origin;
 }
-
 
 /*
  * Lower a few abstractions to facilitate straightforward PPC64 codegen.
