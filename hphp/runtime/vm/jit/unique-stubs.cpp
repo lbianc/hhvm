@@ -962,7 +962,7 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   us.enterTCExit = vwrap(cb, data, [&] (Vout& v) {
     // Eagerly save VM regs and realign the native stack.
     storeVMRegs(v);
-#if defined(__x86_64__)
+#if !defined(__powerpc64__)
     v << lea{rsp()[8], rsp()};
 #endif
 
@@ -1012,15 +1012,15 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 #endif
 
     // Set up linkage with the top VM frame in this nesting.
-#if defined(__powerpc64__)
+#if !defined(__powerpc64__)
+    v << store{rsp(), firstAR[AROFF(m_sfp)]};
+#else
     // On ppc64, the linkage from this vmframe is being set now as it's not
     // dynamic as X64's prologue.
     v << store{firstAR, rsp()[AROFF(m_sfp)]};
 
     // Using the actual frame pointer r1 which is pointing to a valid frame
     v << store{ppc64_asm::reg::r1, firstAR[AROFF(m_sfp)]};
-#else
-    v << store{rsp(), firstAR[AROFF(m_sfp)]};
 #endif
 
     // Set up the VM registers.
@@ -1028,7 +1028,7 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     v << copy{sp, rvmsp()};
     v << copy{tl, rvmtl()};
 
-#if defined(__x86_64__)
+#if !defined(__powerpc64__)
     // Unalign the native stack.
     v << lea{rsp()[-8], rsp()};
 #endif

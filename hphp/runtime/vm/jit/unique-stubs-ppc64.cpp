@@ -313,8 +313,9 @@ TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us) {
   a.addi(rsp(), rsp(), ppc64_asm::min_frame_size);
   a.mr(ppc64_asm::reg::r1, rsp());
 
-  // Corrupt the backchain, but it'll be useless soon as it'll be destroyed.
-  // By doing this, the r31 value will be correctly loaded on stubret.
+  // r31 should have the same value as caller's r1. Loading it soon on stubret.
+  // (this corrupts the backchain, but it's not relevant as this frame will be
+  // destroyed soon)
   a.std(ppc64_asm::reg::r1, rsp()[0]);
 
   // Simply go to enterTCExit
