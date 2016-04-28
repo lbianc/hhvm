@@ -334,46 +334,26 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.begin_cie(dw_reg::IP,
                  reinterpret_cast<const void*>(tc_unwind_personality));
 
-#if defined(__x86_64__)
+  // The part of the ActRec that mirrors the native frame record is the
+  // previous part from the m_func element, which incorporates the backchain
+  // and the return address, at least.
+  auto const record_size = AROFF(m_func);
+  ehfw.def_cfa(dw_reg::FP, record_size);
 
-  // The part of the ActRec that mirrors the native frame record is the first
-  // sixteen bytes.  In particular, the "top" of the record is 16 bytes after
-  // rvmfp(), and the saved fp and return addr are as usual.
-  ehfw.def_cfa(dw_reg::FP, 16);
-  ehfw.offset_extended_sf(dw_reg::IP, 1);
-  ehfw.offset_extended_sf(dw_reg::FP, 2);
+  // The following calculation is related to the "top" of the record. There is
+  // an implicit -8 factor as defined by EHFrameWriter::m_cie.data_align
+  ehfw.offset_extended_sf(dw_reg::IP,  (record_size - AROFF(m_savedRip))/8);
+  ehfw.offset_extended_sf(dw_reg::FP,  (record_size - AROFF(m_sfp)     )/8);
 
-  // This is an artifact of a time when we did not spill registers onto the
-  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
-  // personality routine skips all the way back to native frames before
-  // resuming the unwinder, so its brokenness goes unnoticed.
-  ehfw.same_value(dw_reg::SP);
-
-#elif defined(__powerpc64__)
-
-  // SP and FP follows backchain
-  ehfw.offset_extended_sf(dw_reg::FP, 0);
-  ehfw.offset_extended_sf(dw_reg::SP, 0);
-
-  // The part of the ActRec that mirrors the native frame record is the first
-  // sixteen bytes.  In particular, the "top" of the record is 16 bytes after
-  // rvmfp(), and the saved fp and return addr are as usual.
-  ehfw.def_cfa(dw_reg::FP, 32);
-  ehfw.offset_extended_sf(static_cast<uint8_t>(dw_reg::ppc64::TOC), 1);
-  ehfw.offset_extended_sf(dw_reg::IP, 2);
-  ehfw.offset_extended_sf(dw_reg::FP, 4);
-
-  // This is an artifact of a time when we did not spill registers onto the
-  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
-  // personality routine skips all the way back to native frames before
-  // resuming the unwinder, so its brokenness goes unnoticed.
-  ehfw.same_value(dw_reg::SP);
-
-#else
-
-  not_implemented();
-
+#if defined(__powerpc64__)
+  ehfw.offset_extended_sf(dw_reg::TOC, (record_size - AROFF(m_savedToc))/8);
 #endif
+
+  // This is an artifact of a time when we did not spill registers onto the
+  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
+  // personality routine skips all the way back to native frames before
+  // resuming the unwinder, so its brokenness goes unnoticed.
+  ehfw.same_value(dw_reg::SP);
 
   ehfw.end_cie();
 }
