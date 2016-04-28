@@ -346,7 +346,6 @@ TCA emitEndCatchHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 
   return vwrap(cb, data, [&] (Vout& v) {
     auto const done1 = v.makeBlock();
-    auto const sf = v.makeReg();
     auto const sf1 = v.makeReg();
 
     v << cmpqim{0, udrspo, sf1};
