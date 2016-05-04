@@ -40,6 +40,18 @@
 #include <algorithm>
 #include <tuple>
 
+// TODO(lbianc): This is a temporary solution for compiling in different
+// archs. The correct way of doing that is do not compile arch specific
+// files of a different one, but currently it is not possible, since
+// some common files use arch specific methods without eclusion.
+// The macro bellow returns the dummy field for x86 as it will not be used
+// in x64 arch.
+#ifdef __powerpc64__
+#define SAVED_TOC() m_savedToc
+#else
+#define SAVED_TOC() _dummyA
+#endif
+
 TRACE_SET_MOD(vasm);
 
 namespace HPHP { namespace jit {
@@ -767,7 +779,7 @@ void Vgen::emit(const call& i) {
   a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
   a.call(i.target, true);
   if (i.watch) {
     // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
@@ -781,7 +793,7 @@ void Vgen::emit(const callr& i) {
   a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(m_savedToc)]);
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
   a.call(i.target.asReg(), true);
 }
 
