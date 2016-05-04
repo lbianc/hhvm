@@ -145,9 +145,7 @@ const StaticString
   s_is_deprecated("deprecated function"),
   s_trigger_error("trigger_error"),
   s_trigger_sampled_error("trigger_sampled_error"),
-  s_zend_assertions("zend.assertions"),
-  s_HH_WaitHandle("HH\\WaitHandle"),
-  s_result("result");
+  s_zend_assertions("zend.assertions");
 
 using uchar = unsigned char;
 
@@ -255,17 +253,31 @@ namespace StackSym {
   assertx(false);                                            \
 } while (0)
 
-// RAII guard for function creation.
+/*
+ * RAII guard for function creation.
+ *
+ * This ensures that the eval stack's high water pointer is pointing
+ * to the current function's maxStackCells (needed before we start
+ * emitting bytecodes that manipulate the stack), and also that we
+ * properly finish the function at the end of the scope.
+ */
 struct FuncFinisher {
   FuncFinisher(EmitterVisitor* ev, Emitter& e, FuncEmitter* fe,
                int32_t stackPad = 0)
     : m_ev(ev), m_e(e), m_fe(fe), m_stackPad(stackPad)
-  {}
+  {
+    assert(!ev->m_evalStack.m_actualStackHighWaterPtr ||
+           ev->m_evalStack.m_actualStackHighWaterPtr == &fe->maxStackCells);
+    ev->m_evalStack.m_actualStackHighWaterPtr = &fe->maxStackCells;
+  }
 
   ~FuncFinisher() {
     m_ev->finishFunc(m_e, m_fe, m_stackPad);
   }
 
+  void setStackPad(int32_t stackPad) {
+    m_stackPad = stackPad;
+  }
 private:
   EmitterVisitor* m_ev;
   Emitter&        m_e;
@@ -832,11 +844,16 @@ std::string SymbolicStack::pretty() const {
   return out.str();
 }
 
+void SymbolicStack::updateHighWater() {
+  *m_actualStackHighWaterPtr =
+    std::max(*m_actualStackHighWaterPtr,
+             static_cast<int>(m_actualStack.size() + m_fdescCount));
+}
+
 void SymbolicStack::push(char sym) {
   if (!StackSym::IsSymbolic(sym)) {
     m_actualStack.push_back(m_symStack.size());
-    *m_actualStackHighWaterPtr = std::max(*m_actualStackHighWaterPtr,
-                                          (int)m_actualStack.size());
+    updateHighWater();
   }
   m_symStack.push_back(SymEntry(sym));
   ITRACE(4, "push: {}\n", m_symStack.back().pretty());
@@ -1045,7 +1062,7 @@ int SymbolicStack::sizeActual() const {
 
 void SymbolicStack::pushFDesc() {
   m_fdescCount += kNumActRecCells;
-  *m_fdescHighWaterPtr = std::max(*m_fdescHighWaterPtr, m_fdescCount);
+  updateHighWater();
 }
 
 void SymbolicStack::popFDesc() {
@@ -1933,13 +1950,13 @@ void EmitterVisitor::unregisterControlTarget(ControlTarget* t) {
 EmitterVisitor::EmittedClosures EmitterVisitor::s_emittedClosures;
 
 EmitterVisitor::EmitterVisitor(UnitEmitter& ue)
-  : m_ue(ue), m_curFunc(ue.getMain()),
+  : m_ue(ue),
+    m_curFunc(ue.getMain()),
     m_evalStackIsUnknown(false),
-    m_actualStackHighWater(0), m_fdescHighWater(0), m_stateLocal(-1),
+    m_stateLocal(-1),
     m_retLocal(-1) {
   m_prevOpcode = OpLowInvalid;
-  m_evalStack.m_actualStackHighWaterPtr = &m_actualStackHighWater;
-  m_evalStack.m_fdescHighWaterPtr = &m_fdescHighWater;
+  m_evalStack.m_actualStackHighWaterPtr = &m_curFunc->maxStackCells;
 }
 
 EmitterVisitor::~EmitterVisitor() {
@@ -4094,6 +4111,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         e.AKExists();
         return true;
       }
+    } else if (call->isCallToFunction("hh\\asm")) {
+      if (emitInlineHHAS(e, call)) return true;
     } else if (call->isCallToFunction("hh\\invariant")) {
       if (emitHHInvariant(e, call)) return true;
     } else if (call->isCallToFunction("hh\\idx") &&
@@ -5202,6 +5221,45 @@ bool EmitterVisitor::emitInlineGen(
     return emitInlineGena(e, call);
   }
   return false;
+}
+
+// Compile a static string as HHAS
+//
+// The hhas bytecodes should either leave the stack untouched, in
+// which case the result of the hh\asm() expression will be null; or
+// they should push exactly one cell, which will be the result of the
+// hh\asm() expression.
+bool EmitterVisitor::emitInlineHHAS(Emitter& e, SimpleFunctionCallPtr func) {
+  if (SystemLib::s_inited &&
+      !func->getFunctionScope()->isSystem() &&
+      !RuntimeOption::EvalAllowHhas) {
+    throw IncludeTimeFatalException(func,
+      "Inline hhas only allowed in systemlib");
+  }
+  auto const params = func->getParams();
+  if (!params || params->getCount() != 1) {
+    throw IncludeTimeFatalException(func,
+      "Inline hhas expects exactly one argument");
+  }
+  Variant v;
+  if (!((*params)[0]->getScalarValue(v)) || !v.isString()) {
+    throw IncludeTimeFatalException(func,
+      "Inline hhas must be string literal");
+  }
+
+  try {
+    if (assemble_expression(m_ue, m_curFunc,
+                            m_evalStack.size() + m_evalStack.fdescSize(),
+                            v.toString().toCppString())) {
+      pushEvalStack(StackSym::C);
+    } else {
+      e.Null();
+    }
+  } catch (const std::exception& ex) {
+    throw IncludeTimeFatalException(func, ex.what());
+  }
+
+  return true;
 }
 
 bool EmitterVisitor::emitHHInvariant(Emitter& e, SimpleFunctionCallPtr call) {
@@ -6816,8 +6874,7 @@ determine_type_constraint(const ParameterExpressionPtr& par) {
 void EmitterVisitor::emitPostponedMeths() {
   std::vector<FuncEmitter*> top_fes;
   while (!m_postponedMeths.empty()) {
-    assert(m_actualStackHighWater == 0);
-    assert(m_fdescHighWater == 0);
+    assert(m_evalStack.m_actualStackHighWaterPtr == nullptr);
     PostponedMeth& p = m_postponedMeths.front();
     MethodStatementPtr meth = p.m_meth;
     FuncEmitter* fe = p.m_fe;
@@ -7046,6 +7103,7 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
   }
 
   Emitter e(meth, m_ue, *this);
+  FuncFinisher ff(this, e, fe, 0);
   Label topOfBody(e);
 
   Offset base = m_ue.bcPos();
@@ -7056,13 +7114,11 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
 
   fe->setBuiltinFunc(bif, nif, attributes, base);
   fillFuncEmitterParams(fe, meth->getParams(), true);
-  int32_t stackPad = 0;
   if (nativeAttrs & Native::AttrOpCodeImpl) {
-    stackPad = emitNativeOpCodeImpl(meth, funcname, classname, fe);
+    ff.setStackPad(emitNativeOpCodeImpl(meth, funcname, classname, fe));
   } else {
     e.NativeImpl();
   }
-  FuncFinisher ff(this, e, fe, stackPad);
   emitMethodDVInitializers(e, meth, topOfBody);
 }
 
@@ -7307,6 +7363,7 @@ void EmitterVisitor::emitMethod(MethodStatementPtr meth) {
   SCOPE_EXIT { leaveRegion(region); };
 
   Emitter e(meth, m_ue, *this);
+  FuncFinisher ff(this, e, m_curFunc);
   Label topOfBody(e);
   emitMethodPrologue(e, meth);
 
@@ -7338,7 +7395,6 @@ void EmitterVisitor::emitMethod(MethodStatementPtr meth) {
     e.setTempLocation(OptLocation());
   }
 
-  FuncFinisher ff(this, e, m_curFunc);
   if (!m_curFunc->isMemoizeImpl) {
     emitMethodDVInitializers(e, meth, topOfBody);
   }
@@ -7481,6 +7537,8 @@ void EmitterVisitor::emitMemoizeMethod(MethodStatementPtr meth,
   SCOPE_EXIT { leaveRegion(region); };
 
   Emitter e(meth, m_ue, *this);
+  FuncFinisher ff(this, e, m_curFunc);
+
   Label topOfBody(e);
   Label cacheMiss;
 
@@ -7615,7 +7673,6 @@ void EmitterVisitor::emitMemoizeMethod(MethodStatementPtr meth,
 
   assert(m_evalStack.size() == 0);
 
-  FuncFinisher ff(this, e, m_curFunc);
   emitMethodDVInitializers(e, meth, topOfBody);
 }
 
@@ -9024,13 +9081,12 @@ void EmitterVisitor::copyOverFPIRegions(FuncEmitter* fe) {
 }
 
 void EmitterVisitor::saveMaxStackCells(FuncEmitter* fe, int32_t stackPad) {
-  fe->maxStackCells = m_actualStackHighWater +
-                      fe->numIterators() * kNumIterCells +
-                      fe->numLocals() +
-                      m_fdescHighWater +
-                      stackPad;
-  m_actualStackHighWater = 0;
-  m_fdescHighWater = 0;
+  fe->maxStackCells +=
+    fe->numIterators() * kNumIterCells +
+    fe->numLocals() +
+    stackPad;
+
+  m_evalStack.m_actualStackHighWaterPtr = nullptr;
 }
 
 // Are you sure you mean to be calling this directly? Would FuncFinisher
@@ -9662,17 +9718,6 @@ static int32_t emitGeneratorMethod(UnitEmitter& ue,
   return 1;  // Above cases push at most one stack cell.
 }
 
-// HH\WaitHandle::result()
-static int32_t emitWaitHandleResult(UnitEmitter& ue,
-                                    FuncEmitter* fe) {
-  Attr attrs = (Attr)(AttrBuiltin | AttrPublic);
-  fe->init(0, 0, ue.bcPos(), attrs, false, staticEmptyString());
-  ue.emitOp(OpThis);
-  ue.emitOp(OpWHResult);
-  ue.emitOp(OpRetC);
-  return 1;
-}
-
 // Emit byte codes to implement methods. Return the maximum stack cell count.
 int32_t EmitterVisitor::emitNativeOpCodeImpl(MethodStatementPtr meth,
                                              const char* funcName,
@@ -9688,9 +9733,6 @@ int32_t EmitterVisitor::emitNativeOpCodeImpl(MethodStatementPtr meth,
   } else if (asyncGenCls.same(s_class) &&
       (cmeth = folly::get_ptr(s_asyncGenMethods, s_func))) {
     return emitGeneratorMethod(m_ue, fe, *cmeth, true);
-  } else if (s_HH_WaitHandle.same(s_class) &&
-             s_result.same(s_func)) {
-    return emitWaitHandleResult(m_ue, fe);
   }
 
   throw IncludeTimeFatalException(meth,

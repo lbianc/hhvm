@@ -507,6 +507,47 @@ DELEGATE_OPCODE(NSameObj)
 DELEGATE_OPCODE(EqRes)
 DELEGATE_OPCODE(NeqRes)
 
+DELEGATE_OPCODE(BaseG)
+DELEGATE_OPCODE(PropX)
+DELEGATE_OPCODE(PropDX)
+DELEGATE_OPCODE(PropQ)
+DELEGATE_OPCODE(CGetProp)
+DELEGATE_OPCODE(CGetPropQ)
+DELEGATE_OPCODE(VGetProp)
+DELEGATE_OPCODE(BindProp)
+DELEGATE_OPCODE(SetProp)
+DELEGATE_OPCODE(UnsetProp)
+DELEGATE_OPCODE(SetOpProp)
+DELEGATE_OPCODE(IncDecProp)
+DELEGATE_OPCODE(IssetProp)
+DELEGATE_OPCODE(EmptyProp)
+DELEGATE_OPCODE(ElemX)
+DELEGATE_OPCODE(ElemDX)
+DELEGATE_OPCODE(ElemUX)
+DELEGATE_OPCODE(CGetElem)
+DELEGATE_OPCODE(VGetElem)
+DELEGATE_OPCODE(SetElem)
+DELEGATE_OPCODE(UnsetElem)
+DELEGATE_OPCODE(IssetElem)
+DELEGATE_OPCODE(EmptyElem)
+DELEGATE_OPCODE(ProfileMixedArrayOffset)
+DELEGATE_OPCODE(CheckMixedArrayOffset)
+DELEGATE_OPCODE(CheckArrayCOW)
+DELEGATE_OPCODE(ElemArray)
+DELEGATE_OPCODE(ElemArrayW)
+DELEGATE_OPCODE(ElemArrayD)
+DELEGATE_OPCODE(ElemArrayU)
+DELEGATE_OPCODE(ElemMixedArrayK)
+DELEGATE_OPCODE(ArrayGet)
+DELEGATE_OPCODE(MixedArrayGetK)
+DELEGATE_OPCODE(ArraySet)
+DELEGATE_OPCODE(ArraySetRef)
+DELEGATE_OPCODE(ArrayIsset)
+DELEGATE_OPCODE(ArrayIdx)
+DELEGATE_OPCODE(MapGet)
+DELEGATE_OPCODE(MapSet)
+DELEGATE_OPCODE(MapIsset)
+
 #undef NOOP_OPCODE
 #undef DELEGATE_OPCODE
 
@@ -641,52 +682,23 @@ void CodeGenerator::cgCallNative(Vout& v, IRInstruction* inst) {
 }
 
 CallDest CodeGenerator::callDest(Vreg reg0) const {
-  return { DestType::SSA, reg0 };
+  return irlower::callDest(reg0);
 }
 
 CallDest CodeGenerator::callDest(Vreg reg0, Vreg reg1) const {
-  return { DestType::TV, reg0, reg1 };
+  return irlower::callDest(reg0, reg1);
 }
 
 CallDest CodeGenerator::callDest(const IRInstruction* inst) const {
-  if (!inst->numDsts()) return kVoidDest;
-  return callDest(inst, dstLoc(inst, 0));
-}
-
-CallDest CodeGenerator::callDest(const IRInstruction* inst,
-                                 const Vloc& loc) const {
-  if (loc.numAllocated() == 0) return kVoidDest;
-  assertx(loc.numAllocated() == 1);
-  return {
-    inst->dst(0)->isA(TBool) ? DestType::Byte : DestType::SSA,
-    loc.reg(0)
-  };
+  return irlower::callDest(m_state, inst);
 }
 
 CallDest CodeGenerator::callDestTV(const IRInstruction* inst) const {
-  if (!inst->numDsts()) return kVoidDest;
-  return callDestTV(inst, dstLoc(inst, 0));
-}
-
-CallDest CodeGenerator::callDestTV(const IRInstruction* inst,
-                                   const Vloc& loc) const {
-  if (loc.numAllocated() == 0) return kVoidDest;
-  if (loc.isFullSIMD()) {
-    assertx(loc.numAllocated() == 1);
-    return { DestType::SIMD, loc.reg(0) };
-  }
-  if (loc.numAllocated() == 2) {
-    return { DestType::TV, loc.reg(0), loc.reg(1) };
-  }
-  assertx(loc.numAllocated() == 1);
-  // Sometimes we statically know the type and only need the value.
-  return { DestType::TV, loc.reg(0), InvalidReg };
+  return irlower::callDestTV(m_state, inst);
 }
 
 CallDest CodeGenerator::callDestDbl(const IRInstruction* inst) const {
-  if (!inst->numDsts()) return kVoidDest;
-  auto loc = dstLoc(inst, 0);
-  return { DestType::Dbl, loc.reg(0) };
+  return irlower::callDestDbl(m_state, inst);
 }
 
 void CodeGenerator::cgCallHelper(Vout& v, CallSpec call,
@@ -732,41 +744,40 @@ void CodeGenerator::emitTypeTest(Type type, Loc1 typeSrc, Loc2 dataSrc,
     !type.subtypeOfAny(TCls, TCountedStr, TPersistentArr),
     "Unsupported type in emitTypeTest: {}", type
   );
+
+  // Nothing to check.
+  if (type == TGen) return;
+
   auto& v = vmain();
-  ConditionCode cc;
-  if (type <= TPersistentStr) {
-    emitCmpTVType(v, sf, KindOfPersistentString, typeSrc);
-    cc = CC_E;
-  } else if (type <= TStr) {
-    emitTestTVType(v, sf, KindOfStringBit, typeSrc);
-    cc = CC_NZ;
-  } else if (type <= TArr) {
-    emitTestTVType(v, sf, KindOfArrayBit, typeSrc);
-    cc = CC_NZ;
-  } else if (type == TNull) {
-    emitCmpTVType(v, sf, KindOfNull, typeSrc);
-    cc = CC_LE;
-  } else if (type == TUncountedInit) {
-    emitTestTVType(v, sf, KindOfUncountedInitBit, typeSrc);
-    cc = CC_NZ;
-  } else if (type == TUncounted) {
-    emitCmpTVType(v, sf, KindOfRefCountThreshold, typeSrc);
-    cc = CC_LE;
-  } else if (type == TCell) {
-    emitCmpTVType(v, sf, KindOfRef, typeSrc);
-    cc = CC_L;
-  } else if (type == TGen) {
-    // nothing to check
-    return;
-  } else {
+
+  auto const cc = [&] {
+    auto const cmp = [&] (DataType kind, ConditionCode cc) {
+      emitCmpTVType(v, sf, kind, typeSrc);
+      return cc;
+    };
+
+    auto const test = [&] (int bits, ConditionCode cc) {
+      emitTestTVType(v, sf, bits, typeSrc);
+      return cc;
+    };
+
+    if (type <= TPersistentStr) return cmp(KindOfPersistentString, CC_E);
+    if (type <= TStr)           return test(KindOfStringBit, CC_NZ);
+    if (type <= TArr)           return test(KindOfArrayBit, CC_NZ);
+
+    // These are intentionally == and not <=.
+    if (type == TNull)          return cmp(KindOfNull, CC_LE);
+    if (type == TUncountedInit) return test(KindOfUncountedInitBit, CC_NZ);
+    if (type == TUncounted)     return cmp(KindOfRefCountThreshold, CC_LE);
+    if (type == TCell)          return cmp(KindOfRef, CC_L);
+
     always_assert(type.isKnownDataType());
     always_assert(!(type < TBoxedInitCell));
-    DataType dataType = type.toDataType();
-    assertx(dataType == KindOfRef ||
-           (dataType >= KindOfUninit && dataType <= KindOfResource));
-    emitCmpTVType(v, sf, dataType, typeSrc);
-    cc = CC_E;
-  }
+    auto const dt = type.toDataType();
+    assertx(dt == KindOfRef || (dt >= KindOfUninit && dt <= KindOfResource));
+    return cmp(dt, CC_E);
+  }();
+
   doJcc(cc, sf);
 
   if (type.isSpecialized()) {
@@ -1333,12 +1344,14 @@ void CodeGenerator::cgOrdStrIdx(IRInstruction* inst) {
                });
 }
 
+static const StaticString s_1("1");
+
 void CodeGenerator::cgConvBoolToStr(IRInstruction* inst) {
   auto dstReg = dstLoc(inst, 0).reg();
   auto srcReg = srcLoc(inst, 0).reg();
   auto& v = vmain();
-  auto f = v.cns(makeStaticString(""));
-  auto t = v.cns(makeStaticString("1"));
+  auto f = v.cns(staticEmptyString());
+  auto t = v.cns(s_1.get());
   auto const sf = v.makeReg();
   v << testb{srcReg, srcReg, sf};
   v << cmovq{CC_NZ, sf, f, t, dstReg};
@@ -4273,7 +4286,7 @@ void CodeGenerator::cgCheckCold(IRInstruction* inst) {
   auto counterAddr = mcg->tx().profData()->transCounterAddr(transId);
   auto& v = vmain();
   auto const sf = v.makeReg();
-  v << decqm{v.cns(counterAddr)[0], sf};
+  v << decqmlock{v.cns(counterAddr)[0], sf};
   v << jcc{CC_LE, sf, {label(inst->next()), label(taken)}};
 }
 
@@ -5047,7 +5060,7 @@ void CodeGenerator::cgIncProfCounter(IRInstruction* inst) {
   auto const transId = inst->extra<TransIDData>()->transId;
   auto const counterAddr = mcg->tx().profData()->transCounterAddr(transId);
   auto& v = vmain();
-  v << decqm{v.cns(counterAddr)[0], v.makeReg()};
+  v << decqmlock{v.cns(counterAddr)[0], v.makeReg()};
 }
 
 void CodeGenerator::cgDbgTraceCall(IRInstruction* inst) {
@@ -5173,7 +5186,25 @@ void CodeGenerator::cgLdClsInitData(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgConjure(IRInstruction* inst) {
-  vmain() << ud2();
+  auto dst = dstLoc(inst, 0);
+  auto& v = vmain();
+  if (dst.hasReg(0)) {
+    v << conjure{dst.reg(0)};
+  }
+  if (dst.hasReg(1)) {
+    v << conjure{dst.reg(1)};
+  }
+}
+
+void CodeGenerator::cgConjureUse(IRInstruction* inst) {
+  auto src = srcLoc(inst, 0);
+  auto& v = vmain();
+  if (src.hasReg(0)) {
+    v << conjureuse{src.reg(0)};
+  }
+  if (src.hasReg(1)) {
+    v << conjureuse{src.reg(1)};
+  }
 }
 
 void CodeGenerator::cgCountArray(IRInstruction* inst) {
@@ -5517,6 +5548,35 @@ void CodeGenerator::cgProfileObjClass(IRInstruction* inst) {
   cgCallHelper(v, CallSpec::direct(profileObjClassHelper),
                kVoidDest, SyncOptions::None,
                argGroup(inst).reg(profile).ssa(0));
+}
+
+void CodeGenerator::cgSetOpCell(IRInstruction* inst) {
+  auto const op = inst->extra<SetOpData>()->op;
+  auto const helper = [&] {
+    switch (op) {
+      case SetOpOp::PlusEqual:   return cellAddEq;
+      case SetOpOp::MinusEqual:  return cellSubEq;
+      case SetOpOp::MulEqual:    return cellMulEq;
+      case SetOpOp::ConcatEqual: return cellConcatEq;
+      case SetOpOp::DivEqual:    return cellDivEq;
+      case SetOpOp::PowEqual:    return cellPowEq;
+      case SetOpOp::ModEqual:    return cellModEq;
+      case SetOpOp::AndEqual:    return cellBitAndEq;
+      case SetOpOp::OrEqual:     return cellBitOrEq;
+      case SetOpOp::XorEqual:    return cellBitXorEq;
+      case SetOpOp::SlEqual:     return cellShlEq;
+      case SetOpOp::SrEqual:     return cellShrEq;
+      case SetOpOp::PlusEqualO:  return cellAddEqO;
+      case SetOpOp::MinusEqualO: return cellSubEqO;
+      case SetOpOp::MulEqualO:   return cellMulEqO;
+    }
+    not_reached();
+  }();
+
+  auto& v = vmain();
+  cgCallHelper(v, CallSpec::direct(helper),
+               kVoidDest, SyncOptions::Sync,
+               argGroup(inst).ssa(0).typedValue(1));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

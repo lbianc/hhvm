@@ -1595,7 +1595,8 @@ bool HHVM_FUNCTION(copy,
     }
 
     if (!HHVM_FN(stream_copy_to_stream)(sfile.toResource(),
-                                        dfile.toResource()).toBoolean()) {
+                                        dfile.toResource()).toBoolean() &&
+        HHVM_FN(filesize)(source).toBoolean()) {
       return false;
     }
 
@@ -1873,9 +1874,7 @@ bool HHVM_FUNCTION(rmdir,
 
 String HHVM_FUNCTION(dirname,
                      const String& path) {
-  char *buf = strndup(path.data(), path.size());
-  int len = FileUtil::dirname_helper(buf, path.size());
-  return String(buf, len, AttachString);
+  return FileUtil::dirname(path);
 }
 
 Variant HHVM_FUNCTION(getcwd) {

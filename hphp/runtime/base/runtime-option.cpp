@@ -98,6 +98,7 @@ bool RuntimeOption::AutoprimeGenerators = true;
 
 #ifdef FACEBOOK
 bool RuntimeOption::UseThriftLogger = false;
+size_t RuntimeOption::LoggerBatchSize = 100;
 #endif
 std::map<std::string, ErrorLogFileData> RuntimeOption::ErrorLogs = {
   {Logger::DEFAULT, ErrorLogFileData()},
@@ -817,6 +818,7 @@ void RuntimeOption::Load(
     Config::Bind(LogFileSymLink, ini, config, "Log.SymLink");
 #ifdef FACEBOOK
     Config::Bind(UseThriftLogger, ini, config, "Log.UseThriftLogger");
+    Config::Bind(LoggerBatchSize, ini, config, "Log.BatchSize", 100);
     if (UseThriftLogger) {
       fprintf(stderr,
               "WARNING: Log.UseThriftLogger overrides other logger options.\n"
@@ -1826,9 +1828,8 @@ void RuntimeOption::Load(
                          value, RuntimeOption::UploadMaxFileSize);
                      },
                      []() {
-                       int uploadMaxFilesize =
-                         VirtualHost::GetUploadMaxFileSize() / (1 << 20);
-                       return std::to_string(uploadMaxFilesize) + "M";
+                       return convert_long_to_bytes(
+                         VirtualHost::GetUploadMaxFileSize());
                      }
                    ));
   // Filesystem and Streams Configuration Options

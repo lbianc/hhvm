@@ -550,6 +550,8 @@ bool canDCE(IRInstruction* inst) {
   case InlineReturnNoFrame:
   case BeginInlining:
   case SyncReturnBC:
+  case SetOpCell:
+  case ConjureUse:
     return false;
   }
   not_reached();

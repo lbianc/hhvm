@@ -16,6 +16,9 @@ let get_result_type res =
   | IdentifySymbolService.Method _ -> "method"
   | IdentifySymbolService.Function -> "function"
   | IdentifySymbolService.LocalVar -> "local"
+  | IdentifySymbolService.Property _ -> "property"
+  | IdentifySymbolService.ClassConst _ -> "class_const"
+  | IdentifySymbolService.Typeconst _ -> "typeconst"
 
 let to_json = function
   | Some res ->

@@ -425,7 +425,15 @@ struct FPIReg {
  */
 struct StackDepth {
   int currentOffset;
+  /*
+   * Tracks the max depth of elem stack + desc stack offset inside a region
+   * where baseValue is unknown.
+   */
   int maxOffset;
+  /*
+   * Tracks the min depth of the elem stack inside a region where baseValue
+   * is unknown, and the line where the min occurred.
+   */
   int minOffset;
   int minOffsetLine;
   folly::Optional<int> baseValue;
@@ -451,6 +459,10 @@ struct StackDepth {
   void adjust(AsmState& as, int delta);
   void addListener(AsmState& as, StackDepth* target);
   void setBase(AsmState& as, int stackDepth);
+  int absoluteDepth() {
+    assert(baseValue.hasValue());
+    return baseValue.value() + currentOffset;
+  }
 
   /*
    * Sets the baseValue such as the current stack depth matches the
@@ -522,7 +534,9 @@ struct AsmState {
   }
 
   void adjustStackHighwater(int depth) {
-    stackHighWater = std::max(stackHighWater, depth);
+    if (depth) {
+      fe->maxStackCells = std::max(fe->maxStackCells, depth);
+    }
   }
 
   std::string displayStackDepth() {
@@ -624,11 +638,13 @@ struct AsmState {
       currentStackDepth->currentOffset
     });
     fdescDepth += kNumActRecCells;
-    fdescHighWater = std::max(fdescDepth, fdescHighWater);
+    currentStackDepth->adjust(*this, 0);
   }
 
   void endFpi() {
-    assert(!fpiRegs.empty());
+    if (fpiRegs.empty()) {
+      error("endFpi called with no active fpi region");
+    }
 
     auto& ent = fe->addFPIEnt();
     const auto& reg = fpiRegs.back();
@@ -646,6 +662,7 @@ struct AsmState {
     }
 
     fpiRegs.pop_back();
+    always_assert(fdescDepth >= kNumActRecCells);
     fdescDepth -= kNumActRecCells;
   }
 
@@ -677,7 +694,7 @@ struct AsmState {
     }
   }
 
-  void finishFunction() {
+  void finishSection() {
     for (auto const& label : labelMap) {
       if (!label.second.bound) {
         error("Undefined label " + label.first);
@@ -697,6 +714,10 @@ struct AsmState {
 
       fe->fpitab[kv.first].m_fpOff += *kv.second->baseValue;
     }
+  }
+
+  void finishFunction() {
+    finishSection();
 
     // Stack depth should be 0 at the end of a function body
     enforceStackDepth(0);
@@ -707,10 +728,10 @@ struct AsmState {
       fe->allocUnnamedLocal();
     }
 
-    fe->maxStackCells = fe->numLocals() +
-                        fe->numIterators() * kNumIterCells +
-                        stackHighWater +
-                        fdescHighWater; // in units of cells already
+    fe->maxStackCells +=
+      fe->numLocals() +
+      fe->numIterators() * kNumIterCells;
+
     fe->finish(ue->bcPos(), false);
     ue->recordFunction(fe);
 
@@ -721,9 +742,7 @@ struct AsmState {
     initStackDepth = StackDepth();
     initStackDepth.setBase(*this, 0);
     currentStackDepth = &initStackDepth;
-    stackHighWater = 0;
     fdescDepth = 0;
-    fdescHighWater = 0;
     maxUnnamed = -1;
     fpiToUpdate.clear();
   }
@@ -768,9 +787,8 @@ struct AsmState {
   bool enumTySet{false};
   StackDepth initStackDepth;
   StackDepth* currentStackDepth{&initStackDepth};
-  int stackHighWater{0};
   int fdescDepth{0};
-  int fdescHighWater{0};
+  int minStackDepth{0};
   int maxUnnamed{-1};
   std::vector<std::pair<size_t, StackDepth*>> fpiToUpdate;
   std::set<std::string,stdltistr> hoistables;
@@ -783,7 +801,7 @@ void StackDepth::adjust(AsmState& as, int delta) {
     // The absolute stack depth is unknown. We only store the min
     // and max offsets, and we will take a decision later, when the
     // base value will be known.
-    maxOffset = std::max(currentOffset, maxOffset);
+    maxOffset = std::max(currentOffset + as.fdescDepth, maxOffset);
     if (currentOffset < minOffset) {
       minOffsetLine = as.in.getLineNumber();
       minOffset = currentOffset;
@@ -795,7 +813,7 @@ void StackDepth::adjust(AsmState& as, int delta) {
     as.error("opcode sequence caused stack depth to go negative");
   }
 
-  as.adjustStackHighwater(*baseValue + currentOffset);
+  as.adjustStackHighwater(*baseValue + currentOffset + as.fdescDepth);
 }
 
 void StackDepth::addListener(AsmState& as, StackDepth* target) {
@@ -1984,7 +2002,7 @@ void parse_default_ctor(AsmState& as) {
               as.ue->bcPos(), AttrPublic, true, 0);
   as.ue->emitOp(OpNull);
   as.ue->emitOp(OpRetC);
-  as.stackHighWater = 1;
+  as.fe->maxStackCells = 1;
   as.finishFunction();
 
   as.in.expectWs(';');
@@ -2395,6 +2413,39 @@ UnitEmitter* assemble_string(const char* code, int codeLen,
   }
 
   return ue.release();
+}
+
+bool assemble_expression(UnitEmitter& ue, FuncEmitter* fe,
+                         int incomingStackDepth,
+                         const std::string& expr) {
+  std::stringstream sstr(expr + '}');
+  AsmState as(sstr);
+  as.ue = &ue;
+  as.fe = fe;
+  as.initStackDepth.adjust(as, incomingStackDepth);
+  parse_function_body(as, 1);
+  as.finishSection();
+  if (as.maxUnnamed >= 0) {
+    as.error("Unnamed locals are not allowed in inline assembly");
+  }
+  if (as.currentStackDepth) {
+    // If we fall off the end of the inline assembly, we're
+    // expected to leave a single value on the stack.
+    if (!as.currentStackDepth->baseValue) {
+      as.error("Unknown stack offset on exit from inline assembly");
+    }
+    auto curStackDepth = as.currentStackDepth->absoluteDepth();
+    if (curStackDepth == incomingStackDepth + 1) {
+      return true;
+    }
+    if (curStackDepth != incomingStackDepth) {
+      as.error("Inline assembly expressions should leave the stack unchanged, "
+               "or push exactly one cell onto the stack.");
+    }
+  }
+
+  // indicate that we didn't push a value onto the stack
+  return false;
 }
 
 //////////////////////////////////////////////////////////////////////

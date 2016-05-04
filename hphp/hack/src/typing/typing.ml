@@ -693,6 +693,7 @@ and catch parent_lenv after_try env (ety, exn, b) =
   let env = LEnv.fully_integrate env parent_lenv in
   let cid = CI ety in
   let ety_p = (fst ety) in
+  TUtils.process_class_id cid;
   let env, _ = instantiable_cid ety_p env cid in
   let env, ety = static_class_id ety_p env cid in
   let env = exception_ty ety_p env ety in
@@ -1276,6 +1277,7 @@ and expr_
       Phase.hint_locl env ty
   | InstanceOf (e, cid) ->
       let env, _ = expr env e in
+      TUtils.process_class_id cid;
       let env, _class = instantiable_cid p env cid in
       env, (Reason.Rwitness p, Tprim Tbool)
   | Efun (f, _idl) ->
@@ -1945,15 +1947,18 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
        (match el, uel with
          | [(_, Array_get (ea, Some _))], [] ->
            let env, ty = expr env ea in
-           Errors.try_
-             (fun () -> SubType.sub_type
-                          env (Reason.Rnone, Tarraykind AKany) ty)
-             (fun _ ->
-              let env, (r, ety) = Env.expand_type env ty in
-              Errors.unset_nonidx_in_strict
-                p
-                (Reason.to_string ("This is " ^ Typing_print.error ety) r);
-              env)
+           if List.exists ~f:(fun super -> SubType.is_sub_type env super ty) [
+             (Reason.Rnone, (Tclass ((Pos.none, SN.Collections.cDict),
+               [(Reason.Rnone, Tany); (Reason.Rnone, Tany)])));
+             (Reason.Rnone, Tarraykind AKany)
+           ] then env
+           else begin
+             let env, (r, ety) = Env.expand_type env ty in
+             Errors.unset_nonidx_in_strict
+               p
+               (Reason.to_string ("This is " ^ Typing_print.error ety) r);
+             env
+           end
          | _ -> Errors.unset_nonidx_in_strict p []; env)
        else env in
       (match el with
@@ -2669,7 +2674,7 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
               (p, (class_.tc_name^"::"^mid)) ::
                   !Typing_defs.accumulate_method_calls_result;
         Typing_hooks.dispatch_smethod_hook
-          class_ (p, mid) env ety_env.from_class ~is_method;
+          class_ (p, mid) env ety_env.from_class ~is_method ~is_const;
         let ety_env =
           { ety_env with
             substs = Subst.make class_.tc_tparams paraml } in
@@ -4048,7 +4053,8 @@ and method_def env m =
     | Some _ -> ();
   Typing_hooks.dispatch_exit_method_def_hook m
 
-and typedef_def tid typedef =
+and typedef_def typedef =
+  let tid = (snd typedef.t_name) in
   let filename = Pos.filename (fst typedef.t_kind) in
   let dep = Typing_deps.Dep.Class tid in
   let env =
@@ -4061,11 +4067,13 @@ and typedef_def tid typedef =
   let env = Typing_env.set_mode env FileInfo.Mdecl in
   NastCheck.typedef env typedef;
   let {
-    t_pos;
+    t_name = t_pos, _;
     t_tparams = _;
     t_constraint = tcstr;
     t_kind = hint;
     t_user_attributes = _;
+    t_vis = _;
+    t_mode = _;
   } = typedef in
   let ty = TI.instantiable_hint env hint in
   let env, ty = Phase.localize_with_self env ty in

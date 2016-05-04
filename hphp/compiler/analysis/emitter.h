@@ -225,12 +225,12 @@ private:
 
 public:
   int* m_actualStackHighWaterPtr;
-  int* m_fdescHighWaterPtr;
 
   SymbolicStack() : m_fdescCount(0) {}
 
   std::string pretty() const;
 
+  void updateHighWater();
   void push(char sym);
   void setInt(int64_t v);
   void setString(const StringData* s);
@@ -248,6 +248,7 @@ public:
   void set(int index, char sym);
   size_t size() const;
   size_t actualSize() const;
+  size_t fdescSize() const { return m_fdescCount; }
   bool empty() const;
   void clear();
 
@@ -643,8 +644,6 @@ private:
   SymbolicStack m_evalStack;
   bool m_evalStackIsUnknown;
   hphp_hash_map<Offset, SymbolicStack> m_jumpTargetEvalStacks;
-  int m_actualStackHighWater;
-  int m_fdescHighWater;
   typedef tbb::concurrent_hash_map<const StringData*, int,
                                    StringDataHashICompare> EmittedClosures;
   static EmittedClosures s_emittedClosures;
@@ -806,6 +805,7 @@ public:
   bool emitInlineGen(Emitter& e, const ExpressionPtr&);
   bool emitInlineGena(Emitter& e, const SimpleFunctionCallPtr& call);
   bool emitInlineGenva(Emitter& e, const SimpleFunctionCallPtr& call);
+  bool emitInlineHHAS(Emitter& e, SimpleFunctionCallPtr);
   bool emitHHInvariant(Emitter& e, SimpleFunctionCallPtr);
   void emitMethodDVInitializers(Emitter& e,
                                 MethodStatementPtr& meth,

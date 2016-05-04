@@ -193,6 +193,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::debugtrap:
     case Vinstr::declm:
     case Vinstr::decqm:
+    case Vinstr::decqmlock:
     case Vinstr::fallback:
     case Vinstr::fallbackcc:
     case Vinstr::fallthru:
@@ -255,6 +256,8 @@ bool effectful(Vinstr& inst) {
     case Vinstr::vcall:
     case Vinstr::vcallarray:
     case Vinstr::vinvoke:
+    case Vinstr::conjure:
+    case Vinstr::conjureuse:
       return true;
   }
   always_assert(false);

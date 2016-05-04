@@ -200,7 +200,7 @@ loaded, using a separate CheckRefInner instruction.
   If S0 is not a null pointer, branch to block B. This is used to check the
   return value of a native helper that returns a potentially null StringData*.
 
-| AssertType, DRefineS(0), S(Gen,Cls), P
+| AssertType, DRefineS(0), S(Gen,Cls,Ctx), P
 
   Assert that the type of S0 is T, copying it to D.
 
@@ -962,6 +962,11 @@ To string conversions:
 
   Define a value of type T. This instruction aborts at runtime; it is meant to
   be used in tests or code that is known to be unreachable.
+
+| ConjureUse, ND, S(Gen), NF
+
+  Define a "use" of S0 effectively keeping the value alive. As with Conjure it
+  should not appear in reachable code.
 
 | LdCls, D(Cls), S(Str) C(Cls), Er
 
@@ -1829,6 +1834,10 @@ To string conversions:
 
   Returns a bool indicating whether the class, interface, or trait named by S0
   exists. Invokes autoload if S1 is true.
+
+| SetOpCell<op>, ND, S(PtrToCell) S(Cell), Er
+
+  Performs S0 <op>= S1.
 
 
 15. Generators & Closures

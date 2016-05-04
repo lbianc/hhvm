@@ -355,8 +355,9 @@ private:
   /*
    * Prologue-generation helpers.
    */
-  TCA regeneratePrologues(Func* func, SrcKey triggerSk);
-  TCA regeneratePrologue(TransID prologueTransId, SrcKey triggerSk);
+  TCA regeneratePrologues(Func* func, SrcKey triggerSk, bool& includedBody);
+  TCA regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
+                         bool& emittedDVInit);
   TCA emitFuncPrologue(Func* func, int nPassed);
   bool checkCachedPrologue(const Func*, int prologueIndex, TCA&) const;
 
@@ -433,6 +434,12 @@ TCA unstashDebuggerCatch(const ActRec* ar);
  * in bytes. Note that the code may have been emitted by other threads.
  */
 void codeEmittedThisRequest(size_t& requestEntry, size_t& now);
+
+/*
+ * Whether we should dump TC annotations for translations of `func' of
+ * `transKind'.
+ */
+bool dumpTCAnnotation(const Func& func, TransKind transKind);
 
 ///////////////////////////////////////////////////////////////////////////////
 

@@ -81,6 +81,8 @@ struct Vunit;
   O(phidef, Inone, Un, D(defs))\
   O(phijcc, I(cc), U(uses) U(sf), Dn)\
   O(phijmp, Inone, U(uses), Dn)\
+  O(conjure, Inone, Un, D(c))\
+  O(conjureuse, Inone, U(c), Dn)\
   /* native function abi */\
   O(vcall, I(call) I(destType) I(fixup), U(args), D(d))\
   O(vinvoke, I(call) I(destType) I(fixup), U(args), D(d))\
@@ -146,6 +148,7 @@ struct Vunit;
   O(declm, Inone, U(m), D(sf))\
   O(decq, Inone, UH(s,d), DH(d,s) D(sf))\
   O(decqm, Inone, U(m), D(sf))\
+  O(decqmlock, Inone, U(m), D(sf))\
   O(incw, Inone, UH(s,d), DH(d,s) D(sf))\
   O(incwm, Inone, U(m), D(sf))\
   O(incl, Inone, UH(s,d), DH(d,s) D(sf))\
@@ -510,6 +513,13 @@ struct mcprep { Vreg64 d; };
 struct phidef { Vtuple defs; };
 struct phijmp { Vlabel target; Vtuple uses; };
 struct phijcc { ConditionCode cc; VregSF sf; Vlabel targets[2]; Vtuple uses; };
+
+/*
+ * These marker instructions are used to model dataflow in pseudo-translations.
+ * They should not be used in any translations that will eventually be emitted.
+ */
+struct conjure { Vreg c; };
+struct conjureuse { Vreg c; };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Native function ABI.
@@ -894,6 +904,7 @@ struct decl { Vreg32 s, d; VregSF sf; };
 struct declm { Vptr m; VregSF sf; };
 struct decq { Vreg64 s, d; VregSF sf; };
 struct decqm { Vptr m; VregSF sf; };
+struct decqmlock { Vptr m; VregSF sf; };
 // inc: {s|m} + 1 => {d|m}, sf
 struct incw { Vreg16 s, d; VregSF sf; };
 struct incwm { Vptr m; VregSF sf; };

@@ -213,6 +213,9 @@ let json_string_of_response id response =
           | IdentifySymbolService.Method _ -> "method"
           | IdentifySymbolService.Function -> "function"
           | IdentifySymbolService.LocalVar -> "local"
+          | IdentifySymbolService.Property _ -> "property"
+          | IdentifySymbolService.ClassConst _ -> "class_const"
+          | IdentifySymbolService.Typeconst _ -> "typeconst"
         in
         JSON_Object [
           "name",        JSON_String res.IdentifySymbolService.name;

@@ -596,6 +596,9 @@ void RegionDesc::Block::addPredicted(TypedLocation locType) {
   FTRACE(2, "Block::addPredicted({})\n", show(locType));
   assertx(locType.type != TBottom);
   assertx(locType.type <= TStkElem);
+  // type predictions should be added in order of location
+  assertx(m_typePredictions.size() == 0 ||
+          (m_typePredictions.back().location < locType.location));
   m_typePredictions.push_back(locType);
 }
 
@@ -777,7 +780,6 @@ RegionDescPtr selectHotRegion(TransID transId,
   FuncId funcId = func.getFuncId();
   TransCFG cfg(funcId, profData, mcg->tx().getSrcDB(),
                mcg->jmpToTransIDMap());
-  TransIDSet selectedTIDs;
   assertx(regionMode() != RegionMode::Method);
   RegionDescPtr region;
   HotTransContext ctx;
@@ -787,7 +789,7 @@ RegionDescPtr selectHotRegion(TransID transId,
   ctx.maxBCInstrs = RuntimeOption::EvalJitMaxRegionInstrs;
   switch (pgoRegionMode(func)) {
     case PGORegionMode::Hottrace:
-      region = selectHotTrace(ctx, selectedTIDs);
+      region = selectHotTrace(ctx);
       break;
 
     case PGORegionMode::Hotblock:
@@ -796,7 +798,7 @@ RegionDescPtr selectHotRegion(TransID transId,
 
     case PGORegionMode::WholeCFG:
     case PGORegionMode::HotCFG:
-      region = selectHotCFG(ctx, selectedTIDs);
+      region = selectHotCFG(ctx);
       break;
   }
   assertx(region);
@@ -805,7 +807,7 @@ RegionDescPtr selectHotRegion(TransID transId,
     std::string dotFileName = std::string("/tmp/trans-cfg-") +
                               folly::to<std::string>(transId) + ".dot";
 
-    cfg.print(dotFileName, funcId, profData, &selectedTIDs);
+    cfg.print(dotFileName, funcId, profData);
     FTRACE(5, "selectHotRegion: New Translation {} (file: {}) {}\n",
            mcg->tx().profData()->curTransID(), dotFileName,
            region ? show(*region) : std::string("empty region"));
@@ -859,7 +861,8 @@ bool breaksRegion(SrcKey sk) {
       return true;
 
     case Op::Await:
-      // We break regions at resumed Await instructions, to avoid
+    case Op::FCallAwait:
+      // We break regions at resumed Await/FCallAwait instructions, to avoid
       // duplicating the translation of the resumed SrcKey after the
       // Await.
       return sk.resumed();

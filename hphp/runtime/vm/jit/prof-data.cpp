@@ -60,7 +60,11 @@ ProfTransRec::~ProfTransRec() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-ProfData::ProfData() : m_counters(RuntimeOption::EvalJitPGOThreshold) {}
+ProfData::ProfData() :
+  m_counters(RuntimeOption::ServerExecutionMode()
+               ? std::numeric_limits<int64_t>::max()
+               : RuntimeOption::EvalJitPGOThreshold)
+{ }
 
 TransID ProfData::proflogueTransId(const Func* func, int nArgs) const {
   auto const numParams = func->numNonVariadicParams();
@@ -86,8 +90,8 @@ void ProfData::setProfiling(FuncId funcId) {
   }
 }
 
-TransID ProfData::addTransProfile(const RegionDescPtr& region,
-                                  const PostConditions& pconds) {
+void ProfData::addTransProfile(const RegionDescPtr& region,
+                               const PostConditions& pconds) {
   TransID transId = m_numTrans++;
   auto const lastBcOff = region->lastSrcKey().offset();
 
@@ -118,7 +122,13 @@ TransID ProfData::addTransProfile(const RegionDescPtr& region,
   }
 
   m_funcProfTrans[funcId].push_back(transId);
-  return transId;
+}
+
+void ProfData::addTransNonProf() {
+  if (Translator::isTransDBEnabled()) {
+    m_numTrans++;
+    m_transRecs.emplace_back(nullptr);
+  }
 }
 
 TransID ProfData::addTransProflogue(SrcKey sk, int nArgs) {
@@ -177,6 +187,17 @@ bool ProfData::anyBlockEndsAt(const Func* func, Offset offset) {
   }
 
   return offsets.count(offset);
+}
+
+void ProfData::maybeResetCounters() {
+  if (m_countersReset) return;
+  if (requestCount() < RuntimeOption::EvalJitResetProfCountersRequest) return;
+
+  BlockingLeaseHolder writer(Translator::WriteLease());
+  assert(writer.canWrite());
+  if (m_countersReset) return;
+  m_counters.resetAllCounters(RuntimeOption::EvalJitPGOThreshold);
+  m_countersReset = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -387,6 +387,9 @@ struct Vgen {
     copyCR0toCR1(a, rAsm);
   }
 
+  void emit(const conjure& i) { always_assert(false); }
+  void emit(const conjureuse& i) { always_assert(false); }
+
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
   // fallback to the templated emit function.
@@ -1474,7 +1477,7 @@ void lowerForPPC64(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
-void optimizePPC64(Vunit& unit, const Abi& abi) {
+void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
   Timer timer(Timer::vasm_optimize);
 
   removeTrivialNops(unit);
@@ -1491,7 +1494,7 @@ void optimizePPC64(Vunit& unit, const Abi& abi) {
 
   if (unit.needsRegAlloc()) {
     removeDeadCode(unit);
-    allocateRegisters(unit, abi);
+    if (regalloc) allocateRegisters(unit, abi);
   }
   if (unit.blocks.size() > 1) {
     optimizeJmps(unit);

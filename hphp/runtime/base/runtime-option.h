@@ -80,6 +80,7 @@ struct RuntimeOption {
 
 #ifdef FACEBOOK
   static bool UseThriftLogger;
+  static size_t LoggerBatchSize;
 #endif
   static std::map<std::string, ErrorLogFileData> ErrorLogs;
   static std::string LogFile;
@@ -431,6 +432,7 @@ struct RuntimeOption {
   F(bool, SimulateARM,                 simulateARMDefault())            \
   F(bool, JitRequireWriteLease,        false)                           \
   F(uint64_t, JitRelocationSize,       kJitRelocationSizeDefault)       \
+  F(uint64_t, JitMatureSize,           20 << 20)                        \
   F(bool, JitTimer,                    kJitTimerDefault)                \
   F(bool, JitConcurrently,             false)                           \
   F(bool, RecordSubprocessTimes,       false)                           \
@@ -485,6 +487,7 @@ struct RuntimeOption {
   F(bool, JitProfileWarmupRequests,    false)                           \
   F(uint32_t, NumSingleJitRequests,    nsjrDefault())                   \
   F(uint32_t, JitProfileRequests,      kDefaultProfileRequests)         \
+  F(uint32_t, JitResetProfCountersRequest, 500)                         \
   F(bool, JitProfileRecord,            false)                           \
   F(uint32_t, GdbSyncChunks,           128)                             \
   F(bool, JitKeepDbgFiles,             false)                           \
@@ -503,11 +506,7 @@ struct RuntimeOption {
   F(bool, HHIRGenOpts,                 true)                            \
   F(bool, HHIRRefcountOpts,            true)                            \
   F(bool, HHIREnableGenTimeInlining,   true)                            \
-  F(uint32_t, HHIRInliningMaxBindJmps, 0)                               \
-  F(uint32_t, HHIRInliningMaxReturns,  3)                               \
-  F(uint32_t, HHIRInliningMaxCost,     13)                              \
-  F(uint32_t, HHIRPGOInliningMaxCost,  6)                               \
-  F(uint32_t, HHIRInliningMaxDepth,    4)                               \
+  F(uint32_t, HHIRInliningMaxVasmCost, 400)                             \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 6)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \
   F(bool, HHIRPartialInlineFrameOpts,  true)                            \
@@ -522,6 +521,7 @@ struct RuntimeOption {
   F(bool, HHIRMemoryOpts,              true)                            \
   F(bool, HHIRStorePRE,                true)                            \
   F(bool, HHIROutlineGenericIncDecRef, true)                            \
+  F(double, HHIRMixedArrayProfileThreshold, 0.8)                        \
   /* Register allocation flags */                                       \
   F(bool, HHIREnablePreColoring,       true)                            \
   F(bool, HHIREnableCoalescing,        true)                            \
@@ -549,6 +549,7 @@ struct RuntimeOption {
   F(bool, DumpTC,                      false)                           \
   F(bool, DumpTCAnchors,               false)                           \
   F(uint32_t, DumpIR,                  0)                               \
+  F(bool, DumpTCAnnotationsForAllTrans,false)                           \
   F(bool, DumpRegion,                  false)                           \
   F(bool, DumpAst,                     false)                           \
   F(bool, MapTgtCacheHuge,             false)                           \
