@@ -64,12 +64,12 @@ struct APCLocalArray final : private ArrayData,
   static ArrayData *RemoveStr(ArrayData* ad, const StringData* k, bool copy);
   static ArrayData* Copy(const ArrayData*);
   static ArrayData* CopyWithStrongIterators(const ArrayData*);
-  static ArrayData* Append(ArrayData* a, const Variant& v, bool copy);
+  static ArrayData* Append(ArrayData* a, Cell v, bool copy);
   static ArrayData* AppendRef(ArrayData*, Variant& v, bool copy);
   static ArrayData* AppendWithRef(ArrayData*, const Variant& v, bool copy);
   static ArrayData* PlusEq(ArrayData*, const ArrayData *elems);
   static ArrayData* Merge(ArrayData*, const ArrayData *elems);
-  static ArrayData* Prepend(ArrayData*, const Variant& v, bool copy);
+  static ArrayData* Prepend(ArrayData*, Cell v, bool copy);
   static const TypedValue* NvGetInt(const ArrayData*, int64_t k);
   static const TypedValue* NvGetStr(const ArrayData*, const StringData* k);
   static void NvGetKey(const ArrayData*, TypedValue* out, ssize_t pos);

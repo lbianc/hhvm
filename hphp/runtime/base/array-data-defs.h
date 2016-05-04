@@ -155,7 +155,8 @@ inline void ArrayData::release() noexcept {
   return g_array_funcs.release[kind()](this);
 }
 
-inline ArrayData* ArrayData::append(const Variant& v, bool copy) {
+inline ArrayData* ArrayData::append(Cell v, bool copy) {
+  assertx(v.m_type != KindOfUninit);
   return g_array_funcs.append[kind()](this, v, copy);
 }
 
@@ -350,8 +351,9 @@ inline ArrayData* ArrayData::dequeue(Variant& value) {
   return g_array_funcs.dequeue[kind()](this, value);
 }
 
-inline ArrayData* ArrayData::prepend(const Variant& value, bool copy) {
-  return g_array_funcs.prepend[kind()](this, value, copy);
+inline ArrayData* ArrayData::prepend(Cell v, bool copy) {
+  assertx(v.m_type != KindOfUninit);
+  return g_array_funcs.prepend[kind()](this, v, copy);
 }
 
 inline ArrayData* ArrayData::toDict() {

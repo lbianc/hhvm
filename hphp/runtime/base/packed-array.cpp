@@ -97,16 +97,13 @@ MixedArray* PackedArray::ToMixed(ArrayData* old) {
   auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  auto i = uint32_t{0};
-  for (; i < oldSize; ++i) {
-    dstData->setIntKey(i);
+  ad->initHash(dstHash, ad->scale());
+  for (uint32_t i = 0; i < oldSize; ++i) {
+    auto h = hashint(i);
+    *ad->findForNewInsert(dstHash, mask, h) = i;
+    dstData->setIntKey(i, h);
     tvCopy(srcData[i], dstData->data);
-    *dstHash = i;
     ++dstData;
-    ++dstHash;
-  }
-  for (; i <= mask; ++i) {
-    *dstHash++ = MixedArray::Empty;
   }
   old->m_sizeAndPos = 0;
 
@@ -127,21 +124,18 @@ MixedArray* PackedArray::ToMixedCopy(const ArrayData* old) {
 
   auto const oldSize = old->m_size;
   auto const ad      = ToMixedHeader(old, oldSize + 1);
+  auto const mask    = ad->mask();
   auto dstData       = ad->data();
   auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  auto i = uint32_t{0};
-  for (; i < oldSize; ++i) {
-    dstData->setIntKey(i);
+  ad->initHash(dstHash, ad->scale());
+  for (uint32_t i = 0; i < oldSize; ++i) {
+    auto h = hashint(i);
+    *ad->findForNewInsert(dstHash, mask, h) = i;
+    dstData->setIntKey(i, h);
     tvDupFlattenVars(&srcData[i], &dstData->data, old);
-    *dstHash = i;
     ++dstData;
-    ++dstHash;
-  }
-  auto const n = ad->hashSize();
-  for (; i < n; ++i) {
-    *dstHash++ = MixedArray::Empty;
   }
 
   assert(ad->checkInvariants());
@@ -165,16 +159,13 @@ MixedArray* PackedArray::ToMixedCopyReserve(const ArrayData* old,
   auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  auto i = uint32_t{0};
-  for (; i < oldSize; ++i) {
-    dstData->setIntKey(i);
+  ad->initHash(dstHash, ad->scale());
+  for (uint32_t i = 0; i < oldSize; ++i) {
+    auto h = hashint(i);
+    *ad->findForNewInsert(dstHash, mask, h) = i;
+    dstData->setIntKey(i, h);
     tvDupFlattenVars(&srcData[i], &dstData->data, old);
-    *dstHash = i;
     ++dstData;
-    ++dstHash;
-  }
-  for (; i <= mask; ++i) {
-    *dstHash++ = MixedArray::Empty;
   }
 
   assert(ad->checkInvariants());
@@ -647,7 +638,7 @@ PackedArray::SetInt(ArrayData* adIn, int64_t k, Cell v, bool copy) {
 
   // Setting the int at the size of the array can keep it in packed
   // mode---it's the same as an append.
-  if (size_t(k) == adIn->m_size) return Append(adIn, tvAsCVarRef(&v), copy);
+  if (size_t(k) == adIn->m_size) return Append(adIn, v, copy);
 
   // On the promote-to-mixed path, we can use addVal since we know the
   // key can't exist.
@@ -697,7 +688,7 @@ ArrayData* PackedArray::RemoveInt(ArrayData* adIn, int64_t k, bool copy) {
     // TODO(#2606310): if we're removing the /last/ element, we
     // probably could stay packed, but this needs to be verified.
     auto const mixed = copy ? ToMixedCopy(adIn) : ToMixed(adIn);
-    auto pos = mixed->findForRemove(k, false);
+    auto pos = mixed->findForRemove(k, hashint(k), false);
     if (validPos(pos)) mixed->erase(pos);
     return mixed;
   }
@@ -761,13 +752,13 @@ bool PackedArray::AdvanceMArrayIter(ArrayData* ad, MArrayIter& fp) {
   return true;
 }
 
-ArrayData* PackedArray::Append(ArrayData* adIn, const Variant& v, bool copy) {
+ArrayData* PackedArray::Append(ArrayData* adIn, Cell v, bool copy) {
   assert(checkInvariants(adIn));
-  auto const ad = copy ? CopyAndResizeIfNeeded(adIn)
-                       : ResizeIfNeeded(adIn);
-  // TODO(#3888164): we should restructure things so we don't have to
-  // check KindOfUninit here.
-  initVal(packedData(ad)[ad->m_size++], *v.asCell());
+  assertx(v.m_type != KindOfUninit);
+  auto const ad = copy
+    ? CopyAndResizeIfNeeded(adIn)
+    : ResizeIfNeeded(adIn);
+  cellDup(v, packedData(ad)[ad->m_size++]);
   return ad;
 }
 
@@ -886,9 +877,7 @@ ArrayData* PackedArray::Dequeue(ArrayData* adIn, Variant& value) {
   return ad;
 }
 
-ArrayData* PackedArray::Prepend(ArrayData* adIn,
-                                const Variant& v,
-                                bool copy) {
+ArrayData* PackedArray::Prepend(ArrayData* adIn, Cell v, bool copy) {
   assert(checkInvariants(adIn));
 
   auto const ad = adIn->cowCheck() ? CopyAndResizeIfNeeded(adIn)
@@ -902,8 +891,7 @@ ArrayData* PackedArray::Prepend(ArrayData* adIn,
   auto const size = ad->m_size;
   auto const data = packedData(ad);
   std::memmove(data + 1, data, sizeof *data * size);
-  // TODO(#3888164): constructValHelper is making KindOfUninit checks.
-  tvAsUninitializedVariant(&data[0]).constructValHelper(v);
+  cellDup(v, data[0]);
   ad->m_size = size + 1;
   ad->m_pos = 0;
   return ad;

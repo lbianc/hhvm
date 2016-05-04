@@ -371,9 +371,11 @@ let print_symbol symbol =
     | Typeconst _ -> "Typeconst"
     end
     (Pos.string_no_file symbol.pos);
-  Option.iter symbol.name_pos begin fun x ->
-    Printf.printf "defined: %s\n"  (Pos.string_no_file x)
-  end
+  Printf.printf "defined: %s\n"
+    (Option.value_map symbol.name_pos ~f:Pos.string_no_file ~default:"None");
+  Printf.printf "definition extents: %s\n"
+    (Option.value_map symbol.name_extents
+      ~f:Pos.multiline_string_no_file ~default:"None")
 
 let handle_mode mode filename tcopt files_contents files_info errors =
   match mode with
@@ -461,7 +463,10 @@ let handle_mode mode filename tcopt files_contents files_info errors =
   | Identify_symbol (line, column) ->
     let file = cat (Relative_path.to_absolute filename) in
     let result = ServerIdentifyFunction.go file line column tcopt in
-    Option.iter result print_symbol
+    begin match result with
+      | Some symbol -> print_symbol symbol
+      | None -> print_endline "None"
+    end
   | Find_local (line, column) ->
     let file = cat (Relative_path.to_absolute filename) in
     let result = ServerFindLocals.go file line column in

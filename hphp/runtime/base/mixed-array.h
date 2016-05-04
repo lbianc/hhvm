@@ -45,7 +45,8 @@ struct MixedArray final : private ArrayData,
   constexpr static uint32_t Capacity(uint32_t scale) { return 3 * scale; }
   constexpr static uint32_t Mask(uint32_t scale) { return 4 * scale - 1; }
 
-public:
+  using hash_t = strhash_t;
+
   /*
    * Iterator helper for kPackedKind and kMixedKind.  You can use this
    * to look at the values in the array, but not the keys unless you
@@ -81,11 +82,11 @@ public:
       return data.hash() < 0;
     }
 
-    int32_t hash() const {
+    hash_t hash() const {
       return data.hash();
     }
 
-    int32_t probe() const {
+    hash_t probe() const {
       return hash();
     }
 
@@ -101,9 +102,9 @@ public:
       k->incRefCount();
     }
 
-    void setIntKey(int64_t k) {
+    void setIntKey(int64_t k, inthash_t h) {
       ikey = k;
-      data.hash() = k | STRHASH_MSB;
+      data.hash() = h | STRHASH_MSB;
       assert(hasIntKey());
       static_assert(STRHASH_MSB < 0, "using strhash_t = int32_t");
     }
@@ -136,16 +137,19 @@ public:
 
   struct ElmKey {
     ElmKey() {}
-    ElmKey(int32_t hash, StringData* key)
+    ElmKey(strhash_t hash, StringData* key)
         : skey(key), hash(hash)
       {}
     union {
       StringData* skey;
       int64_t ikey;
     };
-    int32_t hash;
+    hash_t hash;
 
-    TYPE_SCAN_CUSTOM() { if (hash < 0) scanner.enqueue(skey); }
+    TYPE_SCAN_CUSTOM() {
+      if (hash < 0) scanner.enqueue(skey);
+      static_assert(STRHASH_MSB < 0, "using strhash_t = int32_t");
+    }
   };
 
   /*
@@ -278,14 +282,14 @@ public:
   static ArrayData* Copy(const ArrayData*);
   static ArrayData* CopyWithStrongIterators(const ArrayData*);
   static ArrayData* CopyStatic(const ArrayData*);
-  static ArrayData* Append(ArrayData*, const Variant& v, bool copy);
+  static ArrayData* Append(ArrayData*, Cell v, bool copy);
   static ArrayData* AppendRef(ArrayData*, Variant& v, bool copy);
   static ArrayData* AppendWithRef(ArrayData*, const Variant& v, bool copy);
   static ArrayData* PlusEq(ArrayData*, const ArrayData* elems);
   static ArrayData* Merge(ArrayData*, const ArrayData* elems);
   static ArrayData* Pop(ArrayData*, Variant& value);
   static ArrayData* Dequeue(ArrayData*, Variant& value);
-  static ArrayData* Prepend(ArrayData*, const Variant& v, bool copy);
+  static ArrayData* Prepend(ArrayData*, Cell v, bool copy);
   static ArrayData* ToDict(ArrayData*);
   static ArrayData* ToDictInPlace(ArrayData*);
   static void Renumber(ArrayData*);
@@ -452,18 +456,18 @@ private:
   bool checkInvariants() const;
 
   template <class Hit>
-  ssize_t findImpl(size_t h0, Hit) const;
+  ssize_t findImpl(hash_t h0, Hit) const;
 
 public:
-  ssize_t find(int64_t ki) const;
+  ssize_t find(int64_t ki, inthash_t h) const;
   ssize_t find(const StringData* s, strhash_t h) const;
 
 private:
   // The array should already be sized for the new insertion before
   // calling these methods.
   template <class Hit>
-  int32_t* findForInsertImpl(size_t h0, Hit) const;
-  int32_t* findForInsert(int64_t ki) const;
+  int32_t* findForInsertImpl(hash_t h0, Hit) const;
+  int32_t* findForInsert(int64_t ki, inthash_t h) const;
   int32_t* findForInsert(const StringData* k, strhash_t h) const;
 
   struct InsertPos {
@@ -475,8 +479,8 @@ private:
   InsertPos insert(StringData* k);
 
   template <class Hit, class Remove>
-  ssize_t findForRemoveImpl(size_t h0, Hit, Remove) const;
-  ssize_t findForRemove(int64_t ki, bool updateNext);
+  ssize_t findForRemoveImpl(hash_t h0, Hit, Remove) const;
+  ssize_t findForRemove(int64_t ki, inthash_t h, bool updateNext);
   ssize_t findForRemove(const StringData* k, strhash_t h);
 
   ssize_t iter_advance_helper(ssize_t prev) const;
@@ -488,12 +492,12 @@ private:
    * version checks for the array becoming too unbalanced because of hash
    * collisions, and is only called when an array Grow()s.
    */
-  int32_t* findForNewInsert(size_t h0) const;
-  int32_t* findForNewInsert(int32_t* table, size_t mask, size_t h0) const;
+  int32_t* findForNewInsert(hash_t h0) const;
+  int32_t* findForNewInsert(int32_t* table, size_t mask, hash_t h0) const;
   int32_t* findForNewInsertCheckUnbalanced(int32_t* table,
-                                           size_t mask, size_t h0);
+                                           size_t mask, hash_t h0);
 
-  bool nextInsert(const Variant& data);
+  bool nextInsert(Cell);
   ArrayData* nextInsertRef(Variant& data);
   ArrayData* nextInsertWithRef(const Variant& data);
   ArrayData* addVal(int64_t ki, Cell data);

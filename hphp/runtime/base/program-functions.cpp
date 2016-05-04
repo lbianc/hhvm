@@ -52,6 +52,7 @@
 #include "hphp/runtime/ext/std/ext_std_file.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/std/ext_std_variable.h"
+#include "hphp/runtime/ext/xdebug/status.h"
 #include "hphp/runtime/ext/xenon/ext_xenon.h"
 #include "hphp/runtime/server/admin-request-handler.h"
 #include "hphp/runtime/server/http-request-handler.h"
@@ -441,6 +442,8 @@ static void handle_exception_helper(bool& ret,
       Array argv = make_packed_array(ExitException::ExitCode.load(), stack);
       vm_call_user_func(context->getExitCallback(), argv);
     }
+  } catch (const XDebugExitExn&) {
+    // Do nothing, this is normal behavior.
   } catch (const PhpFileDoesNotExistException &e) {
     ret = false;
     if (where != ContextOfException::Handler) {
@@ -699,7 +702,9 @@ void execute_command_line_end(int xhprof, bool coverage, const char *program) {
   if (xhprof) {
     Variant profileData = HHVM_FN(xhprof_disable)();
     if (!profileData.isNull()) {
-      HHVM_FN(var_dump)(HHVM_FN(json_encode)(HHVM_FN(xhprof_disable)()));
+      HHVM_FN(var_dump)(Variant::attach(
+        HHVM_FN(json_encode)(HHVM_FN(xhprof_disable)())
+      ));
     }
   }
   g_context->onShutdownPostSend(); // runs more php
@@ -1998,12 +2003,21 @@ void hphp_process_init() {
   pthread_attr_t attr;
 // Linux+GNU extension
 #if defined(_GNU_SOURCE) && (defined(__linux__) || defined(__CYGWIN__))
-  pthread_getattr_np(pthread_self(), &attr);
+  if (pthread_getattr_np(pthread_self(), &attr) != 0 ) {
+    Logger::Error("pthread_getattr_np failed before checking stack limits");
+    _exit(1);
+  }
 #else
-  pthread_attr_init(&attr);
+  if (pthread_attr_init(&attr) != 0 ) {
+    Logger::Error("pthread_attr_init failed before checking stack limits");
+    _exit(1);
+  }
 #endif
   init_stack_limits(&attr);
-  pthread_attr_destroy(&attr);
+  if (pthread_attr_destroy(&attr) != 0 ) {
+    Logger::Error("pthread_attr_destroy failed after checking stack limits");
+    _exit(1);
+  }
   BootStats::mark("pthread_init");
 
   Process::InitProcessStatics();
@@ -2263,8 +2277,13 @@ void hphp_context_shutdown() {
   context->destructObjects();
   context->onRequestShutdown();
 
-  // Shutdown the debugger
-  DEBUGGER_ATTACHED_ONLY(phpDebuggerRequestShutdownHook());
+  try {
+    // Shutdown the debugger.  This can throw, but we don't care about what the
+    // error is.
+    DEBUGGER_ATTACHED_ONLY(phpDebuggerRequestShutdownHook());
+  } catch (...) {
+    // Gotta catch 'em all!
+  }
 
   // Extensions could have shutdown handlers
   ExtensionRegistry::requestShutdown();

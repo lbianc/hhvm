@@ -348,11 +348,11 @@ public:
   ArrayData* copyStatic() const;
 
   /**
-   * Append a value to the array. If "copy" is true, make a copy first
-   * then append the value. Return NULL if escalation is not needed, or an
+   * Append a value to the array.  If "copy" is true, make a copy first and then
+   * append the value.  Return nullptr if escalation is not needed, or an
    * escalated array data.
    */
-  ArrayData* append(const Variant& v, bool copy);
+  ArrayData* append(Cell v, bool copy);
   ArrayData* appendRef(Variant& v, bool copy);
 
   /**
@@ -376,7 +376,7 @@ public:
   /**
    * Array function: prepend a new item.
    */
-  ArrayData* prepend(const Variant& v, bool copy);
+  ArrayData* prepend(Cell v, bool copy);
 
   /**
    * Convert array to dictionary type
@@ -577,14 +577,14 @@ struct ArrayFunctions {
   ArrayData* (*copy[NK])(const ArrayData*);
   ArrayData* (*copyWithStrongIterators[NK])(const ArrayData*);
   ArrayData* (*copyStatic[NK])(const ArrayData*);
-  ArrayData* (*append[NK])(ArrayData*, const Variant& v, bool copy);
+  ArrayData* (*append[NK])(ArrayData*, Cell v, bool copy);
   ArrayData* (*appendRef[NK])(ArrayData*, Variant& v, bool copy);
   ArrayData* (*appendWithRef[NK])(ArrayData*, const Variant& v, bool copy);
   ArrayData* (*plusEq[NK])(ArrayData*, const ArrayData* elems);
   ArrayData* (*merge[NK])(ArrayData*, const ArrayData* elems);
   ArrayData* (*pop[NK])(ArrayData*, Variant& value);
   ArrayData* (*dequeue[NK])(ArrayData*, Variant& value);
-  ArrayData* (*prepend[NK])(ArrayData*, const Variant& value, bool copy);
+  ArrayData* (*prepend[NK])(ArrayData*, Cell v, bool copy);
   void (*renumber[NK])(ArrayData*);
   void (*onSetEvalScalar[NK])(ArrayData*);
   ArrayData* (*escalate[NK])(const ArrayData*);

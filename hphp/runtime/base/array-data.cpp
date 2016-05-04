@@ -510,11 +510,12 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(CopyStatic)
 
   /*
-   * ArrayData* Append(ArrayData*, const Variant& v, bool copy)
+   * ArrayData* Append(ArrayData*, Cell v, bool copy)
    *
    *   Append a new value to the array, with the next available
    *   integer key.  If there is no next available integer key, no
-   *   value is appended.  This function has copy/grow semantics.
+   *   value is appended.  This function has copy/grow semantics.  The
+   *   value must not be KindOfUninit.
    */
   DISPATCH(Append)
 
@@ -577,10 +578,11 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(Dequeue)
 
   /*
-   * ArrayData* Prepend(ArrayData*, const Variant& `v', bool copy)
+   * ArrayData* Prepend(ArrayData*, Cell v, bool copy)
    *
    *   Insert `v' as the first element of the array.  Then renumber
-   *   integer keys.  This function has copy/grow semantics.
+   *   integer keys.  This function has copy/grow semantics.  `v' must
+   *   not be KindOfUninit.
    */
   DISPATCH(Prepend)
 

@@ -323,10 +323,8 @@ Variant HHVM_FUNCTION(apc_add,
   return apc_store().add(strKey, var, ttl);
 }
 
-Variant HHVM_FUNCTION(apc_fetch,
-                      const Variant& key,
-                      VRefParam success /* = null */) {
-  if (!apcExtension::Enable) return false;
+TypedValue HHVM_FUNCTION(apc_fetch, const Variant& key, VRefParam success) {
+  if (!apcExtension::Enable) return make_tv<KindOfBoolean>(false);
 
   Variant v;
 
@@ -338,7 +336,7 @@ Variant HHVM_FUNCTION(apc_fetch,
       Variant k = iter.second();
       if (!k.isString()) {
         throw_invalid_argument("apc key: (not a string)");
-        return false;
+        return make_tv<KindOfBoolean>(false);
       }
       String strKey = k.toString();
       if (apc_store().get(strKey, v)) {
@@ -347,7 +345,7 @@ Variant HHVM_FUNCTION(apc_fetch,
       }
     }
     success.assignIfRef(tmp);
-    return init.toVariant();
+    return tvReturn(init.toVariant());
   }
 
   if (apc_store().get(key.toString(), v)) {
@@ -356,7 +354,7 @@ Variant HHVM_FUNCTION(apc_fetch,
     success.assignIfRef(false);
     v = false;
   }
-  return v;
+  return tvReturn(std::move(v));
 }
 
 Variant HHVM_FUNCTION(apc_delete,
@@ -823,7 +821,7 @@ void apc_load_impl_compressed
         if (UNLIKELY(snap != nullptr)) snap->addInt(v[-1], item);
         k += int_lens[i + 2] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((k - keys) == len);
     }
   }
@@ -858,7 +856,7 @@ void apc_load_impl_compressed
         }
         k += char_lens[i + 2] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((k - keys) == len);
     }
   }
@@ -882,7 +880,7 @@ void apc_load_impl_compressed
         if (UNLIKELY(snap != nullptr)) snap->addString(value, item);
         p += string_lens[i + i + 3] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((p - decoded) == len);
     }
   }
@@ -904,7 +902,7 @@ void apc_load_impl_compressed
         if (UNLIKELY(snap != nullptr)) snap->addObject(value, item);
         p += object_lens[i + i + 3] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((p - decoded) == len);
     }
   }
@@ -931,7 +929,7 @@ void apc_load_impl_compressed
         if (UNLIKELY(snap != nullptr)) snap->addThrift(value, item);
         p += thrift_lens[i + i + 3] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((p - decoded) == len);
     }
   }
@@ -959,7 +957,7 @@ void apc_load_impl_compressed
         if (UNLIKELY(snap != nullptr)) snap->addOther(value, item);
         p += other_lens[i + i + 3] + 1; // skip \0
       }
-      s.prime(vars);
+      s.prime(std::move(vars));
       assert((p - decoded) == len);
     }
   }

@@ -1441,7 +1441,7 @@ static Array HHVM_METHOD(PDO, errorinfo) {
   if (error_expected_count > error_count) {
     int error_count_diff = error_expected_count - error_count;
     for (int i = 0; i < error_count_diff; i++) {
-      ret.append(uninit_null());
+      ret.append(init_null_variant);
     }
   }
   return ret;
@@ -1484,8 +1484,12 @@ static Variant HHVM_METHOD(PDO, query, const String& sql,
     // the argument count is > 1
     int argc = _argv.size() + 1;
     if (argc == 1 ||
-        pdo_stmt_set_fetch_mode(stmt, 0, _argv.rvalAt(0).toInt64Val(),
-                                HHVM_FN(array_splice)(_argv, 1).toArray())) {
+        pdo_stmt_set_fetch_mode(
+          stmt,
+          0,
+          _argv.rvalAt(0).toInt64Val(),
+          Variant::attach(HHVM_FN(array_splice)(_argv, 1)).toArray()
+        )) {
       /* now execute the statement */
       setPDOErrorNone(stmt->error_code);
       if (stmt->executer()) {

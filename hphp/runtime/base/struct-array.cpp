@@ -489,7 +489,7 @@ ArrayData* StructArray::ZAppend(ArrayData* ad, RefData* v, int64_t* key_ptr) {
   return MixedArray::ZAppend(ToMixedCopy(asStructArray(ad)), v, key_ptr);
 }
 
-ArrayData* StructArray::Append(ArrayData* ad, const Variant& v, bool copy) {
+ArrayData* StructArray::Append(ArrayData* ad, Cell v, bool copy) {
   auto structArray = asStructArray(ad);
   auto mixedArray = copy ? ToMixedCopy(structArray) : ToMixed(structArray);
   return MixedArray::Append(mixedArray->asArrayData(), v, false);
@@ -541,7 +541,7 @@ ArrayData* StructArray::Dequeue(ArrayData* ad, Variant& value) {
   return MixedArray::Dequeue(ToMixed(asStructArray(ad))->asArrayData(), value);
 }
 
-ArrayData* StructArray::Prepend(ArrayData* ad, const Variant& v, bool copy) {
+ArrayData* StructArray::Prepend(ArrayData* ad, Cell v, bool copy) {
   return MixedArray::Prepend(ToMixed(asStructArray(ad)), v, copy);
 }
 

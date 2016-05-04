@@ -9855,7 +9855,9 @@ commitGlobalData(std::unique_ptr<ArrayTypeTable::Builder> arrTable) {
   gd.PHP7_ScalarTypes         = RuntimeOption::PHP7_ScalarTypes;
   gd.AutoprimeGenerators      = RuntimeOption::AutoprimeGenerators;
   gd.HardPrivatePropInference = true;
-
+  for (auto a : Option::APCProfile) {
+    gd.APCProfile.emplace_back(StringData::MakeStatic(folly::StringPiece(a)));
+  }
   if (arrTable) gd.arrayTypeTable.repopulate(*arrTable);
   Repo::get().saveGlobalData(gd);
 }
@@ -9911,7 +9913,10 @@ void emitAllHHBC(AnalysisResultPtr&& ar) {
   dispatcher.start();
   ar->visitFiles(addEmitterWorker, &dispatcher);
 
-  std::vector<std::unique_ptr<UnitEmitter>> ues;
+  auto ues = ar->getHhasFiles();
+  if (!Option::UseHHBBC && ues.size()) {
+    batchCommit(std::move(ues));
+  }
 
   if (Option::GenerateBinaryHHBC) {
     // kBatchSize needs to strike a balance between reducing transaction commit
