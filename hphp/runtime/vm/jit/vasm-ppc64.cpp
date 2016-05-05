@@ -444,6 +444,7 @@ struct Vgen {
   void emit(const stubtophp& i);
   void emit(const syncpoint& i);
   void emit(const tailcallstub& i);
+  void emit(const testqi& i);
   void emit(const ucomisd& i);
   void emit(const unwind& i);
 
@@ -846,6 +847,15 @@ void Vgen::emit(const tailcallstub& i) {
   emit(jmpi{i.target, i.args});
 }
 
+void Vgen::emit(const testqi& i) {
+  if (i.s0.fits(sz::word)) {
+    a.li(rAsm, i.s0);
+  } else {
+    a.li32(rAsm, i.s0.l());
+  }
+  emit(testq{rAsm, i.s1, i.sf});
+}
+
 void Vgen::emit(const loadstubret& i) {
   // grab the return address and store this return address for phplogue
   a.ld(i.d, rsp()[AROFF(m_savedRip)]);
@@ -1058,7 +1068,6 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 }
 
 X(addli,  addl,  s0, TWO(s1, d))
-X(testqi, testq, s0, ONE(s1))
 X(cmpqi,  cmpq,  s0, ONE(s1))
 X(addqi,  addq,  s0, TWO(s1, d))
 X(subqi,  subq,  s0, TWO(s1, d))
