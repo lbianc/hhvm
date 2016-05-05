@@ -332,11 +332,7 @@ struct BranchParams {
     BranchParams::BI m_bi;
 };
 
-
-enum class LinkReg {
-  Save,
-  DoNotTouch
-};
+//////////////////////////////////////////////////////////////////////
 
 enum class RegNumber : uint32_t {};
 
@@ -448,7 +444,47 @@ namespace reg {
 
 //////////////////////////////////////////////////////////////////////
 
-struct Label;
+// Forward declaration to be used in Label
+struct Assembler;
+
+enum class LinkReg {
+  Save,
+  DoNotTouch
+};
+
+struct Label {
+  Label() : m_a(nullptr) , m_address(nullptr) {}
+  /* implicit */ Label(CodeAddress predefined) : m_a(nullptr) ,
+                                                 m_address(predefined) {}
+
+  ~Label();
+
+  Label(const Label&) = delete;
+  Label& operator=(const Label&) = delete;
+
+  void branch(Assembler& a, BranchConditions bc, LinkReg lr);
+  void branchFar(Assembler& a, BranchConditions bc, LinkReg lr);
+  void asm_label(Assembler& a);
+
+  enum class BranchType {
+    b,    // unconditional branch up to 26 bits offset
+    bc,   // conditional branch up to 16 bits offset
+    bctr  // conditional branch by using a 64 bits absolute address
+  };
+
+private:
+  struct JumpInfo {
+    BranchType type;
+    Assembler* a;
+    CodeAddress addr;
+  };
+
+  void addJump(Assembler* a, BranchType type);
+
+  Assembler* m_a;
+  CodeAddress m_address;
+  std::vector<JumpInfo> m_toPatch;
+};
 
 struct Assembler {
 
@@ -1964,28 +2000,58 @@ struct Assembler {
   }
 
   // Label variants
-  void b(Label& l);
-  void ba(Label& l);
-  void bl(Label& l);
-  void bla(Label& l);
 
-  void bc(Label& l, BranchConditions bc);
-  void bc(Label& l, ConditionCode cc);
-  void bca(Label& l, BranchConditions bc);
-  void bcl(Label& l, BranchConditions bc);
-  void bcla(Label& l, BranchConditions bc);
+  // Simplify to conditional branch that always branch
+  void b(Label& l)  { bc(l, BranchConditions::Always); }
+  void bl(Label& l)  { bcl(l, BranchConditions::Always); }
+
+  void bc(Label& l, BranchConditions bc) {
+    l.branch(*this, bc, LinkReg::DoNotTouch);
+  }
+  void bc(Label& l, ConditionCode cc) {
+    l.branch(*this, BranchParams::convertCC(cc), LinkReg::DoNotTouch);
+  }
+  void bcl(Label& l, BranchConditions bc) {
+    l.branch(*this, bc, LinkReg::Save);
+  }
 
   void branchAuto(Label& l,
                   BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch);
+                  LinkReg lr = LinkReg::DoNotTouch) {
+    l.branch(*this, bc, lr);
+  }
 
   void branchAuto(CodeAddress c,
                   BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch);
+                  LinkReg lr = LinkReg::DoNotTouch) {
+    Label l(c);
+    l.branch(*this, bc, lr);
+  }
 
   void branchAuto(CodeAddress c,
                   ConditionCode cc,
-                  LinkReg lr = LinkReg::DoNotTouch);
+                  LinkReg lr = LinkReg::DoNotTouch) {
+    branchAuto(c, BranchParams::convertCC(cc), lr);
+  }
+
+  void branchFar(Label& l,
+                 BranchConditions bc = BranchConditions::Always,
+                 LinkReg lr = LinkReg::DoNotTouch) {
+    l.branchFar(*this, bc, lr);
+  }
+
+  void branchFar(CodeAddress c,
+                 BranchConditions bc = BranchConditions::Always,
+                 LinkReg lr = LinkReg::DoNotTouch) {
+    Label l(c);
+    l.branchFar(*this, bc, lr);
+  }
+
+  void branchFar(CodeAddress c,
+                 ConditionCode cc,
+                 LinkReg lr = LinkReg::DoNotTouch) {
+    branchFar(c, BranchParams::convertCC(cc), lr);
+  }
 
   // ConditionCode variants
   void bc(ConditionCode cc, int16_t address) {
@@ -1993,32 +2059,44 @@ struct Assembler {
     bc(bp.bo(), bp.bi(), address);
   }
 
-  // Auxiliary for loading a complete 64bits immediate into a register
-  void li64(const Reg64& rt, int64_t imm64, bool fixedSize = true);
+//////////////////////////////////////////////////////////////////////
+
+  enum class CallArg {
+                // Saves TOC?    | Smashable?
+                // --------------------------
+    Internal,   // No            | No
+    External,   // Yes           | No
+    Smashable,  // No (internal) | Yes
+  };
+
+  void callEpilogue(CallArg ca) {
+    // Several vasms like nothrow, unwind and syncpoint will skip one
+    // instruction after call and use it as expected return address. Use a nop
+    // to guarantee this consistency even if toc doesn't need to be saved
+    if (CallArg::External != ca) nop();
+    else ld(reg::r2, reg::r1[toc_position_on_frame]);
+  }
 
   // generic template, for CodeAddress and Label
   template <typename T>
-  void call(T& target, bool save_toc = false) {
-    branchAuto(target, BranchConditions::Always, LinkReg::Save);
-
-    // Several vasms like nothrow, unwind and syncpoint will skip one
-    // instruction after call and use it as expected return address. Use a nop
-    // to guarantee this consistency even if toc doesn't need to be saved
-    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_frame]);
-    else          nop();
+  void call(T& target, CallArg ca = CallArg::Internal) {
+    if (CallArg::Smashable == ca) {
+      // To make a branch smashable, the most conservative method needs to be
+      // used so the target can be changed later or on bindCall.
+      branchFar(target, BranchConditions::Always, LinkReg::Save);
+    } else {
+      // tries best performance possible
+      branchAuto(target, BranchConditions::Always, LinkReg::Save);
+    }
+    callEpilogue(ca);
   }
 
   // specialization of call for Reg64
-  void call(Reg64 target, bool save_toc = false) {
+  void call(Reg64 target, CallArg ca = CallArg::Internal) {
     mr(reg::r12, target);
     mtctr(reg::r12);
     bctrl();
-
-    // Several vasms like nothrow, unwind and syncpoint will skip one
-    // instruction after call and use it as expected return address. Use a nop
-    // to guarantee this consistency even if toc doesn't need to be saved
-    if (save_toc) ld(reg::r2, reg::r1[toc_position_on_frame]);
-    else          nop();
+    callEpilogue(ca);
   }
 
   // checks if the @inst is pointing to a call
@@ -2026,6 +2104,11 @@ struct Assembler {
     DecodedInstruction di(inst);
     return di.isCall();
   }
+
+//////////////////////////////////////////////////////////////////////
+
+  // Auxiliary for loading a complete 64bits immediate into a register
+  void li64(const Reg64& rt, int64_t imm64, bool fixedSize = true);
 
   // Retrieve the target defined by li64 instruction
   static int64_t getLi64(PPC64Instr* pinstr);
@@ -2057,12 +2140,6 @@ struct Assembler {
     return getLi32Reg(reinterpret_cast<PPC64Instr*>(instr));
   }
 
-  //Can be used to generate or force a unimplemented opcode exception
-  void unimplemented();
-
-  static void patchBc(CodeAddress jmp, CodeAddress dest);
-  static void patchBctr(CodeAddress jmp, CodeAddress dest);
-
   void emitNop(int nbytes) {
     assert((nbytes % 4 == 0) && "This arch supports only 4 bytes alignment");
     for (; nbytes > 0; nbytes -= 4)
@@ -2075,6 +2152,21 @@ struct Assembler {
     assert(sizeof(instruction) == sizeof(uint32_t));
     dword(instruction);
   }
+
+  // Can be used to generate or force a unimplemented opcode exception
+  void unimplemented();
+
+//////////////////////////////////////////////////////////////////////
+
+  /*
+   * Patch a branch to the correct target.
+   *
+   * It decodes the branch @jmp to decide whether it's an absolute branch or an
+   * offset branch and patches it properly.
+   */
+  static void patchBranch(CodeAddress jmp, CodeAddress dest);
+
+//////////////////////////////////////////////////////////////////////
 
 protected:
 
@@ -2573,167 +2665,6 @@ private:
   }
 
 };
-
-//////////////////////////////////////////////////////////////////////
-// Branches
-//////////////////////////////////////////////////////////////////////
-
-struct Label {
-  Label() : m_a(nullptr) , m_address(nullptr) {}
-  /* implicit */ Label(CodeAddress predefined) : m_a(nullptr) ,
-                                                 m_address(predefined) {}
-
-  ~Label() {
-    if (!m_toPatch.empty()) {
-      assert(m_a && m_address && "Label had jumps but was never set");
-    }
-    for (auto& ji : m_toPatch) {
-      switch (ji.type) {
-      case BranchType::bc:
-        ji.a->patchBc(ji.addr, m_address);
-        break;
-      case BranchType::bctr:
-        ji.a->patchBctr(ji.addr, m_address);
-        break;
-      }
-    }
-  }
-
-  Label(const Label&) = delete;
-  Label& operator=(const Label&) = delete;
-
-  void branchOffset(Assembler& a,
-                    BranchConditions bc,
-                    LinkReg lr) {
-    BranchParams bp(bc);
-    addJump(&a, BranchType::bc);
-
-    int16_t offset;
-    if (m_address) {
-      ssize_t diff = ssize_t(m_address - a.frontier());
-      assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) && "Offset too big");
-
-      offset = diff;
-    } else {
-      // offset will be redefined on patchBc()
-      offset = ssize_t(a.frontier());
-    }
-
-    // TODO(gut): Use a typedef or something to avoid copying code like below:
-    if (LinkReg::Save == lr) a.bcl(bp.bo(), bp.bi(), offset);
-    else                     a.bc (bp.bo(), bp.bi(), offset);
-  }
-
-  void branchAbsolute(Assembler& a,
-                    BranchConditions bc,
-                    LinkReg lr) {
-    BranchParams bp(bc);
-    addJump(&a, BranchType::bc);
-
-    // Address is going to be redefined on patchBc()
-    const ssize_t address = ssize_t(m_address ? m_address : a.frontier());
-    assert(HPHP::jit::deltaFits(address, HPHP::sz::word) && "Address too big");
-
-    // TODO(gut): Use a typedef or something to avoid copying code like below:
-    if (LinkReg::Save == lr) a.bcla(bp.bo(), bp.bi(), uint16_t(address));
-    else                     a.bca (bp.bo(), bp.bi(), uint16_t(address));
-  }
-
-  void branchAuto(Assembler& a, BranchConditions bc, LinkReg lr) {
-    // use CTR to perform absolute branch
-    BranchParams bp(bc);
-    const ssize_t address = ssize_t(m_address);
-    // Use reserved function linkage register
-    addJump(&a, BranchType::bctr);  // marking THIS address for patchBctr
-    a.li64(reg::r12, address);
-    // When branching to another context, r12 need to keep the target address
-    // to correctly set r2 (TOC reference).
-    a.mtctr(reg::r12);
-    if (bc == BranchConditions::Overflow ||
-        bc == BranchConditions::NoOverflow) {
-      a.xor(reg::r0, reg::r0, reg::r0,false);
-      a.mtspr(Assembler::SpecialReg::XER, reg::r0);
-    } else {
-      a.emitNop(2 * instr_size_in_bytes);
-    }
-    if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
-    else                     a.bcctr (bp.bo(), bp.bi(), 0);
-  }
-
-  void asm_label(Assembler& a) {
-    assert(!m_address && !m_a && "Label was already set");
-    m_a = &a;
-    m_address = a.frontier();
-  }
-
-private:
-  enum class BranchType {
-    bc,
-    bctr
-  };
-
-  struct JumpInfo {
-    BranchType type;
-    Assembler* a;
-    CodeAddress addr;
-  };
-
-private:
-  void addJump(Assembler* a, BranchType type) {
-    if (m_address) return;
-    JumpInfo info;
-    info.type = type;
-    info.a = a;
-    info.addr = a->codeBlock.frontier();
-    m_toPatch.push_back(info);
-  }
-
-private:
-  Assembler* m_a;
-  CodeAddress m_address;
-  std::vector<JumpInfo> m_toPatch;
-};
-
-/* Simplify to conditional branch that always branch */
-// TODO: implement also a patchB if b is not a mnemonic to bc
-inline void Assembler::b(Label& l)  { bc(l, BranchConditions::Always); }
-inline void Assembler::ba(Label& l) { bca(l, BranchConditions::Always); }
-inline void Assembler::bl(Label& l)  { bcl(l, BranchConditions::Always); }
-inline void Assembler::bla(Label& l) { bcla(l, BranchConditions::Always); }
-
-
-inline void Assembler::bc(Label& l, BranchConditions bc) {
-  l.branchOffset(*this, bc, LinkReg::DoNotTouch);
-}
-inline void Assembler::bc(Label& l, ConditionCode cc) {
-  l.branchOffset(*this, BranchParams::convertCC(cc), LinkReg::DoNotTouch);
-}
-inline void Assembler::bca(Label& l, BranchConditions bc) {
-  l.branchAbsolute(*this, bc, LinkReg::DoNotTouch);
-}
-inline void Assembler::bcl(Label& l, BranchConditions bc) {
-  l.branchOffset(*this, bc, LinkReg::Save);
-}
-inline void Assembler::bcla(Label& l, BranchConditions bc) {
-  l.branchAbsolute(*this, bc, LinkReg::Save);
-}
-
-inline void Assembler::branchAuto(Label& l,
-                                  BranchConditions bc,
-                                  LinkReg lr) {
-  l.branchAuto(*this, bc, lr);
-}
-inline void Assembler::branchAuto(CodeAddress c,
-                                  BranchConditions bc,
-                                  LinkReg lr) {
-  Label l(c);
-  l.branchAuto(*this, bc, lr);
-}
-inline void Assembler::branchAuto(CodeAddress c,
-                                  ConditionCode cc,
-                                  LinkReg lr) {
-  branchAuto(c, BranchParams::convertCC(cc), lr);
-}
 
 } // namespace ppc64_asm
 

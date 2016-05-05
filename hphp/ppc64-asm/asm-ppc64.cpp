@@ -22,10 +22,15 @@ namespace ppc64_asm {
 BranchParams::BranchParams(PPC64Instr instr) {
   DecoderInfo* dinfo = Decoder::GetDecoder().decode(instr);
   switch (dinfo->opcode_name()) {
+    case OpcodeNames::op_b:
+    case OpcodeNames::op_ba:
+    case OpcodeNames::op_bl:
+    case OpcodeNames::op_bla:
+      assert(dinfo->form() == Form::kI);
+      defineBoBi(BranchConditions::Always);
+      break;
     case OpcodeNames::op_bc:
     case OpcodeNames::op_bca:
-    case OpcodeNames::op_bcl:
-    case OpcodeNames::op_bcla:
     case OpcodeNames::op_bclr:
       assert(dinfo->form() == Form::kB);
       B_form_t bform;
@@ -35,9 +40,6 @@ BranchParams::BranchParams(PPC64Instr instr) {
       break;
     case OpcodeNames::op_bcctr:
     case OpcodeNames::op_bcctrl:
-    case OpcodeNames::op_bclrl:
-    case OpcodeNames::op_bctar:
-    case OpcodeNames::op_bctarl:
       assert(dinfo->form() == Form::kXL);
       XL_form_t xlform;
       xlform.instruction = dinfo->instruction_image();
@@ -744,10 +746,13 @@ void Assembler::unimplemented(){
   EmitDForm(0, rn(0), rn(0), 0);
 }
 
-void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
+//////////////////////////////////////////////////////////////////////
+
+/*
+ * Auxiliaries for Assembler::patchBranch
+ */
+static void patchOffset(CodeAddress jmp, ssize_t diff) {
   // Used for a relative branch
-  ssize_t diff = dest - jmp;
-  ssize_t abs = dest - static_cast<CodeAddress>(0);
   PPC64Instr* instr = reinterpret_cast<PPC64Instr*>(jmp);
 
   DecoderInfo* dinfo = Decoder::GetDecoder().decode(*instr);
@@ -755,47 +760,29 @@ void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
   switch (opn) {
     case OpcodeNames::op_b:
     case OpcodeNames::op_bl:
-    case OpcodeNames::op_ba:
-      // TODO(gut): actually the immediate can be as big as 26 bits
       assert(dinfo->form() == Form::kI);
       I_form_t iform;
       iform.instruction = dinfo->instruction_image();
-      if (opn == OpcodeNames::op_ba) {
-        // absolute branch
-        assert(HPHP::jit::deltaFits(abs, HPHP::sz::word) &&
-            "Patching address is too big");
-        // address is 4 bytes aligned and it optimizes these 2 bits.
-        iform.LI = static_cast<uint32_t>(abs >> 2);
-      } else {
-        // relative branch
-        assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
-            "Patching offset is too big");
-        // address is 4 bytes aligned and it optimizes these 2 bits.
-        iform.LI = static_cast<uint32_t>(diff >> 2);
-      }
+
+      // relative branch. Branch offset can be up to 26 bits
+      always_assert(HPHP::jit::deltaFitsBits(diff, 26) &&
+          "Patching offset is too big");
+
+      // address is 4 bytes aligned and it optimizes these 2 bits.
+      iform.LI = static_cast<uint32_t>(diff >> 2);
       *instr = iform.instruction;
       break;
     case OpcodeNames::op_bc:
-    case OpcodeNames::op_bca:
-    case OpcodeNames::op_bcl:
-    case OpcodeNames::op_bcla:
-    case OpcodeNames::op_bclr:
       assert(dinfo->form() == Form::kB);
       B_form_t bform;
       bform.instruction = dinfo->instruction_image();
-      if ((opn == OpcodeNames::op_bca) && (opn == OpcodeNames::op_bcla)) {
-        // absolute branch
-        assert(HPHP::jit::deltaFits(abs, HPHP::sz::word) &&
-            "Patching address is too big");
-        // address is 4 bytes aligned and it optimizes these 2 bits.
-        bform.BD = static_cast<uint32_t>(abs >> 2);
-      } else {
-        // relative branch
-        assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
-            "Patching offset is too big");
-        // address is 4 bytes aligned and it optimizes these 2 bits.
-        bform.BD = static_cast<uint32_t>(diff >> 2);
-      }
+
+      // relative branch
+      always_assert(HPHP::jit::deltaFits(diff, HPHP::sz::word) &&
+          "Patching offset is too big");
+
+      // address is 4 bytes aligned and it optimizes these 2 bits.
+      bform.BD = static_cast<uint32_t>(diff >> 2);
       *instr = bform.instruction;
       break;
     default:
@@ -804,27 +791,66 @@ void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
   }
 }
 
-void Assembler::patchBctr(CodeAddress jmp, CodeAddress dest) {
-
-#ifdef DEBUG
-  // skips the li64, 2*nop and a mtctr instruction
-  CodeAddress bctr_addr = jmp + kLi64InstrLen + 3 * instr_size_in_bytes;
-
-  // check for instruction opcode
-  DecoderInfo* dinfo = Decoder::GetDecoder().decode(bctr_addr);
-  OpcodeNames opn = dinfo->opcode_name();
-  if ((opn != OpcodeNames::op_bcctr) && (opn != OpcodeNames::op_bcctrl)) {
-      assert(false && "tried to patch not-expected-branch instruction");
-      return;
-  }
-#endif
-
+static void patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(jmp, kLi64InstrLen, "patched bctr");
-  Assembler b{ cb };
-  b.li64(reg::r12, ssize_t(dest));
+  cb.init(jmp, Assembler::kLi64InstrLen, "patched bctr");
+  Assembler a{ cb };
+  a.li64(reg::r12, ssize_t(dest));
 }
+
+void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
+  // Detecting absolute branching: if it's an bcctr or bcctrl
+  {
+    // skips the li64, 2*nop and a mtctr instruction
+    CodeAddress bctr_addr =
+      jmp + Assembler::kLi64InstrLen + 3 * instr_size_in_bytes;
+
+    // check for instruction opcode
+    DecoderInfo* dinfo = Decoder::GetDecoder().decode(bctr_addr);
+    OpcodeNames opn = dinfo->opcode_name();
+    if ((opn == OpcodeNames::op_bcctr) || (opn == OpcodeNames::op_bcctrl)) {
+      patchAbsolute(jmp, dest);
+      return;
+    }
+  }
+
+  // Now analyses if the offset fits by checking how big is the difference to
+  // be patched
+  auto new_target = reinterpret_cast<int64_t>(dest);
+
+  // Define the branch as the origin of the branch offset calculation
+  auto base = reinterpret_cast<int64_t>(jmp);
+  auto diff = new_target - base;
+
+  // There are 2 flavors of offset branching. (See BranchType for more info)
+  DecoderInfo* dinfo = Decoder::GetDecoder().decode(jmp);
+  OpcodeNames opn = dinfo->opcode_name();
+
+  // checks if @opn is 'b', 'bl' or 'bc' and if the offset @diff fits it
+  auto branch_fits_offset = [](OpcodeNames opn, int64_t diff) -> bool {
+    auto is_and_fits_b = [](OpcodeNames opn, int64_t diff) -> bool {
+      return ((opn == OpcodeNames::op_b) || (opn == OpcodeNames::op_bl)) &&
+              HPHP::jit::deltaFitsBits(diff, 26);
+    };
+
+    auto is_and_fits_bc = [](OpcodeNames opn, int64_t diff) -> bool {
+      return opn == OpcodeNames::op_bc &&
+              HPHP::jit::deltaFits(diff, HPHP::sz::word);
+    };
+
+    return is_and_fits_b(opn, diff) || is_and_fits_bc(opn, diff);
+  };
+
+  if (!branch_fits_offset(opn, diff)) {
+    assert(false && "Can't patch a branch with such a big offset");
+  } else {
+    // Regular patch for branch by offset type
+    patchOffset(jmp, diff);
+  }
+}
+
+//////////////////////////////////////////////////////////////////////
 
 void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
   // li64 always emits 5 instructions i.e. 20 bytes of instructions.
@@ -891,8 +917,8 @@ int64_t Assembler::getLi64(PPC64Instr* pinstr) {
   // by counting how many nops there are inside of the code
   uint8_t nops = [&]() {
     uint8_t nNops = 0;
-    for (PPC64Instr* i = pinstr; i < pinstr + kLi64InstrLen/instr_size_in_bytes;
-        i++) {
+    auto total_li64_instr = kLi64InstrLen/instr_size_in_bytes;
+    for (PPC64Instr* i = pinstr; i < pinstr + total_li64_instr; i++) {
       if (Decoder::GetDecoder().decode(*i)->isNop()) nNops++;
     }
     return nNops;
@@ -931,8 +957,7 @@ int64_t Assembler::getLi64(PPC64Instr* pinstr) {
   }
 
   // first getImm is suppose to get the sign
-  uint64_t imm64 = static_cast<uint64_t>(
-                        static_cast<int16_t>(getImm(pinstr)));
+  uint64_t imm64 = static_cast<uint64_t>(getImm(pinstr));
   switch (immParts) {
     case 1:
       break;
@@ -1010,4 +1035,96 @@ int32_t Assembler::getLi32(PPC64Instr* pinstr) {
   }
   return static_cast<int32_t>(imm32);
 }
+
+//////////////////////////////////////////////////////////////////////
+// Label
+//////////////////////////////////////////////////////////////////////
+
+Label::~Label() {
+  if (!m_toPatch.empty()) {
+    assert(m_a && m_address && "Label had jumps but was never set");
+  }
+  for (auto& ji : m_toPatch) {
+    ji.a->patchBranch(ji.addr, m_address);
+  }
+}
+
+void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
+  // Only optimize jump if it'll unlikely going to be patched.
+  if (m_address) {
+    // if diff is 0, then this is for sure going to be patched.
+    ssize_t diff = ssize_t(m_address - a.frontier());
+    if (diff) {
+      // check if an unconditional branch with b can be used
+      if (BranchConditions::Always == bc) {
+        // unconditional branch
+        if (HPHP::jit::deltaFitsBits(diff, 26)) {
+          addJump(&a, BranchType::b);
+          if (LinkReg::Save == lr) a.bl(diff);
+          else                     a.b (diff);
+          return;
+        }
+      } else {
+        // conditional branch
+        if (HPHP::jit::deltaFits(diff, HPHP::sz::word)) {
+          BranchParams bp(bc);
+          addJump(&a, BranchType::bc);
+          assert(LinkReg::DoNotTouch == lr &&
+              "Conditional call is NOT supported.");
+
+          // Special code for overflow handling
+          if (bc == BranchConditions::Overflow ||
+              bc == BranchConditions::NoOverflow) {
+            a.xor(reg::r0, reg::r0, reg::r0,false);
+            a.mtspr(Assembler::SpecialReg::XER, reg::r0);
+          }
+          a.bc (bp.bo(), bp.bi(), diff);
+          return;
+        }
+      }
+    }
+  }
+  // fallback: use CTR to perform absolute branch up to 64 bits
+  branchFar(a, bc, lr);
+}
+
+void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
+  BranchParams bp(bc);
+  const ssize_t address = ssize_t(m_address);
+
+  // Use reserved function linkage register
+  addJump(&a, BranchType::bctr);  // marking THIS address for patchAbsolute
+  a.li64(reg::r12, address);
+
+  // When branching to another context, r12 need to keep the target address
+  // to correctly set r2 (TOC reference).
+  a.mtctr(reg::r12);
+
+  // Special code for overflow handling
+  if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
+    a.xor(reg::r0, reg::r0, reg::r0,false);
+    a.mtspr(Assembler::SpecialReg::XER, reg::r0);
+  } else {
+    a.emitNop(2 * instr_size_in_bytes);
+  }
+
+  if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
+  else                     a.bcctr (bp.bo(), bp.bi(), 0);
+}
+
+void Label::asm_label(Assembler& a) {
+  assert(!m_address && !m_a && "Label was already set");
+  m_a = &a;
+  m_address = a.frontier();
+}
+
+void Label::addJump(Assembler* a, BranchType type) {
+  if (m_address) return;
+  JumpInfo info;
+  info.type = type;
+  info.a = a;
+  info.addr = a->codeBlock.frontier();
+  m_toPatch.push_back(info);
+}
+
 } // namespace ppc64_asm

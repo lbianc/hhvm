@@ -79,11 +79,11 @@ struct Vgen {
   static void patch(Venv& env) {
     for (auto& p : env.jmps) {
       assertx(env.addrs[p.target]);
-      Assembler::patchBctr(p.instr, env.addrs[p.target]);
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
     for (auto& p : env.jccs) {
       assertx(env.addrs[p.target]);
-      Assembler::patchBctr(p.instr, env.addrs[p.target]);
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
     assertx(env.bccs.empty());
   }
@@ -632,7 +632,7 @@ void Vgen::emit(const jmp& i) {
   if (next == i.target) return;
   jmps.push_back({a.frontier(), i.target});
 
-  // offset to be determined by a.patchBctr
+  // offset to be determined by a.patchBranch
   a.branchAuto(a.frontier());
 }
 void Vgen::emit(const jmpr& i) {
@@ -648,7 +648,7 @@ void Vgen::emit(const jcc& i) {
     auto taken = i.targets[1];
     jccs.push_back({a.frontier(), taken});
 
-    // offset to be determined by a.patchBctr
+    // offset to be determined by a.patchBranch
     a.branchAuto(a.frontier(), i.cc);
   }
   emit(jmp{i.targets[0]});
@@ -776,7 +776,7 @@ void Vgen::emit(const call& i) {
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
   a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
-  a.call(i.target, true);
+  a.call(i.target, Assembler::CallArg::External);
   if (i.watch) {
     // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
     *i.watch = a.frontier() - call_skip_bytes_for_ret;
@@ -790,7 +790,7 @@ void Vgen::emit(const callr& i) {
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
   a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
-  a.call(i.target.asReg(), true);
+  a.call(i.target.asReg(), Assembler::CallArg::External);
 }
 
 void Vgen::emit(const calls& i) {

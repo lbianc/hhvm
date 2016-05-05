@@ -66,18 +66,17 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
   align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
-
-  return EMIT_BODY(cb, call, Call, target);
+  return EMIT_BODY(cb, call, Call, target, Assembler::CallArg::Smashable);
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, branchAuto, Jmp, target);
+  return EMIT_BODY(cb, branchFar, Jmp, target);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
   assertx(cc != CC_None);
-  return EMIT_BODY(cb, branchAuto, Jcc, target, cc);
+  return EMIT_BODY(cb, branchFar, Jcc, target, cc);
 }
 
 std::pair<TCA,TCA>
@@ -89,9 +88,9 @@ emitSmashableJccAndJmp(CodeBlock& cb, CGMeta& fixups, TCA target,
 
   Assembler a { cb };
   auto const jcc = cb.frontier();
-  a.branchAuto(target, cc);
+  a.branchFar(target, cc);
   auto const jmp = cb.frontier();
-  a.branchAuto(target);
+  a.branchFar(target);
 
   return std::make_pair(jcc, jmp);
 }
@@ -159,7 +158,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   always_assert(is_aligned(inst, Alignment::SmashJcc));
 
   if (cc == CC_None) {
-    Assembler::patchBctr(inst, target);
+    Assembler::patchBranch(inst, target);
   } else {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };
