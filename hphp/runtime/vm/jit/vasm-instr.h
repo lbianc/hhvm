@@ -282,6 +282,7 @@ struct Vunit;
   O(hostcall, I(argc), U(args), Dn)\
   O(tbcc, I(cc) I(bit), U(s), Dn)\
   /* ppc64 instructions */\
+  O(extrb, Inone, UH(s,d), DH(d,s))\
   O(extsb, Inone, UH(s,d), DH(d,s))\
   O(extsw, Inone, UH(s,d), DH(d,s))\
   O(fabs, Inone, UH(s,d), DH(d,s))\
@@ -1118,6 +1119,9 @@ struct stdcx { Vreg64 s; Vptr d; };
 struct xscvsxddp { Vreg128 s, d; };
 struct xxlxor { Vreg128 s0, s1, d; };
 struct xxpermdi { Vreg128 s0, s1, d; };
+
+// Extract and zeros the upper bits
+struct extrb { Vreg8 s; Vreg8 d; };
 
 // Extend byte sign
 struct extsb { Vreg64 s; Vreg64 d; };

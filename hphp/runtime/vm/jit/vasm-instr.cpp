@@ -185,6 +185,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::hostcall:
     case Vinstr::tbcc:
     // ppc64 instructions
+    case Vinstr::extrb:
     case Vinstr::extsb:
     case Vinstr::extsw:
     case Vinstr::fabs:
