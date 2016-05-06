@@ -84,6 +84,10 @@ public:
     return Array(ArrayData::Create(), NoIncRef{});
   }
 
+  static Array CreateVec() {
+    return Array(ArrayData::CreateVec(), NoIncRef{});
+  }
+
   static Array Create(const Variant& value) {
     return Array(ArrayData::Create(value), NoIncRef{});
   }
@@ -121,6 +125,12 @@ public:
     auto new_arr = m_arr->copy();
     return (new_arr != m_arr) ?
       Array{new_arr, NoIncRef{}} : Array{*this};
+  }
+
+  Array toVec() const {
+    if (!m_arr) return CreateVec();
+    auto new_arr = m_arr->toVec();
+    return (new_arr != m_arr) ? Array{new_arr, NoIncRef{}} : Array{*this};
   }
 
   /*
@@ -168,7 +178,7 @@ public:
 
   bool useWeakKeys() const {
     // If array isn't set we may implicitly create a mixed array. We never
-    // implicitly create a dict array
+    // implicitly create a dict array or vec.
     return !m_arr || m_arr->useWeakKeys();
   }
 
@@ -379,6 +389,16 @@ public:
   Variant& lvalAt(const String& key, Flags = Flags::None);
   Variant& lvalAt(const Variant& key, Flags = Flags::None);
 
+  Variant& lvalAtRef(int key, Flags flags = Flags::None) {
+    return lvalAtRefImpl(key, flags);
+  }
+  Variant& lvalAtRef(int64_t key, Flags flags = Flags::None) {
+    return lvalAtRefImpl(key, flags);
+  }
+  Variant& lvalAtRef(double key, Flags = Flags::None) = delete;
+  Variant& lvalAtRef(const String& key, Flags = Flags::None);
+  Variant& lvalAtRef(const Variant& key, Flags = Flags::None);
+
   /*
    * Set an element to a value.
    */
@@ -477,10 +497,20 @@ public:
   }
 
   template<typename T>
-  Variant& lvalAtImpl(const T& key, Flags flags = Flags::None) {
+  Variant& lvalAtImpl(const T& key, Flags = Flags::None) {
     if (!m_arr) m_arr = Ptr::attach(ArrayData::Create());
     Variant* ret = nullptr;
     ArrayData* escalated = m_arr->lval(key, ret, m_arr->cowCheck());
+    if (escalated != m_arr) m_arr = Ptr::attach(escalated);
+    assert(ret);
+    return *ret;
+  }
+
+  template<typename T>
+  Variant& lvalAtRefImpl(const T& key, Flags = Flags::None) {
+    if (!m_arr) m_arr = Ptr::attach(ArrayData::Create());
+    Variant* ret = nullptr;
+    ArrayData* escalated = m_arr->lvalRef(key, ret, m_arr->cowCheck());
     if (escalated != m_arr) m_arr = Ptr::attach(escalated);
     assert(ret);
     return *ret;

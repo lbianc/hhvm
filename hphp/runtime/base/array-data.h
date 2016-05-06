@@ -32,6 +32,7 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
+struct Array;
 struct String;
 struct TypedValue;
 struct MArrayIter;
@@ -60,7 +61,8 @@ struct ArrayData {
     kProxyKind = 6,   // ProxyArray
     kDictKind = 7,    // MixedArray without implicit conversion of integer-like
                       // string keys
-    kNumKinds = 8     // insert new values before kNumKinds.
+    kVecKind = 8,     // Vector array (more restrictive PackedArray)
+    kNumKinds = 9     // insert new values before kNumKinds.
   };
 
 protected:
@@ -99,6 +101,8 @@ public:
   static ArrayData *CreateRef(Variant& value);
   static ArrayData *CreateRef(const Variant& name, Variant& value);
 
+  static ArrayData *CreateVec();
+
   /*
    * Called to return an ArrayData to the request heap.  This is
    * normally called when the reference count goes to zero (e.g. via a
@@ -126,7 +130,7 @@ public:
    * are inserted?
    */
   bool useWeakKeys() const {
-    return !isDict();
+    return !isDict() && !isVecArray();
   }
 
   bool convertKey(const StringData* key, int64_t& i) const;
@@ -178,6 +182,9 @@ public:
   bool isProxyArray() const { return kind() == kProxyKind; }
   bool isEmptyArray() const { return kind() == kEmptyKind; }
   bool isDict() const { return kind() == kDictKind; }
+  bool isVecArray() const { return kind() == kVecKind; }
+
+  bool isPackedLayout() const { return isPacked() || isVecArray(); }
 
   bool isMixedLayout() const { return isMixed() || isDict(); }
 
@@ -224,6 +231,8 @@ public:
    */
   const TypedValue* nvGet(int64_t k) const;
   const TypedValue* nvGet(const StringData* k) const;
+  const TypedValue* nvTryGet(int64_t k) const;
+  const TypedValue* nvTryGet(const StringData* k) const;
   void nvGetKey(TypedValue* out, ssize_t pos) const;
 
   // wrappers that call getValueRef()
@@ -236,6 +245,8 @@ public:
    */
   ArrayData *lval(int64_t k, Variant *&ret, bool copy);
   ArrayData *lval(StringData* k, Variant *&ret, bool copy);
+  ArrayData *lvalRef(int64_t k, Variant *&ret, bool copy);
+  ArrayData *lvalRef(StringData* k, Variant *&ret, bool copy);
 
   /**
    * Getting l-value (that Variant pointer) of a new element with the next
@@ -293,6 +304,8 @@ public:
   const Variant& get(const Variant& k, bool error = false) const;
   ArrayData *lval(const String& k, Variant *&ret, bool copy);
   ArrayData *lval(const Variant& k, Variant *&ret, bool copy);
+  ArrayData *lvalRef(const String& k, Variant *&ret, bool copy);
+  ArrayData *lvalRef(const Variant& k, Variant *&ret, bool copy);
   ArrayData *set(const String& k, const Variant& v, bool copy);
   ArrayData *set(const Variant& k, const Variant& v, bool copy);
   ArrayData *set(const StringData*, const Variant&, bool) = delete;
@@ -382,6 +395,8 @@ public:
    * Convert array to dictionary type
    */
   ArrayData* toDict();
+
+  ArrayData* toVec() const;
 
   /**
    * Only map classes need this. Re-index all numeric keys to start from 0.
@@ -507,6 +522,7 @@ static_assert(ArrayData::kApcKind == uint8_t(HeaderKind::Apc), "");
 static_assert(ArrayData::kGlobalsKind == uint8_t(HeaderKind::Globals), "");
 static_assert(ArrayData::kProxyKind == uint8_t(HeaderKind::Proxy), "");
 static_assert(ArrayData::kDictKind == uint8_t(HeaderKind::Dict), "");
+static_assert(ArrayData::kVecKind == uint8_t(HeaderKind::VecArray), "");
 
 //////////////////////////////////////////////////////////////////////
 
@@ -515,6 +531,11 @@ extern std::aligned_storage<
   alignof(ArrayData)
 >::type s_theEmptyArray;
 
+extern std::aligned_storage<
+  sizeof(ArrayData),
+  alignof(ArrayData)
+>::type s_theEmptyVecArray;
+
 /*
  * Return the "static empty array".  This is a singleton static array
  * that can be used whenever an empty array is needed.  It has
@@ -522,6 +543,11 @@ extern std::aligned_storage<
  */
 ALWAYS_INLINE ArrayData* staticEmptyArray() {
   void* vp = &s_theEmptyArray;
+  return static_cast<ArrayData*>(vp);
+}
+
+ALWAYS_INLINE ArrayData* staticEmptyVecArray() {
+  void* vp = &s_theEmptyVecArray;
   return static_cast<ArrayData*>(vp);
 }
 
@@ -538,7 +564,9 @@ struct ArrayFunctions {
   static auto const NK = size_t(ArrayData::ArrayKind::kNumKinds);
   void (*release[NK])(ArrayData*);
   const TypedValue* (*nvGetInt[NK])(const ArrayData*, int64_t k);
+  const TypedValue* (*nvTryGetInt[NK])(const ArrayData*, int64_t k);
   const TypedValue* (*nvGetStr[NK])(const ArrayData*, const StringData* k);
+  const TypedValue* (*nvTryGetStr[NK])(const ArrayData*, const StringData* k);
   void (*nvGetKey[NK])(const ArrayData*, TypedValue* out, ssize_t pos);
   ArrayData* (*setInt[NK])(ArrayData*, int64_t k, Cell v, bool copy);
   ArrayData* (*setStr[NK])(ArrayData*, StringData* k, Cell v,
@@ -550,8 +578,12 @@ struct ArrayFunctions {
   bool (*existsStr[NK])(const ArrayData*, const StringData* k);
   ArrayData* (*lvalInt[NK])(ArrayData*, int64_t k, Variant*& ret,
                             bool copy);
+  ArrayData* (*lvalIntRef[NK])(ArrayData*, int64_t k, Variant*& ret,
+                               bool copy);
   ArrayData* (*lvalStr[NK])(ArrayData*, StringData* k, Variant*& ret,
                             bool copy);
+  ArrayData* (*lvalStrRef[NK])(ArrayData*, StringData* k, Variant*& ret,
+                               bool copy);
   ArrayData* (*lvalNew[NK])(ArrayData*, Variant *&ret, bool copy);
   ArrayData* (*lvalNewRef[NK])(ArrayData*, Variant *&ret, bool copy);
   ArrayData* (*setRefInt[NK])(ArrayData*, int64_t k, Variant& v, bool copy);
@@ -592,6 +624,7 @@ struct ArrayFunctions {
   ArrayData* (*zSetStr[NK])(ArrayData*, StringData* k, RefData* v);
   ArrayData* (*zAppend[NK])(ArrayData*, RefData* v, int64_t* key_ptr);
   ArrayData* (*toDict[NK])(ArrayData*);
+  ArrayData* (*toVec[NK])(const ArrayData*);
 };
 
 extern const ArrayFunctions g_array_funcs;
@@ -601,10 +634,15 @@ void decRefArr(ArrayData* arr) {
   arr->decRefAndRelease();
 }
 
-[[noreturn]] void throwInvalidArrayKeyException(const TypedValue* key);
+[[noreturn]] void throwInvalidArrayKeyException(const TypedValue* key,
+                                                const ArrayData* ad);
+[[noreturn]] void throwInvalidArrayKeyException(const StringData* key,
+                                                const ArrayData* ad);
 [[noreturn]] void throwOOBArrayKeyException(TypedValue key);
 [[noreturn]] void throwOOBArrayKeyException(int64_t key);
 [[noreturn]] void throwOOBArrayKeyException(const StringData* key);
+[[noreturn]] void throwRefInvalidArrayValueException(const ArrayData* ad);
+[[noreturn]] void throwRefInvalidArrayValueException(const Array& arr);
 
 ///////////////////////////////////////////////////////////////////////////////
 }

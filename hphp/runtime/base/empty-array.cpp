@@ -299,7 +299,7 @@ ArrayData* EmptyArray::PlusEq(ArrayData*, const ArrayData* elems) {
 
 ArrayData* EmptyArray::Merge(ArrayData*, const ArrayData* elems) {
   // Packed arrays don't need renumbering, so don't make a copy.
-  if (elems->isPacked() || elems->isStruct()) {
+  if (elems->isPackedLayout() || elems->isStruct()) {
     elems->incRefCount();
     return const_cast<ArrayData*>(elems);
   }
@@ -328,6 +328,10 @@ ArrayData* EmptyArray::Prepend(ArrayData*, Cell v, bool) {
 
 ArrayData* EmptyArray::ToDict(ArrayData*) {
   return MixedArray::MakeReserveDict(0);
+}
+
+ArrayData* EmptyArray::ToVec(const ArrayData*) {
+  return staticEmptyVecArray();
 }
 
 //////////////////////////////////////////////////////////////////////

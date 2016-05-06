@@ -198,18 +198,18 @@ void emitEntryAssertions(irgen::IRGS& irgs, const Func* func, SrcKey sk) {
  */
 void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
                                      const RegionDesc& region,
-                                     const RegionDesc::BlockPtr block,
+                                     const RegionDesc::Block& block,
                                      bool isEntry,
                                      bool checkOuterTypeOnly) {
-  auto const sk = block->start();
+  auto const sk = block.start();
   auto const bcOff = sk.offset();
-  auto& typePredictions = block->typePredictions();
-  auto& typePreConditions = block->typePreConditions();
-  auto& refPreds = block->reffinessPreds();
+  auto& typePredictions = block.typePredictions();
+  auto& typePreConditions = block.typePreConditions();
+  auto& refPreds = block.reffinessPreds();
 
   if (isEntry) {
     irgen::ringbufferEntry(irgs, Trace::RBTypeTraceletGuards, sk);
-    emitEntryAssertions(irgs, block->func(), sk);
+    emitEntryAssertions(irgs, block.func(), sk);
   }
 
   // Emit type predictions.
@@ -246,7 +246,7 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
     }
 
     if (irgs.context.kind == TransKind::Profile) {
-      if (block->func()->isEntry(bcOff)) {
+      if (block.func()->isEntry(bcOff)) {
         irgen::checkCold(irgs, mcg->tx().profData()->curTransID());
       } else {
         irgen::incProfCounter(irgs, mcg->tx().profData()->curTransID());
@@ -299,7 +299,6 @@ void initNormalizedInstruction(
 }
 
 bool shouldTrySingletonInline(const RegionDesc& region,
-                              RegionDesc::BlockPtr block,
                               const NormalizedInstruction& inst,
                               unsigned instIdx,
                               TransFlags trflags) {
@@ -525,7 +524,7 @@ RegionDescPtr getInlinableCalleeRegion(const ProfSrcKey& psk,
 
   // Make sure the FPushOp wasn't interpreted, based on an FPushCuf, or spanned
   // another call
-  auto const info = fpiStack.front();
+  auto const info = fpiStack.back();
   if (isFPushCuf(info.fpushOpc) || info.interp || info.spansCall) {
     return nullptr;
   }
@@ -612,10 +611,10 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
 
   while (auto optBlockId = nextReachableBlock(workQ, irb, blockIdToIRBlock)) {
     auto const blockId = optBlockId.value();
-    auto const& block  = region.block(blockId);
-    auto sk            = block->start();
-    auto byRefs        = makeMapWalker(block->paramByRefs());
-    auto knownFuncs    = makeMapWalker(block->knownFuncs());
+    auto const& block  = *region.block(blockId);
+    auto sk            = block.start();
+    auto byRefs        = makeMapWalker(block.paramByRefs());
+    auto knownFuncs    = makeMapWalker(block.knownFuncs());
     auto skipTrans     = false;
 
     SCOPE_ASSERT_DETAIL("IRGS") { return show(irgs); };
@@ -660,7 +659,7 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
     // the first instruction in the region, we check inner type eagerly, insert
     // `EndGuards` after the checks, and generate profiling code in profiling
     // translations.
-    auto const isEntry = block == region.entry() && !inl.inlining();
+    auto const isEntry = &block == region.entry().get() && !inl.inlining();
     auto const checkOuterTypeOnly = !irb.guardFailBlock() &&
       (!isEntry || irgs.context.kind != TransKind::Profile);
     emitPredictionsAndPreConditions(irgs, region, block, isEntry,
@@ -668,9 +667,9 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
     irb.resetGuardFailBlock();
 
     // Generate IR for each bytecode instruction in this block.
-    for (unsigned i = 0; i < block->length(); ++i, sk.advance(block->unit())) {
+    for (unsigned i = 0; i < block.length(); ++i, sk.advance(block.unit())) {
       ProfSrcKey psk { irgs.profTransID, sk };
-      auto const lastInstr = i == block->length() - 1;
+      auto const lastInstr = i == block.length() - 1;
 
       // Update bcOff here so any guards or assertions from metadata are
       // attributed to this instruction.
@@ -683,22 +682,22 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
       // HHIR may have figured the topFunc even though the RegionDesc
       // didn't know it.  When that happens, update topFunc.
       if (!topFunc && !irb.fs().fpiStack().empty()) {
-        auto& fpiInfo = irb.fs().fpiStack().front();
+        auto& fpiInfo = irb.fs().fpiStack().back();
         auto func = fpiInfo.func;
-        if (func && func->isNameBindingImmutable(block->unit())) {
+        if (func && func->isNameBindingImmutable(block.unit())) {
           topFunc = func;
         }
       }
 
       // Create and initialize the instruction.
-      NormalizedInstruction inst(sk, block->unit());
+      NormalizedInstruction inst(sk, block.unit());
       bool toInterpInst = retry.toInterp.count(psk);
       initNormalizedInstruction(inst, byRefs, irgs, region, blockId,
                                 topFunc, lastInstr, toInterpInst);
 
       // Singleton inlining optimization.
       if (RuntimeOption::EvalHHIRInlineSingletons && !lastInstr &&
-          shouldTrySingletonInline(region, block, inst, i, irgs.transFlags) &&
+          shouldTrySingletonInline(region, inst, i, irgs.transFlags) &&
           knownFuncs.hasNext(inst.nextSk())) {
 
         // This is safe to do even if singleton inlining fails; we just won't
@@ -733,14 +732,14 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
 
         FTRACE(1, "\nstarting inlined call from {} to {} with {} args "
                "and stack:\n{}\n",
-               block->func()->fullName()->data(),
+               block.func()->fullName()->data(),
                callee->fullName()->data(),
                inst.imm[0].u_IVA,
                show(irgs));
 
         auto returnSk = inst.nextSk();
         auto returnBlock = irb.unit().defBlock(irgen::curProfCount(irgs));
-        auto returnFuncOff = returnSk.offset() - block->func()->base();
+        auto returnFuncOff = returnSk.offset() - block.func()->base();
 
         if (irgen::beginInlining(irgs, inst.imm[0].u_IVA, callee, returnFuncOff,
                                  irgen::ReturnTarget { returnBlock })) {

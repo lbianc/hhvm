@@ -33,8 +33,24 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
+std::aligned_storage<
+  sizeof(ArrayData),
+  alignof(ArrayData)
+>::type s_theEmptyVecArray;
+
+struct PackedArray::VecInitializer {
+  VecInitializer() {
+    auto const ad = reinterpret_cast<ArrayData*>(&s_theEmptyVecArray);
+    ad->m_sizeAndPos = 0;
+    ad->m_hdr.init(HeaderKind::VecArray, StaticValue);
+  }
+};
+PackedArray::VecInitializer PackedArray::s_initializer;
+
+//////////////////////////////////////////////////////////////////////
+
 bool PackedArray::checkInvariants(const ArrayData* arr) {
-  assert(arr->isPacked());
+  assert(arr->isPackedLayout());
   assert(arr->checkCount());
   assert(arr->m_size <= arr->cap());
   assert(arr->m_pos >= 0 && arr->m_pos <= arr->m_size);
@@ -50,6 +66,7 @@ bool PackedArray::checkInvariants(const ArrayData* arr) {
     for (; ptr != stop; ptr++) {
       assert(ptr->m_type != KindOfUninit);
       assert(tvIsPlausible(*ptr));
+      assert(!arr->isVecArray() || ptr->m_type != KindOfRef);
     }
   }
   return true;
@@ -195,7 +212,7 @@ ArrayData* PackedArray::Grow(ArrayData* old) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = old->m_sizeAndPos;
     ad->m_hdr.init(CapCode::exact(cap), old->m_hdr.kind, 1);
-    assert(ad->isPacked());
+    assert(ad->kind() == old->kind());
     assert(ad->m_size == old->m_size);
     assert(ad->cap() == cap);
   } else {
@@ -209,8 +226,10 @@ ArrayData* PackedArray::Grow(ArrayData* old) {
   auto const oldSize = old->m_size;
   old->m_sizeAndPos = 0;                // zombie
 
-  memcpy16_inline(packedData(ad), packedData(old),
-                  oldSize * sizeof(TypedValue));
+  if (oldSize > 0) {
+    memcpy16_inline(packedData(ad), packedData(old),
+                    oldSize * sizeof(TypedValue));
+  }
 
   assert(ad->m_pos == oldPos);
   assert(ad->hasExactlyOneRef());
@@ -224,11 +243,11 @@ ArrayData* PackedArray::GrowHelper(ArrayData* old) {
   static_assert(CapCode::Max >= MixedArray::MaxSize, "");
   if (UNLIKELY(oldCap > MixedArray::MaxSize / 2)) return nullptr;
   assert(CapCode::ceil(oldCap*2).decode() > CapCode::Threshold);
-  auto ad = MakeReserveSlow(oldCap*2); // pos=size=kind=0
+  auto ad = MakeReserveSlow(oldCap * 2, old->m_hdr.kind); // pos=size=kind=0
   if (UNLIKELY(ad == nullptr)) return nullptr;
   // ad->m_hdr is already set correctly in MakeReserveSlow
   ad->m_sizeAndPos = old->m_sizeAndPos;
-  assert(ad->isPacked());
+  assert(ad->kind() == old->kind());
   assert(ad->m_size == old->m_size);
   assert(ad->cap() >= oldCap*2);
   assert(ad->hasExactlyOneRef());
@@ -289,23 +308,32 @@ ArrayData* PackedArray::ResizeIfNeeded(ArrayData* adIn) {
 //////////////////////////////////////////////////////////////////////
 ALWAYS_INLINE
 void PackedArray::CopyPackedHelper(const ArrayData* adIn, ArrayData* ad,
-                                   RefCount initial_count) {
+                                   RefCount initial_count, HeaderKind dest_hk) {
   // Copy everything from `adIn' to `ad', including refcount, etc.
+  assert(adIn->isPackedLayout());
   auto const size = adIn->m_size;
   static_assert(sizeof(ArrayData) == 16 && sizeof(TypedValue) == 16, "");
   memcpy16_inline(ad, adIn, (size + 1) * 16);
-  ad->m_hdr.init(adIn->m_hdr, initial_count);
+  ad->m_hdr.init(adIn->m_hdr.aux, dest_hk, initial_count);
 
   // Copy counted types correctly, especially RefData.
   auto data = packedData(ad);
   for (uint32_t i = 0; i < size; ++i) {
     auto pTv = data + i;
     if (UNLIKELY(pTv->m_type == KindOfRef)) {
+      assert(!adIn->isVecArray());
       auto ref = pTv->m_data.pref;
       // See also tvDupFlatternVars()
       if (!ref->isReferenced() && ref->tv()->m_data.parr != adIn) {
         cellDup(*ref->tv(), *pTv);
         continue;
+      } else if (dest_hk == HeaderKind::VecArray) {
+        ad->m_size = i;
+        SCOPE_EXIT {
+          if (ad->isRefCounted()) Release(ad);
+          else if (ad->isUncounted()) ReleaseUncounted(ad);
+        };
+        throwRefInvalidArrayValueException(ad);
       }
     }
     tvRefcountedIncRef(pTv);
@@ -321,9 +349,9 @@ ArrayData* PackedArray::Copy(const ArrayData* adIn) {
     MM().objMalloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
   );
 
-  CopyPackedHelper(adIn, ad, 1);
+  CopyPackedHelper(adIn, ad, 1, adIn->m_hdr.kind);
 
-  assert(ad->isPacked());
+  assert(ad->kind() == adIn->kind());
   assert(ad->cap() == adIn->cap());
   assert(ad->m_size == adIn->m_size);
   assert(ad->m_pos == adIn->m_pos);
@@ -339,6 +367,21 @@ ArrayData* PackedArray::CopyWithStrongIterators(const ArrayData* ad) {
     return move_strong_iterators(cpy, const_cast<ArrayData*>(ad));
   }
   return cpy;
+}
+
+NEVER_INLINE
+ArrayData* PackedArray::CopyStaticHelper(const ArrayData* adIn) {
+  auto const fpcap = CapCode::ceil(adIn->m_size);
+  auto const cap = fpcap.decode();
+  auto const ad = static_cast<ArrayData*>(
+    std::malloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
+  );
+  ad->m_sizeAndPos = adIn->m_sizeAndPos;
+  ad->m_hdr.init(fpcap, adIn->m_hdr.kind, StaticValue);
+  assert(ad->cap() == cap);
+  assert(ad->m_size == adIn->m_size);
+  assert(ad->isStatic());
+  return ad;
 }
 
 NEVER_INLINE
@@ -358,30 +401,14 @@ ArrayData* PackedArray::CopyStatic(const ArrayData* adIn) {
   } else {
     ad = CopyStaticHelper(adIn);
   }
-  CopyPackedHelper(adIn, ad, StaticValue);
+  CopyPackedHelper(adIn, ad, StaticValue, adIn->m_hdr.kind);
 
-  assert(ad->isPacked());
+  assert(ad->kind() == adIn->kind());
   assert(ad->cap() == adIn->cap());
   assert(ad->m_size == adIn->m_size);
   assert(ad->m_pos == adIn->m_pos);
   assert(ad->isStatic());
   assert(checkInvariants(ad));
-  return ad;
-}
-
-NEVER_INLINE
-ArrayData* PackedArray::CopyStaticHelper(const ArrayData* adIn) {
-  auto const fpcap = CapCode::ceil(adIn->m_size);
-  auto const cap = fpcap.decode();
-  auto const ad = static_cast<ArrayData*>(
-    std::malloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
-  );
-  ad->m_sizeAndPos = adIn->m_sizeAndPos;
-  ad->m_hdr.init(fpcap, HeaderKind::Packed, StaticValue);
-  assert(ad->isPacked());
-  assert(ad->cap() == cap);
-  assert(ad->m_size == adIn->m_size);
-  assert(ad->isStatic());
   return ad;
 }
 
@@ -431,7 +458,23 @@ ArrayData* PackedArray::ConvertStaticHelper(const ArrayData* arr) {
   return ad;
 }
 
-ArrayData* PackedArray::MakeReserve(uint32_t capacity) {
+NEVER_INLINE
+ArrayData* PackedArray::MakeReserveSlow(uint32_t capacity, HeaderKind hk) {
+  auto const fpcap = CapCode::ceil(capacity);
+  auto const cap = fpcap.decode();
+  auto const requestSize = sizeof(ArrayData) + sizeof(TypedValue) * cap;
+  auto const ad = static_cast<ArrayData*>(MM().objMalloc(requestSize));
+  ad->m_sizeAndPos = 0;
+  ad->m_hdr.init(fpcap, hk, 1);
+  assert(ad->cap() == cap);
+  assert(ad->m_size == 0);
+  assert(ad->hasExactlyOneRef());
+  assert(checkInvariants(ad));
+  return ad;
+}
+
+ALWAYS_INLINE
+ArrayData* PackedArray::MakeReserveImpl(uint32_t capacity, HeaderKind hk) {
   ArrayData* ad;
   if (LIKELY(capacity <= CapCode::Threshold)) {
     auto const smallSize = SmallSize;
@@ -443,37 +486,91 @@ ArrayData* PackedArray::MakeReserve(uint32_t capacity) {
     );
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = 0; // size=0, pos=0
-    ad->m_hdr.init(CapCode::exact(cap), HeaderKind::Packed, 1);
-    assert(ad->isPacked());
+    ad->m_hdr.init(CapCode::exact(cap), hk, 1);
     assert(ad->cap() == cap);
     assert(ad->m_size == 0);
   } else {
-    ad = MakeReserveSlow(capacity); // size=pos=kind=0
+    ad = MakeReserveSlow(capacity, hk); // size=pos=kind=0
   }
 
+  assert(ad->m_hdr.kind == hk);
   assert(ad->hasExactlyOneRef());
   assert(ad->m_pos == 0);
   assert(checkInvariants(ad));
   return ad;
 }
 
-NEVER_INLINE
-ArrayData* PackedArray::MakeReserveSlow(uint32_t capacity) {
-  auto const fpcap = CapCode::ceil(capacity);
-  auto const cap = fpcap.decode();
-  auto const requestSize = sizeof(ArrayData) + sizeof(TypedValue) * cap;
-  auto const ad = static_cast<ArrayData*>(MM().objMalloc(requestSize));
-  ad->m_sizeAndPos = 0;
-  ad->m_hdr.init(fpcap, HeaderKind::Packed, 1);
+ArrayData* PackedArray::MakeReserve(uint32_t capacity) {
+  auto ad = MakeReserveImpl(capacity, HeaderKind::Packed);
   assert(ad->isPacked());
-  assert(ad->cap() == cap);
-  assert(ad->m_size == 0);
+  return ad;
+}
+
+ArrayData* PackedArray::MakeReserveVec(uint32_t capacity) {
+  auto ad = MakeReserveImpl(capacity, HeaderKind::VecArray);
+  assert(ad->isVecArray());
+  return ad;
+}
+
+ALWAYS_INLINE
+ArrayData* PackedArray::MakePackedImpl(uint32_t size,
+                                       const TypedValue* values,
+                                       HeaderKind hk) {
+  assert(size > 0);
+  ArrayData* ad;
+  if (LIKELY(size <= CapCode::Threshold)) {
+    auto cap = size;
+    if (auto const newCap = getMaxCapInPlaceFast(cap)) {
+      cap = newCap;
+    }
+    assert(cap > 0);
+    static_assert(sizeof(TypedValue) * CapCode::Threshold + sizeof(ArrayData)
+                  <= kMaxSmallSize, "should fit in a small size class");
+    ad = static_cast<ArrayData*>(
+      MM().mallocSmallSize(sizeof(ArrayData) + sizeof(TypedValue) * cap)
+    );
+    assert(cap == CapCode::ceil(cap).code);
+    ad->m_sizeAndPos = size; // pos=0
+    ad->m_hdr.init(CapCode::exact(cap), hk, 1);
+    assert(ad->m_size == size);
+    assert(ad->m_hdr.kind == hk);
+    assert(ad->cap() == cap);
+  } else {
+    ad = MakeReserveSlow(size, hk);
+  }
+
+  // Append values by moving -- Caller assumes we update refcount.
+  // Values are in reverse order since they come from the stack, which
+  // grows down.
+  auto ptr = reinterpret_cast<TypedValue*>(ad + 1);
+  for (auto i = uint32_t{0}; i < size; ++i) {
+    auto const& src = values[size - i - 1];
+    assert(hk != HeaderKind::VecArray || src.m_type != KindOfRef);
+    ptr->m_type = src.m_type;
+    ptr->m_data = src.m_data;
+    ++ptr;
+  }
+
+  assert(ad->m_pos == 0);
   assert(ad->hasExactlyOneRef());
   assert(checkInvariants(ad));
   return ad;
 }
 
-ArrayData* PackedArray::MakeUninitialized(uint32_t size) {
+ArrayData* PackedArray::MakePacked(uint32_t size, const TypedValue* values) {
+  auto ad = MakePackedImpl(size, values, HeaderKind::Packed);
+  assert(ad->isPacked());
+  return ad;
+}
+
+ArrayData* PackedArray::MakeVec(uint32_t size, const TypedValue* values) {
+  auto ad = MakePackedImpl(size, values, HeaderKind::VecArray);
+  assert(ad->isVecArray());
+  return ad;
+}
+
+ALWAYS_INLINE
+ArrayData* PackedArray::MakeUninitializedImpl(uint32_t size, HeaderKind hk) {
   assert(size > 0);
   ArrayData* ad;
   assert(size <= CapCode::Threshold);
@@ -483,13 +580,33 @@ ArrayData* PackedArray::MakeUninitialized(uint32_t size) {
   );
   assert(cap == CapCode::ceil(cap).code);
   ad->m_sizeAndPos = size; // pos=0
-  ad->m_hdr.init(CapCode::exact(cap), HeaderKind::Packed, 1);
+  ad->m_hdr.init(CapCode::exact(cap), hk, 1);
   assert(ad->m_size == size);
   assert(ad->m_pos == 0);
-  assert(ad->isPacked());
+  assert(ad->m_hdr.kind == hk);
   assert(ad->cap() == cap);
   assert(ad->hasExactlyOneRef());
   assert(checkInvariants(ad));
+  return ad;
+}
+
+ArrayData* PackedArray::MakeUninitialized(uint32_t size) {
+  auto ad = MakeUninitializedImpl(size, HeaderKind::Packed);
+  assert(ad->isPacked());
+  return ad;
+}
+
+ArrayData* PackedArray::MakeUninitializedVec(uint32_t size) {
+  auto ad = MakeUninitializedImpl(size, HeaderKind::VecArray);
+  assert(ad->isVecArray());
+  return ad;
+}
+
+ArrayData* PackedArray::MakeFromVec(ArrayData* adIn, bool copy) {
+  assert(checkInvariants(adIn));
+  assert(adIn->isVecArray());
+  ArrayData* ad = copy ? Copy(adIn) : adIn;
+  ad->m_hdr.kind = HeaderKind::Packed;
   return ad;
 }
 
@@ -533,13 +650,28 @@ void PackedArray::ReleaseUncounted(ArrayData* ad) {
 }
 
 const TypedValue* PackedArray::NvGetInt(const ArrayData* ad, int64_t ki) {
+  assert(checkInvariants(ad));
   auto const data = packedData(ad);
   return LIKELY(size_t(ki) < ad->m_size) ? &data[ki] : nullptr;
 }
 
 const TypedValue*
 PackedArray::NvGetStr(const ArrayData* ad, const StringData* s) {
+  assert(checkInvariants(ad));
   return nullptr;
+}
+
+const TypedValue* PackedArray::NvTryGetIntVec(const ArrayData* ad, int64_t ki) {
+  assert(checkInvariants(ad));
+  auto const data = packedData(ad);
+  if (LIKELY(size_t(ki) < ad->m_size)) return &data[ki];
+  throwOOBArrayKeyException(ki);
+}
+
+const TypedValue* PackedArray::NvTryGetStrVec(const ArrayData* ad,
+                                              const StringData* s) {
+  assert(checkInvariants(ad));
+  throwInvalidArrayKeyException(s, ad);
 }
 
 void PackedArray::NvGetKey(const ArrayData* ad, TypedValue* out, ssize_t pos) {
@@ -566,6 +698,7 @@ bool PackedArray::ExistsInt(const ArrayData* ad, int64_t k) {
 }
 
 bool PackedArray::ExistsStr(const ArrayData* ad, const StringData* s) {
+  assert(checkInvariants(ad));
   return false;
 }
 
@@ -591,14 +724,45 @@ ArrayData* PackedArray::LvalInt(ArrayData* adIn,
   return mixed->addLvalImpl(k, ret);
 }
 
+ArrayData* PackedArray::LvalIntVec(ArrayData* adIn,
+                                   int64_t k,
+                                   Variant*& ret,
+                                   bool copy) {
+  assert(checkInvariants(adIn));
+  if (UNLIKELY(size_t(k) >= adIn->m_size)) throwOOBArrayKeyException(k);
+  auto const ad = copy ? Copy(adIn) : adIn;
+  ret = &tvAsVariant(&packedData(ad)[k]);
+  return ad;
+}
+
 ArrayData* PackedArray::LvalStr(ArrayData* adIn,
                                 StringData* key,
                                 Variant*& ret,
                                 bool copy) {
   // We have to promote.  We know the key doesn't exist, but aren't
   // making use of that fact yet.  TODO(#2606310).
+  assert(checkInvariants(adIn));
   auto const mixed = copy ? ToMixedCopy(adIn) : ToMixed(adIn);
   return mixed->addLvalImpl(key, ret);
+}
+
+ArrayData*
+PackedArray::LvalStrVec(ArrayData* adIn, StringData* key, Variant*&, bool) {
+  assert(checkInvariants(adIn));
+  throwInvalidArrayKeyException(key, adIn);
+}
+
+ArrayData*
+PackedArray::LvalIntRefVec(ArrayData* adIn, int64_t k, Variant*&, bool) {
+  assert(checkInvariants(adIn));
+  if (UNLIKELY(size_t(k) >= adIn->m_size)) throwOOBArrayKeyException(k);
+  throwRefInvalidArrayValueException(adIn);
+}
+
+ArrayData*
+PackedArray::LvalStrRefVec(ArrayData* adIn, StringData* key, Variant*&, bool) {
+  assert(checkInvariants(adIn));
+  throwInvalidArrayKeyException(key, adIn);
 }
 
 ArrayData* PackedArray::LvalNew(ArrayData* adIn, Variant*& ret, bool copy) {
@@ -611,14 +775,9 @@ ArrayData* PackedArray::LvalNew(ArrayData* adIn, Variant*& ret, bool copy) {
   return ad;
 }
 
-ArrayData* PackedArray::LvalNewRef(ArrayData* adIn, Variant*& ret, bool copy) {
+ArrayData* PackedArray::LvalNewRefVec(ArrayData* adIn, Variant*&, bool) {
   assert(checkInvariants(adIn));
-  auto const ad = copy ? CopyAndResizeIfNeeded(adIn)
-                       : ResizeIfNeeded(adIn);
-  auto& tv = packedData(ad)[ad->m_size++];
-  tv.m_type = KindOfNull;
-  ret = &tvAsVariant(&tv);
-  return ad;
+  throwRefInvalidArrayValueException(adIn);
 }
 
 ArrayData*
@@ -646,12 +805,29 @@ PackedArray::SetInt(ArrayData* adIn, int64_t k, Cell v, bool copy) {
   return mixed->addVal(k, v);
 }
 
+ArrayData*
+PackedArray::SetIntVec(ArrayData* adIn, int64_t k, Cell v, bool copy) {
+  assert(checkInvariants(adIn));
+  if (UNLIKELY(size_t(k) >= adIn->m_size)) throwOOBArrayKeyException(k);
+  auto const ad = copy ? Copy(adIn) : adIn;
+  // TODO(#3888164): we should restructure things so we don't have
+  // to check KindOfUninit here.
+  setVal(packedData(ad)[k], v);
+  return ad;
+}
+
 ArrayData* PackedArray::SetStr(ArrayData* adIn, StringData* k, Cell v,
                                bool copy) {
   // We must convert to mixed, but can call addVal since the key must
   // not exist.
+  assert(checkInvariants(adIn));
   auto const mixed = copy ? ToMixedCopy(adIn) : ToMixed(adIn);
   return mixed->addVal(k, v);
+}
+
+ArrayData* PackedArray::SetStrVec(ArrayData* adIn, StringData* k, Cell, bool) {
+  assert(checkInvariants(adIn));
+  throwInvalidArrayKeyException(k, adIn);
 }
 
 ArrayData* PackedArray::SetRefInt(ArrayData* adIn, int64_t k, Variant& v,
@@ -671,13 +847,27 @@ ArrayData* PackedArray::SetRefInt(ArrayData* adIn, int64_t k, Variant& v,
   return mixed;
 }
 
+ArrayData*
+PackedArray::SetRefIntVec(ArrayData* adIn, int64_t k, Variant& v, bool copy) {
+  assert(checkInvariants(adIn));
+  if (UNLIKELY(size_t(k) >= adIn->m_size)) throwOOBArrayKeyException(k);
+  throwRefInvalidArrayValueException(adIn);
+}
+
 ArrayData* PackedArray::SetRefStr(ArrayData* adIn,
                                   StringData* k,
                                   Variant& v,
                                   bool copy) {
+  assert(checkInvariants(adIn));
   auto const mixed = copy ? ToMixedCopy(adIn) : ToMixed(adIn);
   // todo t2606310: key can't exist.  use add/findForNewInsert
   return mixed->updateRef(k, v);
+}
+
+ArrayData*
+PackedArray::SetRefStrVec(ArrayData* adIn, StringData* k, Variant&, bool) {
+  assert(checkInvariants(adIn));
+  throwInvalidArrayKeyException(k, adIn);
 }
 
 ArrayData* PackedArray::RemoveInt(ArrayData* adIn, int64_t k, bool copy) {
@@ -694,6 +884,14 @@ ArrayData* PackedArray::RemoveInt(ArrayData* adIn, int64_t k, bool copy) {
   }
   // Key doesn't exist---we're still packed.
   return copy ? Copy(adIn) : adIn;
+}
+
+ArrayData* PackedArray::RemoveIntVec(ArrayData* adIn, int64_t k, bool copy) {
+  assert(checkInvariants(adIn));
+  if (size_t(k) >= adIn->m_size) return adIn;
+  auto mixed = copy ? ToMixedCopy(adIn) : ToMixed(adIn);
+  auto dict = MixedArray::ToDictInPlace(mixed);
+  return MixedArray::RemoveInt(dict, k, dict->cowCheck());
 }
 
 ArrayData*
@@ -775,6 +973,11 @@ ArrayData* PackedArray::AppendRef(ArrayData* adIn,
   return ad;
 }
 
+ArrayData* PackedArray::AppendRefVec(ArrayData* adIn, Variant&, bool) {
+  assert(checkInvariants(adIn));
+  throwRefInvalidArrayValueException(adIn);
+}
+
 ArrayData* PackedArray::AppendWithRef(ArrayData* adIn,
                                       const Variant& v,
                                       bool copy) {
@@ -785,6 +988,17 @@ ArrayData* PackedArray::AppendWithRef(ArrayData* adIn,
   dst.m_type = KindOfNull;
   tvAsVariant(&dst).setWithRef(v);
   return ad;
+}
+
+ArrayData* PackedArray::AppendWithRefVec(ArrayData* adIn,
+                                         const Variant& v,
+                                         bool copy) {
+  assert(checkInvariants(adIn));
+  if (v.isReferenced()) throwRefInvalidArrayValueException(adIn);
+  auto const cell = LIKELY(v.getType() != KindOfUninit)
+    ? *v.asCell()
+    : make_tv<KindOfNull>();
+  return Append(adIn, cell, copy);
 }
 
 ArrayData* PackedArray::PlusEq(ArrayData* adIn, const ArrayData* elems) {
@@ -802,6 +1016,22 @@ ArrayData* PackedArray::PlusEq(ArrayData* adIn, const ArrayData* elems) {
   }
 }
 
+ArrayData* PackedArray::PlusEqVec(ArrayData* adIn, const ArrayData* elems) {
+  assert(checkInvariants(adIn));
+  auto const neededSize = adIn->size() + elems->size();
+  auto const mixed = ToMixedCopyReserve(adIn, neededSize);
+  auto const dict = MixedArray::ToDictInPlace(mixed);
+  try {
+    auto const ret = MixedArray::PlusEq(dict, elems);
+    assert(ret == dict);
+    assert(dict->hasExactlyOneRef());
+    return ret;
+  } catch (...) {
+    MixedArray::Release(dict);
+    throw;
+  }
+}
+
 ArrayData* PackedArray::Merge(ArrayData* adIn, const ArrayData* elems) {
   assert(checkInvariants(adIn));
   auto const neededSize = adIn->m_size + elems->size();
@@ -809,8 +1039,16 @@ ArrayData* PackedArray::Merge(ArrayData* adIn, const ArrayData* elems) {
   return MixedArray::ArrayMergeGeneric(ret, elems);
 }
 
+ArrayData* PackedArray::MergeVec(ArrayData* adIn, const ArrayData* elems) {
+  assert(checkInvariants(adIn));
+  auto const neededSize = adIn->m_size + elems->size();
+  auto const mixed = ToMixedCopyReserve(adIn, neededSize);
+  auto const dict = MixedArray::ToDictInPlace(mixed);
+  return MixedArray::ArrayMergeGeneric(dict, elems);
+}
+
 static void adjustMArrayIter(ArrayData* ad, ssize_t pos) {
-  assert(ad->isPacked());
+  assert(ad->isPackedLayout());
   for_each_strong_iterator([&] (MIterTable::Ent& miEnt) {
     if (miEnt.array != ad) return;
     auto const iter = miEnt.iter;
@@ -902,6 +1140,26 @@ ArrayData* PackedArray::ToDict(ArrayData* ad) {
   return MixedArray::ToDictInPlace(mixed);
 }
 
+ArrayData* PackedArray::ToVec(const ArrayData* adIn) {
+  assert(checkInvariants(adIn));
+  assert(adIn->isPacked());
+
+  auto const cap = adIn->cap();
+  auto const ad = static_cast<ArrayData*>(
+    MM().objMalloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
+  );
+
+  CopyPackedHelper(adIn, ad, 1, HeaderKind::VecArray);
+
+  assert(ad->isVecArray());
+  assert(ad->cap() == adIn->cap());
+  assert(ad->m_size == adIn->m_size);
+  assert(ad->m_pos == adIn->m_pos);
+  assert(ad->hasExactlyOneRef());
+  assert(checkInvariants(ad));
+  return ad;
+}
+
 void PackedArray::OnSetEvalScalar(ArrayData* ad) {
   assert(checkInvariants(ad));
   auto ptr = packedData(ad);
@@ -958,8 +1216,8 @@ ArrayData* PackedArray::MakeUncounted(ArrayData* array) {
     );
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = array->m_sizeAndPos;
-    ad->m_hdr.init(CapCode::exact(cap), HeaderKind::Packed, UncountedValue);
-    assert(ad->kind() == ArrayData::kPackedKind);
+    ad->m_hdr.init(CapCode::exact(cap), array->m_hdr.kind, UncountedValue);
+    assert(ad->kind() == array->kind());
     assert(ad->cap() == cap);
     assert(ad->m_size == size);
   } else {
@@ -988,8 +1246,8 @@ ArrayData* PackedArray::MakeUncountedHelper(ArrayData* array) {
     std::malloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
   );
   ad->m_sizeAndPos = array->m_sizeAndPos;
-  ad->m_hdr.init(fpcap, HeaderKind::Packed, UncountedValue);
-  assert(ad->kind() == ArrayData::kPackedKind);
+  ad->m_hdr.init(fpcap, array->m_hdr.kind, UncountedValue);
+  assert(ad->kind() == array->kind());
   assert(ad->cap() == cap);
   assert(ad->m_size == array->m_size);
   assert(ad->m_pos == array->m_pos);

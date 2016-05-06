@@ -52,7 +52,9 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
   static void Release(ArrayData*);
   static void ReleaseUncounted(ArrayData*);
   static const TypedValue* NvGetInt(const ArrayData*, int64_t ki);
+  static constexpr auto NvTryGetInt = &NvGetInt;
   static const TypedValue* NvGetStr(const ArrayData*, const StringData*);
+  static constexpr auto NvTryGetStr = &NvGetStr;
   static void NvGetKey(const ArrayData*, TypedValue* out, ssize_t pos);
   static ArrayData* SetInt(ArrayData*, int64_t k, Cell v, bool copy);
   static ArrayData* SetStr(ArrayData*, StringData* k, Cell v, bool copy);
@@ -64,10 +66,12 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
   static bool ExistsInt(const ArrayData* ad, int64_t k);
   static bool ExistsStr(const ArrayData*, const StringData*);
   static ArrayData* LvalInt(ArrayData*, int64_t k, Variant*& ret, bool copy);
+  static constexpr auto LvalIntRef = &LvalInt;
   static ArrayData* LvalStr(ArrayData*, StringData* k, Variant*& ret,
                             bool copy);
+  static constexpr auto LvalStrRef = &LvalStr;
   static ArrayData* LvalNew(ArrayData*, Variant*& ret, bool copy);
-  static ArrayData* LvalNewRef(ArrayData*, Variant*& ret, bool copy);
+  static constexpr auto LvalNewRef = &LvalNew;
   static ArrayData* SetRefInt(ArrayData*, int64_t k, Variant& v, bool copy);
   static ArrayData* SetRefStr(ArrayData*, StringData* k, Variant& v,
     bool copy);
@@ -83,11 +87,10 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
   static constexpr auto ValidMArrayIter = &ArrayCommon::ValidMArrayIter;
   static bool AdvanceMArrayIter(ArrayData*, MArrayIter& fp);
   static void CopyPackedHelper(const ArrayData* adIn, ArrayData* ad,
-                               RefCount initial_count);
+                               RefCount initial_count, HeaderKind dest_hk);
   static ArrayData* Copy(const ArrayData* ad);
   static ArrayData* CopyWithStrongIterators(const ArrayData*);
   static ArrayData* CopyStatic(const ArrayData*);
-  static ArrayData* CopyStaticHelper(const ArrayData*);
   static ArrayData* EscalateForSort(ArrayData*, SortFunction);
   static void Ksort(ArrayData*, int, bool);
   static void Sort(ArrayData*, int, bool);
@@ -107,11 +110,69 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
   static ArrayData* Dequeue(ArrayData*, Variant& value);
   static ArrayData* Prepend(ArrayData*, Cell v, bool copy);
   static ArrayData* ToDict(ArrayData*);
+  static ArrayData* ToVec(const ArrayData*);
   static void Renumber(ArrayData*) {}
   static void OnSetEvalScalar(ArrayData*);
   static ArrayData* Escalate(const ArrayData* ad) {
     return const_cast<ArrayData*>(ad);
   }
+
+  static const TypedValue* NvTryGetIntVec(const ArrayData*, int64_t);
+  static const TypedValue* NvTryGetStrVec(const ArrayData*, const StringData*);
+  static ArrayData* SetIntVec(ArrayData*, int64_t, Cell, bool);
+  static ArrayData* SetStrVec(ArrayData*, StringData*, Cell, bool);
+  static ArrayData* RemoveIntVec(ArrayData*, int64_t, bool);
+  static ArrayData* LvalIntVec(ArrayData*, int64_t, Variant*&, bool);
+  static ArrayData* LvalStrVec(ArrayData*, StringData*, Variant*&, bool);
+  static ArrayData* LvalIntRefVec(ArrayData*, int64_t, Variant*&, bool);
+  static ArrayData* LvalStrRefVec(ArrayData*, StringData*, Variant*&, bool);
+  static ArrayData* LvalNewRefVec(ArrayData*, Variant*&, bool);
+  static ArrayData* SetRefIntVec(ArrayData*, int64_t, Variant&, bool);
+  static ArrayData* SetRefStrVec(ArrayData*, StringData*, Variant&, bool);
+  static ArrayData* AppendRefVec(ArrayData*, Variant&, bool);
+  static ArrayData* AppendWithRefVec(ArrayData*, const Variant&, bool);
+  static ArrayData* PlusEqVec(ArrayData*, const ArrayData*);
+  static ArrayData* MergeVec(ArrayData*, const ArrayData*);
+  static ArrayData* ToVecVec(const ArrayData* ad) {
+    return const_cast<ArrayData*>(ad);
+  }
+
+  static constexpr auto ReleaseVec = &Release;
+  static constexpr auto NvGetIntVec = &NvGetInt;
+  static constexpr auto NvGetStrVec = &NvGetStr;
+  static constexpr auto NvGetKeyVec = &NvGetKey;
+  static constexpr auto VsizeVec = &Vsize;
+  static constexpr auto GetValueRefVec = &GetValueRef;
+  static constexpr auto IsVectorDataVec = &IsVectorData;
+  static constexpr auto ExistsIntVec = &ExistsInt;
+  static constexpr auto ExistsStrVec = &ExistsStr;
+  static constexpr auto LvalNewVec = &LvalNew;
+  static constexpr auto RemoveStrVec = &RemoveStr;
+  static constexpr auto IterBeginVec = &IterBegin;
+  static constexpr auto IterLastVec = &IterLast;
+  static constexpr auto IterEndVec = &IterEnd;
+  static constexpr auto IterAdvanceVec = &IterAdvance;
+  static constexpr auto IterRewindVec = &IterRewind;
+  static constexpr auto ValidMArrayIterVec = ValidMArrayIter;
+  static constexpr auto AdvanceMArrayIterVec = &AdvanceMArrayIter;
+  static constexpr auto EscalateForSortVec = &EscalateForSort;
+  static constexpr auto KsortVec = &Ksort;
+  static constexpr auto SortVec = &Sort;
+  static constexpr auto AsortVec = &Asort;
+  static constexpr auto UksortVec = &Uksort;
+  static constexpr auto UsortVec = &Usort;
+  static constexpr auto UasortVec = &Uasort;
+  static constexpr auto CopyVec = &Copy;
+  static constexpr auto CopyStaticVec = &CopyStatic;
+  static constexpr auto CopyWithStrongIteratorsVec = &CopyWithStrongIterators;
+  static constexpr auto AppendVec = &Append;
+  static constexpr auto PopVec = &Pop;
+  static constexpr auto DequeueVec = &Dequeue;
+  static constexpr auto PrependVec = &Prepend;
+  static constexpr auto RenumberVec = &Renumber;
+  static constexpr auto OnSetEvalScalarVec = &OnSetEvalScalar;
+  static constexpr auto EscalateVec = &Escalate;
+  static constexpr auto ToDictVec = &ToDict;
 
   //////////////////////////////////////////////////////////////////////
 
@@ -131,7 +192,7 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
   template<class Marker> static void scan(const ArrayData*, Marker&);
 
   static ArrayData* MakeReserve(uint32_t capacity);
-  static ArrayData* MakeReserveSlow(uint32_t capacity);
+  static ArrayData* MakeReserveVec(uint32_t capacity);
 
   /*
    * Allocate a PackedArray containing `size' values, in the reverse order of
@@ -140,11 +201,15 @@ struct PackedArray final: type_scan::MarkCountable<PackedArray> {
    * This function takes ownership of the TypedValues in `values'.
    */
   static ArrayData* MakePacked(uint32_t size, const TypedValue* values);
-  static ArrayData* MakePackedHelper(uint32_t size, const TypedValue* values);
+  static ArrayData* MakeVec(uint32_t size, const TypedValue* values);
+
   static ArrayData* MakeUninitialized(uint32_t size);
+  static ArrayData* MakeUninitializedVec(uint32_t size);
 
   static ArrayData* MakeUncounted(ArrayData* array);
   static ArrayData* MakeUncountedHelper(ArrayData* array);
+
+  static ArrayData* MakeFromVec(ArrayData* adIn, bool copy);
 
   // Fast iteration
   template <class F> static void IterateV(ArrayData* arr, F fn);
@@ -161,6 +226,18 @@ private:
   static ArrayData* CopyAndResizeIfNeeded(const ArrayData*);
   static ArrayData* ResizeIfNeeded(ArrayData*);
   static SortFlavor preSort(ArrayData*);
+
+  static ArrayData* MakeReserveImpl(uint32_t, HeaderKind);
+  static ArrayData* MakeReserveSlow(uint32_t, HeaderKind);
+
+  static ArrayData* MakePackedImpl(uint32_t, const TypedValue*, HeaderKind);
+
+  static ArrayData* MakeUninitializedImpl(uint32_t, HeaderKind);
+
+  static ArrayData* CopyStaticHelper(const ArrayData*);
+
+  struct VecInitializer;
+  static VecInitializer s_initializer;
 };
 
 //////////////////////////////////////////////////////////////////////

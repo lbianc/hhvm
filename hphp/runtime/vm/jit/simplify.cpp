@@ -122,6 +122,7 @@ bool arrayKindNeedsVsize(const ArrayData::ArrayKind kind) {
     case ArrayData::kStructKind:
     case ArrayData::kMixedKind:
     case ArrayData::kEmptyKind:
+    case ArrayData::kVecKind:
     case ArrayData::kApcKind:
     case ArrayData::kDictKind:
       return false;
@@ -318,6 +319,29 @@ SSATmp* simplifyLdClsCtx(State& env, const IRInstruction* inst) {
   }
   if (ctxType <= TCctx) {
     return gen(env, LdClsCctx, ctx);
+  }
+  return nullptr;
+}
+
+SSATmp* simplifyLdClsMethod(State& env, const IRInstruction* inst) {
+  SSATmp* ctx = inst->src(0);
+  if (ctx->isA(TCls)) {
+    auto const src = ctx->inst();
+    if (src->op() == LdClsCctx) {
+      return gen(env, LdClsMethod, src->src(0), inst->src(1));
+    }
+  }
+  return nullptr;
+}
+
+SSATmp* simplifySpillFrame(State& env, const IRInstruction* inst) {
+  SSATmp* ctx = inst->src(2);
+  if (ctx->isA(TCls)) {
+    auto const src = ctx->inst();
+    if (src->op() == LdClsCctx) {
+      return gen(env, SpillFrame, *inst->extra<SpillFrame>(),
+                 inst->src(0), inst->src(1), src->src(0));
+    }
   }
   return nullptr;
 }
@@ -2521,6 +2545,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(HasToString)
   X(LdClsCtx)
   X(LdClsName)
+  X(LdClsMethod)
   X(LdStrLen)
   X(MethodExists)
   X(CheckCtxThis)
@@ -2608,6 +2633,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(LdStk)
   X(JmpSwitchDest)
   X(CheckRange)
+  X(SpillFrame)
   default: break;
   }
 #undef X

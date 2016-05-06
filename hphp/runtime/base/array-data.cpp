@@ -63,21 +63,26 @@ ArrayData::ScalarArrayKey ArrayData::GetScalarArrayKey(ArrayData* arr) {
 }
 
 ArrayData* ArrayData::GetScalarArray(ArrayData* arr) {
-  if (arr->empty() && !arr->isDict()) return staticEmptyArray();
+  if (arr->empty()) {
+    if (arr->isVecArray()) return staticEmptyVecArray();
+    if (!arr->isDict()) return staticEmptyArray();
+  }
   auto key = GetScalarArrayKey(arr);
   return GetScalarArray(arr, key);
 }
 
 ArrayData* ArrayData::GetScalarArray(ArrayData* arr,
                                      const ScalarArrayKey& key) {
-  if (arr->empty() && !arr->isDict()) return staticEmptyArray();
+  if (arr->empty()) {
+    if (arr->isVecArray()) return staticEmptyVecArray();
+    if (!arr->isDict()) return staticEmptyArray();
+  }
   assert(key == GetScalarArrayKey(arr));
 
   ArrayDataMap::accessor acc;
   if (s_arrayDataMap.insert(acc, key)) {
     ArrayData* ad;
-
-    if (arr->isVectorData() && !arr->isPacked() && !arr->isDict()) {
+    if (arr->isVectorData() && !arr->isPackedLayout() && !arr->isDict()) {
       ad = PackedArray::ConvertStatic(arr);
     } else {
       ad = arr->copyStatic();
@@ -124,7 +129,8 @@ static ArrayData* ToDictNoop(ArrayData* ad) {
     APCLocalArray::entry,                       \
     GlobalsArray::entry,                        \
     ProxyArray::entry,                          \
-    MixedArray::entry /* Dict */                \
+    MixedArray::entry##Dict, /* Dict */         \
+    PackedArray::entry##Vec, /* Vec */          \
   },
 
 /*
@@ -170,10 +176,18 @@ const ArrayFunctions g_array_funcs = {
   /*
    * const TypedValue* NvGetInt(const ArrayData*, int64_t key)
    *
-   *   Lookup a value in an array using an integer key.  Returns
-   *   nullptr if the key is not in the array.
+   *   Lookup a value in an array using an integer key.  Returns nullptr if the
+   *   key is not in the array. Must not throw if key isn't present.
    */
   DISPATCH(NvGetInt)
+
+  /*
+   * const TypedValue* NvTryGetInt(const ArrayData*, int64_t key)
+   *
+   *   Lookup a value in an array using an integer key. Either throws, or
+   *   returns nullptr if the key is not in the array.
+   */
+  DISPATCH(NvTryGetInt)
 
   /*
    * const TypedValue* NvGetStr(const ArrayData*, const StringData*)
@@ -183,6 +197,14 @@ const ArrayFunctions g_array_funcs = {
    *   is not in the array.
    */
   DISPATCH(NvGetStr)
+
+  /*
+   * const TypedValue* NvTryGetStr(const ArrayData*, const StringData*)
+   *
+   *   Lookup a value in an array using a string key. Either throws, or
+   *   returns nullptr if the key is not in the array.
+   */
+  DISPATCH(NvTryGetStr)
 
   /*
    * void NvGetKey(const ArrayData*, TypedValue* out, ssize_t pos)
@@ -260,47 +282,40 @@ const ArrayFunctions g_array_funcs = {
 
   /*
    * ArrayData* LvalInt(ArrayData*, int64_t k, Variant*& out, bool copy)
+   * ArrayData* LvalIntRef(ArrayData*, int64_t k, Variant*& out, bool copy)
    *
-   *   Looks up a value in the array by the supplied integer key,
-   *   creating it as a KindOfNull if it doesn't exist, and sets `out'
-   *   to point to it.  This function has copy/grow semantics.
+   *   Looks up a value in the array by the supplied integer key, creating it as
+   *   a KindOfNull if it doesn't exist, and sets `out' to point to it. Use the
+   *   ref variant if the retrieved value will be boxed. This function has
+   *   copy/grow semantics.
    */
   DISPATCH(LvalInt)
+  DISPATCH(LvalIntRef)
 
   /*
    * ArrayData* LvalStr(ArrayData*, StringData* key, Variant*& out, bool copy)
+   * ArrayData* LvalStrRef(ArrayData*, StringData* key, Variant*& out, bool copy)
    *
-   *   Looks up a value in the array by the supplied string key,
-   *   creating it as a KindOfNull if it doesn't exist, and sets `out'
-   *   to point to it.  The string `key' may not be an integer-like
-   *   string.  This function has copy/grow semantics.
+   *   Looks up a value in the array by the supplied string key, creating it as
+   *   a KindOfNull if it doesn't exist, and sets `out' to point to it.  The
+   *   string `key' may not be an integer-like string. Use the ref variant if
+   *   the retrieved value will be boxed. This function has copy/grow semantics.
    */
   DISPATCH(LvalStr)
+  DISPATCH(LvalStrRef)
 
   /*
    * ArrayData* LvalNew(ArrayData*, Variant*& out, bool copy)
+   * ArrayData* LvalNewRef(ArrayData*, Variant*& out, bool copy)
    *
-   *   This function inserts a new null value in the array at the next
-   *   available integer key, and then sets `out' to point to it.  In
-   *   the case that there is no next available integer key, this
-   *   function sets out to point to the lvalBlackHole.  This function
-   *   has copy/grow semantics.
+   *   This function inserts a new null value in the array at the next available
+   *   integer key, and then sets `out' to point to it.  In the case that there
+   *   is no next available integer key, this function sets out to point to the
+   *   lvalBlackHole. Use the ref variant if the retrieved value will be
+   *   boxed. This function has copy/grow semantics.
    */
   DISPATCH(LvalNew)
-
-  /*
-   * ArrayData* LvalNewRef(ArrayData*, Variant*& out, bool copy)
-   */
-  {
-    PackedArray::LvalNewRef,
-    StructArray::LvalNew,
-    MixedArray::LvalNew,
-    EmptyArray::LvalNew,
-    APCLocalArray::LvalNew,
-    GlobalsArray::LvalNew,
-    ProxyArray::LvalNew,
-    MixedArray::LvalNew,
-  },
+  DISPATCH(LvalNewRef)
 
   /*
    * ArrayData* SetRefInt(ArrayData*, int64_t key, Variant& v, bool copy)
@@ -629,6 +644,7 @@ const ArrayFunctions g_array_funcs = {
     &ZSetIntThrow,
     &ProxyArray::ZSetInt,
     &MixedArray::ZSetInt,
+    &ZSetIntThrow,
   },
 
   {
@@ -640,6 +656,7 @@ const ArrayFunctions g_array_funcs = {
     &ZSetStrThrow,
     &ProxyArray::ZSetStr,
     &MixedArray::ZSetStr,
+    &ZSetStrThrow,
   },
 
   {
@@ -650,6 +667,7 @@ const ArrayFunctions g_array_funcs = {
     &ZAppendThrow,
     &ZAppendThrow,
     &ProxyArray::ZAppend,
+    &MixedArray::ZAppend,
     &ZAppendThrow,
   },
 
@@ -662,7 +680,17 @@ const ArrayFunctions g_array_funcs = {
     ToDictThrow,
     ProxyArray::ToDict,
     ToDictNoop,
+    PackedArray::ToDictVec,
   },
+
+  /*
+   * ArrayData* ToVec(ArrayData*)
+   *
+   *   Convert array to a new vector array. Keys will be discarded and the
+   *   vector array will contain the values in iteration order. If the array is
+   *   already a vector array, it will be returned unchanged (without copying).
+   */
+  DISPATCH(ToVec)
 };
 
 #undef DISPATCH
@@ -684,6 +712,10 @@ bool ArrayData::IsValidKey(const Variant& k) {
 
 ArrayData *ArrayData::Create() {
   return staticEmptyArray();
+}
+
+ArrayData* ArrayData::CreateVec() {
+  return staticEmptyVecArray();
 }
 
 ArrayData *ArrayData::Create(const Variant& value) {
@@ -888,7 +920,7 @@ const Variant& ArrayData::getNotFound(const Variant& k) {
 }
 
 const char* ArrayData::kindToString(ArrayKind kind) {
-  std::array<const char*,8> names = {{
+  std::array<const char*,9> names = {{
     "PackedKind",
     "StructKind",
     "MixedKind",
@@ -897,9 +929,134 @@ const char* ArrayData::kindToString(ArrayKind kind) {
     "GlobalsKind",
     "ProxyKind",
     "DictKind",
+    "VecKind"
   }};
   static_assert(names.size() == kNumKinds, "add new kinds here");
   return names[kind];
+}
+
+namespace {
+
+////////////////////////////////////////////////////////////////////////////////
+
+const char* describeKeyType(const TypedValue* tv) {
+  switch (tv->m_type) {
+  case KindOfUninit:
+  case KindOfNull:             return "null";
+  case KindOfBoolean:          return "bool";
+  case KindOfInt64:            return "int";
+  case KindOfDouble:           return "double";
+  case KindOfPersistentString:
+  case KindOfString:           return "string";
+  case KindOfPersistentArray:
+  case KindOfArray: {
+    if (tv->m_data.parr->isVecArray()) return "vec";
+    if (tv->m_data.parr->isDict()) return "dict";
+    return "array";
+  }
+  case KindOfResource:
+    return tv->m_data.pres->data()->o_getClassName().c_str();
+
+  case KindOfObject:
+    return tv->m_data.pobj->getClassName().c_str();
+
+  case KindOfRef:
+    return describeKeyType(tv->m_data.pref->var()->asTypedValue());
+
+  case KindOfClass:
+    break;
+  }
+  not_reached();
+}
+
+std::string describeKeyValue(TypedValue tv) {
+  switch (tv.m_type) {
+  case KindOfPersistentString:
+  case KindOfString:
+    return folly::sformat("\"{}\"", tv.m_data.pstr->data());
+  case KindOfInt64:
+    return folly::to<std::string>(tv.m_data.num);
+  case KindOfRef:
+    return describeKeyValue(*tv.m_data.pref->var()->asTypedValue());
+  case KindOfUninit:
+  case KindOfNull:
+  case KindOfBoolean:
+  case KindOfDouble:
+  case KindOfPersistentArray:
+  case KindOfArray:
+  case KindOfResource:
+  case KindOfObject:
+  case KindOfClass:
+    return "<invalid key type>";
+  }
+  not_reached();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+}
+
+void throwInvalidArrayKeyException(const TypedValue* key, const ArrayData* ad) {
+  const char* msg = [&]{
+    if (ad->isVecArray()) {
+      return "Invalid vec key: expected a key of type int, {} given";
+    }
+    if (ad->isDict()) {
+      return "Invalid dict key: expected a key of type int or string, {} given";
+    }
+    return "Invalid array key: expected a key of type int or string, {} given";
+  }();
+  SystemLib::throwInvalidArgumentExceptionObject(
+    folly::sformat(msg, describeKeyType(key))
+  );
+}
+
+void throwInvalidArrayKeyException(const StringData* key, const ArrayData* ad) {
+  auto const tv = key->isRefCounted() ?
+    make_tv<KindOfString>(const_cast<StringData*>(key)) :
+    make_tv<KindOfPersistentString>(key);
+  throwInvalidArrayKeyException(&tv, ad);
+}
+
+void throwOOBArrayKeyException(TypedValue key) {
+  SystemLib::throwOutOfBoundsExceptionObject(
+    folly::sformat(
+      "Out of bounds array access: invalid index {}",
+      describeKeyValue(key)
+    )
+  );
+}
+
+void throwOOBArrayKeyException(int64_t key) {
+  SystemLib::throwOutOfBoundsExceptionObject(
+    folly::sformat(
+      "Out of bounds array access: invalid index {}",
+      folly::to<std::string>(key)
+    )
+  );
+}
+
+void throwOOBArrayKeyException(const StringData* key) {
+  SystemLib::throwOutOfBoundsExceptionObject(
+    folly::sformat(
+      "Out of bounds array access: invalid index \"{}\"",
+      key->data()
+    )
+  );
+}
+
+void throwRefInvalidArrayValueException(const ArrayData* ad) {
+  SystemLib::throwInvalidArgumentExceptionObject(
+    folly::sformat(
+      ad->isVecArray() ?
+      "Vecs cannot contain references" :
+      "Dicts cannot contain references"
+    )
+  );
+}
+
+void throwRefInvalidArrayValueException(const Array& arr) {
+  throwRefInvalidArrayValueException(arr.get());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -44,10 +44,7 @@ inline StringData* getStringKey(const Cell* cell) {
 }
 
 inline bool ArrayData::convertKey(const StringData* key, int64_t& i) const {
-  if (key->isStrictlyInteger(i)) {
-    return useWeakKeys();
-  }
-  return false;
+  return key->isStrictlyInteger(i) && useWeakKeys();
 }
 
 inline bool ArrayData::exists(const String& k) const {
@@ -87,6 +84,20 @@ inline ArrayData* ArrayData::lval(const Variant& k, Variant *&ret, bool copy) {
   auto const cell = k.asCell();
   return isIntKey(cell) ? lval(getIntKey(cell), ret, copy)
                         : lval(getStringKey(cell), ret, copy);
+}
+
+inline ArrayData*
+ArrayData::lvalRef(const String& k, Variant *&ret, bool copy) {
+  assert(IsValidKey(k));
+  return lvalRef(k.get(), ret, copy);
+}
+
+inline ArrayData*
+ArrayData::lvalRef(const Variant& k, Variant *&ret, bool copy) {
+  assert(IsValidKey(k));
+  auto const cell = k.asCell();
+  return isIntKey(cell) ? lvalRef(getIntKey(cell), ret, copy)
+                        : lvalRef(getStringKey(cell), ret, copy);
 }
 
 inline ArrayData* ArrayData::set(const String& k, const Variant& v,
@@ -172,8 +183,16 @@ inline const TypedValue* ArrayData::nvGet(int64_t ikey) const {
   return g_array_funcs.nvGetInt[kind()](this, ikey);
 }
 
+inline const TypedValue* ArrayData::nvTryGet(int64_t ikey) const {
+  return g_array_funcs.nvTryGetInt[kind()](this, ikey);
+}
+
 inline const TypedValue* ArrayData::nvGet(const StringData* skey) const {
   return g_array_funcs.nvGetStr[kind()](this, skey);
+}
+
+inline const TypedValue* ArrayData::nvTryGet(const StringData* skey) const {
+  return g_array_funcs.nvTryGetStr[kind()](this, skey);
 }
 
 inline void ArrayData::nvGetKey(TypedValue* out, ssize_t pos) const {
@@ -237,8 +256,16 @@ inline ArrayData* ArrayData::lval(int64_t k, Variant*& ret, bool copy) {
   return g_array_funcs.lvalInt[kind()](this, k, ret, copy);
 }
 
+inline ArrayData* ArrayData::lvalRef(int64_t k, Variant*& ret, bool copy) {
+  return g_array_funcs.lvalIntRef[kind()](this, k, ret, copy);
+}
+
 inline ArrayData* ArrayData::lval(StringData* k, Variant*& ret, bool copy) {
   return g_array_funcs.lvalStr[kind()](this, k, ret, copy);
+}
+
+inline ArrayData* ArrayData::lvalRef(StringData* k, Variant*& ret, bool copy) {
+  return g_array_funcs.lvalStrRef[kind()](this, k, ret, copy);
 }
 
 inline ArrayData* ArrayData::lvalNew(Variant*& ret, bool copy) {
@@ -360,6 +387,10 @@ inline ArrayData* ArrayData::toDict() {
   return g_array_funcs.toDict[kind()](this);
 }
 
+inline ArrayData* ArrayData::toVec() const {
+  return g_array_funcs.toVec[kind()](this);
+}
+
 inline void ArrayData::renumber() {
   return g_array_funcs.renumber[kind()](this);
 }
@@ -378,94 +409,6 @@ inline ArrayData* ArrayData::plusEq(const ArrayData* elms) {
 
 inline ArrayData* ArrayData::merge(const ArrayData* elms) {
   return g_array_funcs.merge[kind()](this, elms);
-}
-
-namespace {
-const char* describeKeyType(const TypedValue* tv) {
-  switch (tv->m_type) {
-  case KindOfUninit:
-  case KindOfNull:             return "null";
-  case KindOfBoolean:          return "bool";
-  case KindOfInt64:            return "int";
-  case KindOfDouble:           return "double";
-  case KindOfPersistentString:
-  case KindOfString:           return "string";
-  case KindOfPersistentArray:
-  case KindOfArray:            return "array";
-
-  case KindOfResource:
-    return tv->m_data.pres->data()->o_getClassName().c_str();
-
-  case KindOfObject:
-    return tv->m_data.pobj->getClassName().c_str();
-
-  case KindOfRef:
-    return describeKeyType(tv->m_data.pref->var()->asTypedValue());
-
-  case KindOfClass:
-    break;
-  }
-  not_reached();
-}
-
-std::string describeKeyValue(TypedValue tv) {
-  switch (tv.m_type) {
-  case KindOfPersistentString:
-  case KindOfString:
-    return folly::sformat("\"{}\"", tv.m_data.pstr->data());
-  case KindOfInt64:
-    return folly::to<std::string>(tv.m_data.num);
-  case KindOfRef:
-    return describeKeyValue(*tv.m_data.pref->var()->asTypedValue());
-  case KindOfUninit:
-  case KindOfNull:
-  case KindOfBoolean:
-  case KindOfDouble:
-  case KindOfPersistentArray:
-  case KindOfArray:
-  case KindOfResource:
-  case KindOfObject:
-  case KindOfClass:
-    return "<invalid key type>";
-  }
-  not_reached();
-}
-}
-
-inline void throwInvalidArrayKeyException(const TypedValue* key) {
-  SystemLib::throwInvalidArgumentExceptionObject(
-    folly::sformat(
-      "Invalid array key: expected a key of type int or string, {} given",
-      describeKeyType(key)
-    )
-  );
-}
-
-inline void throwOOBArrayKeyException(TypedValue key) {
-  SystemLib::throwOutOfBoundsExceptionObject(
-    folly::sformat(
-      "Out of bounds array access: invalid index {}",
-      describeKeyValue(key)
-    )
-  );
-}
-
-inline void throwOOBArrayKeyException(int64_t key) {
-  SystemLib::throwOutOfBoundsExceptionObject(
-    folly::sformat(
-      "Out of bounds array access: invalid index {}",
-      folly::to<std::string>(key)
-    )
-  );
-}
-
-inline void throwOOBArrayKeyException(const StringData* key) {
-  SystemLib::throwOutOfBoundsExceptionObject(
-    folly::sformat(
-      "Out of bounds array access: invalid index \"{}\"",
-      key->data()
-    )
-  );
 }
 
 ///////////////////////////////////////////////////////////////////////////////

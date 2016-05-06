@@ -16,13 +16,14 @@
 
 #include "hphp/runtime/base/array-common.h"
 
-#include "hphp/runtime/base/array-data-defs.h"
 #include "hphp/runtime/base/array-data.h"
-#include "hphp/runtime/base/type-variant.h"
-#include "hphp/runtime/base/packed-array.h"
+#include "hphp/runtime/base/array-data-defs.h"
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/mixed-array-defs.h"
+#include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/struct-array.h"
 #include "hphp/runtime/base/struct-array-defs.h"
+#include "hphp/runtime/base/type-variant.h"
 
 namespace HPHP {
 
@@ -35,7 +36,7 @@ ssize_t ArrayCommon::ReturnInvalidIndex(const ArrayData*) {
 bool ArrayCommon::ValidMArrayIter(const ArrayData* ad, const MArrayIter& fp) {
   assert(fp.getContainer() == ad);
   if (fp.getResetFlag()) return false;
-  if (ad->isPacked()) {
+  if (ad->isPackedLayout()) {
     assert(PackedArray::checkInvariants(ad));
     return fp.m_pos != ad->getSize();
   } else if (ad->isStruct()) {
@@ -68,6 +69,20 @@ ArrayData* ArrayCommon::Dequeue(ArrayData* a, Variant &value) {
   }
   value = uninit_null();
   return a;
+}
+
+ArrayData* ArrayCommon::ToVec(const ArrayData* a) {
+  auto const size = a->size();
+  if (!size) return staticEmptyVecArray();
+  VecArrayInit init{size};
+  for (ArrayIter it{a}; it; ++it) {
+    auto const& value = it.secondRef();
+    if (UNLIKELY(value.isReferenced())) {
+      throwRefInvalidArrayValueException(init.toArray());
+    }
+    init.append(value);
+  }
+  return init.create();
 }
 
 //////////////////////////////////////////////////////////////////////
