@@ -63,13 +63,6 @@ using namespace ppc64_asm;
 
 namespace {
 
-///////////////////////////////////////////////////////////////////////////////
-
-/* Parameters for push/pop and keep stack aligned */
-constexpr int push_pop_position           = 8;
-
-///////////////////////////////////////////////////////////////////////////////
-
 struct Vgen {
   explicit Vgen(Venv& env)
     : env(env)
@@ -576,14 +569,14 @@ void Vgen::emit(const syncpoint& i) {
 }
 
 /*
- * Push/pop mechanism is as simple as X64: it stores 8 bytes below the SP.
+ * Push/pop mechanism is as simple as X64: it stores 8 bytes below the RSP.
  */
 void Vgen::emit(const pop& i) {
-  a.ld(i.d, rsp()[0]);                         // popped element
-  a.addi(rsp(), rsp(), push_pop_position);     // recover stack
+  a.ld(i.d, rsp()[0]);              // popped element
+  a.addi(rsp(), rsp(), 8);          // recover stack
 }
 void Vgen::emit(const push& i) {
-  a.stdu(i.s, rsp()[-push_pop_position]);      // pushed element
+  a.stdu(i.s, rsp()[-8]);           // pushed element
 }
 
 void Vgen::emit(const load& i) {
