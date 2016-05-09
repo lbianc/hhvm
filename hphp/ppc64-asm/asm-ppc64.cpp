@@ -799,7 +799,7 @@ void Assembler::patchBc(CodeAddress jmp, CodeAddress dest) {
       *instr = bform.instruction;
       break;
     default:
-      assert(false && "tried to patch not-expected-branch instruction");
+      always_assert(false && "tried to patch not-expected-branch instruction");
       break;
   }
 }
@@ -898,14 +898,12 @@ int64_t Assembler::getLi64(PPC64Instr* pinstr) {
     return nNops;
   }();
 
-  // TODO(gut) use Decoder, but for now, do it hardcoded
   auto hasClearSignBit = [&](PPC64Instr* i) -> bool {
     return Decoder::GetDecoder().decode(*i)->isClearSignBit();
   };
 
-  // TODO(gut) use Decoder, but for now, do it hardcoded
-  auto getImm = [&](PPC64Instr* instr) -> uint16_t {
-    return *instr & UINT16_MAX;
+  auto getImm = [&](PPC64Instr* i) -> uint16_t {
+    return Decoder::GetDecoder().decode(*i)->offset();
   };
 
   uint8_t immParts = 0;
@@ -993,14 +991,14 @@ void Assembler::li32 (const Reg64& rt, int32_t imm32) {
 int32_t Assembler::getLi32(PPC64Instr* pinstr) {
   // @pinstr should be pointing to the beginning of the li32 block
 
-  // TODO(gut) use Decoder, but for now, do it hardcoded
-  auto getImm = [&](PPC64Instr* instr) -> uint32_t {
-    return *instr & UINT16_MAX;
+  auto getImm = [&](PPC64Instr* i) -> uint32_t {
+    return Decoder::GetDecoder().decode(*i)->offset();
   };
 
   // if first instruction is a li, it's using 16bits only
-  bool is_16b_only = [&](PPC64Instr instr) -> bool {
-    return (instr >> 26) == 14;        // check opcode
+  bool is_16b_only = [&](PPC64Instr i) -> bool {
+    auto opn = Decoder::GetDecoder().decode(i)->opcode_name();
+    return OpcodeNames::op_addi == opn;
   }(*pinstr);
 
   uint32_t imm32 = 0;

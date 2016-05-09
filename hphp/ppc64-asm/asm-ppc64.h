@@ -324,7 +324,6 @@ struct BranchParams {
       return ret;
     }
 
-
     uint8_t bo() { return (uint8_t)m_bo; }
     uint8_t bi() { return (uint8_t)m_bi; }
 

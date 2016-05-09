@@ -159,15 +159,14 @@ bool DecoderInfo::isSpOffsetInstr() const {
 }
 
 /**
- * Look for the offset from instructions addi or add, which was created by
+ * Look for the offset from instructions like addi or add, which was created by
  * the lower of the Lea instruction.
  */
 int32_t DecoderInfo::offset() const {
-  assert(((m_form == Form::kD) && (m_opn == OpcodeNames::op_addi))
-    && "Instruction not expected.");
+  always_assert(m_form == Form::kD && "Instruction not expected.");
   D_form_t instr_d;
   instr_d.instruction = m_image;
-  // As the instruction is know (addi) the immediate is a signed number of
+  // As the instruction is known, the immediate is a signed number of
   // 16bits, so to consider the sign, it must be casted to int16_t.
   return static_cast<int16_t>(instr_d.D);
 }
