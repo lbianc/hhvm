@@ -115,8 +115,7 @@ struct IRBuilder {
   /*
    * Helper for unboxing predicted types.
    *
-   * @returns: ldRefReturn(fs().local(id).predictedType.unbox())
-   *           ldRefReturn(fs().stack(id).predictedType.unbox())
+   * @returns: ldRefReturn(fs().predictedTypeOf(location).unbox())
    */
   Type predictedLocalInnerType(uint32_t id) const;
   Type predictedStackInnerType(IRSPRelOffset) const;
@@ -157,6 +156,7 @@ struct IRBuilder {
   /*
    * Constrain the type sources of the given bytecode location.
    */
+  bool constrainLocation(Location l, TypeConstraint tc);
   bool constrainLocal(uint32_t id, TypeConstraint tc, const std::string& why);
   bool constrainStack(IRSPRelOffset offset, TypeConstraint tc);
 
@@ -206,8 +206,17 @@ struct IRBuilder {
 
   /*
    * Append `block' to the unit.
+   *
+   * This is used by irgen in IR-level control-flow helpers.  In certain cases,
+   * these helpers may append unreachable blocks, which will not have a valid
+   * in-state in FrameStateMgr.
+   *
+   * Rather than implicitly propagating the out state for m_curBlock, which is
+   * the default behavior, `pred' can be set to indicate the logical
+   * predecessor, in case `block' is unreachable.  If `block' is reachable,
+   * `pred' is ignored.
    */
-  void appendBlock(Block* block);
+  void appendBlock(Block* block, Block* pred = nullptr);
 
   /*
    * Get, set, or null out the block to branch to in case of a guard failure.

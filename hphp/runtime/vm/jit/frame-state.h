@@ -114,6 +114,21 @@ struct LocationState {
 using LocalState = LocationState<LTag::Local>;
 using StackState = LocationState<LTag::Stack>;
 
+struct MBaseState {
+  SSATmp* value{nullptr};
+};
+
+/*
+ * MBRState tracks the value and type of the member base register pointer.
+ *
+ * These are used for some gen-time load elimination to preserve important
+ * information about the base.
+ */
+struct MBRState {
+  SSATmp* ptr{nullptr};
+  Type ptrType{TPtrToGen};
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -138,25 +153,6 @@ struct FrameState {
    * Depth of the in-memory eval stack.
    */
   FPInvOffset bcSPOff{0};
-
-  /*
-   * Here we keep track of the raw pointer value of the member base register,
-   * the type of the pointer, as well as the value it points to, which we often
-   * know after simple base operations like BaseH or BaseL. These are used for
-   * some gen-time load elimination to preserve important information about the
-   * base.
-   */
-  struct {
-    SSATmp* ptr{nullptr};
-    Type ptrType{TPtrToGen};
-    SSATmp* value{nullptr};
-
-    void reset() {
-      ptr = nullptr;
-      ptrType = TPtrToGen;
-      value = nullptr;
-    }
-  } mbase;
 
   /*
    * Tracks whether we will need to ratchet tvRef and tvRef2 after emitting an
@@ -204,6 +200,12 @@ struct FrameState {
    * (if the state is initialized).
    */
   jit::vector<LocalState> locals;
+
+  /*
+   * Values and types of the member base register and its pointee.
+   */
+  MBRState mbr;
+  MBaseState mbase;
 
   /*
    * Predicted types for values that lived in a local or stack slot at one
@@ -261,16 +263,26 @@ struct FrameStateMgr final {
    *
    * `hasUnprocessedPred' is set to indicate that the given block has a
    * predecessor in the region that might not yet be linked into the IR CFG.
+   *
+   * `pred' is the logical predecessor of `b' to be used in the event that `b'
+   * is unreachable.
    */
-  void startBlock(Block* b, bool hasUnprocessedPred);
+  void startBlock(Block* b, bool hasUnprocessedPred,
+                  Block* pred = nullptr);
 
   /*
-   * Finish tracking state for a block and save the current state to any
-   * successors.
+   * Finish tracking state for `b' and save the current state to b->next()
+   * (b->taken() is handled in update()).  Also save the out-state if
+   * setSaveOutState() was called on `b'.
    *
-   * Returns true iff the out-state for the block has changed.
+   * Returns true iff the in-state for the next block has changed.
    */
-  bool finishBlock(Block*);
+  bool finishBlock(Block* b);
+
+  /*
+   * Mark that `b' should save its out-state when finishBlock() is called.
+   */
+  void setSaveOutState(Block* b);
 
   /*
    * Save current state of a block so we can resume processing it after working
@@ -311,8 +323,6 @@ struct FrameStateMgr final {
   SSATmp*     sp()                const { return cur().spValue; }
   FPInvOffset irSPOff()           const { return cur().irSPOff; }
   FPInvOffset bcSPOff()           const { return cur().bcSPOff; }
-  SSATmp*     memberBasePtr()     const { return cur().mbase.ptr; }
-  Type        memberBasePtrType() const { return cur().mbase.ptrType; }
   SSATmp*     memberBaseValue()   const { return cur().mbase.value; }
   bool        needRatchet()       const { return cur().needRatchet; }
   bool        thisAvailable()     const { return cur().thisAvailable; }
@@ -356,6 +366,11 @@ struct FrameStateMgr final {
   const TypeSourceSet& typeSrcsOf(Location l) const;
 
   /*
+   * Return tracked state for the member base register.
+   */
+  const MBRState& mbr()     const { return cur().mbr; }
+
+  /*
    * Update the predicted type for `l'.
    */
   void refinePredictedType(Location l, Type type);
@@ -393,7 +408,7 @@ private:
   /*
    * Per-block state helpers.
    */
-  bool save(Block*);
+  bool save(Block* b, Block* pred = nullptr);
   void clearForUnprocessedPred();
   void collectPostConds(Block* exitBlock);
 
@@ -435,7 +450,12 @@ private:
 
 private:
   struct BlockState {
+    // Mandatory in-state computed from predecessors.
     jit::vector<FrameState> in;
+    // Optionally-saved out-state.  Non-none but empty indicates that out-state
+    // should be saved.
+    folly::Optional<jit::vector<FrameState>> out;
+    // Paused state, used by IRBuilder::{push,pop}Block().
     folly::Optional<jit::vector<FrameState>> paused;
   };
 

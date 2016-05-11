@@ -133,16 +133,13 @@ let get_class_parents_and_traits env class_nast =
 
 let rec ifun_decl tcopt (f: Ast.fun_) =
   let f = Naming.fun_ tcopt f in
-  let cid = snd f.f_name in
-  Naming_heap.FunHeap.add cid f;
   fun_decl f;
   ()
 
 and make_param_ty env param =
-  let param_pos = (fst param.param_id) in
   let ty = match param.param_hint with
     | None ->
-      let r = Reason.Rwitness param_pos in
+      let r = Reason.Rwitness param.param_pos in
       (r, Tany)
       (* if the code is strict, use the type-hint *)
     | Some x ->
@@ -152,7 +149,7 @@ and make_param_ty env param =
     | _, t when param.param_is_variadic ->
       (* When checking a call f($a, $b) to a function f(C ...$args),
        * both $a and $b must be of type C *)
-      Reason.Rvar_param param_pos, t
+      Reason.Rvar_param param.param_pos, t
     | x -> x
   in
   Some param.param_name, ty
@@ -227,7 +224,7 @@ and make_param env mandatory arity param =
       assert(param.param_expr = None);
       false
     end else begin
-      check_default (fst param.param_id) mandatory param.param_expr;
+      check_default param.param_pos mandatory param.param_expr;
       mandatory && param.param_expr = None
     end
   in
@@ -266,7 +263,7 @@ let rec class_decl_if_missing class_env c =
   if check_if_cyclic class_env c_name
   then ()
   else begin
-    if Naming_heap.ClassHeap.mem cid then () else
+    if Typing_heap.Classes.mem cid then () else
       class_naming_and_decl class_env cid c
   end
 
@@ -275,24 +272,6 @@ and class_naming_and_decl (class_env:class_env) cid c =
   let c = Naming.class_ class_env.tcopt c in
   class_parents_decl class_env c;
   class_decl class_env.tcopt c;
-  (* It is important to add the "named" ast (nast.ml) only
-   * AFTER we are done declaring the type type of the class.
-   * Otherwise there is a subtle race condition.
-   *
-   * Worker 1: looks up class A. Sees that class A needs
-   * to be recomputed, starts to recompute the type of A
-   *
-   * Worker 2: loops up class A, sees that the named Ast for
-   * A is there, deduces that the type has already been computed
-   * and could end up using an old version of the class type if
-   * Worker 1 didn't finish.
-   *
-   * This race doesn't occur if we set the named Ast for class A
-   * AFTER we are done declaring the type of A.
-   * The worst case scenario is both workers recompute the same type
-   * which is OK.
-   *)
-  Naming_heap.ClassHeap.add cid c;
   ()
 
 and class_parents_decl class_env c =
@@ -309,7 +288,7 @@ and class_hint_decl class_env hint =
   match hint with
   | _, Happly ((_, cid), _) ->
     begin match Naming_heap.TypeIdHeap.get cid with
-      | Some (p, `Class) when not (Naming_heap.ClassHeap.mem cid) ->
+      | Some (p, `Class) when not (Typing_heap.Classes.mem cid) ->
         (* We are supposed to redeclare the class *)
         let fn = Pos.filename p in
         let class_opt = Parser_heap.find_class_in_file fn cid in
@@ -737,7 +716,7 @@ and method_check_trait_overrides c id method_ce =
 
 let rec type_typedef_decl_if_missing tcopt typedef =
   let _, tid = typedef.Ast.t_id in
-  if Naming_heap.TypedefHeap.mem tid
+  if Typing_heap.Typedefs.mem tid
   then ()
   else
     type_typedef_naming_and_decl tcopt typedef
@@ -764,9 +743,7 @@ and typedef_decl tdef =
 
 and type_typedef_naming_and_decl tcopt tdef =
   let tdef = Naming.typedef tcopt tdef in
-  let tid = snd tdef.t_name in
   typedef_decl tdef;
-  Naming_heap.TypedefHeap.add tid tdef;
   ()
 
 (*****************************************************************************)
@@ -777,7 +754,6 @@ let iconst_decl tcopt cst =
   let open Option.Monad_infix in
   let cst = Naming.global_const tcopt cst in
   let cst_pos, cst_name = cst.cst_name in
-  Naming_heap.ConstHeap.add cst_name cst;
   let dep = Dep.GConst (snd cst.cst_name) in
   let env = {Decl_env.mode = cst.cst_mode; droot = Some dep} in
   let hint_ty =

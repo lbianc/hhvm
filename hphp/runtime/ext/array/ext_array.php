@@ -1387,7 +1387,12 @@ namespace __SystemLib {
   function array_map(mixed $callback,
                      mixed $arr1,
                      ...$argv): mixed;
+}
 
+namespace HH {
   <<__Native>>
   function dict(array $arr): dict;
+
+  <<__Native>>
+  function vec(array $arr): vec;
 }

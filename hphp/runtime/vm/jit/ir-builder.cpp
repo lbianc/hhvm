@@ -80,6 +80,7 @@ SSATmp* fwdGuardSource(IRInstruction* inst) {
 #define DBoxPtr        return false;
 #define DAllocObj      return false; // fixed type from ExtraData
 #define DArrPacked     return false; // fixed type
+#define DArrVec        return false; // fixed type
 #define DArrElem       assertx(inst->is(LdStructArrayElem, ArrayGet));    \
                          return typeMightRelax(inst->src(0));
 #define DCol           return false; // fixed in bytecode
@@ -120,6 +121,7 @@ IRBuilder::IRBuilder(IRUnit& unit, BCMarker initMarker)
   if (RuntimeOption::EvalHHIRGenOpts) {
     m_enableSimplification = RuntimeOption::EvalHHIRSimplification;
   }
+  m_state.startBlock(m_curBlock, false);
 }
 
 bool IRBuilder::shouldConstrainGuards() const {
@@ -459,9 +461,9 @@ SSATmp* IRBuilder::preOptimizeCoerceStk(IRInstruction* inst) {
 }
 
 SSATmp* IRBuilder::preOptimizeLdMBase(IRInstruction* inst) {
-  if (auto ptr = m_state.memberBasePtr()) return ptr;
+  if (auto ptr = m_state.mbr().ptr) return ptr;
 
-  inst->setTypeParam(inst->typeParam() & m_state.memberBasePtrType());
+  inst->setTypeParam(inst->typeParam() & m_state.mbr().ptrType);
   return nullptr;
 }
 
@@ -705,14 +707,17 @@ bool IRBuilder::constrainLocation(Location l, TypeConstraint tc,
   return changed;
 }
 
+bool IRBuilder::constrainLocation(Location l, TypeConstraint tc) {
+  return constrainLocation(l, tc, "");
+}
+
 bool IRBuilder::constrainLocal(uint32_t locID, TypeConstraint tc,
                                const std::string& why) {
-  return constrainLocation(Location::Local { locID }, tc, why);
+  return constrainLocation(loc(locID), tc, why);
 }
 
 bool IRBuilder::constrainStack(IRSPRelOffset offset, TypeConstraint tc) {
-  auto const fpRel = offset.to<FPInvOffset>(m_state.irSPOff());
-  return constrainLocation(Location::Stack { fpRel }, tc, "");
+  return constrainLocation(stk(offset), tc);
 }
 
 bool IRBuilder::constrainTypeSrc(TypeSource typeSrc, TypeConstraint tc) {
@@ -904,12 +909,12 @@ void IRBuilder::setBlock(SrcKey sk, Block* block) {
   m_skToBlockMap[sk] = block;
 }
 
-void IRBuilder::appendBlock(Block* block) {
+void IRBuilder::appendBlock(Block* block, Block* pred) {
   m_state.finishBlock(m_curBlock);
 
   FTRACE(2, "appending B{}\n", block->id());
   // Load up the state for the new block.
-  m_state.startBlock(block, false);
+  m_state.startBlock(block, false, pred);
   m_curBlock = block;
 }
 

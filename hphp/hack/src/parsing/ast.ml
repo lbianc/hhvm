@@ -90,7 +90,7 @@ and class_ = {
   c_body: class_elt list;
   c_namespace: Namespace_env.env;
   c_enum: enum_ option;
-  c_extents: Pos.t;
+  c_span: Pos.t;
 }
 
 and enum_ = {
@@ -123,7 +123,7 @@ and class_elt =
   | XhpAttrUse of hint
   | ClassTraitRequire of trait_req_kind * hint
   | ClassVars of kind list * hint option * class_var list
-  | XhpAttr of kind list * hint option * class_var list * bool *
+  | XhpAttr of hint option * class_var * bool *
                ((Pos.t * expr list) option)
   | Method of method_
   | XhpCategory of pstring list
@@ -156,7 +156,49 @@ and og_null_flavor =
   | OG_nullsafe
 
 (* id is stored without the $ *)
-and class_var = id * expr option
+(* Pos is the span of the the variable definition. What does it mean exactly?
+ * At first, one might think that in a definition like:
+ *
+ *   public ?string $foo = "aaaa";
+ *
+ * span of "foo" is entire line from the start of "public" to the semicolon
+ * (excluded). This is not true though - what here is a single '$foo = "aaaa"'
+ * is in fact a list, and "public string" applies to all of it's elements.
+ * So it could be as well:
+ *
+ *  public ?string
+ *    $foo = "aaaa",
+ *    $bar = "cccc",
+ *    $i_have_no_initializer;
+ *
+ * which makes it hard to include visibility and type into span of $bar
+ * (since span is a single continuos range).
+ * To make things more complicated, there are also XHP properties, with syntax:
+ *
+ *  attributes
+ *    string xhp_prop = "aaa" @required,
+ *    int other_xhp_prop;
+ *
+ * where each type and "@required" applies only to one property and could be
+ * part of span.
+ *
+ * Moreover, there is also the case of implicit properties defined in
+ * constructor:
+ *
+ *  public function __construct(
+ *    public string $property,
+ *  )
+ *
+ * The visibility, type and possible initializer are "per property", but
+ * capturing their whole span is annoying from implementation point of view
+ * - constructor is just a regular method in AST with special name, so we would
+ * have to store additional data for every method argument just to use it in
+ * this single case.
+ *
+ * The "lowest common denominator" of all those cases is to treat the property
+ * extent as span of name + initializer, if present.
+ *)
+and class_var = Pos.t * id * expr option
 
 and method_ = {
   m_kind: kind list ;
@@ -168,7 +210,7 @@ and method_ = {
   m_ret: hint option;
   m_ret_by_ref: bool;
   m_fun_kind: fun_kind;
-  m_extents: Pos.t
+  m_span: Pos.t
 }
 
 and typeconst = {
@@ -176,6 +218,7 @@ and typeconst = {
   tconst_name: id;
   tconst_constraint: hint option;
   tconst_type: hint option;
+  tconst_span: Pos.t;
 }
 
 and is_reference = bool
@@ -206,6 +249,7 @@ and fun_ = {
   f_user_attributes : user_attribute list;
   f_fun_kind        : fun_kind;
   f_namespace       : Namespace_env.env;
+  f_span         : Pos.t;
 }
 
 and fun_decl_kind =
