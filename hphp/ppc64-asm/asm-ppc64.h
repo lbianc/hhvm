@@ -2224,6 +2224,7 @@ protected:
      // GP Register cannot be greater than 31
      assert(static_cast<uint32_t>(ra) < 32);
      assert(static_cast<uint32_t>(rt) < 32);
+     assert(static_cast<uint16_t>(imm << 14) == 0);
 
       DS_form_t ds_formater {
                              xop,
@@ -2243,6 +2244,7 @@ protected:
 
      // GP Register cannot be greater than 31
      assert(static_cast<uint32_t>(ra) < 32);
+     assert(static_cast<uint16_t>(imm << 12) == 0);
 
       DQ_form_t dq_formater {
                              0x0, //Reserved
