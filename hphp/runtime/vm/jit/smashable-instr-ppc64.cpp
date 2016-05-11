@@ -27,6 +27,7 @@
 namespace HPHP { namespace jit { namespace ppc64 {
 
 using ppc64_asm::PPC64Instr;
+using ppc64_asm::Assembler;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -37,7 +38,7 @@ using ppc64_asm::PPC64Instr;
           Alignment::Smash##Inst,       \
           AlignContext::Live);          \
     auto const start = cb.frontier();   \
-    ppc64_asm::Assembler a { cb };      \
+    Assembler a { cb };                 \
     a.inst(__VA_ARGS__);                \
     return start;                       \
   }())
@@ -52,7 +53,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
   align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
 
   auto const start = cb.frontier();
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
 
   // don't use cmpqim because of smashableCmpqImm implementation. A "load 32bits
   // immediate" is mandatory
@@ -86,7 +87,7 @@ emitSmashableJccAndJmp(CodeBlock& cb, CGMeta& fixups, TCA target,
 
   align(cb, &fixups, Alignment::SmashJccAndJmp, AlignContext::Live);
 
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
   auto const jcc = cb.frontier();
   a.branchAuto(target, cc);
   auto const jmp = cb.frontier();
@@ -104,11 +105,11 @@ void smashMovq(TCA inst, uint64_t imm) {
 
   CodeBlock cb;
   // Initialize code block cb pointing to li64
-  cb.init(inst, ppc64_asm::Assembler::kLi64InstrLen, "smashing Movq");
+  cb.init(inst, Assembler::kLi64InstrLen, "smashing Movq");
   CodeCursor cursor { cb, inst };
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
 
-  Reg64 reg = ppc64_asm::Assembler::getLi64Reg(inst);
+  Reg64 reg = Assembler::getLi64Reg(inst);
 
   a.li64(reg, imm);
 }
@@ -118,10 +119,10 @@ void smashCmpq(TCA inst, uint32_t imm) {
 
   auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
 
   // the first instruction is a vasm ldimml, which is a li32
-  Reg64 reg = ppc64_asm::Assembler::getLi32Reg(inst);
+  Reg64 reg = Assembler::getLi32Reg(inst);
 
   a.li32(reg, imm);
 }
@@ -129,9 +130,9 @@ void smashCmpq(TCA inst, uint32_t imm) {
 void smashCall(TCA inst, TCA target) {
   auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
 
-  if (!ppc64_asm::Assembler::isCall(inst)) {
+  if (!Assembler::isCall(inst)) {
     always_assert(false && "smashCall has unexpected block");
   }
 
@@ -145,7 +146,7 @@ void smashJmp(TCA inst, TCA target) {
 
   auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
-  ppc64_asm::Assembler a { cb };
+  Assembler a { cb };
 
   if (target > inst && target - inst <= smashableJmpLen()) {
     a.emitNop(target - inst);
@@ -158,11 +159,11 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   always_assert(is_aligned(inst, Alignment::SmashJcc));
 
   if (cc == CC_None) {
-    ppc64_asm::Assembler::patchBctr(inst, target);
+    Assembler::patchBctr(inst, target);
   } else {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };
-    ppc64_asm::Assembler a { cb };
+    Assembler a { cb };
     a.branchAuto(target, cc);
   }
 }
@@ -170,18 +171,18 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return static_cast<uint64_t>(ppc64_asm::Assembler::getLi64(inst));
+  return static_cast<uint64_t>(Assembler::getLi64(inst));
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  return static_cast<uint32_t>(ppc64_asm::Assembler::getLi32(inst));
+  return static_cast<uint32_t>(Assembler::getLi32(inst));
 }
 
 TCA smashableCallTarget(TCA inst) {
-  if (!ppc64_asm::Assembler::isCall(inst)) return nullptr;
+  if (!Assembler::isCall(inst)) return nullptr;
 
   return reinterpret_cast<TCA>(
-      ppc64_asm::Assembler::getLi64(inst));
+      Assembler::getLi64(inst));
 }
 
 TCA smashableJmpTarget(TCA inst) {
@@ -194,7 +195,7 @@ TCA smashableJccTarget(TCA inst) {
     return nullptr;
   }
 
-  return reinterpret_cast<TCA>(ppc64_asm::Assembler::getLi64(inst));
+  return reinterpret_cast<TCA>(Assembler::getLi64(inst));
 }
 
 ConditionCode smashableJccCond(TCA inst) {

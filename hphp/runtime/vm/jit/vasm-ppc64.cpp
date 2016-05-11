@@ -60,6 +60,7 @@ namespace HPHP { namespace jit {
 
 using namespace ppc64;
 using namespace ppc64_asm;
+using Assembler = ppc64_asm::Assembler;
 
 namespace {
 
@@ -75,8 +76,23 @@ struct Vgen {
     , catches(env.catches)
   {}
 
-  static void patch(Venv& env);
-  static void pad(CodeBlock& cb);
+  static void patch(Venv& env) {
+    for (auto& p : env.jmps) {
+      assertx(env.addrs[p.target]);
+      Assembler::patchBctr(p.instr, env.addrs[p.target]);
+    }
+    for (auto& p : env.jccs) {
+      assertx(env.addrs[p.target]);
+      Assembler::patchBctr(p.instr, env.addrs[p.target]);
+    }
+    assertx(env.bccs.empty());
+  }
+
+  static void pad(CodeBlock& cb) {
+    Assembler a {cb};
+    while (a.available() >= 4) a.trap();
+    assertx(a.available() == 0);
+  }
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -455,7 +471,7 @@ private:
 
   Venv& env;
   Vtext& text;
-  ppc64_asm::Assembler a;
+  Assembler a;
 
   const Vlabel current;
   const Vlabel next;
@@ -620,8 +636,8 @@ void Vgen::emit(const jmp& i) {
   a.branchAuto(a.frontier());
 }
 void Vgen::emit(const jmpr& i) {
-  a.mr(reg::r12, i.target.asReg());
-  a.mtctr(reg::r12);
+  a.mr(ppc64_asm::reg::r12, i.target.asReg());
+  a.mtctr(ppc64_asm::reg::r12);
   a.bctr();
 }
 void Vgen::emit(const jcc& i) {
@@ -653,24 +669,6 @@ void Vgen::emit(const cmovq& i) {
     std::swap(t,f);
   }
   a.isel(i.d, t, f, (4 * int(i.sf.asReg())) + bp.bi());
-}
-
-void Vgen::patch(Venv& env) {
-  for (auto& p : env.jmps) {
-    assertx(env.addrs[p.target]);
-    Assembler::patchBctr(p.instr, env.addrs[p.target]);
-  }
-  for (auto& p : env.jccs) {
-    assertx(env.addrs[p.target]);
-    Assembler::patchBctr(p.instr, env.addrs[p.target]);
-  }
-  assertx(env.bccs.empty());
-}
-
-void Vgen::pad(CodeBlock& cb) {
-  ppc64_asm::Assembler a {cb};
-  while (a.available() >= 4) a.trap();
-  assertx(a.available() == 0);
 }
 
 void Vgen::emit(const store& i) {
@@ -737,8 +735,8 @@ void Vgen::emit(const calltc& i) {
   a.mtlr(rfuncln());
 
   // and jump. When it returns, it'll be to enterTCExit
-  a.mr(reg::r12, i.target.asReg());
-  a.mtctr(reg::r12);
+  a.mr(ppc64_asm::reg::r12, i.target.asReg());
+  a.mtctr(ppc64_asm::reg::r12);
   a.bctr();
 }
 
@@ -752,8 +750,8 @@ void Vgen::emit(const resumetc& i) {
   a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
 
   // and jump. When it returns, it'll be to enterTCExit
-  a.mr(reg::r12, i.target.asReg());
-  a.mtctr(reg::r12);
+  a.mr(ppc64_asm::reg::r12, i.target.asReg());
+  a.mtctr(ppc64_asm::reg::r12);
   a.bctr();
 }
 
