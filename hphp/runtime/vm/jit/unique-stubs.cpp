@@ -187,15 +187,8 @@ TCA emitEndCatchHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 }
 
 TCA emitDecRefGeneric(CodeBlock& cb, DataBlock& data) {
-  switch (arch()) {
-    case Arch::X64:
-      return x64::emitDecRefGeneric(cb, data);
-    case Arch::PPC64:
-      return ppc64::emitDecRefGeneric(cb, data);
-    default:
-      not_implemented();
-      break;
-  }
+  if (arch() != Arch::X64) not_implemented();
+  return x64::emitDecRefGeneric(cb, data);
 }
 
 
