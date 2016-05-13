@@ -949,7 +949,7 @@ TCA emitDecRefGeneric(CodeBlock& cb, DataBlock& data) {
      Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 2 +
           AROFF(m_savedRip) / sizeof(int64_t));
 #else
-     Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 1)
+     Fixup fixup = makeIndirectFixup(prs.dwordsPushed() + 1);
 #endif
       v << syncpoint{fixup};
     };
