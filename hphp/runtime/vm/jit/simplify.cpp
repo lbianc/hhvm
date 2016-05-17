@@ -324,11 +324,6 @@ SSATmp* simplifyLdClsCtx(State& env, const IRInstruction* inst) {
 }
 
 SSATmp* simplifyLdClsMethod(State& env, const IRInstruction* inst) {
-// TODO(lbianc): This simplify is generating unaligned memory access.
-// PPC64 load and store instructions currently do not support this kind
-// of access.
-// Removing this code from PPC64 temporarily, untill we find a solution.
-#if !defined(__powerpc64__)
   SSATmp* ctx = inst->src(0);
   if (ctx->isA(TCls)) {
     auto const src = ctx->inst();
@@ -336,7 +331,6 @@ SSATmp* simplifyLdClsMethod(State& env, const IRInstruction* inst) {
       return gen(env, LdClsMethod, src->src(0), inst->src(1));
     }
   }
-#endif
   return nullptr;
 }
 
