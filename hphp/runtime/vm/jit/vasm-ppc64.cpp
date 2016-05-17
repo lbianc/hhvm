@@ -599,6 +599,12 @@ void Vgen::emit(const load& i) {
   if (i.d.isGP()) {
     if (i.s.index.isValid()){
       a.ldx(i.d, i.s);
+    } else if (i.s.disp & 0x3) {     // Unaligned memory access
+      Vptr p = i.s;
+      a.li64(rAsm, (int64_t)p.disp); // Load disp to reg
+      p.disp = 0;                    // Remove disp
+      p.index = rAsm;                // Set disp reg as index
+      a.ldx(i.d, p);                 // Use ldx for unaligned memory access
     } else {
       a.ld(i.d, i.s);
     }
