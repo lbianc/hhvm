@@ -14,14 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/ppc64-asm/decoder-ppc64.h"
+
 #include <cassert>
 
-#include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 namespace ppc64_asm {
 
-Decoder* Decoder::decoder = nullptr;
+Decoder* Decoder::s_decoder = nullptr;
 
 std::string DecoderInfo::toString() {
   if (m_form == Form::kInvalid) return ".long " + std::to_string(m_image);
@@ -180,14 +181,14 @@ DecoderInfo* Decoder::decode(PPC64Instr instr) {
     auto decoded_instr = instr & DecoderList[i];
     auto index = (decoded_instr % kDecoderSize);
 
-    while (decoder_table[index] != nullptr &&
-        decoder_table[index]->opcode() != decoded_instr) {
+    while (m_decoder_table[index] != nullptr &&
+        m_decoder_table[index]->opcode() != decoded_instr) {
       index = (index + 1) % kDecoderSize;
     }
 
-    if (decoder_table[index] != nullptr) {
-      decoder_table[index]->instruction_image(instr);
-      return decoder_table[index];
+    if (m_decoder_table[index] != nullptr) {
+      m_decoder_table[index]->instruction_image(instr);
+      return m_decoder_table[index];
     }
   }
 

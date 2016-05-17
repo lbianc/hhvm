@@ -46,15 +46,15 @@ constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl (so the following)
 // Currently this calculation considers:
-// li64 (5 instr), mtctr, nop, nop, bctrl
-constexpr size_t smashableCallLen() { return kStdIns * 9; }
+// prologue, li64 (5 instr), mtctr, nop, nop, bctrl
+constexpr size_t smashableCallLen() {
+  return ppc64_asm::Assembler::kCallLen;
+}
 
 // li64 + mtctr + nop + nop + bcctr
-constexpr size_t smashableJccLen()  { return kStdIns * 9; }
-// to analyse the cc, it has to be on the bcctr that the smashableJccLen skips
-constexpr size_t smashableJccSkip() { return smashableJccLen() - kStdIns; }
+constexpr size_t smashableJccLen()  { return ppc64_asm::Assembler::kJccLen; }
 
-// Same length as Jcc
+// Same length as Jcc.
 constexpr size_t smashableJmpLen()  { return smashableJccLen(); }
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,

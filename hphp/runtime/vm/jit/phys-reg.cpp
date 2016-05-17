@@ -59,8 +59,6 @@ std::string show(PhysReg r) {
       return r.type() == PhysReg::GP   ? ppc64_asm::reg::regname(Reg64(r)) :
              r.type() == PhysReg::SIMD ? ppc64_asm::reg::regname(RegXMM(r)) :
           /* r.type() == PhysReg::SF)  ? */ ppc64_asm::reg::regname(RegSF(r));
-
-
   }
   not_reached();
 }

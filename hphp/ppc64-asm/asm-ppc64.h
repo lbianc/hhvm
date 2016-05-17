@@ -580,6 +580,19 @@ struct Assembler {
     CR7      = 7,
   };
 
+  // Prologue size of call function (mflr, std, std, addi, std)
+  static const uint8_t kCallPrologueLen = instr_size_in_bytes * 5;
+
+  // Epilogue size of call function after the return address.
+  // ld, addi, ld, mtlr
+  static const uint8_t kCallEpilogueLen = instr_size_in_bytes * 4;
+
+  // Jcc lenght
+  static const uint8_t kJccLen = instr_size_in_bytes * 9;
+
+  // Call lenght prologue + jcc
+  static const uint8_t kCallLen = instr_size_in_bytes * 9;
+
   // Total ammount of bytes that a li64 function emits
   static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
 

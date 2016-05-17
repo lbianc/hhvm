@@ -14,12 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/ppc64-asm/dasm-ppc64.h"
+
 #include <folly/Format.h>
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/ppc64-asm/decoder-ppc64.h"
-
-#include "hphp/ppc64-asm/dasm-ppc64.h"
 
 namespace ppc64_asm {
 
@@ -39,9 +39,8 @@ void Disassembler::disassembly(std::ostream& out, uint8_t* instr) {
   uint32_t instruction = 0;
 
   for (pos = 0; pos < instr_size_in_bytes; ++pos) {
-     //if (print_encoding_) {
+     // TODO(rcardoso): only print encoding if told so.
      out << folly::format("{:02x} ", (uint8_t)instr[pos]);
-     //}
      instruction |= ((uint8_t)instr[pos]) << (8 * pos);
   }
   out << "\t";

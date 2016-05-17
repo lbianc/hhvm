@@ -52,7 +52,6 @@ enum class Form {
   kZ23,
 };
 
-
 /**
  * Instruction Format encoders
  */

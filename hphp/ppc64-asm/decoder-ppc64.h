@@ -1674,23 +1674,23 @@ private:
 };
 
 class Decoder : private boost::noncopyable {
-  DecoderInfo **decoder_table;
-  DecoderInfo **opcode_index_table;
-  static Decoder* decoder;
+  DecoderInfo **m_decoder_table;
+  DecoderInfo **m_opcode_index_table;
+  static Decoder* s_decoder;
 
   void setInstruction(DecoderInfo dinfo) {
 
     PPC64Instr index = (dinfo.opcode() % kDecoderSize);
 
-    while (decoder_table[index] != nullptr &&
-           decoder_table[index]->opcode() != dinfo.opcode()) {
+    while (m_decoder_table[index] != nullptr &&
+           m_decoder_table[index]->opcode() != dinfo.opcode()) {
         index = (index + 1) % kDecoderSize;
     }
 
-    decoder_table[index] = new DecoderInfo(dinfo);
+    m_decoder_table[index] = new DecoderInfo(dinfo);
 
-    opcode_index_table[static_cast<PPC64Instr>(dinfo.opcode_name())] =
-      decoder_table[index];
+   m_opcode_index_table[static_cast<PPC64Instr>(dinfo.opcode_name())] =
+      m_decoder_table[index];
   }
 
   /*
@@ -1699,13 +1699,13 @@ class Decoder : private boost::noncopyable {
    * singleton constructor, it's only called once and, when trace is enabled
    * so optimization here is not a big issue.
    */
-  __attribute__((optimize("O0"))) Decoder() {
+  __attribute__((__optimize__("O0"))) Decoder() {
 
-    decoder_table = new DecoderInfo*[kDecoderSize];
+    m_decoder_table = new DecoderInfo*[kDecoderSize];
     for(int i = 0; i < kDecoderSize; i++)
-      decoder_table[i] = nullptr;
+      m_decoder_table[i] = nullptr;
 
-    opcode_index_table = new DecoderInfo*[kTotalOpcodes];
+    m_opcode_index_table = new DecoderInfo*[kTotalOpcodes];
 
     #define DE(name, op, type, mnemonic, ... )                \
       DecoderInfo instr_##name {                              \
@@ -1724,24 +1724,25 @@ class Decoder : private boost::noncopyable {
 
   ~Decoder() {
     for(int i = 0; i < kDecoderSize; i++)
-       if(decoder_table[i] != nullptr) {
-          delete decoder_table[i];
+       if(m_decoder_table[i] != nullptr) {
+          delete m_decoder_table[i];
        }
-    delete[] decoder_table;
+    delete[] m_decoder_table;
   }
 
   DecoderInfo* getInvalid() {
-    return decoder_table[static_cast<size_t>(OpcodeNames::op_invalid)];
+    return m_decoder_table[static_cast<size_t>(OpcodeNames::op_invalid)];
   }
 
 public:
   static Decoder& GetDecoder() {
     static Decoder dec;
-    decoder= &dec;
-    return *decoder;
+    s_decoder = &dec;
+    return *s_decoder;
   }
 
   DecoderInfo* decode(PPC64Instr ip);
+
   inline DecoderInfo* decode(uint8_t* ip) {
     return decode(*reinterpret_cast<PPC64Instr*>(ip));
   }

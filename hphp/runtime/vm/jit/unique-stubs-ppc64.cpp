@@ -279,7 +279,8 @@ void assert_tc_saved_rip(void* saved_lr_pointer) {
   // saved on enterTCHelper
   auto const saved_lr = *reinterpret_cast<uint8_t**>(saved_lr_pointer);
   auto const branch_block = saved_lr; // next instruction after resumetc's callr
-  auto const branch_instr = branch_block + smashableJccSkip();
+  auto const jccLen = smashableJccLen() - ppc64_asm::instr_size_in_bytes;
+  auto const branch_instr = branch_block + jccLen;
   auto const exittc = mcg->ustubs().enterTCExit;
 
   ppc64_asm::DecodedInstruction di(branch_instr);

@@ -232,10 +232,8 @@ std::string show(Vreg r) {
 }
 
 std::string show(Vptr p) {
-  // [%fs + %base + disp + %index * scale]
   std::string str;
   if (arch() == Arch::PPC64) {
-    str = "";
     auto prefix = false;
     if (p.disp) {
       folly::format(&str, "{}{:#x}",
@@ -255,6 +253,7 @@ std::string show(Vptr p) {
       folly::toAppend(prefix ? "," : "", show(p.index), &str);
     }
   } else {
+    // [%fs + %base + disp + %index * scale]
     str = "[";
     auto prefix = false;
     if (p.seg == Vptr::FS) {

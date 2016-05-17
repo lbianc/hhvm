@@ -189,7 +189,10 @@ TCA smashableJmpTarget(TCA inst) {
 }
 
 TCA smashableJccTarget(TCA inst) {
-  auto branch_instr = *reinterpret_cast<PPC64Instr*>(inst + smashableJccSkip());
+  // To analyse the cc, it has to be on the bcctr so we need go backward one
+  // instruction.
+  uint8_t jccLen = smashableJccLen() - kStdIns;
+  auto branch_instr = *reinterpret_cast<PPC64Instr*>(inst + jccLen);
   if (!ppc64_asm::Decoder::GetDecoder().decode(branch_instr)->isBranch(true)) {
     return nullptr;
   }
@@ -198,9 +201,11 @@ TCA smashableJccTarget(TCA inst) {
 }
 
 ConditionCode smashableJccCond(TCA inst) {
+  // To analyse the cc, it has to be on the bcctr so we need go backward one
+  // instruction.
+  uint8_t jccLen = smashableJccLen() - kStdIns;
   // skip to the branch instruction in order to get its condition
-  ppc64_asm::BranchParams bp(
-      *reinterpret_cast<PPC64Instr*>(inst + smashableJccSkip()));
+  ppc64_asm::BranchParams bp(*reinterpret_cast<PPC64Instr*>(inst + jccLen));
   return bp;
 }
 

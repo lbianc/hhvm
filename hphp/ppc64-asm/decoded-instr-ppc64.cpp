@@ -14,14 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
-
 #include "hphp/ppc64-asm/decoded-instr-ppc64.h"
-#include "hphp/ppc64-asm/decoder-ppc64.h"
-
-#include "hphp/ppc64-asm/asm-ppc64.h"
 
 #include <folly/Format.h>
+
+#include "hphp/ppc64-asm/decoder-ppc64.h"
+#include "hphp/ppc64-asm/asm-ppc64.h"
 
 #include "hphp/util/safe-cast.h"
 
@@ -42,15 +40,13 @@ bool DecodedInstruction::isNop() const {
 
 bool DecodedInstruction::isBranch(bool allowCond /* = true */) const {
   // skip the preparation instructions that are not actually the branch.
-  auto branch_instr = m_ip + HPHP::jit::ppc64::smashableJccSkip();
+  auto branch_instr = m_ip + Assembler::kJccLen - instr_size_in_bytes;
   return Decoder::GetDecoder().decode(branch_instr)->isBranch(allowCond);
 }
 
 bool DecodedInstruction::isCall() const {
-  // The length of a smashable call also includes a nop at the end. The branch
-  // instruction should be right before that.
-  auto branch_instr = m_ip + HPHP::jit::ppc64::smashableCallLen() -
-                      1 * instr_size_in_bytes;
+  // skip the preparation instructions that are not actually the branch.
+  auto branch_instr = m_ip + Assembler::kCallLen - instr_size_in_bytes;
   return Decoder::GetDecoder().decode(branch_instr)->isBranch(false);
 }
 
