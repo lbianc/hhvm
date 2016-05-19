@@ -256,6 +256,7 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
 
     // In the entry block, hhbc-translator gets a chance to emit some code
     // immediately after the initial checks on the first instruction.
+/*TODO: necessary?
     switch (arch()) {
       case Arch::X64:
         irgen::prepareEntry(irgs);
@@ -267,6 +268,8 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
       case Arch::PPC64:
         break;
     }
+*/
+    irgen::prepareEntry(irgs);
   }
 }
 
@@ -875,12 +878,12 @@ std::unique_ptr<IRUnit> irGenRegion(const RegionDesc& region,
   SCOPE_ASSERT_DETAIL("RegionDesc") { return show(region); };
 
   std::unique_ptr<IRUnit> unit;
+  SCOPE_ASSERT_DETAIL("IRUnit") { return unit ? show(*unit) : "<null>"; };
   TranslateRetryContext retry;
   auto result = TranslateResult::Retry;
 
   while (result == TranslateResult::Retry) {
     unit = folly::make_unique<IRUnit>(context);
-    SCOPE_ASSERT_DETAIL("IRUnit") { return show(*unit); };
     irgen::IRGS irgs{*unit};
 
     // Set up inlining context, but disable it for profiling mode.

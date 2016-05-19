@@ -52,7 +52,7 @@ namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-const StaticString s_PackedArray("PackedArray");
+const StaticString s_ArrayKindProfile("ArrayKindProfile");
 const StaticString s_StructArray("StructArray");
 
 //////////////////////////////////////////////////////////////////////
@@ -465,18 +465,25 @@ SSATmp* emitPropSpecialized(
 //////////////////////////////////////////////////////////////////////
 // "Simple op" handlers.
 
-SSATmp* emitPackedArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
+template<class Finish>
+SSATmp* emitPackedArrayGet(IRGS& env, SSATmp* base, SSATmp* key,
+                           Finish finish) {
   assertx(base->isA(TArr) &&
           base->type().arrSpec().kind() == ArrayData::kPackedKind &&
           key->isA(TInt));
+
+  auto finishMe = [&](SSATmp* elem) {
+    auto unboxed = unbox(env, elem, nullptr);
+    gen(env, IncRef, unboxed);
+    return unboxed;
+  };
 
   auto doLdElem = [&] {
     auto const type = packedArrayElemType(base, key).ptr(Ptr::Elem);
     auto addr = gen(env, LdPackedArrayElemAddr, type, base, key);
     auto res = gen(env, LdMem, type.deref(), addr);
-    auto unboxed = unbox(env, res, nullptr);
-    gen(env, IncRef, unboxed);
-    return unboxed;
+    auto pres = profiledType(env, res, [&] { finish(finishMe(res)); });
+    return finishMe(pres);
   };
 
   if (key->hasConstVal()) {
@@ -540,7 +547,8 @@ SSATmp* emitStructArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
   return unboxed;
 }
 
-SSATmp* emitArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
+template<class Finish>
+SSATmp* emitArrayGet(IRGS& env, SSATmp* base, SSATmp* key, Finish finish) {
   auto const elem = profiledArrayAccess(env, base, key,
     [&] (SSATmp* arr, SSATmp* key, uint32_t pos) {
       return gen(env, MixedArrayGetK, IndexData { pos }, arr, key);
@@ -549,27 +557,32 @@ SSATmp* emitArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
       return gen(env, ArrayGet, base, key);
     }
   );
-  auto const cell = unbox(env, elem, nullptr);
-  gen(env, IncRef, cell);
-  return cell;
+  auto finishMe = [&](SSATmp* elem) {
+    auto const cell = unbox(env, elem, nullptr);
+    gen(env, IncRef, cell);
+    return cell;
+  };
+  auto const pelem = profiledType(env, elem, [&] { finish(finishMe(elem)); });
+  return finishMe(pelem);
 }
 
-SSATmp* emitProfiledPackedArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
-  TargetProfile<NonPackedArrayProfile> prof(env.context,
-                                            env.irb->curMarker(),
-                                            s_PackedArray.get());
+template<class Finish>
+SSATmp* emitProfiledPackedArrayGet(IRGS& env, SSATmp* base, SSATmp* key,
+                                   Finish finish) {
+  TargetProfile<ArrayKindProfile> prof(env.context,
+                                       env.irb->curMarker(),
+                                       s_ArrayKindProfile.get());
   if (prof.profiling()) {
-    gen(env, ProfilePackedArray, RDSHandleData{prof.handle()}, base);
-    return emitArrayGet(env, base, key);
+    gen(env, ProfileArrayKind, RDSHandleData{prof.handle()}, base);
+    return emitArrayGet(env, base, key, finish);
   }
 
   if (prof.optimizing()) {
-    auto const data = prof.data(NonPackedArrayProfile::reduce);
-    // NonPackedArrayProfile data counts how many times a non-packed array was
-    // observed.  Zero means it was monomorphic (or never executed).
+    auto const data = prof.data(ArrayKindProfile::reduce);
     auto const typePackedArr = Type::Array(ArrayData::kPackedKind);
     if (base->type().maybe(typePackedArr) &&
-        (data.count == 0 || RuntimeOption::EvalJitPGOArrayGetStress)) {
+        (data.fraction(ArrayData::kPackedKind) == 1.0 ||
+         RuntimeOption::EvalJitPGOArrayGetStress)) {
       // It's safe to side-exit still because we only do these profiled array
       // gets on the first element, with simple bases and single-element dims.
       // See computeSimpleCollectionOp.
@@ -579,21 +592,23 @@ SSATmp* emitProfiledPackedArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
         base,
         TypeConstraint(DataTypeSpecialized).setWantArrayKind()
       );
-      return emitPackedArrayGet(env, base, key);
+      return emitPackedArrayGet(env, base, key, finish);
     }
   }
 
   // Fall back to a generic array get.
-  return emitArrayGet(env, base, key);
+  return emitArrayGet(env, base, key, finish);
 }
 
-SSATmp* emitProfiledStructArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
+template<class Finish>
+SSATmp* emitProfiledStructArrayGet(IRGS& env, SSATmp* base, SSATmp* key,
+                                   Finish finish) {
   TargetProfile<StructArrayProfile> prof(env.context,
                                          env.irb->curMarker(),
                                          s_StructArray.get());
   if (prof.profiling()) {
     gen(env, ProfileStructArray, RDSHandleData{prof.handle()}, base);
-    return emitArrayGet(env, base, key);
+    return emitArrayGet(env, base, key, finish);
   }
 
   if (prof.optimizing()) {
@@ -627,7 +642,7 @@ SSATmp* emitProfiledStructArrayGet(IRGS& env, SSATmp* base, SSATmp* key) {
   }
 
   // Fall back to a generic array get.
-  return emitArrayGet(env, base, key);
+  return emitArrayGet(env, base, key, finish);
 }
 
 void checkBounds(IRGS& env, SSATmp* idx, SSATmp* limit) {
@@ -770,19 +785,20 @@ SSATmp* emitIncDecProp(IRGS& env, IncDecOp op, SSATmp* base, SSATmp* key) {
   return gen(env, IncDecProp, IncDecData{op}, base, key);
 }
 
+template<class Finish>
 SSATmp* emitCGetElem(IRGS& env, SSATmp* base, SSATmp* key,
-                     MOpFlags flags, SimpleOp simpleOp) {
+                     MOpFlags flags, SimpleOp simpleOp, Finish finish) {
   switch (simpleOp) {
     case SimpleOp::Array:
-      return emitArrayGet(env, base, key);
+      return emitArrayGet(env, base, key, finish);
     case SimpleOp::PackedArray:
-      return emitPackedArrayGet(env, base, key);
+      return emitPackedArrayGet(env, base, key, finish);
     case SimpleOp::StructArray:
       return emitStructArrayGet(env, base, key);
     case SimpleOp::ProfiledPackedArray:
-      return emitProfiledPackedArrayGet(env, base, key);
+      return emitProfiledPackedArrayGet(env, base, key, finish);
     case SimpleOp::ProfiledStructArray:
-      return emitProfiledStructArrayGet(env, base, key);
+      return emitProfiledStructArrayGet(env, base, key, finish);
     case SimpleOp::String:
       return gen(env, StringGet, base, key);
     case SimpleOp::Vector:
@@ -1551,7 +1567,8 @@ void emitQueryM(IRGS& env, int32_t nDiscard, QueryMOp query, MemberKey mk) {
           return cGetPropImpl(env, objBase, key, flags, mk.mcode == MQT);
         }
         auto const realBase = simpleOp == SimpleOp::None ? basePtr : base;
-        return emitCGetElem(env, realBase, key, flags, simpleOp);
+        return emitCGetElem(env, realBase, key, flags, simpleOp,
+                            [&](SSATmp* el) { mFinalImpl(env, nDiscard, el); });
       }
 
       case QueryMOp::Isset: {

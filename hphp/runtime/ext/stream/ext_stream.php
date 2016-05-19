@@ -359,6 +359,33 @@ function stream_await(resource $fp,
 function stream_set_blocking(resource $stream, int $mode): bool;
 
 /**
+ * Set read file buffering on the given stream.
+ *
+ * @param resource $stream - The file pointer.
+ * @param int $buffer - The number of bytes to buffer. If buffer is 0 then
+ * read operations are unbuffered.
+ *
+ * @return int - Returns 0 on success, or another value if the request cannot
+ * be honored.
+ *
+ */
+<<__Native>>
+function stream_set_read_buffer(resource $stream, int $buffer): int;
+
+/**
+ * Set the stream chunk size.
+ *
+ * @param resource $stream - The target stream.
+ * @param int $chunk_size - The desired new chunk size.
+ *
+ * @return int - Returns the previous chunk size on success.  Will return FALSE
+ * if less than 1 or greater than PHP_INT_MAX.
+ *
+ */
+<<__Native>>
+function stream_set_chunk_size(resource $stream, int $chunk_size): mixed;
+
+/**
  * Sets the timeout value on stream, expressed in the sum of seconds and
  *   microseconds.  When the stream times out, the 'timed_out' key of the array
  *   returned by stream_get_meta_data() is set to TRUE, although no

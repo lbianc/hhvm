@@ -544,16 +544,7 @@ bool ak_exist_int_obj(ObjectData* obj, int64_t key) {
 namespace {
 ALWAYS_INLINE
 TypedValue getDefaultIfNullCell(const TypedValue* tv, TypedValue& def) {
-  if (UNLIKELY(nullptr == tv)) {
-    // DecRef of def is done unconditionally by the IR, since there's
-    // a good chance it will be paired with an IncRef and optimized
-    // away.  So we need to IncRef here if it is being returned.
-    tvRefcountedIncRef(&def);
-    return def;
-  }
-  auto const ret = tvToCell(tv);
-  tvRefcountedIncRef(ret);
-  return *ret;
+  return UNLIKELY(tv == nullptr) ? def : *tv;
 }
 }
 
@@ -759,8 +750,19 @@ void lookupClsMethodHelper(Class* cls,
   }
 }
 
-void profileObjClassHelper(ClassProfile* profile, ObjectData* obj) {
-  profile->reportClass(obj->getVMClass());
+void profileClassMethodHelper(MethProfile* profile,
+                              const ActRec* ar,
+                              const Class* cls) {
+  profile->reportMeth(ar, cls);
+}
+
+void profileTypeHelper(TypeProfile* profile, TypedValue newTV) {
+  auto newType = typeFromTV(&newTV);
+  profile->report(newType);
+}
+
+void profileArrayKindHelper(ArrayKindProfile* profile, ArrayData* arr) {
+  profile->report(arr->kind());
 }
 
 Cell lookupCnsUHelper(const TypedValue* tv,
@@ -1307,18 +1309,12 @@ void bindElemC(TypedValue* base, TypedValue key, RefData* val) {
   tvBindRef(val, elem);
 }
 
-void setWithRefElemC(TypedValue* base, TypedValue keyTV, TypedValue val) {
+void setWithRefElem(TypedValue* base, TypedValue keyTV, TypedValue val) {
   TypedValue localTvRef;
   auto const keyC = tvToCell(&keyTV);
-  auto elem = HPHP::ElemD<MOpFlags::Define>(localTvRef, base, *keyC);
-  // Intentionally leak the old value pointed to by elem, including from magic
-  // methods.
-  tvDup(val, *elem);
-}
-
-void setWithRefNewElem(TypedValue* base, TypedValue val) {
-  TypedValue localTvRef;
-  auto elem = NewElem<false>(localTvRef, base);
+  auto elem = UNLIKELY(val.m_type == KindOfRef)
+    ? HPHP::ElemD<MOpFlags::DefineReffy>(localTvRef, base, *keyC)
+    : HPHP::ElemD<MOpFlags::Define>(localTvRef, base, *keyC);
   // Intentionally leak the old value pointed to by elem, including from magic
   // methods.
   tvDup(val, *elem);

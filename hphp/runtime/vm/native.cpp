@@ -33,9 +33,6 @@ static size_t numGPRegArgs() {
 #elif defined(__powerpc64__)
   return 31;
 #else // amd64
-  if (UNLIKELY(RuntimeOption::EvalSimulateARM)) {
-    return 8;
-  }
   return 6; // rdi, rsi, rdx, rcx, r8, r9
 #endif
 }
@@ -536,6 +533,10 @@ void getFunctionPointers(const BuiltinFunctionInfo& info,
 
 static bool tcCheckNative(const TypeConstraint& tc, const NativeSig::Type ty) {
   using T = NativeSig::Type;
+
+  if (tc.isDict() || tc.isVec()) {
+    return ty == T::Array || ty == T::ArrayArg;
+  }
 
   if (!tc.hasConstraint() || tc.isNullable() || tc.isCallable() ||
       tc.isArrayKey() || tc.isNumber()) {

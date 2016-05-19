@@ -1117,7 +1117,7 @@ void UniqueStubs::emitAll(CodeCache& code, Debug::DebugInfo& dbg) {
   auto& main = view.main();
   auto& cold = view.cold();
   auto& frozen = view.frozen();
-  auto& hotBlock = code.view(true /* hot */).main();
+  auto& hotBlock = code.view(TransKind::Optimize).main();
   auto& data = view.data();
 
   auto const hot = [&]() -> CodeBlock& {

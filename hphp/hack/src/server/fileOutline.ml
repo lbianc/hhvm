@@ -32,7 +32,9 @@ let summarize_property kinds var =
     pos;
     span;
     modifiers;
-    children = [];
+    children = None;
+    params = None;
+    docblock = None;
   }
 
 let summarize_const ((pos, name), (expr_pos, _)) =
@@ -43,7 +45,9 @@ let summarize_const ((pos, name), (expr_pos, _)) =
     pos;
     span;
     modifiers = [];
-    children = [];
+    children = None;
+    params = None;
+    docblock = None;
   }
 
 let summarize_abs_const (pos, name) =
@@ -53,7 +57,9 @@ let summarize_abs_const (pos, name) =
     pos = pos;
     span = pos;
     modifiers = [Abstract];
-    children = [];
+    children = None;
+    params = None;
+    docblock = None;
   }
 
 let modifier_of_fun_kind acc = function
@@ -68,19 +74,41 @@ let summarize_typeconst t =
     pos;
     span = t.Ast.tconst_span;
     modifiers = if t.Ast.tconst_abstract then [Abstract] else [];
-    children = [];
+    children = None;
+    params = None;
+    docblock = None;
+  }
+
+let summarize_param param =
+  let pos, name = param.Ast.param_id in
+  let param_start = Option.value_map param.Ast.param_hint ~f:fst ~default:pos in
+  let param_end = Option.value_map param.Ast.param_expr ~f:fst ~default:pos in
+  let modifiers =
+    modifiers_of_ast_kinds (Option.to_list param.Ast.param_modifier) in
+  {
+    kind = Param;
+    name;
+    pos;
+    span = Pos.btw param_start param_end;
+    children = None;
+    modifiers;
+    params = None;
+    docblock = None;
   }
 
 let summarize_method m =
   let modifiers = modifier_of_fun_kind [] m.Ast.m_fun_kind in
   let modifiers = (modifiers_of_ast_kinds m.Ast.m_kind) @ modifiers in
+  let params = Some (List.map m.Ast.m_params summarize_param) in
   {
     kind = Method;
     name = snd m.Ast.m_name;
     pos = (fst m.Ast.m_name);
     span = m.Ast.m_span;
     modifiers;
-    children = [];
+    children = None;
+    params;
+    docblock = None;
   }
 
 let summarize_class class_ ~no_children =
@@ -94,7 +122,7 @@ let summarize_class class_ ~no_children =
     | Ast.Cabstract -> Abstract :: modifiers
     | _ -> modifiers
   in
-  let children = if no_children then [] else List.concat
+  let children = if no_children then None else Some (List.concat
     (List.map class_.Ast.c_body ~f:begin function
     | Ast.Method m -> [summarize_method m]
     | Ast.ClassVars (kinds, _, vars) ->
@@ -104,7 +132,7 @@ let summarize_class class_ ~no_children =
     | Ast.AbsConst (_, id) -> [summarize_abs_const id]
     | Ast.TypeConst t -> [summarize_typeconst t]
     | _ -> []
-    end)
+    end))
   in
   let kind = match class_.Ast.c_kind with
     | Ast.Cinterface -> Interface
@@ -119,17 +147,34 @@ let summarize_class class_ ~no_children =
     span = c_span;
     modifiers;
     children;
+    params = None;
+    docblock = None;
   }
 
 let summarize_fun f =
   let modifiers = modifier_of_fun_kind [] f.Ast.f_fun_kind in
+  let params = Some (List.map f.Ast.f_params summarize_param) in
   {
     kind = Function;
     name = Utils.strip_ns (snd f.Ast.f_name);
     pos = fst f.Ast.f_name;
     span = f.Ast.f_span;
     modifiers;
-    children = []
+    children = None;
+    params;
+    docblock = None;
+  }
+
+let summarize_local name span =
+  {
+    kind = LocalVar;
+    name;
+    pos = span;
+    span;
+    modifiers = [];
+    children = None;
+    params = None;
+    docblock = None;
   }
 
 let outline_ast ast =
@@ -161,33 +206,76 @@ let to_json_legacy input =
      | Function -> (def.pos, def.name, "function") :: acc
      | Class | Enum | Interface | Trait ->
          let acc = (def.pos, def.name, "class") :: acc in
-         to_legacy (prefix ^ def.name ^ "::") acc def.children
+         Option.value_map def.children
+          ~f:(to_legacy (prefix ^ def.name ^ "::") acc)
+          ~default:acc
      | Method ->
        let desc =
          if List.mem def.modifiers Static
          then "static method" else "method"
        in
        (def.pos, prefix ^ def.name, desc) :: acc
+     | Param
      | Typeconst
      | LocalVar
      | Property
      | Const -> acc
    end
 
- let to_legacy outline = to_legacy "" [] outline
+let to_legacy outline = to_legacy "" [] outline
+
+let should_add_docblock = function
+  | Function| Class | Method | Property | Const | Enum
+  | Interface | Trait | Typeconst -> true
+  | LocalVar | Param -> false
+
+let add_def_docblock finder previous_def_line def =
+  let line = Pos.line def.pos in
+  let docblock = if should_add_docblock def.kind
+    then Docblock_finder.find_docblock finder previous_def_line line
+    else None
+  in
+  line, { def with docblock }
+
+let add_docblocks defs comments =
+  let finder = Docblock_finder.make_docblock_finder comments in
+
+  let rec map_def f acc def =
+    let acc, def = f acc def in
+    let acc, children = Option.value_map def.children
+      ~f:(fun defs ->
+        let acc, defs = map_def_list f acc defs in
+        acc, Some defs)
+      ~default:(acc, None)
+    in
+    acc, { def with children }
+
+  and map_def_list f acc defs =
+    let acc, defs = List.fold_left defs
+      ~f:(fun (acc, defs) def ->
+        let acc, def = map_def f acc def in
+        acc, def :: defs)
+      ~init:(acc, []) in
+    acc, List.rev defs
+
+  in
+  snd (map_def_list (add_def_docblock finder) 0 defs)
 
  let outline content =
-   let {Parser_hack.ast; _} = Errors.ignore_ begin fun () ->
+   let {Parser_hack.ast; comments; _} =
      Parser_hack.program Relative_path.default content
-   end in
-   outline_ast ast
+       ~include_line_comments:true
+       ~keep_errors:false
+   in
+   let result = outline_ast ast in
+   add_docblocks result comments
 
  let outline_legacy content =
    to_legacy @@ outline content
 
  let rec to_json outline =
    Hh_json.JSON_Array begin
-     List.map outline ~f:begin fun def -> Hh_json.JSON_Object [
+     List.map outline ~f:begin fun def -> Hh_json.JSON_Object ([
        "kind", Hh_json.JSON_String (string_of_kind def.kind);
        "name", Hh_json.JSON_String def.name;
        "position", Pos.json def.pos;
@@ -195,8 +283,16 @@ let to_json_legacy input =
        "modifiers", Hh_json.JSON_Array
          (List.map def.modifiers
            (fun x -> Hh_json.JSON_String (string_of_modifier x)));
-       "children", (to_json def.children)
-     ] end
+     ] @
+     (Option.value_map def.children
+       ~f:(fun x -> [("children", to_json x)]) ~default:[])
+       @
+     (Option.value_map def.params
+       ~f:(fun x -> [("params", to_json x)]) ~default:[])
+       @
+     (Option.value_map def.docblock
+       ~f:(fun x -> [("docblock", Hh_json.JSON_String x)]) ~default:[]))
+     end
    end
 
  let rec print indent defs  =
@@ -208,8 +304,19 @@ let to_json_legacy input =
      Printf.printf "%s  modifiers: " indent;
      List.iter def.modifiers
        (fun x -> Printf.printf "%s " (string_of_modifier x));
-       Printf.printf "\n\n";
-     print (indent ^ "  ") def.children
+       Printf.printf "\n";
+     Option.iter def.params (fun x ->
+       Printf.printf "%s  params:\n" indent;
+       print (indent ^ "    ") x;
+     );
+     Option.iter def.docblock (fun x ->
+       Printf.printf "%s  docblock:\n" indent;
+       Printf.printf "%s\n" x;
+     );
+     Printf.printf "\n";
+     Option.iter def.children (fun x ->
+       print (indent ^ "  ") x
+     );
    end
 
  let print  = print ""

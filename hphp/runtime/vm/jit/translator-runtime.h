@@ -37,7 +37,9 @@ struct c_Vector;
 namespace jit {
 //////////////////////////////////////////////////////////////////////
 
-struct ClassProfile;
+struct MethProfile;
+struct TypeProfile;
+struct ArrayKindProfile;
 struct TypeConstraint;
 
 //////////////////////////////////////////////////////////////////////
@@ -161,7 +163,11 @@ int64_t switchObjHelper(ObjectData* o, int64_t base, int64_t nTargets);
 typedef FixedStringMap<TCA,true> SSwitchMap;
 TCA sswitchHelperFast(const StringData* val, const SSwitchMap* table, TCA* def);
 
-void profileObjClassHelper(ClassProfile*, ObjectData*);
+void profileClassMethodHelper(MethProfile*, const ActRec*, const Class*);
+
+void profileTypeHelper(TypeProfile*, TypedValue);
+
+void profileArrayKindHelper(ArrayKindProfile* profile, ArrayData* arr);
 
 Cell lookupCnsHelper(const TypedValue* tv,
                      StringData* nm,
@@ -229,8 +235,7 @@ StringData* stringGetI(StringData*, uint64_t);
 uint64_t pairIsset(c_Pair*, int64_t);
 uint64_t vectorIsset(c_Vector*, int64_t);
 void bindElemC(TypedValue*, TypedValue, RefData*);
-void setWithRefElemC(TypedValue*, TypedValue, TypedValue);
-void setWithRefNewElem(TypedValue*, TypedValue);
+void setWithRefElem(TypedValue*, TypedValue, TypedValue);
 TypedValue incDecElem(TypedValue* base, TypedValue key, IncDecOp op);
 void bindNewElem(TypedValue* base, RefData* val);
 }
