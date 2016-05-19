@@ -259,7 +259,6 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   }
 
   // All the stub entrypoints share the same ret.
-  // It doesn't use stubret because there was no stublogue.
   vwrap(cb, data, fixups, [] (Vout& v) { v << ret{}; });
 
   // This stub is hot, so make sure to keep it small.

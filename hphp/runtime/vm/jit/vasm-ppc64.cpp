@@ -621,14 +621,10 @@ void Vgen::emit(const loadqd& i) {
 }
 
 void Vgen::emit(const callstub& i) {
-  // Build a minimal call frame in order to save the LR.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
-  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
   a.call(i.target);
 }
 
 void Vgen::emit(const callfaststub& i) {
-  // no frame being built
   a.call(i.target);
   emit(syncpoint{i.fix});
 }
@@ -716,6 +712,11 @@ void Vgen::emit(const callphp& i) {
 }
 
 void Vgen::emit(const inittc&) {
+  // workaround for avoiding the first useless stublogue: we don't need to
+  // create a frame here. X64 needs it as only the stublogue will complete a
+  // frame.
+  a.addi(rsp(), ppc64_asm::reg::r1, min_frame_size);
+
   // initialize our rone register
   a.li(ppc64::rone(), 1);
 }
@@ -816,8 +817,9 @@ void Vgen::emit(const callarray& i) {
  * Stub function ABI
  */
 void Vgen::emit(const stublogue& i) {
-  // recover the frame created on callstub.
-  a.mr(rsp(), ppc64_asm::reg::r1);
+  // Save a complete frame
+  if (i.saveframe) a.stdu(rvmfp(), rsp()[-min_frame_size]);
+  else a.addi(rsp(), rsp(), -min_frame_size);
 
   // save return address on this frame, just like phplogue does
   a.mflr(rfuncln());
@@ -832,7 +834,7 @@ void Vgen::emit(const stubret& i) {
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
 
-  // pop this frame as created by callstub and return
+  // pop this frame as created by stublogue and return
   a.addi(rsp(), rsp(), min_frame_size);
   a.blr();
 }
@@ -864,7 +866,7 @@ void Vgen::emit(const stubtophp& i) {
   // reset the return address from native frame due to call to the vm frame
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
-  // pop this frame as created by callstub
+  // pop this frame as created by stublogue
   a.addi(rsp(), rsp(), min_frame_size);
 }
 
