@@ -20,8 +20,9 @@
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/base/rds.h"
 
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
+#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/type.h"
 
 #include <folly/Optional.h>
 
@@ -154,10 +155,11 @@ private:
 
       // fallthrough
     case TransKind::Anchor:
-    case TransKind::Prologue:
     case TransKind::Interp:
     case TransKind::Live:
-    case TransKind::Proflogue:
+    case TransKind::LivePrologue:
+    case TransKind::ProfPrologue:
+    case TransKind::OptPrologue:
     case TransKind::Invalid:
       return rds::Link<T>(rds::kInvalidHandle);
     }
@@ -171,50 +173,83 @@ private:
 
 //////////////////////////////////////////////////////////////////////
 
-struct ClassProfile {
-  static const size_t kClassProfileSampleSize = 4;
+struct MethProfile {
+  using RawType = LowPtr<Class>::storage_type;
 
-  const Class* sampledClasses[kClassProfileSampleSize];
+  enum class Tag {
+    UniqueClass = 0,
+    UniqueMeth = 1,
+    BaseMeth = 2,
+    InterfaceMeth = 3,
+    Invalid = 4
+  };
 
-  bool isMonomorphic() const {
-    return size() == 1;
+  MethProfile() : m_curMeth(nullptr), m_curClass(nullptr) {}
+  MethProfile(const MethProfile& other) :
+      m_curMeth(other.m_curMeth),
+      m_curClass(other.m_curClass) {}
+
+  const Class* uniqueClass() const {
+    return curTag() == Tag::UniqueClass ? rawClass() : nullptr;
   }
 
-  const Class* getClass(size_t i) const {
-    if (i >= kClassProfileSampleSize) return nullptr;
-    return sampledClasses[i];
+  const Func* uniqueMeth() const {
+    return curTag() == Tag::UniqueMeth || curTag() == Tag::UniqueClass ?
+      rawMeth() : nullptr;
   }
 
-  size_t size() const {
-    for (auto i = 0; i < kClassProfileSampleSize; ++i) {
-      auto const cls = sampledClasses[i];
-      if (!cls) return i;
+  const Func* baseMeth() const {
+    return curTag() == Tag::BaseMeth ? rawMeth() : nullptr;
+  }
+
+  const Func* interfaceMeth() const {
+    return curTag() == Tag::InterfaceMeth ? rawMeth() : nullptr;
+  }
+
+  void reportMeth(const ActRec* ar, const Class* cls) {
+    if (!cls) {
+      cls = ar->hasThis() ?
+        ar->getThis()->getVMClass() : ar->getClass();
     }
-    return kClassProfileSampleSize;
+    auto const meth = ar->func();
+    reportMethHelper(cls, meth);
   }
 
-  void reportClass(const Class* cls) {
-    for (auto& myCls : sampledClasses) {
-      // If the current slot is empty, store the class here.
-      if (!myCls) {
-        myCls = cls;
-        break;
-      }
+  static void reduce(MethProfile& a, const MethProfile& b);
+ private:
+  void reportMethHelper(const Class* cls, const Func* meth);
 
-      // If the current slot matches the requested class, give up.
-      if (cls == myCls) {
-        break;
-      }
-    }
+  static Tag toTag(uintptr_t val) {
+    return static_cast<Tag>(val & 7);
   }
 
-  static void reduce(ClassProfile& a, const ClassProfile& b) {
-    // Racy, but who cares?
-    for (auto const cls : b.sampledClasses) {
-      if (!cls) return;
-      a.reportClass(cls);
-    }
+  static const Func* fromValue(uintptr_t value) {
+    return (Func*)(value & uintptr_t(-8));
   }
+
+  Tag curTag() const { return toTag(methValue()); }
+
+  const Class* rawClass() const {
+    return m_curClass;
+  }
+
+  const Func* rawMeth() const {
+    return fromValue(methValue());
+  }
+
+  const uintptr_t methValue() const {
+    return uintptr_t(m_curMeth.get());
+  }
+
+  void setMeth(const Func* meth, Tag tag) {
+    auto encoded_meth = (Func*)(uintptr_t(meth) | static_cast<uintptr_t>(tag));
+    m_curMeth = encoded_meth;
+  }
+
+  AtomicLowPtr<const Func,
+               std::memory_order_acquire, std::memory_order_release> m_curMeth;
+  AtomicLowPtr<const Class,
+               std::memory_order_acquire, std::memory_order_release> m_curClass;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -268,16 +303,42 @@ typedef folly::Optional<TargetProfile<DecRefProfile>> OptDecRefProfile;
 //////////////////////////////////////////////////////////////////////
 
 /*
- * Record profiling information about non-packed arrays. This counts the
- * number of times a non-packed array was used as the base of a CGetElem
- * operation.
+ * ArrayKindProfile profiles the distribution of the array kinds
+ * observed for a given value.  The array kinds currently tracked are
+ * Empty, Packed, and Mixed.
  */
-struct NonPackedArrayProfile {
-  int32_t count;
-  static void reduce(NonPackedArrayProfile& a, const NonPackedArrayProfile& b) {
-    a.count += b.count;
+struct ArrayKindProfile {
+
+  static const uint32_t kNumProfiledArrayKinds = 4;
+
+  static void reduce(ArrayKindProfile& a, const ArrayKindProfile& b) {
+    for (uint32_t i = 0; i < kNumProfiledArrayKinds; i++) {
+      a.count[i] += b.count[i];
+    }
   }
+
+  void report(ArrayData::ArrayKind kind);
+
+  /*
+   * Returns what fraction of the total profiled arrays had the given `kind'.
+   */
+  double fraction(ArrayData::ArrayKind kind) const;
+
+  /*
+   * Returns the total number of samples profiled so far.
+   */
+  uint32_t total() const {
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < kNumProfiledArrayKinds; i++) {
+      sum += count[i];
+    }
+    return sum;
+  }
+
+  uint32_t count[kNumProfiledArrayKinds];
 };
+
+//////////////////////////////////////////////////////////////////////
 
 struct StructArrayProfile {
   int32_t nonStructCount;
@@ -338,6 +399,24 @@ struct ReleaseVVProfile {
     // Racy but OK -- just used for profiling to trigger optimization.
     a.executed += b.executed;
     a.released += b.released;
+  }
+};
+
+//////////////////////////////////////////////////////////////////////
+
+/*
+ * TypeProfile keeps the union of all the types observed during profiling.
+ */
+struct TypeProfile {
+  Type type; // this gets initialized with 0, which is TBottom
+  static_assert(Type::Bits::kBottom == 0, "Assuming TBottom is 0");
+
+  void report(Type newType) {
+    type |= newType;
+  }
+
+  static void reduce(TypeProfile& a, const TypeProfile& b) {
+    a.report(b.type);
   }
 };
 

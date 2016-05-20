@@ -429,7 +429,6 @@ struct RuntimeOption {
     kEvalVMInitialGlobalTableSizeDefault)                               \
   F(bool, Jit,                         evalJitDefault())                \
   F(bool, JitEvaledCode,               true)                            \
-  F(bool, SimulateARM,                 simulateARMDefault())            \
   F(bool, JitRequireWriteLease,        false)                           \
   F(uint64_t, JitRelocationSize,       kJitRelocationSizeDefault)       \
   F(uint64_t, JitMatureSize,           20 << 20)                        \
@@ -487,7 +486,7 @@ struct RuntimeOption {
   F(bool, JitProfileWarmupRequests,    false)                           \
   F(uint32_t, NumSingleJitRequests,    nsjrDefault())                   \
   F(uint32_t, JitProfileRequests,      kDefaultProfileRequests)         \
-  F(uint32_t, JitResetProfCountersRequest, 500)                         \
+  F(uint32_t, JitResetProfCountersRequest, 1000)                        \
   F(bool, JitProfileRecord,            false)                           \
   F(uint32_t, GdbSyncChunks,           128)                             \
   F(bool, JitKeepDbgFiles,             false)                           \
@@ -499,7 +498,7 @@ struct RuntimeOption {
                                                                         \
   F(bool, JitDisabledByHphpd,          false)                           \
   F(bool, JitTransCounters,            false)                           \
-  F(bool, JitPseudomain,               jitPseudomainDefault())          \
+  F(bool, JitPseudomain,               true)                            \
   F(uint32_t, JitWriteLeaseExpiration, 1500) /* in microseconds */      \
   F(bool, HHIRLICM,                    false)                           \
   F(bool, HHIRSimplification,          true)                            \
@@ -530,7 +529,7 @@ struct RuntimeOption {
   /* Region compiler flags */                                           \
   F(string,   JitRegionSelector,       regionSelectorDefault())         \
   F(bool,     JitPGO,                  pgoDefault())                    \
-  F(string,   JitPGORegionSelector,    pgoRegionSelectorDefault())      \
+  F(string,   JitPGORegionSelector,    "hotcfg")                        \
   F(uint64_t, JitPGOThreshold,         pgoThresholdDefault())           \
   F(bool,     JitPGOHotOnly,           false)                           \
   F(bool,     JitPGOUsePostConditions, true)                            \

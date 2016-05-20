@@ -133,6 +133,7 @@ bool canDCE(IRInstruction* inst) {
   case NeqRes:
   case CmpRes:
   case EqCls:
+  case EqFunc:
   case InstanceOf:
   case InstanceOfIface:
   case InstanceOfIfaceVtable:
@@ -180,6 +181,7 @@ bool canDCE(IRInstruction* inst) {
   case GetCtxFwdCall:
   case LdClsMethodCacheFunc:
   case LdClsMethodCacheCls:
+  case LdFuncVecLen:
   case LdClsMethod:
   case LdIfaceMethod:
   case LdPropAddr:
@@ -508,7 +510,6 @@ bool canDCE(IRInstruction* inst) {
   case IncDecElem:
   case SetNewElem:
   case SetNewElemArray:
-  case SetWithRefNewElem:
   case BindNewElem:
   case ArrayIsset:
   case VectorIsset:
@@ -516,9 +517,10 @@ bool canDCE(IRInstruction* inst) {
   case MapIsset:
   case IssetElem:
   case EmptyElem:
-  case ProfilePackedArray:
+  case ProfileArrayKind:
   case ProfileStructArray:
-  case ProfileObjClass:
+  case ProfileType:
+  case ProfileMethod:
   case CheckPackedArrayBounds:
   case LdStructArrayElem:
   case LdVectorSize:

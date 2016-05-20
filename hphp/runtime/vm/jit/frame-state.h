@@ -17,6 +17,7 @@
 #ifndef incl_HPHP_JIT_FRAME_STATE_H_
 #define incl_HPHP_JIT_FRAME_STATE_H_
 
+#include "hphp/runtime/vm/jit/alias-class.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
@@ -85,7 +86,7 @@ struct LocationState {
    * However, whenever we have a value, the type of the SSATmp must match this
    * `type' field.
    */
-  Type type{default_type()};
+  Type type{LocationState::default_type()};
 
   /*
    * Prediction for the type at the location, if it's boxed or if we're in a
@@ -93,7 +94,7 @@ struct LocationState {
    *
    * @requires: predictedType <= type
    */
-  Type predictedType{default_type()};
+  Type predictedType{LocationState::default_type()};
 
   /*
    * The sources of the currently known type, which may be values.
@@ -126,6 +127,7 @@ struct MBaseState {
  */
 struct MBRState {
   SSATmp* ptr{nullptr};
+  AliasClass pointee{AUnknownTV};
   Type ptrType{TPtrToGen};
 };
 

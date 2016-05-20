@@ -435,25 +435,12 @@ static inline bool pgoDefault() {
 #ifdef HHVM_NO_DEFAULT_PGO
   return false;
 #else
-  // TODO(3496304)
-  return !RuntimeOption::EvalSimulateARM;
+  return true;
 #endif
 }
 
 static inline uint64_t pgoThresholdDefault() {
-#ifdef HHVM_WHOLE_CFG
-  return 100;
-#else
-  return debug ? 2 : 5000;
-#endif
-}
-
-static inline std::string pgoRegionSelectorDefault() {
-#ifdef HHVM_WHOLE_CFG
-  return "wholecfg";
-#else
-  return "hotcfg";
-#endif
+  return debug ? 2 : 2000;
 }
 
 static inline bool evalJitDefault() {
@@ -463,19 +450,6 @@ static inline bool evalJitDefault() {
 #else
   return true;
 #endif
-}
-
-static inline bool simulateARMDefault() {
-#ifdef HHVM_SIMULATE_ARM_BY_DEFAULT
-  return true;
-#else
-  return false;
-#endif
-}
-
-static inline bool jitPseudomainDefault() {
-  // TODO(#4238120)
-  return !RuntimeOption::EvalSimulateARM;
 }
 
 static inline bool reuseTCDefault() {
@@ -503,7 +477,7 @@ const uint64_t kEvalVMStackElmsDefault =
  ;
 const uint32_t kEvalVMInitialGlobalTableSizeDefault = 512;
 static const int kDefaultProfileInterpRequests = debug ? 1 : 11;
-static const uint32_t kDefaultProfileRequests = debug ? 1 << 31 : 500;
+static const uint32_t kDefaultProfileRequests = debug ? 1 << 31 : 2000;
 static const uint64_t kJitRelocationSizeDefault = 1 << 20;
 
 static const bool kJitTimerDefault =
@@ -703,6 +677,11 @@ static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
         // no break here, so we can continue to match more overwrites
       }
       hdf["overwrite"].setVisited(); // avoid lint complaining
+      if (hdf.exists("clear")) {
+        // when the tier does not match, "clear" is not accessed
+        // mark it visited, so the linter does not complain
+        hdf["clear"].setVisited();
+      }
     }
   }
   return messages;

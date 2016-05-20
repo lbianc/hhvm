@@ -243,9 +243,9 @@ bool MCGenerator::profileSrcKey(SrcKey sk) const {
   if (m_tx.profData()->profiling(sk.funcID())) return true;
 
   // Don't start profiling new functions if the size of either main or
-  // prof is already above Eval.JitAMaxUsage.
+  // prof is already above Eval.JitAMaxUsage and we already filled hot.
   auto tcUsage = std::max(m_code.main().used(), m_code.prof().used());
-  if (tcUsage >= CodeCache::AMaxUsage) {
+  if (tcUsage >= CodeCache::AMaxUsage && !m_code.hotEnabled()) {
     return false;
   }
 
@@ -366,10 +366,14 @@ TCA MCGenerator::retranslateOpt(TransID transId, bool align) {
     transCFGAnnot = ""; // so we don't annotate it again
   }
 
-  // In PGO mode, we free all the profiling data once the TC is full.
+  // In PGO mode, we free all the profiling data once the main area code reaches
+  // its maximum usage and either the hot area is also full or all the functions
+  // that were profiled have already been optimized.
   if (RuntimeOption::EvalJitPGO &&
       m_code.main().used() >= CodeCache::AMaxUsage) {
-    m_tx.profData()->free();
+    if (!m_code.hotEnabled() || m_tx.profData()->optimizedAllProfiledFuncs()) {
+      m_tx.profData()->free();
+    }
   }
 
   return start;
@@ -450,10 +454,21 @@ bool MCGenerator::shouldTranslateNoSizeLimit(const Func* func) const {
 
 bool MCGenerator::shouldTranslate(const Func* func, TransKind kind) const {
   if (!shouldTranslateNoSizeLimit(func)) return false;
-  // Otherwise, follow the Eval.JitAMaxUsage limit.  However, we do
-  // allow Optimize translations past that limit.
-  return m_code.main().used() < CodeCache::AMaxUsage ||
-    kind == TransKind::Optimize;
+
+  // Otherwise, follow the Eval.JitAMaxUsage limit.  However, we do allow PGO
+  // translations past that limit if there's still space in code.hot.
+  if (m_code.main().used() < CodeCache::AMaxUsage) return true;
+
+  switch (kind) {
+    case TransKind::ProfPrologue:
+    case TransKind::Profile:
+    case TransKind::OptPrologue:
+    case TransKind::Optimize:
+      return m_code.hotEnabled();
+
+    default:
+      return false;
+  }
 }
 
 
@@ -792,16 +807,18 @@ MCGenerator::checkCachedPrologue(const Func* func, int paramIdx,
   return false;
 }
 
-TCA MCGenerator::emitFuncPrologue(Func* func, int argc) {
+TCA MCGenerator::emitFuncPrologue(Func* func, int argc,
+                                  bool forRegeneratePrologue) {
   const int nparams = func->numNonVariadicParams();
   const int paramIndex = argc <= nparams ? argc : nparams + 1;
 
   auto const funcBody = SrcKey{func, func->getEntryForNumArgs(argc), false};
-  auto const kind = profileSrcKey(funcBody) ? TransKind::Proflogue
-                                            : TransKind::Prologue;
+  auto const kind = profileSrcKey(funcBody) ? TransKind::ProfPrologue :
+                    forRegeneratePrologue   ? TransKind::OptPrologue  :
+                                              TransKind::LivePrologue;
 
   profileSetHotFuncAttr();
-  auto code = m_code.view(func->attrs() & AttrHot, kind);
+  auto code = m_code.view(kind);
   TCA mainOrig = code.main().frontier();
   CGMeta fixups;
 
@@ -870,7 +887,9 @@ TCA MCGenerator::emitFuncPrologue(Func* func, int argc) {
         this, func->fullName()->data(), argc, start);
   func->setPrologue(paramIndex, start);
 
-  assertx(kind == TransKind::Prologue || kind == TransKind::Proflogue);
+  assertx(kind == TransKind::LivePrologue ||
+          kind == TransKind::ProfPrologue ||
+          kind == TransKind::OptPrologue);
 
   auto tr = maker.rec(funcBody, kind);
   m_tx.addTranslation(tr);
@@ -908,7 +927,7 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
   if (forRegeneratePrologue) {
     if (!shouldTranslateNoSizeLimit(func)) return nullptr;
   } else {
-    if (!shouldTranslate(func, TransKind::Prologue)) return nullptr;
+    if (!shouldTranslate(func, TransKind::LivePrologue)) return nullptr;
   }
 
   // Double check the prologue array now that we have the write lease
@@ -916,7 +935,7 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
   if (checkCachedPrologue(func, paramIndex, prologue)) return prologue;
 
   try {
-    return emitFuncPrologue(func, nPassed);
+    return emitFuncPrologue(func, nPassed, forRegeneratePrologue);
   } catch (const DataBlockFull& dbFull) {
 
     // Fail hard if the block isn't code.hot.
@@ -927,7 +946,7 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
     // Otherwise, fall back to code.main and retry.
     m_code.disableHot();
     try {
-      return emitFuncPrologue(func, nPassed);
+      return emitFuncPrologue(func, nPassed, forRegeneratePrologue);
     } catch (const DataBlockFull& dbFull) {
       always_assert_flog(0, "data block = {}\nmessage: {}\n",
                          dbFull.name, dbFull.what());
@@ -1756,7 +1775,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   // the translation process without the write lease, and wants us to make sure
   // we emit code here rather than throwing away the work already done.
   BlockingLeaseHolder write{Translator::WriteLease()};
-  auto code = m_code.view(sk.func()->attrs() & AttrHot, args.kind);
+  auto code = m_code.view(args.kind);
   auto const preAlignMain = code.main().frontier();
 
   if (args.align) {

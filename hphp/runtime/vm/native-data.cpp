@@ -54,6 +54,7 @@ void registerNativeDataInfo(const StringData* name,
   assert(s_nativedatainfo.find(name) == s_nativedatainfo.end());
   assert((sleep == nullptr && wakeup == nullptr) ||
          (sleep != nullptr && wakeup != nullptr));
+  assert(scan);
   NativeDataInfo info;
   info.sz = sz;
   info.odattrs = ObjectData::Attribute::HasNativeData;
@@ -92,9 +93,6 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
   if (UNLIKELY(attrs &
                (AttrAbstract | AttrInterface | AttrTrait | AttrEnum))) {
     ObjectData::raiseAbstractClassError(cls);
-  }
-  if (cls->needInitialization()) {
-    cls->initialize();
   }
   auto ndi = cls->getNativeDataInfo();
   size_t nativeDataSize = ndsize(ndi->sz);

@@ -18,6 +18,8 @@
 
 #include "hphp/runtime/base/runtime-option.h"
 
+#include "hphp/util/assertions.h"
+
 #include <boost/type_traits.hpp>
 
 namespace HPHP {
@@ -26,11 +28,12 @@ namespace HPHP {
 
 enum class Arch { X64, ARM, PPC64, };
 
-inline Arch arch() {
+constexpr Arch arch() {
 #if defined(__powerpc64__)
   return Arch::PPC64;
+#elif defined(__aarch64__)
+  return Arch::ARM;
 #else
-  if (RuntimeOption::EvalSimulateARM) return Arch::ARM;
   return Arch::X64;
 #endif
 }
