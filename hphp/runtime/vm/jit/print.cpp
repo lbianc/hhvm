@@ -40,7 +40,6 @@
 #include "hphp/ppc64-asm/dasm-ppc64.h"
 
 #include "hphp/vixl/a64/disasm-a64.h"
-#include "hphp/ppc64-asm/dasm-ppc64.h"
 
 namespace HPHP { namespace jit {
 

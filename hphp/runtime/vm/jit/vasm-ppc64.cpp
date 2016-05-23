@@ -85,7 +85,6 @@ struct Vgen {
       assertx(env.addrs[p.target]);
       Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
-    assertx(env.bccs.empty());
   }
 
   static void pad(CodeBlock& cb) {
@@ -715,6 +714,8 @@ void Vgen::emit(const inittc&) {
   // workaround for avoiding the first useless stublogue: we don't need to
   // create a frame here. X64 needs it as only the stublogue will complete a
   // frame.
+  // TODO(rcardoso): as pointed to us maybe there is a better way to do this
+  // instead discard stublogue first frame.
   a.addi(rsp(), ppc64_asm::reg::r1, min_frame_size);
 
   // initialize our rone register
