@@ -192,7 +192,7 @@ struct ArgGroup {
       push_SIMDarg(arg);
 #if defined(__powerpc64__)
       // PPC64 ABIv2 compliant: reserve the aligned GP if FP is used
-      push_arg(arg);    // TODO(gut): make it a dummy
+      push_arg(ArgDesc(ArgDesc::Kind::Imm, 0)); // Push a dummy parameter
 #endif
     } else {
       push_arg(arg);
