@@ -240,7 +240,6 @@ void analyze_copy(Env& env, const copy& copy) {
 void analyze_lea(Env& env, const lea& lea) {
   if (!(lea.s.seg == Vptr::DS &&
         lea.s.index == InvalidReg &&
-        lea.s.scale == 1 &&
         lea.d.isVirt())) {
     return;
   }
