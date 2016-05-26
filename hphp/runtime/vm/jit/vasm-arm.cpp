@@ -143,6 +143,7 @@ struct Vgen {
   void emit(const cmpqi& i) { a->Cmp(X(i.s1), i.s0.l()); }
   void emit(const decq& i) { a->Sub(X(i.d), X(i.s), 1LL, SetFlags); }
   void emit(const incq& i) { a->Add(X(i.d), X(i.s), 1LL, SetFlags); }
+  void emit(const inittc& i) {}
   void emit(jcc i);
   void emit(jmp i);
   void emit(const lea& i);
