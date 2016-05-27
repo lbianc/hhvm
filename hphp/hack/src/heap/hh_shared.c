@@ -80,10 +80,11 @@
  * 'caml_' */
 #define CAML_NAME_SPACE
 #include <caml/mlvalues.h>
-#include <caml/unixsupport.h>
+#include <caml/callback.h>
 #include <caml/memory.h>
 #include <caml/alloc.h>
 #include <caml/fail.h>
+#include <caml/unixsupport.h>
 
 #include <assert.h>
 
@@ -106,6 +107,49 @@
 #include <unistd.h>
 #endif
 
+// Ideally these would live in a handle.h file but our internal build system
+// can't support that at the moment. These are shared with handle_stubs.c
+#ifdef _WIN32
+#define Val_handle(fd) (win_alloc_handle(fd))
+#else
+#define Handle_val(fd) (Long_val(fd))
+#define Val_handle(fd) (Val_long(fd))
+#endif
+
+/****************************************************************************
+ * Quoting the linux manpage: memfd_create() creates an anonymous file
+ * and returns a file descriptor that refers to it. The file behaves
+ * like a regular file, and so can be modified, truncated,
+ * memory-mapped, and so on. However, unlike a regular file, it lives
+ * in RAM and has a volatile backing storage. Once all references to
+ * the file are dropped, it is automatically released. Anonymous
+ * memory is used for all backing pages of the file. Therefore, files
+ * created by memfd_create() have the same semantics as other
+ * anonymous memory allocations such as those allocated using mmap(2)
+ * with the MAP_ANONYMOUS flag. The memfd_create() system call first
+ * appeared in Linux 3.17.
+ ****************************************************************************/
+#if !defined __APPLE__ && !defined _WIN32
+  // We're assuming x86_64 linux here
+  #ifndef __x86_64__
+    #error "hh_shared.c requires Linux to be x86_64"
+  #endif
+
+  #define MEMFD_CREATE 1
+  #include <asm/unistd.h>
+
+  /* Originally this function would call uname(), parse the linux
+   * kernel release version and make a decision based on whether
+   * the kernel was >= 3.17 or not. However, syscall will return -1
+   * with an strerr(errno) of "Function not implemented" if the
+   * kernel is < 3.17, and that's good enough. Also, I got the value
+   * of 319 from here: https://github.com/kernelslacker/trinity/blob/825b51cfe8fcbc7461c9a327411475ae481654c8/include/memfd.h
+   */
+  static int memfd_create(const char *name, unsigned int flags) {
+    return syscall(319, name, flags);
+  }
+#endif
+
 // The following 'typedef' won't be required anymore
 // when dropping support for OCaml < 4.03
 #ifdef __MINGW64__
@@ -118,8 +162,7 @@ typedef unsigned __int64 uint64_t;
 #endif
 
 #ifdef _WIN32
-static int win32_getpagesize(void)
-{
+static int win32_getpagesize(void) {
   SYSTEM_INFO siSysInfo;
   GetSystemInfo(&siSysInfo);
   return siSysInfo.dwPageSize;
@@ -132,31 +175,18 @@ static int win32_getpagesize(void)
  * memory), initialized in hh_shared_init */
 /*****************************************************************************/
 
+/* Convention: .*_b = Size in bytes. */
+
 static size_t global_size_b;
 static size_t heap_size;
 
-// XXX: DEP_POW and HASHTBL_POW are not configurable because we take a ~2% perf
-// hit by doing so, likely because the compiler does some constant folding.
-// Should revisit this if / when we switch to compiling with an optimization
-// level higher than -O0. In lieu of that, let's use a define so we don't use
-// absurd amounts of RAM for OSS users.
-#ifdef OSS_SMALL_HH_TABLE_POWS
-#define DEP_POW         17
-#define HASHTBL_POW     18
-#else
-#define DEP_POW         26
-#define HASHTBL_POW     26
-#endif
-
-/* Convention: .*_B = Size in bytes. */
-
 /* Used for the dependency hashtable */
-#define DEP_SIZE        (1ul << DEP_POW)
-#define DEP_SIZE_B      (DEP_SIZE * sizeof(value))
+static unsigned long dep_size;
+static unsigned long dep_size_b;
 
 /* Used for the shared hashtable */
-#define HASHTBL_SIZE    (1ul << HASHTBL_POW)
-#define HASHTBL_SIZE_B  (HASHTBL_SIZE * sizeof(helt_t))
+static unsigned long hashtbl_size;
+static unsigned long hashtbl_size_b;
 
 /* Size of where we allocate shared objects. */
 #define Get_size(x)     (((size_t*)(x))[-1])
@@ -167,6 +197,15 @@ static size_t heap_size;
 #define CACHE_LINE_SIZE (1 << 6)
 #define CACHE_MASK      (~(CACHE_LINE_SIZE - 1))
 #define ALIGNED(x)      ((x + CACHE_LINE_SIZE - 1) & CACHE_MASK)
+
+/* Fix the location of our shared memory so we can save and restore the
+ * hashtable easily */
+#ifdef _WIN32
+/* We have to set differently our shared memory location on Windows. */
+#define SHARED_MEM_INIT ((char *) 0x48047e00000ll)
+#else
+#define SHARED_MEM_INIT ((char *)0x500000000000ll)
+#endif
 
 /* As a sanity check when loading from a file */
 static uint64_t MAGIC_CONSTANT = 0xfacefacefaceb000ll;
@@ -219,7 +258,7 @@ static uintptr_t early_counter = 1;
 static char** heap;
 
 /* Useful to add assertions */
-static pid_t master_pid;
+static pid_t* master_pid;
 static pid_t my_pid;
 
 /* Where the heap started (bottom) */
@@ -243,7 +282,7 @@ CAMLprim value hh_hash_used_slots(void) {
   CAMLparam0();
   uint64_t count = 0;
   uintptr_t i = 0;
-  for (i = 0; i < HASHTBL_SIZE; ++i) {
+  for (i = 0; i < hashtbl_size; ++i) {
     if (hashtbl[i].addr != NULL) {
       count++;
     }
@@ -253,8 +292,16 @@ CAMLprim value hh_hash_used_slots(void) {
 
 CAMLprim value hh_hash_slots(void) {
   CAMLparam0();
-  CAMLreturn(Val_long(HASHTBL_SIZE));
+  CAMLreturn(Val_long(hashtbl_size));
 }
+
+#ifdef _WIN32
+
+struct timeval log_duration(const char *prefix, struct timeval start_t) {
+   return start_t; // TODO
+}
+
+#else
 
 struct timeval log_duration(const char *prefix, struct timeval start_t) {
   struct timeval end_t;
@@ -266,24 +313,230 @@ struct timeval log_duration(const char *prefix, struct timeval start_t) {
   return end_t;
 }
 
+#endif
+
+#ifdef _WIN32
+
+static HANDLE memfd;
+
+/**************************************************************************
+ * We create an anonymous memory file, whose `handle` might be
+ * inherited by slave processes.
+ *
+ * This memory file is tagged "reserved" but not "committed". This
+ * means that the memory space will be reserved in the virtual memory
+ * table but the pages will not be bound to any physical memory
+ * yet. Further calls to 'VirtualAlloc' will "commit" pages, meaning
+ * they will be bound to physical memory.
+ *
+ * This is behavior that should reflect the 'MAP_NORESERVE' flag of
+ * 'mmap' on Unix. But, on Unix, the "commit" is implicit.
+ *
+ * Committing the whole shared heap at once would require the same
+ * amount of free space in memory (or in swap file).
+ **************************************************************************/
+void memfd_init(char *shm_dir, size_t shared_mem_size, long minimum_avail) {
+  memfd = CreateFileMapping(
+    INVALID_HANDLE_VALUE,
+    NULL,
+    PAGE_READWRITE | SEC_RESERVE,
+    shared_mem_size >> 32, shared_mem_size & ((1ll << 32) - 1),
+    NULL);
+  if (memfd == NULL) {
+    win32_maperr(GetLastError());
+    uerror("CreateFileMapping", Nothing);
+  }
+  if (!SetHandleInformation(memfd, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)) {
+    win32_maperr(GetLastError());
+    uerror("SetHandleInformation", Nothing);
+  }
+}
+
+#else
+
+static int memfd = -1;
+
+static void raise_failed_anonymous_memfd_init() {
+  static value *exn = NULL;
+  if (!exn) exn = caml_named_value("failed_anonymous_memfd_init");
+  caml_raise_constant(*exn);
+}
+
+static void raise_less_than_minimum_available(long avail) {
+  CAMLlocal1(arg);
+  static value *exn = NULL;
+  if (!exn) exn = caml_named_value("less_than_minimum_available");
+  arg = Val_long(avail);
+  caml_raise_with_arg(*exn, arg);
+}
+
+#include <sys/statvfs.h>
+void assert_avail_exceeds_minimum(char *shm_dir, long minimum_avail) {
+  struct statvfs stats;
+  long avail;
+  if (statvfs(shm_dir, &stats)) {
+    uerror("statvfs", caml_copy_string(shm_dir));
+  }
+  avail = stats.f_bsize * stats.f_bavail;
+  if (avail < minimum_avail) {
+    raise_less_than_minimum_available(avail);
+  }
+}
+
+/**************************************************************************
+ * The memdfd_init function creates a anonymous memory file that might
+ * be inherited by `Daemon.spawned` processus (contrary to a simple
+ * anonymous mmap).
+ *
+ * The preferred mechanism is memfd_create(2) (see the upper
+ * description).  Then we try shm_open(2) (on Apple OS X). As a safe fallback,
+ * we use `mkstemp/unlink`.
+ *
+ * mkstemp is preferred over shm_open on Linux as it allows to
+ * choose another directory that `/dev/shm` on system where this
+ * partition is too small (e.g. the Travis containers).
+ *
+ * The resulting file descriptor should be mmaped with the memfd_map
+ * function (see below).
+ ****************************************************************************/
+void memfd_init(char *shm_dir, size_t shared_mem_size, long minimum_avail) {
+  if (shm_dir == NULL) {
+    // This means that we should try to use the anonymous-y system calls
+#if defined(MEMFD_CREATE)
+    memfd = memfd_create("fb_heap", 0);
+#endif
+#if defined(__APPLE__)
+    if (memfd < 0) {
+      char memname[255];
+      snprintf(memname, sizeof(memname), "/fb_heap.%d", getpid());
+      memfd = shm_open(memname, O_CREAT | O_RDWR, 0666);
+      if (memfd < 0) {
+          uerror("shm_open", Nothing);
+      }
+    }
+#endif
+    if (memfd < 0) {
+      raise_failed_anonymous_memfd_init();
+    }
+  } else {
+    assert_avail_exceeds_minimum(shm_dir, minimum_avail);
+    if (memfd < 0) {
+      char template[1024];
+      if (!snprintf(template, 1024, "%s/fb_heap-XXXXXX", shm_dir)) {
+        uerror("snprintf", Nothing);
+      };
+      memfd = mkstemp(template);
+      if (memfd < 0) {
+        uerror("mkstemp", caml_copy_string(template));
+      }
+      unlink(template);
+    }
+  }
+  if(ftruncate(memfd, shared_mem_size) == -1) {
+    uerror("ftruncate", Nothing);
+  }
+}
+
+#endif
+
+
 /*****************************************************************************/
 /* Given a pointer to the shared memory address space, initializes all
  * the globals that live in shared memory.
  */
 /*****************************************************************************/
 
-static void init_shared_globals(char* mem) {
-  size_t page_size = getpagesize();
+#ifdef _WIN32
+
+static char *memfd_map(size_t shared_mem_size) {
+  char *mem;
+  mem = MapViewOfFileEx(
+    memfd,
+    FILE_MAP_ALL_ACCESS,
+    0, 0, 0,
+    (char *)SHARED_MEM_INIT);
+  if (mem != SHARED_MEM_INIT) {
+    win32_maperr(GetLastError());
+    uerror("MapViewOfFileEx", Nothing);
+  }
+  return mem;
+}
+
+#else
+
+static char *memfd_map(size_t shared_mem_size) {
+  char *mem;
+  /* MAP_NORESERVE is because we want a lot more virtual memory than what
+   * we are actually going to use.
+   */
+  int flags = MAP_SHARED | MAP_NORESERVE | MAP_FIXED;
+  int prot  = PROT_READ  | PROT_WRITE;
+  mem =
+    (char*)mmap((void *)SHARED_MEM_INIT, shared_mem_size, prot,
+                flags, memfd, 0);
+  if(mem == MAP_FAILED) {
+    printf("Error initializing: %s\n", strerror(errno));
+    exit(2);
+  }
+  return mem;
+}
+
+#endif
+
+/****************************************************************************
+ * The function memfd_reserve force allocation of (mem -> mem+sz) in
+ * the shared heap. This is mandatory on Windows. This is optional on
+ * Linux but it allows to have explicit "Out of memory" error
+ * messages. Otherwise, the kernel might terminate the process with
+ * `SIGBUS`.
+ ****************************************************************************/
+
+
+static void raise_out_of_shared_memory()
+{
+  static value *exn = NULL;
+  if (!exn) exn = caml_named_value("out_of_shared_memory");
+  caml_raise_constant(*exn);
+}
 
 #ifdef _WIN32
-  if (!VirtualAlloc(mem,
-                    page_size + global_size_b +
-                      2 * DEP_SIZE_B + HASHTBL_SIZE_B,
-                    MEM_COMMIT, PAGE_READWRITE)) {
+
+static void memfd_reserve(char * mem, size_t sz) {
+  if (!VirtualAlloc(mem, sz, MEM_COMMIT, PAGE_READWRITE)) {
     win32_maperr(GetLastError());
-    uerror("VirtualAlloc2", Nothing);
+    raise_out_of_shared_memory();
   }
+}
+
+#elif defined(__APPLE__)
+
+/* So OSX lacks fallocate, but in general you can do
+ * fcntl(fd, F_PREALLOCATE, &store)
+ * however it doesn't seem to work for a shm_open fd, so this function is
+ * currently a no-op. This means that our OOM handling for OSX is a little
+ * weaker than the other OS's */
+static void memfd_reserve(char * mem, size_t sz) {
+  (void)mem;
+  (void)sz;
+}
+
+#else
+
+static void memfd_reserve(char *mem, size_t sz) {
+  if(posix_fallocate(memfd, (uint64_t)(mem - shared_mem), sz)) {
+    raise_out_of_shared_memory();
+  }
+}
+
 #endif
+
+
+static void define_globals(char * shared_mem_init) {
+  size_t page_size = getpagesize();
+  char *mem = shared_mem_init;
+
+  // Beginning of the shared memory
+  shared_mem = mem;
 
   /* BEGINNING OF THE SMALL OBJECTS PAGE
    * We keep all the small objects in this page.
@@ -298,37 +551,79 @@ static void init_shared_globals(char* mem) {
   // The number of elements in the hashtable
   assert(CACHE_LINE_SIZE >= sizeof(int));
   hcounter = (int*)(mem + CACHE_LINE_SIZE);
-  *hcounter = 0;
 
   assert (CACHE_LINE_SIZE >= sizeof(uintptr_t));
   counter = (uintptr_t*)(mem + 2*CACHE_LINE_SIZE);
-  *counter = early_counter + 1;
+
+  assert (CACHE_LINE_SIZE >= sizeof(pid_t));
+  master_pid = (pid_t*)(mem + 3*CACHE_LINE_SIZE);
 
   mem += page_size;
   // Just checking that the page is large enough.
-  assert(page_size > 2*CACHE_LINE_SIZE + (int)sizeof(int));
+  assert(page_size > 3*CACHE_LINE_SIZE + (int)sizeof(int));
   /* END OF THE SMALL OBJECTS PAGE */
 
   /* Global storage initialization */
   global_storage = (value*)mem;
-  // Initial size is zero
-  global_storage[0] = 0;
   mem += global_size_b;
 
   /* Dependencies */
   deptbl = (uint64_t*)mem;
-  mem += DEP_SIZE_B;
+  mem += dep_size_b;
 
   deptbl_bindings = (uint64_t*)mem;
-  mem += DEP_SIZE_B;
+  mem += dep_size_b;
 
   /* Hashtable */
   hashtbl = (helt_t*)mem;
-  mem += HASHTBL_SIZE_B;
+  mem += hashtbl_size_b;
 
   /* Heap */
   heap_init = mem;
-  *heap = mem;
+
+#ifdef _WIN32
+  /* Reserve all memory space except the "huge" `global_size_b`. This is
+   * required for Windows but we don't do this for Linux since it lets us run
+   * more processes in parallel without running out of memory immediately
+   * (though we do risk it later on) */
+  memfd_reserve((char *)global_storage, sizeof(global_storage[0]));
+  memfd_reserve((char *)heap, heap_init - (char *)heap);
+#endif
+
+}
+
+static void init_shared_globals() {
+  // Initial size is zero for global storage is zero
+  global_storage[0] = 0;
+  // Initialize the number of element in the table
+  *hcounter = 0;
+  *counter = early_counter + 1;
+  // Initialize top heap pointers
+  *heap = heap_init;
+}
+
+
+/* The total size of the shared memory.  Most of it is going to remain
+ * virtual. */
+static size_t get_shared_mem_size() {
+  size_t page_size = getpagesize();
+  return (global_size_b + 2 * dep_size_b + hashtbl_size_b +
+          heap_size + page_size);
+}
+
+static void set_sizes(
+  unsigned long config_global_size,
+  unsigned long config_heap_size,
+  unsigned long config_dep_table_pow,
+  unsigned long config_hash_table_pow) {
+
+  global_size_b = config_global_size;
+  heap_size = config_heap_size;
+
+  dep_size       = 1ul << config_dep_table_pow;
+  dep_size_b     = dep_size * sizeof(value);
+  hashtbl_size   = 1ul << config_hash_table_pow;
+  hashtbl_size_b = hashtbl_size * sizeof(helt_t);
 }
 
 /*****************************************************************************/
@@ -336,78 +631,55 @@ static void init_shared_globals(char* mem) {
 /*****************************************************************************/
 
 CAMLprim value hh_shared_init(
-  value global_size_val,
-  value heap_size_val
+  value config_val,
+  value shm_dir_val
 ) {
+  CAMLparam2(config_val, shm_dir_val);
+  CAMLlocal5(
+    connector,
+    config_global_size_val,
+    config_heap_size_val,
+    config_dep_table_pow_val,
+    config_hash_table_pow_val
+  );
 
-  CAMLparam2(global_size_val, heap_size_val);
+  config_global_size_val = Field(config_val, 0);
+  config_heap_size_val = Field(config_val, 1);
+  config_dep_table_pow_val = Field(config_val, 2);
+  config_hash_table_pow_val = Field(config_val, 3);
+  set_sizes(
+    Long_val(config_global_size_val),
+    Long_val(config_heap_size_val),
+    Long_val(config_dep_table_pow_val),
+    Long_val(config_hash_table_pow_val)
+  );
 
-  global_size_b = Long_val(global_size_val);
-  heap_size = Long_val(heap_size_val);
+  shared_mem_size = get_shared_mem_size();
 
-  size_t page_size = getpagesize();
+  // None -> NULL
+  // Some str -> String_val(str)
+  char *shm_dir = NULL;
+  if (shm_dir_val != Val_int(0)) {
+    shm_dir = String_val(Field(shm_dir_val, 0));
+  }
 
-  /* The total size of the shared memory.  Most of it is going to remain
-   * virtual. */
-  shared_mem_size =
-    global_size_b + 2 * DEP_SIZE_B + HASHTBL_SIZE_B +
-    heap_size + page_size;
+  memfd_init(
+    shm_dir,
+    shared_mem_size,
+    Long_val(Field(config_val, 5))
+  );
+  char *shared_mem_init = memfd_map(shared_mem_size);
+  define_globals(shared_mem_init);
 
+  // Keeping the pids around to make asserts.
 #ifdef _WIN32
-  /*
+  *master_pid = 0;
+  my_pid = *master_pid;
+#else
+  *master_pid = getpid();
+  my_pid = *master_pid;
+#endif
 
-     We create an anonymous memory file, whose `handle` might be
-     inherited by slave processes.
-
-     This memory file is tagged "reserved" but not "committed". This
-     means that the memory space will be reserved in the virtual
-     memory table but the pages will not be bound to any physical
-     memory yet. Further calls to 'VirtualAlloc' will "commit" pages,
-     meaning they will be bound to physical memory.
-
-     This is behavior that should reflect the 'MAP_NORESERVE' flag of
-     'mmap' on Unix. But, on Unix, the "commit" is implicit.
-
-     Committing the whole shared heap at once would require the same
-     amount of free space in memory (or in swap file).
-
-  */
-  HANDLE handle = CreateFileMapping(
-    INVALID_HANDLE_VALUE,
-    NULL,
-    PAGE_READWRITE | SEC_RESERVE,
-    shared_mem_size >> 32, shared_mem_size & ((1ll << 32) - 1),
-    NULL);
-  if (handle == NULL) {
-    win32_maperr(GetLastError());
-    uerror("CreateFileMapping", Nothing);
-  }
-  if (!SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT)) {
-    win32_maperr(GetLastError());
-    uerror("SetHandleInformation", Nothing);
-  }
-  shared_mem = MapViewOfFileEx(
-    handle,
-    FILE_MAP_ALL_ACCESS,
-    0, 0, 0);
-  if (shared_mem == NULL) {
-    win32_maperr(GetLastError());
-    uerror("MapViewOfFileEx", Nothing);
-  }
-
-#else /* _WIN32 */
-
-  /* MAP_NORESERVE is because we want a lot more virtual memory than what
-   * we are actually going to use.
-   */
-  int flags = MAP_SHARED | MAP_ANON | MAP_NORESERVE;
-  int prot  = PROT_READ  | PROT_WRITE;
-
-  shared_mem = (char*)mmap(NULL, shared_mem_size, prot, flags, 0, 0);
-  if(shared_mem == MAP_FAILED) {
-    printf("Error initializing: %s\n", strerror(errno));
-    exit(2);
-  }
 
 #ifdef MADV_DONTDUMP
   // We are unlikely to get much useful information out of the shared heap in
@@ -417,17 +689,9 @@ CAMLprim value hh_shared_init(
   madvise(shared_mem, shared_mem_size, MADV_DONTDUMP);
 #endif
 
-  // Keeping the pids around to make asserts.
-  master_pid = getpid();
-  my_pid = master_pid;
-
-#endif /* _WIN32 */
-
-  char* bottom = shared_mem;
-  init_shared_globals(shared_mem);
-
+  init_shared_globals();
   // Checking that we did the maths correctly.
-  assert(*heap + heap_size == bottom + shared_mem_size);
+  assert(*heap + heap_size == shared_mem + shared_mem_size);
 
 #ifndef _WIN32
   // Uninstall ocaml's segfault handler. It's supposed to throw an exception on
@@ -441,7 +705,14 @@ CAMLprim value hh_shared_init(
   sigaction(SIGSEGV, &sigact, NULL);
 #endif
 
-  CAMLreturn(Val_unit);
+  connector = caml_alloc_tuple(5);
+  Field(connector, 0) = Val_handle(memfd);
+  Field(connector, 1) = config_global_size_val;
+  Field(connector, 2) = config_heap_size_val;
+  Field(connector, 3) = config_dep_table_pow_val;
+  Field(connector, 4) = config_hash_table_pow_val;
+
+  CAMLreturn(connector);
 }
 
 void hh_shared_reset() {
@@ -449,15 +720,33 @@ void hh_shared_reset() {
   assert(shared_mem);
   early_counter = 1;
   memset(shared_mem, 0, heap_init - shared_mem);
-  init_shared_globals(shared_mem);
+  init_shared_globals();
 #endif
 }
 
 /* Must be called by every worker before any operation is performed */
-void hh_worker_init() {
-#ifndef _WIN32
+value hh_connect(value connector, value is_master) {
+  CAMLparam2(connector, is_master);
+  memfd = Handle_val(Field(connector, 0));
+  set_sizes(
+    Long_val(Field(connector, 1)),
+    Long_val(Field(connector, 2)),
+    Long_val(Field(connector, 3)),
+    Long_val(Field(connector, 4))
+  );
+#ifdef _WIN32
+  my_pid = 1; // Trick
+#else
   my_pid = getpid();
 #endif
+  char *shared_mem_init = memfd_map(get_shared_mem_size());
+  define_globals(shared_mem_init);
+
+  if (Bool_val(is_master)) {
+    *master_pid = my_pid;
+  }
+
+  CAMLreturn(Val_unit);
 }
 
 /*****************************************************************************/
@@ -488,6 +777,18 @@ CAMLprim value hh_counter_next(void) {
 }
 
 /*****************************************************************************/
+/* There are a bunch of operations that only the designated master thread is
+ * allowed to do. This assert will fail if the current process is not the master
+ * process
+ */
+/*****************************************************************************/
+void assert_master() {
+  assert(my_pid == *master_pid);
+}
+
+/*****************************************************************************/
+
+/*****************************************************************************/
 /* Global storage */
 /*****************************************************************************/
 
@@ -495,11 +796,12 @@ void hh_shared_store(value data) {
   CAMLparam1(data);
   size_t size = caml_string_length(data);
 
-  assert(my_pid == master_pid);                  // only the master can store
+  assert_master();                               // only the master can store
   assert(global_storage[0] == 0);                // Is it clear?
   assert(size < global_size_b - sizeof(value));  // Do we have enough space?
 
   global_storage[0] = size;
+  memfd_reserve((char *)&global_storage[1], size);
   memcpy(&global_storage[1], &Field(data, 0), size);
 
   CAMLreturn0;
@@ -526,7 +828,7 @@ CAMLprim value hh_shared_load(void) {
 }
 
 void hh_shared_clear(void) {
-  assert(my_pid == master_pid);
+  assert_master();
   global_storage[0] = 0;
 }
 
@@ -561,7 +863,7 @@ static uint64_t hash_uint64(uint64_t n) {
 /*****************************************************************************/
 
 static int htable_add(uint64_t* table, unsigned long hash, uint64_t value) {
-  unsigned long slot = hash & (DEP_SIZE - 1);
+  unsigned long slot = hash & (dep_size - 1);
 
   while(1) {
     /* It considerably speeds things up to do a normal load before trying using
@@ -585,7 +887,7 @@ static int htable_add(uint64_t* table, unsigned long hash, uint64_t value) {
       }
     }
 
-    slot = (slot + 1) & (DEP_SIZE - 1);
+    slot = (slot + 1) & (dep_size - 1);
   }
 }
 
@@ -606,7 +908,7 @@ CAMLprim value hh_dep_used_slots(void) {
   CAMLparam0();
   uint64_t count = 0;
   uintptr_t slot = 0;
-  for (slot = 0; slot < DEP_SIZE; ++slot) {
+  for (slot = 0; slot < dep_size; ++slot) {
     if (deptbl[slot]) {
       count++;
     }
@@ -616,7 +918,7 @@ CAMLprim value hh_dep_used_slots(void) {
 
 CAMLprim value hh_dep_slots(void) {
   CAMLparam0();
-  CAMLreturn(Val_long(DEP_SIZE));
+  CAMLreturn(Val_long(dep_size));
 }
 
 /* Given a key, returns the list of values bound to it. */
@@ -625,7 +927,7 @@ CAMLprim value hh_get_dep(value dep) {
   CAMLlocal2(result, cell);
 
   unsigned long hash = Long_val(dep);
-  unsigned long slot = hash & (DEP_SIZE - 1);
+  unsigned long slot = hash & (dep_size - 1);
 
   result = Val_int(0); // The empty list
 
@@ -639,7 +941,7 @@ CAMLprim value hh_get_dep(value dep) {
       Field(cell, 1) = result;
       result = cell;
     }
-    slot = (slot + 1) & (DEP_SIZE - 1);
+    slot = (slot + 1) & (dep_size - 1);
   }
 
   CAMLreturn(result);
@@ -648,6 +950,50 @@ CAMLprim value hh_get_dep(value dep) {
 /*****************************************************************************/
 /* Garbage collector */
 /*****************************************************************************/
+
+/** Wrappers around mmap/munmap */
+
+#ifdef _WIN32
+
+static char *temp_memory_map() {
+  char *tmp_heap;
+  tmp_heap = VirtualAlloc(NULL, heap_size, MEM_RESERVE, PAGE_READWRITE);
+  if (!tmp_heap) {
+    win32_maperr(GetLastError());
+    uerror("VirtualAlloc2", Nothing);
+  }
+  return tmp_heap;
+}
+
+static void temp_memory_unmap(char * tmp_heap) {
+  if(!VirtualFree(tmp_heap, 0, MEM_RELEASE)) {
+    win32_maperr(GetLastError());
+    uerror("VirtualFree", Nothing);
+  }
+}
+
+#else
+
+static char *temp_memory_map() {
+  char *tmp_heap;
+  int flags       = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
+  int prot        = PROT_READ | PROT_WRITE;
+  tmp_heap = (char*)mmap(NULL, heap_size, prot, flags, 0, 0);
+  if(tmp_heap == MAP_FAILED) {
+    printf("Error while collecting: %s\n", strerror(errno));
+    exit(2);
+  }
+  return tmp_heap;
+}
+
+static void temp_memory_unmap(char * tmp_heap) {
+  if(munmap(tmp_heap, heap_size) == -1) {
+    printf("Error while collecting: %s\n", strerror(errno));
+    exit(2);
+  }
+}
+
+#endif
 
 /*****************************************************************************/
 /* Must be called after the hack server is done initializing.
@@ -682,16 +1028,9 @@ value hh_check_heap_overflow() {
  */
 /*****************************************************************************/
 void hh_collect(value aggressive_val) {
-#ifdef _WIN32
-  // TODO GRGR
-  return;
-#else
   int aggressive  = Bool_val(aggressive_val);
-  int flags       = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
-  int prot        = PROT_READ | PROT_WRITE;
-  char* dest;
+  char* tmp_heap, *dest;
   size_t mem_size = 0;
-  char* tmp_heap;
 
   float space_overhead = aggressive ? 1.2 : 2.0;
   if(used_heap_size() < (size_t)(space_overhead * heap_init_size)) {
@@ -699,24 +1038,19 @@ void hh_collect(value aggressive_val) {
     return;
   }
 
-  tmp_heap = (char*)mmap(NULL, heap_size, prot, flags, 0, 0);
+  tmp_heap = temp_memory_map();
   dest = tmp_heap;
-
-  if(tmp_heap == MAP_FAILED) {
-    printf("Error while collecting: %s\n", strerror(errno));
-    exit(2);
-  }
-
-  assert(my_pid == master_pid); // Comes from the master
+  assert_master(); // Comes from the master
 
   // Walking the table
   size_t i;
-  for(i = 0; i < HASHTBL_SIZE; i++) {
+  for(i = 0; i < hashtbl_size; i++) {
     if(hashtbl[i].addr != NULL) { // Found a non empty slot
       size_t bl_size      = Get_buf_size(hashtbl[i].addr);
       size_t aligned_size = ALIGNED(bl_size);
       char* addr          = Get_buf(hashtbl[i].addr);
 
+      memfd_reserve(dest, bl_size);
       memcpy(dest, addr, bl_size);
       // This is where the data ends up after the copy
       hashtbl[i].addr = heap_init + mem_size + sizeof(size_t);
@@ -729,11 +1063,8 @@ void hh_collect(value aggressive_val) {
   memcpy(heap_init, tmp_heap, mem_size);
   *heap = heap_init + mem_size;
 
-  if(munmap(tmp_heap, heap_size) == -1) {
-    printf("Error while collecting: %s\n", strerror(errno));
-    exit(2);
-  }
-#endif
+  temp_memory_unmap(tmp_heap);
+
 }
 
 /*****************************************************************************/
@@ -748,12 +1079,7 @@ void hh_collect(value aggressive_val) {
 static char* hh_alloc(size_t size) {
   size_t slot_size  = ALIGNED(size + sizeof(size_t));
   char* chunk       = __sync_fetch_and_add(heap, (char*)slot_size);
-#ifdef _WIN32
-  if (!VirtualAlloc(chunk, slot_size, MEM_COMMIT, PAGE_READWRITE)) {
-    win32_maperr(GetLastError());
-    uerror("VirtualAlloc1", Nothing);
-  }
-#endif
+  memfd_reserve(chunk, slot_size);
   *((size_t*)chunk) = size;
   return (chunk + sizeof(size_t));
 }
@@ -801,7 +1127,7 @@ static void write_at(unsigned int slot, value data) {
 /*****************************************************************************/
 void hh_add(value key, value data) {
   unsigned long hash = get_hash(key);
-  unsigned int slot = hash & (HASHTBL_SIZE - 1);
+  unsigned int slot = hash & (hashtbl_size - 1);
 
   while(1) {
     unsigned long slot_hash = hashtbl[slot].hash;
@@ -815,7 +1141,7 @@ void hh_add(value key, value data) {
       // We think we might have a free slot, try to atomically grab it.
       if(__sync_bool_compare_and_swap(&(hashtbl[slot].hash), 0, hash)) {
         unsigned long size = __sync_fetch_and_add(hcounter, 1);
-        assert(size < HASHTBL_SIZE);
+        assert(size < hashtbl_size);
         write_at(slot, data);
         return;
       }
@@ -839,7 +1165,7 @@ void hh_add(value key, value data) {
       }
     }
 
-    slot = (slot + 1) & (HASHTBL_SIZE - 1);
+    slot = (slot + 1) & (hashtbl_size - 1);
   }
 }
 
@@ -850,7 +1176,7 @@ void hh_add(value key, value data) {
 /*****************************************************************************/
 static unsigned int find_slot(value key) {
   unsigned long hash = get_hash(key);
-  unsigned int slot = hash & (HASHTBL_SIZE - 1);
+  unsigned int slot = hash & (hashtbl_size - 1);
 
   while(1) {
     if(hashtbl[slot].hash == hash) {
@@ -859,7 +1185,7 @@ static unsigned int find_slot(value key) {
     if(hashtbl[slot].hash == 0) {
       return slot;
     }
-    slot = (slot + 1) & (HASHTBL_SIZE - 1);
+    slot = (slot + 1) & (hashtbl_size - 1);
   }
 }
 
@@ -871,6 +1197,7 @@ static unsigned int find_slot(value key) {
  */
 /*****************************************************************************/
 value hh_mem(value key) {
+  CAMLparam1(key);
   unsigned int slot = find_slot(key);
   if(hashtbl[slot].hash == get_hash(key) &&
      hashtbl[slot].addr != NULL) {
@@ -883,9 +1210,9 @@ value hh_mem(value key) {
       asm volatile("pause" : : : "memory");
 #endif
     }
-    return Val_bool(1);
+    CAMLreturn(Val_bool(1));
   }
-  return Val_bool(0);
+  CAMLreturn(Val_bool(0));
 }
 
 /*****************************************************************************/
@@ -915,7 +1242,7 @@ void hh_move(value key1, value key2) {
   unsigned int slot1 = find_slot(key1);
   unsigned int slot2 = find_slot(key2);
 
-  assert(my_pid == master_pid);
+  assert_master();
   assert(hashtbl[slot1].hash == get_hash(key1));
   assert(hashtbl[slot2].addr == NULL);
   hashtbl[slot2].hash = get_hash(key2);
@@ -931,7 +1258,7 @@ void hh_move(value key1, value key2) {
 void hh_remove(value key) {
   unsigned int slot = find_slot(key);
 
-  assert(my_pid == master_pid);
+  assert_master();
   assert(hashtbl[slot].hash == get_hash(key));
   hashtbl[slot].addr = NULL;
 }
@@ -1004,11 +1331,11 @@ void hh_save_dep_table(value out_filename) {
 
   int compressed_size = 0;
 
-  assert(LZ4_MAX_INPUT_SIZE >= DEP_SIZE_B);
-  char* compressed = malloc(DEP_SIZE_B);
+  assert(LZ4_MAX_INPUT_SIZE >= dep_size_b);
+  char* compressed = malloc(dep_size_b);
   assert(compressed != NULL);
 
-  compressed_size = LZ4_compressHC((char*)deptbl, compressed, DEP_SIZE_B);
+  compressed_size = LZ4_compressHC((char*)deptbl, compressed, dep_size_b);
   assert(compressed_size > 0);
 
   fwrite_no_fail(&compressed_size, sizeof compressed_size, 1, fp);
@@ -1042,12 +1369,12 @@ void hh_load_dep_table(value in_filename) {
   int actual_compressed_size = LZ4_decompress_fast(
       compressed,
       (char*)deptbl,
-      DEP_SIZE_B);
+      dep_size_b);
   assert(compressed_size == actual_compressed_size);
   tv = log_duration("Loading file", tv);
 
   uintptr_t slot = 0;
-  for (slot = 0; slot < DEP_SIZE; ++slot) {
+  for (slot = 0; slot < dep_size; ++slot) {
     uint64_t dep = deptbl[slot];
     if (dep != 0) {
       htable_add(deptbl_bindings, hash_uint64(dep), dep);

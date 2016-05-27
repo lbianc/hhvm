@@ -196,8 +196,8 @@ bool RuntimeOption::ServerEnableH2C = false;
 int RuntimeOption::BrotliCompressionEnabled = -1;
 int RuntimeOption::BrotliChunkedCompressionEnabled = -1;
 int RuntimeOption::BrotliCompressionMode = 0;
-int RuntimeOption::BrotliCompressionQuality = 11;
-int RuntimeOption::BrotliCompressionLgWindowSize = 22;
+int RuntimeOption::BrotliCompressionQuality = 6;
+int RuntimeOption::BrotliCompressionLgWindowSize = 20;
 int RuntimeOption::GzipCompressionLevel = 3;
 int RuntimeOption::GzipMaxCompressionLevel = 9;
 std::string RuntimeOption::ForceCompressionURL;
@@ -299,6 +299,7 @@ std::vector<std::string> RuntimeOption::AllowedExecCmds;
 
 bool RuntimeOption::UnserializationWhitelistCheck = false;
 bool RuntimeOption::UnserializationWhitelistCheckWarningOnly = true;
+int64_t RuntimeOption::UnserializationBigMapThreshold = 1 << 16;
 
 std::string RuntimeOption::TakeoverFilename;
 int RuntimeOption::AdminServerPort = 0;
@@ -878,7 +879,11 @@ void RuntimeOption::Load(
                                              false);
           string format = Config::GetString(ini_pl, hdf_pl, "Format",
                                             AccessLogDefaultFormat, false);
-          logs[logName] = AccessLogFileData(fname, symlink, format);
+          auto periodMultiplier = Config::GetUInt16(ini_pl, hdf_pl,
+                                                    "PeriodMultiplier",
+                                                    0, false);
+          logs[logName] = AccessLogFileData(fname, symlink,
+                                            format, periodMultiplier);
 
 
         }
@@ -1053,10 +1058,6 @@ void RuntimeOption::Load(
     Config::Bind(Eval ## name, ini, config, "Eval."#name, defaultVal);
     EVALFLAGS()
 #undef F
-    if (RuntimeOption::EvalJitConcurrently) {
-      // TODO(t10247359): Remove this.
-      RuntimeOption::EvalJitPGO = false;
-    }
     if (EvalPerfRelocate > 0) {
       setRelocateRequests(EvalPerfRelocate);
     }
@@ -1319,11 +1320,11 @@ void RuntimeOption::Load(
     Config::Bind(BrotliChunkedCompressionEnabled, ini, config,
                  "Server.BrotliChunkedCompressionEnabled", -1);
     Config::Bind(BrotliCompressionLgWindowSize, ini, config,
-                 "Server.BrotliCompressionLgWindowSize", 22);
+                 "Server.BrotliCompressionLgWindowSize", 20);
     Config::Bind(BrotliCompressionMode, ini, config,
                  "Server.BrotliCompressionMode", 0);
     Config::Bind(BrotliCompressionQuality, ini, config,
-                 "Server.BrotliCompressionQuality", 11);
+                 "Server.BrotliCompressionQuality", 6);
     Config::Bind(GzipCompressionLevel, ini, config,
                  "Server.GzipCompressionLevel", 3);
     Config::Bind(GzipMaxCompressionLevel, ini, config,
@@ -1425,6 +1426,8 @@ void RuntimeOption::Load(
                  "Server.UnserializationWhitelistCheck", false);
     Config::Bind(UnserializationWhitelistCheckWarningOnly, ini, config,
                  "Server.UnserializationWhitelistCheckWarningOnly", true);
+    Config::Bind(UnserializationBigMapThreshold, ini, config,
+                 "Server.UnserializationBigMapThreshold", 1 << 16);
     Config::Bind(AllowedFiles, ini, config, "Server.AllowedFiles");
     Config::Bind(ForbiddenFileExtensions, ini, config,
                  "Server.ForbiddenFileExtensions");

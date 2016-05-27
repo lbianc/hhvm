@@ -96,8 +96,8 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
  public:
   static void resetMaxId();
 
-  explicit ObjectData(Class*);
-  explicit ObjectData(Class*, uint16_t flags, HeaderKind = HeaderKind::Object);
+  explicit ObjectData(Class*, uint16_t flags = 0,
+                      HeaderKind = HeaderKind::Object);
   ~ObjectData();
 
   // Disallow copy construction and assignemt
@@ -312,7 +312,6 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
 
  public:
   ObjectData* callCustomInstanceInit();
-  ObjectData* cloneImpl();
   const Func* methodNamed(const StringData*) const;
   static size_t sizeForNProps(Slot);
 
@@ -488,29 +487,6 @@ inline ObjectData* instanceFromTv(TypedValue* tv) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-template<uint16_t Flags>
-struct ExtObjectDataFlags : ObjectData {
-  explicit ExtObjectDataFlags(HPHP::Class* cb,
-                              HeaderKind kind = HeaderKind::Object)
-    : ObjectData(cb, Flags | ObjectData::IsCppBuiltin, kind)
-  {
-    assert(!getVMClass()->callsCustomInstanceInit());
-  }
-
-protected:
-  explicit ExtObjectDataFlags(HPHP::Class* cb,
-                              HeaderKind kind,
-                              NoInit ni) noexcept
-  : ObjectData(cb, Flags | ObjectData::IsCppBuiltin, kind, ni)
-  {
-    assert(!getVMClass()->callsCustomInstanceInit());
-  }
-
-  ~ExtObjectDataFlags() {}
-};
-
-using ExtObjectData = ExtObjectDataFlags<ObjectData::IsCppBuiltin>;
 
 #define DECLARE_CLASS_NO_SWEEP(originalName)                           \
   public:                                                              \

@@ -98,8 +98,12 @@ let update_status_ (server: ServerProcess.server_process) = match server with
       | 0, _ ->
         server
       | _, _ ->
+        let oom_code = Exit_status.(exit_code Out_of_shared_memory) in
+        let was_oom = match proc_stat with
+        | Unix.WEXITED code when code = oom_code -> true
+        | _ -> check_dmesg_for_oom process in
         ServerProcessTools.check_exit_status proc_stat process;
-        Died_unexpectedly (proc_stat, (check_dmesg_for_oom process)))
+        Died_unexpectedly (proc_stat, was_oom))
   | _ -> server
 
 let start_servers monitor_starter =
@@ -144,11 +148,11 @@ let update_status env =
    let env = { env with servers = servers } in
    let watchman_failed _ status = match status with
      | Died_unexpectedly ((Unix.WEXITED c), _)
-        when c = Exit_status.(ec Watchman_failed) -> true
+        when c = Exit_status.(exit_code Watchman_failed) -> true
      | _ -> false in
    let config_changed _ status = match status with
      | Died_unexpectedly ((Unix.WEXITED c), _)
-        when c = Exit_status.(ec Hhconfig_changed) -> true
+        when c = Exit_status.(exit_code Hhconfig_changed) -> true
      | _ -> false in
    let max_watchman_retries = 3 in
    if (SMap.exists watchman_failed servers)
@@ -340,7 +344,7 @@ let start_monitoring ~waiting_client monitor_config monitor_starter =
    * can be notified when the monitor socket is ready. The FD number was passed
    * in program args. *)
   Option.iter waiting_client begin fun fd ->
-    let oc = Handle.to_out_channel fd in
+    let oc = Unix.out_channel_of_descr fd in
     try
       output_string oc (ServerMonitorUtils.ready^"\n");
       close_out oc;

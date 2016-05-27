@@ -395,6 +395,8 @@ CALL_OPCODE(Clone)
 CALL_OPCODE(AllocObj)
 CALL_OPCODE(InitProps)
 CALL_OPCODE(InitSProps)
+CALL_OPCODE(DebugBacktrace)
+CALL_OPCODE(InitThrowableFileAndLine)
 CALL_OPCODE(RegisterLiveObj)
 CALL_OPCODE(LdClsCtor)
 CALL_OPCODE(LookupClsRDSHandle)
@@ -407,6 +409,7 @@ CALL_OPCODE(LdSwitchStrIndex)
 CALL_OPCODE(LdSwitchObjIndex)
 CALL_OPCODE(VerifyParamCallable)
 CALL_OPCODE(VerifyParamFail)
+CALL_OPCODE(VerifyParamFailHard)
 CALL_OPCODE(VerifyRetCallable)
 CALL_OPCODE(VerifyRetFail)
 CALL_OPCODE(RaiseUninitLoc)
@@ -4323,7 +4326,7 @@ void CodeGenerator::cgCheckSurpriseFlags(IRInstruction* inst) {
 void CodeGenerator::cgCheckCold(IRInstruction* inst) {
   Block*     taken = inst->taken();
   TransID  transId = inst->extra<CheckCold>()->transId;
-  auto counterAddr = mcg->tx().profData()->transCounterAddr(transId);
+  auto counterAddr = profData()->transCounterAddr(transId);
   auto& v = vmain();
   auto const sf = v.makeReg();
   v << decqmlock{v.cns(counterAddr)[0], sf};
@@ -4776,6 +4779,14 @@ void CodeGenerator::cgAsyncRetFast(IRInstruction* inst) {
   v << jmpi{mcg->ustubs().asyncRetCtrl, args};
 }
 
+void CodeGenerator::cgAsyncSwitchFast(IRInstruction* inst) {
+  auto& v = vmain();
+  adjustSPForReturn(m_state, inst);
+  prepare_return_regs(v, inst->src(2), srcLoc(inst, 2),
+                      inst->extra<AsyncSwitchFast>()->aux);
+  v << jmpi{mcg->ustubs().asyncSwitchCtrl, php_return_regs()};
+}
+
 void CodeGenerator::cgIsWaitHandle(IRInstruction* inst) {
   auto const robj = srcLoc(inst, 0).reg();
   auto const rdst = dstLoc(inst, 0).reg();
@@ -5098,7 +5109,7 @@ void CodeGenerator::cgIncTransCounter(IRInstruction* inst) {
 
 void CodeGenerator::cgIncProfCounter(IRInstruction* inst) {
   auto const transId = inst->extra<TransIDData>()->transId;
-  auto const counterAddr = mcg->tx().profData()->transCounterAddr(transId);
+  auto const counterAddr = profData()->transCounterAddr(transId);
   auto& v = vmain();
   v << decqmlock{v.cns(counterAddr)[0], v.makeReg()};
 }

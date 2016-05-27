@@ -18,13 +18,15 @@
 #include <folly/Format.h>
 #include <folly/Singleton.h>
 
-#include "hphp/util/logger.h"
-#include "hphp/util/trace.h"
-#include "hphp/util/build-info.h"
-#include "hphp/util/assertions.h"
-#include "hphp/util/process.h"
+#include "hphp/compiler/option.h"
+#include "hphp/hhbbc/options.h"
 #include "hphp/runtime/vm/blob-helper.h"
 #include "hphp/runtime/vm/repo-global-data.h"
+#include "hphp/util/assertions.h"
+#include "hphp/util/build-info.h"
+#include "hphp/util/logger.h"
+#include "hphp/util/process.h"
+#include "hphp/util/trace.h"
 
 namespace HPHP {
 
@@ -175,7 +177,8 @@ void Repo::loadGlobalData(bool allowFailure /* = false */) {
     RuntimeOption::PHP7_IntSemantics = s_globalData.PHP7_IntSemantics;
     RuntimeOption::PHP7_ScalarTypes  = s_globalData.PHP7_ScalarTypes;
     RuntimeOption::AutoprimeGenerators = s_globalData.AutoprimeGenerators;
-
+    HHBBC::options.HardTypeHints = s_globalData.HardTypeHints;
+    HHBBC::options.HardReturnTypeHints = s_globalData.HardReturnTypeHints;
     return;
   }
 
@@ -646,10 +649,10 @@ bool Repo::openCentral(const char* rawPath, std::string& errorMsg) {
                              repoPath, re.what()).str();
     return false;
   }
+
   // sqlite3_open_v2() will silently open in read-only mode if file permissions
-  // prevent writing, and there is no apparent way to detect this other than to
-  // attempt writing to the database.  Therefore, tell initSchema() to verify
-  // that the database is writable.
+  // prevent writing.  Therefore, tell initSchema() to verify that the database
+  // is writable.
   bool centralWritable = true;
   if (initSchema(RepoIdCentral, centralWritable, errorMsg) ||
       !centralWritable) {
@@ -845,12 +848,6 @@ bool Repo::createSchema(int repoId, std::string& errorMsg) {
     }
     {
       std::stringstream ssCreate;
-      ssCreate << "CREATE TABLE " << table(repoId, "writable")
-               << "(canary INTEGER);";
-      txn.exec(ssCreate.str());
-    }
-    {
-      std::stringstream ssCreate;
       ssCreate << "CREATE TABLE " << table(repoId, "FileMd5")
                << "(path TEXT, md5 BLOB, UNIQUE(path, md5));";
       txn.exec(ssCreate.str());
@@ -871,22 +868,13 @@ bool Repo::createSchema(int repoId, std::string& errorMsg) {
 }
 
 bool Repo::writable(int repoId) {
-  try {
-    // Check whether database is writable by adding and removing a row in the
-    // 'writable' table.
-    RepoTxn txn(*this);
-    std::stringstream ssInsert;
-    ssInsert << "INSERT INTO " << table(repoId, "writable") << " VALUES(0);";
-    txn.exec(ssInsert.str());
-    std::stringstream ssDelete;
-    ssDelete << "DELETE FROM " << table(repoId, "writable")
-             << " WHERE canary == 0;";
-    txn.exec(ssDelete.str());
-    txn.commit();
-  } catch (RepoExc& re) {
-    return false;
+  switch (sqlite3_db_readonly(m_dbc, dbName(repoId))) {
+    case 0:  return true;
+    case 1:  return false;
+    case -1: return false;
+    default: break;
   }
-  return true;
+  always_assert(false);
 }
 
 //////////////////////////////////////////////////////////////////////

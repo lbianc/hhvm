@@ -27,10 +27,6 @@ inline void ObjectData::resetMaxId() {
   os_max_id = 0;
 }
 
-inline ObjectData::ObjectData(Class* cls)
-  : ObjectData(cls, 0, HeaderKind::Object)
-{}
-
 inline ObjectData::ObjectData(Class* cls, uint16_t flags, HeaderKind kind)
   : m_cls(cls)
 {
@@ -53,7 +49,7 @@ inline ObjectData::ObjectData(Class* cls, NoInit) noexcept
   : m_cls(cls)
 {
   m_hdr.init(0, HeaderKind::Object, 1);
-  assert(!m_hdr.aux && m_hdr.kind == HeaderKind::Object && hasExactlyOneRef());
+  assert(m_hdr.aux == 0 && hasExactlyOneRef());
   assert(!cls->needInitialization() || cls->initialized());
   o_id = ++os_max_id;
 }
@@ -78,6 +74,11 @@ inline size_t ObjectData::heapSize() const {
 }
 
 inline ObjectData* ObjectData::newInstance(Class* cls) {
+  Attr attrs = cls->attrs();
+  if (UNLIKELY(attrs &
+               (AttrAbstract | AttrInterface | AttrTrait | AttrEnum))) {
+    raiseAbstractClassError(cls);
+  }
   if (cls->needInitialization()) {
     cls->initialize();
   }
@@ -86,17 +87,12 @@ inline ObjectData* ObjectData::newInstance(Class* cls) {
     assert(obj->checkCount());
     return obj;
   }
-  Attr attrs = cls->attrs();
-  if (UNLIKELY(attrs &
-               (AttrAbstract | AttrInterface | AttrTrait | AttrEnum))) {
-    raiseAbstractClassError(cls);
-  }
   size_t nProps = cls->numDeclProperties();
   size_t size = sizeForNProps(nProps);
   auto& mm = MM();
   auto const obj = new (mm.objMalloc(size)) ObjectData(cls);
   assert(obj->hasExactlyOneRef());
-  if (UNLIKELY(cls->callsCustomInstanceInit())) {
+  if (UNLIKELY(cls->needsInitThrowable())) {
     /*
      * This must happen after the constructor finishes, because it can leak
      * references to obj AND it can throw exceptions. If we have this in the
@@ -115,7 +111,7 @@ inline ObjectData* ObjectData::newInstance(Class* cls) {
 inline ObjectData* ObjectData::newInstanceNoPropInit(Class* cls) {
   if (cls->needInitialization()) cls->initialize();
 
-  assert(!cls->instanceCtor() && !cls->callsCustomInstanceInit() &&
+  assert(!cls->instanceCtor() &&
          !(cls->attrs() &
            (AttrAbstract | AttrInterface | AttrTrait | AttrEnum)));
 

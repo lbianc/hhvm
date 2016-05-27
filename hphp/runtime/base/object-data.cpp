@@ -19,6 +19,7 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/container-functions.h"
+#include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/externals.h"
 #include "hphp/runtime/base/runtime-error.h"
@@ -766,7 +767,35 @@ ObjectData* ObjectData::clone() {
     always_assert(instanceof(c_Closure::classof()));
     return c_Closure::fromObject(this)->clone();
   }
-  return cloneImpl();
+
+  auto obj = instanceof(Generator::getClass()) ? Generator::allocClone(this) :
+             ObjectData::newInstance(m_cls);
+  // clone prevents a leak if something throws before clone() returns
+  Object clone = Object::attach(obj);
+  auto const nProps = m_cls->numDeclProperties();
+  auto const clonePropVec = clone->propVec();
+  for (auto i = Slot{0}; i < nProps; i++) {
+    tvRefcountedDecRef(&clonePropVec[i]);
+    tvDupFlattenVars(&propVec()[i], &clonePropVec[i]);
+  }
+  if (UNLIKELY(getAttribute(HasDynPropArr))) {
+    clone->setAttribute(HasDynPropArr);
+    g_context->dynPropTable.emplace(clone.get(), dynPropArray().get());
+  }
+  if (UNLIKELY(getAttribute(HasNativeData))) {
+    Native::nativeDataInstanceCopy(clone.get(), this);
+  }
+  if (getAttribute(HasClone)) {
+    auto const method = clone->m_cls->lookupMethod(s_clone.get());
+    // PHP classes that inherit from cpp builtins that have special clone
+    // functionality *may* also define a __clone method, but it's totally
+    // fine if a __clone doesn't exist.
+    if (method || !getAttribute(IsCppBuiltin)) {
+      assert(method);
+      g_context->invokeMethodV(clone.get(), method);
+    }
+  }
+  return clone.detach();
 }
 
 bool ObjectData::equal(const ObjectData& other) const {
@@ -887,7 +916,7 @@ void deepInitHelper(TypedValue* propVec, const TypedValueAux* propData,
 }
 
 /**
- * Only call this if cls->callsCustomInstanceInit() is true
+ * Only call this if cls->needsInitThrowable() is true
  */
 ObjectData* ObjectData::callCustomInstanceInit() {
   auto const init = m_cls->lookupMethod(s___init__.get());
@@ -1725,37 +1754,6 @@ String ObjectData::invokeToString() {
 
 bool ObjectData::hasToString() {
   return (m_cls->getToString() != nullptr);
-}
-
-ObjectData* ObjectData::cloneImpl() {
-  auto obj = instanceof(Generator::getClass()) ? Generator::allocClone(this) :
-             ObjectData::newInstance(m_cls);
-  // clone prevents a leak if something throws before cloneImpl() returns
-  Object clone = Object::attach(obj);
-  auto const nProps = m_cls->numDeclProperties();
-  auto const clonePropVec = clone->propVec();
-  for (auto i = Slot{0}; i < nProps; i++) {
-    tvRefcountedDecRef(&clonePropVec[i]);
-    tvDupFlattenVars(&propVec()[i], &clonePropVec[i]);
-  }
-  if (UNLIKELY(getAttribute(HasDynPropArr))) {
-    clone->setAttribute(HasDynPropArr);
-    g_context->dynPropTable.emplace(clone.get(), dynPropArray().get());
-  }
-  if (UNLIKELY(getAttribute(HasNativeData))) {
-    Native::nativeDataInstanceCopy(clone.get(), this);
-  }
-  if (getAttribute(HasClone)) {
-    auto const method = clone->m_cls->lookupMethod(s_clone.get());
-    // PHP classes that inherit from cpp builtins that have special clone
-    // functionality *may* also define a __clone method, but it's totally
-    // fine if a __clone doesn't exist.
-    if (method || !getAttribute(IsCppBuiltin)) {
-      assert(method);
-      g_context->invokeMethodV(clone.get(), method);
-    }
-  }
-  return clone.detach();
 }
 
 const char* ObjectData::classname_cstr() const {

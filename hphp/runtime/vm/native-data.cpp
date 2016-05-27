@@ -89,11 +89,6 @@ NativeDataInfo* getNativeDataInfo(const StringData* name) {
  * NativeNode is a link in the NativeData sweep list for this ND block
  */
 ObjectData* nativeDataInstanceCtor(Class* cls) {
-  HPHP::Attr attrs = cls->attrs();
-  if (UNLIKELY(attrs &
-               (AttrAbstract | AttrInterface | AttrTrait | AttrEnum))) {
-    ObjectData::raiseAbstractClassError(cls);
-  }
   auto ndi = cls->getNativeDataInfo();
   size_t nativeDataSize = ndsize(ndi->sz);
   size_t nProps = cls->numDeclProperties();
@@ -114,7 +109,7 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
   if (ndi->sweep) {
     MM().addNativeObject(node);
   }
-  if (UNLIKELY(cls->callsCustomInstanceInit())) {
+  if (UNLIKELY(cls->needsInitThrowable())) {
     obj->callCustomInstanceInit();
   }
   return obj;

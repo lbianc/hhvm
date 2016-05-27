@@ -1,4 +1,6 @@
 #include "hphp/runtime/ext/collections/ext_collections-set.h"
+
+#include "hphp/runtime/ext/collections/ext_collections.h"
 #include "hphp/runtime/ext/collections/ext_collections-map.h"
 #include "hphp/runtime/ext/collections/ext_collections-pair.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
@@ -350,7 +352,7 @@ typename std::enable_if<
   std::is_base_of<BaseSet, TSet>::value, TSet*>::type
 BaseSet::Clone(ObjectData* obj) {
   auto thiz = static_cast<TSet*>(obj);
-  auto target = static_cast<TSet*>(obj->cloneImpl());
+  auto target = static_cast<TSet*>(TSet::instanceCtor(TSet::classof()));
   if (!thiz->m_size) {
     return target;
   }
@@ -417,7 +419,7 @@ void BaseSet::OffsetUnset(ObjectData* obj, const TypedValue* key) {
 template<typename TSet, bool useKey>
 typename std::enable_if<
   std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_map(const Variant& callback) const {
+BaseSet::php_map(const Variant& callback) {
   VMRegGuard _;
   CallCtx ctx;
   vm_decode_function(callback, nullptr, false, ctx);
@@ -457,7 +459,7 @@ BaseSet::php_map(const Variant& callback) const {
 template<typename TSet, bool useKey>
 typename std::enable_if<
   std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_filter(const Variant& callback) const {
+BaseSet::php_filter(const Variant& callback) {
   VMRegGuard _;
   CallCtx ctx;
   vm_decode_function(callback, nullptr, false, ctx);

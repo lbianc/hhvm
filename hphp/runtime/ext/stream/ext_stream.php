@@ -326,7 +326,7 @@ function stream_select(mixed &$read,
  * @param resource $fp - Stream resource, must be backed by a file descriptor
  *                       such as a normal file, socket, tempfile, or stdio.
  *                       Does not work with memory streams or user streams.
- * @param int $events - Mix of STREAM_AWAIT_READ and/or STREAM_EVENT_WRITE
+ * @param int $events - Mix of STREAM_AWAIT_READ and/or STREAM_AWAIT_WRITE
  * @param float $timeout - Timeout in seconds
  *
  * @return int - Result code
@@ -346,8 +346,8 @@ function stream_await(resource $fp,
  *   socket streams).
  *
  * @param resource $stream - The stream.
- * @param int $mode - If mode is 0, the given stream will be switched to
- *   non-blocking mode, and if 1, it will be switched to blocking mode. This
+ * @param int $mode - If mode is FALSE, the given stream will be switched to
+ *   non-blocking mode, and if TRUE, it will be switched to blocking mode. This
  *   affects calls like fgets() and fread() that read from the stream. In
  *   non-blocking mode an fgets() call will always return right away while in
  *   blocking mode it will wait for data to become available on the stream.
@@ -356,7 +356,7 @@ function stream_await(resource $fp,
  *
  */
 <<__Native>>
-function stream_set_blocking(resource $stream, int $mode): bool;
+function stream_set_blocking(resource $stream, bool $mode): bool;
 
 /**
  * Set read file buffering on the given stream.
@@ -415,8 +415,7 @@ function stream_set_timeout(resource $stream,
  *   are completed before other processes are allowed to write to that output
  *   stream.
  *
- * @return int - Returns 0 on success, or EOF if the request cannot be
- *   honored.
+ * @return int - Returns 0 on success.
  *
  */
 <<__Native>>

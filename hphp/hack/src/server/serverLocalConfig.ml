@@ -9,6 +9,7 @@
  *)
 
 open Config_file.Getters
+open Core
 
 type t = {
   use_watchman: bool;
@@ -20,6 +21,7 @@ type t = {
   lazy_decl: bool;
   io_priority: int;
   cpu_priority: int;
+  shm_dirs: string list;
 }
 
 let default = {
@@ -32,6 +34,7 @@ let default = {
   lazy_decl = false;
   io_priority = 7;
   cpu_priority = 10;
+  shm_dirs = [GlobalConfig.shm_dir; GlobalConfig.tmp_dir;];
 }
 
 let path =
@@ -57,6 +60,12 @@ let load_ fn =
     int_ "watchman_init_timeout" ~default:10 config in
   let io_priority = int_ "io_priority" ~default:7 config in
   let cpu_priority = int_ "cpu_priority" ~default:10 config in
+  let shm_dirs = string_list
+    ~delim:(Str.regexp ",")
+    "shm_dirs"
+    ~default:default.shm_dirs
+    config
+  |> List.map ~f:(fun(dir) -> Path.(to_string @@ make dir)) in
   {
     use_watchman;
     watchman_init_timeout;
@@ -67,6 +76,7 @@ let load_ fn =
     lazy_decl;
     io_priority;
     cpu_priority;
+    shm_dirs;
   }
 
 let load () =

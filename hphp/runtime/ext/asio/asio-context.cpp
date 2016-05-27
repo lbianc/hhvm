@@ -117,6 +117,31 @@ void AsioContext::schedule(c_RescheduleWaitHandle* wait_handle, uint32_t queue,
   wait_handle->incRefCount();
 }
 
+c_AsyncFunctionWaitHandle* AsioContext::maybePopFast() {
+  assertx(this == AsioSession::Get()->getCurrentContext());
+
+  while (!m_fastRunnableQueue.empty()) {
+    auto wh = m_fastRunnableQueue.back();
+    m_fastRunnableQueue.pop_back();
+
+    if (wh->getState() == c_ResumableWaitHandle::STATE_READY &&
+        wh->isFastResumable()) {
+      // We only call maybePopFast() on the current context.  Since `wh' was
+      // scheduled in this context at some point, it must still be scheduled
+      // here now, since the only way it could leave the context is if the
+      // context was destroyed.  (Being scheduled here supercedes it having
+      // been scheduled in earlier contexts.)
+      assertx(wh->getContextIdx() ==
+              AsioSession::Get()->getCurrentContextIdx());
+      return wh;
+    } else {
+      // `wh' is blocked or finished in some other context.
+      decRefObj(wh);
+    }
+  }
+  return nullptr;
+}
+
 void AsioContext::runUntil(c_WaitableWaitHandle* wait_handle) {
   assert(wait_handle);
   assert(wait_handle->getContext() == this);
@@ -175,20 +200,17 @@ void AsioContext::runUntil(c_WaitableWaitHandle* wait_handle) {
     if (!m_externalThreadEvents.empty()) {
       // ...but only until the next sleeper (from any context) finishes.
 
-      // Wait if necessary.
-      if (LIKELY(!ete_queue->hasReceived())) {
-        onIOWaitEnter(session);
-        // check if onIOWaitEnter callback unblocked any wait handles
-        if (LIKELY(m_runnableQueue.empty() &&
-                   m_fastRunnableQueue.empty() &&
-                   !m_externalThreadEvents.empty() &&
-                   !ete_queue->hasReceived() &&
-                   m_priorityQueueDefault.empty())) {
-          auto waketime = session->sleepWakeTime();
-          ete_queue->receiveSomeUntil(waketime);
-        }
-        onIOWaitExit(session, this);
+      onIOWaitEnter(session);
+      // check if onIOWaitEnter callback unblocked any wait handles
+      if (LIKELY(m_runnableQueue.empty() &&
+                 m_fastRunnableQueue.empty() &&
+                 !m_externalThreadEvents.empty() &&
+                 !ete_queue->hasReceived() &&
+                 m_priorityQueueDefault.empty())) {
+        auto waketime = session->sleepWakeTime();
+        ete_queue->receiveSomeUntil(waketime);
       }
+      onIOWaitExit(session, this);
 
       if (ete_queue->hasReceived()) {
         // Either we didn't have to wait, or we waited but no sleeper timed us
@@ -210,7 +232,8 @@ void AsioContext::runUntil(c_WaitableWaitHandle* wait_handle) {
       if (LIKELY(m_runnableQueue.empty() &&
                  m_fastRunnableQueue.empty() &&
                  m_externalThreadEvents.empty() &&
-                 m_priorityQueueDefault.empty())) {
+                 m_priorityQueueDefault.empty() &&
+                 !m_sleepEvents.empty())) {
         std::this_thread::sleep_until(session->sleepWakeTime());
       }
       onIOWaitExit(session, this);

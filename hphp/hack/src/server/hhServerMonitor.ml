@@ -22,7 +22,7 @@
 open HhServerMonitorConfig
 module SP = ServerProcess
 
-let start_server options name log_link daemon_entry =
+let start_server options handle name log_link daemon_entry =
   let log_fds =
     if ServerArgs.should_detach options then begin
       (try Sys.rename log_link (log_link ^ ".old") with _ -> ());
@@ -37,10 +37,13 @@ let start_server options name log_link daemon_entry =
     end
   in
   let start_t = Unix.time () in
+  let state = ServerGlobalState.save () in
   let {Daemon.pid; Daemon.channels = (ic, oc)} =
-    (* TODO: switch this back to Daemon.spawn after it's compatible with
-     * shared memory (#9556242) *)
-    Daemon.fork ~channel_mode:`socket log_fds daemon_entry options in
+    Daemon.spawn
+      ~channel_mode:`socket
+      log_fds
+      daemon_entry
+      (state, handle, options) in
   Hh_logger.log "Just started %s server with pid: %d." name pid;
   let server =
     SP.({
@@ -53,9 +56,10 @@ let start_server options name log_link daemon_entry =
     }) in
   server
 
-let start_hh_server options =
+let start_hh_server options handle =
   let log_link = ServerFiles.log_link (ServerArgs.root options) in
-  start_server options Program.hh_server log_link ServerMain.daemon_main
+  start_server options handle Program.hh_server log_link ServerMain.entry
+
 
 (** Main method of the server monitor daemon. The daemon is responsible for
  * listening to socket requests from hh_client, checking Build ID, and relaying
@@ -85,12 +89,13 @@ let monitor_daemon_main (options: ServerArgs.options) =
   ignore (Hhi.get_hhi_root());
 
   Relative_path.set_path_prefix Relative_path.Root www_root;
+
   let config = ServerConfig.(sharedmem_config (load filename options)) in
-  SharedMem.init config;
+  let handle = SharedMem.init config in
   let first_init = ref true in
 
   if ServerArgs.check_mode options then
-    ServerMain.run_once options
+    ServerMain.run_once options handle
   else
     let hh_server_monitor_starter = begin fun () ->
 
@@ -100,7 +105,7 @@ let monitor_daemon_main (options: ServerArgs.options) =
         SharedMem.reset ()
       end;
 
-      let typechecker = start_hh_server options in
+      let typechecker = start_hh_server options handle in
       [typechecker]
     end in
     let waiting_client = ServerArgs.waiting_client options in
@@ -136,8 +141,14 @@ let daemon_starter options =
 (** Either starts a monitor daemon (which will spawn a typechecker daemon),
  * or just runs the typechecker if detachment not enabled. *)
 let start () =
-  Daemon.check_entry_point (); (* this call might not return *)
-  let options = ServerArgs.parse_options () in
-  if ServerArgs.should_detach options
-  then Exit_status.exit (daemon_starter options)
-  else monitor_daemon_main options
+  (* TODO: Catch all exceptions that make it this high, log them, and exit with
+   * the proper code *)
+  try
+    Daemon.check_entry_point (); (* this call might not return *)
+    let options = ServerArgs.parse_options () in
+    if ServerArgs.should_detach options
+    then Exit_status.exit (daemon_starter options)
+    else monitor_daemon_main options
+  with
+  | SharedMem.Out_of_shared_memory ->
+      Exit_status.(exit Out_of_shared_memory)

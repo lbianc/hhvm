@@ -346,6 +346,8 @@ bool canDCE(IRInstruction* inst) {
   case CheckInitSProps:
   case InitSProps:
   case InitObjProps:
+  case DebugBacktrace:
+  case InitThrowableFileAndLine:
   case ConstructInstance:
   case AllocPackedArray:
   case AllocVecArray:
@@ -382,6 +384,7 @@ bool canDCE(IRInstruction* inst) {
   case VerifyParamCls:
   case VerifyParamCallable:
   case VerifyParamFail:
+  case VerifyParamFailHard:
   case VerifyRetCallable:
   case VerifyRetCls:
   case VerifyRetFail:
@@ -438,6 +441,7 @@ bool canDCE(IRInstruction* inst) {
   case StAsyncArResult:
   case AFWHBlockOn:
   case AsyncRetFast:
+  case AsyncSwitchFast:
   case ABCUnblock:
   case IncStat:
   case IncTransCounter:

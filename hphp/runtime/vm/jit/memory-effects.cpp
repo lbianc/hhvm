@@ -503,8 +503,9 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
       AStackAny | AFrameAny | AMIStateAny
     };
 
-  case AsyncRetFast:
   case AsyncRetCtrl:
+  case AsyncRetFast:
+  case AsyncSwitchFast:
     if (inst.extra<RetCtrlData>()->suspendingResumed) {
       return UnknownEffects {};
     }
@@ -659,8 +660,15 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   // possibly avoid storing KindOfUninits if we modify this.
   case VerifyParamCallable:
   case VerifyParamCls:
-  case VerifyParamFail:
+  case VerifyParamFailHard:
     return may_raise(inst, may_load_store(AUnknown, AHeapAny));
+  // VerifyParamFail might coerce the parameter to the desired type rather than
+  // throwing.
+  case VerifyParamFail: {
+    auto const localId = inst.src(0)->intVal();
+    auto const stores = AHeapAny | AFrame{inst.marker().fp(), localId};
+    return may_raise(inst, may_load_store(AUnknown, stores));
+  }
   // However the following ones can't read locals from our frame on the way
   // out, except as a side effect of raising a warning.
   case VerifyRetCallable:
@@ -882,6 +890,10 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   case InitObjProps:
     return may_load_store(AEmpty, APropAny);
+
+  // Loads $obj->trace, stores $obj->file and $obj->line.
+  case InitThrowableFileAndLine:
+    return may_load_store(AHeapAny, APropAny);
 
   //////////////////////////////////////////////////////////////////////
   // Array loads and stores
@@ -1549,6 +1561,10 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ReleaseVVAndSkip:  // can decref ExtraArgs or VarEnv and Locals
     return may_reenter(inst,
                        may_load_store(AHeapAny|AFrameAny, AHeapAny|AFrameAny));
+
+  // debug_backtrace() traverses stack and WaitHandles on the heap.
+  case DebugBacktrace:
+    return may_load_store(AHeapAny|AFrameAny|AStackAny, AHeapAny);
 
   // These two instructions don't touch memory we track, except that they may
   // re-enter to construct php Exception objects.  During this re-entry anything

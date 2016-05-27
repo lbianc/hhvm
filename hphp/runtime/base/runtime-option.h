@@ -287,6 +287,7 @@ struct RuntimeOption {
 
   static bool UnserializationWhitelistCheck;
   static bool UnserializationWhitelistCheckWarningOnly;
+  static int64_t UnserializationBigMapThreshold;
 
   static std::string TakeoverFilename;
   static int AdminServerPort;
@@ -433,7 +434,7 @@ struct RuntimeOption {
   F(uint64_t, JitRelocationSize,       kJitRelocationSizeDefault)       \
   F(uint64_t, JitMatureSize,           20 << 20)                        \
   F(bool, JitTimer,                    kJitTimerDefault)                \
-  F(bool, JitConcurrently,             false)                           \
+  F(int,  JitConcurrently,             0)                               \
   F(bool, RecordSubprocessTimes,       false)                           \
   F(bool, AllowHhas,                   false)                           \
   F(string, UseExternalEmitter,        "")                              \

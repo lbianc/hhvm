@@ -42,12 +42,15 @@ bool effectful(Vinstr& inst) {
     case Vinstr::addq:
     case Vinstr::addqi:
     case Vinstr::addsd:
+    case Vinstr::addxi:
     case Vinstr::andb:
     case Vinstr::andbi:
     case Vinstr::andl:
     case Vinstr::andli:
     case Vinstr::andq:
     case Vinstr::andqi:
+    case Vinstr::asrxi:
+    case Vinstr::asrxis:
     case Vinstr::cloadq:
     case Vinstr::cmovb:
     case Vinstr::cmovw:
@@ -56,7 +59,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::cmpb:
     case Vinstr::cmpbi:
     case Vinstr::cmpbim:
-    case Vinstr::cmpwim:
     case Vinstr::cmpl:
     case Vinstr::cmpli:
     case Vinstr::cmplim:
@@ -66,8 +68,10 @@ bool effectful(Vinstr& inst) {
     case Vinstr::cmpqim:
     case Vinstr::cmpqm:
     case Vinstr::cmpsd:
-    case Vinstr::copy2:
+    case Vinstr::cmpsds:
+    case Vinstr::cmpwim:
     case Vinstr::copy:
+    case Vinstr::copy2:
     case Vinstr::copyargs:
     case Vinstr::cvtsi2sd:
     case Vinstr::cvtsi2sdm:
@@ -89,27 +93,34 @@ bool effectful(Vinstr& inst) {
     case Vinstr::incl:
     case Vinstr::incq:
     case Vinstr::incw:
-    case Vinstr::ldimmq:
-    case Vinstr::ldimml:
-    case Vinstr::ldimmw:
     case Vinstr::ldimmb:
+    case Vinstr::ldimml:
+    case Vinstr::ldimmq:
     case Vinstr::ldimmqs:
+    case Vinstr::ldimmw:
     case Vinstr::lea:
-    case Vinstr::leap:
     case Vinstr::lead:
-    case Vinstr::ldarx:
+    case Vinstr::leap:
     case Vinstr::load:
-    case Vinstr::loadups:
     case Vinstr::loadb:
     case Vinstr::loadl:
-    case Vinstr::loadqp:
     case Vinstr::loadqd:
+    case Vinstr::loadqp:
     case Vinstr::loadsd:
-    case Vinstr::loadw:
     case Vinstr::loadtqb:
+    case Vinstr::loadups:
+    case Vinstr::loadw:
     case Vinstr::loadzbl:
     case Vinstr::loadzbq:
     case Vinstr::loadzlq:
+    case Vinstr::lslwi:
+    case Vinstr::lslwis:
+    case Vinstr::lslxi:
+    case Vinstr::lslxis:
+    case Vinstr::lsrwi:
+    case Vinstr::lsrwis:
+    case Vinstr::lsrxi:
+    case Vinstr::lsrxis:
     case Vinstr::mfcr:
     case Vinstr::mflr:
     case Vinstr::mfvsrd:
@@ -122,11 +133,15 @@ bool effectful(Vinstr& inst) {
     case Vinstr::movzbl:
     case Vinstr::movzbq:
     case Vinstr::movzlq:
+    case Vinstr::mrs:
+    case Vinstr::msr:
     case Vinstr::mulsd:
     case Vinstr::neg:
     case Vinstr::nop:
     case Vinstr::not:
     case Vinstr::notb:
+    case Vinstr::orsw:
+    case Vinstr::orswi:
     case Vinstr::orq:
     case Vinstr::orqi:
     case Vinstr::psllq:
@@ -149,6 +164,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::subli:
     case Vinstr::subq:
     case Vinstr::subqi:
+    case Vinstr::subsb:
     case Vinstr::subsd:
     case Vinstr::testb:
     case Vinstr::testbi:
@@ -182,7 +198,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::bindjcc1st:
     case Vinstr::bindjcc:
     case Vinstr::bindjmp:
-    case Vinstr::brk:
+    case Vinstr::bln:
     case Vinstr::call:
     case Vinstr::callarray:
     case Vinstr::callfaststub:
@@ -192,7 +208,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::calls:
     case Vinstr::callstub:
     case Vinstr::calltc:
-    case Vinstr::cbcc:
     case Vinstr::contenter:
     case Vinstr::cqo:
     case Vinstr::debugtrap:
@@ -202,7 +217,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::fallback:
     case Vinstr::fallbackcc:
     case Vinstr::fallthru:
-    case Vinstr::hostcall:
     case Vinstr::idiv:
     case Vinstr::inclm:
     case Vinstr::incqm:
@@ -231,8 +245,10 @@ bool effectful(Vinstr& inst) {
     case Vinstr::phpret:
     case Vinstr::pop:
     case Vinstr::popm:
+    case Vinstr::popp:
     case Vinstr::push:
     case Vinstr::pushm:
+    case Vinstr::pushp:
     case Vinstr::resumetc:
     case Vinstr::ret:
     case Vinstr::retransopt:
@@ -256,7 +272,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::syncvmsp:
     case Vinstr::tailcallphp:
     case Vinstr::tailcallstub:
-    case Vinstr::tbcc:
     case Vinstr::ud2:
     case Vinstr::unwind:
     case Vinstr::vcall:
