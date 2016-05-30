@@ -593,7 +593,7 @@ struct Assembler {
   // Call length prologue + jcc
   static const uint8_t kCallLen = instr_size_in_bytes * 9;
 
-  // Total ammount of bytes that a li64 function emits
+  // Total ammount of bytes that a li64 function emits as fixed size
   static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
 
   // TODO(rcardoso): Must create a macro for these similar instructions.
@@ -2121,7 +2121,7 @@ struct Assembler {
 //////////////////////////////////////////////////////////////////////
 
   // Auxiliary for loading a complete 64bits immediate into a register
-  void li64(const Reg64& rt, int64_t imm64, bool fixedSize = true);
+  void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
   // Retrieve the target defined by li64 instruction
   static int64_t getLi64(PPC64Instr* pinstr);

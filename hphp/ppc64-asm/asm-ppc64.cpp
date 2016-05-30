@@ -796,7 +796,7 @@ static void patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLi64InstrLen, "patched bctr");
   Assembler a{ cb };
-  a.li64(reg::r12, ssize_t(dest));
+  a.li64(reg::r12, ssize_t(dest), true);
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
@@ -860,7 +860,10 @@ void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
   // for assert purposes
   DEBUG_ONLY CodeAddress li64StartPos = frontier();
 
-  if (HPHP::jit::deltaFits(imm64, HPHP::sz::word)) {
+  if (0 == imm64) {
+    xor(rt, rt, rt);
+    missing = kLi64InstrLen - 1 * instr_size_in_bytes;
+  } else if (HPHP::jit::deltaFits(imm64, HPHP::sz::word)) {
     // immediate has only low 16 bits set, use simple load immediate
     li(rt, static_cast<int16_t>(imm64));
     if (imm64 & (1ULL << 15) && !(imm64 & (1ULL << 16))) {
@@ -903,7 +906,8 @@ void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
     oris(rt, rt, static_cast<int16_t>((imm64 >> 16) & UINT16_MAX));
     ori(rt, rt, static_cast<int16_t>(imm64 & UINT16_MAX));
   }
-  if(fixedSize){
+
+  if (fixedSize) {
     emitNop(missing);
     // guarantee our math with kLi64InstrLen is working
     assert(kLi64InstrLen == frontier() - li64StartPos);
@@ -1094,7 +1098,7 @@ void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
 
   // Use reserved function linkage register
   addJump(&a, BranchType::bctr);  // marking THIS address for patchAbsolute
-  a.li64(reg::r12, address);
+  a.li64(reg::r12, address, true);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).

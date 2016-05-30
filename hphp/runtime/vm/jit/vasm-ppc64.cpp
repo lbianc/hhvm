@@ -365,7 +365,7 @@ struct Vgen {
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lower byte
   }
   void emit(const orqi& i) {
-    a.li64(rAsm, i.s0.l(), false);
+    a.li64(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
     copyCR0toCR1(a, rAsm);
   }
@@ -415,7 +415,7 @@ struct Vgen {
     }
   }
   void emit(const xorqi& i) {
-    a.li64(rAsm, i.s0.l(), false);
+    a.li64(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
     copyCR0toCR1(a, rAsm);
   }
@@ -510,7 +510,7 @@ void Vgen::emit(const ucomisd& i) {
   a.bc(notNAN, BranchConditions::CR0_NoOverflow);
   {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-    a.li64(rAsm, 0x99000000, false);
+    a.li64(rAsm, 0x99000000);
     a.mtcrf(0xC0, rAsm);
     copyCR0toCR1(a, rAsm);
   }
@@ -542,14 +542,7 @@ void Vgen::emit(const ldimml& i) {
 void Vgen::emit(const ldimmq& i) {
   auto val = i.s.q();
   if (i.d.isGP()) {
-    if (val == 0) {
-      a.xor(i.d, i.d, i.d);
-      // emit nops to fill a standard li64 instruction block
-      // this will be useful on patching and smashable operations
-      a.emitNop(Assembler::kLi64InstrLen - 1 * instr_size_in_bytes);
-    } else {
-      a.li64(i.d, val);
-    }
+    a.li64(i.d, val);
   } else {
     assertx(i.d.isSIMD());
     a.li64(rAsm, i.s.q());

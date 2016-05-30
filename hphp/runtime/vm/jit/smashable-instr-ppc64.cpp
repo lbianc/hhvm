@@ -45,7 +45,7 @@ using ppc64_asm::Assembler;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, li64, Movq, d, imm);
+  return EMIT_BODY(cb, li64, Movq, d, imm, true);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
