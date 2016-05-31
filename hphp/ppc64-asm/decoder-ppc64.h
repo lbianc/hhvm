@@ -1653,6 +1653,9 @@ struct DecoderInfo {
   }
 
   bool isNop() const;
+  bool isOffsetBranch(bool allowCond = true) const;
+  bool isAbsoluteBranch(bool allowCond = true) const;
+  bool isRegisterBranch(bool allowCond = true) const;
   bool isBranch(bool allowCond = true) const;
   bool isClearSignBit() const;
   bool isSpOffsetInstr() const;

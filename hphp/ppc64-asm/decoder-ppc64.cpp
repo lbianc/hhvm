@@ -14,6 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/ppc64-asm/branch-ppc64.h"
 #include "hphp/ppc64-asm/decoder-ppc64.h"
 
 #include <cassert>
@@ -71,52 +72,102 @@ bool DecoderInfo::isNop() const {
 }
 
 
-bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
+bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
   // allowCond: true
-  //   b, ba, bl - unconditional branches
-  //   bc, bca, bcctr, bcctrl, bcl, bcla, bclr, bclrl, bctar, bctarl
+  //   b, bl - unconditional branches
+  //   bc, bcl
   //
   // allowCond: false
-  //   b, ba, bl - unconditional branches
+  //   b, bl - unconditional branches
   //  And also, if condition is "branch always" (BO field is 1x1xx):
-  //   bc, bca, bcctr, bcctrl, bcl, bcla, bclr, bclrl, bctar, bctarl
+  //   bc, bcl
   //
   // (based on the branch instructions defined on this Decoder)
-  constexpr uint32_t uncondition_bo = 0x14;
-
   switch (m_opn) {
     case OpcodeNames::op_b:
-    case OpcodeNames::op_ba:
     case OpcodeNames::op_bl:
       return true;
       break;
     case OpcodeNames::op_bc:
-    case OpcodeNames::op_bca:
     case OpcodeNames::op_bcl:
-    case OpcodeNames::op_bcla:
-    case OpcodeNames::op_bclr:
-      if (!allowCond) {
-        // checking if the condition is "always branch", then it counts as an
-        // unconditional branch
-        assert(m_form == Form::kB);
-        B_form_t bform;
-        bform.instruction = m_image;
-        return ((bform.BO & uncondition_bo) == uncondition_bo);
+      {
+        if (!allowCond) {
+          // checking if the condition is "always branch", then it counts as an
+          // unconditional branch
+          assert(m_form == Form::kB);
+          B_form_t bform;
+          bform.instruction = m_image;
+          BranchParams uncondition_bp(BranchConditions::Always);
+          return bform.BO == uncondition_bp.bo();
+        }
+        return true;
+        break;
       }
+    default:
+      break;
+  }
+  return false;
+}
+
+bool DecoderInfo::isAbsoluteBranch(bool allowCond /* = true */) const {
+  // allowCond: true
+  //   ba, bla - unconditional branches
+  //   bca, bcla
+  //
+  // allowCond: false
+  //   ba, bla - unconditional branches
+  //  And also, if condition is "branch always" (BO field is 1x1xx):
+  //   bca, bcla
+  //
+  // (based on the branch instructions defined on this Decoder)
+  switch (m_opn) {
+    case OpcodeNames::op_ba:
+    case OpcodeNames::op_bla:
       return true;
       break;
+    case OpcodeNames::op_bca:
+    case OpcodeNames::op_bcla:
+      {
+        if (!allowCond) {
+          // checking if the condition is "always branch", then it counts as an
+          // unconditional branch
+          assert(m_form == Form::kB);
+          B_form_t bform;
+          bform.instruction = m_image;
+          BranchParams uncondition_bp(BranchConditions::Always);
+          return bform.BO == uncondition_bp.bo();
+        }
+        return true;
+      }
+      break;
+    default:
+      break;
+  }
+  return false;
+}
+
+bool DecoderInfo::isRegisterBranch(bool allowCond /* = true */) const {
+  // allowCond: true
+  //   bcctr, bcctrl, bctar, bctarl
+  //
+  // allowCond: false - Same if condition is "branch always" (BO field: 1x1xx)
+  //
+  // NOTE: not considering bclr as it's more like a return than a branch
+  switch (m_opn) {
     case OpcodeNames::op_bcctr:
     case OpcodeNames::op_bcctrl:
-    case OpcodeNames::op_bclrl:
     case OpcodeNames::op_bctar:
     case OpcodeNames::op_bctarl:
-      if (!allowCond) {
-        // checking if the condition is "always branch", then it counts as an
-        // unconditional branch
-        assert(m_form == Form::kXL);
-        XL_form_t xlform;
-        xlform.instruction = m_image;
-        return ((xlform.BT & uncondition_bo) == uncondition_bo);
+      {
+        if (!allowCond) {
+          // checking if the condition is "always branch", then it counts as an
+          // unconditional branch
+          assert(m_form == Form::kXL);
+          XL_form_t xlform;
+          xlform.instruction = m_image;
+          BranchParams uncondition_bp(BranchConditions::Always);
+          return xlform.BT == uncondition_bp.bo();
+        }
       }
       return true;
       break;
@@ -124,6 +175,12 @@ bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
       break;
   }
   return false;
+}
+
+bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
+  return isOffsetBranch(allowCond)   ||
+         isAbsoluteBranch(allowCond) ||
+         isRegisterBranch(allowCond);
 }
 
 bool DecoderInfo::isClearSignBit() const {
