@@ -587,10 +587,10 @@ struct Assembler {
   // ld, addi, ld, mtlr
   static const uint8_t kCallEpilogueLen = instr_size_in_bytes * 4;
 
-  // Jcc lenght
+  // Jcc length
   static const uint8_t kJccLen = instr_size_in_bytes * 9;
 
-  // Call lenght prologue + jcc
+  // Call length prologue + jcc
   static const uint8_t kCallLen = instr_size_in_bytes * 9;
 
   // Total ammount of bytes that a li64 function emits

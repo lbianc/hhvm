@@ -22,8 +22,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #ifndef _MSC_VER
 #include <unwind.h>
 #endif
@@ -41,6 +39,8 @@
 #include <folly/MapUtil.h>
 #include <folly/Optional.h>
 #include <folly/String.h>
+#include <folly/portability/SysMman.h>
+#include <folly/portability/Unistd.h>
 
 #include "hphp/util/abi-cxx.h"
 #include "hphp/util/asm-x64.h"

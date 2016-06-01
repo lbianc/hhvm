@@ -17,22 +17,16 @@
 #include "hphp/runtime/ext/sockets/ext_sockets.h"
 
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/un.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
-#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/uio.h>
-#include <poll.h>
 
 #include <folly/String.h>
 #include <folly/SocketAddress.h>
+#include <folly/portability/Sockets.h>
+#include <folly/portability/SysTime.h>
+#include <folly/portability/SysUio.h>
+#include <folly/portability/Unistd.h>
 
 #include "hphp/util/network.h"
 #include "hphp/runtime/base/array-init.h"

@@ -19,14 +19,14 @@
 #include <string>
 
 #include <sys/types.h>
-#include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/file.h>
 #include <fcntl.h>
-#include <dirent.h>
 #include <vector>
 
 #include <folly/String.h>
+#include <folly/portability/Dirent.h>
+#include <folly/portability/SysFile.h>
+#include <folly/portability/SysTime.h>
 
 #include "hphp/util/lock.h"
 #include "hphp/util/logger.h"

@@ -26,10 +26,9 @@
 
 #include <boost/filesystem.hpp>
 
-#include <libgen.h>
-#include <sys/mman.h>
-
 #include <folly/String.h>
+#include <folly/portability/Libgen.h>
+#include <folly/portability/SysMman.h>
 
 #include "hphp/util/debug.h"
 #include "hphp/util/portability.h"

@@ -22,8 +22,8 @@
 #include <mach/mach.h>
 #endif
 
-#include <sys/time.h>
-#include <sys/resource.h>
+#include <folly/portability/SysResource.h>
+#include <folly/portability/SysTime.h>
 
 #include "hphp/util/logger.h"
 #include "hphp/util/trace.h"

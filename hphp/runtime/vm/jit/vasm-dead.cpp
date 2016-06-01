@@ -93,6 +93,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::incl:
     case Vinstr::incq:
     case Vinstr::incw:
+    case Vinstr::ldarx:
     case Vinstr::ldimmb:
     case Vinstr::ldimml:
     case Vinstr::ldimmq:

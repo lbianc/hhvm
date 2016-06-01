@@ -19,15 +19,16 @@
 #include <cassert>
 
 #include <sys/types.h>
-#include <sys/file.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/ext/stream/ext_stream.h"
+
+#include <folly/portability/SysFile.h>
+#include <folly/portability/Unistd.h>
 
 namespace HPHP {
 

@@ -20,12 +20,13 @@
 #include <execinfo.h>
 #include <dlfcn.h>
 #endif
-#include <unistd.h>
 
 #include "hphp/runtime/base/extended-logger.h"
 #include "hphp/util/assertions.h"
 #include "hphp/util/compatibility.h"
 #include "hphp/util/mutex.h"
+
+#include <folly/portability/Unistd.h>
 
 namespace HPHP {
 
@@ -74,7 +75,7 @@ std::string get_thread_mem_usage() {
            "\t\tBytes allocated\t\tThread Name\n";
   for (auto it : threadMap) {
     if (!it.second->mm) continue;
-    auto usage = it.second->mm->getStats().usage;
+    auto usage = it.second->mm->getStats().usage();
     result += folly::sformat("\t{:10}\t{:9}\t{:13}\t\t{}\n", it.second->pid,
                              it.second->tid, usage,
                              *it.second->start_name_ptr);

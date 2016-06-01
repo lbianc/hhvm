@@ -26,17 +26,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
-#include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <asm/unistd.h>
 #include <sys/prctl.h>
 #include <linux/perf_event.h>
+
 #include <folly/String.h>
 #include <folly/Memory.h>
+#include <folly/portability/SysMman.h>
+#include <folly/portability/Unistd.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
