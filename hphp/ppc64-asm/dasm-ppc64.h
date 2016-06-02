@@ -14,8 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef INCLUDE_DASM_PPC64_H_
-#define INCLUDE_DASM_PPC64_H_
+#ifndef incl_HPHP_PPC64_ASM_DASM_PPC64_H_
+#define incl_HPHP_PPC64_ASM_DASM_PPC64_H_
 
 #include <ostream>
 
