@@ -7,6 +7,8 @@ if(CYGWIN OR MSVC OR MINGW)
   list(APPEND CXX_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/embed.rc)
 endif()
 
+option(ENABLE_TC_PRINT "Enable tc-print tool" off)
+
 option(ENABLE_LD_GOLD "Enable Hot Linker script using ld-gold" On)
 set(SECTION_ORDERING_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../tools/oss_hot_section_ordering CACHE FILEPATH "File used by ld-gold for the relocation of sections")
 if (ENABLE_LD_GOLD)
