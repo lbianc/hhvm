@@ -20,7 +20,6 @@
 #include "hphp/runtime/base/curl-tls-workarounds.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/util/timer.h"
-#include <curl/curl.h>
 #include <curl/easy.h>
 #include <vector>
 #include "hphp/util/logger.h"
@@ -111,7 +110,9 @@ const StaticString
   s_capath("capath"),
   s_cafile("cafile"),
   s_local_cert("local_cert"),
-  s_passphrase("passphrase");
+  s_passphrase("passphrase"),
+  s_http("http"),
+  s_header("header");
 
 int HttpClient::request(const char* verb,
                      const char *url, const char *data, size_t size,
@@ -137,6 +138,8 @@ int HttpClient::request(const char* verb,
   curl_easy_setopt(cp, CURLOPT_NOSIGNAL, 1); // for multithreading mode
   curl_easy_setopt(cp, CURLOPT_SSL_VERIFYPEER,    1);
   curl_easy_setopt(cp, CURLOPT_SSL_CTX_FUNCTION, curl_tls_workarounds_cb);
+  curl_easy_setopt(cp, CURLOPT_USE_SSL, m_use_ssl);
+  curl_easy_setopt(cp, CURLOPT_SSLVERSION, m_sslversion);
 
   /*
    * cipher list varies according to SSL library, and "ALL" is for OpenSSL
@@ -186,7 +189,14 @@ int HttpClient::request(const char* verb,
         slist = curl_slist_append(slist, header.data());
       }
     }
-    if (slist) {
+  if (m_stream_context_options[s_http].isArray()) {
+    const Array http = m_stream_context_options[s_http].toArray();
+    if (http.exists(s_header)) {
+      slist = curl_slist_append(slist,
+                                http[s_header].toString().data());
+    }
+  }
+  if (slist) {
       curl_easy_setopt(cp, CURLOPT_HTTPHEADER, slist);
     }
   }

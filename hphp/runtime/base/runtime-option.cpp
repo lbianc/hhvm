@@ -186,6 +186,7 @@ bool RuntimeOption::ServerKillOnTimeout = true;
 int RuntimeOption::ServerPreShutdownWait = 0;
 int RuntimeOption::ServerShutdownListenWait = 0;
 int RuntimeOption::ServerShutdownEOMWait = 0;
+int RuntimeOption::ServerPrepareToStopTimeout = 0;
 bool RuntimeOption::StopOldServer = false;
 int RuntimeOption::OldServerWait = 30;
 int RuntimeOption::CacheFreeFactor = 50;
@@ -406,7 +407,10 @@ bool RuntimeOption::PHP7_LTR_assign = false;
 bool RuntimeOption::PHP7_NoHexNumerics = false;
 bool RuntimeOption::PHP7_ReportVersion = false;
 bool RuntimeOption::PHP7_ScalarTypes = false;
+bool RuntimeOption::PHP7_Substr = false;
 bool RuntimeOption::PHP7_UVS = false;
+
+std::map<std::string, std::string> RuntimeOption::AliasedNamespaces;
 
 int RuntimeOption::GetScannerType() {
   int type = 0;
@@ -1064,7 +1068,7 @@ void RuntimeOption::Load(
     HardwareCounter::Init(EvalProfileHWEnable,
                           url_decode(EvalProfileHWEvents.data(),
                                      EvalProfileHWEvents.size()).toCppString(),
-                          EvalRecordSubprocessTimes);
+                          false);
 
     Config::Bind(EnableEmitterStats, ini, config, "Eval.EnableEmitterStats",
                  EnableEmitterStats);
@@ -1225,6 +1229,8 @@ void RuntimeOption::Load(
                  s_PHP7_master);
     Config::Bind(PHP7_ScalarTypes, ini, config, "PHP7.ScalarTypes",
                  s_PHP7_master);
+    Config::Bind(PHP7_Substr, ini, config, "PHP7.Substr",
+                 s_PHP7_master);
     Config::Bind(PHP7_UVS, ini, config, "PHP7.UVS", s_PHP7_master);
   }
   {
@@ -1305,6 +1311,8 @@ void RuntimeOption::Load(
                  "Server.ShutdownListenWait", 0);
     Config::Bind(ServerShutdownEOMWait, ini, config,
                  "Server.ShutdownEOMWait", 0);
+    Config::Bind(ServerPrepareToStopTimeout, ini, config,
+                 "Server.PrepareToStopTimeout", 240);
     Config::Bind(StopOldServer, ini, config, "Server.StopOld", false);
     Config::Bind(OldServerWait, ini, config, "Server.StopOldWait", 30);
     Config::Bind(ServerRSSNeededMb, ini, config, "Server.RSSNeededMb", 4096);
@@ -1737,6 +1745,7 @@ void RuntimeOption::Load(
     if (b) RuntimeOption::AssertEmitted = v.toInt64() >= 0;
   }
 
+  Config::Bind(AliasedNamespaces, ini, config, "AliasedNamespaces");
   Config::Bind(CustomSettings, ini, config, "CustomSettings");
 
   refineStaticStringTableSize();

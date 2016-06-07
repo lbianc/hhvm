@@ -8,25 +8,33 @@
  *
  *)
 
-type result =
-  ((string SymbolOccurrence.t) * (string SymbolDefinition.t option)) option
+open Core
 
-let go content line char tcopt =
-  let symbol_occurence = ref None in
-  IdentifySymbolService.attach_hooks symbol_occurence line char;
+type result =
+  ((string SymbolOccurrence.t) * (string SymbolDefinition.t option)) list
+
+let get_occurrence_and_map content line char ~f =
+  let result = ref [] in
+  IdentifySymbolService.attach_hooks result line char;
   let path = Relative_path.default in
   let (funs, classes, typedefs), ast =
     ServerIdeUtils.declare_and_check_get_ast path content in
 
-  let result = Option.map !symbol_occurence begin fun x ->
-    let symbol_definition = ServerSymbolDefinition.go tcopt ast x in
-      x, symbol_definition
-  end in
-  ServerIdeUtils.revive funs classes typedefs path;
   IdentifySymbolService.detach_hooks ();
+  let result = List.map !result (fun x -> f x ast) in
+  ServerIdeUtils.revive funs classes typedefs path;
   result
 
+let get_occurrence content line char =
+  get_occurrence_and_map content line char ~f:(fun x _ -> x)
+
+let go content line char tcopt =
+  get_occurrence_and_map content line char ~f:(fun x ast ->
+    let symbol_definition = ServerSymbolDefinition.go tcopt ast x in
+    x, symbol_definition
+  )
+
 let go_absolute content line char tcopt =
-  Option.map (go content line char tcopt) begin fun (x, y) ->
+  List.map (go content line char tcopt) begin fun (x, y) ->
     SymbolOccurrence.to_absolute x, Option.map y SymbolDefinition.to_absolute
   end

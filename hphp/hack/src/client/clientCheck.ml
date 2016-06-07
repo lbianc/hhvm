@@ -124,7 +124,8 @@ let main args =
         try
           match pieces with
           | class_name :: method_name :: _ ->
-              FindRefsService.Method (class_name, method_name)
+              FindRefsService.Member
+                (class_name, FindRefsService.Method method_name)
           | method_name :: _ -> FindRefsService.Function method_name
           | _ -> raise Exit
         with _ ->
@@ -132,6 +133,13 @@ let main args =
           raise Exit_status.(Exit_with Input_error)
       in
       let results = rpc args @@ Rpc.FIND_REFS action in
+      ClientFindRefs.go results args.output_json;
+      Exit_status.No_error
+    | MODE_IDE_FIND_REFS arg ->
+      let line, char = parse_position_string arg in
+      let content = Sys_utils.read_stdin_to_string () in
+      let results =
+        rpc args @@ Rpc.IDE_FIND_REFS (content, line, char) in
       ClientFindRefs.go results args.output_json;
       Exit_status.No_error
     | MODE_DUMP_SYMBOL_INFO files ->
@@ -155,7 +163,7 @@ let main args =
       let content = Sys_utils.read_stdin_to_string () in
       let result =
         rpc args @@ Rpc.IDENTIFY_FUNCTION (content, line, char) in
-      let result = match result with
+      let result = match List.hd result with
         | Some (result, _) -> Utils.strip_ns result.SymbolOccurrence.name
         | _ -> ""
       in
@@ -307,7 +315,7 @@ let main args =
       let content = Sys_utils.read_stdin_to_string () in
       let result =
         rpc args @@ Rpc.IDENTIFY_FUNCTION (content, line, char) in
-      ClientGetMethodName.go result args.output_json;
+      ClientGetMethodName.go (List.hd result) args.output_json;
       Exit_status.No_error
     | MODE_FORMAT (from, to_) ->
       let content = Sys_utils.read_stdin_to_string () in
@@ -321,7 +329,8 @@ let main args =
         try
           match pieces with
           | class_name :: method_name :: _ ->
-              Ai.TraceService.Method (class_name, method_name)
+              Ai.TraceService.Member (class_name,
+                  Ai.TraceService.Method method_name)
           | method_name :: _ -> Ai.TraceService.Function method_name
           | _ -> raise Exit
         with _ ->
