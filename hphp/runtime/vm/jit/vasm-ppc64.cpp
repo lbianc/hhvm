@@ -1513,11 +1513,8 @@ void fixVptr(Vout& v, Vptr& p) {
     case AddressModes::IndexBaseDisp: {
       // This mode is not supported: Displacement will be embedded on Index
       Vreg index_disp_reg = v.makeReg();
-      if (patched_disp) {
-        v << addq{disp_reg, p.index, index_disp_reg, VregSF(RegSF{0})};
-      } else {
-        v << addqi{p.disp, p.index, index_disp_reg, VregSF(RegSF{0})};
-      }
+      lowerImm(Immed(p.disp), v, disp_reg);
+      v << addq{disp_reg, p.index, index_disp_reg, VregSF(RegSF{0})};
       p.index = index_disp_reg;
       p.disp = 0;
       break;
