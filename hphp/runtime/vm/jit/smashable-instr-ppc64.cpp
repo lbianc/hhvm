@@ -21,7 +21,8 @@
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
-#include "hphp/ppc64-asm/decoder-ppc64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
+
 #include "hphp/util/data-block.h"
 
 namespace HPHP { namespace jit { namespace ppc64 {
@@ -142,7 +143,8 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   always_assert(is_aligned(inst, Alignment::SmashJcc));
 
   if (cc == CC_None) {
-    Assembler::patchBranch(inst, target);
+    // It was emitted as a conditional, so patching needs to be conditional
+    Assembler::patchBranch(inst, target, true);
   } else {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };
@@ -168,20 +170,19 @@ TCA smashableCallTarget(TCA inst) {
       Assembler::getLi64(inst));
 }
 
+static TCA smashableBranchTarget(TCA inst, bool allowCond) {
+  ppc64_asm::DecodedInstruction di(inst);
+  if (!di.isBranch(allowCond)) return nullptr;
+
+  return reinterpret_cast<TCA>(Assembler::getLi64(inst));
+}
+
 TCA smashableJmpTarget(TCA inst) {
-  return smashableJccTarget(inst); // for now, it's the same as Jcc
+  return smashableBranchTarget(inst, false);
 }
 
 TCA smashableJccTarget(TCA inst) {
-  // To analyse the cc, it has to be on the bcctr so we need go backward one
-  // instruction.
-  uint8_t jccLen = smashableJccLen() - kStdIns;
-  auto branch_instr = *reinterpret_cast<PPC64Instr*>(inst + jccLen);
-  if (!ppc64_asm::Decoder::GetDecoder().decode(branch_instr)->isBranch(true)) {
-    return nullptr;
-  }
-
-  return reinterpret_cast<TCA>(Assembler::getLi64(inst));
+  return smashableBranchTarget(inst, true);
 }
 
 ConditionCode smashableJccCond(TCA inst) {

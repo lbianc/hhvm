@@ -799,12 +799,13 @@ static void patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   a.li64(reg::r12, ssize_t(dest), true);
 }
 
-void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
+void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest, bool cond) {
   // Detecting absolute branching: if it's an bcctr or bcctrl
   {
-    // skips the li64, 2*nop and a mtctr instruction
+    // skips the li64, 2*nop (if conditional) and a mtctr instruction
+    auto cond_skip = cond ? 2 : 0;
     CodeAddress bctr_addr =
-      jmp + Assembler::kLi64InstrLen + 3 * instr_size_in_bytes;
+      jmp + Assembler::kLi64InstrLen + (cond_skip + 1) * instr_size_in_bytes;
 
     // check for instruction opcode
     DecoderInfo* dinfo = Decoder::GetDecoder().decode(bctr_addr);
@@ -1049,7 +1050,9 @@ Label::~Label() {
     assert(m_a && m_address && "Label had jumps but was never set");
   }
   for (auto& ji : m_toPatch) {
-    ji.a->patchBranch(ji.addr, m_address);
+    bool cond = ((BranchType::bc == ji.type) ||
+        (BranchType::bcctr == ji.type));
+    ji.a->patchBranch(ji.addr, m_address, cond);
   }
 }
 
@@ -1093,11 +1096,12 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
 }
 
 void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
-  BranchParams bp(bc);
-  const ssize_t address = ssize_t(m_address);
+  // marking current address for patchAbsolute
+  bool cond = (BranchConditions::Always != bc);
+  addJump(&a, cond ? BranchType::bcctr : BranchType::bctr);
 
   // Use reserved function linkage register
-  addJump(&a, BranchType::bctr);  // marking THIS address for patchAbsolute
+  const ssize_t address = ssize_t(m_address);
   a.li64(reg::r12, address, true);
 
   // When branching to another context, r12 need to keep the target address
@@ -1108,10 +1112,12 @@ void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
   if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
     a.xor(reg::r0, reg::r0, reg::r0,false);
     a.mtspr(Assembler::SpecialReg::XER, reg::r0);
-  } else {
+  } else if (cond) {
+    // Unconditional branch (jmp or call) doesn't need this reserve bytes
     a.emitNop(2 * instr_size_in_bytes);
   }
 
+  BranchParams bp(bc);
   if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
   else                     a.bcctr (bp.bo(), bp.bi(), 0);
 }

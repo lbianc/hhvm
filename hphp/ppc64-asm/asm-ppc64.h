@@ -54,8 +54,6 @@ constexpr uint8_t toc_position_on_frame     = 3 * 8;
 // reserved by ABI)
 constexpr uint8_t exittc_position_on_frame  = 1 * 8;
 
-// How many bytes a PPC64 instruction length is.
-constexpr uint8_t instr_size_in_bytes       = sizeof(PPC64Instr);
 // Amount of bytes to skip after an Assembler::call to grab the return address.
 // Currently it skips a "nop" or a "ld 2,24(1)"
 constexpr uint8_t call_skip_bytes_for_ret   = 1 * instr_size_in_bytes;
@@ -469,7 +467,8 @@ struct Label {
   enum class BranchType {
     b,    // unconditional branch up to 26 bits offset
     bc,   // conditional branch up to 16 bits offset
-    bctr  // conditional branch by using a 64 bits absolute address
+    bctr, // unconditional branch by using a 64 bits absolute address
+    bcctr // conditional branch by using a 64 bits absolute address
   };
 
 private:
@@ -591,7 +590,7 @@ struct Assembler {
   static const uint8_t kJccLen = instr_size_in_bytes * 9;
 
   // Call length prologue + jcc
-  static const uint8_t kCallLen = instr_size_in_bytes * 9;
+  static const uint8_t kCallLen = instr_size_in_bytes * 7;
 
   // Total ammount of bytes that a li64 function emits as fixed size
   static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
@@ -2175,9 +2174,10 @@ struct Assembler {
    * Patch a branch to the correct target.
    *
    * It decodes the branch @jmp to decide whether it's an absolute branch or an
-   * offset branch and patches it properly.
+   * offset branch and patches it properly. The @cond argument is used to skip
+   * the overflow handling, if it's unconditional branch.
    */
-  static void patchBranch(CodeAddress jmp, CodeAddress dest);
+  static void patchBranch(CodeAddress jmp, CodeAddress dest, bool cond);
 
 //////////////////////////////////////////////////////////////////////
 

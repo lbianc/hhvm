@@ -21,23 +21,43 @@
 
 #include "hphp/util/asm-x64.h"
 
+#include "hphp/ppc64-asm/decoder-ppc64.h"
+#include "hphp/ppc64-asm/isa-ppc64.h"
+
 namespace ppc64_asm {
 
 struct DecodedInstruction {
-  explicit DecodedInstruction(uint8_t* ip) : m_ip(ip) { }
+  explicit DecodedInstruction(uint8_t* ip)
+    : m_ip(ip)
+    , m_size(instr_size_in_bytes)
+  {
+    dinfo = Decoder::GetDecoder().decode(m_ip);
+  }
 
-  size_t size() const;
-  int32_t offset() const;
-  bool isNop() const;
-  bool isBranch(bool allowCond = true) const;
-  bool isCall() const;
-  bool isJmp() const;
-  bool isSpOffsetInstr() const;
-  bool isClearSignBit() const;
+  DecodedInstruction() = delete;
+
+  size_t size() const           { return size_t{m_size}; }
+
+  int32_t offset() const        { return dinfo->offset(); }
+  bool isNop() const            { return dinfo->isNop(); }
+  // if it's conditional branch, it's not a jmp
+  bool isJmp() const            { return isBranch(false); }
+  bool isSpOffsetInstr() const  { return dinfo->isSpOffsetInstr(); }
+  bool isClearSignBit() const   { return dinfo->isClearSignBit(); }
+
   HPHP::jit::ConditionCode jccCondCode() const;
+
+  // True if it's Near or Far type.
+  bool isBranch(bool allowCond = true) const;
+  bool isNearBranch(bool allowCond = true) const;
+  bool isFarBranch(bool allowCond = true) const;
+
+  bool isCall() const;
 
 private:
   uint8_t* m_ip;
+  DecoderInfo* dinfo;
+  uint8_t m_size;
 };
 
 }

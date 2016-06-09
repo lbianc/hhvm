@@ -21,46 +21,24 @@
 #include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/ppc64-asm/asm-ppc64.h"
 
-#include "hphp/util/safe-cast.h"
-
 namespace ppc64_asm {
 
-size_t DecodedInstruction::size() const {
-  not_implemented();
-  return size_t{0};
-}
-
-int32_t DecodedInstruction::offset() const {
-  return Decoder::GetDecoder().decode(m_ip)->offset();
-}
-
-bool DecodedInstruction::isNop() const {
-  return Decoder::GetDecoder().decode(m_ip)->isNop();
-}
-
 bool DecodedInstruction::isBranch(bool allowCond /* = true */) const {
+  return isFarBranch(allowCond) || isNearBranch(allowCond);
+}
+bool DecodedInstruction::isNearBranch(bool allowCond /* = true */) const {
+  return dinfo->isBranch(allowCond);
+}
+bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
+  auto size = (allowCond) ? Assembler::kJccLen : Assembler::kCallLen;
+
   // skip the preparation instructions that are not actually the branch.
-  auto branch_instr = m_ip + Assembler::kJccLen - instr_size_in_bytes;
-  return Decoder::GetDecoder().decode(branch_instr)->isBranch(allowCond);
+  auto far_branch_instr = m_ip + size - instr_size_in_bytes;
+  return Decoder::GetDecoder().decode(far_branch_instr)->isBranch(allowCond);
 }
 
 bool DecodedInstruction::isCall() const {
-  // skip the preparation instructions that are not actually the branch.
-  auto branch_instr = m_ip + Assembler::kCallLen - instr_size_in_bytes;
-  return Decoder::GetDecoder().decode(branch_instr)->isBranch(false);
-}
-
-bool DecodedInstruction::isJmp() const {
-  // if it's conditional branch, it's not a jmp
-  return isBranch(false);
-}
-
-bool DecodedInstruction::isSpOffsetInstr() const {
-  return Decoder::GetDecoder().decode(m_ip)->isSpOffsetInstr();
-}
-
-bool DecodedInstruction::isClearSignBit() const {
-  return Decoder::GetDecoder().decode(m_ip)->isClearSignBit();
+  return isFarBranch(false);
 }
 
 HPHP::jit::ConditionCode DecodedInstruction::jccCondCode() const {
