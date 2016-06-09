@@ -245,17 +245,18 @@ struct Vgen {
     // A lowering would be handy here, but the Vptr's displacement is only
     // later added at the optimizeCopies optimization
     Vptr p(i.s);
-    if (-1 != p.index) {
-      if (p.disp) {
-        a.li(rAsm, p.disp);
-        p.index = rAsm;
-      } else {
-        p.index = ppc64_asm::reg::r0; // use zero, not the content of r0
-      }
+    if ((!p.base.isValid()) || (p.base == 0)) {
+      p.base = ppc64_asm::reg::r0; // use zero not r0
+    }
+    if (!p.index.isValid()) {
+      a.li(rAsm, p.disp);
+      p.index = rAsm;
+      p.disp = 0;
     } else {
       if (p.disp) {
         a.addi(rAsm, p.index, p.disp);
         p.index = rAsm;
+        p.disp = 0;
       }
     }
     a.lxvd2x(i.d, p);
@@ -312,17 +313,18 @@ struct Vgen {
   void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
   void emit(const storeups& i) {
     Vptr p(i.m);
-    if (-1 != p.index) {
-      if (p.disp) {
-        a.li(rAsm, p.disp);
-        p.index = rAsm;
-      } else {
-        p.index = ppc64_asm::reg::r0; // use zero, not the content of r0
-      }
+    if ((!p.base.isValid()) || (p.base == 0)) {
+      p.base = ppc64_asm::reg::r0;
+    }
+    if (!p.index.isValid()) {
+      a.li(rAsm, p.disp);
+      p.index = rAsm;
+      p.disp = 0;
     } else {
       if (p.disp) {
         a.addi(rAsm, p.index, p.disp);
         p.index = rAsm;
+        p.disp = 0;
       }
     }
     a.stxvw4x(i.s, p);
