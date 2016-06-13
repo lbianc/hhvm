@@ -263,13 +263,14 @@ bool MCGenerator::profileSrcKey(SrcKey sk) const {
 void MCGenerator::invalidateFuncProfSrcKeys(const Func* func) {
   assertx(profData());
   FuncId funcId = func->getFuncId();
+  auto codeLock = lockCode();
   for (auto tid : profData()->funcProfTransIDs(funcId)) {
     invalidateSrcKey(profData()->transRec(tid)->srcKey());
   }
 }
 
-TransResult MCGenerator::retranslate(const TransArgs& args) {
-  auto sr = m_tx.getSrcDB().find(args.sk);
+TransResult MCGenerator::retranslate(TransArgs args) {
+  auto sr = m_srcDB.find(args.sk);
   always_assert(sr);
   bool locked = sr->tryLock();
   SCOPE_EXIT {
@@ -282,11 +283,18 @@ TransResult MCGenerator::retranslate(const TransArgs& args) {
     return nullptr;
   }
 
-  LeaseHolder writer(Translator::WriteLease(), args.sk.func());
-  if (!writer.canTranslate() ||
-      !shouldTranslate(args.sk.func(), args.kind)) {
+  // We need to recompute the kind after acquiring the write lease in case the
+  // answer to profileSrcKey() changes, so use a lambda rather than just
+  // storing the result.
+  auto kind = [&] {
+    return profileSrcKey(args.sk) ? TransKind::Profile : TransKind::Live;
+  };
+  LeaseHolder writer(Translator::WriteLease(), args.sk.func(), kind());
+  if (!writer ||
+      !shouldTranslate(args.sk.func(), kind())) {
     return nullptr;
   }
+
   if (!locked) {
     // Even though we knew above that we were going to skip doing another
     // translation, we wait until we get the write lease, to avoid spinning
@@ -301,48 +309,29 @@ TransResult MCGenerator::retranslate(const TransArgs& args) {
   }
   SKTRACE(1, args.sk, "retranslate\n");
 
-  auto newArgs = args;
-  newArgs.kind = profileSrcKey(args.sk) ? TransKind::Profile : TransKind::Live;
+  args.kind = kind();
+  if (!writer.checkKind(args.kind)) return nullptr;
 
-  // We only allow concurrent jitting of non-Profile translations if
-  // EvalJitConcurrently is >= 2.
-  if (RuntimeOption::EvalJitConcurrently < 2 &&
-      newArgs.kind != TransKind::Profile &&
-      !writer.acquire()) {
-    return nullptr;
-  }
-
-  auto result = translate(newArgs);
+  auto result = translate(args);
 
   checkFreeProfData();
   return result;
 }
 
-TCA MCGenerator::retranslateOpt(TransID transId, bool align) {
-  if (profData() == nullptr) return nullptr;
+TCA MCGenerator::retranslateOpt(SrcKey sk, TransID transId, bool align) {
   if (isDebuggerAttachedProcess()) return nullptr;
 
-  // Until the rest of this function is cleaned up enough to support concurrent
-  // retranslation of different functions, we grab both the global write lease
-  // and a Func-specific lease for the current Func.
-  LeaseHolder writer(Translator::WriteLease());
-  if (!writer.canWrite()) return nullptr;
+  auto const func = const_cast<Func*>(sk.func());
+  auto const funcID = func->getFuncId();
+  if (profData() == nullptr || profData()->optimized(funcID)) return nullptr;
 
-  auto rec = profData()->transRec(transId);
-  always_assert(rec);
-  always_assert(rec->region() != nullptr);
-  LeaseHolder funcWriter(Translator::WriteLease(), rec->func());
-  if (!funcWriter.canTranslate()) return nullptr;
+  LeaseHolder writer(Translator::WriteLease(), func, TransKind::Optimize);
+  if (!writer) return nullptr;
+
+  if (profData()->optimized(funcID)) return nullptr;
+  profData()->setOptimized(funcID);
 
   TRACE(1, "retranslateOpt: transId = %u\n", transId);
-
-  auto func   = rec->func();
-  auto funcId = func->getFuncId();
-  auto sk     = rec->srcKey();
-
-  if (profData()->optimized(funcId)) return nullptr;
-  profData()->setOptimized(funcId);
-
   func->setFuncBody(ustubs().funcBodyHelperThunk);
 
   // Invalidate SrcDB's entries for all func's SrcKeys.
@@ -414,7 +403,7 @@ TCA MCGenerator::findTranslation(const TransArgs& args) const {
     return nullptr;
   }
 
-  if (auto const sr = m_tx.getSrcDB().find(sk)) {
+  if (auto const sr = m_srcDB.find(sk)) {
     if (auto const tca = sr->getTopTranslation()) {
       SKTRACE(2, sk, "getTranslation: found %p\n", tca);
       return tca;
@@ -436,7 +425,7 @@ TransResult MCGenerator::getTranslation(const TransArgs& args) {
 }
 
 int MCGenerator::numTranslations(SrcKey sk) const {
-  if (const SrcRec* sr = m_tx.getSrcDB().find(sk)) {
+  if (const SrcRec* sr = m_srcDB.find(sk)) {
     return sr->translations().size();
   }
   return 0;
@@ -448,7 +437,8 @@ const StaticString
 
 bool MCGenerator::shouldTranslateNoSizeLimit(const Func* func) const {
   // If we've hit Eval.JitGlobalTranslationLimit, then we stop translating.
-  if (m_numTrans >= RuntimeOption::EvalJitGlobalTranslationLimit) {
+  if (m_numTrans.load(std::memory_order_relaxed) >=
+      RuntimeOption::EvalJitGlobalTranslationLimit) {
     return false;
   }
 
@@ -527,21 +517,14 @@ static void populateLiveContext(RegionContext& ctx) {
   );
 }
 
-TransResult MCGenerator::createTranslation(const TransArgs& args) {
+TransResult MCGenerator::createTranslation(TransArgs args) {
+  args.kind = profileSrcKey(args.sk) ? TransKind::Profile : TransKind::Live;
+
   if (!shouldTranslate(args.sk.func(), args.kind)) return nullptr;
 
-  /*
-   * Try to become the writer. We delay this until we *know* we will have a
-   * need to create new translations, instead of just trying to win the lottery
-   * at the dawn of time. Hopefully lots of requests won't require any new
-   * translation.
-   */
   auto sk = args.sk;
-  LeaseHolder writer(Translator::WriteLease(), sk.func());
-  if (!writer.canTranslate() ||
-      !shouldTranslate(args.sk.func(), args.kind)) {
-    return nullptr;
-  }
+  LeaseHolder writer(Translator::WriteLease(), sk.func(), args.kind);
+  if (!writer || !shouldTranslate(sk.func(), args.kind)) return nullptr;
 
   if (RuntimeOption::EvalFailJitPrologs && sk.op() == Op::FCallAwait) {
     return nullptr;
@@ -549,7 +532,7 @@ TransResult MCGenerator::createTranslation(const TransArgs& args) {
 
   if (!createSrcRec(sk)) return nullptr;
 
-  auto sr = m_tx.getSrcDB().find(sk);
+  auto sr = m_srcDB.find(sk);
   always_assert(sr);
 
   if (auto const tca = sr->getTopTranslation()) {
@@ -563,21 +546,14 @@ TransResult MCGenerator::createTranslation(const TransArgs& args) {
 }
 
 bool MCGenerator::createSrcRec(SrcKey sk) {
-  if (m_tx.getSrcDB().find(sk)) return true;
-
-  LeaseHolder writer{Translator::WriteLease()};
-  if (!writer.canWrite()) return false;
-
-  if (m_tx.getSrcDB().find(sk)) {
-    // Someone created it between our check above and getting the write lease.
-    return true;
-  }
+  if (m_srcDB.find(sk)) return true;
 
   auto const srcRecSPOff = sk.resumed() ? folly::none
                                         : folly::make_optional(liveSpOff());
 
   // We put retranslate requests at the end of our slab to more frequently
   // allow conditional jump fall-throughs
+  auto codeLock  = lockCode();
   auto code       = m_code.view();
   TCA astart      = code.main().frontier();
   TCA coldStart   = code.cold().frontier();
@@ -608,7 +584,13 @@ bool MCGenerator::createSrcRec(SrcKey sk) {
   }
   SKTRACE(1, sk, "inserting anchor translation for (%p,%d) at %p\n",
           sk.unit(), sk.offset(), req);
-  SrcRec* sr = m_tx.getSrcRec(sk);
+
+  auto metaLock = lockMetadata();
+  always_assert(m_srcDB.find(sk) == nullptr);
+  auto const sr = m_srcDB.insert(sk);
+  if (RuntimeOption::EvalEnableReusableTC) {
+    recordFuncSrcRec(sk.func(), sr);
+  }
   sr->setFuncInfo(sk.func());
   sr->setAnchorTranslation(req);
 
@@ -632,7 +614,7 @@ bool MCGenerator::createSrcRec(SrcKey sk) {
     }
 
     assertx(!m_tx.isTransDBEnabled() ||
-           m_tx.getTransRec(coldStart)->kind == TransKind::Anchor);
+            m_tx.getTransRec(coldStart)->kind == TransKind::Anchor);
   }
 
   return true;
@@ -640,7 +622,7 @@ bool MCGenerator::createSrcRec(SrcKey sk) {
 
 TCA
 MCGenerator::lookupTranslation(SrcKey sk) const {
-  if (SrcRec* sr = m_tx.getSrcDB().find(sk)) {
+  if (auto const sr = m_srcDB.find(sk)) {
     return sr->getTopTranslation();
   }
   return nullptr;
@@ -721,11 +703,11 @@ TransResult MCGenerator::translate(TransArgs args) {
 
   Timer timer(Timer::mcg_translate);
 
-  assertx(m_tx.getSrcDB().find(args.sk));
-  auto& srcRec = *m_tx.getSrcRec(args.sk);
+  auto const srcRec = m_srcDB.find(args.sk);
+  always_assert(srcRec);
 
-  args.region = reachedTranslationLimit(args.sk, srcRec) ? nullptr
-                                                         : prepareRegion(args);
+  args.region = reachedTranslationLimit(args.sk, *srcRec) ? nullptr
+                                                          : prepareRegion(args);
   TransEnv env{args};
   env.initSpOffset = args.region ? args.region->entry()->initialSpOffset()
                                  : liveSpOff();
@@ -760,16 +742,18 @@ TransResult MCGenerator::translate(TransArgs args) {
 }
 
 TCA MCGenerator::getFuncBody(Func* func) {
-  TCA tca = func->getFuncBody();
+  auto tca = func->getFuncBody();
   if (tca != ustubs().funcBodyHelperThunk) return tca;
 
-  DVFuncletsVec dvs = func->getDVFunclets();
+  LeaseHolder writer(Translator::WriteLease(), func, TransKind::Profile);
+  if (!writer) return nullptr;
 
+  tca = func->getFuncBody();
+  if (tca != ustubs().funcBodyHelperThunk) return tca;
+
+  auto const dvs = func->getDVFunclets();
   if (dvs.size()) {
-    LeaseHolder writer(Translator::WriteLease());
-    if (!writer.canWrite()) return nullptr;
-    tca = func->getFuncBody();
-    if (tca != ustubs().funcBodyHelperThunk) return tca;
+    auto codeLock = mcg->lockCode();
     tca = genFuncBodyDispatch(func, dvs, m_code.view());
     func->setFuncBody(tca);
   } else {
@@ -827,17 +811,19 @@ MCGenerator::checkCachedPrologue(const Func* func, int paramIdx,
   return false;
 }
 
-TCA MCGenerator::emitFuncPrologue(Func* func, int argc,
-                                  bool forRegeneratePrologue) {
+TCA MCGenerator::emitFuncPrologue(Func* func, int argc, TransKind kind) {
+  if (m_numTrans.fetch_add(1, std::memory_order_relaxed) >=
+      RuntimeOption::EvalJitGlobalTranslationLimit) {
+    return nullptr;
+  }
+
   const int nparams = func->numNonVariadicParams();
   const int paramIndex = argc <= nparams ? argc : nparams + 1;
 
   auto const funcBody = SrcKey{func, func->getEntryForNumArgs(argc), false};
-  auto const kind = profileSrcKey(funcBody) ? TransKind::ProfPrologue :
-                    forRegeneratePrologue   ? TransKind::OptPrologue  :
-                                              TransKind::LivePrologue;
 
   profileSetHotFuncAttr();
+  auto codeLock = lockCode();
   auto code = m_code.view(kind);
   TCA mainOrig = code.main().frontier();
   CGMeta fixups;
@@ -870,6 +856,8 @@ TCA MCGenerator::emitFuncPrologue(Func* func, int argc,
   TCA start = genFuncPrologue(transID, kind, func, argc, code, fixups);
 
   auto loc = maker.markEnd();
+  auto metaLock = lockMetadata();
+
   if (RuntimeOption::EvalEnableReusableTC) {
     TCA UNUSED ms = loc.mainStart(), me = loc.mainEnd(),
                cs = loc.coldStart(), ce = loc.coldEnd(),
@@ -930,9 +918,6 @@ TCA MCGenerator::emitFuncPrologue(Func* func, int argc,
   recordGdbTranslation(funcBody, func, code.main(), aStart, false, true);
   recordBCInstr(OpFuncPrologue, loc.mainStart(), loc.mainEnd(), false);
 
-  m_numTrans++;
-  assertx(m_numTrans <= RuntimeOption::EvalJitGlobalTranslationLimit);
-
   return start;
 }
 
@@ -947,8 +932,19 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
   TCA prologue;
   if (checkCachedPrologue(func, paramIndex, prologue)) return prologue;
 
-  LeaseHolder writer(Translator::WriteLease());
-  if (!writer.canWrite()) return nullptr;
+  auto const funcBody = SrcKey{func, func->getEntryForNumArgs(nPassed), false};
+  auto computeKind = [&] {
+    return profileSrcKey(funcBody) ? TransKind::ProfPrologue :
+           forRegeneratePrologue   ? TransKind::OptPrologue  :
+                                     TransKind::LivePrologue;
+  };
+  LeaseHolder writer(Translator::WriteLease(), func, computeKind());
+  if (!writer) return nullptr;
+
+  auto const kind = computeKind();
+  // Check again now that we have the write lease, in case the answer to
+  // profileSrcKey() changed.
+  if (!writer.checkKind(kind)) return nullptr;
 
   // If we're regenerating a prologue, and we want to check shouldTranslate()
   // but ignore the code size limits.  We still want to respect the global
@@ -964,7 +960,7 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
   if (checkCachedPrologue(func, paramIndex, prologue)) return prologue;
 
   try {
-    return emitFuncPrologue(func, nPassed, forRegeneratePrologue);
+    return emitFuncPrologue(func, nPassed, kind);
   } catch (const DataBlockFull& dbFull) {
 
     // Fail hard if the block isn't code.hot.
@@ -975,7 +971,7 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
     // Otherwise, fall back to code.main and retry.
     m_code.disableHot();
     try {
-      return emitFuncPrologue(func, nPassed, forRegeneratePrologue);
+      return emitFuncPrologue(func, nPassed, kind);
     } catch (const DataBlockFull& dbFull) {
       always_assert_flog(0, "data block = {}\nmessage: {}\n",
                          dbFull.name, dbFull.what());
@@ -991,7 +987,6 @@ TCA MCGenerator::getFuncPrologue(Func* func, int nPassed, ActRec* ar,
  */
 TCA MCGenerator::regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
                                     bool& emittedDVInit) {
-  assertx(Translator::WriteLease().amOwner());
   auto rec = profData()->transRec(prologueTransId);
   auto func = rec->func();
   auto nArgs = rec->prologueArgs();
@@ -1008,6 +1003,8 @@ TCA MCGenerator::regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
   if (!start) return nullptr;
 
   func->setPrologue(nArgs, start);
+
+  auto codeLock = lockCode();
 
   // Smash callers of the old prologue with the address of the new one.
   for (auto toSmash : rec->mainCallers()) {
@@ -1034,6 +1031,10 @@ TCA MCGenerator::regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
       auto funcletTransId = profData()->dvFuncletTransId(func, nArgs);
       if (funcletTransId != kInvalidTransID) {
         invalidateSrcKey(funcletSK);
+        // We're done touching the TC on behalf of the prologue so drop the
+        // lock.
+        codeLock.unlock();
+
         auto args = TransArgs{funcletSK};
         args.transId = funcletTransId;
         args.kind = TransKind::Optimize;
@@ -1136,15 +1137,19 @@ MCGenerator::bindJmp(TCA toSmash, SrcKey destSk, ServiceRequest req,
   auto tDest = getTranslation(args).tca();
   if (!tDest) return nullptr;
 
-  LeaseHolder writer(Translator::WriteLease());
-  if (!writer.canWrite()) return tDest;
+  LeaseHolder writer(Translator::WriteLease(), destSk.func(),
+                     TransKind::Profile);
+  if (!writer) return tDest;
 
-  SrcRec* sr = m_tx.getSrcRec(destSk);
+  auto const sr = m_srcDB.find(destSk);
+  always_assert(sr);
   // The top translation may have changed while we waited for the write lease,
   // so read it again.  If it was replaced with a new translation, then bind to
   // the new one.  If it was invalidated, then don't bind the jump.
   tDest = sr->getTopTranslation();
   if (tDest == nullptr) return nullptr;
+
+  auto codeLock = lockCode();
 
   if (req == REQ_BIND_ADDR) {
     auto addr = reinterpret_cast<TCA*>(toSmash);
@@ -1213,11 +1218,7 @@ struct FreeRequestStubTrigger {
   }
   void operator()() {
     TRACE(3, "FreeStubTrigger: Firing @ %p , stub %p\n", this, m_stub);
-    if (mcg->freeRequestStub(m_stub) != true) {
-      // If we can't free the stub, enqueue again to retry.
-      TRACE(3, "FreeStubTrigger: write lease failed, requeueing %p\n", m_stub);
-      Treadmill::enqueue(FreeRequestStubTrigger(m_stub));
-    }
+    mcg->freeRequestStub(m_stub);
   }
 private:
   TCA m_stub;
@@ -1292,7 +1293,7 @@ TCA MCGenerator::handleServiceRequest(svcreq::ReqInfo& info) noexcept {
     case REQ_RETRANSLATE_OPT: {
       sk = SrcKey::fromAtomicInt(info.args[0].sk);
       auto transID = info.args[1].transID;
-      start = retranslateOpt(transID, false);
+      start = retranslateOpt(sk, transID, false);
       SKTRACE(2, sk, "retranslated-OPT: transId = %d  start: @%p\n", transID,
               start);
       break;
@@ -1346,6 +1347,7 @@ TCA MCGenerator::handleServiceRequest(svcreq::ReqInfo& info) noexcept {
     case REQ_POST_DEBUGGER_RET: {
       auto fp = vmfp();
       auto caller = fp->func();
+      assert(g_unwind_rds.isInit());
       vmpc() = caller->unit()->at(caller->base() +
                                   g_unwind_rds->debuggerReturnOff);
       FTRACE(3, "REQ_DEBUGGER_RET: pc {} in {}\n",
@@ -1391,48 +1393,51 @@ TCA MCGenerator::handleBindCall(TCA toSmash,
   }
 
   if (start && !RuntimeOption::EvalFailJitPrologs) {
-    LeaseHolder writer(Translator::WriteLease());
-    if (writer.canWrite()) {
-      // Someone else may have changed the func prologue while we waited for
-      // the write lease, so read it again.
-      start = getFuncPrologue(func, nArgs);
-      if (start && !isImmutable) start = funcGuardFromPrologue(start, func);
+    LeaseHolder writer(Translator::WriteLease(), func, TransKind::Profile);
+    if (!writer) return start;
 
-      if (start && smashableCallTarget(toSmash) != start) {
-        assertx(smashableCallTarget(toSmash));
-        TRACE(2, "bindCall smash %p -> %p\n", toSmash, start);
-        smashCall(toSmash, start);
+    // Someone else may have changed the func prologue while we waited for
+    // the write lease, so read it again.
+    start = getFuncPrologue(func, nArgs);
+    if (start && !isImmutable) start = funcGuardFromPrologue(start, func);
 
-        bool is_profiled = false;
-        // For functions to be PGO'ed, if their current prologues are still
-        // profiling ones (living in code.prof()), then save toSmash as a
-        // caller to the prologue, so that it can later be smashed to call a
-        // new prologue when it's generated.
-        int calleeNumParams = func->numNonVariadicParams();
-        int calledPrologNumArgs = (nArgs <= calleeNumParams ?
-                                   nArgs :  calleeNumParams + 1);
-        auto const profData = jit::profData();
-        if (profData != nullptr && m_code.prof().contains(start)) {
-          auto rec = profData->prologueTransRec(
-            func,
-            calledPrologNumArgs
-          );
-          if (isImmutable) {
-            rec->addMainCaller(toSmash);
-          } else {
-            rec->addGuardCaller(toSmash);
-          }
-          is_profiled = true;
+    auto codeLock = lockCode();
+
+    if (start && smashableCallTarget(toSmash) != start) {
+      assertx(smashableCallTarget(toSmash));
+      TRACE(2, "bindCall smash %p -> %p\n", toSmash, start);
+      smashCall(toSmash, start);
+
+      bool is_profiled = false;
+      // For functions to be PGO'ed, if their current prologues are still
+      // profiling ones (living in code.prof()), then save toSmash as a
+      // caller to the prologue, so that it can later be smashed to call a
+      // new prologue when it's generated.
+      int calleeNumParams = func->numNonVariadicParams();
+      int calledPrologNumArgs = (nArgs <= calleeNumParams ?
+                                 nArgs :  calleeNumParams + 1);
+      auto const profData = jit::profData();
+      if (profData != nullptr && m_code.prof().contains(start)) {
+        auto rec = profData->prologueTransRec(
+          func,
+          calledPrologNumArgs
+        );
+        if (isImmutable) {
+          rec->addMainCaller(toSmash);
+        } else {
+          rec->addGuardCaller(toSmash);
         }
+        is_profiled = true;
+      }
 
-        // We need to be able to reclaim the function prologues once the unit
-        // associated with this function is treadmilled-- so record all of the
-        // callers that will need to be re-smashed
-        if (RuntimeOption::EvalEnableReusableTC) {
-          if (debug || !isImmutable) {
-            recordFuncCaller(func, toSmash, isImmutable,
-                             is_profiled, calledPrologNumArgs);
-          }
+      // We need to be able to reclaim the function prologues once the unit
+      // associated with this function is treadmilled-- so record all of the
+      // callers that will need to be re-smashed
+      if (RuntimeOption::EvalEnableReusableTC) {
+        if (debug || !isImmutable) {
+          auto metaLock = lockMetadata();
+          recordFuncCaller(func, toSmash, isImmutable,
+                           is_profiled, calledPrologNumArgs);
         }
       }
     }
@@ -1536,18 +1541,15 @@ void FreeStubList::push(TCA stub) {
   m_list = n;
 }
 
-bool
-MCGenerator::freeRequestStub(TCA stub) {
-  LeaseHolder writer(Translator::WriteLease());
-  /*
-   * If we can't acquire the write lock, the caller
-   * (FreeRequestStubTrigger) retries
-   */
-  if (!writer.canWrite()) return false;
+void MCGenerator::freeRequestStub(TCA stub) {
+  // We need to lock the code because m_freeStubs.push() writes to the stub and
+  // the metadata to protect m_freeStubs itself.
+  auto codeLock = lockCode();
+  auto metaLock = lockMetadata();
+
   assertx(m_code.frozen().contains(stub));
   m_debugInfo.recordRelocMap(stub, 0, "FreeStub");
   m_freeStubs.push(stub);
-  return true;
 }
 
 TCA MCGenerator::getFreeStub(CodeBlock& frozen, CGMeta* fixups,
@@ -1703,12 +1705,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
 
   profileSetHotFuncAttr();
 
-  // Grab the write lease before touching the TC. We use a blocking aqcuisition
-  // because either a) we already have the lease and this will return right
-  // away, or b) a caller above our pay grade decided to do the first part of
-  // the translation process without the write lease, and wants us to make sure
-  // we emit code here rather than throwing away the work already done.
-  BlockingLeaseHolder write{Translator::WriteLease()};
+  auto codeLock = lockCode();
   auto code = m_code.view(args.kind);
 
   CGMeta fixups;
@@ -1727,8 +1724,10 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   }
 
   if (env.vunit) {
-    m_numTrans++;
-    assertx(m_numTrans <= RuntimeOption::EvalJitGlobalTranslationLimit);
+    if (m_numTrans.fetch_add(1, std::memory_order_relaxed) >=
+        RuntimeOption::EvalJitGlobalTranslationLimit) {
+      return nullptr;
+    }
   } else {
     args.kind = TransKind::Interp;
     FTRACE(1, "emitting dispatchBB interp request for failed "
@@ -1739,6 +1738,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   }
 
   Timer metaTimer(Timer::mcg_finishTranslation_metadata);
+  auto metaLock = lockMetadata();
   auto loc = maker.markEnd();
 
   tryRelocateNewTranslation(sk, loc, code, fixups);
@@ -1762,8 +1762,9 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
     }
   }
 
-  auto& srcRec = *m_tx.getSrcRec(args.sk);
-  recordRelocationMetaData(sk, srcRec, loc, fixups);
+  auto const srcRec = m_srcDB.find(args.sk);
+  always_assert(srcRec);
+  recordRelocationMetaData(sk, *srcRec, loc, fixups);
   recordGdbTranslation(sk, sk.func(), code.main(), loc.mainStart(),
                        false, false);
   recordGdbTranslation(sk, sk.func(), code.cold(), loc.coldStart(),
@@ -1789,7 +1790,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   // metadata is not yet visible.
   TRACE(1, "newTranslation: %p  sk: (func %d, bcOff %d)\n",
         loc.mainStart(), sk.funcID(), sk.offset());
-  srcRec.newTranslation(loc, inProgressTailBranches);
+  srcRec->newTranslation(loc, inProgressTailBranches);
 
   TRACE(1, "mcg: %zd-byte tracelet\n", (ssize_t)loc.mainSize());
   if (Trace::moduleEnabledRelease(Trace::tcspace, 1)) {
@@ -1804,6 +1805,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
 MCGenerator::MCGenerator()
   : m_numTrans(0)
   , m_catchTraceMap(128)
+  , m_literals(128)
 {
   TRACE(1, "MCGenerator@%p startup\n", this);
   mcg = this;
@@ -1881,6 +1883,9 @@ void MCGenerator::requestInit() {
   Stats::init();
   requestInitProfData();
   s_initialTCSize = m_code.totalUsed();
+  assert(!g_unwind_rds.isInit());
+  memset(g_unwind_rds.get(), 0, sizeof(UnwindRDS));
+  g_unwind_rds.markInit();
 }
 
 void MCGenerator::requestExit() {
@@ -1935,7 +1940,7 @@ void MCGenerator::recordGdbTranslation(SrcKey sk,
                                        bool exit,
                                        bool inPrologue) {
   if (start != cb.frontier()) {
-    assertx(Translator::WriteLease().amOwner());
+    assertOwnsCodeLock();
     if (!RuntimeOption::EvalJitNoGdb) {
       m_debugInfo.recordTracelet(rangeFrom(cb, start, &cb == &m_code.cold()),
                                  srcFunc,
@@ -1945,7 +1950,7 @@ void MCGenerator::recordGdbTranslation(SrcKey sk,
     }
     if (RuntimeOption::EvalPerfPidMap) {
       m_debugInfo.recordPerfMap(rangeFrom(cb, start, &cb == &m_code.cold()),
-                                srcFunc, exit, inPrologue);
+                                sk, srcFunc, exit, inPrologue);
     }
   }
 }
@@ -1955,7 +1960,9 @@ bool MCGenerator::addDbgGuards(const Unit* unit) {
   // It grabs the write lease and iterates through whole SrcDB...
   struct timespec tsBegin, tsEnd;
   {
-    BlockingLeaseHolder writer(Translator::WriteLease());
+    auto codeLock = lockCode();
+    auto metaLock = lockMetadata();
+
     auto code = m_code.view();
     auto& main = code.main();
     auto& data = code.data();
@@ -1964,13 +1971,12 @@ bool MCGenerator::addDbgGuards(const Unit* unit) {
     // Doc says even find _could_ invalidate iterator, in pactice it should
     // be very rare, so go with it now.
     CGMeta fixups;
-    for (SrcDB::const_iterator it = m_tx.getSrcDB().begin();
-         it != m_tx.getSrcDB().end(); ++it) {
-      SrcKey const sk = SrcKey::fromAtomicInt(it->first);
+    for (auto& pair : m_srcDB) {
+      SrcKey const sk = SrcKey::fromAtomicInt(pair.first);
       // We may have a SrcKey to a deleted function. NB: this may miss a
       // race with deleting a Func. See task #2826313.
       if (!Func::isFuncIdValid(sk.funcID())) continue;
-      SrcRec* sr = it->second;
+      SrcRec* sr = pair.second;
       if (sr->unitMd5() == unit->md5() &&
           !sr->hasDebuggerGuard() &&
           m_tx.isSrcKeyInBL(sk)) {
@@ -1979,6 +1985,7 @@ bool MCGenerator::addDbgGuards(const Unit* unit) {
     }
     fixups.process(nullptr);
   }
+
   HPHP::Timer::GetMonotonicTime(tsEnd);
   int64_t elapsed = gettime_diff_us(tsBegin, tsEnd);
   if (Trace::moduleEnabledRelease(Trace::mcg, 5)) {
@@ -1990,7 +1997,7 @@ bool MCGenerator::addDbgGuards(const Unit* unit) {
 bool MCGenerator::addDbgGuard(const Func* func, Offset offset, bool resumed) {
   SrcKey sk(func, offset, resumed);
   {
-    if (SrcRec* sr = m_tx.getSrcDB().find(sk)) {
+    if (SrcRec* sr = m_srcDB.find(sk)) {
       if (sr->hasDebuggerGuard()) {
         return true;
       }
@@ -2005,10 +2012,12 @@ bool MCGenerator::addDbgGuard(const Func* func, Offset offset, bool resumed) {
       return false;
     }
   }
-  BlockingLeaseHolder writer(Translator::WriteLease());
+
+  auto codeLock = lockCode();
+  auto metaLock = lockMetadata();
 
   CGMeta fixups;
-  if (SrcRec* sr = m_tx.getSrcDB().find(sk)) {
+  if (SrcRec* sr = m_srcDB.find(sk)) {
     auto code = m_code.view();
     addDbgGuardImpl(sk, sr, code.main(), code.data(), fixups);
   }
@@ -2050,9 +2059,11 @@ bool MCGenerator::dumpTCCode(const char* filename) {
 }
 
 bool MCGenerator::dumpTC(bool ignoreLease /* = false */) {
-  folly::Optional<BlockingLeaseHolder> writer;
+  std::unique_lock<SimpleMutex> codeLock;
+  std::unique_lock<SimpleMutex> metaLock;
   if (!ignoreLease) {
-    writer.emplace(Translator::WriteLease());
+    codeLock = lockCode();
+    metaLock = lockMetadata();
   }
   return dumpTCData() && dumpTCCode("/tmp/tc_dump");
 }
@@ -2102,13 +2113,12 @@ bool MCGenerator::dumpTCData() {
 
 void MCGenerator::invalidateSrcKey(SrcKey sk) {
   assertx(!RuntimeOption::RepoAuthoritative || RuntimeOption::EvalJitPGO);
-  assertx(Translator::WriteLease().amOwner());
   /*
    * Reroute existing translations for SrcKey to an as-yet indeterminate
    * new one.
    */
-  SrcRec* sr = m_tx.getSrcDB().find(sk);
-  assertx(sr);
+  auto const sr = m_srcDB.find(sk);
+  always_assert(sr);
   /*
    * Since previous translations aren't reachable from here, we know we
    * just created some garbage in the TC. We currently have no mechanism

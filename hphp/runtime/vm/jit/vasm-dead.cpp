@@ -59,6 +59,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::cmpb:
     case Vinstr::cmpbi:
     case Vinstr::cmpbim:
+    case Vinstr::cmpbm:
     case Vinstr::cmpl:
     case Vinstr::cmpli:
     case Vinstr::cmplim:
@@ -70,6 +71,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::cmpsd:
     case Vinstr::cmpsds:
     case Vinstr::cmpwim:
+    case Vinstr::cmpwm:
     case Vinstr::copy:
     case Vinstr::copy2:
     case Vinstr::copyargs:
@@ -130,6 +132,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::movlk:
     case Vinstr::movtqb:
     case Vinstr::movtql:
+    case Vinstr::movw:
     case Vinstr::movzbw:
     case Vinstr::movzbl:
     case Vinstr::movzbq:

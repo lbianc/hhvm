@@ -317,12 +317,13 @@ static_assert(kNumSmallSizes <= sizeof(kSmallSize2Index),
  * debugging.  There's also 0x7a for junk-filling some cases of
  * ex-TypedValue memory (evaluation stack).
  */
-constexpr char kSmallFreeFill    = 0x6a;
-constexpr char kTVTrashFill      = 0x7a; // used by interpreter
-constexpr char kTVTrashFill2     = 0x7b; // used by req::ptr dtors
-constexpr char kTVTrashJITStk    = 0x7c; // used by the JIT for stack slots
-constexpr char kTVTrashJITFrame  = 0x7d; // used by the JIT for stack frames
-constexpr char kTVTrashJITHeap   = 0x7e; // used by the JIT for heap
+constexpr char kSmallFreeFill   = 0x6a;
+constexpr char kRDSTrashFill    = 0x6b; // used by RDS for "normal" section
+constexpr char kTVTrashFill     = 0x7a; // used by interpreter
+constexpr char kTVTrashFill2    = 0x7b; // used by req::ptr dtors
+constexpr char kTVTrashJITStk   = 0x7c; // used by the JIT for stack slots
+constexpr char kTVTrashJITFrame = 0x7d; // used by the JIT for stack frames
+constexpr char kTVTrashJITHeap  = 0x7e; // used by the JIT for heap
 constexpr char kTVTrashJITRetVal = 0x7f; // used by the JIT for ActRec::m_r
 constexpr uintptr_t kSmallFreeWord = 0x6a6a6a6a6a6a6a6aLL;
 constexpr uintptr_t kMallocFreeWord = 0x5a5a5a5a5a5a5a5aLL;
@@ -341,19 +342,12 @@ static_assert(std::numeric_limits<type_scan::Index>::max() <=
               "to fit into HeaderWord");
 
 // This is the header MemoryManager uses to remember large allocations
-// so they can be auto-freed in MemoryManager::reset()
-struct BigNode {
+// so they can be auto-freed in MemoryManager::reset(), as well as large/small
+// req::malloc()'d blocks, which must track their size internally.
+struct MallocNode {
   size_t nbytes;
   HeaderWord<> hdr;
   uint32_t& index() { return hdr.hi32; }
-  uint16_t& typeIndex() { return hdr.aux; }
-  uint16_t typeIndex() const { return hdr.aux; }
-};
-
-// Header used for small req::malloc allocations (but not *Size allocs)
-struct SmallNode {
-  size_t padbytes;
-  HeaderWord<> hdr;
   uint16_t& typeIndex() { return hdr.aux; }
   uint16_t typeIndex() const { return hdr.aux; }
 };
@@ -406,7 +400,7 @@ struct BigHeap {
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size);
 
-  // allocation api for big blocks. These get a BigNode header and
+  // allocation api for big blocks. These get a MallocNode header and
   // are tracked in m_bigs
   MemBlock allocBig(size_t size, HeaderKind kind, type_scan::Index tyindex);
   MemBlock callocBig(size_t size, HeaderKind kind, type_scan::Index tyindex);
@@ -423,11 +417,11 @@ struct BigHeap {
   template<class Fn> void iterate(Fn);
 
  protected:
-  void enlist(BigNode*, HeaderKind kind, size_t size, type_scan::Index tyindex);
+  void enlist(MallocNode*, HeaderKind kind, size_t size, type_scan::Index);
 
  protected:
   std::vector<MemBlock> m_slabs;
-  std::vector<BigNode*> m_bigs;
+  std::vector<MallocNode*> m_bigs;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -567,7 +561,7 @@ struct MemoryManager {
   MemBlock mallocBigSize(size_t size, HeaderKind kind = HeaderKind::BigObj,
                          type_scan::Index tyindex = 0);
   void freeBigSize(void* vp, size_t size);
-  MemBlock resizeBig(BigNode* n, size_t nbytes);
+  MemBlock resizeBig(MallocNode* n, size_t nbytes);
 
   /*
    * Allocate/deallocate objects when the size is not known to be

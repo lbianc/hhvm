@@ -151,7 +151,7 @@ let call_of_string s =
   match
     (get_object_fields s) >>= fun fields ->
     (get_id_field fields) >>= fun id ->
-    (get_type_field fields) >>= fun type_ ->
+    (get_type_field fields) >>= fun _type ->
     (get_call id fields)
   with
   | Ok x -> x
@@ -216,6 +216,7 @@ let json_string_of_response id response =
           | SymbolOccurrence.Property _ -> "property"
           | SymbolOccurrence.ClassConst _ -> "class_const"
           | SymbolOccurrence.Typeconst _ -> "typeconst"
+          | SymbolOccurrence.GConst -> "global_const"
         in
         JSON_Object [
           "name",        JSON_String res.SymbolOccurrence.name;

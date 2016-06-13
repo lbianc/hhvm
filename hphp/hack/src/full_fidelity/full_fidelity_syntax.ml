@@ -351,6 +351,42 @@ module WithToken(Token: TokenType) = struct
     let kind node =
       to_kind (syntax node)
 
+    let is_missing node = kind node = SyntaxKind.Missing
+    let is_token node = kind node = SyntaxKind.Token
+    let is_literal node = kind node = SyntaxKind.LiteralExpression
+    let is_variable node = kind node = SyntaxKind.VariableExpression
+    let is_qualified_name node = kind node = SyntaxKind.QualifiedNameExpression
+    let is_error node = kind node = SyntaxKind.Error
+    let is_list node = kind node = SyntaxKind.SyntaxList
+    let is_header node = kind node = SyntaxKind.ScriptHeader
+    let is_script node = kind node = SyntaxKind.Script
+    let is_function node = kind node = SyntaxKind.FunctionDeclaration
+    let is_parameter node = kind node = SyntaxKind.ParameterDeclaration
+    let is_default_arg_specifier node =
+      kind node = SyntaxKind.DefaultArgumentSpecifier
+    let is_compound_statement node = kind node = SyntaxKind.CompoundStatement
+    let is_expression_statement node =
+      kind node = SyntaxKind.ExpressionStatement
+    let is_while_statement node = kind node = SyntaxKind.WhileStatement
+    let is_if_statement node = kind node = SyntaxKind.IfStatement
+    let is_elseif node = kind node = SyntaxKind.ElseifClause
+    let is_else node = kind node = SyntaxKind.ElseClause
+    let is_do_statement node = kind node = SyntaxKind.DoStatement
+    let is_switch_statement node = kind node = SyntaxKind.SwitchStatement
+    let is_prefix_operator node = kind node = SyntaxKind.PrefixUnaryOperator
+    let is_postfix_operator node = kind node = SyntaxKind.PostfixUnaryOperator
+    let is_binary_operator node = kind node = SyntaxKind.BinaryOperator
+    let is_parenthesized_expression node =
+      kind node = SyntaxKind.ParenthesizedExpression
+    let is_braced_expression node = kind node = SyntaxKind.BracedExpression
+    let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
+    let is_xhp_open node = kind node = SyntaxKind.XHPOpen
+    let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
+    let is_type_constant node = kind node = SyntaxKind.TypeConstant
+    let is_simple_type node = kind node = SyntaxKind.SimpleTypeSpecifier
+    let is_generic_type node = kind node = SyntaxKind.GenericTypeSpecifier
+    let is_type_arguments node = kind node = SyntaxKind.TypeArguments
+
     let children node =
       match node.syntax with
       | Missing -> []
@@ -489,8 +525,8 @@ module WithToken(Token: TokenType) = struct
     let throw_semicolon x = x.throw_semicolon
     let break_keyword x = x.break_keyword
     let break_semicolon x = x.break_semicolon
-    let continue_keyword x = x.break_keyword
-    let continue_semicolon x = x.break_semicolon
+    let continue_keyword x = x.continue_keyword
+    let continue_semicolon x = x.continue_semicolon
     let expr_statement_expr x = x.expr_statement_expr
     let expr_statement_semicolon x = x.expr_statement_semicolon
     let unary_operator x = x.unary_operator
@@ -716,7 +752,7 @@ module WithToken(Token: TokenType) = struct
 
       let make_postfix_unary_operator unary_operator unary_operand =
         from_children SyntaxKind.PostfixUnaryOperator
-          [ unary_operator; unary_operand ]
+          [ unary_operand; unary_operator ]
 
       let make_binary_operator
         binary_left_operand binary_operator binary_right_operand =

@@ -43,10 +43,10 @@ namespace HPHP { namespace jit {
 struct TransRelocInfo {
   TransRelocInfo() {}
 
-  TransRelocInfo(TransRelocInfo&& other) = default;
-  TransRelocInfo& operator=(TransRelocInfo&& other) = default;
+  TransRelocInfo(TransRelocInfo&&) = default;
+  TransRelocInfo& operator=(TransRelocInfo&&) = default;
   TransRelocInfo(const TransRelocInfo&) = delete;
-  TransRelocInfo& operator=(const TransRelocInfo& other) = delete;
+  TransRelocInfo& operator=(const TransRelocInfo&) = delete;
   SrcKey sk;
   int argNum;
   TCA start;
@@ -77,11 +77,7 @@ template<class T> void swap_trick(T& container) { T().swap(container); }
 struct CodeSmasher {
   std::vector<std::pair<TCA,TCA>> entries;
   void operator()() {
-    LeaseHolder writer(Translator::WriteLease());
-    if (!writer.canWrite()) {
-      Treadmill::enqueue(std::move(*this));
-      return;
-    }
+    auto codeLock = mcg->lockCode();
 
     for (auto& e : entries) {
       CodeBlock cb;
@@ -327,8 +323,8 @@ void liveRelocate(int time) {
   auto relocMap = mcg->debugInfo()->getRelocMap();
   if (!relocMap) return;
 
-  BlockingLeaseHolder writer(Translator::WriteLease());
-  assert(writer.canWrite());
+  auto codeLock = mcg->lockCode();
+  auto metaLock = mcg->lockMetadata();
   if (!okToRelocate) return;
 
   SCOPE_EXIT { fseek(relocMap, 0, SEEK_END); };
@@ -450,7 +446,7 @@ String perfRelocMapInfo(
 
 void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
               CGMeta& fixups) {
-  assert(Translator::WriteLease().amOwner());
+  mcg->assertOwnsCodeLock();
   assert(!Func::s_treadmill);
 
   auto newRelocMapName = mcg->debugInfo()->getRelocMapName() + ".tmp";
@@ -519,7 +515,7 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
   // Since we can now execute the relocated code, its ok to start fixing these
   // things now.
 
-  for (auto& it : mcg->tx().getSrcDB()) {
+  for (auto& it : mcg->srcDB()) {
     it.second->relocate(rel);
   }
 

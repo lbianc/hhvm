@@ -94,7 +94,7 @@ void clearProfCaller(TCA toSmash, const Func* func, int numArgs,
  */
 void clearTCMaps(TCA start, TCA end) {
   auto& catchMap = mcg->catchTraceMap();
-  auto& jmpMap = mcg->jmpToTransIDMap();
+  auto const profData = jit::profData();
   while (start < end) {
 
     #if defined(__powerpc64__)
@@ -104,12 +104,8 @@ void clearTCMaps(TCA start, TCA end) {
     #else
     not_implemented();
     #endif
-    if (di.isBranch()) {
-      auto it = jmpMap.find(start);
-      if (it != jmpMap.end()) {
-        ITRACE(1, "Erasing JMP @ {}\n", start);
-        jmpMap.erase(it);
-      }
+    if (profData && di.isBranch()) {
+      profData->clearJmpTransID(start);
     }
     if (auto* ct = catchMap.find(start)) {
       // We mark nothrow with a nullptr, which will assert during unwinding,
@@ -140,7 +136,7 @@ void clearTCMaps(TCA start, TCA end) {
  * translation.
  */
 void reclaimSrcRec(const SrcRec* rec) {
-  assertx(Translator::WriteLease().amOwner());
+  mcg->assertOwnsCodeLock();
 
   ITRACE(1, "Reclaiming SrcRec addr={} anchor={}\n", (void*)rec,
          rec->getFallbackTranslation());
@@ -166,7 +162,7 @@ int recordedFuncs()   { return s_funcTCData.size(); }
 
 void recordFuncCaller(const Func* func, TCA toSmash, bool immutable,
                       bool profiled, int numArgs) {
-  assertx(Translator::WriteLease().amOwner());
+  mcg->assertOwnsCodeLock();
 
   FTRACE(1, "Recording smashed call @ {} to func {} (id = {})\n",
          toSmash, func->fullName()->data(), func->getFuncId());
@@ -177,7 +173,7 @@ void recordFuncCaller(const Func* func, TCA toSmash, bool immutable,
 }
 
 void recordFuncSrcRec(const Func* func, SrcRec* rec) {
-  assertx(Translator::WriteLease().amOwner());
+  mcg->assertOwnsCodeLock();
 
   FTRACE(1, "Recording SrcRec for func {} (id = {}) addr = {}\n",
          func->fullName()->data(), func->getFuncId(), (void*)rec);
@@ -185,7 +181,7 @@ void recordFuncSrcRec(const Func* func, SrcRec* rec) {
 }
 
 void recordFuncPrologue(const Func* func, TransLoc loc) {
-  assertx(Translator::WriteLease().amOwner());
+  mcg->assertOwnsCodeLock();
 
   FTRACE(1, "Recording Prologue for func {} (id = {}) main={}\n",
          func->fullName()->data(), func->getFuncId(), loc.mainStart());
@@ -193,7 +189,7 @@ void recordFuncPrologue(const Func* func, TransLoc loc) {
 }
 
 void recordJump(TCA toSmash, SrcRec* sr) {
- assertx(MCGenerator::canWrite());
+ mcg->assertOwnsCodeLock();
 
   FTRACE(1, "Recording smashed branch @ {} to SrcRec addr={}\n",
          toSmash, (void*)sr);
@@ -203,7 +199,8 @@ void recordJump(TCA toSmash, SrcRec* sr) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void reclaimTranslation(TransLoc loc) {
-  BlockingLeaseHolder writer(Translator::WriteLease());
+  auto codeLock = mcg->lockCode();
+  auto metaLock = mcg->lockMetadata();
 
   ITRACE(1, "Reclaiming translation M[{}, {}] C[{}, {}] F[{}, {}]\n",
          loc.mainStart(), loc.mainEnd(), loc.coldStart(), loc.coldEnd(),
@@ -259,7 +256,8 @@ void reclaimTranslation(TransLoc loc) {
 }
 
 void reclaimFunction(const Func* func) {
-  BlockingLeaseHolder writer(Translator::WriteLease());
+  auto codeLock = mcg->lockCode();
+  auto metaLock = mcg->lockMetadata();
 
   auto it = s_funcTCData.find(func);
   if (it == s_funcTCData.end()) return;
@@ -296,7 +294,8 @@ void reclaimFunction(const Func* func) {
   // the function is now unreachable). Once the following block runs the guards
   // should be unreachable.
   Treadmill::enqueue([fname, fid, movedData] {
-    BlockingLeaseHolder writer(Translator::WriteLease());
+    auto codeLock = mcg->lockCode();
+    auto metaLock = mcg->lockMetadata();
 
     ITRACE(1, "Reclaiming func {} (id={})\n", fname, fid);
     Trace::Indent _i;

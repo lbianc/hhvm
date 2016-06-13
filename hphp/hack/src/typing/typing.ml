@@ -919,6 +919,7 @@ and expr_
       env, fty
   | Id ((cst_pos, cst_name) as id) ->
       Typing_hooks.dispatch_id_hook id env;
+      Typing_hooks.dispatch_global_const_hook id;
       (match Env.get_gconst env cst_name with
       | None when Env.is_strict env ->
           Errors.unbound_global cst_pos;
@@ -935,6 +936,7 @@ and expr_
      * Typing this is pretty simple, we just need to check that instance->meth
      * is public+not static and then return its type.
      *)
+    Typing_hooks.dispatch_fun_id_hook (p, "\\"^SN.SpecialFunctions.inst_meth);
     let env, ty1 = expr env instance in
     let env, result, vis =
       obj_get_with_visibility ~is_method:true ~nullsafe:None env ty1
@@ -963,6 +965,7 @@ and expr_
     (* meth_caller('X', 'foo') desugars to:
      * $x ==> $x->foo()
      *)
+    Typing_hooks.dispatch_fun_id_hook (p, "\\"^SN.SpecialFunctions.meth_caller);
     let class_ = Env.get_class env class_name in
     (match class_ with
     | None -> unbound_name env pos_cname
@@ -1030,6 +1033,7 @@ and expr_
      * Typing this is pretty simple, we just need to check that c::meth is
      * public+static and then return its type.
      *)
+    Typing_hooks.dispatch_fun_id_hook (p, "\\"^SN.SpecialFunctions.class_meth);
     let class_ = Env.get_class env (snd c) in
     (match class_ with
     | None ->
@@ -1079,6 +1083,10 @@ and expr_
       Typing_hooks.dispatch_lvar_hook id env;
       let env, x = Env.get_local env x in
       env, x
+  | Lvarvar (_, id) ->
+      Typing_hooks.dispatch_lvar_hook id env;
+      (** Can't easily track any typing information for variable variable. *)
+      env, (Reason.Rnone, Tany)
   | List el ->
       let env, tyl = List.map_env env el expr in
       let env, tyl = List.map_env env tyl Typing_env.unbind in
@@ -2395,7 +2403,8 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
       let env = Type.sub_type p Reason.index_array env ty1 ty2 in
       env, ty
   | Tclass ((_, cn) as id, argl)
-    when cn = SN.Collections.cVector ->
+    when cn = SN.Collections.cVector
+    || cn = SN.Collections.cVec ->
       let ty = match argl with
         | [ty] -> ty
         | _ -> arity_error id; Reason.Rwitness p, Tany in
@@ -2579,7 +2588,9 @@ and array_append is_lvalue p env ty1 =
   match snd ety1 with
   | Tany | Tarraykind (AKany | AKempty) -> env, (Reason.Rnone, Tany)
   | Tclass ((_, n), [ty])
-      when n = SN.Collections.cVector || n = SN.Collections.cSet ->
+      when n = SN.Collections.cVector
+      || n = SN.Collections.cSet
+      || n = SN.Collections.cVec ->
       env, ty
   | Tclass ((_, n), [])
       when n = SN.Collections.cVector || n = SN.Collections.cSet ->

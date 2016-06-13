@@ -191,7 +191,9 @@ let builtins =
   "const string __NAMESPACE__ = '';\n"^
   "interface Indexish<+Tk, +Tv> extends KeyedContainer<Tk, Tv> {}\n"^
   "abstract final class dict<+Tk, +Tv> implements Indexish<Tk, Tv> {}\n"^
-  "function dict<Tk, Tv>(KeyedTraversable<Tk, Tv> $arr): dict<Tk, Tv> {}\n"
+  "function dict<Tk, Tv>(KeyedTraversable<Tk, Tv> $arr): dict<Tk, Tv> {}\n"^
+  "abstract final class vec<+Tv> implements Indexish<int, Tv> {}\n"^
+  "function meth_caller(string $cls_name, string $meth_name);\n"
 
 (*****************************************************************************)
 (* Helpers *)
@@ -386,6 +388,7 @@ let print_symbol (symbol, definition) =
     | Property _ -> "Property"
     | ClassConst _ -> "ClassConst"
     | Typeconst _ -> "Typeconst"
+    | GConst -> "GlobalConst"
     end
     (Pos.string_no_file symbol.pos);
   Printf.printf "defined: %s\n"
@@ -403,7 +406,7 @@ let handle_mode mode filename tcopt files_contents files_info errors =
   | Autocomplete ->
       let file = cat (Relative_path.to_absolute filename) in
       let result =
-        ServerAutoComplete.auto_complete tcopt files_info file in
+        ServerAutoComplete.auto_complete tcopt file in
       List.iter ~f: begin fun r ->
         let open AutocompleteService in
         Printf.printf "%s %s\n" r.res_name r.res_ty
