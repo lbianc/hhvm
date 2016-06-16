@@ -594,8 +594,7 @@ bool MCGenerator::createSrcRec(SrcKey sk) {
   sr->setFuncInfo(sk.func());
   sr->setAnchorTranslation(req);
 
-  //if (srcRecSPOff) always_assert(sr->nonResumedSPOff() == *srcRecSPOff);
-  // TODO PPC64
+  if (srcRecSPOff) always_assert(sr->nonResumedSPOff() == *srcRecSPOff);
 
   size_t asize      = code.main().frontier()   - astart;
   size_t coldSize   = code.cold().frontier()   - coldStart;
