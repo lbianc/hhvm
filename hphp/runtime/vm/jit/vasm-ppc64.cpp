@@ -1075,7 +1075,6 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();                          \
   Vptr p = inst.attr_addr;                                              \
   v << vasm_filter{inst.attr, tmp1};                                    \
-  patchVptr(p, v);                                                      \
   v << vasm_load{p, tmp2};                                              \
   v << vasm_dst{tmp1, tmp2, inst.sf};                                   \
 }
@@ -1548,6 +1547,8 @@ void fixVptrsForPPC64(Vout& v, cmplm& inst)     { fixVptr(v, inst.s1); }
 void fixVptrsForPPC64(Vout& v, cmpqim& inst)    { fixVptr(v, inst.s1); }
 void fixVptrsForPPC64(Vout& v, cmpqm& inst)     { fixVptr(v, inst.s1); }
 void fixVptrsForPPC64(Vout& v, cmpwim& inst)    { fixVptr(v, inst.s1); }
+void fixVptrsForPPC64(Vout& v, cmpwm& inst)     { fixVptr(v, inst.s1); }
+void fixVptrsForPPC64(Vout& v, cmpbm& inst)     { fixVptr(v, inst.s1); }
 void fixVptrsForPPC64(Vout& v, cvtsi2sdm& inst) { fixVptr(v, inst.s); }
 void fixVptrsForPPC64(Vout& v, declm& inst)     { fixVptr(v, inst.m); }
 void fixVptrsForPPC64(Vout& v, decqm& inst)     { fixVptr(v, inst.m); }
