@@ -32,6 +32,8 @@ type mode =
   | Find_local of int * int
   | Outline
   | Find_refs of int * int
+  | Symbol_definition_by_id of string
+  | Highlight_refs of int * int
 
 type options = {
   filename : string;
@@ -258,6 +260,9 @@ let parse_options () =
         Arg.Int (fun column -> set_mode (Identify_symbol (!line, column)) ());
       ]),
       "Show info about symbol at given line and column";
+    "--symbol-by-id",
+      Arg.String (fun s -> set_mode (Symbol_definition_by_id s) ()),
+      "Show info about symbol with given id";
     "--find-local",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
@@ -273,6 +278,12 @@ let parse_options () =
         Arg.Int (fun column -> set_mode (Find_refs (!line, column)) ());
       ]),
       "Find all usages of a symbol at given line and column";
+    "--highlight-refs",
+      Arg.Tuple ([
+        Arg.Int (fun x -> line := x);
+        Arg.Int (fun column -> set_mode (Highlight_refs (!line, column)) ());
+      ]),
+      "Highlight all usages of a symbol at given line and column";
   ] in
   let options = Arg.align options in
   Arg.parse options (fun fn -> fn_ref := Some fn) usage;
@@ -490,6 +501,12 @@ let handle_mode mode filename tcopt files_contents files_info errors =
       | [] -> print_endline "None"
       | _ -> List.iter result print_symbol
     end
+  | Symbol_definition_by_id id ->
+    let result = ServerSymbolDefinition.from_symbol_id tcopt id in
+    begin match result with
+      | None -> print_endline "None"
+      | Some s -> FileOutline.print [SymbolDefinition.to_absolute s]
+    end
   | Find_local (line, column) ->
     let file = cat (Relative_path.to_absolute filename) in
     let result = ServerFindLocals.go file line column in
@@ -509,6 +526,10 @@ let handle_mode mode filename tcopt files_contents files_info errors =
     let file = cat (Relative_path.to_absolute filename) in
     let results = ServerFindRefs.go_from_file (file, line, column) genv env in
     FindRefsService.print results;
+  | Highlight_refs (line, column) ->
+    let file = cat (Relative_path.to_absolute filename) in
+    let results = ServerHighlightRefs.go (file, line, column) tcopt  in
+    ClientHighlightRefs.go results ~output_json:false;
   | Suggest
   | Errors ->
       let errors =

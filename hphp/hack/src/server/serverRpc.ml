@@ -20,10 +20,12 @@ type _ t =
   | AUTOCOMPLETE : string -> AutocompleteService.result t
   | IDENTIFY_FUNCTION : string * int * int -> ServerIdentifyFunction.result t
   | OUTLINE : string -> FileOutline.outline t
+  | GET_DEFINITION_BY_ID : string -> string SymbolDefinition.t option t
   | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
   | FIND_DEPENDENT_FILES: string list -> string list t
   | FIND_REFS : FindRefsService.action -> FindRefsService.result t
   | IDE_FIND_REFS : string * int * int -> FindRefsService.result t
+  | IDE_HIGHLIGHT_REFS : string * int * int -> ServerHighlightRefs.result t
   | REFACTOR : ServerRefactor.action -> ServerRefactor.patch list t
   | DUMP_SYMBOL_INFO : string list -> SymbolInfoService.result t
   | DUMP_AI_INFO : string list -> Ai.InfoService.result t
@@ -57,6 +59,9 @@ let handle : type a. genv -> env -> a t -> a =
         ServerIdentifyFunction.go_absolute content line char env.tcopt
     | OUTLINE content ->
         FileOutline.outline content
+    | GET_DEFINITION_BY_ID id ->
+        Option.map (ServerSymbolDefinition.from_symbol_id env.tcopt id)
+          SymbolDefinition.to_absolute
     | METHOD_JUMP (class_, find_children) ->
       MethodJumps.get_inheritance env.tcopt class_ ~find_children
         env.files_info genv.workers
@@ -70,6 +75,8 @@ let handle : type a. genv -> env -> a t -> a =
           Ai.ServerFindRefs.go find_refs_action genv env
     | IDE_FIND_REFS (content, line, char) ->
         ServerFindRefs.go_from_file (content, line, char) genv env
+    | IDE_HIGHLIGHT_REFS (content, line, char) ->
+        ServerHighlightRefs.go (content, line, char) env.tcopt
     | REFACTOR refactor_action -> ServerRefactor.go refactor_action genv env
     | REMOVE_DEAD_FIXMES codes ->
       HackEventLogger.check_response (Errors.get_error_list env.errorl);
@@ -126,3 +133,5 @@ let to_string : type a. a t -> _ = function
   | FORMAT _ -> "FORMAT"
   | TRACE_AI _ -> "TRACE_AI"
   | IDE_FIND_REFS _ -> "IDE_FIND_REFS"
+  | GET_DEFINITION_BY_ID _ -> "GET_DEFINITION_BY_ID"
+  | IDE_HIGHLIGHT_REFS _ -> "IDE_HIGHLIGHT_REFS"

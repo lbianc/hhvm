@@ -69,6 +69,7 @@ module Operator = Full_fidelity_operator
 module type TokenType = sig
   type t
   val kind: t -> Full_fidelity_token_kind.t
+  val to_json: t -> Hh_json.json
 end
 
 module type SyntaxValueType = sig
@@ -149,6 +150,23 @@ module WithToken(Token: TokenType) = struct
       else_keyword: t;
       else_statement: t;
     }
+    and try_statement = {
+      try_keyword: t;
+      try_compound_statement: t;
+      catch_clauses: t;
+      finally_clause: t;
+    }
+    and catch_clause = {
+      catch_keyword: t;
+      catch_left_paren: t;
+      catch_params: t;
+      catch_right_paren: t;
+      catch_compound_statement: t;
+    }
+    and finally_clause = {
+      finally_keyword: t;
+      finally_compound_statement: t;
+    }
     and do_statement = {
       do_keyword: t;
       do_statement: t;
@@ -157,6 +175,17 @@ module WithToken(Token: TokenType) = struct
       do_condition_expr: t;
       do_right_paren: t;
       do_semicolon: t
+    }
+    and for_statement = {
+      for_keyword: t;
+      for_left_paren: t;
+      for_initializer_expr: t;
+      for_first_semicolon: t;
+      for_control_expr: t;
+      for_second_semicolon: t;
+      for_end_of_loop_expr: t;
+      for_right_paren: t;
+      for_statement: t;
     }
     and switch_statement = {
       switch_keyword: t;
@@ -203,6 +232,13 @@ module WithToken(Token: TokenType) = struct
       binary_operator : t;
       binary_right_operand : t
     }
+    and conditional_expression = {
+      conditional_test : t;
+      conditional_question : t;
+      conditional_consequence : t;
+      conditional_colon : t;
+      conditional_alternative : t
+    }
     and parenthesized_expression = {
       paren_expr_left_paren : t;
       paren_expr : t;
@@ -247,10 +283,19 @@ module WithToken(Token: TokenType) = struct
       generic_class_type : t;
       generic_arguments : t
     }
+    and nullable_type_specifier = {
+      nullable_question : t;
+      nullable_type : t
+    }
     and type_arguments = {
       type_arguments_left_angle : t;
       type_arguments : t;
       type_arguments_right_angle : t
+    }
+    and tuple_type_specifier = {
+      tuple_left_paren : t;
+      tuple_types : t;
+      tuple_right_paren : t
     }
     and syntax =
     | Token of Token.t
@@ -270,7 +315,11 @@ module WithToken(Token: TokenType) = struct
     | IfStatement of if_statement
     | ElseifClause of elseif_clause
     | ElseClause of else_clause
+    | TryStatement of try_statement
+    | CatchClause of catch_clause
+    | FinallyClause of finally_clause
     | DoStatement of do_statement
+    | ForStatement of for_statement
     | SwitchStatement of switch_statement
     | CaseStatement of case_statement
     | DefaultStatement of default_statement
@@ -285,6 +334,7 @@ module WithToken(Token: TokenType) = struct
     | PrefixUnaryOperator of unary_operator
     | PostfixUnaryOperator of unary_operator
     | BinaryOperator of binary_operator
+    | ConditionalExpression of conditional_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
     | XHPExpression of xhp_expression
@@ -292,9 +342,11 @@ module WithToken(Token: TokenType) = struct
     | XHPAttribute of xhp_attribute
 
     | SimpleTypeSpecifier of t
+    | NullableTypeSpecifier of nullable_type_specifier
     | TypeConstant of type_constant
     | GenericTypeSpecifier of generic_type
     | TypeArguments of type_arguments
+    | TupleTypeSpecifier of tuple_type_specifier
 
     and t = { syntax : syntax ; value : SyntaxValue.t}
 
@@ -327,7 +379,11 @@ module WithToken(Token: TokenType) = struct
       | IfStatement _ -> SyntaxKind.IfStatement
       | ElseifClause _ -> SyntaxKind.ElseifClause
       | ElseClause _ -> SyntaxKind.ElseClause
+      | TryStatement _ -> SyntaxKind.TryStatement
+      | CatchClause _ -> SyntaxKind.CatchClause
+      | FinallyClause _ -> SyntaxKind.FinallyClause
       | DoStatement _ -> SyntaxKind.DoStatement
+      | ForStatement _ -> SyntaxKind.ForStatement
       | SwitchStatement _ -> SyntaxKind.SwitchStatement
       | CaseStatement _ -> SyntaxKind.CaseStatement
       | DefaultStatement _ -> SyntaxKind.DefaultStatement
@@ -338,6 +394,7 @@ module WithToken(Token: TokenType) = struct
       | PrefixUnaryOperator _ -> SyntaxKind.PrefixUnaryOperator
       | PostfixUnaryOperator _ -> SyntaxKind.PostfixUnaryOperator
       | BinaryOperator _ -> SyntaxKind.BinaryOperator
+      | ConditionalExpression _ -> SyntaxKind.ConditionalExpression
       | ParenthesizedExpression _ -> SyntaxKind.ParenthesizedExpression
       | BracedExpression _ -> SyntaxKind.BracedExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
@@ -345,8 +402,10 @@ module WithToken(Token: TokenType) = struct
       | XHPAttribute _ -> SyntaxKind.XHPAttribute
       | TypeConstant _ ->  SyntaxKind.TypeConstant
       | SimpleTypeSpecifier _ -> SyntaxKind.SimpleTypeSpecifier
+      | NullableTypeSpecifier _ -> SyntaxKind.NullableTypeSpecifier
       | GenericTypeSpecifier _ -> SyntaxKind.GenericTypeSpecifier
       | TypeArguments _ -> SyntaxKind.TypeArguments
+      | TupleTypeSpecifier _ -> SyntaxKind.TupleTypeSpecifier
 
     let kind node =
       to_kind (syntax node)
@@ -371,11 +430,16 @@ module WithToken(Token: TokenType) = struct
     let is_if_statement node = kind node = SyntaxKind.IfStatement
     let is_elseif node = kind node = SyntaxKind.ElseifClause
     let is_else node = kind node = SyntaxKind.ElseClause
+    let is_try_statement node = kind node = SyntaxKind.TryStatement
+    let is_catch node = kind node = SyntaxKind.CatchClause
+    let is_finally node = kind node = SyntaxKind.FinallyClause
     let is_do_statement node = kind node = SyntaxKind.DoStatement
     let is_switch_statement node = kind node = SyntaxKind.SwitchStatement
     let is_prefix_operator node = kind node = SyntaxKind.PrefixUnaryOperator
     let is_postfix_operator node = kind node = SyntaxKind.PostfixUnaryOperator
     let is_binary_operator node = kind node = SyntaxKind.BinaryOperator
+    let is_conditional_expression node =
+      kind node = SyntaxKind.ConditionalExpression
     let is_parenthesized_expression node =
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node = kind node = SyntaxKind.BracedExpression
@@ -385,7 +449,10 @@ module WithToken(Token: TokenType) = struct
     let is_type_constant node = kind node = SyntaxKind.TypeConstant
     let is_simple_type node = kind node = SyntaxKind.SimpleTypeSpecifier
     let is_generic_type node = kind node = SyntaxKind.GenericTypeSpecifier
+    let is_nullable_type_specifier node =
+      kind node = SyntaxKind.NullableTypeSpecifier
     let is_type_arguments node = kind node = SyntaxKind.TypeArguments
+    let is_tuple_type node = kind node = SyntaxKind.TupleTypeSpecifier
 
     let children node =
       match node.syntax with
@@ -396,63 +463,310 @@ module WithToken(Token: TokenType) = struct
       | QualifiedNameExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
-      | ScriptHeader x ->
-        [ x.header_less_than; x.header_question; x.header_language ]
-      | Script x -> [ x.script_header; x.script_declarations ]
-      | FunctionDeclaration x -> [ x.function_attr; x.function_async;
-        x.function_token; x.function_name; x.function_type_params;
-        x.function_left_paren; x.function_params; x.function_right_paren;
-        x.function_colon; x.function_type; x.function_body]
-      | ParameterDeclaration x ->
-        [ x.param_attr; x.param_type; x.param_name; x.param_default ]
-      | DefaultArgumentSpecifier x -> [ x.default_equal; x.default_value ]
-      | CompoundStatement x ->
-        [ x.compound_left_brace; x.compound_statements; x.compound_right_brace ]
-      | ExpressionStatement x -> [ x.expr_statement_expr;
-        x.expr_statement_semicolon ]
-      | WhileStatement x -> [ x.while_keyword; x.while_left_paren;
-        x.while_condition_expr; x.while_right_paren; x.while_body ]
-      | IfStatement x -> [ x.if_keyword; x.if_left_paren; x.if_condition_expr;
-        x.if_right_paren; x.if_statement; x.if_elseif_clauses;
-        x.if_else_clause ]
-      | ElseifClause x -> [ x.elseif_keyword; x.elseif_left_paren;
-        x.elseif_condition_expr; x.elseif_right_paren; x.elseif_statement ]
-      | ElseClause x -> [ x.else_keyword; x.else_statement ]
-      | DoStatement x -> [ x.do_keyword; x.do_statement;
-      x.do_while_keyword; x.do_left_paren; x.do_condition_expr;
-      x.do_right_paren; x.do_semicolon ]
-      | SwitchStatement x -> [ x.switch_keyword; x.switch_left_paren;
-        x.switch_expr; x.switch_right_paren; x.switch_compound_statement ]
-      | CaseStatement x ->
-        [ x.case_keyword; x.case_expr; x.case_colon; x.case_stmt ]
-      | DefaultStatement x ->
-        [ x.default_keyword; x.default_colon; x.default_stmt ]
-      | ReturnStatement x -> [ x.return_keyword;
-        x.return_expr; x.return_semicolon ]
-      | ThrowStatement x -> [ x.throw_keyword; x.throw_expr; x.throw_semicolon ]
-      | BreakStatement x -> [ x.break_keyword; x.break_semicolon ]
-      | ContinueStatement x -> [ x.continue_keyword; x.continue_semicolon ]
-      | PrefixUnaryOperator x -> [ x.unary_operator; x.unary_operand ]
-      | PostfixUnaryOperator x -> [ x.unary_operand; x.unary_operator ]
-      | BinaryOperator x ->
-        [ x.binary_left_operand; x.binary_operator; x.binary_right_operand ]
-      | ParenthesizedExpression x ->
-        [ x.paren_expr_left_paren; x.paren_expr; x.paren_expr_right_paren ]
-      | BracedExpression x ->
-        [ x.braced_expr_left_brace; x.braced_expr; x.braced_expr_right_brace ]
-      | XHPExpression x ->
-        [ x.xhp_open; x.xhp_body; x.xhp_close ]
-      | XHPOpen x ->
-        [ x.xhp_open_name; x.xhp_open_attrs; x.xhp_open_right_angle ]
-      | XHPAttribute x ->
-        [ x.xhp_attr_name; x.xhp_attr_equal; x.xhp_attr_expr ]
-      | TypeConstant x ->
-        [ x.type_constant_left_type; x.type_constant_separator;
-        x.type_constant_right_type ]
+      | ScriptHeader
+        { header_less_than; header_question; header_language } ->
+        [ header_less_than; header_question; header_language ]
+      | Script
+        { script_header; script_declarations } ->
+        [ script_header; script_declarations ]
+      | FunctionDeclaration
+        { function_attr; function_async; function_token; function_name;
+          function_type_params; function_left_paren; function_params;
+          function_right_paren; function_colon; function_type; function_body} ->
+        [ function_attr; function_async; function_token; function_name;
+          function_type_params; function_left_paren; function_params;
+          function_right_paren; function_colon; function_type; function_body]
+      | ParameterDeclaration
+        { param_attr; param_type; param_name; param_default } ->
+        [ param_attr; param_type; param_name; param_default ]
+      | DefaultArgumentSpecifier
+        { default_equal; default_value } ->
+        [ default_equal; default_value ]
+      | CompoundStatement
+        { compound_left_brace; compound_statements; compound_right_brace } ->
+        [ compound_left_brace; compound_statements; compound_right_brace ]
+      | ExpressionStatement
+        { expr_statement_expr; expr_statement_semicolon } ->
+        [ expr_statement_expr; expr_statement_semicolon ]
+      | WhileStatement
+        { while_keyword; while_left_paren; while_condition_expr;
+          while_right_paren; while_body } ->
+        [ while_keyword; while_left_paren; while_condition_expr;
+          while_right_paren; while_body ]
+      | IfStatement
+        { if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+          if_statement; if_elseif_clauses; if_else_clause } ->
+        [ if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+          if_statement; if_elseif_clauses; if_else_clause ]
+      | ElseifClause
+        { elseif_keyword; elseif_left_paren; elseif_condition_expr;
+          elseif_right_paren; elseif_statement } ->
+        [ elseif_keyword; elseif_left_paren; elseif_condition_expr;
+          elseif_right_paren; elseif_statement ]
+      | ElseClause
+        { else_keyword; else_statement } ->
+        [ else_keyword; else_statement ]
+      | TryStatement {try_keyword; try_compound_statement; catch_clauses;
+                      finally_clause} ->
+        [try_keyword; try_compound_statement; catch_clauses; finally_clause]
+      | CatchClause {catch_keyword; catch_left_paren; catch_params;
+                     catch_right_paren; catch_compound_statement} ->
+        [catch_keyword; catch_left_paren; catch_params; catch_right_paren;
+         catch_compound_statement]
+      | FinallyClause {finally_keyword; finally_compound_statement} ->
+        [finally_keyword; finally_compound_statement]
+      | DoStatement
+        { do_keyword; do_statement; do_while_keyword; do_left_paren;
+          do_condition_expr; do_right_paren; do_semicolon } ->
+        [ do_keyword; do_statement; do_while_keyword; do_left_paren;
+          do_condition_expr; do_right_paren; do_semicolon ]
+      | ForStatement
+        { for_keyword; for_left_paren; for_initializer_expr;
+          for_first_semicolon; for_control_expr; for_second_semicolon;
+          for_end_of_loop_expr; for_right_paren; for_statement } ->
+        [ for_keyword; for_left_paren; for_initializer_expr;
+          for_first_semicolon; for_control_expr; for_second_semicolon;
+          for_end_of_loop_expr; for_right_paren; for_statement ]
+      | SwitchStatement
+        { switch_keyword; switch_left_paren; switch_expr; switch_right_paren;
+          switch_compound_statement } ->
+        [ switch_keyword; switch_left_paren; switch_expr; switch_right_paren;
+          switch_compound_statement ]
+      | CaseStatement
+        { case_keyword; case_expr; case_colon; case_stmt } ->
+        [ case_keyword; case_expr; case_colon; case_stmt ]
+      | DefaultStatement
+        { default_keyword; default_colon; default_stmt } ->
+        [ default_keyword; default_colon; default_stmt ]
+      | ReturnStatement
+        { return_keyword; return_expr; return_semicolon } ->
+        [ return_keyword; return_expr; return_semicolon ]
+      | ThrowStatement
+        { throw_keyword; throw_expr; throw_semicolon } ->
+        [ throw_keyword; throw_expr; throw_semicolon ]
+      | BreakStatement
+        { break_keyword; break_semicolon } ->
+        [ break_keyword; break_semicolon ]
+      | ContinueStatement
+        { continue_keyword; continue_semicolon } ->
+        [ continue_keyword; continue_semicolon ]
+      | PrefixUnaryOperator
+        { unary_operator; unary_operand } ->
+        [ unary_operator; unary_operand ]
+      | PostfixUnaryOperator
+        { unary_operand; unary_operator } ->
+        [ unary_operand; unary_operator ]
+      | BinaryOperator
+        { binary_left_operand; binary_operator; binary_right_operand } ->
+        [ binary_left_operand; binary_operator; binary_right_operand ]
+      | ConditionalExpression
+        { conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative } ->
+        [ conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative ]
+      | ParenthesizedExpression
+        { paren_expr_left_paren; paren_expr; paren_expr_right_paren } ->
+        [ paren_expr_left_paren; paren_expr; paren_expr_right_paren ]
+      | BracedExpression
+        { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
+        [ braced_expr_left_brace; braced_expr; braced_expr_right_brace ]
+      | XHPExpression
+        { xhp_open; xhp_body; xhp_close } ->
+        [ xhp_open; xhp_body; xhp_close ]
+      | XHPOpen
+        { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
+        [ xhp_open_name; xhp_open_attrs; xhp_open_right_angle ]
+      | XHPAttribute
+        { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
+        [ xhp_attr_name; xhp_attr_equal; xhp_attr_expr ]
+      | TypeConstant
+        { type_constant_left_type; type_constant_separator;
+          type_constant_right_type } ->
+        [ type_constant_left_type; type_constant_separator;
+        type_constant_right_type ]
+
       | SimpleTypeSpecifier x -> [x]
-      | GenericTypeSpecifier x -> [ x.generic_class_type; x.generic_arguments ]
-      | TypeArguments x -> [ x.type_arguments_left_angle;
-        x.type_arguments; x.type_arguments_right_angle ]
+      | NullableTypeSpecifier
+        { nullable_question; nullable_type } ->
+        [ nullable_question; nullable_type ]
+      | GenericTypeSpecifier
+        { generic_class_type; generic_arguments } ->
+        [ generic_class_type; generic_arguments ]
+      | TypeArguments
+        { type_arguments_left_angle; type_arguments;
+          type_arguments_right_angle } ->
+        [ type_arguments_left_angle; type_arguments;
+          type_arguments_right_angle ]
+      | TupleTypeSpecifier
+        { tuple_left_paren; tuple_types; tuple_right_paren } ->
+        [ tuple_left_paren; tuple_types; tuple_right_paren ]
+
+    let children_names node =
+      match node.syntax with
+      | Missing -> []
+      | Token _ -> []
+      | LiteralExpression _ -> [ "literal_expression" ]
+      | VariableExpression _ -> [ "variable_expression" ]
+      | QualifiedNameExpression _ -> [ "qualified_name_expression" ]
+      | Error _ -> []
+      | SyntaxList _ -> []
+      | ScriptHeader
+        { header_less_than; header_question; header_language } ->
+        [ "header_less_than"; "header_question"; "header_language" ]
+      | Script
+        { script_header; script_declarations } ->
+        [ "script_header"; "script_declarations" ]
+      | FunctionDeclaration
+        { function_attr; function_async; function_token; function_name;
+          function_type_params; function_left_paren; function_params;
+          function_right_paren; function_colon; function_type;
+          function_body} ->
+        [ "function_attr"; "function_async"; "function_token"; "function_name";
+          "function_type_params"; "function_left_paren"; "function_params";
+          "function_right_paren"; "function_colon"; "function_type";
+          "function_body" ]
+      | ParameterDeclaration
+        { param_attr; param_type; param_name; param_default } ->
+        [ "param_attr"; "param_type"; "param_name"; "param_default" ]
+      | DefaultArgumentSpecifier
+        { default_equal; default_value } ->
+        [ "default_equal"; "default_value" ]
+      | CompoundStatement
+        { compound_left_brace; compound_statements; compound_right_brace } ->
+        [ "compound_left_brace"; "compound_statements"; "compound_right_brace" ]
+      | ExpressionStatement
+        { expr_statement_expr; expr_statement_semicolon } ->
+        [ "expr_statement_expr"; "expr_statement_semicolon" ]
+      | WhileStatement
+        { while_keyword; while_left_paren; while_condition_expr;
+          while_right_paren; while_body } ->
+        [ "while_keyword"; "while_left_paren"; "while_condition_expr";
+          "while_right_paren"; "while_body" ]
+      | IfStatement
+        { if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+          if_statement; if_elseif_clauses; if_else_clause } ->
+        [ "if_keyword"; "if_left_paren"; "if_condition_expr"; "if_right_paren";
+          "if_statement"; "if_elseif_clauses"; "if_else_clause" ]
+      | ElseifClause
+        { elseif_keyword; elseif_left_paren; elseif_condition_expr;
+          elseif_right_paren; elseif_statement } ->
+        [ "elseif_keyword"; "elseif_left_paren"; "elseif_condition_expr";
+          "elseif_right_paren"; "elseif_statement" ]
+      | ElseClause
+        { else_keyword; else_statement } ->
+        [ "else_keyword"; "else_statement" ]
+      | TryStatement {try_keyword; try_compound_statement; catch_clauses;
+                      finally_clause} ->
+        ["try_keyword"; "try_compound_statement"; "catch_clauses";
+        "finally_clause"]
+      | CatchClause {catch_keyword; catch_left_paren; catch_params;
+                     catch_right_paren; catch_compound_statement} ->
+        ["catch_keyword"; "catch_left_paren"; "catch_params";
+        "catch_right_paren"; "catch_compound_statement"]
+      | FinallyClause {finally_keyword; finally_compound_statement} ->
+        ["finally_keyword"; "finally_compound_statement"]
+      | DoStatement
+        { do_keyword; do_statement; do_while_keyword; do_left_paren;
+          do_condition_expr; do_right_paren; do_semicolon } ->
+        [ "do_keyword"; "do_statement"; "do_while_keyword"; "do_left_paren";
+          "do_condition_expr"; "do_right_paren"; "do_semicolon" ]
+      | ForStatement
+        { for_keyword; for_left_paren; for_initializer_expr;
+          for_first_semicolon; for_control_expr; for_second_semicolon;
+          for_end_of_loop_expr; for_right_paren; for_statement } ->
+        [ "for_keyword"; "for_left_paren"; "for_initializer_expr";
+          "for_first_semicolon"; "for_control_expr"; "for_second_semicolon";
+          "for_end_of_loop_expr"; "for_right_paren"; "for_statement" ]
+      | SwitchStatement
+        { switch_keyword; switch_left_paren; switch_expr;
+          switch_right_paren; switch_compound_statement } ->
+        [ "switch_keyword"; "switch_left_paren"; "switch_expr";
+          "switch_right_paren"; "switch_compound_statement" ]
+      | CaseStatement
+        { case_keyword; case_expr; case_colon; case_stmt } ->
+        [ "case_keyword"; "case_expr"; "case_colon"; "case_stmt" ]
+      | DefaultStatement
+        { default_keyword; default_colon; default_stmt } ->
+        [ "default_keyword"; "default_colon"; "default_stmt" ]
+      | ReturnStatement
+        { return_keyword; return_expr; return_semicolon } ->
+        [ "return_keyword"; "return_expr"; "return_semicolon" ]
+      | ThrowStatement
+        { throw_keyword; throw_expr; throw_semicolon } ->
+        [ "throw_keyword"; "throw_expr"; "throw_semicolon" ]
+      | BreakStatement
+        { break_keyword; break_semicolon } ->
+        [ "break_keyword"; "break_semicolon" ]
+      | ContinueStatement
+        { continue_keyword; continue_semicolon } ->
+        [ "continue_keyword"; "continue_semicolon" ]
+      | PrefixUnaryOperator
+        { unary_operator; unary_operand } ->
+        [ "unary_operator"; "unary_operand" ]
+      | PostfixUnaryOperator
+        { unary_operand; unary_operator } ->
+        [ "unary_operand"; "unary_operator" ]
+      | BinaryOperator
+        { binary_left_operand; binary_operator; binary_right_operand } ->
+        [ "binary_left_operand"; "binary_operator"; "binary_right_operand" ]
+      | ConditionalExpression
+        { conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative } ->
+        [ "conditional_test"; "conditional_question"; "conditional_consequence";
+          "conditional_colon"; "conditional_alternative" ]
+      | ParenthesizedExpression
+        { paren_expr_left_paren; paren_expr; paren_expr_right_paren } ->
+        [ "paren_expr_left_paren"; "paren_expr"; "paren_expr_right_paren" ]
+      | BracedExpression
+        { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
+        [ "braced_expr_left_brace"; "braced_expr"; "braced_expr_right_brace" ]
+      | XHPExpression
+        { xhp_open; xhp_body; xhp_close } ->
+        [ "xhp_open"; "xhp_body"; "xhp_close" ]
+      | XHPOpen
+        { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
+        [ "xhp_open_name"; "xhp_open_attrs"; "xhp_open_right_angle" ]
+      | XHPAttribute
+        { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
+        [ "xhp_attr_name"; "xhp_attr_equal"; "xhp_attr_expr" ]
+      | TypeConstant
+        { type_constant_left_type; type_constant_separator;
+          type_constant_right_type } ->
+        [ "type_constant_left_type"; "type_constant_separator";
+        "type_constant_right_type" ]
+      | SimpleTypeSpecifier _ -> [ "simple_type_specifier" ]
+      | NullableTypeSpecifier
+        { nullable_question; nullable_type } ->
+        [ "nullable_question"; "nullable_type" ]
+      | GenericTypeSpecifier
+        { generic_class_type; generic_arguments } ->
+        [ "generic_class_type"; "generic_arguments" ]
+      | TypeArguments
+        { type_arguments_left_angle; type_arguments;
+          type_arguments_right_angle } ->
+        [ "type_arguments_left_angle"; "type_arguments";
+          "type_arguments_right_angle" ]
+      | TupleTypeSpecifier
+        { tuple_left_paren; tuple_types; tuple_right_paren } ->
+        [ "tuple_left_paren"; "tuple_types"; "tuple_right_paren" ]
+
+
+    let rec to_json node =
+      let open Hh_json in
+      let ch = match node.syntax with
+      | Token t -> [ "token", Token.to_json t ]
+      | Error x -> [ ("errors", JSON_Array (List.map to_json x)) ]
+      | SyntaxList x -> [ ("elements", JSON_Array (List.map to_json x)) ]
+      | _ ->
+        let rec aux acc c n =
+          match c, n with
+          | ([], []) -> acc
+          | ((hc :: tc), (hn :: tn)) ->
+            aux ((hn, to_json hc) :: acc) tc tn
+          | _ -> failwith "mismatch between children and names" in
+        List.rev (aux [] (children node) (children_names node)) in
+      let k = ("kind", JSON_String (SyntaxKind.to_string (kind node))) in
+      JSON_Object (k :: ch)
 
     let script_header x = x.script_header
     let script_declarations x = x.script_declarations
@@ -498,6 +812,17 @@ module WithToken(Token: TokenType) = struct
     let elseif_statement x = x.elseif_statement
     let else_keyword x = x.else_keyword
     let else_statement x = x.else_statement
+    let try_keyword x = x.try_keyword
+    let try_compound_statement x = x.try_compound_statement
+    let try_catch_clauses x = x.catch_clauses
+    let try_finally_clause x = x.finally_clause
+    let catch_keyword x = x.catch_keyword
+    let catch_left_paren x = x.catch_left_paren
+    let catch_params x = x.catch_params
+    let catch_right_paren x = x.catch_right_paren
+    let catch_compound_statement x = x.catch_compound_statement
+    let finally_keyword x = x.finally_keyword
+    let finally_compound_statement x = x.finally_compound_statement
     let do_keyword x = x.do_keyword
     let do_statement x = x.do_statement
     let do_while_keyword x = x.do_while_keyword
@@ -534,6 +859,11 @@ module WithToken(Token: TokenType) = struct
     let binary_left_operand b = b.binary_left_operand
     let binary_operator b = b.binary_operator
     let binary_right_operand b = b.binary_right_operand
+    let conditional_test x = x.conditional_test
+    let conditional_question x = x.conditional_question
+    let conditional_consequence x = x.conditional_consequence
+    let conditional_colon x = x.conditional_colon
+    let conditional_alternative x = x.conditional_alternative
     let paren_expr_left_paren x = x.paren_expr_left_paren
     let paren_expr x = x.paren_expr
     let paren_expr_right_paren x = x.paren_expr_right_paren
@@ -649,12 +979,32 @@ module WithToken(Token: TokenType) = struct
           elseif_condition_expr; elseif_right_paren; elseif_statement }
       | (SyntaxKind.ElseClause, [ else_keyword; else_statement ]) ->
         ElseClause { else_keyword; else_statement }
+
+      | SyntaxKind.TryStatement, [try_keyword; try_compound_statement;
+        catch_clauses; finally_clause] ->
+        TryStatement {try_keyword; try_compound_statement; catch_clauses;
+          finally_clause}
+      | SyntaxKind.CatchClause, [catch_keyword; catch_left_paren; catch_params;
+        catch_right_paren; catch_compound_statement] ->
+        CatchClause {catch_keyword; catch_left_paren; catch_params;
+          catch_right_paren; catch_compound_statement}
+      | SyntaxKind.FinallyClause, [finally_keyword;
+        finally_compound_statement] ->
+        FinallyClause {finally_keyword; finally_compound_statement}
       | (SyntaxKind.DoStatement, [ do_keyword; do_statement;
         do_while_keyword; do_left_paren; do_condition_expr;
         do_right_paren; do_semicolon ]) ->
         DoStatement { do_keyword; do_statement;
           do_while_keyword; do_left_paren; do_condition_expr;
           do_right_paren; do_semicolon }
+      | (SyntaxKind.ForStatement, [ for_keyword; for_left_paren;
+        for_initializer_expr; for_first_semicolon; for_control_expr;
+        for_second_semicolon; for_end_of_loop_expr; for_right_paren;
+        for_statement ]) ->
+        ForStatement { for_keyword; for_left_paren;
+          for_initializer_expr; for_first_semicolon; for_control_expr;
+          for_second_semicolon; for_end_of_loop_expr; for_right_paren;
+          for_statement }
       | (SyntaxKind.SwitchStatement, [ switch_keyword; switch_left_paren;
         switch_expr; switch_right_paren; switch_compound_statement ]) ->
         SwitchStatement{ switch_keyword; switch_left_paren;
@@ -684,6 +1034,12 @@ module WithToken(Token: TokenType) = struct
         binary_right_operand ]) ->
         BinaryOperator { binary_left_operand; binary_operator;
         binary_right_operand }
+      | (SyntaxKind.ConditionalExpression,
+        [ conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative ]) ->
+        ConditionalExpression
+        { conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative }
       | (SyntaxKind.ParenthesizedExpression, [ paren_expr_left_paren;
         paren_expr; paren_expr_right_paren ]) ->
         ParenthesizedExpression { paren_expr_left_paren; paren_expr;
@@ -707,11 +1063,18 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.GenericTypeSpecifier, [ generic_class_type;
           generic_arguments ]) ->
         GenericTypeSpecifier { generic_class_type; generic_arguments }
+      | (SyntaxKind.NullableTypeSpecifier,
+          [ nullable_question; nullable_type ]) ->
+          NullableTypeSpecifier
+          { nullable_question; nullable_type }
       | (SyntaxKind.TypeArguments, [ type_arguments_left_angle;
           type_arguments; type_arguments_right_angle ]) ->
         TypeArguments { type_arguments_left_angle;
             type_arguments; type_arguments_right_angle }
-
+      | (SyntaxKind.TupleTypeSpecifier,
+          [ tuple_left_paren; tuple_types; tuple_right_paren ]) ->
+        TupleTypeSpecifier
+          { tuple_left_paren; tuple_types; tuple_right_paren }
       | _ -> failwith "with_children called with wrong number of children"
 
     let all_tokens node =
@@ -758,6 +1121,13 @@ module WithToken(Token: TokenType) = struct
         binary_left_operand binary_operator binary_right_operand =
           from_children SyntaxKind.BinaryOperator
             [ binary_left_operand; binary_operator; binary_right_operand ]
+
+      let make_conditional_expression
+        conditional_test conditional_question conditional_consequence
+        conditional_colon conditional_alternative =
+        from_children SyntaxKind.ConditionalExpression
+        [ conditional_test; conditional_question; conditional_consequence;
+          conditional_colon; conditional_alternative ]
 
       let make_parenthesized_expression
         paren_expr_left_paren paren_expr paren_expr_right_paren =
@@ -845,15 +1215,38 @@ module WithToken(Token: TokenType) = struct
           elseif_right_paren; elseif_statement ]
 
       let make_else_clause else_keyword else_statement =
-        from_children SyntaxKind.ElseClause
-          [ else_keyword; else_statement ]
+        from_children SyntaxKind.ElseClause [ else_keyword; else_statement ]
+
+      let make_try_statement
+        try_keyword try_compound_statement catch_clauses finally_clause =
+          from_children SyntaxKind.TryStatement
+          [ try_keyword; try_compound_statement; catch_clauses; finally_clause ]
+
+      let make_catch_clause catch_keyword catch_left_paren catch_params
+        catch_right_paren catch_compound_statement =
+        from_children SyntaxKind.CatchClause
+          [ catch_keyword; catch_left_paren; catch_params; catch_right_paren;
+          catch_compound_statement ]
+
+      let make_finally_clause finally_keyword finally_compound_statement =
+        from_children SyntaxKind.FinallyClause
+          [finally_keyword; finally_compound_statement]
 
       let make_do_statement
         do_keyword do_statement do_while_keyword do_left_paren
         do_condition_expr do_right_paren do_semicolon =
         from_children SyntaxKind.DoStatement
-        [ do_keyword; do_statement; do_while_keyword; do_left_paren;
-        do_condition_expr; do_right_paren; do_semicolon ]
+          [ do_keyword; do_statement; do_while_keyword; do_left_paren;
+          do_condition_expr; do_right_paren; do_semicolon ]
+
+      let make_for_statement
+        for_keyword for_left_paren for_initializer_expr for_first_semicolon
+        for_control_expr for_second_semicolon for_end_of_loop_expr
+        for_right_paren for_statement =
+        from_children SyntaxKind.ForStatement
+        [ for_keyword; for_left_paren; for_initializer_expr;
+        for_first_semicolon; for_control_expr; for_second_semicolon;
+        for_end_of_loop_expr; for_right_paren; for_statement ]
 
       let make_switch_statement
         switch_keyword switch_left_paren switch_expr
@@ -895,12 +1288,19 @@ module WithToken(Token: TokenType) = struct
       let make_simple_type_specifier simple_type =
         from_children SyntaxKind.SimpleTypeSpecifier [ simple_type ]
 
+      let make_nullable_type_specifier nullable_question nullable_type =
+        from_children SyntaxKind.NullableTypeSpecifier
+          [ nullable_question; nullable_type ]
+
       let make_generic_type_specifier generic_class_type generic_arguments =
         from_children SyntaxKind.GenericTypeSpecifier
           [ generic_class_type; generic_arguments ]
 
       let make_type_arguments left items right =
         from_children SyntaxKind.TypeArguments [ left; items; right ]
+
+      let make_tuple_type_specifier left types right =
+        from_children SyntaxKind.TupleTypeSpecifier [ left; types; right ]
 
       let make_literal_expression literal =
         from_children SyntaxKind.LiteralExpression [ literal ]

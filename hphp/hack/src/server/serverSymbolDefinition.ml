@@ -41,6 +41,7 @@ let get_gconst_by_name x =
 let get_member_def (x : class_element) =
   let type_, member_origin, member_name = x in
   get_class_by_name member_origin >>= fun c ->
+  let member_origin = Utils.strip_ns member_origin in
   match type_ with
   | Constructor
   | Method
@@ -50,7 +51,7 @@ let get_member_def (x : class_element) =
       | _ -> None
     end in
     List.find methods (fun m -> (snd m.Ast.m_name) = member_name) >>= fun m ->
-    Some (FileOutline.summarize_method m)
+    Some (FileOutline.summarize_method member_origin m)
   | Property
   | Static_property ->
     let props = List.concat_map c.Ast.c_body begin function
@@ -62,7 +63,7 @@ let get_member_def (x : class_element) =
     let get_prop_name (_, (_, x), _) = x in
     List.find props (fun p -> get_prop_name (snd p) = member_name) >>=
       fun (kinds, p) ->
-    Some (FileOutline.summarize_property kinds p)
+    Some (FileOutline.summarize_property member_origin kinds p)
   | Class_const ->
     let consts = List.concat_map c.Ast.c_body begin function
       | Ast.Const (_, consts) ->
@@ -72,7 +73,7 @@ let get_member_def (x : class_element) =
       | _ -> []
     end in
     let res = List.find consts (fun c -> snd c = member_name) >>= fun c ->
-      Some (FileOutline.summarize_const (fst c))
+      Some (FileOutline.summarize_const member_origin (fst c))
     in
     if Option.is_some res then res else
     let abs_consts = List.concat_map c.Ast.c_body begin function
@@ -80,7 +81,7 @@ let get_member_def (x : class_element) =
       | _ -> []
     end in
     List.find abs_consts (fun c -> snd c = member_name) >>= fun c ->
-      Some (FileOutline.summarize_abs_const c)
+      Some (FileOutline.summarize_abs_const member_origin c)
   | Typeconst ->
     let tconsts = List.filter_map c.Ast.c_body begin function
       | Ast.TypeConst t -> Some t
@@ -88,7 +89,7 @@ let get_member_def (x : class_element) =
     end in
     List.find tconsts (fun m -> (snd m.Ast.tconst_name) = member_name)
       >>= fun t ->
-    Some (FileOutline.summarize_typeconst t)
+    Some (FileOutline.summarize_typeconst member_origin t)
 
 let get_local_var_def ast name p =
   let line, char, _ = Pos.info_pos p in
@@ -145,3 +146,38 @@ let go tcopt ast result =
     | SymbolOccurrence.LocalVar ->
       get_local_var_def
         ast result.SymbolOccurrence.name result.SymbolOccurrence.pos
+
+let build_symbol_occurence kind name =
+  {
+    SymbolOccurrence.name = "\\" ^ name;
+    type_ = kind;
+    pos = Pos.none;
+  }
+
+let from_symbol_id tcopt id =
+  match Str.split (Str.regexp_string "::") id with
+  | [kind; name] when kind = SymbolDefinition.function_kind_name ->
+      go tcopt [] (build_symbol_occurence SymbolOccurrence.Function name)
+  | [kind; name] when kind = SymbolDefinition.type_id_kind_name ->
+      go tcopt [] (build_symbol_occurence SymbolOccurrence.Class name)
+  | [kind; class_name; method_name ]
+        when kind = SymbolDefinition.method_kind_name ->
+      go tcopt [] (build_symbol_occurence
+        (SymbolOccurrence.Method ("\\" ^ class_name, method_name)) "")
+  | [kind; class_name; property_name ]
+        when kind = SymbolDefinition.property_kind_name ->
+      go tcopt [] (build_symbol_occurence
+        (SymbolOccurrence.Property ("\\" ^ class_name, property_name)) "")
+  | [kind; class_name; const_name ]
+        when kind = SymbolDefinition.class_const_kind_name ->
+      let try_const () = go tcopt [] (build_symbol_occurence
+        (SymbolOccurrence.ClassConst ("\\" ^ class_name, const_name)) "")
+      in
+      let try_typeconst () = go tcopt [] (build_symbol_occurence
+        (SymbolOccurrence.Typeconst ("\\" ^ class_name, const_name)) "")
+      in
+      begin match try_const () with
+      | Some result -> Some result
+      | None -> try_typeconst ()
+      end
+  | _ -> None

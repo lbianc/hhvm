@@ -295,6 +295,25 @@ let rec get_doc node =
     let statement = get_doc (else_statement x) in
     let indt = peek_and_decide_indent (else_statement x) indt in
     group_doc (indent_doc keyword statement indt)
+  | TryStatement x ->
+    let keyword = get_doc (try_keyword x) in
+    let compound_stmt = get_doc (try_compound_statement x) in
+    let catch_clauses = get_doc (try_catch_clauses x) in
+    let finally_clause = get_doc (try_finally_clause x) in
+    group_doc (keyword ^| compound_stmt ^| catch_clauses ^| finally_clause)
+  | CatchClause x ->
+    let keyword = get_doc (catch_keyword x) in
+    let left = get_doc (catch_left_paren x) in
+    let params = get_doc (catch_params x) in
+    let right = get_doc (catch_right_paren x) in
+    let stmt = get_doc (catch_compound_statement x) in
+    let front_part = group_doc (keyword ^| left) in
+    let before_stmt = indent_block_no_space front_part params right indt in
+    group_doc (before_stmt ^| stmt)
+  | FinallyClause x ->
+    let keyword = get_doc (finally_keyword x) in
+    let stmt = get_doc (finally_compound_statement x) in
+    group_doc (keyword ^| stmt)
   | DoStatement x ->
     let keyword = get_doc (do_keyword x) in
     let statement = get_doc (do_statement x) in
@@ -309,6 +328,32 @@ let rec get_doc node =
     let left_part = group_doc (while_keyword ^^| left) in
     let condition_part = indent_block_no_space left_part condition right indt in
     group_doc (statement_part ^| condition_part) ^^^ semicolon
+  | ForStatement x ->
+    let keyword = get_doc x.for_keyword in
+    let left_paren = get_doc x.for_left_paren in
+    let initializer_expr = get_doc x.for_initializer_expr in
+    let first_semicolon = get_doc x.for_first_semicolon in
+    let control_expr = get_doc x.for_control_expr in
+    let second_semicolon = get_doc x.for_second_semicolon in
+    let end_of_loop_expr = get_doc x.for_end_of_loop_expr in
+    let right_paren = get_doc x.for_right_paren in
+    let statement = get_doc x.for_statement in
+
+    let left_part = group_doc (keyword ^^| left_paren) in
+
+    let for_expressions =
+      control_expr ^^^ second_semicolon ^| end_of_loop_expr in
+    let for_expressions = if is_missing x.for_control_expr
+      then first_semicolon ^^| for_expressions
+      else first_semicolon ^| for_expressions
+    in
+    let for_expressions = group_doc (initializer_expr ^^^ for_expressions) in
+
+    let start_block =
+      indent_block_no_space left_part for_expressions right_paren indt
+    in
+    let indt = peek_and_decide_indent x.for_statement indt in
+    group_doc (indent_doc start_block statement indt)
   | SwitchStatement x ->
     let keyword = get_doc (switch_keyword x) in
     let left = get_doc (switch_left_paren x) in
@@ -327,6 +372,14 @@ let rec get_doc node =
     let op = get_doc (binary_operator x) in
     let right = get_doc (binary_right_operand x) in
     group_doc (left ^| op ^| right)
+  | ConditionalExpression x ->
+    let tst = get_doc (conditional_test x) in
+    let qm = get_doc (conditional_question x) in
+    let con = get_doc (conditional_consequence x) in
+    let col = get_doc (conditional_colon x) in
+    let alt = get_doc (conditional_alternative x) in
+    (* TODO: Could this be improved? *)
+    group_doc ( tst ^| qm ^| con ^| col ^| alt )
   | ParenthesizedExpression x ->
     let left = get_doc (paren_expr_left_paren x) in
     let right = get_doc (paren_expr_right_paren x) in
@@ -358,6 +411,10 @@ let rec get_doc node =
     let separator = get_doc (type_constant_separator x) in
     left ^^^ separator ^^^ right
   | SimpleTypeSpecifier x -> get_doc x
+  | NullableTypeSpecifier x ->
+    let qm = get_doc x.nullable_question in
+    let ty = get_doc x.nullable_type in
+    qm ^^^ ty
   | GenericTypeSpecifier x ->
     let name = get_doc (generic_class_type x) in
     let argument = get_doc (generic_arguments x) in
@@ -367,6 +424,11 @@ let rec get_doc node =
     let right = get_doc (type_arguments_right_angle x) in
     let args = get_doc (type_arguments x) in
     indent_block_no_space left args right indt
+  | TupleTypeSpecifier x ->
+    let left = get_doc x.tuple_left_paren in
+    let types = get_doc x.tuple_types in
+    let right = get_doc x.tuple_right_paren in
+    indent_block_no_space left types right indt
   (* this ideally should never be called *)
   | CaseStatement x ->
     let keyword = get_doc (case_keyword x) in

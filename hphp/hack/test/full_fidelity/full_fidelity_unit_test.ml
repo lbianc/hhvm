@@ -10,25 +10,49 @@
 
 module SourceText = Full_fidelity_source_text
 module SyntaxTree = Full_fidelity_syntax_tree
-module SyntaxKind = Full_fidelity_syntax_kind
-module TriviaKind = Full_fidelity_trivia_kind
-module TokenKind = Full_fidelity_token_kind
-module MinimalSyntax = Full_fidelity_minimal_syntax
-module MinimalToken = Full_fidelity_minimal_token
-module MinimalTrivia = Full_fidelity_minimal_trivia
 module PositionedSyntax = Full_fidelity_positioned_syntax
 module ParserErrors = Full_fidelity_parser_errors
 module SyntaxError = Full_fidelity_syntax_error
+module TestUtils = Full_fidelity_test_utils
 
 open Core
 open OUnit
 
-type code_extent_test = {
+let test_files_dir = "./hphp/hack/test/full_fidelity/cases"
+
+type test_case = {
+  (** Source files is loaded from <name>.php in the <cwd>/<test_files_dir>/ *)
   name: string;
   source: string;
   expected: string;
   test_function: string -> string;
 }
+
+let ident str = str
+
+let cat_file name =
+  let path = Filename.concat test_files_dir name in
+  let raw = Sys_utils.cat path in
+  (** cat adds an extra newline at the end. *)
+  if (String.length raw > 0) &&
+      (String.get raw (String.length raw - 1)) == '\n' then
+    String.sub raw 0 (String.length raw - 1)
+  else
+    raw
+
+(** Create a test_case by reading input from <cwd>/<test_files_dir>/name.php
+ * and name.exp *)
+let make_test_case_from_files
+    ?preprocess_exp:(preprocess_exp=ident) name test_function =
+  let source = cat_file (name ^ ".php") in
+  let expected = preprocess_exp (cat_file (name ^ ".exp")) in
+  {
+    name = name;
+    source = source;
+    expected = expected;
+    test_function = test_function;
+  }
+
 
 let remove_whitespace text =
   let length = String.length text in
@@ -43,38 +67,11 @@ let remove_whitespace text =
       | _ -> begin Buffer.add_char buffer ch; aux (i + 1) end in
   aux 0
 
-let minimal_trivia_to_string trivia =
-  let name = TriviaKind.to_string (MinimalTrivia.kind trivia) in
-  Printf.sprintf "(%s)" name
-
-let minimal_trivia_list_to_string trivia_list =
-  String.concat "" (List.map trivia_list ~f:minimal_trivia_to_string)
-
-let minimal_token_to_string token =
-  let leading = minimal_trivia_list_to_string (MinimalToken.leading token) in
-  let name = TokenKind.to_string (MinimalToken.kind token) in
-  let name =
-    if name = "(" then "lparen"
-    else if name = ")" then "rparen"
-    else name in
-  let trailing = minimal_trivia_list_to_string (MinimalToken.trailing token) in
-  Printf.sprintf "(%s(%s)%s)" leading name trailing
-
-let rec minimal_to_string node =
-  match MinimalSyntax.syntax node with
-  | MinimalSyntax.Token token ->
-    minimal_token_to_string token
-  | _ ->
-    let name = SyntaxKind.to_string (MinimalSyntax.kind node) in
-    let children = MinimalSyntax.children node in
-    let children = List.map children ~f:minimal_to_string in
-    let children = String.concat "" children in
-    Printf.sprintf "(%s%s)" name children
 
 let test_minimal source =
   let source_text = SourceText.make source in
   let syntax_tree = SyntaxTree.make source_text in
-  minimal_to_string (SyntaxTree.root syntax_tree)
+  TestUtils.minimal_to_string (SyntaxTree.root syntax_tree)
 
 let test_mode source =
   let source_text = SourceText.make source in
@@ -98,170 +95,19 @@ let test_errors source =
   let errors = List.map errors ~f:mapper in
   Printf.sprintf "%s" (String.concat "\n" errors)
 
-let source_simple =
-"<?hh
-/* comment */ function foo() {
-  $a = (123 + $b) * $c;
-}"
-
-let result_simple = remove_whitespace
-  "(script
-    (header((<))((?))((name)(end_of_line)))
-      (function_declaration
-        (missing)
-        (missing)
-        ((delimited_comment)(whitespace)(function)(whitespace))
-        ((name))
-        (missing)
-        ((lparen))
-        (missing)
-        ((rparen)(whitespace))
-        (missing)
-        (missing)
-        (compound_statement
-          (({)(end_of_line))
-            (expression_statement
-              (binary_operator
-                (variable((whitespace)(variable)(whitespace)))
-                ((=)(whitespace))
-                (binary_operator
-                  (parenthesized_expression
-                    ((lparen))
-                    (binary_operator
-                      (literal((decimal_literal)(whitespace)))
-                      ((+)(whitespace))
-                      (variable((variable))))
-                    ((rparen)(whitespace)))
-                  ((*)(whitespace))
-                  (variable((variable)))))
-              ((;)(end_of_line)))
-          ((})))))"
-
-let source_statements =
-"<?hh
-function foo() {
-  if ($a)
-    if ($b)
-      switch ($c) {
-        case 123: break;
-        default: break;
-      }
-    else
-      return $d;
-  elseif($e)
-    do {
-      while($f)
-        throw $g;
-      continue;
-    } while ($h);
-}"
-
-let result_statements = remove_whitespace "
-(script(header((<))((?))((name)(end_of_line)))
-    (function_declaration(missing)(missing)((function)(whitespace))((name))
-    (missing)((lparen))(missing)((rparen)(whitespace))(missing)(missing)
-    (compound_statement
-      (({)(end_of_line))
-          (if_statement
-            ((whitespace)(if)(whitespace))
-            ((lparen))(variable((variable)))
-            ((rparen)(end_of_line))
-            (if_statement
-              ((whitespace)(if)(whitespace))
-              ((lparen))
-              (variable((variable)))
-              ((rparen)(end_of_line))
-              (switch_statement
-                ((whitespace)(switch)(whitespace))
-                ((lparen))
-                (variable((variable)))
-                ((rparen)(whitespace))
-                (compound_statement
-                  (({)(end_of_line))
-                    (list
-                      (case_statement
-                        ((whitespace)(case)(whitespace))
-                        (literal((decimal_literal)))
-                        ((:)(whitespace))
-                        (break_statement((break))((;)(end_of_line))))
-                      (default_statement
-                        ((whitespace)(default))
-                        ((:)(whitespace))
-                        (break_statement((break))((;)(end_of_line)))))
-                    ((whitespace)(})(end_of_line))))
-              (missing)
-              (else_clause
-                ((whitespace)(else)(end_of_line))
-                (return_statement
-                  ((whitespace)(return)(whitespace))
-                  (variable((variable)))
-                  ((;)(end_of_line)))))
-              (elseif_clause
-                ((whitespace)(elseif))
-                ((lparen))
-                (variable((variable)))
-                ((rparen)(end_of_line))
-                (do_statement
-                  ((whitespace)(do)(whitespace))
-                  (compound_statement
-                    (({)(end_of_line))
-                    (list
-                      (while_statement
-                        ((whitespace)(while))
-                        ((lparen))
-                        (variable((variable)))
-                        ((rparen)(end_of_line))
-                        (throw_statement
-                          ((whitespace)(throw)(whitespace))
-                          (variable((variable)))
-                          ((;)(end_of_line))))
-                      (continue_statement
-                        ((whitespace)(continue))
-                        ((;)(end_of_line))))
-                    ((whitespace)(})(whitespace)))
-                  ((while)(whitespace))
-                  ((lparen))
-                  (variable((variable)))
-                  ((rparen))
-                  ((;)(end_of_line))))
-            (missing))
-      ((})))))"
-
-let source_errors_strict =
-"<?hh // strict
-function foo($a) {
-  return $a;
-}"
-
-let source_errors_not_strict =
-"<?hh
-function foo($a) {
-  return $a;
-}"
-
-let source_no_errors_strict =
-"<?hh // strict
-function foo(int $a) : int {
-  return $a;
-}"
-
-let results_errors_strict =
-"(2,14)-(2,15) A type annotation is required in strict mode.
-(2,16)-(2,16) A type annotation is required in strict mode."
 
 let test_data = [
-  {
-    name = "test_simple";
-    source = source_simple;
-    expected = result_simple;
-    test_function = test_minimal;
-  };
-  {
-    name = "test_statements";
-    source = source_statements;
-    expected = result_statements;
-    test_function = test_minimal;
-  };
+  make_test_case_from_files
+    ~preprocess_exp:remove_whitespace "test_simple" test_minimal;
+  make_test_case_from_files
+    ~preprocess_exp:remove_whitespace "test_conditional" test_minimal;
+  make_test_case_from_files
+    ~preprocess_exp:remove_whitespace "test_statements" test_minimal;
+  make_test_case_from_files
+    ~preprocess_exp:remove_whitespace "test_for_statements" test_minimal;
+  make_test_case_from_files
+    ~preprocess_exp:remove_whitespace "test_try_statement" test_minimal;
+
   {
     name = "test_mode_1";
     source = "<?hh   ";
@@ -298,25 +144,9 @@ let test_data = [
     expected = "Lang:hhMode:Strict:falseHack:truePhp:false";
     test_function = test_mode;
   };
-  {
-    name = "test_errors_not_strict";
-    source = source_errors_not_strict;
-    expected = "";
-    test_function = test_errors;
-  };
-  {
-    name = "test_errors_strict";
-    source = source_errors_strict;
-    expected = results_errors_strict;
-    test_function = test_errors;
-  };
-  {
-    name = "test_no_errors_strict";
-    source = source_no_errors_strict;
-    expected = "";
-    test_function = test_errors;
-  };
-
+  make_test_case_from_files "test_errors_not_strict" test_errors;
+  make_test_case_from_files "test_errors_strict" test_errors;
+  make_test_case_from_files "test_no_errors_strict" test_errors;
 ]
 
 let driver test () =
@@ -327,6 +157,7 @@ let run_test test =
   test.name >:: (driver test)
 
 let run_tests tests =
+  Printf.printf "%s" (Sys.getcwd());
   List.map tests ~f:run_test
 
 let test_suite =

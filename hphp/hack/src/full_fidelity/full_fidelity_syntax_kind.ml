@@ -26,9 +26,13 @@ type t =
 | ExpressionStatement
 | WhileStatement
 | DoStatement
+| ForStatement
 | IfStatement
 | ElseifClause
 | ElseClause
+| TryStatement
+| CatchClause
+| FinallyClause
 | SwitchStatement
 | CaseStatement
 | DefaultStatement
@@ -44,6 +48,7 @@ type t =
 | PrefixUnaryOperator
 | PostfixUnaryOperator
 | BinaryOperator
+| ConditionalExpression
 | ParenthesizedExpression
 | BracedExpression
 | XHPExpression
@@ -52,9 +57,11 @@ type t =
 
 (* Types *)
 | SimpleTypeSpecifier
+| NullableTypeSpecifier
 | TypeConstant
 | GenericTypeSpecifier
 | TypeArguments
+| TupleTypeSpecifier
 
 let to_string kind =
   match kind with
@@ -73,9 +80,13 @@ let to_string kind =
   | ExpressionStatement -> "expression_statement"
   | WhileStatement -> "while_statement"
   | DoStatement -> "do_statement"
+  | ForStatement -> "for_statement"
   | IfStatement -> "if_statement"
   | ElseifClause -> "elseif_clause"
   | ElseClause -> "else_clause"
+  | TryStatement -> "try_statement"
+  | CatchClause -> "catch_clause"
+  | FinallyClause -> "finally_clause"
   | SwitchStatement -> "switch_statement"
   | CaseStatement -> "case_statement"
   | DefaultStatement -> "default_statement"
@@ -86,11 +97,14 @@ let to_string kind =
   | PrefixUnaryOperator -> "prefix_unary_operator"
   | PostfixUnaryOperator -> "postfix_unary_operator"
   | BinaryOperator -> "binary_operator"
+  | ConditionalExpression -> "conditional_expression"
   | ParenthesizedExpression -> "parenthesized_expression"
-  | BracedExpression -> "parenthesized_expression"
+  | BracedExpression -> "braced_expression"
   | TypeConstant -> "type_constant"
-  | SimpleTypeSpecifier -> "simple_type_specifier "
+  | SimpleTypeSpecifier -> "simple_type_specifier"
+  | NullableTypeSpecifier -> "nullable_type_specifier"
   | GenericTypeSpecifier -> "generic_type_specifier"
+  | TupleTypeSpecifier -> "tuple_type_specifier"
   | TypeArguments -> "type_arguments"
   | DefaultArgumentSpecifier -> "default_argument_specifier"
   | XHPExpression -> "xhp_expression"

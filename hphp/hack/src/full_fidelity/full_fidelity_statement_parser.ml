@@ -19,8 +19,9 @@ module Lexer = Full_fidelity_lexer
 open TokenKind
 open Syntax
 
-module WithExpressionParser(ExpressionParser :
-  Full_fidelity_expression_parser_type.ExpressionParserType) :
+module WithExpressionAndDeclParser
+  (ExpressionParser : Full_fidelity_expression_parser_type.ExpressionParserType)
+  (DeclParser : Full_fidelity_declaration_parser_type.DeclarationParserType) :
   Full_fidelity_statement_parser_type.StatementParserType = struct
 
   type t = {
@@ -115,10 +116,59 @@ module WithExpressionParser(ExpressionParser :
       expect_token parser RightParen SyntaxError.error1011 in
     (parser, left_paren, expr_syntax, right_paren)
 
+  (* List of expressions and commas. No trailing comma. *)
+  and parse_for_expr_group parser =
+    let rec aux parser acc =
+      let (parser, expr) = parse_expression parser in
+      let acc = expr :: acc in
+      let (parser1, token) = next_token parser in
+      match (Token.kind token) with
+      | Comma -> aux parser1 ((make_token token) :: acc )
+      | RightParen -> (parser, acc)
+      | _ ->
+        let parser = with_error parser SyntaxError.error1009 in
+        (parser, acc) in
+    let (parser, expressions_and_commas) = aux parser [] in
+    (parser, make_list (List.rev expressions_and_commas))
+
+  and parse_for_expr parser =
+    let token = peek_token parser in
+    let parser, for_expr_group = match Token.kind token with
+      | Semicolon -> parser, make_missing ()
+      | _ -> parse_for_expr_group parser
+    in
+    let parser, semicolon =
+      expect_token parser Semicolon SyntaxError.error1010 in
+    parser, for_expr_group, semicolon
+
+  and parse_last_for_expr parser =
+    let token = peek_token parser in
+    let parser, for_expr_group = match Token.kind token with
+      | RightParen -> parser, make_missing ()
+      | _ -> parse_for_expr_group parser
+    in
+    (parser, for_expr_group)
+
   and parse_for_statement parser =
-    (* TODO *)
-    let (parser, token) = next_token parser in
-    (parser, make_error [make_token token])
+    let parser, for_keyword_token =
+      assert_token parser For in
+    let parser, for_left_paren =
+      expect_token parser LeftParen SyntaxError.error1019 in
+    let parser, for_initializer_expr, for_first_semicolon =
+      parse_for_expr parser in
+    let parser, for_control_expr, for_second_semicolon =
+      parse_for_expr parser in
+    let parser, for_end_of_loop_expr =
+      parse_last_for_expr parser in
+    let parser, for_right_paren =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let parser, for_statement =
+      parse_statement parser in
+    let syntax = make_for_statement for_keyword_token for_left_paren
+      for_initializer_expr for_first_semicolon for_control_expr
+      for_second_semicolon for_end_of_loop_expr for_right_paren for_statement
+    in
+    (parser, syntax)
 
   and parse_foreach_statement parser =
     (* TODO *)
@@ -169,8 +219,8 @@ module WithExpressionParser(ExpressionParser :
     let parse_elseif_opt parser_elseif =
       let (parser_elseif, elseif_token) = optional_token parser_elseif Elseif in
       match syntax elseif_token with
-      |Missing -> (parser_elseif, elseif_token)  (* return original parser *)
-      |_ ->
+      | Missing -> (parser_elseif, elseif_token)  (* return original parser *)
+      | _ ->
         let (parser_elseif, elseif_left_paren, elseif_condition_expr,
           elseif_right_paren, elseif_statement) =
           parse_if_body_helper parser_elseif in
@@ -182,8 +232,8 @@ module WithExpressionParser(ExpressionParser :
     let parse_else_opt parser_else =
       let (parser_else, else_token) = optional_token parser_else Else in
       match syntax else_token with
-      |Missing ->(parser_else, else_token)
-      |_ ->
+      | Missing ->(parser_else, else_token)
+      | _ ->
         let (parser_else, else_consequence) = parse_statement parser_else in
         let else_syntax = make_else_clause else_token else_consequence in
         (parser_else, else_syntax)
@@ -196,9 +246,9 @@ module WithExpressionParser(ExpressionParser :
       let rec parse_clauses_helper acc parser_elseif =
         let (parser_elseif, elseif_syntax) = parse_elseif_opt parser_elseif in
         match (syntax elseif_syntax, acc) with
-        |Missing, [] -> (parser_elseif, elseif_syntax)
-        |Missing, _ -> (parser_elseif, make_list (List.rev acc))
-        |_, _ -> parse_clauses_helper (elseif_syntax :: acc) parser_elseif
+        | Missing, [] -> (parser_elseif, elseif_syntax)
+        | Missing, _ -> (parser_elseif, make_list (List.rev acc))
+        | _, _ -> parse_clauses_helper (elseif_syntax :: acc) parser_elseif
       in
       parse_clauses_helper [] parser_elseif
     in
@@ -222,9 +272,52 @@ module WithExpressionParser(ExpressionParser :
     (parser, syntax)
 
   and parse_try_statement parser =
-    (* TODO *)
-    let (parser, token) = next_token parser in
-    (parser, make_error [make_token token])
+    let parse_catch_clause_opt parser_catch =
+      let (parser_catch, catch_token) = optional_token parser_catch Catch in
+      match syntax catch_token with
+      | Missing -> (parser_catch, catch_token)
+      | _ ->
+      (* catch  (  parameter-declaration-list  )  compound-statement *)
+        let (parser_catch, left_paren) =
+          expect_token parser_catch LeftParen SyntaxError.error1019 in
+        let (parser_catch, param_decl) =
+          parse_parameter_list_opt parser_catch in
+        let (parser_catch, right_paren) =
+          expect_token parser_catch RightParen SyntaxError.error1011 in
+        let (parser_catch, compound_stmt) =
+          parse_compound_statement parser_catch in
+        let catch_clause = make_catch_clause catch_token left_paren param_decl
+          right_paren compound_stmt in
+        (parser_catch, catch_clause)
+    in
+    let parse_finally_clause_opt parser_f =
+      let (parser_f, finally_token) = optional_token parser_f Finally in
+      match syntax finally_token with
+      | Missing -> (parser_f, finally_token)
+      | _ ->
+        let (parser_f, compound_stmt) = parse_compound_statement parser_f in
+        let finally_clause = make_finally_clause finally_token compound_stmt in
+        (parser_f, finally_clause)
+    in
+    let parse_catch_clauses parser_catch =
+      let rec aux acc parser_catch =
+        let (parser_catch, catch_clause) =
+          parse_catch_clause_opt parser_catch in
+        match (syntax catch_clause, acc) with
+        | Missing, [] -> (parser_catch, catch_clause)
+        | Missing, _ -> (parser_catch, acc |> List.rev |> make_list)
+        | _, _ -> aux (catch_clause :: acc) parser_catch
+      in
+      aux [] parser_catch
+    in
+    let (parser, try_keyword_token) = assert_token parser Try in
+    let (parser, try_compound_stmt) = parse_compound_statement parser in
+    let (parser, catch_clauses) = parse_catch_clauses parser in
+    let (parser, finally_clause) = parse_finally_clause_opt parser in
+    (* TODO ERROR RECOVERY: give an error for missing both catch and finally *)
+    let syntax = make_try_statement try_keyword_token try_compound_stmt
+      catch_clauses finally_clause in
+    (parser, syntax)
 
   and parse_break_statement parser =
     let (parser, break_token) = assert_token parser Break in
@@ -315,5 +408,15 @@ module WithExpressionParser(ExpressionParser :
     let errors = ExpressionParser.errors expression_parser in
     let parser = make lexer errors in
     (parser, node)
+
+and parse_parameter_list_opt parser =
+  let declaration_parser = DeclParser.make parser.lexer parser.errors in
+  let (declaration_parser, node) =
+    DeclParser.parse_parameter_list_opt declaration_parser in
+  let lexer = DeclParser.lexer declaration_parser in
+  let errors = DeclParser.errors declaration_parser in
+  let parser = make lexer errors in
+  (parser, node)
+
 
 end
