@@ -15,7 +15,6 @@
 */
 #include "hphp/runtime/base/program-functions.h"
 
-#include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/backtrace.h"
 #include "hphp/runtime/base/builtin-functions.h"
@@ -72,8 +71,8 @@
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/treadmill.h"
 
-
 #include "hphp/util/abi-cxx.h"
+#include "hphp/util/arch.h"
 #include "hphp/util/boot_timer.h"
 #include "hphp/util/compatibility.h"
 #include "hphp/util/capability.h"
@@ -1182,6 +1181,9 @@ static bool open_server_log_files() {
         always_assert(cronoLog);
         cronoLog->m_template = errlog.logFile;
         cronoLog->setPeriodicity();
+        if (errlog.periodMultiplier) {
+          cronoLog->m_periodMultiple = errlog.periodMultiplier;
+        }
         cronoLog->m_linkName = errlog.symLink;
       } else {
         auto output = fopen(errlog.logFile.c_str(), "a");

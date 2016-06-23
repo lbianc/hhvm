@@ -774,16 +774,20 @@ void lower(Vunit& unit, stublogue& inst, Vlabel b, size_t i) {
   }
 }
 
-void lower(Vunit& unit, phplogue& inst, Vlabel b, size_t i) {
-  unit.blocks[b].code[i] = popm{inst.fp[AROFF(m_savedRip)]};
+void lower(Vunit& unit, stubunwind& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = lea{reg::rsp[16], reg::rsp};
+}
+
+void lower(Vunit& unit, stubtophp& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = lea{reg::rsp[16], reg::rsp};
 }
 
 void lower(Vunit& unit, loadstubret& inst, Vlabel b, size_t i) {
   unit.blocks[b].code[i] = load{reg::rsp[8], inst.d};
 }
 
-void lower(Vunit& unit, stubtophp& inst, Vlabel b, size_t i) {
-  unit.blocks[b].code[i] = lea{reg::rsp[16], reg::rsp};
+void lower(Vunit& unit, phplogue& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = popm{inst.fp[AROFF(m_savedRip)]};
 }
 
 void lower(Vunit& unit, resumetc& inst, Vlabel b, size_t i) {
@@ -839,6 +843,12 @@ void lower(Vunit& unit, divint& inst, Vlabel b, size_t i) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void lower(Vunit& unit, movtqb& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = copy{inst.s, inst.d};
+}
+void lower(Vunit& unit, movtdb& inst, Vlabel b, size_t i) {
+  unit.blocks[b].code[i] = copy{inst.s, inst.d};
+}
+void lower(Vunit& unit, movtdq& inst, Vlabel b, size_t i) {
   unit.blocks[b].code[i] = copy{inst.s, inst.d};
 }
 void lower(Vunit& unit, movtql& inst, Vlabel b, size_t i) {

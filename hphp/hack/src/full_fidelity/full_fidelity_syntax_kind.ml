@@ -13,6 +13,7 @@ type t =
 | Error
 | Missing
 | SyntaxList
+| ListItem
 
 (* Declarations *)
 | ScriptHeader
@@ -27,6 +28,7 @@ type t =
 | WhileStatement
 | DoStatement
 | ForStatement
+| ForeachStatement
 | IfStatement
 | ElseifClause
 | ElseClause
@@ -51,6 +53,7 @@ type t =
 | ConditionalExpression
 | ParenthesizedExpression
 | BracedExpression
+| ListExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -62,6 +65,9 @@ type t =
 | GenericTypeSpecifier
 | TypeArguments
 | TupleTypeSpecifier
+| VectorTypeSpecifier
+| MapTypeSpecifier
+| ClosureTypeSpecifier
 
 let to_string kind =
   match kind with
@@ -72,6 +78,7 @@ let to_string kind =
   | QualifiedNameExpression -> "qualified_name"
   | Error -> "error"
   | SyntaxList -> "list"
+  | ListItem -> "list_item"
   | ScriptHeader -> "header"
   | Script -> "script"
   | FunctionDeclaration -> "function_declaration"
@@ -81,6 +88,7 @@ let to_string kind =
   | WhileStatement -> "while_statement"
   | DoStatement -> "do_statement"
   | ForStatement -> "for_statement"
+  | ForeachStatement -> "foreach_statement"
   | IfStatement -> "if_statement"
   | ElseifClause -> "elseif_clause"
   | ElseClause -> "else_clause"
@@ -100,11 +108,15 @@ let to_string kind =
   | ConditionalExpression -> "conditional_expression"
   | ParenthesizedExpression -> "parenthesized_expression"
   | BracedExpression -> "braced_expression"
+  | ListExpression -> "list_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | NullableTypeSpecifier -> "nullable_type_specifier"
   | GenericTypeSpecifier -> "generic_type_specifier"
   | TupleTypeSpecifier -> "tuple_type_specifier"
+  | VectorTypeSpecifier -> "vector_type_specifier"
+  | MapTypeSpecifier -> "map_type_specifier"
+  | ClosureTypeSpecifier -> "closure_type_specifier"
   | TypeArguments -> "type_arguments"
   | DefaultArgumentSpecifier -> "default_argument_specifier"
   | XHPExpression -> "xhp_expression"

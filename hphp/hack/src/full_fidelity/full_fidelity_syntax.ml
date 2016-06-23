@@ -187,6 +187,18 @@ module WithToken(Token: TokenType) = struct
       for_right_paren: t;
       for_statement: t;
     }
+    and foreach_statement = {
+      foreach_keyword: t;
+      foreach_left_paren: t;
+      foreach_collection_name: t;
+      foreach_await_opt: t;
+      foreach_as: t;
+      foreach_key_opt: t;
+      foreach_key_arrow_opt: t;
+      foreach_value: t;
+      foreach_right_paren: t;
+      foreach_statement: t;
+    }
     and switch_statement = {
       switch_keyword: t;
       switch_left_paren: t;
@@ -249,6 +261,12 @@ module WithToken(Token: TokenType) = struct
       braced_expr : t;
       braced_expr_right_brace : t
     }
+    and listlike_expression = {
+      listlike_keyword: t;
+      listlike_left_paren: t;
+      listlike_members: t;
+      listlike_right_paren: t;
+    }
     and xhp_attribute = {
       xhp_attr_name : t;
       xhp_attr_equal : t;
@@ -279,6 +297,30 @@ module WithToken(Token: TokenType) = struct
       type_constant_separator : t;
       type_constant_right_type : t
     }
+    and vector_type_specifier = {
+      vector_array : t;
+      vector_left_angle : t;
+      vector_type : t;
+      vector_right_angle : t
+    }
+    and map_type_specifier = {
+      map_array : t;
+      map_left_angle : t;
+      map_key : t;
+      map_comma : t;
+      map_value : t;
+      map_right_angle : t
+    }
+    and closure_type_specifier = {
+      closure_outer_left_paren : t;
+      closure_function : t;
+      closure_inner_left_paren : t;
+      closure_parameter_types : t;
+      closure_inner_right_paren : t;
+      closure_colon : t;
+      closure_return_type : t;
+      closure_outer_right_paren : t
+    }
     and generic_type = {
       generic_class_type : t;
       generic_arguments : t
@@ -297,11 +339,16 @@ module WithToken(Token: TokenType) = struct
       tuple_types : t;
       tuple_right_paren : t
     }
+    and list_item = {
+      list_item : t;
+      list_separator : t
+    }
     and syntax =
     | Token of Token.t
     | Error of t list
     | Missing
     | SyntaxList of t list
+    | ListItem of list_item
     | ScriptHeader of script_header
     | Script of script
 
@@ -320,6 +367,7 @@ module WithToken(Token: TokenType) = struct
     | FinallyClause of finally_clause
     | DoStatement of do_statement
     | ForStatement of for_statement
+    | ForeachStatement of foreach_statement
     | SwitchStatement of switch_statement
     | CaseStatement of case_statement
     | DefaultStatement of default_statement
@@ -337,6 +385,7 @@ module WithToken(Token: TokenType) = struct
     | ConditionalExpression of conditional_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
+    | ListExpression of listlike_expression
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -347,6 +396,9 @@ module WithToken(Token: TokenType) = struct
     | GenericTypeSpecifier of generic_type
     | TypeArguments of type_arguments
     | TupleTypeSpecifier of tuple_type_specifier
+    | VectorTypeSpecifier of vector_type_specifier
+    | MapTypeSpecifier of map_type_specifier
+    | ClosureTypeSpecifier of closure_type_specifier
 
     and t = { syntax : syntax ; value : SyntaxValue.t}
 
@@ -368,6 +420,7 @@ module WithToken(Token: TokenType) = struct
       | QualifiedNameExpression _ -> SyntaxKind.QualifiedNameExpression
       | Error _ -> SyntaxKind.Error
       | SyntaxList _ -> SyntaxKind.SyntaxList
+      | ListItem _ -> SyntaxKind.ListItem
       | ScriptHeader _ -> SyntaxKind.ScriptHeader
       | Script _ -> SyntaxKind.Script
       | FunctionDeclaration _ -> SyntaxKind.FunctionDeclaration
@@ -384,6 +437,7 @@ module WithToken(Token: TokenType) = struct
       | FinallyClause _ -> SyntaxKind.FinallyClause
       | DoStatement _ -> SyntaxKind.DoStatement
       | ForStatement _ -> SyntaxKind.ForStatement
+      | ForeachStatement _ -> SyntaxKind.ForeachStatement
       | SwitchStatement _ -> SyntaxKind.SwitchStatement
       | CaseStatement _ -> SyntaxKind.CaseStatement
       | DefaultStatement _ -> SyntaxKind.DefaultStatement
@@ -397,6 +451,7 @@ module WithToken(Token: TokenType) = struct
       | ConditionalExpression _ -> SyntaxKind.ConditionalExpression
       | ParenthesizedExpression _ -> SyntaxKind.ParenthesizedExpression
       | BracedExpression _ -> SyntaxKind.BracedExpression
+      | ListExpression _ -> SyntaxKind.ListExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPAttribute _ -> SyntaxKind.XHPAttribute
@@ -406,6 +461,9 @@ module WithToken(Token: TokenType) = struct
       | GenericTypeSpecifier _ -> SyntaxKind.GenericTypeSpecifier
       | TypeArguments _ -> SyntaxKind.TypeArguments
       | TupleTypeSpecifier _ -> SyntaxKind.TupleTypeSpecifier
+      | VectorTypeSpecifier _ -> SyntaxKind.VectorTypeSpecifier
+      | MapTypeSpecifier _ -> SyntaxKind.MapTypeSpecifier
+      | ClosureTypeSpecifier _ -> SyntaxKind.ClosureTypeSpecifier
 
     let kind node =
       to_kind (syntax node)
@@ -417,6 +475,7 @@ module WithToken(Token: TokenType) = struct
     let is_qualified_name node = kind node = SyntaxKind.QualifiedNameExpression
     let is_error node = kind node = SyntaxKind.Error
     let is_list node = kind node = SyntaxKind.SyntaxList
+    let is_list_item node = kind node = SyntaxKind.ListItem
     let is_header node = kind node = SyntaxKind.ScriptHeader
     let is_script node = kind node = SyntaxKind.Script
     let is_function node = kind node = SyntaxKind.FunctionDeclaration
@@ -426,6 +485,7 @@ module WithToken(Token: TokenType) = struct
     let is_compound_statement node = kind node = SyntaxKind.CompoundStatement
     let is_expression_statement node =
       kind node = SyntaxKind.ExpressionStatement
+    let is_foreach_statement node = kind node = SyntaxKind.ForeachStatement
     let is_while_statement node = kind node = SyntaxKind.WhileStatement
     let is_if_statement node = kind node = SyntaxKind.IfStatement
     let is_elseif node = kind node = SyntaxKind.ElseifClause
@@ -443,6 +503,7 @@ module WithToken(Token: TokenType) = struct
     let is_parenthesized_expression node =
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node = kind node = SyntaxKind.BracedExpression
+    let is_listlike_expression node = kind node = SyntaxKind.ListExpression
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -453,6 +514,20 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.NullableTypeSpecifier
     let is_type_arguments node = kind node = SyntaxKind.TypeArguments
     let is_tuple_type node = kind node = SyntaxKind.TupleTypeSpecifier
+    let is_vector_type_specifier node =
+      kind node = SyntaxKind.VectorTypeSpecifier
+    let is_map_type_specifier node =
+      kind node = SyntaxKind.MapTypeSpecifier
+    let is_closure_type_specifier node =
+      kind node = SyntaxKind.ClosureTypeSpecifier
+
+    let is_separable_prefix node =
+      match syntax node with
+      | Token t -> begin
+        Full_fidelity_token_kind.(match Token.kind t with
+        | PlusPlus | MinusMinus -> false
+        | _ -> true) end
+      | _ -> true
 
     let children node =
       match node.syntax with
@@ -463,6 +538,9 @@ module WithToken(Token: TokenType) = struct
       | QualifiedNameExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
+      | ListItem
+        { list_item; list_separator } ->
+        [ list_item; list_separator ]
       | ScriptHeader
         { header_less_than; header_question; header_language } ->
         [ header_less_than; header_question; header_language ]
@@ -527,6 +605,13 @@ module WithToken(Token: TokenType) = struct
         [ for_keyword; for_left_paren; for_initializer_expr;
           for_first_semicolon; for_control_expr; for_second_semicolon;
           for_end_of_loop_expr; for_right_paren; for_statement ]
+      | ForeachStatement
+        { foreach_keyword; foreach_left_paren; foreach_collection_name;
+          foreach_await_opt; foreach_as; foreach_key_opt; foreach_key_arrow_opt;
+          foreach_value; foreach_right_paren; foreach_statement } ->
+        [ foreach_keyword; foreach_left_paren; foreach_collection_name;
+          foreach_await_opt; foreach_as; foreach_key_opt; foreach_key_arrow_opt;
+          foreach_value; foreach_right_paren; foreach_statement ]
       | SwitchStatement
         { switch_keyword; switch_left_paren; switch_expr; switch_right_paren;
           switch_compound_statement } ->
@@ -570,6 +655,11 @@ module WithToken(Token: TokenType) = struct
       | BracedExpression
         { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
         [ braced_expr_left_brace; braced_expr; braced_expr_right_brace ]
+      | ListExpression
+        { listlike_keyword; listlike_left_paren; listlike_members;
+          listlike_right_paren } ->
+        [ listlike_keyword; listlike_left_paren; listlike_members;
+          listlike_right_paren ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -600,6 +690,23 @@ module WithToken(Token: TokenType) = struct
       | TupleTypeSpecifier
         { tuple_left_paren; tuple_types; tuple_right_paren } ->
         [ tuple_left_paren; tuple_types; tuple_right_paren ]
+      | VectorTypeSpecifier
+        { vector_array; vector_left_angle; vector_type; vector_right_angle } ->
+        [ vector_array; vector_left_angle; vector_type; vector_right_angle ]
+      | MapTypeSpecifier
+        { map_array; map_left_angle; map_key; map_comma; map_value;
+          map_right_angle } ->
+        [ map_array; map_left_angle; map_key; map_comma; map_value;
+          map_right_angle ]
+      | ClosureTypeSpecifier
+        { closure_outer_left_paren; closure_function;
+          closure_inner_left_paren; closure_parameter_types;
+          closure_inner_right_paren; closure_colon; closure_return_type;
+          closure_outer_right_paren } ->
+        [ closure_outer_left_paren; closure_function;
+          closure_inner_left_paren; closure_parameter_types;
+          closure_inner_right_paren; closure_colon; closure_return_type;
+          closure_outer_right_paren ]
 
     let children_names node =
       match node.syntax with
@@ -610,6 +717,9 @@ module WithToken(Token: TokenType) = struct
       | QualifiedNameExpression _ -> [ "qualified_name_expression" ]
       | Error _ -> []
       | SyntaxList _ -> []
+      | ListItem
+        { list_item; list_separator } ->
+        [ "list_item"; "list_separator" ]
       | ScriptHeader
         { header_less_than; header_question; header_language } ->
         [ "header_less_than"; "header_question"; "header_language" ]
@@ -677,6 +787,14 @@ module WithToken(Token: TokenType) = struct
         [ "for_keyword"; "for_left_paren"; "for_initializer_expr";
           "for_first_semicolon"; "for_control_expr"; "for_second_semicolon";
           "for_end_of_loop_expr"; "for_right_paren"; "for_statement" ]
+      | ForeachStatement
+        { foreach_keyword; foreach_left_paren; foreach_collection_name;
+          foreach_await_opt; foreach_as; foreach_key_opt; foreach_key_arrow_opt;
+          foreach_value; foreach_right_paren; foreach_statement } ->
+        [ "foreach_keyword"; "foreach_left_paren"; "foreach_collection_name";
+          "foreach_await_opt"; "foreach_as"; "foreach_key_opt";
+          "foreach_key_arrow_opt"; "foreach_value"; "foreach_right_paren";
+          "foreach_statement" ]
       | SwitchStatement
         { switch_keyword; switch_left_paren; switch_expr;
           switch_right_paren; switch_compound_statement } ->
@@ -720,6 +838,11 @@ module WithToken(Token: TokenType) = struct
       | BracedExpression
         { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
         [ "braced_expr_left_brace"; "braced_expr"; "braced_expr_right_brace" ]
+      | ListExpression
+        { listlike_keyword; listlike_left_paren; listlike_members;
+          listlike_right_paren } ->
+        [ "listlike_keyword"; "listlike_left_paren"; "listlike_members";
+          "listlike_right_paren" ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -749,7 +872,24 @@ module WithToken(Token: TokenType) = struct
       | TupleTypeSpecifier
         { tuple_left_paren; tuple_types; tuple_right_paren } ->
         [ "tuple_left_paren"; "tuple_types"; "tuple_right_paren" ]
-
+      | VectorTypeSpecifier
+        { vector_array; vector_left_angle; vector_type; vector_right_angle } ->
+        [ "vector_array"; "vector_left_angle"; "vector_type";
+          "vector_right_angle" ]
+      | MapTypeSpecifier
+        { map_array; map_left_angle; map_key; map_comma; map_value;
+          map_right_angle } ->
+        [ "map_array"; "map_left_angle"; "map_key"; "map_comma"; "map_value";
+          "map_right_angle" ]
+      | ClosureTypeSpecifier
+        { closure_outer_left_paren; closure_function;
+          closure_inner_left_paren; closure_parameter_types;
+          closure_inner_right_paren; closure_colon; closure_return_type;
+          closure_outer_right_paren } ->
+        [ "closure_outer_left_paren"; "closure_function";
+          "closure_inner_left_paren"; "closure_parameter_types";
+          "closure_inner_right_paren"; "closure_colon"; "closure_return_type";
+          "closure_outer_right_paren" ]
 
     let rec to_json node =
       let open Hh_json in
@@ -798,6 +938,16 @@ module WithToken(Token: TokenType) = struct
     let while_condition_expr x = x.while_condition_expr
     let while_right_paren x = x.while_right_paren
     let while_body x = x.while_body
+    let foreach_keyword x = x.foreach_keyword
+    let foreach_left_paren x = x.foreach_left_paren
+    let foreach_collection_name x = x.foreach_collection_name
+    let foreach_await_opt x = x.foreach_await_opt
+    let foreach_as x = x.foreach_as
+    let foreach_key_opt x = x.foreach_key_opt
+    let foreach_key_arrow_opt x = x.foreach_key_arrow_opt
+    let foreach_value x = x.foreach_value
+    let foreach_right_paren x = x.foreach_right_paren
+    let foreach_statement x = x.foreach_statement
     let if_keyword x = x.if_keyword
     let if_left_paren x = x.if_left_paren
     let if_condition_expr x = x.if_condition_expr
@@ -870,6 +1020,10 @@ module WithToken(Token: TokenType) = struct
     let braced_expr_left_brace x = x.braced_expr_left_brace
     let braced_expr x = x.braced_expr
     let braced_expr_right_brace x = x.braced_expr_right_brace
+    let listlike_keyword x = x.listlike_keyword
+    let listlike_left_paren x = x.listlike_left_paren
+    let listlike_members x = x.listlike_members
+    let listlike_right_paren x = x.listlike_right_paren
     let xhp_open x = x.xhp_open
     let xhp_body x = x.xhp_body
     let xhp_close x = x.xhp_close
@@ -933,6 +1087,8 @@ module WithToken(Token: TokenType) = struct
       match kind, ts with
       | (SyntaxKind.Missing, []) -> Missing
       | (SyntaxKind.SyntaxList, x) -> SyntaxList x
+      | (SyntaxKind.ListItem, [ list_item; list_separator ]) ->
+        ListItem { list_item; list_separator }
       | (SyntaxKind.Error, x) -> Error x
       | (SyntaxKind.LiteralExpression, [x]) -> LiteralExpression x
       | (SyntaxKind.VariableExpression, [x]) -> VariableExpression x
@@ -1005,6 +1161,14 @@ module WithToken(Token: TokenType) = struct
           for_initializer_expr; for_first_semicolon; for_control_expr;
           for_second_semicolon; for_end_of_loop_expr; for_right_paren;
           for_statement }
+      | (SyntaxKind.ForeachStatement, [ foreach_keyword; foreach_left_paren;
+          foreach_collection_name; foreach_await_opt; foreach_as;
+          foreach_key_opt; foreach_key_arrow_opt; foreach_value;
+          foreach_right_paren; foreach_statement ]) ->
+        ForeachStatement { foreach_keyword; foreach_left_paren;
+          foreach_collection_name; foreach_await_opt; foreach_as;
+          foreach_key_opt; foreach_key_arrow_opt; foreach_value;
+          foreach_right_paren; foreach_statement }
       | (SyntaxKind.SwitchStatement, [ switch_keyword; switch_left_paren;
         switch_expr; switch_right_paren; switch_compound_statement ]) ->
         SwitchStatement{ switch_keyword; switch_left_paren;
@@ -1048,6 +1212,10 @@ module WithToken(Token: TokenType) = struct
         braced_expr; braced_expr_right_brace ]) ->
         BracedExpression { braced_expr_left_brace; braced_expr;
           braced_expr_right_brace }
+      | (SyntaxKind.ListExpression, [ listlike_keyword; listlike_left_paren;
+        listlike_members; listlike_right_paren ]) ->
+        ListExpression { listlike_keyword; listlike_left_paren;
+          listlike_members; listlike_right_paren }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -1075,6 +1243,26 @@ module WithToken(Token: TokenType) = struct
           [ tuple_left_paren; tuple_types; tuple_right_paren ]) ->
         TupleTypeSpecifier
           { tuple_left_paren; tuple_types; tuple_right_paren }
+      | (SyntaxKind.VectorTypeSpecifier,
+        [ vector_array; vector_left_angle; vector_type; vector_right_angle ]) ->
+        VectorTypeSpecifier
+        { vector_array; vector_left_angle; vector_type; vector_right_angle }
+      | (SyntaxKind.MapTypeSpecifier,
+        [ map_array; map_left_angle; map_key; map_comma; map_value;
+          map_right_angle ]) ->
+        MapTypeSpecifier
+        { map_array; map_left_angle; map_key; map_comma; map_value;
+          map_right_angle }
+      | (SyntaxKind.ClosureTypeSpecifier,
+        [ closure_outer_left_paren; closure_function;
+          closure_inner_left_paren; closure_parameter_types;
+          closure_inner_right_paren; closure_colon; closure_return_type;
+          closure_outer_right_paren ]) ->
+        ClosureTypeSpecifier
+        { closure_outer_left_paren; closure_function;
+          closure_inner_left_paren; closure_parameter_types;
+          closure_inner_right_paren; closure_colon; closure_return_type;
+          closure_outer_right_paren }
       | _ -> failwith "with_children called with wrong number of children"
 
     let all_tokens node =
@@ -1139,6 +1327,13 @@ module WithToken(Token: TokenType) = struct
           from_children SyntaxKind.BracedExpression
             [ braced_expr_left_brace; braced_expr; braced_expr_right_brace ]
 
+      let make_listlike_expression
+        listlike_keyword listlike_left_paren listlike_members
+        listlike_right_paren =
+        from_children SyntaxKind.ListExpression
+          [ listlike_keyword; listlike_left_paren; listlike_members;
+          listlike_right_paren ]
+
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
 
@@ -1155,6 +1350,9 @@ module WithToken(Token: TokenType) = struct
         | [] -> make_missing()
         | h :: [] -> h
         | _ -> from_children SyntaxKind.SyntaxList items
+
+      let make_list_item item separator =
+        from_children SyntaxKind.ListItem [item; separator]
 
       let make_error items =
         from_children SyntaxKind.Error items
@@ -1248,6 +1446,14 @@ module WithToken(Token: TokenType) = struct
         for_first_semicolon; for_control_expr; for_second_semicolon;
         for_end_of_loop_expr; for_right_paren; for_statement ]
 
+      let make_foreach_statement foreach_keyword foreach_left_paren
+        foreach_collection_name foreach_await_opt foreach_as foreach_key_opt
+        foreach_arrow foreach_value foreach_right_paren foreach_statement =
+        from_children SyntaxKind.ForeachStatement
+        [ foreach_keyword; foreach_left_paren; foreach_collection_name;
+        foreach_await_opt; foreach_as; foreach_key_opt; foreach_arrow;
+        foreach_value; foreach_right_paren; foreach_statement]
+
       let make_switch_statement
         switch_keyword switch_left_paren switch_expr
         switch_right_paren switch_compound_statement =
@@ -1301,6 +1507,28 @@ module WithToken(Token: TokenType) = struct
 
       let make_tuple_type_specifier left types right =
         from_children SyntaxKind.TupleTypeSpecifier [ left; types; right ]
+
+      let make_vector_type_specifier
+          vector_array vector_left_angle vector_type vector_right_angle =
+        from_children SyntaxKind.VectorTypeSpecifier
+          [ vector_array; vector_left_angle; vector_type; vector_right_angle ]
+
+      let make_map_type_specifier
+          map_array map_left_angle map_key map_comma map_value map_right_angle =
+        from_children SyntaxKind.MapTypeSpecifier
+          [ map_array; map_left_angle; map_key; map_comma; map_value;
+            map_right_angle ]
+
+      let make_closure_type_specifier
+          closure_outer_left_paren closure_function
+          closure_inner_left_paren closure_parameter_types
+          closure_inner_right_paren closure_colon closure_return_type
+          closure_outer_right_paren =
+        from_children SyntaxKind.ClosureTypeSpecifier
+          [ closure_outer_left_paren; closure_function;
+            closure_inner_left_paren; closure_parameter_types;
+            closure_inner_right_paren; closure_colon; closure_return_type;
+            closure_outer_right_paren ]
 
       let make_literal_expression literal =
         from_children SyntaxKind.LiteralExpression [ literal ]

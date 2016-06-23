@@ -1257,15 +1257,21 @@ Y(incwm, incw, loadw, storew, m)
 
 #undef Y
 
-void lower(Vunit& u, loadstubret& i, Vlabel b, size_t z) {
+void lower(Vunit& u, stubunwind& i, Vlabel b, size_t z) {
   lower_impl(u, b, z, [&] (Vout& v) {
-    v << load{rsp()[8], i.d};
+    v << lea{rsp()[16], rsp()};
   });
 }
 
 void lower(Vunit& u, stubtophp& i, Vlabel b, size_t z) {
   lower_impl(u, b, z, [&] (Vout& v) {
     v << lea{rsp()[16], rsp()};
+  });
+}
+
+void lower(Vunit& u, loadstubret& i, Vlabel b, size_t z) {
+  lower_impl(u, b, z, [&] (Vout& v) {
+    v << load{rsp()[8], i.d};
   });
 }
 

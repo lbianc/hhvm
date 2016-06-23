@@ -132,6 +132,8 @@ bool effectful(Vinstr& inst) {
     case Vinstr::movl:
     case Vinstr::movlk:
     case Vinstr::movtqb:
+    case Vinstr::movtdb:
+    case Vinstr::movtdq:
     case Vinstr::movtql:
     case Vinstr::movw:
     case Vinstr::movzbw:
@@ -235,6 +237,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::jmpr:
     case Vinstr::landingpad:
     case Vinstr::leavetc:
+    case Vinstr::loadstubret:
     case Vinstr::mcprep:
     case Vinstr::mtlr:
     case Vinstr::mtvsrd:
@@ -270,7 +273,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::stublogue:
     case Vinstr::stubret:
     case Vinstr::stubtophp:
-    case Vinstr::loadstubret:
+    case Vinstr::stubunwind:
     case Vinstr::syncpoint:
     case Vinstr::syncvmret:
     case Vinstr::syncvmsp:
