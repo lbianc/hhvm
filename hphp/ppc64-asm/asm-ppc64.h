@@ -216,6 +216,27 @@ private:
   std::vector<JumpInfo> m_toPatch;
 };
 
+struct vmTOC {
+  vmTOC() {}
+  ~vmTOC(){}
+
+  /* push an element into the stack and return its index */
+  uint64_t pushElem(int64_t elem) {
+
+    funcaddrs[++last_elem] = elem;
+    return last_elem;
+  }
+
+  /* return the address of the first element */
+  intptr_t getPtrVector() const{
+    return reinterpret_cast<intptr_t>(&funcaddrs[0]);
+  };
+
+private:
+  static uint32_t last_elem;
+  static std::vector<int64_t> funcaddrs;
+};
+
 struct Assembler {
 
   friend struct Label;
@@ -231,6 +252,10 @@ struct Assembler {
 
   CodeAddress frontier() const {
     return codeBlock.frontier();
+  }
+
+  intptr_t getTOCptr() const {
+    return TOCtable.getPtrVector();
   }
 
   void setFrontier(CodeAddress newFrontier) {
@@ -2403,6 +2428,7 @@ private:
   }
 
   HPHP::CodeBlock& codeBlock;
+  vmTOC TOCtable;
 
   RegNumber rn(Reg64 r) {
     return RegNumber(int(r));
