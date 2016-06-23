@@ -717,6 +717,9 @@ void Vgen::emit(const inittc&) {
 
   // initialize our rone register
   a.li(ppc64::rone(), 1);
+
+  // Save TOC pointer in r2
+  a.li64(ppc64_asm::reg::r2, a.getTOCptr());
 }
 
 void Vgen::emit(const leavetc&) {
