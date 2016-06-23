@@ -1198,8 +1198,6 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     v << copy{calleeAR, rvmfp()};
     v << calltc{start, rvmfp(), us.enterTCExit, vm_regs_with_sp()};
   });
-
-  return entertc;
 }
 
 TCA emitHandleSRHelper(CodeBlock& cb, DataBlock& data) {
