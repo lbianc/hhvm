@@ -1576,7 +1576,13 @@ class Decoder : private boost::noncopyable {
       m_decoder_table[index];
   }
 
-  Decoder();
+  /*
+  * Disable optimizations for this constructor.  In release mode -O3 causes
+  * compilation to hang due the huge initialization list.  This is a static
+  * singleton constructor, it's only called once and, when trace is enabled so
+  * optimization here is not a big issue.
+  */
+  NO_OPT Decoder();
 
   ~Decoder() {
     for(int i = 0; i < kDecoderSize; i++)
