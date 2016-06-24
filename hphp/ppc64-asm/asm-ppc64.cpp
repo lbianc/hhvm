@@ -1190,6 +1190,6 @@ void Label::addJump(Assembler* a, BranchType type) {
 }
 
 std::vector<int64_t>  vmTOC::funcaddrs(1024);
-uint32_t vmTOC::last_elem = 0;
+uint64_t vmTOC::last_elem = 0;
 
 } // namespace ppc64_asm

@@ -233,7 +233,7 @@ struct vmTOC {
   };
 
 private:
-  static uint32_t last_elem;
+  static uint64_t last_elem;
   static std::vector<int64_t> funcaddrs;
 };
 
