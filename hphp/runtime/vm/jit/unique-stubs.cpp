@@ -1153,6 +1153,10 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
 #endif
 
   return vwrap2(cb, cb, data, [&] (Vout& v, Vout& vc) {
+
+    // Architecture-specific setup to enter on TC.
+    v << inittc{};
+
     // Native func prologue.
     v << stublogue{true};
 
