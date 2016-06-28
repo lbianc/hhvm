@@ -148,7 +148,6 @@ TypedValue getMemoKeyHelper(TypedValue tv);
 
 int32_t arrayVsize(ArrayData*);
 
-TypedValue* ldGblAddrHelper(StringData* name);
 TypedValue* ldGblAddrDefHelper(StringData* name);
 
 TypedValue* getSPropOrNull(const Class* cls,
@@ -160,43 +159,22 @@ int64_t switchDoubleHelper(int64_t val, int64_t base, int64_t nTargets);
 int64_t switchStringHelper(StringData* s, int64_t base, int64_t nTargets);
 int64_t switchObjHelper(ObjectData* o, int64_t base, int64_t nTargets);
 
-typedef FixedStringMap<TCA,true> SSwitchMap;
-TCA sswitchHelperFast(const StringData* val, const SSwitchMap* table, TCA* def);
-
 void profileClassMethodHelper(MethProfile*, const ActRec*, const Class*);
 
 void profileTypeHelper(TypeProfile*, TypedValue);
 
 void profileArrayKindHelper(ArrayKindProfile* profile, ArrayData* arr);
 
-Cell lookupCnsHelperNormal(rds::Handle tv_handle,
-                           StringData* nm, bool error);
-Cell lookupCnsHelperPersistent(rds::Handle tv_handle,
-                               StringData* nm, bool error);
-Cell lookupCnsUHelperNormal(rds::Handle tv_handle,
-                            StringData* nm, StringData* fallback);
-Cell lookupCnsUHelperPersistent(rds::Handle tv_handle,
-                                StringData* nm, StringData* fallback);
 void lookupClsMethodHelper(Class* cls, StringData* meth,
                            ActRec* ar, ActRec* fp);
 
 void checkFrame(ActRec* fp, Cell* sp, bool fullCheck, Offset bcOff);
-void traceCallback(ActRec* fp, Cell* sp, Offset pcOff);
 
 void loadArrayFunctionContext(ArrayData*, ActRec* preLiveAR, ActRec* fp);
 void fpushCufHelperArray(ArrayData*, ActRec* preLiveAR, ActRec* fp);
 void fpushCufHelperString(StringData*, ActRec* preLiveAR, ActRec* fp);
 
 const Func* loadClassCtor(Class* cls, ActRec* fp);
-const Func* lookupUnknownFunc(const StringData*);
-const Func* lookupFallbackFunc(const StringData*, const StringData*);
-
-Class* lookupKnownClass(rds::Handle cache_handle, const StringData* clsName);
-
-TypedValue lookupClassConstantTv(TypedValue* cache,
-                                 const NamedEntity* ne,
-                                 const StringData* cls,
-                                 const StringData* cns);
 
 ObjectData* colAddNewElemCHelper(ObjectData* coll, TypedValue value);
 ObjectData* colAddElemCHelper(ObjectData* coll, TypedValue key,

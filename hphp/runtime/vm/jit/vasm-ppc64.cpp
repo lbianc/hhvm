@@ -16,7 +16,6 @@
 
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 
-#include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
@@ -36,6 +35,8 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-util.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
+
+#include "hphp/util/arch.h"
 
 #include <algorithm>
 #include <tuple>
@@ -468,6 +469,7 @@ struct Vgen {
   void emit(const stublogue& i);
   void emit(const stubret& i);
   void emit(const stubtophp& i);
+  void emit(const stubunwind& i);
   void emit(const syncpoint& i);
   void emit(const tailcallstub& i);
   void emit(const testqi& i);
@@ -708,13 +710,6 @@ void Vgen::emit(const mcprep& i) {
 }
 
 void Vgen::emit(const inittc&) {
-  // workaround for avoiding the first useless stublogue: we don't need to
-  // create a frame here. X64 needs it as only the stublogue will complete a
-  // frame.
-  // TODO(rcardoso): as pointed to us maybe there is a better way to do this
-  // instead discard stublogue first frame.
-  a.addi(rsp(), ppc64_asm::reg::r1, min_frame_size);
-
   // initialize our rone register
   a.li(ppc64::rone(), 1);
 
@@ -723,7 +718,8 @@ void Vgen::emit(const inittc&) {
 }
 
 void Vgen::emit(const leavetc&) {
-  a.ld(rAsm, rsp()[AROFF(m_savedRip)]);
+  // should read enterTCExit address that was pushed by calltc/resumetc
+  emit(pop{rAsm});
   a.mtlr(rAsm);
   a.blr();
 }
@@ -735,7 +731,7 @@ void Vgen::emit(const calltc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
+  emit(push{rAsm});
 
   // keep the return address as initialized by the vm frame
   a.ld(rfuncln(), i.fp[AROFF(m_savedRip)]);
@@ -754,7 +750,7 @@ void Vgen::emit(const resumetc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
+  emit(push{rAsm});
 
   // and jump. When it returns, it'll be to enterTCExit
   a.mr(ppc64_asm::reg::r12, i.target.asReg());
@@ -884,12 +880,16 @@ void Vgen::emit(const loadstubret& i) {
   a.ld(i.d, rsp()[AROFF(m_savedRip)]);
 }
 
-void Vgen::emit(const stubtophp& i) {
+void Vgen::emit(const stubunwind& i) {
   // reset the return address from native frame due to call to the vm frame
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
   // pop this frame as created by stublogue
   a.addi(rsp(), rsp(), min_frame_size);
+}
+
+void Vgen::emit(const stubtophp& i) {
+  emit(stubunwind{});
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1193,6 +1193,8 @@ void lowerForPPC64(Vout& v, tailcallphp& inst) {
 // Lower movs to copy
 void lowerForPPC64(Vout& v, movtqb& inst) { v << copy{inst.s, inst.d}; }
 void lowerForPPC64(Vout& v, movtql& inst) { v << copy{inst.s, inst.d}; }
+void lowerForPPC64(Vout& v, movtdb& inst) { v << copy{inst.s, inst.d}; }
+void lowerForPPC64(Vout& v, movtdq& inst) { v << copy{inst.s, inst.d}; }
 
 // Lower all movzb* to extrb as ppc64 always sign extend the unused bits of reg.
 void lowerForPPC64(Vout& v, movzbl& i)    { v << extrb{i.s, Reg8(i.d)}; }

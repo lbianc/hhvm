@@ -43,6 +43,7 @@
 #include <folly/portability/Unistd.h>
 
 #include "hphp/util/abi-cxx.h"
+#include "hphp/util/arch.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/bitops.h"
 #include "hphp/util/cycles.h"
@@ -65,7 +66,6 @@
 #include "hphp/vixl/a64/constants-a64.h"
 #include "hphp/vixl/a64/macro-assembler-a64.h"
 
-#include "hphp/runtime/base/arch.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/runtime-option.h"
@@ -1825,7 +1825,6 @@ MCGenerator::MCGenerator()
 
   s_jitMaturityCounter = ServiceData::createCounter("jit.maturity");
 
-  // Do not initialize JIT stubs for PPC64 - port under development
   m_ustubs.emitAll(m_code, m_debugInfo);
 
   // Write an .eh_frame section that covers the whole TC.

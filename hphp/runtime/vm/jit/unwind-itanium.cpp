@@ -262,12 +262,6 @@ tc_unwind_personality(int version,
       FTRACE(1, "rip == functionEnterHelperReturn, continuing unwind\n");
       return _URC_CONTINUE_UNWIND;
     }
-    if (ip == stubs.fcallArrayReturn) {
-      FTRACE(1, "rip == fcallArrayReturn, entering catch\n");
-      g_unwind_rds->exn = ue;
-      _Unwind_SetIP(context, uint64_t(stubs.fcallArrayEndCatch));
-      return _URC_INSTALL_CONTEXT;
-    }
 
     FTRACE(1, "unwinder hit normal TC frame, going to tc_unwind_resume\n");
     g_unwind_rds->exn = ue;
@@ -353,10 +347,10 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.offset_extended_sf(dw_reg::TOC, (record_size - 24) / 8);
 #endif
 
-  // This is an artifact of a time when we did not spill registers onto the
-  // native stack.  Now that we do, this CFI is a lie.  Fortunately, our TC
-  // personality routine skips all the way back to native frames before
-  // resuming the unwinder, so its brokenness goes unnoticed.
+  // It's not actually the case that %rsp keeps the same value across all TC
+  // frames---in particular, we use the native stack for spill space.  However,
+  // the responsibility of restoring it properly falls to TC catch traces, so
+  // this .eh_frame entry need only preserve it.
   ehfw.same_value(dw_reg::SP);
 
   ehfw.end_cie();

@@ -171,9 +171,52 @@ module WithExpressionAndDeclParser
     (parser, syntax)
 
   and parse_foreach_statement parser =
-    (* TODO *)
-    let (parser, token) = next_token parser in
-    (parser, make_error [make_token token])
+    let parser, foreach_keyword_token = assert_token parser Foreach in
+    let parser, foreach_left_paren =
+      expect_token parser LeftParen SyntaxError.error1019 in
+    let parser, foreach_collection_name = parse_expression parser in
+    let parser, await_token = optional_token parser Await in
+    let parser, as_token = expect_token parser As SyntaxError.error1023 in
+    let (parser1, token) = next_token parser in
+    let (parser, after_as) =
+      match Token.kind token with
+      | List ->
+        (* TODO need to handle list intrinsic. For now just create error *)
+        let rec aux parser acc =
+          let (parser1, token) = next_token parser in
+          match Token.kind token with
+          | RightParen -> (parser, make_list (List.rev acc))
+          | _ ->
+            let error = make_error [make_token token] in
+            aux parser1 (error :: acc)
+        in
+        aux parser []
+      | _ -> parse_expression parser
+    in
+    (* let parser, expr = parse_expression parser in *)
+    let (parser, foreach_key, foreach_arrow, foreach_value) =
+    match Token.kind (peek_token parser) with
+      | RightParen ->
+        (parser, make_missing (), make_missing (), after_as)
+      | EqualGreaterThan ->
+        let parser, arrow = assert_token parser EqualGreaterThan in
+        let parser, value = parse_expression parser in
+        (parser, after_as, arrow, value)
+      | _ ->
+        (* TODO ERROR RECOVERY. Now assumed that the arrow is missing
+         * and goes on to parse the next expression *)
+        let parser, token = next_token parser in
+        let parser, foreach_value = parse_expression parser in
+        (parser, after_as, make_error [make_token token], foreach_value)
+    in
+    let parser, right_paren_token =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let parser, foreach_statement = parse_statement parser in
+    let syntax =
+      make_foreach_statement foreach_keyword_token foreach_left_paren
+      foreach_collection_name await_token as_token foreach_key foreach_arrow
+      foreach_value right_paren_token foreach_statement in
+    (parser, syntax)
 
   and parse_do_statement parser =
     let (parser, do_keyword_token) =
@@ -335,7 +378,7 @@ module WithExpressionAndDeclParser
     let (parser, return_token) = assert_token parser Return in
     let (parser1, semi_token) = next_token parser in
     if Token.kind semi_token = Semicolon then
-      (parser, make_return_statement
+      (parser1, make_return_statement
         return_token (make_missing()) (make_token semi_token))
     else
       let (parser, expr) = parse_expression parser in
@@ -373,9 +416,15 @@ module WithExpressionAndDeclParser
     (parser, make_error [make_token token])
 
   and parse_expression_statement parser =
-    let (parser, expression) = parse_expression parser in
-    let (parser, token) = expect_token parser Semicolon SyntaxError.error1010 in
-    (parser, make_expression_statement expression token)
+    let (parser1, token) = next_token parser in
+    match Token.kind token with
+    | Semicolon ->
+      (parser1, make_expression_statement (make_missing ()) (make_token token))
+    | _ ->
+      let (parser, expression) = parse_expression parser in
+      let (parser, token) =
+        expect_token parser Semicolon SyntaxError.error1010 in
+      (parser, make_expression_statement expression token)
 
   and parse_statement_list_opt parser =
      let rec aux parser acc =

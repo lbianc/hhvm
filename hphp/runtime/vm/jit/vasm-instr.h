@@ -96,14 +96,15 @@ struct Vunit;
   O(callstub, I(target), U(args), Dn)\
   O(callfaststub, I(fix), U(args), Dn)\
   O(tailcallstub, I(target), U(args), Dn)\
+  O(stubunwind, Inone, Un, Dn)\
+  O(stubtophp, Inone, U(fp), Dn)\
+  O(loadstubret, Inone, Un, D(d))\
   /* php function abi */\
   O(defvmsp, Inone, Un, D(d))\
   O(syncvmsp, Inone, U(s), Dn)\
   O(defvmret, Inone, Un, D(data) D(type))\
   O(syncvmret, Inone, U(data) U(type), Dn)\
   O(phplogue, Inone, U(fp), Dn)\
-  O(stubtophp, Inone, Un, Dn)\
-  O(loadstubret, Inone, Un, D(d))\
   O(phpret, Inone, U(fp) U(args), D(d))\
   O(callphp, I(stub), U(args), Dn)\
   O(tailcallphp, Inone, U(target) U(fp) U(args), Dn)\
@@ -231,6 +232,8 @@ struct Vunit;
   O(movzbl, Inone, UH(s,d), DH(d,s))\
   O(movzbq, Inone, UH(s,d), DH(d,s))\
   O(movzlq, Inone, UH(s,d), DH(d,s))\
+  O(movtdb, Inone, UH(s,d), DH(d,s))\
+  O(movtdq, Inone, UH(s,d), DH(d,s))\
   O(movtqb, Inone, UH(s,d), DH(d,s))\
   O(movtql, Inone, UH(s,d), DH(d,s))\
   /* loads/stores */\
@@ -626,6 +629,40 @@ struct callfaststub { TCA target; Fixup fix; RegSet args; };
  */
 struct tailcallstub { CodeAddress target; RegSet args; };
 
+/*
+ * Restore %rsp when leaving a stub context via an exception edge.
+ *
+ * When we unwind into normal TC frames (i.e., for PHP functions), we require
+ * that %rsp be restored correctly, since we use spill space as our means of
+ * restoring all other registers.  Thus, when we leave a stub because of an
+ * exception, we have to undo the stack effects of both the stublogue{} and the
+ * callstub{}.
+ */
+struct stubunwind {};
+
+/*
+ * Convert from a stublogue{} context to a phplogue{} context.  `fp' is the
+ * target PHP context's frame.
+ *
+ * This is only used by fcallArrayHelper, which needs to begin with a
+ * stublogue{} (see unique-stubs.cpp) and later perform the work of phplogue{}.
+ *
+ * This instruction should, in theory, teleport the stub frame's saved %rip
+ * onto the PHP callee's frame.  However, since fcallArrayHelper is the only
+ * user, and since the PHP frame's m_savedRip always gets updated by a native
+ * helper before stubtophp{} is hit, for now, implementations of stubtophp{}
+ * needn't touch the callee frame at all.
+ */
+struct stubtophp { Vreg fp; };
+
+/*
+ * Load the saved return address from the stub's frame record.
+ *
+ * This is only valid from a stublogue{} context, and when the native stack
+ * pointer has not been further adjusted.
+ */
+struct loadstubret { Vreg d; };
+
 ///////////////////////////////////////////////////////////////////////////////
 // PHP function ABI.
 
@@ -685,26 +722,6 @@ struct syncvmret { Vreg data; Vreg type; };
  * register allocator spill space.
  */
 struct phplogue { Vreg fp; };
-
-/*
- * Convert from a stublogue{} context to a phplogue{} context.
- *
- * This is only used by fcallArrayHelper, which needs to begin with a
- * stublogue{} (see unique-stubs.cpp) and later perform the work of phplogue{}.
- *
- * This does not modify the PHP ActRec, which can be loaded prior to this
- * instruction using loadstubret.
- */
-struct stubtophp {};
-
-/*
- * Load the return address for this stub in rvmfp(). This is only valid from a
- * stublogue{} context.
- *
- * This is only used by fcallArrayHelper, which needs to begin with a
- * stublogue{} (see unique-stubs.cpp) and later perform the work of phplogue{}.
- */
-struct loadstubret { Vreg d; };
 
 /*
  * Load fp[m_sfp] into `d' and return to m_savedRip on `fp'.
@@ -1019,8 +1036,11 @@ struct movzbl { Vreg8 s; Vreg32 d; };
 struct movzbq { Vreg8 s; Vreg64 d; };
 struct movzlq { Vreg32 s; Vreg64 d; };
 // truncated s to d
+struct movtdb { VregDbl s; Vreg8 d; };
+struct movtdq { VregDbl s; Vreg64 d; };
 struct movtqb { Vreg64 s; Vreg8 d; };
 struct movtql { Vreg64 s; Vreg32 d; };
+
 
 /*
  * Loads and stores.

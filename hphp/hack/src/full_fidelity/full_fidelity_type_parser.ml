@@ -61,6 +61,15 @@ let peek_token parser =
   let (_, token) = Lexer.next_token_in_type parser.lexer in
   token
 
+let expect_token parser kind error =
+  let (parser1, token) = next_token parser in
+  if (Token.kind token) = kind then
+    (parser1, make_token token)
+  else
+    (* ERROR RECOVERY: Create a missing token for the expected token,
+       and continue on from the current token. Don't skip it. *)
+    (with_error parser error, (make_missing()))
+
 (* TODO: What about something like for::for? Is that a legal
   type constant?  *)
 
@@ -177,7 +186,8 @@ and parse_type_list parser close_kind =
         the type, it's associated with the formal parameter list.  *)
 
       let parser = with_error parser1 SyntaxError.error1007 in
-      aux parser ((make_token token) :: (make_missing()) :: acc)
+      let item = make_list_item (make_missing()) (make_token token) in
+      aux parser (item :: acc)
     else
       let (parser, ty) = parse_type_specifier parser in
       let (parser1, token) = next_token parser in
@@ -185,7 +195,8 @@ and parse_type_list parser close_kind =
       if kind = close_kind then
         (parser, (ty :: acc))
       else if kind = Comma then
-        aux parser1 ((make_token token) :: ty :: acc)
+        let item = make_list_item ty (make_token token) in
+        aux parser1 (item :: acc)
       else
         (* ERROR RECOVERY: We were expecting a close brace or comma, but
            got neither. Bail out. Caller will give an error. *)
@@ -210,9 +221,35 @@ and parse_generic_type_argument_list parser =
     (parser, result)
 
 and parse_array_type_specifier parser =
-  let (parser, token) = next_token parser in
-    (* TODO *)
-    (parser, make_error [make_token token])
+  let (parser, array_token) = next_token parser in
+  let array_token = make_token array_token in
+  let (parser, left_angle) =
+    expect_token parser LessThan SyntaxError.error1021 in
+  (* ERROR RECOVERY: We could improve error recovery by detecting
+     array<,  and marking the key type as missing. *)
+  let (parser, key_type) = parse_type_specifier parser in
+  let kind = Token.kind (peek_token parser) in
+  if kind = GreaterThan then
+    let (parser, right_angle) = next_token parser in
+    let right_angle = make_token right_angle in
+    let result = make_vector_type_specifier array_token
+      left_angle key_type right_angle in
+    (parser, result)
+  else if kind = Comma then
+    let (parser, comma) = next_token parser in
+    let comma = make_token comma in
+    let (parser, value_type) = parse_type_specifier parser in
+    let (parser, right_angle) =
+      expect_token parser GreaterThan SyntaxError.error1013 in
+    let result = make_map_type_specifier array_token left_angle key_type
+      comma value_type right_angle in
+    (parser, result)
+  else
+    (* ERROR RECOVERY: Assume that the > is missing and keep going. *)
+    let right_angle = make_missing() in
+    let result = make_vector_type_specifier array_token
+      left_angle key_type right_angle in
+    (parser, result)
 
 and parse_tuple_or_closure_type_specifier parser =
   let (parser1, _) = next_token parser in
@@ -223,11 +260,41 @@ and parse_tuple_or_closure_type_specifier parser =
     parse_tuple_type_specifier parser
 
 and parse_closure_type_specifier parser =
-  let (parser, token) = next_token parser in
-    (* TODO *)
-    (parser, make_error [make_token token])
+
+  (* SPEC
+      closure-type-specifier:
+          ( function ( type-specifier-listopt ) : type-specifier )
+  *)
+
+  (* TODO: Error recovery is pretty weak here. We could be smarter. *)
+  let (parser, olp) = next_token parser in
+  let olp = make_token olp in
+  let (parser, fnc) = next_token parser in
+  let fnc = make_token fnc in
+  let (parser, ilp) = expect_token parser LeftParen SyntaxError.error1019 in
+  let (parser1, token) = next_token parser in
+  let (parser, pts, irp) =
+    if (Token.kind token) = RightParen then
+      (parser1, (make_missing()), (make_token token))
+    else
+      let (parser, pts) = parse_type_list parser RightParen in
+      let (parser, irp) =
+        expect_token parser RightParen SyntaxError.error1011 in
+      (parser, pts, irp) in
+  let (parser, col) = expect_token parser Colon SyntaxError.error1020 in
+  let (parser, ret) = parse_type_specifier parser in
+  let (parser, orp) =
+    expect_token parser RightParen SyntaxError.error1011 in
+  let result = make_closure_type_specifier olp fnc ilp pts irp col ret orp in
+  (parser, result)
 
 and parse_tuple_type_specifier parser =
+
+  (* SPEC
+      tuple-type-specifier:
+        ( type-specifier  ,  type-specifier-list  )
+  *)
+
   let (parser, left_paren) = next_token parser in
   let left_paren = make_token left_paren in
   let (parser, args) = parse_type_list parser RightParen in
