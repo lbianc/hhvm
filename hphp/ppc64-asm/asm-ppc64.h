@@ -53,9 +53,6 @@ namespace ppc64_asm {
 constexpr uint8_t min_frame_size            = 4 * 8;
 // Must be the same value of AROFF(_savedToc).
 constexpr uint8_t toc_position_on_frame     = 3 * 8;
-// exittc offset on our first native frame. (This position is requested as
-// reserved by ABI)
-constexpr uint8_t exittc_position_on_frame  = 1 * 8;
 
 // Amount of bytes to skip after an Assembler::call to grab the return address.
 // Currently it skips a "nop" or a "ld 2,24(1)"

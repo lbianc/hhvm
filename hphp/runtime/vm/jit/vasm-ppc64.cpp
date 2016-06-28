@@ -722,7 +722,8 @@ void Vgen::emit(const inittc&) {
 }
 
 void Vgen::emit(const leavetc&) {
-  a.ld(rAsm, rsp()[AROFF(m_savedRip)]);
+  // should read enterTCExit address that was pushed by calltc/resumetc
+  emit(pop{rAsm});
   a.mtlr(rAsm);
   a.blr();
 }
@@ -734,7 +735,7 @@ void Vgen::emit(const calltc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
+  emit(push{rAsm});
 
   // keep the return address as initialized by the vm frame
   a.ld(rfuncln(), i.fp[AROFF(m_savedRip)]);
@@ -753,7 +754,7 @@ void Vgen::emit(const resumetc& i) {
 
   // this will be verified by emitCallToExit
   a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
-  a.std(rAsm, rsp()[ppc64_asm::exittc_position_on_frame]);
+  emit(push{rAsm});
 
   // and jump. When it returns, it'll be to enterTCExit
   a.mr(ppc64_asm::reg::r12, i.target.asReg());

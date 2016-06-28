@@ -1113,9 +1113,9 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     // Realign the native stack.
     switch (arch()) {
       case Arch::X64:
+      case Arch::PPC64:
         v << lea{rsp()[8], rsp()};
         break;
-      case Arch::PPC64:
       case Arch::ARM:
         break;
     }
@@ -1174,9 +1174,9 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     // Unalign the native stack.
     switch (arch()) {
       case Arch::X64:
+      case Arch::PPC64:
         v << lea{rsp()[-8], rsp()};
         break;
-      case Arch::PPC64:
       case Arch::ARM:
         break;
     }
