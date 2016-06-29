@@ -33,11 +33,8 @@ using ppc64_asm::Assembler;
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#define EMIT_BODY(cb, inst, Inst, ...)  \
+#define EMIT_BODY(cb, inst, ...)        \
   ([&] {                                \
-    align(cb, &fixups,                  \
-          Alignment::Smash##Inst,       \
-          AlignContext::Live);          \
     auto const start = cb.frontier();   \
     Assembler a { cb };                 \
     a.inst(__VA_ARGS__);                \
@@ -46,13 +43,11 @@ using ppc64_asm::Assembler;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, li64, Movq, d, imm, true);
+  return EMIT_BODY(cb, li64, d, imm, true);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
                       PhysReg r, int8_t disp) {
-  align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
-
   auto const start = cb.frontier();
   Assembler a { cb };
 
@@ -66,18 +61,17 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  align(cb, &fixups, Alignment::SmashCmpq, AlignContext::Live);
-  return EMIT_BODY(cb, call, Call, target, Assembler::CallArg::Smashable);
+  return EMIT_BODY(cb, call, target, Assembler::CallArg::Smashable);
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, branchFar, Jmp, target);
+  return EMIT_BODY(cb, branchFar, target);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
   assertx(cc != CC_None);
-  return EMIT_BODY(cb, branchFar, Jcc, target, cc);
+  return EMIT_BODY(cb, branchFar, target, cc);
 }
 
 #undef EMIT_BODY
@@ -85,28 +79,26 @@ TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
 ///////////////////////////////////////////////////////////////////////////////
 
 void smashMovq(TCA inst, uint64_t imm) {
-  always_assert(is_aligned(inst, Alignment::SmashMovq));
-
   CodeBlock cb;
   // Initialize code block cb pointing to li64
-  cb.init(inst, Assembler::kLi64InstrLen, "smashing Movq");
+  cb.init(inst, Assembler::kLi64Len, "smashing Movq");
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
-  Reg64 reg = Assembler::getLi64Reg(inst);
+  const ppc64_asm::DecodedInstruction di(inst);
+  Reg64 reg = di.getLi64Reg();
 
   a.li64(reg, imm);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
-  always_assert(is_aligned(inst, Alignment::SmashCmpq));
-
   auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
   // the first instruction is a vasm ldimml, which is a li32
-  Reg64 reg = Assembler::getLi32Reg(inst);
+  const ppc64_asm::DecodedInstruction di(inst);
+  Reg64 reg = di.getLi32Reg();
 
   a.li32(reg, imm);
 }
@@ -116,7 +108,8 @@ void smashCall(TCA inst, TCA target) {
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
-  if (!Assembler::isCall(inst)) {
+  const ppc64_asm::DecodedInstruction di(inst);
+  if (!di.isCall()) {
     always_assert(false && "smashCall has unexpected block");
   }
 
@@ -126,8 +119,6 @@ void smashCall(TCA inst, TCA target) {
 }
 
 void smashJmp(TCA inst, TCA target) {
-  always_assert(is_aligned(inst, Alignment::SmashJmp));
-
   auto& cb = mcg->code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
@@ -140,8 +131,6 @@ void smashJmp(TCA inst, TCA target) {
 }
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
-  always_assert(is_aligned(inst, Alignment::SmashJcc));
-
   if (cc == CC_None) {
     // It was emitted as a conditional, so patching needs to be conditional
     Assembler::patchBranch(inst, target, true);
@@ -156,25 +145,27 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return static_cast<uint64_t>(Assembler::getLi64(inst));
+  const ppc64_asm::DecodedInstruction di(inst);
+  return di.immediate();
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  return static_cast<uint32_t>(Assembler::getLi32(inst));
+  const ppc64_asm::DecodedInstruction di(inst);
+  return static_cast<uint32_t>(di.immediate());
 }
 
 TCA smashableCallTarget(TCA inst) {
-  if (!Assembler::isCall(inst)) return nullptr;
+  const ppc64_asm::DecodedInstruction di(inst);
+  if (!di.isCall()) return nullptr;
 
-  return reinterpret_cast<TCA>(
-      Assembler::getLi64(inst));
+  return di.farBranchTarget();
 }
 
 static TCA smashableBranchTarget(TCA inst, bool allowCond) {
-  ppc64_asm::DecodedInstruction di(inst);
+  const ppc64_asm::DecodedInstruction di(inst);
   if (!di.isBranch(allowCond)) return nullptr;
 
-  return reinterpret_cast<TCA>(Assembler::getLi64(inst));
+  return di.farBranchTarget();
 }
 
 TCA smashableJmpTarget(TCA inst) {

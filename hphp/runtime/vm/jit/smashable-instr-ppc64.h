@@ -38,20 +38,14 @@ namespace ppc64 {
 constexpr uint8_t kStdIns = ppc64_asm::instr_size_in_bytes;
 
 // li64
-constexpr size_t smashableMovqLen() { return kStdIns * 5; }
+constexpr size_t smashableMovqLen() { return ppc64_asm::Assembler::kLi64Len; }
 
 // li64 + cmpd
-constexpr size_t smashableCmpqLen() { return kStdIns * 6; }
+constexpr size_t smashableCmpqLen() { return smashableMovqLen() + kStdIns; }
 
 // The following instruction size is from the beginning of the smashableCall
-// to the address the LR saves upon branching with bctrl (so the following)
-// Currently this calculation considers:
-// prologue, li64 (5 instr), mtctr, nop, nop, bctrl
-constexpr size_t smashableCallLen() {
-  return ppc64_asm::Assembler::kCallLen;
-}
-
-// li64 + mtctr + nop + nop + bcctr
+// to the address the LR saves upon branching with bctrl
+constexpr size_t smashableCallLen() { return ppc64_asm::Assembler::kCallLen; }
 constexpr size_t smashableJccLen()  { return ppc64_asm::Assembler::kJccLen; }
 
 // Same length as Jcc.

@@ -1516,7 +1516,7 @@ struct DecoderInfo {
   inline OpcodeNames opcode_name() const { return m_opn; }
   inline PPC64Instr opcode() const { return m_op; }
   inline std::string mnemonic() const { return m_mnemonic; }
-  std::string toString();
+  std::string toString() const;
 
   PPC64Instr instruction_image() const { return m_image; }
   void instruction_image(PPC64Instr i) { m_image = i; }
@@ -1533,14 +1533,16 @@ struct DecoderInfo {
             i.mnemonic() != m_mnemonic);
   }
 
+  bool isException() const;
   bool isNop() const;
   bool isOffsetBranch(bool allowCond = true) const;
   bool isAbsoluteBranch(bool allowCond = true) const;
   bool isRegisterBranch(bool allowCond = true) const;
-  bool isBranch(bool allowCond = true) const;
   bool isClearSignBit() const;
   bool isSpOffsetInstr() const;
   int32_t offset() const;
+  int32_t branchOffset() const;
+  PPC64Instr setBranchOffset(int32_t offset) const;
 
 private:
   // opcode enumeration identifier
@@ -1593,8 +1595,8 @@ class Decoder : private boost::noncopyable {
     delete[] m_decoder_table;
   }
 
-  DecoderInfo* getInvalid() {
-    return m_decoder_table[static_cast<size_t>(OpcodeNames::op_invalid)];
+  const DecoderInfo getInvalid() {
+    return *m_decoder_table[static_cast<size_t>(OpcodeNames::op_invalid)];
   }
 
 public:
@@ -1604,9 +1606,9 @@ public:
     return *s_decoder;
   }
 
-  DecoderInfo* decode(PPC64Instr ip);
+  const DecoderInfo decode(PPC64Instr ip);
 
-  inline DecoderInfo* decode(uint8_t* ip) {
+  inline const DecoderInfo decode(uint8_t* ip) {
     return decode(*reinterpret_cast<PPC64Instr*>(ip));
   }
 };

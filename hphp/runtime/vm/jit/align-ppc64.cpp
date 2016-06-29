@@ -42,6 +42,8 @@ struct AlignImpl {
 
   static void pad(CodeBlock& cb, AlignContext context, size_t bytes) {
     ppc64_asm::Assembler a { cb };
+    assertx((0 == (bytes % ppc64_asm::instr_size_in_bytes))
+        && "Padding is not aligned.");
 
     switch (context) {
       case AlignContext::Live:
@@ -49,13 +51,11 @@ struct AlignImpl {
         return;
 
       case AlignContext::Dead:
-        if (bytes > 4) {
+        if (bytes) {
           a.trap();
-          bytes -= 4;
+          bytes -= ppc64_asm::instr_size_in_bytes;
         }
-        if (bytes > 0) {
-          a.emitNop(bytes);
-        }
+        a.emitNop(bytes);
         return;
     }
     not_reached();

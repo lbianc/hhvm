@@ -307,21 +307,14 @@ struct Assembler {
     CR7      = 7,
   };
 
-  // Prologue size of call function (mflr, std, std, addi, std)
-  static const uint8_t kCallPrologueLen = instr_size_in_bytes * 5;
-
-  // Epilogue size of call function after the return address.
-  // ld, addi, ld, mtlr
-  static const uint8_t kCallEpilogueLen = instr_size_in_bytes * 4;
-
-  // Jcc length
+  // Jcc length: li64 + mtctr + nop + nop + bcctr
   static const uint8_t kJccLen = instr_size_in_bytes * 9;
 
-  // Call length prologue + jcc
+  // Call length: li64 + mtctr + bctr
   static const uint8_t kCallLen = instr_size_in_bytes * 7;
 
   // Total ammount of bytes that a li64 function emits as fixed size
-  static const uint8_t kLi64InstrLen = 5 * instr_size_in_bytes;
+  static const uint8_t kLi64Len = instr_size_in_bytes * 5;
 
   // TODO(rcardoso): Must create a macro for these similar instructions.
   // This will make code more clean.
@@ -1848,46 +1841,13 @@ struct Assembler {
     callEpilogue(ca);
   }
 
-  // checks if the @inst is pointing to a call
-  static inline bool isCall(HPHP::jit::TCA inst) {
-    DecodedInstruction di(inst);
-    return di.isCall();
-  }
-
 //////////////////////////////////////////////////////////////////////
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
-  // Retrieve the target defined by li64 instruction
-  static int64_t getLi64(PPC64Instr* pinstr);
-  static int64_t getLi64(CodeAddress pinstr) {
-    return getLi64(reinterpret_cast<PPC64Instr*>(pinstr));
-  }
-
-  // Retrieve the register used by li64 instruction
-  static Reg64 getLi64Reg(PPC64Instr* instr);
-  static Reg64 getLi64Reg(CodeAddress instr) {
-    return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
-  }
-
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, int32_t imm32);
-
-  // Retrieve the target defined by li32 instruction
-  static int32_t getLi32(PPC64Instr* pinstr);
-  static int32_t getLi32(CodeAddress pinstr) {
-    return getLi32(reinterpret_cast<PPC64Instr*>(pinstr));
-  }
-
-  // Retrieve the register used by li32 instruction
-  static Reg64 getLi32Reg(PPC64Instr* instr) {
-    // it also starts with li or lis, so the same as getLi64
-    return getLi64Reg(instr);
-  }
-  static Reg64 getLi32Reg(CodeAddress instr) {
-    return getLi32Reg(reinterpret_cast<PPC64Instr*>(instr));
-  }
 
   void emitNop(int nbytes) {
     assert((nbytes % 4 == 0) && "This arch supports only 4 bytes alignment");
@@ -1919,6 +1879,7 @@ struct Assembler {
    * the overflow handling, if it's unconditional branch.
    */
   static void patchBranch(CodeAddress jmp, CodeAddress dest, bool cond);
+  static void patchAbsolute(CodeAddress jmp, CodeAddress dest);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -2386,38 +2347,17 @@ protected:
   void EmitZ22Form()  { not_implemented(); }
 
 private:
-  //Low-level emitter functions.
-  void byte(uint8_t b) {
-    codeBlock.byte(b);
-  }
-  void word(uint16_t w) {
-    codeBlock.word(w);
-  }
+  HPHP::CodeBlock& codeBlock;
+
+  // Low-level emitter functions.
   void dword(uint32_t dw) {
     codeBlock.dword(dw);
   }
-  void qword(uint64_t qw) {
-    codeBlock.qword(qw);
-  }
-  void bytes(size_t n, const uint8_t* bs) {
-    codeBlock.bytes(n, bs);
-  }
 
-  HPHP::CodeBlock& codeBlock;
-
-  RegNumber rn(Reg64 r) {
+  template <typename T>
+  RegNumber rn(T r) {
     return RegNumber(int(r));
   }
-  RegNumber rn(RegXMM r) {
-    return RegNumber(int(r));
-  }
-  RegNumber rn(RegSF r) {
-    return RegNumber(int(r));
-  }
-  RegNumber rn(int n) {
-    return RegNumber(int(n));
-  }
-
 };
 
 } // namespace ppc64_asm

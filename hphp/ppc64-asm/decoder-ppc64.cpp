@@ -275,7 +275,7 @@ Decoder::Decoder() {
 #undef XS
 #undef XT
 
-std::string DecoderInfo::toString() {
+std::string DecoderInfo::toString() const {
   if (m_form == Form::kInvalid) return ".long " + std::to_string(m_image);
   if (isNop())                  return "nop";
 
@@ -306,6 +306,19 @@ std::string DecoderInfo::toString() {
   // close that parentheses now.
   if (hasParen) instr += ")";
   return instr;
+}
+
+bool DecoderInfo::isException() const {
+  // trap is a mnemonic of tw 31,0,0
+  if ((m_form == Form::kX) && (m_opn == OpcodeNames::op_tw)) {
+    X_form_t xform;
+    xform.instruction = m_image;
+    if ((31 == xform.RT) && (!xform.RA) && (!xform.RB) && (4 == xform.XO)) {
+      // trap
+      return true;
+    }
+  }
+  return false;
 }
 
 bool DecoderInfo::isNop() const {
@@ -427,12 +440,6 @@ bool DecoderInfo::isRegisterBranch(bool allowCond /* = true */) const {
   return false;
 }
 
-bool DecoderInfo::isBranch(bool allowCond /* = true */) const {
-  return isOffsetBranch(allowCond)   ||
-         isAbsoluteBranch(allowCond) ||
-         isRegisterBranch(allowCond);
-}
-
 bool DecoderInfo::isClearSignBit() const {
   // clrldi is a mnemonic to rldicl when
   if (m_opn == OpcodeNames::op_rldicl) {
@@ -479,9 +486,72 @@ int32_t DecoderInfo::offset() const {
   return static_cast<int16_t>(instr_d.D);
 }
 
+/*
+ * Return offset of a branch by offset like b or bc.
+ */
+int32_t DecoderInfo::branchOffset() const {
+  int32_t offset = 0;
+  switch (m_opn) {
+    case OpcodeNames::op_b:
+    case OpcodeNames::op_bl:
+      {
+        I_form_t iform;
+        iform.instruction = m_image;
+        // sign bit of LI
+        auto signBit = 1 << 25;
+        auto li = iform.LI << 2;
+        // sign-extend 32-bits from a 26-bit value, if negative
+        offset = (signBit & li) ? ((int32_t(-1) - ((1<<26)-1)) | li) : li;
+        break;
+      }
+    case OpcodeNames::op_bc:
+    case OpcodeNames::op_bcl:
+      {
+        B_form_t bform;
+        bform.instruction = m_image;
+        offset = int16_t(bform.BD << 2);
+        break;
+      }
+    default:
+      always_assert(false && "Instruction not expected.");
+      break;
+  }
+  return offset;
+}
+
+/*
+ * Set offset of a branch by offset like b or bc. Return that instruction
+ */
+PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
+  switch (m_opn) {
+    case OpcodeNames::op_b:
+    case OpcodeNames::op_bl:
+      {
+        I_form_t iform;
+        iform.instruction = m_image;
+        iform.LI = offset >> 2;
+        return iform.instruction;
+        break;
+      }
+    case OpcodeNames::op_bc:
+    case OpcodeNames::op_bcl:
+      {
+        B_form_t bform;
+        bform.instruction = m_image;
+        bform.BD = offset >> 2;
+        return bform.instruction;
+        break;
+      }
+    default:
+      always_assert(false && "Instruction not expected.");
+      return 0;
+      break;
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-DecoderInfo* Decoder::decode(PPC64Instr instr) {
+const DecoderInfo Decoder::decode(PPC64Instr instr) {
   // To decode a instruction we extract the decoder fields
   // masking the instruction and test if it 'hits' the decoder table.
   for (size_t i = 0; i < sizeof(DecoderList)/sizeof(PPC64Instr); i++) {
@@ -495,7 +565,7 @@ DecoderInfo* Decoder::decode(PPC64Instr instr) {
 
     if (m_decoder_table[index] != nullptr) {
       m_decoder_table[index]->instruction_image(instr);
-      return m_decoder_table[index];
+      return *m_decoder_table[index];
     }
   }
 

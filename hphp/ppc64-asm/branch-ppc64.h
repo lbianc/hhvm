@@ -169,10 +169,7 @@ struct BranchParams {
     BranchParams() = delete;
 
     BranchParams(BranchConditions bc) { defineBoBi(bc); }
-
-    BranchParams(ConditionCode cc) {
-      defineBoBi(convertCC(cc));
-    }
+    BranchParams(ConditionCode cc)    { defineBoBi(convertCC(cc)); }
 
     static BranchConditions convertCC(ConditionCode cc) {
       BranchConditions ret = BranchConditions::Always;
@@ -234,6 +231,10 @@ struct BranchParams {
           ret = BranchConditions::GreaterThan;
           break;
 
+        case HPHP::jit::CC_None:
+          ret = BranchConditions::Always;
+          break;
+
         default:
           not_implemented();
           break;
@@ -244,7 +245,12 @@ struct BranchParams {
     /*
      * Get the BranchParams from an emitted conditional branch
      */
-    BranchParams(PPC64Instr instr);
+    BranchParams(PPC64Instr instr) { decodeInstr(instr); }
+    BranchParams(uint8_t* pinstr) {
+      decodeInstr(*reinterpret_cast<PPC64Instr*>(pinstr));
+    }
+
+    void decodeInstr(PPC64Instr instr);
 
     ~BranchParams() {}
 

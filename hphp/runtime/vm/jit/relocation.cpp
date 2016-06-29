@@ -24,6 +24,8 @@
 #include "hphp/runtime/vm/jit/cg-meta.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
+#include "hphp/runtime/vm/jit/relocation-ppc64.h"
+#include "hphp/runtime/vm/jit/relocation-x64.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 
 #include "hphp/tools/hfsort/jitsort.h"
@@ -862,20 +864,6 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
 //////////////////////////////////////////////////////////////////////
 
 /*
- * Arch-specific relocation functions
- */
-namespace x64 {
-void adjustForRelocation(RelocationInfo&);
-void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
-void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
-void adjustMetaDataForRelocation(RelocationInfo&, AsmInfo*, CGMeta&);
-void findFixups(TCA start, TCA end, CGMeta& fixups);
-size_t relocate(RelocationInfo&, CodeBlock&, TCA, TCA, CGMeta&, TCA*);
-}
-
-//////////////////////////////////////////////////////////////////////
-
-/*
  * Wrappers. Not using ARCH_SWITCH_CALL as not all platforms implemented
  * relocation.
  */
@@ -885,6 +873,7 @@ void adjustForRelocation(RelocationInfo& rel) {
   case Arch::X64:
     x64::adjustForRelocation(rel);
   case Arch::PPC64:
+    ppc64::adjustForRelocation(rel);
   case Arch::ARM:
     break;
   }
@@ -894,6 +883,7 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
   case Arch::X64:
     x64::adjustForRelocation(rel, srcStart, srcEnd);
   case Arch::PPC64:
+    ppc64::adjustForRelocation(rel, srcStart, srcEnd);
   case Arch::ARM:
     break;
   }
@@ -903,6 +893,7 @@ void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
   case Arch::X64:
     x64::adjustCodeForRelocation(rel, fixups);
   case Arch::PPC64:
+    ppc64::adjustCodeForRelocation(rel, fixups);
   case Arch::ARM:
     break;
   }
@@ -914,6 +905,7 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
   case Arch::X64:
     x64::adjustMetaDataForRelocation(rel, asmInfo, fixups);
   case Arch::PPC64:
+    ppc64::adjustMetaDataForRelocation(rel, asmInfo, fixups);
   case Arch::ARM:
     break;
   }
@@ -923,6 +915,7 @@ void findFixups(TCA start, TCA end, CGMeta& fixups) {
   case Arch::X64:
     x64::findFixups(start, end, fixups);
   case Arch::PPC64:
+    ppc64::findFixups(start, end, fixups);
   case Arch::ARM:
     break;
   }
@@ -936,6 +929,7 @@ size_t relocate(RelocationInfo& rel,
   case Arch::X64:
     return x64::relocate(rel, destBlock, start, end, fixups, exitAddr);
   case Arch::PPC64:
+    return ppc64::relocate(rel, destBlock, start, end, fixups, exitAddr);
   case Arch::ARM:
     return 0;
   }

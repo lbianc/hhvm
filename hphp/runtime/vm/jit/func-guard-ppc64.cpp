@@ -76,8 +76,9 @@ TCA funcGuardFromPrologue(TCA prologue, const Func* func) {
 bool funcGuardMatches(TCA guard, const Func* func) {
   if (isPrologueStub(guard)) return false;
 
+  const ppc64_asm::DecodedInstruction di(guard);
   auto const ifunc = reinterpret_cast<uintptr_t>(func);
-  return static_cast<uintptr_t>(ppc64_asm::Assembler::getLi64(guard)) == ifunc;
+  return static_cast<uintptr_t>(di.immediate()) == ifunc;
 }
 
 void clobberFuncGuard(TCA guard, const Func* func) {
