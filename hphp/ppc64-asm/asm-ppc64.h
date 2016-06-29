@@ -225,7 +225,7 @@ struct vmTOC {
   }
 
   /* return the address of the first element */
-  intptr_t getPtrVector() const{
+  static intptr_t getPtrVector() {
     return reinterpret_cast<intptr_t>(&funcaddrs[0]);
   };
 
@@ -249,10 +249,6 @@ struct Assembler {
 
   CodeAddress frontier() const {
     return codeBlock.frontier();
-  }
-
-  intptr_t getTOCptr() const {
-    return TOCtable.getPtrVector();
   }
 
   void setFrontier(CodeAddress newFrontier) {

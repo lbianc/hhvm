@@ -714,7 +714,7 @@ void Vgen::emit(const inittc&) {
   a.li(ppc64::rone(), 1);
 
   // Save TOC pointer in r2
-  a.li64(ppc64_asm::reg::r2, a.getTOCptr());
+  a.li64(ppc64_asm::reg::r2, vmTOC::getPtrVector());
 }
 
 void Vgen::emit(const leavetc&) {
