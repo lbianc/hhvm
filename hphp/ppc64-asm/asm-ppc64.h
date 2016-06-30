@@ -218,7 +218,7 @@ struct vmTOC {
   ~vmTOC(){}
 
   /* push an element into the stack and return its index */
-  uint64_t pushElem(int64_t elem) {
+  static uint64_t pushElem(int64_t elem) {
 
     funcaddrs[++last_elem] = elem;
     return last_elem;
