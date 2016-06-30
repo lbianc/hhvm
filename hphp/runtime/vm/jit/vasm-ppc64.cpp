@@ -421,7 +421,7 @@ struct Vgen {
       copyCR0toCR1(a, rAsm);
     } else {
       a.cmpdi(i.s0, Immed(0));
-      a.cmpldi(i.s0, Immed(0));
+      a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
     }
   }
   void emit(const xorqi& i) {
