@@ -64,7 +64,14 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, fixups, call, target, Assembler::CallArg::Smashable);
+  auto const start = cb.frontier();
+  meta.smashableLocations.insert(start);
+  Assembler a { cb };
+
+  // verificar se pode ser colocado dentro da macro.
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[24]);
+  a.call (target, Assembler::CallArg::SmashInt);
+  return start;
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {

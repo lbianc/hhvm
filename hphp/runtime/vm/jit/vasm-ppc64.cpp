@@ -837,7 +837,10 @@ void Vgen::emit(const calls& i) {
   // r1 pointer to a valid frame in order to allow LR save by callee's
   // prologue.
   emitCallPrologue();
-  emitSmashableCall(a.code(), env.meta, i.target);
+  //emitSmashableCall(a.code(), env.meta, i.target);
+  // não pode ser colocado dentro do emitSmashableCall???
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
+  a.call(i.target, Assembler::CallArg::SmashExt);
 }
 
 void Vgen::emit(const callphp& i) {
