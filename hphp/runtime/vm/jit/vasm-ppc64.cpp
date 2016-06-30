@@ -102,6 +102,16 @@ struct Vgen {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
   }
+
+  // Auxiliary for loading immediates in the best way
+  void limmediate (Assembler a, const Reg64& rt, int64_t imm64) {
+    if(HPHP::jit::deltaFits(imm64, HPHP::sz::word))
+      a.li64(rt, imm64);
+    else
+      a.ld(rt, rtoc()[8*vmTOC::pushElem(imm64)]);
+    return;
+  }
+
   void copyCR0toCR1(Assembler a, Reg64 raux)
   {
     a.mfcr(raux);
