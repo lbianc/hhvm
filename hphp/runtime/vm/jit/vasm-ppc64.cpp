@@ -814,7 +814,8 @@ void Vgen::emit(const calls& i) {
   // prologue.
   a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
   a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
-  emitSmashableCall(a.code(), env.meta, i.target);
+  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
+  a.call(i.target, Assembler::CallArg::SmashExt);
 }
 
 void Vgen::emit(const callphp& i) {

@@ -1836,21 +1836,22 @@ struct Assembler {
                 // --------------------------
     Internal,   // No            | No
     External,   // Yes           | No
-    Smashable,  // No (internal) | Yes
+    SmashInt,   // No            | Yes
+    SmashExt,   // Yes           | Yes
   };
 
   void callEpilogue(CallArg ca) {
     // Several vasms like nothrow, unwind and syncpoint will skip one
     // instruction after call and use it as expected return address. Use a nop
     // to guarantee this consistency even if toc doesn't need to be saved
-    if (CallArg::External != ca) nop();
+    if ((CallArg::SmashInt == ca) || (CallArg::Internal == ca)) nop();
     else ld(reg::r2, reg::r1[toc_position_on_frame]);
   }
 
   // generic template, for CodeAddress and Label
   template <typename T>
   void call(T& target, CallArg ca = CallArg::Internal) {
-    if (CallArg::Smashable == ca) {
+    if ((CallArg::SmashInt == ca) || (CallArg::SmashExt == ca)) {
       // To make a branch smashable, the most conservative method needs to be
       // used so the target can be changed later or on bindCall.
       branchFar(target, BranchConditions::Always, LinkReg::Save);
