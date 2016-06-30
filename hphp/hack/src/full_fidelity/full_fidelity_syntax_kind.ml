@@ -51,9 +51,13 @@ type t =
 | PostfixUnaryOperator
 | BinaryOperator
 | ConditionalExpression
+| FunctionCallExpression
 | ParenthesizedExpression
 | BracedExpression
 | ListExpression
+| ObjectCreationExpression
+| ShapeExpression
+| FieldInitializer
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -68,6 +72,9 @@ type t =
 | VectorTypeSpecifier
 | MapTypeSpecifier
 | ClosureTypeSpecifier
+| ClassnameTypeSpecifier
+| ShapeTypeSpecifier
+| FieldSpecifier
 
 let to_string kind =
   match kind with
@@ -106,9 +113,13 @@ let to_string kind =
   | PostfixUnaryOperator -> "postfix_unary_operator"
   | BinaryOperator -> "binary_operator"
   | ConditionalExpression -> "conditional_expression"
+  | FunctionCallExpression -> "function_call_expression"
   | ParenthesizedExpression -> "parenthesized_expression"
   | BracedExpression -> "braced_expression"
   | ListExpression -> "list_expression"
+  | ObjectCreationExpression -> "object_creation_expression"
+  | ShapeExpression -> "shape_expression"
+  | FieldInitializer -> "field_initializer"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | NullableTypeSpecifier -> "nullable_type_specifier"
@@ -117,6 +128,9 @@ let to_string kind =
   | VectorTypeSpecifier -> "vector_type_specifier"
   | MapTypeSpecifier -> "map_type_specifier"
   | ClosureTypeSpecifier -> "closure_type_specifier"
+  | ClassnameTypeSpecifier -> "classname_type_specifier"
+  | ShapeTypeSpecifier -> "shape_type_specifier"
+  | FieldSpecifier -> "field_specifier"
   | TypeArguments -> "type_arguments"
   | DefaultArgumentSpecifier -> "default_argument_specifier"
   | XHPExpression -> "xhp_expression"

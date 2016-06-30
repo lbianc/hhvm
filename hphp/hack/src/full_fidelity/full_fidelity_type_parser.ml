@@ -14,61 +14,14 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module TokenKind = Full_fidelity_token_kind
 module SourceText = Full_fidelity_source_text
 module SyntaxError = Full_fidelity_syntax_error
-module Lexer = Full_fidelity_lexer
+module SimpleParser =
+  Full_fidelity_simple_parser.WithLexer(Full_fidelity_type_lexer)
 
 open TokenKind
 open Syntax
 
-type t = {
-  lexer : Lexer.t;
-  errors : SyntaxError.t list
-}
-
-let make lexer errors =
-  { lexer; errors }
-
-let errors parser =
-  parser.errors
-
-let lexer parser =
-  parser.lexer
-
-let with_error parser message =
-  (* TODO: Should be able to express errors on whole syntax node. *)
-  (* TODO: Is this even right? Won't this put the error on the trivia? *)
-  let start_offset = Lexer.start_offset parser.lexer in
-  let end_offset = Lexer.end_offset parser.lexer in
-  let error = SyntaxError.make start_offset end_offset message in
-  { parser with errors = error :: parser.errors }
-
-let next_token parser =
-  let (lexer, token) = Lexer.next_token_in_type parser.lexer in
-  let parser = { parser with lexer } in
-  (parser, token)
-
-let next_token_as_name parser =
-  (* TODO: This isn't right.  Pass flags to the lexer. *)
-  let (lexer, token) = Lexer.next_token_as_name parser.lexer in
-  let parser = { parser with lexer } in
-  (parser, token)
-
-let skip_token parser =
-  let (lexer, _) = Lexer.next_token_in_type parser.lexer in
-  let parser = { parser with lexer } in
-  parser
-
-let peek_token parser =
-  let (_, token) = Lexer.next_token_in_type parser.lexer in
-  token
-
-let expect_token parser kind error =
-  let (parser1, token) = next_token parser in
-  if (Token.kind token) = kind then
-    (parser1, make_token token)
-  else
-    (* ERROR RECOVERY: Create a missing token for the expected token,
-       and continue on from the current token. Don't skip it. *)
-    (with_error parser error, (make_missing()))
+include SimpleParser
+include Full_fidelity_parser_helpers.WithParser(SimpleParser)
 
 (* TODO: What about something like for::for? Is that a legal
   type constant?  *)
@@ -115,7 +68,7 @@ and parse_remaining_type_constant parser left =
     begin
       let syntax =
         make_type_constant left (make_token separator) (make_token right) in
-      let token = peek_token parser in
+      let token = peek_token parser1 in
       if (Token.kind token) = ColonColon then
         parse_remaining_type_constant parser1 syntax
       else
@@ -164,7 +117,10 @@ and parse_generic_type_argument_list_opt parser =
   else
     (parser, make_missing())
 
-and parse_type_list parser close_kind =
+(* This parses a comma-separated list of items that must contain at least
+   one item.  The list is terminated by a close_kind token. The item is
+   parsed by the given function. *)
+and parse_comma_list parser close_kind error parse_item =
   let rec aux parser acc =
     let (parser1, token) = next_token parser in
     let kind = Token.kind token in
@@ -172,7 +128,7 @@ and parse_type_list parser close_kind =
       (* ERROR RECOVERY: If we're here and we got a close brace then
          the list is empty; we expect at least one type. If we're here
          at the end of the file, then we were expecting one more type. *)
-      let parser = with_error parser SyntaxError.error1007 in
+      let parser = with_error parser error in
       (parser, ((make_missing()) :: acc))
     else if kind = Comma then
 
@@ -185,11 +141,11 @@ and parse_type_list parser close_kind =
         Plainly the type is missing, but the comma is not associated with
         the type, it's associated with the formal parameter list.  *)
 
-      let parser = with_error parser1 SyntaxError.error1007 in
+      let parser = with_error parser1 error in
       let item = make_list_item (make_missing()) (make_token token) in
       aux parser (item :: acc)
     else
-      let (parser, ty) = parse_type_specifier parser in
+      let (parser, ty) = parse_item parser in
       let (parser1, token) = next_token parser in
       let kind = Token.kind token in
       if kind = close_kind then
@@ -203,6 +159,9 @@ and parse_type_list parser close_kind =
         (parser, (ty :: acc)) in
   let (parser, types) = aux parser [] in
   (parser, make_list (List.rev types))
+
+and parse_type_list parser close_kind =
+  parse_comma_list parser close_kind SyntaxError.error1007 parse_type_specifier
 
 and parse_generic_type_argument_list parser =
   let (parser, open_angle) = next_token parser in
@@ -319,11 +278,74 @@ and parse_nullable_type_specifier parser =
   (parser, result)
 
 and parse_classname_type_specifier parser =
-  let (parser, token) = next_token parser in
-    (* TODO *)
-    (parser, make_error [make_token token])
+  (* SPEC
+    classname-type-specifier:
+      classname  <  qualified-name  >
+  *)
+
+  (* TODO ERROR RECOVERY is unsophisticated here. *)
+  let (parser, classname) = next_token parser in
+  let classname = make_token classname in
+  let (parser, left_angle) =
+    expect_token parser LessThan SyntaxError.error1021 in
+  let (parser, classname_type) = next_token parser in
+  let parser = match Token.kind classname_type with
+  | QualifiedName
+  | Name -> parser
+  | _ -> with_error parser SyntaxError.error1004 in
+  let classname_type = make_token classname_type in
+  let (parser, right_angle) =
+    expect_token parser GreaterThan SyntaxError.error1013 in
+  let result = make_classname_type_specifier
+    classname left_angle classname_type right_angle in
+  (parser, result)
+
+and parse_field_specifier parser =
+  (* SPEC
+    field-specifier:
+      single-quoted-string-literal  =>  type-specifier
+      qualified-name  =>  type-specifier
+  *)
+
+  (* TODO: ERROR RECOVERY is not very sophisticated here. *)
+  let (parser, name) = next_token parser in
+  let parser = match Token.kind name with
+  | SingleQuotedStringLiteral
+  | QualifiedName
+  | Name -> parser
+  | _ -> with_error parser SyntaxError.error1025 in
+  let name = make_token name in
+  let (parser, arrow) =
+    expect_token parser EqualGreaterThan SyntaxError.error1028 in
+  let (parser, field_type) = parse_type_specifier parser in
+  let result = make_field_specifier name arrow field_type in
+  (parser, result)
+
+and parse_field_list parser =
+  (* SPEC
+    field-specifier-list:
+      field-specifier
+      field-specifier-list  ,  field-specifier
+  *)
+  parse_comma_list parser RightParen SyntaxError.error1025 parse_field_specifier
+
+and parse_field_list_opt parser =
+  let token = peek_token parser in
+  if Token.kind token = RightParen then
+    (parser, (make_missing()))
+  else
+    parse_field_list parser
 
 and parse_shape_specifier parser =
-  let (parser, token) = next_token parser in
-    (* TODO *)
-    (parser, make_error [make_token token])
+  (* SPEC
+    shape-specifier:
+      shape ( field-specifier-list-opt )
+  *)
+  (* TODO: ERROR RECOVERY is not very sophisticated here. *)
+  let (parser, shape) = next_token parser in
+  let shape = make_token shape in
+  let (parser, lparen) = expect_token parser LeftParen SyntaxError.error1019 in
+  let (parser, fields) = parse_field_list_opt parser in
+  let (parser, rparen) = expect_token parser RightParen SyntaxError.error1011 in
+  let result = make_shape_type_specifier shape lparen fields rparen in
+  (parser, result)

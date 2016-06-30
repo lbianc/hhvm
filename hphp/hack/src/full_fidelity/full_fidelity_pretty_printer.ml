@@ -408,6 +408,12 @@ let rec get_doc node =
     let alt = get_doc (conditional_alternative x) in
     (* TODO: Could this be improved? *)
     group_doc ( tst ^| qm ^| con ^| col ^| alt )
+  | FunctionCallExpression x ->
+    let receiver = get_doc x.function_call_receiver in
+    let lparen = get_doc x.function_call_lparen in
+    let args = get_doc x.function_call_arguments in
+    let rparen = get_doc x.function_call_rparen in
+    receiver ^^^ lparen ^^^ args ^^^ rparen
   | ParenthesizedExpression x ->
     let left = get_doc (paren_expr_left_paren x) in
     let right = get_doc (paren_expr_right_paren x) in
@@ -425,6 +431,24 @@ let rec get_doc node =
     let members = get_doc (listlike_members x) in
     let left = group_doc (keyword ^| left_paren) in
     indent_block_no_space left members right_paren indt
+  | ObjectCreationExpression x ->
+    let n = get_doc x.object_creation_new in
+    let c = get_doc x.object_creation_class in
+    let l = get_doc x.object_creation_lparen in
+    let a = get_doc x.object_creation_arguments in
+    let r = get_doc x.object_creation_rparen in
+    n ^| c ^^^ l ^^^ a ^^^ r
+  | FieldInitializer x ->
+    let n = get_doc x.field_init_name in
+    let a = get_doc x.field_init_arrow in
+    let v = get_doc x.field_init_value in
+    n ^| a ^| v
+  | ShapeExpression x ->
+    let sh = get_doc x.shape_shape in
+    let lp = get_doc x.shape_left_paren in
+    let fs = get_doc x.shape_fields in
+    let rp = get_doc x.shape_right_paren in
+    sh ^| lp ^^^ fs ^^^ rp
   | XHPExpression x ->
     let left = get_doc (xhp_open x) in
     let expr = get_doc (xhp_body x) in
@@ -478,6 +502,23 @@ let rec get_doc node =
     let ret = get_doc x.closure_return_type in
     let orp = get_doc x.closure_outer_right_paren in
     olp ^^^ fnc ^^| ilp ^^^ pts ^^^ irp ^^^ col ^^^ ret ^^^ orp
+  | ClassnameTypeSpecifier x ->
+    let cn = get_doc x.classname_classname in
+    let la = get_doc x.classname_left_angle in
+    let ty = get_doc x.classname_type in
+    let ra = get_doc x.classname_right_angle in
+    cn ^^^ la ^^^ ty ^^^ ra
+  | FieldSpecifier x ->
+    let n = get_doc x.field_name in
+    let a = get_doc x.field_arrow in
+    let t = get_doc x.field_type in
+    n ^| a ^| t
+  | ShapeTypeSpecifier x ->
+    let sh = get_doc x.shape_shape in
+    let lp = get_doc x.shape_left_paren in
+    let fs = get_doc x.shape_fields in
+    let rp = get_doc x.shape_right_paren in
+    sh ^| lp ^^^ fs ^^^ rp
   | TypeArguments x ->
     let left = get_doc (type_arguments_left_angle x) in
     let right = get_doc (type_arguments_right_angle x) in

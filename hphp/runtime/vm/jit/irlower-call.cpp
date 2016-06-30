@@ -246,6 +246,7 @@ void cgCallBuiltin(IRLS& env, const IRInstruction* inst) {
       // location where it can construct the return Array, String, Object, or
       // Variant.
       args.addr(rvmtl(), returnOffset);
+      args.indirect();
     }
   }
 
@@ -399,6 +400,13 @@ void cgDbgTraceCall(IRLS& env, const IRInstruction* inst) {
 
   cgCallHelper(vmain(env), env, CallSpec::direct(traceCallback),
                callDest(env, inst), SyncOptions::None, args);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void cgEnterFrame(IRLS& env, const IRInstruction* inst) {
+  auto const fp = srcLoc(env, inst, 0).reg();
+  vmain(env) << phplogue{fp};
 }
 
 ///////////////////////////////////////////////////////////////////////////////

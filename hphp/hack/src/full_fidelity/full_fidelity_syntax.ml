@@ -251,6 +251,12 @@ module WithToken(Token: TokenType) = struct
       conditional_colon : t;
       conditional_alternative : t
     }
+    and function_call_expression = {
+      function_call_receiver  : t;
+      function_call_lparen : t;
+      function_call_arguments : t;
+      function_call_rparen : t
+    }
     and parenthesized_expression = {
       paren_expr_left_paren : t;
       paren_expr : t;
@@ -266,6 +272,13 @@ module WithToken(Token: TokenType) = struct
       listlike_left_paren: t;
       listlike_members: t;
       listlike_right_paren: t;
+    }
+    and object_creation_expression = {
+      object_creation_new : t;
+      object_creation_class : t;
+      object_creation_lparen : t;
+      object_creation_arguments : t;
+      object_creation_rparen : t
     }
     and xhp_attribute = {
       xhp_attr_name : t;
@@ -320,6 +333,28 @@ module WithToken(Token: TokenType) = struct
       closure_colon : t;
       closure_return_type : t;
       closure_outer_right_paren : t
+    }
+    and classname_type_specifier = {
+      classname_classname : t;
+      classname_left_angle : t;
+      classname_type : t;
+      classname_right_angle : t
+    }
+    and field_specifier = {
+      field_name : t;
+      field_arrow : t;
+      field_type : t
+    }
+    and field_initializer = {
+      field_init_name : t;
+      field_init_arrow : t;
+      field_init_value : t
+    }
+    and shape = {
+      shape_shape : t;
+      shape_left_paren : t;
+      shape_fields : t;
+      shape_right_paren : t
     }
     and generic_type = {
       generic_class_type : t;
@@ -383,9 +418,13 @@ module WithToken(Token: TokenType) = struct
     | PostfixUnaryOperator of unary_operator
     | BinaryOperator of binary_operator
     | ConditionalExpression of conditional_expression
+    | FunctionCallExpression of function_call_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
     | ListExpression of listlike_expression
+    | ObjectCreationExpression of object_creation_expression
+    | ShapeExpression of shape
+    | FieldInitializer of field_initializer
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -399,6 +438,9 @@ module WithToken(Token: TokenType) = struct
     | VectorTypeSpecifier of vector_type_specifier
     | MapTypeSpecifier of map_type_specifier
     | ClosureTypeSpecifier of closure_type_specifier
+    | ClassnameTypeSpecifier of classname_type_specifier
+    | ShapeTypeSpecifier of shape
+    | FieldSpecifier of field_specifier
 
     and t = { syntax : syntax ; value : SyntaxValue.t}
 
@@ -449,9 +491,13 @@ module WithToken(Token: TokenType) = struct
       | PostfixUnaryOperator _ -> SyntaxKind.PostfixUnaryOperator
       | BinaryOperator _ -> SyntaxKind.BinaryOperator
       | ConditionalExpression _ -> SyntaxKind.ConditionalExpression
+      | FunctionCallExpression _ -> SyntaxKind.FunctionCallExpression
       | ParenthesizedExpression _ -> SyntaxKind.ParenthesizedExpression
       | BracedExpression _ -> SyntaxKind.BracedExpression
       | ListExpression _ -> SyntaxKind.ListExpression
+      | ObjectCreationExpression _ -> SyntaxKind.ObjectCreationExpression
+      | ShapeExpression _ -> SyntaxKind.ShapeExpression
+      | FieldInitializer _ -> SyntaxKind.FieldInitializer
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPAttribute _ -> SyntaxKind.XHPAttribute
@@ -464,6 +510,9 @@ module WithToken(Token: TokenType) = struct
       | VectorTypeSpecifier _ -> SyntaxKind.VectorTypeSpecifier
       | MapTypeSpecifier _ -> SyntaxKind.MapTypeSpecifier
       | ClosureTypeSpecifier _ -> SyntaxKind.ClosureTypeSpecifier
+      | ClassnameTypeSpecifier _ -> SyntaxKind.ClassnameTypeSpecifier
+      | ShapeTypeSpecifier _ -> SyntaxKind.ShapeTypeSpecifier
+      | FieldSpecifier _ -> SyntaxKind.FieldSpecifier
 
     let kind node =
       to_kind (syntax node)
@@ -500,10 +549,16 @@ module WithToken(Token: TokenType) = struct
     let is_binary_operator node = kind node = SyntaxKind.BinaryOperator
     let is_conditional_expression node =
       kind node = SyntaxKind.ConditionalExpression
+    let is_function_call_expression node =
+      kind node = SyntaxKind.FunctionCallExpression
     let is_parenthesized_expression node =
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node = kind node = SyntaxKind.BracedExpression
     let is_listlike_expression node = kind node = SyntaxKind.ListExpression
+    let is_object_creation_expression node =
+      kind node = SyntaxKind.ObjectCreationExpression
+    let is_shape_expression node = kind node = SyntaxKind.ShapeExpression
+    let is_field_initializer node = kind node = SyntaxKind.FieldInitializer
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -520,6 +575,12 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.MapTypeSpecifier
     let is_closure_type_specifier node =
       kind node = SyntaxKind.ClosureTypeSpecifier
+    let is_classname_type_specifier node =
+      kind node = SyntaxKind.ClassnameTypeSpecifier
+    let is_shape_type_specifier node =
+      kind node = SyntaxKind.ShapeTypeSpecifier
+    let is_field_specifier node =
+      kind node = SyntaxKind.FieldSpecifier
 
     let is_separable_prefix node =
       match syntax node with
@@ -649,6 +710,11 @@ module WithToken(Token: TokenType) = struct
           conditional_colon; conditional_alternative } ->
         [ conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative ]
+      | FunctionCallExpression
+        { function_call_receiver; function_call_lparen;
+          function_call_arguments; function_call_rparen } ->
+        [ function_call_receiver; function_call_lparen;
+          function_call_arguments; function_call_rparen ]
       | ParenthesizedExpression
         { paren_expr_left_paren; paren_expr; paren_expr_right_paren } ->
         [ paren_expr_left_paren; paren_expr; paren_expr_right_paren ]
@@ -660,6 +726,17 @@ module WithToken(Token: TokenType) = struct
           listlike_right_paren } ->
         [ listlike_keyword; listlike_left_paren; listlike_members;
           listlike_right_paren ]
+      | ObjectCreationExpression
+        { object_creation_new; object_creation_class; object_creation_lparen;
+          object_creation_arguments; object_creation_rparen } ->
+        [ object_creation_new; object_creation_class; object_creation_lparen;
+          object_creation_arguments; object_creation_rparen ]
+      | ShapeExpression
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren } ->
+        [ shape_shape; shape_left_paren; shape_fields; shape_right_paren ]
+      | FieldInitializer
+        { field_init_name; field_init_arrow; field_init_value } ->
+        [ field_init_name; field_init_arrow; field_init_value ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -707,6 +784,17 @@ module WithToken(Token: TokenType) = struct
           closure_inner_left_paren; closure_parameter_types;
           closure_inner_right_paren; closure_colon; closure_return_type;
           closure_outer_right_paren ]
+      | ClassnameTypeSpecifier
+        { classname_classname; classname_left_angle; classname_type;
+          classname_right_angle } ->
+        [ classname_classname; classname_left_angle; classname_type;
+          classname_right_angle ]
+      | ShapeTypeSpecifier
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren } ->
+        [ shape_shape; shape_left_paren; shape_fields; shape_right_paren ]
+      | FieldSpecifier
+        { field_name; field_arrow; field_type } ->
+        [ field_name; field_arrow; field_type ]
 
     let children_names node =
       match node.syntax with
@@ -832,6 +920,11 @@ module WithToken(Token: TokenType) = struct
           conditional_colon; conditional_alternative } ->
         [ "conditional_test"; "conditional_question"; "conditional_consequence";
           "conditional_colon"; "conditional_alternative" ]
+      | FunctionCallExpression
+        { function_call_receiver; function_call_lparen;
+          function_call_arguments; function_call_rparen } ->
+        [ "function_call_receiver"; "function_call_lparen";
+          "function_call_arguments"; "function_call_rparen" ]
       | ParenthesizedExpression
         { paren_expr_left_paren; paren_expr; paren_expr_right_paren } ->
         [ "paren_expr_left_paren"; "paren_expr"; "paren_expr_right_paren" ]
@@ -843,6 +936,20 @@ module WithToken(Token: TokenType) = struct
           listlike_right_paren } ->
         [ "listlike_keyword"; "listlike_left_paren"; "listlike_members";
           "listlike_right_paren" ]
+      | ObjectCreationExpression
+        { object_creation_new; object_creation_class;
+          object_creation_lparen; object_creation_arguments;
+          object_creation_rparen } ->
+        [ "object_creation_new"; "object_creation_class";
+          "object_creation_lparen"; "object_creation_arguments";
+          "object_creation_rparen" ]
+      | ShapeExpression
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren } ->
+        [ "shape_shape"; "shape_left_paren"; "shape_fields";
+          "shape_right_paren" ]
+      | FieldInitializer
+        { field_init_name; field_init_arrow; field_init_value } ->
+        [ "field_init_name"; "field_init_arrow"; "field_init_value" ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -890,6 +997,18 @@ module WithToken(Token: TokenType) = struct
           "closure_inner_left_paren"; "closure_parameter_types";
           "closure_inner_right_paren"; "closure_colon"; "closure_return_type";
           "closure_outer_right_paren" ]
+      | ClassnameTypeSpecifier
+        { classname_classname; classname_left_angle; classname_type;
+          classname_right_angle } ->
+        [ "classname_classname"; "classname_left_angle"; "classname_type";
+          "classname_right_angle" ]
+      | ShapeTypeSpecifier
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren } ->
+        [ "shape_shape"; "shape_left_paren"; "shape_fields";
+          "shape_right_paren" ]
+      | FieldSpecifier
+        { field_name; field_arrow; field_type } ->
+        [ "field_name"; "field_arrow"; "field_type" ]
 
     let rec to_json node =
       let open Hh_json in
@@ -1204,6 +1323,12 @@ module WithToken(Token: TokenType) = struct
         ConditionalExpression
         { conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative }
+      | (SyntaxKind.FunctionCallExpression,
+          [ function_call_receiver; function_call_lparen;
+            function_call_arguments; function_call_rparen ]) ->
+        FunctionCallExpression
+          { function_call_receiver; function_call_lparen;
+            function_call_arguments; function_call_rparen }
       | (SyntaxKind.ParenthesizedExpression, [ paren_expr_left_paren;
         paren_expr; paren_expr_right_paren ]) ->
         ParenthesizedExpression { paren_expr_left_paren; paren_expr;
@@ -1216,6 +1341,20 @@ module WithToken(Token: TokenType) = struct
         listlike_members; listlike_right_paren ]) ->
         ListExpression { listlike_keyword; listlike_left_paren;
           listlike_members; listlike_right_paren }
+      | (SyntaxKind.ObjectCreationExpression,
+        [ object_creation_new; object_creation_class; object_creation_lparen;
+          object_creation_arguments; object_creation_rparen ]) ->
+        ObjectCreationExpression
+        { object_creation_new; object_creation_class; object_creation_lparen;
+          object_creation_arguments; object_creation_rparen }
+      | (SyntaxKind.ShapeExpression,
+        [ shape_shape; shape_left_paren; shape_fields; shape_right_paren ]) ->
+        ShapeExpression
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren }
+      | (SyntaxKind.FieldInitializer,
+        [ field_init_name; field_init_arrow; field_init_value ]) ->
+        FieldInitializer
+        { field_init_name; field_init_arrow; field_init_value }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -1263,6 +1402,21 @@ module WithToken(Token: TokenType) = struct
           closure_inner_left_paren; closure_parameter_types;
           closure_inner_right_paren; closure_colon; closure_return_type;
           closure_outer_right_paren }
+      | (SyntaxKind.ClassnameTypeSpecifier,
+        [ classname_classname; classname_left_angle; classname_type;
+          classname_right_angle ]) ->
+        ClassnameTypeSpecifier
+        { classname_classname; classname_left_angle; classname_type;
+          classname_right_angle }
+      | (SyntaxKind.ShapeTypeSpecifier,
+        [ shape_shape; shape_left_paren; shape_fields; shape_right_paren ]) ->
+        ShapeTypeSpecifier
+        { shape_shape; shape_left_paren; shape_fields; shape_right_paren }
+      | (SyntaxKind.FieldSpecifier,
+        [ field_name; field_arrow; field_type ]) ->
+        FieldSpecifier
+        { field_name; field_arrow; field_type }
+
       | _ -> failwith "with_children called with wrong number of children"
 
     let all_tokens node =
@@ -1317,6 +1471,13 @@ module WithToken(Token: TokenType) = struct
         [ conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative ]
 
+      let make_function_call_expression
+          function_call_receiver function_call_lparen
+          function_call_arguments function_call_rparen =
+        from_children SyntaxKind.FunctionCallExpression
+          [ function_call_receiver; function_call_lparen;
+            function_call_arguments; function_call_rparen ]
+
       let make_parenthesized_expression
         paren_expr_left_paren paren_expr paren_expr_right_paren =
           from_children SyntaxKind.ParenthesizedExpression
@@ -1333,6 +1494,20 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.ListExpression
           [ listlike_keyword; listlike_left_paren; listlike_members;
           listlike_right_paren ]
+
+      let make_object_creation_expression
+        object_creation_new object_creation_class object_creation_lparen
+        object_creation_arguments object_creation_rparen =
+        from_children SyntaxKind.ObjectCreationExpression
+        [ object_creation_new; object_creation_class; object_creation_lparen;
+          object_creation_arguments; object_creation_rparen]
+
+      let make_field_initializer name arrow value =
+        from_children SyntaxKind.FieldInitializer [ name; arrow; value ]
+
+      let make_shape_expression shape lparen fields rparen =
+        from_children SyntaxKind.ShapeExpression
+          [ shape; lparen; fields; rparen ]
 
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
@@ -1529,6 +1704,16 @@ module WithToken(Token: TokenType) = struct
             closure_inner_left_paren; closure_parameter_types;
             closure_inner_right_paren; closure_colon; closure_return_type;
             closure_outer_right_paren ]
+      let make_classname_type_specifier classname left classname_type right =
+        from_children SyntaxKind.ClassnameTypeSpecifier
+          [ classname; left; classname_type; right ]
+
+      let make_field_specifier name arrow field_type =
+        from_children SyntaxKind.FieldSpecifier [ name; arrow; field_type ]
+
+      let make_shape_type_specifier shape lparen fields rparen =
+        from_children SyntaxKind.ShapeTypeSpecifier
+          [ shape; lparen; fields; rparen ]
 
       let make_literal_expression literal =
         from_children SyntaxKind.LiteralExpression [ literal ]

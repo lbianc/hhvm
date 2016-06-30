@@ -155,8 +155,12 @@ void apcExtension::moduleLoad(const IniSetting::Map& ini, Hdf config) {
 
   Config::Bind(NoTTLPrefix, ini, config, "Server.APC.NoTTLPrefix");
 
+#ifdef NO_M_DATA
+  Config::Bind(UseUncounted, ini, config, "Server.APC.MemModelTreadmill", true);
+#else
   Config::Bind(UseUncounted, ini, config, "Server.APC.MemModelTreadmill",
                RuntimeOption::ServerExecutionMode());
+#endif
 
   IniSetting::Bind(this, IniSetting::PHP_INI_SYSTEM, "apc.enabled", &Enable);
   IniSetting::Bind(this, IniSetting::PHP_INI_SYSTEM, "apc.stat",
@@ -166,6 +170,12 @@ void apcExtension::moduleLoad(const IniSetting::Map& ini, Hdf config) {
 }
 
 void apcExtension::moduleInit() {
+#ifdef NO_M_DATA
+  if (!UseUncounted) {
+    Logger::Error("Server.APC.MemModelTreadmill=false ignored in lowptr build");
+    UseUncounted = true;
+  }
+#endif // NO_M_DATA
   if (UseFileStorage) {
     // We use 32 bits to represent offset into a chunk, so don't make it too
     // large.
@@ -250,7 +260,11 @@ int apcExtension::FileStorageAdviseOutPeriod = 1800;
 std::string apcExtension::FileStorageFlagKey = "_madvise_out";
 bool apcExtension::FileStorageKeepFileLinked = false;
 std::vector<std::string> apcExtension::NoTTLPrefix;
+#ifdef NO_M_DATA
+bool apcExtension::UseUncounted = true;
+#else
 bool apcExtension::UseUncounted = false;
+#endif
 bool apcExtension::Stat = true;
 // Different from zend default but matches what we've been returning for years
 bool apcExtension::EnableCLI = true;
@@ -478,6 +492,8 @@ const StaticString s_info("info");
 const StaticString s_in_memory("in_memory");
 const StaticString s_mem_size("mem_size");
 const StaticString s_type("type");
+const StaticString s_c_time("creation_time");
+const StaticString s_mtime("mtime");
 
 // This is a guess to the size of the info array. It is significantly
 // bigger than what we need but hard to control all the info that we
@@ -485,7 +501,7 @@ const StaticString s_type("type");
 // Try to keep it such that we do not have to resize the array
 const uint32_t kCacheInfoSize = 40;
 // Number of elements in the entry array
-const int32_t kEntryInfoSize = 5;
+const int32_t kEntryInfoSize = 7;
 
 Variant HHVM_FUNCTION(apc_cache_info,
                       const String& cache_type,
@@ -514,6 +530,8 @@ Variant HHVM_FUNCTION(apc_cache_info,
       ent.add(s_ttl, entry.ttl);
       ent.add(s_mem_size, entry.size);
       ent.add(s_type, static_cast<int64_t>(entry.type));
+      ent.add(s_c_time, entry.c_time);
+      ent.add(s_mtime, entry.mtime);
       ents.append(ent.toArray());
     }
     info.add(s_cache_list, ents.toArray(), false);

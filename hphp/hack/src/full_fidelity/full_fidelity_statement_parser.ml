@@ -14,7 +14,7 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module TokenKind = Full_fidelity_token_kind
 module SourceText = Full_fidelity_source_text
 module SyntaxError = Full_fidelity_syntax_error
-module Lexer = Full_fidelity_lexer
+module SimpleParser = Full_fidelity_simple_parser.WithLexer(Full_fidelity_lexer)
 
 open TokenKind
 open Syntax
@@ -24,68 +24,8 @@ module WithExpressionAndDeclParser
   (DeclParser : Full_fidelity_declaration_parser_type.DeclarationParserType) :
   Full_fidelity_statement_parser_type.StatementParserType = struct
 
-  type t = {
-    lexer : Lexer.t;
-    errors : SyntaxError.t list
-  }
-
-  let make lexer errors =
-    { lexer; errors }
-
-  let errors parser =
-    parser.errors
-
-  let lexer parser =
-    parser.lexer
-
-  let with_error parser message =
-    (* TODO: Should be able to express errors on whole syntax node. *)
-    (* TODO: Is this even right? Won't this put the error on the trivia? *)
-    let start_offset = Lexer.start_offset parser.lexer in
-    let end_offset = Lexer.end_offset parser.lexer in
-    let error = SyntaxError.make start_offset end_offset message in
-    { parser with errors = error :: parser.errors }
-
-  let next_token parser =
-    let (lexer, token) = Lexer.next_token parser.lexer in
-    let parser = { parser with lexer } in
-    (parser, token)
-
-  (* let skip_token parser =
-    let (lexer, _) = Lexer.next_token parser.lexer in
-    let parser = { parser with lexer } in
-    parser *)
-
-  (* let next_token_as_name parser =
-    let (lexer, token) = Lexer.next_token_as_name parser.lexer in
-    let parser = { parser with lexer } in
-    (parser, token) *)
-
-  let peek_token parser =
-    let (_, token) = Lexer.next_token parser.lexer in
-    token
-
-  let optional_token parser kind =
-    let (parser1, token) = next_token parser in
-    if (Token.kind token) = kind then
-      (parser1, make_token token)
-    else
-      (parser, make_missing())
-
-  let expect_token parser kind error =
-    let (parser1, token) = next_token parser in
-    if (Token.kind token) = kind then
-      (parser1, make_token token)
-    else
-      (* ERROR RECOVERY: Create a missing token for the expected token,
-         and continue on from the current token. Don't skip it. *)
-      (with_error parser error, (make_missing()))
-
-  let assert_token parser kind =
-    let (parser, token) = next_token parser in
-    assert ((Token.kind token) = kind);
-    (parser, make_token token)
-
+  include SimpleParser
+  include Full_fidelity_parser_helpers.WithParser(SimpleParser)
 
   let rec parse_statement parser =
     let token = peek_token parser in
@@ -117,17 +57,23 @@ module WithExpressionAndDeclParser
     (parser, left_paren, expr_syntax, right_paren)
 
   (* List of expressions and commas. No trailing comma. *)
-  and parse_for_expr_group parser =
+  and parse_for_expr_group parser is_last =
     let rec aux parser acc =
       let (parser, expr) = parse_expression parser in
       let acc = expr :: acc in
       let (parser1, token) = next_token parser in
       match (Token.kind token) with
-      | Comma -> aux parser1 ((make_token token) :: acc )
-      | RightParen -> (parser, acc)
-      | _ ->
+      | Comma -> aux parser1 ((make_token token) :: acc)
+      | RightParen when is_last -> (parser, acc)
+      | Semicolon when not is_last -> (parser, acc)
+      (* TODO a similar error is reported by caller, should we duplicate? *)
+      | _ when is_last ->
         let parser = with_error parser SyntaxError.error1009 in
-        (parser, acc) in
+        (parser, acc)
+      | _ ->
+        let parser = with_error parser SyntaxError.error1024 in
+        (parser, acc)
+    in
     let (parser, expressions_and_commas) = aux parser [] in
     (parser, make_list (List.rev expressions_and_commas))
 
@@ -135,7 +81,7 @@ module WithExpressionAndDeclParser
     let token = peek_token parser in
     let parser, for_expr_group = match Token.kind token with
       | Semicolon -> parser, make_missing ()
-      | _ -> parse_for_expr_group parser
+      | _ -> parse_for_expr_group parser false
     in
     let parser, semicolon =
       expect_token parser Semicolon SyntaxError.error1010 in
@@ -145,7 +91,7 @@ module WithExpressionAndDeclParser
     let token = peek_token parser in
     let parser, for_expr_group = match Token.kind token with
       | RightParen -> parser, make_missing ()
-      | _ -> parse_for_expr_group parser
+      | _ -> parse_for_expr_group parser true
     in
     (parser, for_expr_group)
 
@@ -177,22 +123,8 @@ module WithExpressionAndDeclParser
     let parser, foreach_collection_name = parse_expression parser in
     let parser, await_token = optional_token parser Await in
     let parser, as_token = expect_token parser As SyntaxError.error1023 in
-    let (parser1, token) = next_token parser in
-    let (parser, after_as) =
-      match Token.kind token with
-      | List ->
-        (* TODO need to handle list intrinsic. For now just create error *)
-        let rec aux parser acc =
-          let (parser1, token) = next_token parser in
-          match Token.kind token with
-          | RightParen -> (parser, make_list (List.rev acc))
-          | _ ->
-            let error = make_error [make_token token] in
-            aux parser1 (error :: acc)
-        in
-        aux parser []
-      | _ -> parse_expression parser
-    in
+    (* let (parser1, token) = next_token parser in *)
+    let (parser, after_as) = parse_expression parser in
     (* let parser, expr = parse_expression parser in *)
     let (parser, foreach_key, foreach_arrow, foreach_value) =
     match Token.kind (peek_token parser) with

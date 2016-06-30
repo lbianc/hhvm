@@ -14,8 +14,8 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module TokenKind = Full_fidelity_token_kind
 module SourceText = Full_fidelity_source_text
 module SyntaxError = Full_fidelity_syntax_error
-module Lexer = Full_fidelity_lexer
 module Operator = Full_fidelity_operator
+module PrecedenceParser = Full_fidelity_precedence_parser
 
 open TokenKind
 open Syntax
@@ -25,56 +25,8 @@ module WithStatementAndDeclParser
   (DeclParser : Full_fidelity_declaration_parser_type.DeclarationParserType) :
   Full_fidelity_expression_parser_type.ExpressionParserType = struct
 
-  type t = {
-    lexer : Lexer.t;
-    precedence : int;
-    errors : SyntaxError.t list
-  }
-
-  let make lexer errors =
-    { lexer; errors; precedence = 0 }
-
-  let errors parser =
-    parser.errors
-
-  let lexer parser =
-    parser.lexer
-
-  let with_error parser message =
-    (* TODO: Should be able to express errors on whole syntax node. *)
-    (* TODO: Is this even right? Won't this put the error on the trivia? *)
-    let start_offset = Lexer.start_offset parser.lexer in
-    let end_offset = Lexer.end_offset parser.lexer in
-    let error = SyntaxError.make start_offset end_offset message in
-    { parser with errors = error :: parser.errors }
-
-  let with_precedence parser precedence =
-    { parser with precedence }
-
-  let next_token parser =
-    let (lexer, token) = Lexer.next_token parser.lexer in
-    let parser = { parser with lexer } in
-    (parser, token)
-
-  let peek_token parser =
-    let (_, token) = Lexer.next_token parser.lexer in
-    token
-
-  let expect_token parser kind error =
-    let (parser1, token) = next_token parser in
-    if (Token.kind token) = kind then
-      (parser1, make_token token)
-    else
-      (* ERROR RECOVERY: Create a missing token for the expected token,
-         and continue on from the current token. Don't skip it. *)
-      (with_error parser error, (make_missing()))
-
-  let with_reset_precedence parser parse_function =
-    let old_precedence = parser.precedence in
-    let parser = with_precedence parser 0 in
-    let (parser, result) = parse_function parser in
-    let parser = with_precedence parser old_precedence in
-    (parser, result)
+  include PrecedenceParser
+  include Full_fidelity_parser_helpers.WithParser(PrecedenceParser)
 
   let rec parse_expression parser =
     let (parser, term) = parse_term parser in
@@ -82,7 +34,7 @@ module WithStatementAndDeclParser
 
   (* try to parse an expression. If parser cannot make progress, return None *)
   and parse_expression_optional parser =
-    let module Lexer = Full_fidelity_lexer in
+    let module Lexer = PrecedenceParser.Lexer in
     let offset = Lexer.start_offset (lexer parser) in
     let (parser, expr) = parse_expression parser in
     let offset1 = Lexer.start_offset (lexer parser) in
@@ -137,8 +89,8 @@ module WithStatementAndDeclParser
       (parser1, make_token token)
 
     | List  -> parse_list_expression parser
+    | New -> parse_object_creation_expression parser
     | Shape (* TODO: Parse shape *)
-    | New  (* TODO: Parse object creation *)
     | Async (* TODO: Parse lambda *)
     | Function  (* TODO: Parse local function *)
 
@@ -216,15 +168,96 @@ module WithStatementAndDeclParser
       (* TODO parse lambda *)
       (parser1, make_token token)
     | PlusPlus
-    | MinusMinus ->
-      parse_postfix_unary parser term
-
-    | LeftParen (* TODO: Parse call *)
+    | MinusMinus -> parse_postfix_unary parser term
+    | LeftParen -> parse_function_call parser term
     | LeftBracket
     | LeftBrace -> (* TODO indexers *) (* TODO: Produce an error for brace *)
       (parser1, make_token token)
     | Question -> parse_conditional_expression parser1 term (make_token token)
     | _ -> (parser, term)
+
+  and parse_designator parser =
+    (* SPEC
+      class-type-designator:
+        static
+        qualified-name
+        variable-name
+    *)
+
+    let (parser1, token) = next_token parser in
+    match Token.kind token with
+    | Name
+    | QualifiedName
+    | Variable
+    | Static -> parser1, (make_token token)
+    | LeftParen ->
+      (* ERROR RECOVERY: We have "new (", so the type is almost certainly
+         missing. Mark the type as missing, don't eat the token, and we'll
+         try to parse the parameter list. *)
+      (with_error parser SyntaxError.error1027, (make_missing()))
+    | _ ->
+      (* ERROR RECOVERY: We have "new " followed by something not recognizable
+         as a type name. Take the token as the name and hope that what follows
+         is the parameter list. *)
+      (with_error parser1 SyntaxError.error1027, (make_token token))
+
+  and parse_expression_list parser =
+    (* SPEC
+      argument-expression-list:
+        expression
+        argument-expression-list  ,  expression
+    *)
+
+    let rec aux parser exprs =
+      let (parser, expr) = with_reset_precedence parser parse_expression in
+      let exprs = expr :: exprs in
+      let (parser1, token) = next_token parser in
+      match (Token.kind token) with
+      | Comma ->
+        aux parser1 ((make_token token) :: exprs )
+      | RightParen ->
+        (parser, exprs)
+      | EndOfFile
+      | _ ->
+        (* ERROR RECOVERY TODO: How to recover? *)
+        let parser = with_error parser SyntaxError.error1009 in
+        (parser, exprs) in
+    let (parser, exprs) = aux parser [] in
+    (parser, make_list (List.rev exprs))
+
+  and parse_expression_list_opt parser =
+    let token = peek_token parser in
+    if (Token.kind token) = RightParen then (parser, make_missing())
+    else parse_expression_list parser
+
+  and parse_object_creation_expression parser =
+    (* SPEC
+      object-creation-expression:
+        new  class-type-designator  (  argument-expression-listopt  )
+    *)
+    let (parser, new_token) = next_token parser in
+    let (parser, designator) = parse_designator parser in
+    let (parser, left_paren) =
+     expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, args) = parse_expression_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let result = make_object_creation_expression (make_token new_token)
+      designator left_paren args right_paren in
+    (parser, result)
+
+  and parse_function_call parser receiver =
+    (* SPEC
+      function-call-expression:
+        postfix-expression  (  argument-expression-listopt  )
+    *)
+    let (parser, left_paren) = next_token parser in
+    let (parser, args) = parse_expression_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let result = make_function_call_expression receiver (make_token left_paren)
+      args right_paren in
+    parse_remaining_expression parser result
 
   and parse_parenthesized_or_lambda_expression parser =
     (*TODO: Does not yet deal with lambdas *)
