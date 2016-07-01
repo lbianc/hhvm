@@ -108,7 +108,7 @@ struct Vgen {
     if(HPHP::jit::deltaFits(imm64, HPHP::sz::word))
       a.li64(rt, imm64);
     else
-      a.ld(rt, rtoc()[8*vmTOC::pushElem(imm64)]);
+      a.ld(rt, rtoc()[8*VMTOC::getInstance().pushElem(imm64)]);
     return;
   }
 
@@ -726,7 +726,7 @@ void Vgen::emit(const inittc&) {
   a.li(ppc64::rone(), 1);
 
   // Save TOC pointer in r2
-  a.li64(ppc64_asm::reg::r2, vmTOC::getPtrVector());
+  a.li64(ppc64_asm::reg::r2, VMTOC::getInstance().getPtrVector());
 }
 
 void Vgen::emit(const leavetc&) {

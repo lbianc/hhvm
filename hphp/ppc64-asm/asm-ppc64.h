@@ -213,25 +213,43 @@ private:
   std::vector<JumpInfo> m_toPatch;
 };
 
-struct vmTOC {
-  vmTOC() {}
-  ~vmTOC(){}
+struct VMTOC {
+
+private:
+  /* vmTOC is a singleton*/
+  VMTOC()
+    : m_last_elem(0)
+    , m_funcaddrs(kTOCSize)
+  {}
+
+  ~VMTOC(){}
+
+public:
+  VMTOC(VMTOC const&) = delete;
+
+  VMTOC operator=(VMTOC const&) = delete;
 
   /* push an element into the stack and return its index */
-  static uint64_t pushElem(int64_t elem) {
+  uint64_t pushElem(int64_t elem) {
+    m_funcaddrs[++m_last_elem] = elem;
+    return m_last_elem;
+  }
 
-    funcaddrs[++last_elem] = elem;
-    return last_elem;
+  /* get the singleton instance */
+  static VMTOC& getInstance() {
+    static VMTOC instance;
+    return instance;
   }
 
   /* return the address of the first element */
-  static intptr_t getPtrVector() {
-    return reinterpret_cast<intptr_t>(&funcaddrs[0]);
+  intptr_t getPtrVector() {
+    return reinterpret_cast<intptr_t>(&m_funcaddrs[0]);
   };
 
+  static constexpr int kTOCSize = 8192;
 private:
-  static uint64_t last_elem;
-  static std::vector<int64_t> funcaddrs;
+  uint64_t m_last_elem;
+  std::vector<int64_t> m_funcaddrs;
 };
 
 struct Assembler {
@@ -2422,7 +2440,6 @@ private:
   }
 
   HPHP::CodeBlock& codeBlock;
-  vmTOC TOCtable;
 
   RegNumber rn(Reg64 r) {
     return RegNumber(int(r));
