@@ -893,6 +893,13 @@ struct divint { Vreg s0, s1, d; };
  * can do whatever they please with the upper bits.
  */
 
+enum Signs {
+  signedOnly,
+  unsignedOnly,
+  both,
+  neither
+};
+ 
 /*
  * Nop and trap.
  */
@@ -903,11 +910,11 @@ struct ud2 {};
  * Arithmetic instructions.
  */
 // add: s0 + {s1|m} => {d|m}, sf
-struct addl   { Vreg32 s0, s1, d; VregSF sf; bool needUnsigned; };
+struct addl   { Vreg32 s0, s1, d; VregSF sf; Signs signFlags; };
 struct addli  { Immed s0; Vreg32 s1, d; VregSF sf; };
 struct addlm  { Vreg32 s0; Vptr m; VregSF sf; };
 struct addlim { Immed s0; Vptr m; VregSF sf; };
-struct addq  { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
+struct addq  { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
 struct addqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct addqim { Immed s0; Vptr m; VregSF sf; };
 struct addsd  { VregDbl s0, s1, d; };
@@ -917,58 +924,58 @@ struct andbi { Immed s0; Vreg8 s1, d; VregSF sf; };
 struct andbim { Immed s; Vptr m; VregSF sf; };
 struct andl  { Vreg32 s0, s1, d; VregSF sf; };
 struct andli { Immed s0; Vreg32 s1, d; VregSF sf; };
-struct andq  { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct andqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
+struct andq  { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct andqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
 // dec: {s|m} - 1 => {d|m}, sf
-struct decl { Vreg32 s, d; VregSF sf; bool needUnsigned; };
+struct decl { Vreg32 s, d; VregSF sf; Signs signFlags; };
 struct declm { Vptr m; VregSF sf; };
-struct decq { Vreg64 s, d; VregSF sf; bool needUnsigned; };
+struct decq { Vreg64 s, d; VregSF sf; Signs signFlags; };
 struct decqm { Vptr m; VregSF sf; };
 struct decqmlock { Vptr m; VregSF sf; };
 // inc: {s|m} + 1 => {d|m}, sf
-struct incw { Vreg16 s, d; VregSF sf; bool needUnsigned; };
+struct incw { Vreg16 s, d; VregSF sf; Signs signFlags; };
 struct incwm { Vptr m; VregSF sf; };
-struct incl { Vreg32 s, d; VregSF sf; bool needUnsigned; };
+struct incl { Vreg32 s, d; VregSF sf; Signs signFlags; };
 struct inclm { Vptr m; VregSF sf; };
-struct incq { Vreg64 s, d; VregSF sf; bool needUnsigned; };
+struct incq { Vreg64 s, d; VregSF sf; Signs signFlags; };
 struct incqm { Vptr m; VregSF sf; };
 struct incqmlock { Vptr m; VregSF sf; };
 // mul: s0 * s1 => d, sf
-struct imul { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
+struct imul { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
 // neg: 0 - s => d, sf
-struct neg { Vreg64 s, d; VregSF sf;  bool needUnsigned; };
+struct neg { Vreg64 s, d; VregSF sf;  Signs signFlags; };
 // not: ~s => d
 struct notb { Vreg8 s, d; };
 struct not { Vreg64 s, d; };
 // or: s0 | {s1|m} => {d|m}, sf
 struct orbim { Immed s0; Vptr m; VregSF sf; };
 struct orwim { Immed s0; Vptr m; VregSF sf; };
-struct orq { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct orqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
+struct orq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct orqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
 struct orqim { Immed s0; Vptr m; VregSF sf; };
 // shift: s1 << s0 => d, sf
-struct sar { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct shl { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct sarqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
-struct shlli { Immed s0; Vreg32 s1, d; VregSF sf; bool needUnsigned; };
-struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
-struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; bool needUnsigned; };
-struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
+struct sar { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct shl { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct sarqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct shlli { Immed s0; Vreg32 s1, d; VregSF sf; Signs signFlags; };
+struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; Signs signFlags; };
+struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
 struct psllq { Immed s0; VregDbl s1, d; };
 struct psrlq { Immed s0; VregDbl s1, d; };
 // sub: s1 - s0 => d, sf
 struct subbi { Immed s0; Vreg8 s1, d; VregSF sf; };
 struct subl { Vreg32 s0, s1, d; VregSF sf; };
 struct subli { Immed s0; Vreg32 s1, d; VregSF sf; };
-struct subq { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
+struct subq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
 struct subqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct subsd { VregDbl s0, s1, d; };
 // xor: s0 ^ s1 => d, sf
-struct xorb { Vreg8 s0, s1, d; VregSF sf; bool needUnsigned; };
+struct xorb { Vreg8 s0, s1, d; VregSF sf; Signs signFlags; };
 struct xorbi { Immed s0; Vreg8 s1, d; VregSF sf; };
-struct xorl { Vreg32 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct xorq { Vreg64 s0, s1, d; VregSF sf; bool needUnsigned; };
-struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; bool needUnsigned; };
+struct xorl { Vreg32 s0, s1, d; VregSF sf; Signs signFlags; };
+struct xorq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
 
 /*
  * Compares and tests.
@@ -980,12 +987,12 @@ struct cmpbim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpbm { Vreg8 s0; Vptr s1; VregSF sf; };
 struct cmpwim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpwm { Vreg16 s0; Vptr s1; VregSF sf; };
-struct cmpl { Vreg32 s0; Vreg32 s1; VregSF sf; bool needUnsigned; };
-struct cmpli { Immed s0; Vreg32 s1; VregSF sf; bool needUnsigned; };
+struct cmpl { Vreg32 s0; Vreg32 s1; VregSF sf; Signs signFlags; };
+struct cmpli { Immed s0; Vreg32 s1; VregSF sf; Signs signFlags; };
 struct cmplm { Vreg32 s0; Vptr s1; VregSF sf; };
 struct cmplim { Immed s0; Vptr s1; VregSF sf; };
-struct cmpq { Vreg64 s0; Vreg64 s1; VregSF sf; bool needUnsigned; };
-struct cmpqi { Immed s0; Vreg64 s1; VregSF sf; bool needUnsigned; };
+struct cmpq { Vreg64 s0; Vreg64 s1; VregSF sf; Signs signFlags; };
+struct cmpqi { Immed s0; Vreg64 s1; VregSF sf; Signs signFlags; };
 struct cmpqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct cmpqim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpsd { ComparisonPred pred; VregDbl s0, s1, d; };
@@ -998,7 +1005,7 @@ struct testwim { Immed s0; Vptr s1; VregSF sf; };
 struct testl { Vreg32 s0, s1; VregSF sf; };
 struct testli { Immed s0; Vreg32 s1; VregSF sf; };
 struct testlim { Immed s0; Vptr s1; VregSF sf; };
-struct testq { Vreg64 s0, s1; VregSF sf; bool needUnsigned; };
+struct testq { Vreg64 s0, s1; VregSF sf; Signs signFlags; };
 struct testqi { Immed s0; Vreg64 s1; VregSF sf; };
 struct testqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct testqim { Immed s0; Vptr s1; VregSF sf; };
