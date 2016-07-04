@@ -216,7 +216,7 @@ private:
 struct VMTOC {
 
 private:
-  /* vmTOC is a singleton*/
+  /* VMTOC is a singleton*/
   VMTOC()
     : m_last_elem(0)
     , m_funcaddrs(kTOCSize)
@@ -231,7 +231,11 @@ public:
 
   /* push an element into the stack and return its index */
   uint64_t pushElem(int64_t elem) {
+    if (m_map.find(elem) != m_map.end()) {
+      return m_map[elem];
+    }
     m_funcaddrs[++m_last_elem] = elem;
+    m_map.insert({elem, m_last_elem});
     return m_last_elem;
   }
 
@@ -250,6 +254,7 @@ public:
 private:
   uint64_t m_last_elem;
   std::vector<int64_t> m_funcaddrs;
+  std::map<int64_t, uint64_t> m_map;
 };
 
 struct Assembler {
