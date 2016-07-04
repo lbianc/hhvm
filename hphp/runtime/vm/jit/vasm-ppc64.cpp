@@ -154,7 +154,8 @@ struct Vgen {
   }
   void emit(const addl& i) {
     a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
@@ -168,40 +169,53 @@ struct Vgen {
   // instructions
   void emit(const addq& i) {
     a.addo(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned) {
+      Logger::Verbose("addq emitting cr0-1");
+      copyCR0toCR1(a, rAsm);
+    } else {
+      Logger::Verbose("addq not emitting cr0-1");
+    }
   }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) {
     a.and(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const andqi& i) {
     a.andi(i.d, i.s1, i.s0);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   } // andi changes CR0
   void emit(const cmpl& i) {
     a.cmpw(Reg64(i.s1), Reg64(i.s0));
-    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+    if (i.needUnsigned)
+      a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
   void emit(const cmpli& i) {
     a.cmpwi(Reg64(i.s1), i.s0);
-    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+    if (i.needUnsigned)
+      a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpq& i) {
     a.cmpd(i.s1, i.s0);
-    a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
+    if (i.needUnsigned)
+      a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpqi& i) {
     a.cmpdi(i.s1, i.s0);
-    a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
+    if (i.needUnsigned)
+      a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const decl& i) {
     a.subfo(Reg64(i.d), rone(), Reg64(i.s), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const decq& i) {
     a.subfo(i.d, rone(), i.s, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
@@ -224,19 +238,23 @@ struct Vgen {
   }
   void emit(const imul& i) {
     a.mulldo(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incl& i) {
     a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incq& i) {
     a.addo(i.d, i.s, rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incw& i) {
     a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
@@ -272,43 +290,52 @@ struct Vgen {
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
   void emit(const neg& i) {
     a.neg(i.d, i.s, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const nop& i) { a.nop(); } // no-op form
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) {
     a.or(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const ret& i) { a.blr(); }
   void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
   void emit(const sar& i) {
     a.srad(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a,rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a,rAsm);
   }
   void emit(const sarqi& i) {
     a.sradi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shl& i) {
     a.sld(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shlli& i) {
     a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shlqi& i) {
     a.sldi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shrli& i) {
     a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shrqi& i) {
     a.srdi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
   void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
@@ -334,21 +361,25 @@ struct Vgen {
   // Subtractions: d = s1 - s0
   void emit(const subq& i) {
     a.subfo(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const ud2& i) { a.trap(); }
   void emit(const xorb& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorl& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorq& i) {
     a.xor(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
@@ -377,7 +408,8 @@ struct Vgen {
   void emit(const orqi& i) {
     a.li64(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -418,16 +450,19 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
-      copyCR0toCR1(a, rAsm);
+      if (i.needUnsigned)
+        copyCR0toCR1(a, rAsm);
     } else {
       a.cmpdi(i.s0, Immed(0));
-      a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
+      if (i.needUnsigned)
+        a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
     }
   }
   void emit(const xorqi& i) {
     a.li64(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
-    copyCR0toCR1(a, rAsm);
+    if (i.needUnsigned)
+      copyCR0toCR1(a, rAsm);
   }
 
   void emit(const conjure& i) { always_assert(false); }
@@ -1644,6 +1679,154 @@ void fixVptrsForPPC64(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
+#include "hphp/util/logger.h"
+
+bool needsUnsigned(const ConditionCode cc) {
+  bool ret = false;
+  switch (cc) {
+  case HPHP::jit::CC_O:
+    Logger::Verbose("BranchConditions::Overflow");
+    break;
+  case HPHP::jit::CC_NO:
+    Logger::Verbose("BranchConditions::NoOverflow");
+    break;
+  case HPHP::jit::CC_B:
+    Logger::Verbose("BranchConditions::LessThan_Unsigned");
+    ret = true;
+    break;
+  case HPHP::jit::CC_AE:
+    Logger::Verbose("BranchConditions::GreaterThanEqual_Unsigned");
+    ret = true;
+    break;
+  case HPHP::jit::CC_E:
+    Logger::Verbose("BranchConditions::Equal");
+    break;
+  case HPHP::jit::CC_NE:
+    Logger::Verbose("BranchConditions::NotEqual");
+    break;
+  case HPHP::jit::CC_BE:
+    Logger::Verbose("BranchConditions::LessThanEqual_Unsigned");
+    ret = true;
+    break;
+  case HPHP::jit::CC_A:
+    Logger::Verbose("BranchConditions::GreaterThan_Unsigned");
+    ret = true;
+    break;
+  case HPHP::jit::CC_S:
+    Logger::Verbose("BranchConditions::LessThan");
+    break;
+  case HPHP::jit::CC_NS:
+    Logger::Verbose("BranchConditions::GreaterThan");
+    break;
+    
+    /*
+     * Parity works only for unordered double comparison
+     * Todo: fixed point comparison parity
+     * http://stackoverflow.com/q/32319673/5013070
+     */
+  case HPHP::jit::CC_P:
+    Logger::Verbose("BranchConditions::Overflow");
+    break;
+  case HPHP::jit::CC_NP:
+    Logger::Verbose("BranchConditions::NoOverflow");
+    break;
+    
+  case HPHP::jit::CC_L:
+    Logger::Verbose("BranchConditions::LessThan");
+    break;
+  case HPHP::jit::CC_NL:
+    Logger::Verbose("BranchConditions::GreaterThanEqual");
+    break;
+  case HPHP::jit::CC_NG:
+    Logger::Verbose("BranchConditions::LessThanEqual");
+    break;
+  case HPHP::jit::CC_G:
+    Logger::Verbose("BranchConditions::GreaterThan");
+    break;
+    
+  default:
+    not_implemented();
+    break;
+  }
+  return ret;
+}
+
+#define extractCC(name)					    \
+    case Vinstr::name:					    \
+      blockNeedsUnsigned |= needsUnsigned(inst.name##_.cc); \
+      break						    \
+
+#define updateNeedUnsigned(name)		      \
+    case Vinstr::name:				      \
+      inst.name##_.needUnsigned = blockNeedsUnsigned; \
+      break
+    
+void learnConditions(Vunit& unit) {
+  auto blocks = sortBlocks(unit);
+
+  for (auto blockIt = blocks.begin(); blockIt != blocks.end(); blockIt++) {
+    auto b = *blockIt;
+    auto& block = unit.blocks[b];
+    bool blockNeedsUnsigned = false;
+    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+      auto& inst = *i;
+      switch (inst.op) {
+      extractCC(jcc);
+      extractCC(jcci);
+      extractCC(bindjcc);
+      extractCC(fallbackcc);
+      extractCC(phijcc);
+      extractCC(cloadq);
+      extractCC(cmovb);
+      extractCC(cmovw);
+      extractCC(cmovl);
+      extractCC(cmovq);
+      extractCC(setcc);
+      default:
+	break;
+      }
+    }
+    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+      auto& inst = *i;
+      switch (inst.op) {
+      updateNeedUnsigned(addl);
+      updateNeedUnsigned(addq);
+      updateNeedUnsigned(andq);
+      updateNeedUnsigned(andqi);
+      updateNeedUnsigned(decl);
+      updateNeedUnsigned(decq);
+      updateNeedUnsigned(incw);
+      updateNeedUnsigned(incl);
+      updateNeedUnsigned(incq);
+      updateNeedUnsigned(imul);
+      updateNeedUnsigned(neg);
+      updateNeedUnsigned(orq);
+      updateNeedUnsigned(orqi);
+      updateNeedUnsigned(sar);
+      updateNeedUnsigned(shl);
+      updateNeedUnsigned(sarqi);
+      updateNeedUnsigned(shlli);
+      updateNeedUnsigned(shlqi);
+      updateNeedUnsigned(shrli);
+      updateNeedUnsigned(shrqi);
+      updateNeedUnsigned(subq);
+      updateNeedUnsigned(xorb);
+      updateNeedUnsigned(xorl);
+      updateNeedUnsigned(xorq);
+      updateNeedUnsigned(xorqi);
+      updateNeedUnsigned(testq);
+      updateNeedUnsigned(cmpl);
+      updateNeedUnsigned(cmpli);
+      updateNeedUnsigned(cmpq);
+      updateNeedUnsigned(cmpqi);
+      default:
+        break;
+      }
+    }
+  }
+}
+
+    
 void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
   Timer timer(Timer::vasm_optimize);
 
@@ -1667,6 +1850,8 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
   if (unit.blocks.size() > 1) {
     optimizeJmps(unit);
   }
+
+  learnConditions(unit);
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, CGMeta& fixups,
