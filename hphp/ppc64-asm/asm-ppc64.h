@@ -234,9 +234,9 @@ public:
     if (m_map.find(elem) != m_map.end()) {
       return m_map[elem];
     }
-    m_funcaddrs[++m_last_elem] = elem;
+    m_funcaddrs[m_last_elem] = elem;
     m_map.insert({elem, m_last_elem});
-    return m_last_elem;
+    return m_last_elem++;
   }
 
   /* get the singleton instance */
