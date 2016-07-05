@@ -245,6 +245,10 @@ public:
     return instance;
   }
 
+  bool checkFull() {
+    return m_last_elem > 4095 ? true : false;
+  }
+
   /* return the address of the first element */
   intptr_t getPtrVector() {
     return reinterpret_cast<intptr_t>(&m_funcaddrs[0]);

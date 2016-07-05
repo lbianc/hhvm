@@ -105,7 +105,8 @@ struct Vgen {
 
   // Auxiliary for loading immediates in the best way
   void limmediate (Assembler a, const Reg64& rt, int64_t imm64) {
-    if(HPHP::jit::deltaFits(imm64, HPHP::sz::word))
+    if(HPHP::jit::deltaFits(imm64, HPHP::sz::word) ||
+        VMTOC::getInstance().checkFull())
       a.li64(rt, imm64);
     else
       a.ld(rt, rtoc()[8*VMTOC::getInstance().pushElem(imm64)]);
