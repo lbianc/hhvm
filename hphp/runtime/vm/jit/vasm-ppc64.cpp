@@ -883,7 +883,10 @@ void Vgen::emit(const stublogue& i) {
 
 void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
-  if (i.saveframe) a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
+  if (i.saveframe) {
+    a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
+    a.mr(ppc64_asm::reg::r1, rvmfp());
+  }
 
   // restore return address.
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
