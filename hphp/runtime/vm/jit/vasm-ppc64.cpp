@@ -154,7 +154,8 @@ struct Vgen {
   }
   void emit(const addl& i) {
     a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
@@ -168,40 +169,53 @@ struct Vgen {
   // instructions
   void emit(const addq& i) {
     a.addo(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
   void emit(const andq& i) {
     a.and(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const andqi& i) {
     a.andi(i.d, i.s1, i.s0);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   } // andi changes CR0
   void emit(const cmpl& i) {
-    a.cmpw(Reg64(i.s1), Reg64(i.s0));
-    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+    if (i.signFlags == signedOnly || i.signFlags == both)
+      a.cmpw(Reg64(i.s1), Reg64(i.s0));
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
   void emit(const cmpli& i) {
-    a.cmpwi(Reg64(i.s1), i.s0);
-    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+    if (i.signFlags == signedOnly || i.signFlags == both)
+      a.cmpwi(Reg64(i.s1), i.s0);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpq& i) {
-    a.cmpd(i.s1, i.s0);
-    a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
+    if (i.signFlags == signedOnly || i.signFlags == both)
+      a.cmpd(i.s1, i.s0);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpqi& i) {
-    a.cmpdi(i.s1, i.s0);
-    a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
+    if (i.signFlags == signedOnly || i.signFlags == both)
+      a.cmpdi(i.s1, i.s0);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const decl& i) {
     a.subfo(Reg64(i.d), rone(), Reg64(i.s), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const decq& i) {
     a.subfo(i.d, rone(), i.s, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
@@ -216,7 +230,7 @@ struct Vgen {
   void emit(const fallthru& i) {}
   void emit(const fcmpo& i) {
     a.fcmpo(i.sf, i.s0, i.s1);
-    copyCR0toCR1(a, rAsm);
+    copyCR0toCR1(a, rAsm); //todo: guarding this broke 3 tests
   }
   void emit(const fcmpu& i) {
     a.fcmpu(i.sf, i.s0, i.s1);
@@ -224,19 +238,23 @@ struct Vgen {
   }
   void emit(const imul& i) {
     a.mulldo(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incl& i) {
     a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incq& i) {
     a.addo(i.d, i.s, rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const incw& i) {
     a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
@@ -272,43 +290,52 @@ struct Vgen {
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
   void emit(const neg& i) {
     a.neg(i.d, i.s, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const nop& i) { a.nop(); } // no-op form
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
   void emit(const orq& i) {
     a.or(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const ret& i) { a.blr(); }
   void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
   void emit(const sar& i) {
     a.srad(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a,rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a,rAsm);
   }
   void emit(const sarqi& i) {
     a.sradi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shl& i) {
     a.sld(i.d, i.s1, i.s0, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shlli& i) {
     a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shlqi& i) {
     a.sldi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shrli& i) {
     a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const shrqi& i) {
     a.srdi(i.d, i.s1, i.s0.b(), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
   void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
@@ -334,21 +361,25 @@ struct Vgen {
   // Subtractions: d = s1 - s0
   void emit(const subq& i) {
     a.subfo(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const ud2& i) { a.trap(); }
   void emit(const xorb& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorl& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorq& i) {
     a.xor(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
@@ -377,7 +408,8 @@ struct Vgen {
   void emit(const orqi& i) {
     a.li64(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -418,16 +450,20 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
-      copyCR0toCR1(a, rAsm);
+      if (i.signFlags == unsignedOnly || i.signFlags == both)
+        copyCR0toCR1(a, rAsm);
     } else {
-      a.cmpdi(i.s0, Immed(0));
-      a.cmpldi(i.s0, Immed(0));
+      if (i.signFlags == signedOnly || i.signFlags == both)
+	a.cmpdi(i.s0, Immed(0));
+      if (i.signFlags == unsignedOnly || i.signFlags == both)
+        a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
     }
   }
   void emit(const xorqi& i) {
     a.li64(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
-    copyCR0toCR1(a, rAsm);
+    if (i.signFlags == unsignedOnly || i.signFlags == both)
+      copyCR0toCR1(a, rAsm);
   }
 
   void emit(const conjure& i) { always_assert(false); }
@@ -1644,6 +1680,138 @@ void fixVptrsForPPC64(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
+#include "hphp/util/logger.h"
+
+Signs signNeeds(const ConditionCode cc) {
+  Signs ret = neither;
+  switch (cc) {
+  case HPHP::jit::CC_O:
+  case HPHP::jit::CC_NO:
+  case HPHP::jit::CC_E:
+  case HPHP::jit::CC_NE:
+  case HPHP::jit::CC_S:
+  case HPHP::jit::CC_NS:
+  case HPHP::jit::CC_P:
+  case HPHP::jit::CC_NP:
+  case HPHP::jit::CC_L:
+  case HPHP::jit::CC_NL:
+  case HPHP::jit::CC_NG:
+  case HPHP::jit::CC_G:
+    ret = signedOnly;
+    break;
+
+  case HPHP::jit::CC_B:
+  case HPHP::jit::CC_AE:
+  case HPHP::jit::CC_BE:
+  case HPHP::jit::CC_A:
+    ret = unsignedOnly;
+    break;
+
+  default:
+    not_implemented();
+    break;
+  }
+  return ret;
+}
+
+static inline Signs addSigns(Signs a, Signs b) {
+  if (a==both || b==both) {
+    return both;
+  } else if (a == neither) {
+    return b;
+  } else if (b == neither) {
+    return a;
+  } else if (a == signedOnly) { // by now, a, b are either signed or unsigned
+    if (b != signedOnly) {
+      return both;
+    }
+    return signedOnly;
+  } else if (a == unsignedOnly) {
+    if (b != unsignedOnly)
+      return both;
+    return unsignedOnly;
+  }
+  always_assert(false);
+  return both;
+}
+    
+#define extractCC(name)					  \
+    case Vinstr::name:					  \
+      blockSigns = addSigns(blockSigns,			  \
+			    signNeeds(inst.name##_.cc));  \
+      break						  \
+
+#define updateSignFlags(name)		   \
+    case Vinstr::name:			   \
+      inst.name##_.signFlags = blockSigns; \
+      break
+    
+void learnConditions(Vunit& unit) {
+  auto blocks = sortBlocks(unit);
+
+  for (auto blockIt = blocks.begin(); blockIt != blocks.end(); blockIt++) {
+    auto b = *blockIt;
+    auto& block = unit.blocks[b];
+    Signs blockSigns = neither;
+    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+      auto& inst = *i;
+      switch (inst.op) {
+      extractCC(jcc);
+      extractCC(jcci);
+      extractCC(bindjcc);
+      extractCC(fallbackcc);
+      extractCC(phijcc);
+      extractCC(cloadq);
+      extractCC(cmovb);
+      extractCC(cmovw);
+      extractCC(cmovl);
+      extractCC(cmovq);
+      extractCC(setcc);
+      default:
+	break;
+      }
+    }
+    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+      auto& inst = *i;
+      switch (inst.op) {
+      updateSignFlags(addl);
+      updateSignFlags(addq);
+      updateSignFlags(andq);
+      updateSignFlags(andqi);
+      updateSignFlags(decl);
+      updateSignFlags(decq);
+      updateSignFlags(incw);
+      updateSignFlags(incl);
+      updateSignFlags(incq);
+      updateSignFlags(imul);
+      updateSignFlags(neg);
+      updateSignFlags(orq);
+      updateSignFlags(orqi);
+      updateSignFlags(sar);
+      updateSignFlags(shl);
+      updateSignFlags(sarqi);
+      updateSignFlags(shlli);
+      updateSignFlags(shlqi);
+      updateSignFlags(shrli);
+      updateSignFlags(shrqi);
+      updateSignFlags(subq);
+      updateSignFlags(xorb);
+      updateSignFlags(xorl);
+      updateSignFlags(xorq);
+      updateSignFlags(xorqi);
+      updateSignFlags(testq);
+      updateSignFlags(cmpl);
+      updateSignFlags(cmpli);
+      updateSignFlags(cmpq);
+      updateSignFlags(cmpqi);
+      default:
+        break;
+      }
+    }
+  }
+}
+
+    
 void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
   Timer timer(Timer::vasm_optimize);
 
@@ -1667,6 +1835,8 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
   if (unit.blocks.size() > 1) {
     optimizeJmps(unit);
   }
+
+  learnConditions(unit);
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, CGMeta& fixups,

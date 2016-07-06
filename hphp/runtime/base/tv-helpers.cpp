@@ -647,7 +647,7 @@ bool tvCanBeCoercedToNumber(TypedValue* tv) {
       // Because PHP
       auto str = tv->m_data.pstr;
       auto p = str->data();
-      auto l = tv->m_data.pstr->size();
+      unsigned long l = tv->m_data.pstr->size();
       while (l && isspace(*p)) { ++p; --l; }
       if (l && (*p == '+' || *p == '-')) { ++p; --l; }
       if (l && *p == '.') { ++p; --l; }
