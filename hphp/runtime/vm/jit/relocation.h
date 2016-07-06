@@ -141,11 +141,9 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
                             TCA* adjust = nullptr);
 
 //////////////////////////////////////////////////////////////////////
-
 /*
- * X64-specific portions of the code are separated out here.
+ * Wrappers
  */
-namespace x64 {
 void adjustForRelocation(RelocationInfo&);
 void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
 void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
@@ -158,23 +156,6 @@ size_t relocate(RelocationInfo& rel,
                 TCA start, TCA end,
                 CGMeta& fixups,
                 TCA* exitAddr);
-
-}
-
-namespace ppc64 {
-void adjustForRelocation(RelocationInfo&);
-void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
-void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
-void adjustMetaDataForRelocation(RelocationInfo& rel,
-                                 AsmInfo* asmInfo,
-                                 CGMeta& fixups);
-void findFixups(TCA start, TCA end, CGMeta& fixups);
-size_t relocate(RelocationInfo& rel,
-                CodeBlock& destBlock,
-                TCA start, TCA end,
-                CGMeta& fixups,
-                TCA* exitAddr);
-}
 
 //////////////////////////////////////////////////////////////////////
 

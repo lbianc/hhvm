@@ -29,8 +29,11 @@
 #include "hphp/tools/hfsort/jitsort.h"
 
 #include "hphp/util/arch.h"
+#include "hphp/util/asm-x64.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/trace.h"
+
+#include "hphp/ppc64-asm/asm-ppc64.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -68,8 +71,8 @@ bool okToRelocate = true;
 template<class T> void swap_trick(T& container) { T().swap(container); }
 
 /*
- * CodeSmasher is used to overwrite all the relocated code with ud2
- * and int3 to ensure that we never execute it after the code has
+ * CodeSmasher is used to overwrite all the relocated code with undefined
+ * instructions to ensure that we never execute it after the code has
  * been relocated. Its run as a treadmill job, because old requests
  * might continue to execute the old code, even after we finish
  * the relocation step.
@@ -82,11 +85,18 @@ struct CodeSmasher {
     for (auto& e : entries) {
       CodeBlock cb;
       cb.init(e.first, e.second - e.first, "relocated");
-      X64Assembler a { cb };
-      while (a.canEmit(2)) {
-        a.ud2();
+      switch (arch()) {
+        case Arch::PPC64: {
+          ppc64_asm::Assembler a{cb};
+          a.emitExceptions(cb.available());
+        }
+        case Arch::X64: {
+          X64Assembler a{cb};
+          a.emitExceptions(cb.available());
+        }
+        case Arch::ARM:
+          not_implemented();
       }
-      if (a.canEmit(1)) a.int3();
     }
     okToRelocate = true;
   }
@@ -105,7 +115,7 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
   auto relocMap = param.relocMap;
 
   if (!rel.adjustedAddressAfter(tri.start)) {
-    x64::adjustForRelocation(rel, tri.start, tri.end);
+    adjustForRelocation(rel, tri.start, tri.end);
     auto coldStart = tri.coldStart;
     if (&mcg->code().blockFor(coldStart) == &mcg->code().frozen()) {
       /*
@@ -117,12 +127,12 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
        */
       auto it = deadStubs.lower_bound(tri.coldStart);
       while (it != deadStubs.end() && *it < tri.coldEnd) {
-        x64::adjustForRelocation(rel, coldStart, *it);
+        adjustForRelocation(rel, coldStart, *it);
         coldStart = *it + svcreq::stub_size();
         ++it;
       }
     }
-    x64::adjustForRelocation(rel, coldStart, tri.coldEnd);
+    adjustForRelocation(rel, coldStart, tri.coldEnd);
   }
   auto adjustAfter = [&rel](TCA& addr) {
     if (auto adj = rel.adjustedAddressAfter(addr)) addr = adj;
@@ -141,7 +151,7 @@ void postProcess(TransRelocInfo&& tri, void* paramPtr) {
       ib.adjust(adjusted);
     }
   }
-  x64::adjustMetaDataForRelocation(rel, nullptr, tri.fixups);
+  adjustMetaDataForRelocation(rel, nullptr, tri.fixups);
 
   auto data = perfRelocMapInfo(
     tri.start, tri.end,
@@ -227,7 +237,7 @@ void relocateStubs(TransLoc& loc, TCA frozenStart, TCA frozenEnd,
 
     CodeBlock dest;
     dest.init(cache.frozen().frontier(), stubSize, "New Stub");
-    x64::relocate(rel, dest, addr, addr + stubSize, fixups, nullptr);
+    relocate(rel, dest, addr, addr + stubSize, fixups, nullptr);
     cache.frozen().skip(stubSize);
     if (addr != frozenStart) {
       rel.recordRange(frozenStart, addr, frozenStart, addr);
@@ -238,9 +248,9 @@ void relocateStubs(TransLoc& loc, TCA frozenStart, TCA frozenEnd,
     rel.recordRange(frozenStart, frozenEnd, frozenStart, frozenEnd);
   }
 
-  x64::adjustForRelocation(rel);
-  x64::adjustMetaDataForRelocation(rel, nullptr, fixups);
-  x64::adjustCodeForRelocation(rel, fixups);
+  adjustForRelocation(rel);
+  adjustMetaDataForRelocation(rel, nullptr, fixups);
+  adjustCodeForRelocation(rel, fixups);
 }
 
 }
@@ -311,12 +321,10 @@ void RelocationInfo::rewind(TCA start, TCA end) {
 void liveRelocate(int time) {
   switch (arch()) {
   case Arch::X64:
+  case Arch::PPC64:
     break;
   case Arch::ARM:
     // Relocation is not supported on arm.
-    return;
-  case Arch::PPC64:
-    // Relocation is not implemented on ppc64.
     return;
   }
 
@@ -479,7 +487,7 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
     if (ignoreEntry(reloc.sk)) continue;
     auto start DEBUG_ONLY = dest.frontier();
     try {
-      x64::relocate(rel, dest,
+      relocate(rel, dest,
                     reloc.start, reloc.end, reloc.fixups, nullptr);
     } catch (const DataBlockFull& dbf) {
       break;
@@ -494,11 +502,11 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
   swap_trick(fixups.alignments);
   assert(fixups.empty());
 
-  x64::adjustForRelocation(rel);
+  adjustForRelocation(rel);
 
   for (size_t i = 0; i < num; i++) {
     if (!ignoreEntry(relocs[i].sk)) {
-      x64::adjustMetaDataForRelocation(rel, nullptr, relocs[i].fixups);
+      adjustMetaDataForRelocation(rel, nullptr, relocs[i].fixups);
     }
   }
 
@@ -530,12 +538,12 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
     if (!reloc.sk.valid()) continue;
     auto f = const_cast<Func*>(reloc.sk.func());
 
-    x64::adjustCodeForRelocation(rel, reloc.fixups);
+    adjustCodeForRelocation(rel, reloc.fixups);
     reloc.fixups.clear();
 
     // fixup code references in the corresponding cold block to point
     // to the new code
-    x64::adjustForRelocation(rel, reloc.coldStart, reloc.coldEnd);
+    adjustForRelocation(rel, reloc.coldStart, reloc.coldEnd);
 
     if (visitedFuncs.insert(f).second) {
       if (auto adjusted = rel.adjustedAddressAfter(f->getFuncBody())) {
@@ -577,7 +585,7 @@ void relocate(std::vector<TransRelocInfo>& relocs, CodeBlock& dest,
     always_assert(!rel.adjustedAddressAfter(stub));
     fprintf(newRelocMap, "%" PRIxPTR " 0 %s\n", uintptr_t(stub), "NewStub");
   }
-  x64::adjustCodeForRelocation(rel, fixups);
+  adjustCodeForRelocation(rel, fixups);
 
   unlink(mcg->debugInfo()->getRelocMapName().c_str());
   rename(newRelocMapName.c_str(),
@@ -626,7 +634,7 @@ void readRelocations(
       TransRelocInfo tri(trih.toTRI(mcg->code()));
       tri.start = reinterpret_cast<TCA>(addr);
       tri.end = reinterpret_cast<TCA>(end);
-      x64::findFixups(tri.start, tri.end, tri.fixups);
+      findFixups(tri.start, tri.end, tri.fixups);
 
       callback(std::move(tri), data);
     }
@@ -659,10 +667,10 @@ void relocateTranslation(
   RelocationInfo rel;
   size_t asm_count{0};
 
-  asm_count += x64::relocate(rel, main_in,
+  asm_count += relocate(rel, main_in,
                              main.base(), main.frontier(),
                              meta, nullptr);
-  asm_count += x64::relocate(rel, cold_in,
+  asm_count += relocate(rel, cold_in,
                              cold.base(), cold.frontier(),
                              meta, nullptr);
 
@@ -672,9 +680,9 @@ void relocateTranslation(
     rel.recordRange(frozen_start, frozen.frontier(),
                     frozen_start, frozen.frontier());
   }
-  x64::adjustForRelocation(rel);
-  x64::adjustMetaDataForRelocation(rel, ai, meta);
-  x64::adjustCodeForRelocation(rel, meta);
+  adjustForRelocation(rel);
+  adjustMetaDataForRelocation(rel, ai, meta);
+  adjustCodeForRelocation(rel, meta);
 
   if (ai) {
     static int64_t mainDeltaTotal = 0, coldDeltaTotal = 0;
@@ -740,7 +748,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
     mainSize += pad;
 
     dest.init(mainStartRel, mainSize, "New Main");
-    asm_count += x64::relocate(rel, dest, mainStart, loc.mainEnd(),
+    asm_count += relocate(rel, dest, mainStart, loc.mainEnd(),
                                fixups, nullptr);
     mainEndRel = dest.frontier();
 
@@ -754,7 +762,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
     frozenSize += pad;
 
     dest.init(frozenStartRel + sizeof(uint32_t), frozenSize, "New Frozen");
-    asm_count += x64::relocate(rel, dest, frozenStart, loc.frozenEnd(),
+    asm_count += relocate(rel, dest, frozenStart, loc.frozenEnd(),
                                fixups, nullptr);
     frozenEndRel = dest.frontier();
 
@@ -769,7 +777,7 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
       coldSize += pad;
 
       dest.init(coldStartRel + sizeof(uint32_t), coldSize, "New Cold");
-      asm_count += x64::relocate(rel, dest, coldStart, loc.coldEnd(),
+      asm_count += relocate(rel, dest, coldStart, loc.coldEnd(),
                                  fixups, nullptr);
       coldEndRel = dest.frontier();
 
@@ -791,18 +799,27 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
   }
 
   if (asm_count) {
-    x64::adjustForRelocation(rel);
-    x64::adjustMetaDataForRelocation(rel, nullptr, fixups);
-    x64::adjustCodeForRelocation(rel, fixups);
+    adjustForRelocation(rel);
+    adjustMetaDataForRelocation(rel, nullptr, fixups);
+    adjustCodeForRelocation(rel, fixups);
   }
 
   if (debug) {
     auto clearRange = [](TCA start, TCA end) {
       CodeBlock cb;
       cb.init(start, end - start, "Dead code");
-      X64Assembler a {cb};
-      while (cb.available() >= 2) a.ud2();
-      if (cb.available() > 0) a.int3();
+      switch (arch()) {
+        case Arch::PPC64: {
+          ppc64_asm::Assembler a{cb};
+          a.emitExceptions(cb.available());
+        }
+        case Arch::X64: {
+          X64Assembler a{cb};
+          a.emitExceptions(cb.available());
+        }
+        case Arch::ARM:
+          not_implemented();
+      }
       always_assert(!cb.available());
     };
 
@@ -840,6 +857,89 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
   relocateStubs(loc, frozenStartRel + sizeof(uint32_t), frozenEndRel, relStubs,
                 cache, fixups);
   return asm_count != 0;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+/*
+ * Arch-specific relocation functions
+ */
+namespace x64 {
+void adjustForRelocation(RelocationInfo&);
+void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
+void adjustMetaDataForRelocation(RelocationInfo&, AsmInfo*, CGMeta&);
+void findFixups(TCA start, TCA end, CGMeta& fixups);
+size_t relocate(RelocationInfo&, CodeBlock&, TCA, TCA, CGMeta&, TCA*);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+/*
+ * Wrappers. Not using ARCH_SWITCH_CALL as not all platforms implemented
+ * relocation.
+ */
+
+void adjustForRelocation(RelocationInfo& rel) {
+  switch (arch()) {
+  case Arch::X64:
+    x64::adjustForRelocation(rel);
+  case Arch::PPC64:
+  case Arch::ARM:
+    break;
+  }
+}
+void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
+  switch (arch()) {
+  case Arch::X64:
+    x64::adjustForRelocation(rel, srcStart, srcEnd);
+  case Arch::PPC64:
+  case Arch::ARM:
+    break;
+  }
+}
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
+  switch (arch()) {
+  case Arch::X64:
+    x64::adjustCodeForRelocation(rel, fixups);
+  case Arch::PPC64:
+  case Arch::ARM:
+    break;
+  }
+}
+void adjustMetaDataForRelocation(RelocationInfo& rel,
+                                 AsmInfo* asmInfo,
+                                 CGMeta& fixups) {
+  switch (arch()) {
+  case Arch::X64:
+    x64::adjustMetaDataForRelocation(rel, asmInfo, fixups);
+  case Arch::PPC64:
+  case Arch::ARM:
+    break;
+  }
+}
+void findFixups(TCA start, TCA end, CGMeta& fixups) {
+  switch (arch()) {
+  case Arch::X64:
+    x64::findFixups(start, end, fixups);
+  case Arch::PPC64:
+  case Arch::ARM:
+    break;
+  }
+}
+size_t relocate(RelocationInfo& rel,
+                CodeBlock& destBlock,
+                TCA start, TCA end,
+                CGMeta& fixups,
+                TCA* exitAddr) {
+  switch (arch()) {
+  case Arch::X64:
+    return x64::relocate(rel, destBlock, start, end, fixups, exitAddr);
+  case Arch::PPC64:
+  case Arch::ARM:
+    return 0;
+  }
+  not_reached();
 }
 
 //////////////////////////////////////////////////////////////////////
