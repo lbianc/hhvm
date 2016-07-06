@@ -109,7 +109,7 @@ struct Vgen {
         VMTOC::getInstance().checkFull())
       a.li64(rt, imm64);
     else
-      a.ld(rt, rtoc()[8*VMTOC::getInstance().pushElem(imm64)]);
+      a.ld(rt, rtoc()[8 * VMTOC::getInstance().pushElem(imm64)]);
     return;
   }
 

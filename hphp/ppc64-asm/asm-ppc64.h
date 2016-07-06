@@ -213,12 +213,13 @@ private:
   std::vector<JumpInfo> m_toPatch;
 };
 
+/* Class that represents a virtual TOC */
 struct VMTOC {
 
 private:
-  /* VMTOC is a singleton*/
+  // VMTOC is a singleton
   VMTOC()
-    : m_last_elem(0)
+    : m_last_elem_pos(0)
     , m_funcaddrs(kTOCSize)
   {}
 
@@ -230,34 +231,30 @@ public:
   VMTOC operator=(VMTOC const&) = delete;
 
   /* push an element into the stack and return its index */
-  uint64_t pushElem(int64_t elem) {
-    if (m_map.find(elem) != m_map.end()) {
-      return m_map[elem];
-    }
-    m_funcaddrs[m_last_elem] = elem;
-    m_map.insert({elem, m_last_elem});
-    return m_last_elem++;
-  }
+  uint64_t pushElem(int64_t elem);
 
   /* get the singleton instance */
-  static VMTOC& getInstance() {
-    static VMTOC instance;
-    return instance;
-  }
+  static VMTOC& getInstance();
 
-  bool checkFull() {
-    return m_last_elem > 4095 ? true : false;
-  }
+  /* check if the TOC is full */
+  bool checkFull();
 
-  /* return the address of the first element */
-  intptr_t getPtrVector() {
-    return reinterpret_cast<intptr_t>(&m_funcaddrs[0]);
-  };
+  /* return the address of the middle element from the vector
+   * this is done so signed offsets could be used */
+  intptr_t getPtrVector();
 
+  /* number of elements in TOC vector
+   * ld can address an 16bit offset */
   static constexpr int kTOCSize = 8192;
+
 private:
-  uint64_t m_last_elem;
+  /* vector position of the last element */
+  uint64_t m_last_elem_pos;
+
+  /* vector of function addresses */
   std::vector<int64_t> m_funcaddrs;
+
+  /* map used to avoid insertion of duplicates */
   std::map<int64_t, uint64_t> m_map;
 };
 

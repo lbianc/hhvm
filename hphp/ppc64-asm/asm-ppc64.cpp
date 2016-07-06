@@ -19,6 +19,28 @@
 
 namespace ppc64_asm {
 
+uint64_t VMTOC::pushElem(int64_t elem) {
+  if (m_map.find(elem) != m_map.end()) {
+    return m_map[elem] - kTOCSize / 2;
+  }
+  m_map.insert({elem, m_last_elem_pos});
+  m_funcaddrs[m_last_elem_pos] = elem;
+  return m_last_elem_pos++ - kTOCSize / 2;
+}
+
+VMTOC& VMTOC::getInstance() {
+  static VMTOC instance;
+  return instance;
+}
+
+bool VMTOC::checkFull() {
+  return m_last_elem_pos > 8191;
+}
+
+intptr_t VMTOC::getPtrVector() {
+  return reinterpret_cast<intptr_t>(&m_funcaddrs[kTOCSize / 2]);
+}
+
 BranchParams::BranchParams(PPC64Instr instr) {
   DecoderInfo* dinfo = Decoder::GetDecoder().decode(instr);
   switch (dinfo->opcode_name()) {
