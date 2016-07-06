@@ -70,7 +70,6 @@ TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
   auto const start = cb.frontier();
   Assembler a { cb };
 
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[24]);
   a.call (target, Assembler::CallArg::SmashInt);
   return start;
 }
