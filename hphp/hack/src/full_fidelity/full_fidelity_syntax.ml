@@ -104,6 +104,24 @@ module WithToken(Token: TokenType) = struct
       function_type : t;
       function_body : t
     }
+    and classish_declaration = {
+      classish_attr : t;
+      classish_abstract : t;
+      classish_final : t;
+      classish_token : t;
+      classish_name : t;
+      classish_type_params : t;
+      classish_extends : t;
+      classish_extends_list : t;
+      classish_implements : t;
+      classish_implements_list : t;
+      classish_body : t;
+    }
+    and classish_body = {
+      classish_body_left_brace : t;
+      classish_body_elements : t;
+      classish_body_right_brace : t;
+    }
     and parameter_declaration = {
       param_attr : t;
       param_type : t;
@@ -113,6 +131,17 @@ module WithToken(Token: TokenType) = struct
     and default_argument_specifier = {
       default_equal : t;
       default_value : t
+    }
+    and attribute_specification = {
+      attribute_spec_left_double_angle : t;
+      attribute_spec_attribute_list : t;
+      attribute_spec_right_double_angle : t
+    }
+    and attribute = {
+      attribute_name : t;
+      attribute_left_paren : t;
+      attribute_values : t;
+      attribute_right_paren : t
     }
     and compound_statement = {
       compound_left_brace : t;
@@ -280,6 +309,17 @@ module WithToken(Token: TokenType) = struct
       object_creation_arguments : t;
       object_creation_rparen : t
     }
+    and array_creation_expression = {
+      array_creation_left_bracket: t;
+      array_creation_members: t;
+      array_creation_right_bracket: t;
+    }
+    and array_intrinsic_expression = {
+      array_intrinsic_keyword: t;
+      array_intrinsic_left_paren: t;
+      array_intrinsic_members: t;
+      array_intrinsic_right_paren: t;
+    }
     and xhp_attribute = {
       xhp_attr_name : t;
       xhp_attr_equal : t;
@@ -388,8 +428,12 @@ module WithToken(Token: TokenType) = struct
     | Script of script
 
     | FunctionDeclaration of function_declaration
+    | ClassishDeclaration of classish_declaration
+    | ClassishBody of classish_body
     | ParameterDeclaration of parameter_declaration
     | DefaultArgumentSpecifier of default_argument_specifier
+    | AttributeSpecification of attribute_specification
+    | Attribute of attribute
 
     | CompoundStatement of compound_statement
     | ExpressionStatement of expression_statement
@@ -425,6 +469,8 @@ module WithToken(Token: TokenType) = struct
     | ObjectCreationExpression of object_creation_expression
     | ShapeExpression of shape
     | FieldInitializer of field_initializer
+    | ArrayCreationExpression of array_creation_expression
+    | ArrayIntrinsicExpression of array_intrinsic_expression
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -466,8 +512,12 @@ module WithToken(Token: TokenType) = struct
       | ScriptHeader _ -> SyntaxKind.ScriptHeader
       | Script _ -> SyntaxKind.Script
       | FunctionDeclaration _ -> SyntaxKind.FunctionDeclaration
+      | ClassishDeclaration _ -> SyntaxKind.ClassishDeclaration
+      | ClassishBody _ -> SyntaxKind.ClassishBody
       | ParameterDeclaration _ -> SyntaxKind.ParameterDeclaration
       | DefaultArgumentSpecifier _ -> SyntaxKind.DefaultArgumentSpecifier
+      | AttributeSpecification _ -> SyntaxKind.AttributeSpecification
+      | Attribute _ -> SyntaxKind.Attribute
       | CompoundStatement _ -> SyntaxKind.CompoundStatement
       | ExpressionStatement _ -> SyntaxKind.ExpressionStatement
       | WhileStatement _ -> SyntaxKind.WhileStatement
@@ -498,6 +548,8 @@ module WithToken(Token: TokenType) = struct
       | ObjectCreationExpression _ -> SyntaxKind.ObjectCreationExpression
       | ShapeExpression _ -> SyntaxKind.ShapeExpression
       | FieldInitializer _ -> SyntaxKind.FieldInitializer
+      | ArrayCreationExpression _ -> SyntaxKind.ArrayCreationExpression
+      | ArrayIntrinsicExpression _ -> SyntaxKind.ArrayIntrinsicExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPAttribute _ -> SyntaxKind.XHPAttribute
@@ -528,9 +580,14 @@ module WithToken(Token: TokenType) = struct
     let is_header node = kind node = SyntaxKind.ScriptHeader
     let is_script node = kind node = SyntaxKind.Script
     let is_function node = kind node = SyntaxKind.FunctionDeclaration
+    let is_classish node = kind node = SyntaxKind.ClassishDeclaration
+    let is_classish_body node = kind node = SyntaxKind.ClassishBody
     let is_parameter node = kind node = SyntaxKind.ParameterDeclaration
     let is_default_arg_specifier node =
       kind node = SyntaxKind.DefaultArgumentSpecifier
+    let is_attribute_specification node =
+      kind node = SyntaxKind.AttributeSpecification
+    let is_attribute node = kind node = SyntaxKind.Attribute
     let is_compound_statement node = kind node = SyntaxKind.CompoundStatement
     let is_expression_statement node =
       kind node = SyntaxKind.ExpressionStatement
@@ -559,6 +616,10 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ObjectCreationExpression
     let is_shape_expression node = kind node = SyntaxKind.ShapeExpression
     let is_field_initializer node = kind node = SyntaxKind.FieldInitializer
+    let is_array_creation_expression node =
+      kind node = SyntaxKind.ArrayCreationExpression
+    let is_array_intrinsic_expression node =
+      kind node = SyntaxKind.ArrayIntrinsicExpression
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -615,12 +676,36 @@ module WithToken(Token: TokenType) = struct
         [ function_attr; function_async; function_token; function_name;
           function_type_params; function_left_paren; function_params;
           function_right_paren; function_colon; function_type; function_body]
+      | ClassishDeclaration
+        { classish_attr; classish_abstract; classish_final; classish_token;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body } ->
+        [ classish_attr; classish_abstract; classish_final; classish_token;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body ]
+      | ClassishBody
+        { classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace } ->
+        [ classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace ]
       | ParameterDeclaration
         { param_attr; param_type; param_name; param_default } ->
         [ param_attr; param_type; param_name; param_default ]
       | DefaultArgumentSpecifier
         { default_equal; default_value } ->
         [ default_equal; default_value ]
+      | AttributeSpecification
+        { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
+          attribute_spec_right_double_angle } ->
+        [ attribute_spec_left_double_angle; attribute_spec_attribute_list ;
+          attribute_spec_right_double_angle ]
+      | Attribute
+        { attribute_name; attribute_left_paren; attribute_values;
+          attribute_right_paren } ->
+        [ attribute_name; attribute_left_paren; attribute_values;
+          attribute_right_paren ]
       | CompoundStatement
         { compound_left_brace; compound_statements; compound_right_brace } ->
         [ compound_left_brace; compound_statements; compound_right_brace ]
@@ -737,6 +822,16 @@ module WithToken(Token: TokenType) = struct
       | FieldInitializer
         { field_init_name; field_init_arrow; field_init_value } ->
         [ field_init_name; field_init_arrow; field_init_value ]
+      | ArrayCreationExpression
+        { array_creation_left_bracket; array_creation_members;
+          array_creation_right_bracket } ->
+        [ array_creation_left_bracket; array_creation_members;
+          array_creation_right_bracket ]
+      | ArrayIntrinsicExpression
+       { array_intrinsic_keyword; array_intrinsic_left_paren;
+         array_intrinsic_members; array_intrinsic_right_paren } ->
+       [ array_intrinsic_keyword; array_intrinsic_left_paren;
+         array_intrinsic_members; array_intrinsic_right_paren ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -823,12 +918,36 @@ module WithToken(Token: TokenType) = struct
           "function_type_params"; "function_left_paren"; "function_params";
           "function_right_paren"; "function_colon"; "function_type";
           "function_body" ]
+      | ClassishDeclaration
+        { classish_attr; classish_abstract; classish_final; classish_token;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body } ->
+        [ "classish_attr"; "classish_abstract"; "classish_final";
+          "classish_token"; "classish_name"; "classish_type_params";
+          "classish_extends"; "classish_extends_list"; "classish_implements";
+          "classish_implements_list"; "classish_body" ]
+      | ClassishBody
+        { classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace } ->
+        [ "classish_body_left_brace"; "classish_body_elements";
+          "classish_body_right_brace" ]
       | ParameterDeclaration
         { param_attr; param_type; param_name; param_default } ->
         [ "param_attr"; "param_type"; "param_name"; "param_default" ]
       | DefaultArgumentSpecifier
         { default_equal; default_value } ->
         [ "default_equal"; "default_value" ]
+      | AttributeSpecification
+        { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
+          attribute_spec_right_double_angle } ->
+        [ "attribute_spec_left_double_angle"; "attribute_spec_attribute_list" ;
+          "attribute_spec_right_double_angle" ]
+      | Attribute
+        { attribute_name; attribute_left_paren; attribute_values;
+          attribute_right_paren } ->
+        [ "attribute_name"; "attribute_left_paren"; "attribute_values";
+          "attribute_right_paren" ]
       | CompoundStatement
         { compound_left_brace; compound_statements; compound_right_brace } ->
         [ "compound_left_brace"; "compound_statements"; "compound_right_brace" ]
@@ -950,6 +1069,16 @@ module WithToken(Token: TokenType) = struct
       | FieldInitializer
         { field_init_name; field_init_arrow; field_init_value } ->
         [ "field_init_name"; "field_init_arrow"; "field_init_value" ]
+      | ArrayCreationExpression
+        { array_creation_left_bracket; array_creation_members;
+          array_creation_right_bracket } ->
+        [ "array_creation_left_bracket"; "array_creation_members";
+          "array_creation_right_bracket" ]
+      | ArrayIntrinsicExpression
+       { array_intrinsic_keyword; array_intrinsic_left_paren;
+         array_intrinsic_members; array_intrinsic_right_paren } ->
+       [ "array_intrinsic_keyword"; "array_intrinsic_left_paren";
+         "array_intrinsic_members"; "array_intrinsic_right_paren" ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -1043,12 +1172,34 @@ module WithToken(Token: TokenType) = struct
     let function_colon x = x.function_colon
     let function_type x = x.function_type
     let function_body x = x.function_body
+    let classish_attr x = x.classish_attr
+    let classish_abstract x = x.classish_abstract
+    let classish_final x = x.classish_final
+    let classish_token x = x.classish_token
+    let classish_name x = x.classish_name
+    let classish_type_params x = x.classish_type_params
+    let classish_extends x = x.classish_extends
+    let classish_extends_list x = x.classish_extends_list
+    let classish_implements x = x.classish_implements
+    let classish_implements_list x = x.classish_implements_list
+    let classish_body x = x.classish_body
+    let classish_body_left_brace x = x.classish_body_left_brace
+    let classish_body_elements x = x.classish_body_elements
+    let classish_body_right_brace x = x.classish_body_right_brace
     let param_attr x = x.param_attr
     let param_type x = x.param_type
     let param_name x = x.param_name
     let param_default x = x.param_default
     let default_equal x = x.default_equal
     let default_value x = x.default_value
+    let attribute_spec_left_double_angle x = x.attribute_spec_left_double_angle
+    let attribute_spec_attribute_list x = x.attribute_spec_attribute_list
+    let attribute_spec_right_double_angle x =
+      x.attribute_spec_right_double_angle
+    let attribute_name x = x.attribute_name
+    let attribute_left_paren x = x.attribute_left_paren
+    let attribute_values x = x.attribute_values
+    let attribute_right_paren x = x.attribute_right_paren
     let compound_left_brace x = x.compound_left_brace
     let compound_statements x = x.compound_statements
     let compound_right_brace x = x.compound_right_brace
@@ -1143,6 +1294,13 @@ module WithToken(Token: TokenType) = struct
     let listlike_left_paren x = x.listlike_left_paren
     let listlike_members x = x.listlike_members
     let listlike_right_paren x = x.listlike_right_paren
+    let array_creation_left_bracket x = x.array_creation_left_bracket
+    let array_creation_members x = x.array_creation_members
+    let array_creation_right_bracket x = x.array_creation_right_bracket
+    let array_intrinsic_keyword x = x.array_intrinsic_keyword
+    let array_intrinsic_left_paren x = x.array_intrinsic_left_paren
+    let array_intrinsic_members x = x.array_intrinsic_members
+    let array_intrinsic_right_paren x = x.array_intrinsic_right_paren
     let xhp_open x = x.xhp_open
     let xhp_body x = x.xhp_body
     let xhp_close x = x.xhp_close
@@ -1226,6 +1384,22 @@ module WithToken(Token: TokenType) = struct
               function_token; function_name; function_type_params;
               function_left_paren; function_params; function_right_paren;
               function_colon; function_type; function_body }
+      | (SyntaxKind.ClassishDeclaration,
+        [ classish_attr; classish_abstract; classish_final; classish_token;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body ]) ->
+        ClassishDeclaration {
+          classish_attr; classish_abstract; classish_final; classish_token;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body }
+      | (SyntaxKind.ClassishBody,
+        [ classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace ]) ->
+        ClassishBody {
+          classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace }
       | (SyntaxKind.ParameterDeclaration, [ param_attr; param_type; param_name;
         param_default ]) ->
         ParameterDeclaration { param_attr; param_type; param_name;
@@ -1233,6 +1407,14 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.DefaultArgumentSpecifier, [ default_equal;
         default_value ]) ->
         DefaultArgumentSpecifier { default_equal; default_value }
+      | SyntaxKind.AttributeSpecification, [ attribute_spec_left_double_angle;
+        attribute_spec_attribute_list; attribute_spec_right_double_angle ] ->
+        AttributeSpecification { attribute_spec_left_double_angle;
+          attribute_spec_attribute_list; attribute_spec_right_double_angle }
+      | SyntaxKind.Attribute, [ attribute_name; attribute_left_paren;
+        attribute_values; attribute_right_paren ] ->
+        Attribute { attribute_name; attribute_left_paren; attribute_values;
+          attribute_right_paren }
       | (SyntaxKind.CompoundStatement, [ compound_left_brace;
         compound_statements; compound_right_brace ]) ->
         CompoundStatement { compound_left_brace; compound_statements;
@@ -1355,6 +1537,16 @@ module WithToken(Token: TokenType) = struct
         [ field_init_name; field_init_arrow; field_init_value ]) ->
         FieldInitializer
         { field_init_name; field_init_arrow; field_init_value }
+      | SyntaxKind.ArrayCreationExpression, [ array_creation_left_bracket;
+        array_creation_members; array_creation_right_bracket ] ->
+        ArrayCreationExpression { array_creation_left_bracket;
+          array_creation_members; array_creation_right_bracket }
+      | SyntaxKind.ArrayIntrinsicExpression, [ array_intrinsic_keyword;
+        array_intrinsic_left_paren; array_intrinsic_members;
+        array_intrinsic_right_paren ] ->
+        ArrayIntrinsicExpression { array_intrinsic_keyword;
+          array_intrinsic_left_paren; array_intrinsic_members;
+          array_intrinsic_right_paren }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -1509,6 +1701,20 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.ShapeExpression
           [ shape; lparen; fields; rparen ]
 
+      let make_array_creation_expression
+        array_creation_left_bracket array_creation_members
+        array_creation_right_bracket =
+        from_children SyntaxKind.ArrayCreationExpression
+          [array_creation_left_bracket; array_creation_members;
+          array_creation_right_bracket ]
+
+      let make_array_intrinsic_expression
+        array_intrinsic_keyword array_intrinsic_left_paren
+        array_intrinsic_members array_intrinsic_right_paren =
+        from_children SyntaxKind.ArrayIntrinsicExpression
+          [ array_intrinsic_keyword; array_intrinsic_left_paren;
+          array_intrinsic_members; array_intrinsic_right_paren ]
+
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
 
@@ -1547,6 +1753,22 @@ module WithToken(Token: TokenType) = struct
         function_type_params; function_left_paren; function_params;
         function_right_paren; function_colon; function_type; function_body ]
 
+    let make_classish classish_attr classish_abstract classish_final
+      classish_token classish_name classish_type_params classish_extends
+      classish_extends_list classish_implements classish_implements_list
+      classish_body =
+      from_children SyntaxKind.ClassishDeclaration [
+        classish_attr; classish_abstract; classish_final; classish_token;
+        classish_name; classish_type_params; classish_extends;
+        classish_extends_list; classish_implements; classish_implements_list;
+        classish_body ]
+
+    let make_classish_body classish_body_left_brace classish_body_elements
+      classish_body_right_brace =
+      from_children SyntaxKind.ClassishBody [
+        classish_body_left_brace; classish_body_elements;
+        classish_body_right_brace ]
+
       let make_parameter_declaration
         param_attr param_type param_name param_default =
         from_children SyntaxKind.ParameterDeclaration
@@ -1555,6 +1777,18 @@ module WithToken(Token: TokenType) = struct
       let make_default_argument_specifier default_equal default_value =
         from_children SyntaxKind.DefaultArgumentSpecifier
           [ default_equal; default_value ]
+
+      let make_attribute_specification attribute_spec_left_double_angle
+        attribute_spec_attribute_list attribute_spec_right_double_angle =
+        from_children SyntaxKind.AttributeSpecification
+          [ attribute_spec_left_double_angle; attribute_spec_attribute_list;
+          attribute_spec_right_double_angle ]
+
+      let make_attribute attribute_name attribute_left_paren attribute_values
+        attribute_right_paren =
+        from_children SyntaxKind.Attribute
+        [ attribute_name; attribute_left_paren; attribute_values;
+          attribute_right_paren ]
 
       let make_compound_statement
         compound_left_brace compound_statements compound_right_brace =

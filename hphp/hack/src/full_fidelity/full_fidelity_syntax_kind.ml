@@ -19,8 +19,12 @@ type t =
 | ScriptHeader
 | Script
 | FunctionDeclaration
+| ClassishDeclaration
+| ClassishBody
 | ParameterDeclaration
 | DefaultArgumentSpecifier
+| AttributeSpecification
+| Attribute
 
 (* Statements *)
 | CompoundStatement
@@ -58,6 +62,8 @@ type t =
 | ObjectCreationExpression
 | ShapeExpression
 | FieldInitializer
+| ArrayCreationExpression
+| ArrayIntrinsicExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -89,7 +95,11 @@ let to_string kind =
   | ScriptHeader -> "header"
   | Script -> "script"
   | FunctionDeclaration -> "function_declaration"
+  | ClassishDeclaration -> "classish_declaration"
+  | ClassishBody -> "classish_body"
   | ParameterDeclaration -> "parameter_declaration"
+  | AttributeSpecification -> "attribute_specification"
+  | Attribute -> "attribute"
   | CompoundStatement -> "compound_statement"
   | ExpressionStatement -> "expression_statement"
   | WhileStatement -> "while_statement"
@@ -120,6 +130,8 @@ let to_string kind =
   | ObjectCreationExpression -> "object_creation_expression"
   | ShapeExpression -> "shape_expression"
   | FieldInitializer -> "field_initializer"
+  | ArrayCreationExpression -> "array_creation_expression"
+  | ArrayIntrinsicExpression -> "array_intrinsic_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | NullableTypeSpecifier -> "nullable_type_specifier"

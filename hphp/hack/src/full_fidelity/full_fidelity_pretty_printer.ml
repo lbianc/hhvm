@@ -213,6 +213,53 @@ let rec get_doc node =
                       (x |> header_language |> get_doc |> add_break)
   | Script x -> group_doc ( get_doc (script_header x)
                      ^| get_doc (script_declarations x) )
+  | ClassishDeclaration x ->
+    let attr = add_break (get_doc (classish_attr x)) in
+
+    let preface = group_doc (
+      get_doc (classish_abstract x) ^|
+      get_doc (classish_final x) ^|
+      get_doc (classish_token x)
+    ) in
+
+    let name_and_generics =
+      let name = get_doc (classish_name x) in
+      let type_params = get_doc (classish_type_params x) in
+      group_doc (indent_doc name type_params indt)
+    in
+
+    let extends =
+      let extends_token = get_doc (classish_extends x) in
+      let extends_list = get_doc (classish_extends_list x) in
+      group_doc (indent_doc extends_token extends_list indt)
+    in
+
+    let implements =
+      let implements_token = get_doc (classish_implements x) in
+      let implements_list = get_doc (classish_implements_list x) in
+      group_doc (indent_doc implements_token implements_list indt)
+    in
+
+    let body = get_doc (classish_body x) in
+
+    (* TODO: Make this better *)
+    attr ^^^
+    group_doc (
+      group_doc (
+        preface ^|
+        name_and_generics
+      ) ^|
+      group_doc (
+        extends ^|
+        implements
+      ) ^|
+      body
+    )
+  | ClassishBody x ->
+    let left = get_doc (classish_body_left_brace x) in
+    let right = get_doc (classish_body_right_brace x) in
+    let body = get_doc (classish_body_elements x) in
+    indent_block_no_space left body right indt
   | FunctionDeclaration x ->
     let preface = group_doc ( get_doc (function_attr x)
                        ^| get_doc (function_async x)
@@ -250,6 +297,18 @@ let rec get_doc node =
     let def_equal = get_doc (default_equal x) in
     let def_value = get_doc (default_value x) in
     group_doc (def_equal ^| def_value)
+  | AttributeSpecification x ->
+    let left = get_doc (attribute_spec_left_double_angle x) in
+    let right = get_doc (attribute_spec_right_double_angle x) in
+    let specs = get_doc (attribute_spec_attribute_list x) in
+    indent_block_no_space left specs right indt
+  | Attribute x ->
+    let name = get_doc (attribute_name x) in
+    let left = get_doc (attribute_left_paren x) in
+    let right = get_doc (attribute_right_paren x) in
+    let values = get_doc (attribute_values x) in
+    let left_part = group_doc (name ^^| left) in
+    indent_block_no_space left_part values right indt
   | CompoundStatement x ->
     let left = get_doc (compound_left_brace x) in
     let right = get_doc (compound_right_brace x) in
@@ -449,6 +508,18 @@ let rec get_doc node =
     let fs = get_doc x.shape_fields in
     let rp = get_doc x.shape_right_paren in
     sh ^| lp ^^^ fs ^^^ rp
+  | ArrayCreationExpression x ->
+    let left_bracket = get_doc (array_creation_left_bracket x) in
+    let right_bracket = get_doc (array_creation_right_bracket x) in
+    let members = get_doc (array_creation_members x) in
+    indent_block_no_space left_bracket members right_bracket indt
+  | ArrayIntrinsicExpression x ->
+    let keyword = get_doc (array_intrinsic_keyword x) in
+    let left = get_doc (array_intrinsic_left_paren x) in
+    let right = get_doc (array_intrinsic_right_paren x) in
+    let members = get_doc (array_intrinsic_members x) in
+    let left_part = group_doc (keyword ^^| left) in
+    indent_block_no_space left_part members right indt
   | XHPExpression x ->
     let left = get_doc (xhp_open x) in
     let expr = get_doc (xhp_body x) in
