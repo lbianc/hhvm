@@ -1795,6 +1795,11 @@ struct Assembler {
     branchFar(c, BranchParams::convertCC(cc), lr);
   }
 
+  void branchFar(CodeAddress c, BranchParams bp) {
+    LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
+    branchFar(c, static_cast<BranchConditions>(bp), lr);
+  }
+
   // ConditionCode variants
   void bc(ConditionCode cc, int16_t address) {
     BranchParams bp(cc);

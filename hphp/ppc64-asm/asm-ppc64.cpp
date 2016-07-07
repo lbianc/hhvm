@@ -19,8 +19,8 @@
 
 namespace ppc64_asm {
 
-void BranchParams::decodeInstr(PPC64Instr instr) {
-  const DecoderInfo dinfo = Decoder::GetDecoder().decode(instr);
+void BranchParams::decodeInstr(PPC64Instr* pinstr) {
+  const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
   switch (dinfo.opcode_name()) {
     case OpcodeNames::op_b:
     case OpcodeNames::op_ba:
@@ -49,6 +49,18 @@ void BranchParams::decodeInstr(PPC64Instr instr) {
     default:
       assert(false && "Not a valid conditional branch instruction");
       // also possible: defineBoBi(BranchConditions::Always);
+      break;
+  }
+
+  // Set m_lr accordingly for all 'call' flavors used
+  switch (dinfo.opcode_name()) {
+    case OpcodeNames::op_bl:
+    case OpcodeNames::op_bla:
+    case OpcodeNames::op_bcctrl:
+      m_lr = true;
+      break;
+    default:
+      m_lr = false;
       break;
   }
 }

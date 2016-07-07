@@ -181,7 +181,7 @@ ConditionCode smashableJccCond(TCA inst) {
   // instruction.
   uint8_t jccLen = smashableJccLen() - kStdIns;
   // skip to the branch instruction in order to get its condition
-  ppc64_asm::BranchParams bp(*reinterpret_cast<PPC64Instr*>(inst + jccLen));
+  ppc64_asm::BranchParams bp(reinterpret_cast<PPC64Instr*>(inst + jccLen));
   return bp;
 }
 

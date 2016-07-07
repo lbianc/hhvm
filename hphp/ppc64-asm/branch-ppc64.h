@@ -162,6 +162,7 @@ struct BranchParams {
       default:
           not_implemented();
       }
+      m_lr = false;
     }
 #undef SWITCHES
 
@@ -244,13 +245,14 @@ struct BranchParams {
 
     /*
      * Get the BranchParams from an emitted conditional branch
+     * Also set m_lr accordingly.
      */
-    BranchParams(PPC64Instr instr) { decodeInstr(instr); }
+    BranchParams(PPC64Instr* pinstr) { decodeInstr(pinstr); }
     BranchParams(uint8_t* pinstr) {
-      decodeInstr(*reinterpret_cast<PPC64Instr*>(pinstr));
+      decodeInstr(reinterpret_cast<PPC64Instr*>(pinstr));
     }
 
-    void decodeInstr(PPC64Instr instr);
+    void decodeInstr(PPC64Instr* pinstr);
 
     ~BranchParams() {}
 
@@ -293,12 +295,18 @@ struct BranchParams {
       return ret;
     }
 
-    uint8_t bo() { return (uint8_t)m_bo; }
-    uint8_t bi() { return (uint8_t)m_bi; }
+    explicit operator BranchConditions() {
+      return convertCC(static_cast<ConditionCode>(*this));
+    }
+
+    uint8_t bo()    { return (uint8_t)m_bo; }
+    uint8_t bi()    { return (uint8_t)m_bi; }
+    bool savesLR()  { return m_lr;          }
 
   private:
     BranchParams::BO m_bo;
     BranchParams::BI m_bi;
+    bool m_lr;
 };
 
 } // namespace ppc64_asm

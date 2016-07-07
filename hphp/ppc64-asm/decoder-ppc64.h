@@ -1536,6 +1536,7 @@ struct DecoderInfo {
   DecoderInfo(OpcodeNames opn, PPC64Instr op, Form form,
       std::string mnemonic, std::initializer_list<Operands> oper)
   : m_opn(opn)
+  , m_ip(nullptr)
   , m_op(op)
   , m_form(form)
   , m_mnemonic(mnemonic)
@@ -1550,14 +1551,15 @@ struct DecoderInfo {
 
   DecoderInfo() = delete;
 
-  inline Form form() const { return m_form; }
-  inline OpcodeNames opcode_name() const { return m_opn; }
-  inline PPC64Instr opcode() const { return m_op; }
-  inline std::string mnemonic() const { return m_mnemonic; }
+  inline uint8_t* ip() const              { return m_ip; }
+  inline Form form() const                { return m_form; }
+  inline OpcodeNames opcode_name() const  { return m_opn; }
+  inline PPC64Instr opcode() const        { return m_op; }
+  inline std::string mnemonic() const     { return m_mnemonic; }
   std::string toString() const;
 
-  PPC64Instr instruction_image() const { return m_image; }
-  void instruction_image(PPC64Instr i) { m_image = i; }
+  PPC64Instr instruction_image() const    { return m_image; }
+  void instruction_image(PPC64Instr i)    { m_image = i; }
 
   inline bool operator==(const DecoderInfo& i) {
     return (i.form() == m_form &&
@@ -1571,6 +1573,9 @@ struct DecoderInfo {
             i.mnemonic() != m_mnemonic);
   }
 
+  bool isInvalid() const {
+    return m_opn == OpcodeNames::op_invalid;
+  }
   bool isException() const;
   bool isNop() const;
   bool isOffsetBranch(bool allowCond = true) const;
@@ -1581,10 +1586,16 @@ struct DecoderInfo {
   int32_t offset() const;
   int32_t branchOffset() const;
   PPC64Instr setBranchOffset(int32_t offset) const;
+  void setIp(uint8_t* ip)                 { m_ip = ip; }
+  void setIp(PPC64Instr* ip) {
+    setIp(reinterpret_cast<uint8_t*>(ip));
+  }
 
 private:
   // opcode enumeration identifier
   OpcodeNames m_opn;
+  // pointer to the decoded instruction in the memory
+  uint8_t* m_ip;
   // the opcode part of the instruction
   PPC64Instr m_op;
   // points out which -Form the instruction is
@@ -1648,18 +1659,18 @@ class Decoder : private boost::noncopyable {
     delete[] m_decoder_table;
   }
 
+public:
   const DecoderInfo getInvalid() {
     return *m_decoder_table[static_cast<size_t>(OpcodeNames::op_invalid)];
   }
 
-public:
   static Decoder& GetDecoder() {
     static Decoder dec;
     s_decoder = &dec;
     return *s_decoder;
   }
 
-  const DecoderInfo decode(PPC64Instr ip);
+  const DecoderInfo decode(PPC64Instr* ip);
 
   int32_t searchInstr(
       int32_t opc_index,
@@ -1667,7 +1678,7 @@ public:
       PPC64Instr instr) const;
 
   inline const DecoderInfo decode(uint8_t* ip) {
-    return decode(*reinterpret_cast<PPC64Instr*>(ip));
+    return decode(reinterpret_cast<PPC64Instr*>(ip));
   }
 };
 

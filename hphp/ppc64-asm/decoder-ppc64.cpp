@@ -555,10 +555,10 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const DecoderInfo Decoder::decode(PPC64Instr instr) {
+const DecoderInfo Decoder::decode(PPC64Instr* ip) {
   int32_t position;
   PPC64Instr decoded_instr, operand, opcode_index, opcode_size;
-  PPC64Instr opcode = instr & kOpcodeMask;
+  PPC64Instr opcode = *ip & kOpcodeMask;
 
   // Get index and size for the opcode.
   opcode_index = (opcode_index_map.find(opcode))->second;
@@ -567,7 +567,7 @@ const DecoderInfo Decoder::decode(PPC64Instr instr) {
   // To decode a instruction we extract the decoder fields
   // masking the instruction and test if it 'hits' the decoder table.
   for (size_t i = 0; i < sizeof(DecoderList)/sizeof(PPC64Instr); i++) {
-    decoded_instr = instr & DecoderList[i];
+    decoded_instr = *ip & DecoderList[i];
     operand = decoded_instr & kOperandMask;
 
     // Search the instruction for the current mask
@@ -576,13 +576,15 @@ const DecoderInfo Decoder::decode(PPC64Instr instr) {
     // If instruction found, return it.
     if (position != -1) {
       assert(m_decoder_table[position]->opcode() == decoded_instr);
-      m_decoder_table[position]->instruction_image(instr);
+      m_decoder_table[position]->instruction_image(*ip);
       return *m_decoder_table[position];
     }
   }
 
   // invalid instruction! Use fallback.
-  return getInvalid();
+  DecoderInfo ret = getInvalid();
+  ret.setIp(ip);
+  return ret;
 }
 
 /*

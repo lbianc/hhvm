@@ -136,7 +136,11 @@ bool DecodedInstruction::isNearBranch(bool allowCond /* = true */) const {
 }
 
 bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
-  if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return false;
+  return !getFarBranch(allowCond).isInvalid();
+}
+DecoderInfo DecodedInstruction::getFarBranch(bool allowCond) const {
+  if (!isLi64Possible() || (reg::r12 != getLi64Reg()))
+    return Decoder::GetDecoder().getInvalid();
 
   // only read bytes up to the smallest of @max_read or @bytes.
   auto can_read = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
@@ -158,14 +162,19 @@ bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
     // skip the preparation instructions that are not actually the branch.
     auto far_branch_instr = m_ip + n;
     auto di = Decoder::GetDecoder().decode(far_branch_instr);
-    if (di.isRegisterBranch(allowCond)) return true;
+    if (di.isRegisterBranch(allowCond)) return di;
   }
-  return false;
+  return Decoder::GetDecoder().getInvalid();
 }
 bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
-  if (!isFarBranch()) return false;
+  DecoderInfo di = getFarBranch();
+  if (di.isInvalid()) return false;
 
-  Assembler::patchAbsolute(m_ip, target);
+  ppc64_asm::BranchParams bp(di.ip());
+  HPHP::CodeBlock cb;
+  cb.init(m_ip, Assembler::kJccLen, "setFarBranchTarget");
+  Assembler a{ cb };
+  a.branchFar(target, bp);
 
   // refresh m_imm and other parameters
   decode();
@@ -261,8 +270,8 @@ uint8_t DecodedInstruction::decodeImm() {
   };
 
   const auto dest_reg = getLi64Reg();
-  const PPC64Instr* const base = reinterpret_cast<PPC64Instr*>(m_ip);
-  const PPC64Instr* const last_instr = base +
+  PPC64Instr* base = reinterpret_cast<PPC64Instr*>(m_ip);
+  PPC64Instr* last_instr = base +
     (Assembler::kLi64Len / instr_size_in_bytes);
 
   // If m_max_size is 0, it can always read more, otherwise it's limited
@@ -274,11 +283,11 @@ uint8_t DecodedInstruction::decodeImm() {
   // Analyze at maximum kLi64Len instructions (and limited by m_max_size, if
   // not 0) but stop when some other instruction appears (or any that doesn't
   // have the dest_reg as a target).
-  auto pinstr = base;
+  PPC64Instr* pinstr = base;
   uint8_t bytes_read = 0;
   while ((pinstr < last_instr) && canReadMore(bytes_read)) {
 
-    auto dinfo = Decoder::GetDecoder().decode(*pinstr);
+    auto dinfo = Decoder::GetDecoder().decode(pinstr);
     int16_t tmp_imm = 0;
     uint16_t tmp_bits = 0;
 
