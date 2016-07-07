@@ -35,6 +35,7 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-util.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
+#include "hphp/runtime/base/runtime-option.h"
 
 #include "hphp/util/arch.h"
 
@@ -105,11 +106,18 @@ struct Vgen {
 
   // Auxiliary for loading immediates in the best way
   void limmediate (Assembler a, const Reg64& rt, int64_t imm64) {
-    if(HPHP::jit::deltaFits(imm64, HPHP::sz::word) ||
+    always_assert(RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
+      RuntimeOption::Evalppc64minTOCImmSize <= 64);
+
+    auto fits = [](int64_t imm64, uint16_t shift_n) {
+       return static_cast<uint64_t>(imm64) >> shift_n == 0 ? true : false;
+    };
+
+    if (fits(imm64, RuntimeOption::Evalppc64minTOCImmSize) ||
         VMTOC::getInstance().checkFull())
       a.li64(rt, imm64);
     else
-      a.ld(rt, rtoc()[8 * VMTOC::getInstance().pushElem(imm64)]);
+      a.ld(rt, rtoc()[VMTOC::getInstance().pushElem(imm64) << 3]);
     return;
   }
 
@@ -727,7 +735,14 @@ void Vgen::emit(const inittc&) {
   a.li(ppc64::rone(), 1);
 
   // Save TOC pointer in r2
-  a.li64(ppc64_asm::reg::r2, VMTOC::getInstance().getPtrVector());
+  // First, assert the ppc64minTOCImm size.
+  always_assert(RuntimeOption::Evalppc64minTOCImmSize >= 0 && 
+    RuntimeOption::Evalppc64minTOCImmSize <= 64);
+
+  // If ppc64minTOCImmSize is 64, the TOC will never be used. So it is
+  // not necessary to keep the TOC in jit.
+  if(RuntimeOption::Evalppc64minTOCImmSize != 64)
+    a.li64(ppc64_asm::reg::r2, VMTOC::getInstance().getPtrVector());
 }
 
 void Vgen::emit(const leavetc&) {
