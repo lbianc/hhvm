@@ -138,24 +138,29 @@ bool DecodedInstruction::isNearBranch(bool allowCond /* = true */) const {
 bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
   if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return false;
 
-  auto is_register_branch_type = [&](uint8_t offset) -> bool {
-    // only read allowed bytes
-    if (m_max_size && (offset > m_max_size)) return false;
-
-    // skip the preparation instructions that are not actually the branch.
-    auto far_branch_instr = m_ip + offset - instr_size_in_bytes;
-    auto di = Decoder::GetDecoder().decode(far_branch_instr);
-    return di.isRegisterBranch(allowCond);
+  // only read bytes up to the smallest of @max_read or @bytes.
+  auto can_read = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
+    if (max_read)
+#define MIN(a, b)    (((a) < (b)) ? (a) : (b))
+      return n < MIN(max_read, bytes);
+#undef MIN
+    else
+      return n < bytes;
   };
 
-  auto is_call = is_register_branch_type(Assembler::kCallLen);
-  if (!allowCond) {
-    // it only supports calling or jmp, so it's fixed size.
-    return is_call;
-  } else {
-    // supports conditions, so it can be either of them.
-    return is_call || is_register_branch_type(Assembler::kJccLen);
+  // guarantee that the worst case is being analysed
+  assertx(Assembler::kJccLen > Assembler::kCallLen);
+
+  // Search for a register branch instruction like bctr. Return when found.
+  for (uint8_t n = 0;
+      can_read(n, m_max_size, Assembler::kJccLen);
+      n += instr_size_in_bytes) {
+    // skip the preparation instructions that are not actually the branch.
+    auto far_branch_instr = m_ip + n;
+    auto di = Decoder::GetDecoder().decode(far_branch_instr);
+    if (di.isRegisterBranch(allowCond)) return true;
   }
+  return false;
 }
 bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
   if (!isFarBranch()) return false;
