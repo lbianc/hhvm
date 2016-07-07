@@ -186,9 +186,6 @@ size_t relocateImpl(RelocationInfo& rel,
       } else {
         rel.recordAddress(src, dest, 0);
       }
-      if (di.isNop() && src + ppc64_asm::instr_size_in_bytes == end) {
-        smashJmp(dest, src + ppc64_asm::instr_size_in_bytes);
-      }
       dest += d2.size();
       jmp_dest = target;
       assertx(dest <= dest_block.frontier());
