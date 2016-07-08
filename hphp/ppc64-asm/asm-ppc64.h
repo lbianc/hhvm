@@ -189,7 +189,10 @@ struct Label {
   Label& operator=(const Label&) = delete;
 
   void branch(Assembler& a, BranchConditions bc, LinkReg lr);
-  void branchFar(Assembler& a, BranchConditions bc, LinkReg lr);
+  void branchFar(Assembler& a,
+                  BranchConditions bc,
+                  LinkReg lr,
+                  bool fixedSize = true);
   void asm_label(Assembler& a);
 
   enum class BranchType {
@@ -1777,27 +1780,30 @@ struct Assembler {
   }
 
   void branchFar(Label& l,
-                 BranchConditions bc = BranchConditions::Always,
-                 LinkReg lr = LinkReg::DoNotTouch) {
-    l.branchFar(*this, bc, lr);
+                  BranchConditions bc = BranchConditions::Always,
+                  LinkReg lr = LinkReg::DoNotTouch,
+                  bool fixedSize = true) {
+    l.branchFar(*this, bc, lr, fixedSize);
   }
 
   void branchFar(CodeAddress c,
-                 BranchConditions bc = BranchConditions::Always,
-                 LinkReg lr = LinkReg::DoNotTouch) {
+                  BranchConditions bc = BranchConditions::Always,
+                  LinkReg lr = LinkReg::DoNotTouch,
+                  bool fixedSize = true) {
     Label l(c);
-    l.branchFar(*this, bc, lr);
+    l.branchFar(*this, bc, lr, fixedSize);
   }
 
   void branchFar(CodeAddress c,
-                 ConditionCode cc,
-                 LinkReg lr = LinkReg::DoNotTouch) {
-    branchFar(c, BranchParams::convertCC(cc), lr);
+                  ConditionCode cc,
+                  LinkReg lr = LinkReg::DoNotTouch,
+                  bool fixedSize = true) {
+    branchFar(c, BranchParams::convertCC(cc), lr, fixedSize);
   }
 
-  void branchFar(CodeAddress c, BranchParams bp) {
+  void branchFar(CodeAddress c, BranchParams bp, bool fixedSize = true) {
     LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
-    branchFar(c, static_cast<BranchConditions>(bp), lr);
+    branchFar(c, static_cast<BranchConditions>(bp), lr, fixedSize);
   }
 
   // ConditionCode variants
@@ -1829,8 +1835,8 @@ struct Assembler {
   void call(T& target, CallArg ca = CallArg::Internal) {
     if (CallArg::Smashable == ca) {
       // To make a branch smashable, the most conservative method needs to be
-      // used so the target can be changed later or on bindCall.
-      branchFar(target, BranchConditions::Always, LinkReg::Save);
+      // used so the target can be changed later or on bindCall. Also keep nops
+      branchFar(target, BranchConditions::Always, LinkReg::Save, true);
     } else {
       // tries best performance possible
       branchAuto(target, BranchConditions::Always, LinkReg::Save);

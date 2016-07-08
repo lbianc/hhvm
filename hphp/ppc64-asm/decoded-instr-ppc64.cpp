@@ -174,7 +174,8 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
   HPHP::CodeBlock cb;
   cb.init(m_ip, Assembler::kJccLen, "setFarBranchTarget");
   Assembler a{ cb };
-  a.branchFar(target, bp);
+  // avoid nops
+  a.branchFar(target, bp, false);
 
   // refresh m_imm and other parameters
   decode();

@@ -968,14 +968,17 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
   branchFar(a, bc, lr);
 }
 
-void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
+void Label::branchFar(Assembler& a,
+                  BranchConditions bc,
+                  LinkReg lr,
+                  bool fixedSize /* = true */) {
   // Marking current address for patchAbsolute
   bool cond = (BranchConditions::Always != bc);
   addJump(&a, cond ? BranchType::bcctr : BranchType::bctr);
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.li64(reg::r12, address, true);
+  a.li64(reg::r12, address, fixedSize);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).
