@@ -26,6 +26,15 @@
 
 namespace ppc64_asm {
 
+struct DecInfoOffset {
+  DecInfoOffset()
+    : m_di(Decoder::GetDecoder().getInvalid())
+    , m_offset(-1) {}
+
+  DecoderInfo m_di;
+  int8_t m_offset;
+};
+
 struct DecodedInstruction {
   // 0 as @max_size means unlimited size
   explicit DecodedInstruction(uint8_t* ip, uint8_t max_size = 0)
@@ -75,6 +84,7 @@ struct DecodedInstruction {
 
   bool isFarBranch(bool allowCond = true) const;
   DecoderInfo getFarBranch(bool allowCond = true) const;
+  DecInfoOffset getFarBranchLength(bool allowCond = true) const;
   uint8_t* farBranchTarget() const { return (uint8_t*)m_imm; }
   bool setFarBranchTarget(uint8_t* target);
 

@@ -988,7 +988,7 @@ void Label::branchFar(Assembler& a,
   if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
     a.xor(reg::r0, reg::r0, reg::r0,false);
     a.mtspr(Assembler::SpecialReg::XER, reg::r0);
-  } else if (cond) {
+  } else if (cond && fixedSize) {
     // Unconditional branch (jmp or call) doesn't need this reserve bytes
     a.emitNop(2 * instr_size_in_bytes);
   }

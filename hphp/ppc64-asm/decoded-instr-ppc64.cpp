@@ -138,9 +138,16 @@ bool DecodedInstruction::isNearBranch(bool allowCond /* = true */) const {
 bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
   return !getFarBranch(allowCond).isInvalid();
 }
+
 DecoderInfo DecodedInstruction::getFarBranch(bool allowCond) const {
-  if (!isLi64Possible() || (reg::r12 != getLi64Reg()))
-    return Decoder::GetDecoder().getInvalid();
+  return getFarBranchLength(allowCond).m_di;
+}
+
+// Returns -1 if not found, otherwise the offset from m_ip that a register
+// branch instruction is found
+DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
+  DecInfoOffset ret;
+  if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return ret;
 
   // only read bytes up to the smallest of @max_read or @bytes.
   auto can_read = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
@@ -156,23 +163,27 @@ DecoderInfo DecodedInstruction::getFarBranch(bool allowCond) const {
   assertx(Assembler::kJccLen > Assembler::kCallLen);
 
   // Search for a register branch instruction like bctr. Return when found.
-  for (uint8_t n = 0;
-      can_read(n, m_max_size, Assembler::kJccLen);
-      n += instr_size_in_bytes) {
+  for (ret.m_offset = 0;
+      can_read(ret.m_offset, m_max_size, Assembler::kJccLen);
+      ret.m_offset += instr_size_in_bytes) {
     // skip the preparation instructions that are not actually the branch.
-    auto far_branch_instr = m_ip + n;
-    auto di = Decoder::GetDecoder().decode(far_branch_instr);
-    if (di.isRegisterBranch(allowCond)) return di;
+    auto far_branch_instr = m_ip + ret.m_offset;
+    ret.m_di = Decoder::GetDecoder().decode(far_branch_instr);
+    if (ret.m_di.isRegisterBranch(allowCond)) return ret;
   }
-  return Decoder::GetDecoder().getInvalid();
+  return DecInfoOffset();
 }
+
 bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
   DecoderInfo di = getFarBranch();
   if (di.isInvalid()) return false;
 
   ppc64_asm::BranchParams bp(di.ip());
+  bool uncond = (bp.bo() == uint8_t(BranchParams::BO::Always));
+  auto block_size = uncond ? Assembler::kCallLen : Assembler::kJccLen;
+
   HPHP::CodeBlock cb;
-  cb.init(m_ip, Assembler::kJccLen, "setFarBranchTarget");
+  cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
   // avoid nops
   a.branchFar(target, bp, false);
@@ -204,9 +215,9 @@ void DecodedInstruction::decode() {
   if (isLi64Possible() && (reg::r12 == getLi64Reg())) {
     // Compute the whole branch on the m_size. Used on relocation to skip
     // instructions
-    m_size = (isFarBranch(false)) ?
-      Assembler::kCallLen : // unconditional branch
-      Assembler::kJccLen;   // conditional branch
+    DecInfoOffset dio = getFarBranchLength();
+    assertx(dio.m_offset > 0 && "Expected to find a Far branch");
+    m_size = dio.m_offset + instr_size_in_bytes;
     decodeImm();            // sets m_imm for farBranchTarget()
   } else if (isImmediate()) {
     m_size = decodeImm();
