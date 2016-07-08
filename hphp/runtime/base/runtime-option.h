@@ -418,8 +418,6 @@ struct RuntimeOption {
   static std::string DynamicExtensionPath;
   static std::vector<std::string> DynamicExtensions;
 
-
-
   // Namespace aliases for the compiler
   static std::map<std::string, std::string> AliasedNamespaces;
 
@@ -428,7 +426,6 @@ struct RuntimeOption {
   /*                                                                    \
    * Maximum number of elements on the VM execution stack.              \
    */                                                                   \
-  F(uint16_t, pcc64minTOCImmSize, 64)                                   \
   F(uint64_t, VMStackElms, kEvalVMStackElmsDefault)                     \
   /*                                                                    \
    * Initial space reserved for the global variable environment (in     \
@@ -471,7 +468,6 @@ struct RuntimeOption {
          error handler returns something other than boolean false,
          the runtime will throw a fatal error (this goes together
          with Option::HardReturnTypeHints). */                          \
-  F(uint16_t, ppc64minTOCImmSize,      0)                               \
   F(int32_t, CheckReturnTypeHints,     2)                               \
   F(bool, SoftClosureReturnTypeHints,  false)                           \
   F(bool, AllowScopeBinding,           true)                            \
@@ -588,6 +584,8 @@ struct RuntimeOption {
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(uint32_t, ReusableTCPadding, 128)                                   \
+  /* PPC64 Option: minimum immediate size to use TOC */                 \
+  F(uint16_t, ppc64minTOCImmSize,      64)                              \
   /* */
 
 private:
