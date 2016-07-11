@@ -16,6 +16,7 @@ module SourceText = Full_fidelity_source_text
 module SyntaxError = Full_fidelity_syntax_error
 module Operator = Full_fidelity_operator
 module PrecedenceParser = Full_fidelity_precedence_parser
+module TypeParser = Full_fidelity_type_parser
 
 open TokenKind
 open Syntax
@@ -27,6 +28,31 @@ module WithStatementAndDeclParser
 
   include PrecedenceParser
   include Full_fidelity_parser_helpers.WithParser(PrecedenceParser)
+
+  let parse_type_specifier parser =
+    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let (type_parser, node) = TypeParser.parse_type_specifier type_parser in
+    let lexer = TypeParser.lexer type_parser in
+    let errors = TypeParser.errors type_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
+  let parse_parameter_list_opt parser =
+    let decl_parser = DeclParser.make parser.lexer parser.errors in
+    let (decl_parser, node) = DeclParser.parse_parameter_list_opt decl_parser in
+    let lexer = DeclParser.lexer decl_parser in
+    let errors = DeclParser.errors decl_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
+  let parse_compound_statement parser =
+    let statement_parser = StatementParser.make parser.lexer parser.errors in
+    let (statement_parser, node) =
+      StatementParser.parse_compound_statement statement_parser in
+    let lexer = StatementParser.lexer statement_parser in
+    let errors = StatementParser.errors statement_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
 
   let rec parse_expression parser =
     let (parser, term) = parse_term parser in
@@ -95,11 +121,9 @@ module WithStatementAndDeclParser
     | Array -> parse_array_intrinsic_expression parser
     | LeftBracket (* TODO: ? one situation is array. any other situations? *)
       -> parse_array_creation_expression parser
-    | Shape (* TODO: Parse shape *)
-    | Async (* TODO: Parse lambda *)
-    | Function  (* TODO: Parse local function *)
-
-
+    | Shape -> parse_shape_expression parser
+    | Function -> parse_anon parser
+    | Async   (* TODO: anon or lambda *)
 
     | Dollar (* TODO: ? *)
     | DollarDollar (* TODO: ? *)
@@ -502,6 +526,7 @@ module WithStatementAndDeclParser
         (parser, element :: acc |> List.rev |> make_list)
     in
     aux parser []
+
   (* array-element-initializer :=
    * expression
    * expression => expression
@@ -516,5 +541,124 @@ module WithStatementAndDeclParser
       with_reset_precedence parser1 parse_expression in
       (parser, make_list [expr1; make_token token; expr2])
     | _ -> (parser, expr1)
+
+  and parse_field_initializer parser =
+    (* SPEC
+      field-initializer:
+        single-quoted-string-literal  =>  expression
+        integer-literal  =>  expression
+        qualified-name  =>  expression
+        *)
+    let (parser1, token) = next_token parser in
+    let (parser, name) = match Token.kind token with
+    | SingleQuotedStringLiteral
+    | DecimalLiteral
+    | OctalLiteral
+    | HexadecimalLiteral
+    | BinaryLiteral
+    | Name
+    | QualifiedName -> (parser1, make_token token)
+    | EqualGreaterThan ->
+      (* ERROR RECOVERY: We're missing the name. *)
+      (with_error parser SyntaxError.error1025, make_missing())
+    | _ ->
+      (* ERROR RECOVERY: We're missing the name and we have no arrow either.
+         Just eat the token and hope we get an arrow next. *)
+      (with_error parser1 SyntaxError.error1025, make_missing()) in
+    let (parser, arrow) =
+      expect_token parser EqualGreaterThan SyntaxError.error1028 in
+    let (parser, value) = with_reset_precedence parser parse_expression in
+    let result = make_field_initializer name arrow value in
+    (parser, result)
+
+  and parse_field_initializer_list_opt parser =
+    (* SPEC
+      field-initializer-list:
+        field-initializer
+        field-initializer-list    ,  field-initializer
+    *)
+    parse_comma_list_opt
+      parser RightParen SyntaxError.error1025 parse_field_initializer
+
+  and parse_shape_expression parser =
+    (* SPEC
+      shape-literal:
+        shape  (  field-initializer-list-opt  )
+    *)
+    let (parser, shape) = assert_token parser Shape in
+    let (parser, left_paren) =
+     expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, fields) = parse_field_initializer_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let result = make_shape_expression shape left_paren fields right_paren in
+    (parser, result)
+
+  and parse_anon_return_type parser =
+    let (parser, noreturn) = optional_token parser Noreturn in
+    if is_missing noreturn then
+      parse_type_specifier parser
+    else
+      (parser, noreturn)
+
+  and parse_variable parser =
+    (* Note that the use clause is a list of variable *tokens, not
+       *expressions*. *)
+    expect_token parser Variable SyntaxError.error1008
+
+  and parse_variable_list parser =
+    (* SPEC:
+      use-variable-name-list:
+        variable-name
+        use-variable-name-list  ,  variable-name
+    *)
+    parse_comma_list_opt
+      parser RightParen SyntaxError.error1025 parse_variable
+
+  and parse_anon_use_opt parser =
+    (* SPEC:
+      anonymous-function-use-clause:
+        use  (  use-variable-name-list  )
+    *)
+    let (parser, use_token) = optional_token parser Use in
+    if is_missing use_token then
+      (parser, use_token)
+    else
+      let (parser, left_paren) =
+       expect_token parser LeftParen SyntaxError.error1019 in
+      let (parser, variables) = parse_variable_list parser in
+      let (parser, right_paren) =
+        expect_token parser RightParen SyntaxError.error1011 in
+      let result = make_anonymous_function_use_clause use_token
+        left_paren variables right_paren in
+      (parser, result)
+
+  and parse_anon parser =
+    (* SPEC
+      anonymous-function-creation-expression:
+        async-opt  function
+        ( anonymous-function-parameter-declaration-list-opt  )
+        anonymous-function-return-opt
+        anonymous-function-use-clauseopt
+        compound-statement
+    *)
+    let (parser, async) = optional_token parser Async in
+    let (parser, fn) = assert_token parser Function in
+    let (parser, left_paren) =
+     expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, params) = parse_parameter_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let (parser, colon) = optional_token parser Colon in
+    let (parser, return_type) =
+      if is_missing colon then
+        (parser, (make_missing()))
+      else
+        parse_anon_return_type parser in
+    let (parser, use_clause) = parse_anon_use_opt parser in
+    let (parser, body) = parse_compound_statement parser in
+    let result = make_anonymous_function async fn left_paren params
+      right_paren colon return_type use_clause body in
+    (parser, result)
 
 end
