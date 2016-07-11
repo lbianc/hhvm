@@ -106,8 +106,12 @@ size_t relocateImpl(RelocationInfo& rel,
         }
 
         if (far_jmps.count(src)) {
+          // Near branch will be widen to Far branch. Update d2 in order to be
+          // able to read more bytes than only the Near branch
+          d2 = ppc64_asm::DecodedInstruction(dest);
           d2.widenBranch();
           internal_refs_need_update = true;
+
           // widening a branch makes the dest instruction bigger
           dest_block.setFrontier(dest + d2.size());
         } else if ((size_t(di.nearBranchTarget() - start) >= range) &&
@@ -205,7 +209,8 @@ size_t relocateImpl(RelocationInfo& rel,
       while (src != end) {
         ppc64_asm::DecodedInstruction di(src);
         TCA dest = rel.adjustedAddressAfter(src);
-        ppc64_asm::DecodedInstruction d2(dest, di.size());
+        // Avoid set max_size as it would fail when a branch is widen.
+        ppc64_asm::DecodedInstruction d2(dest);
         if (di.isNearBranch()) {
           TCA old_target = di.nearBranchTarget();
           TCA adjusted_target = rel.adjustedAddressAfter(old_target);
@@ -217,9 +222,6 @@ size_t relocateImpl(RelocationInfo& rel,
               ok = false;
             }
           } else {
-            // Near branch was widen to Far branch. Update d2 in order to be
-            // able to read more bytes than only the Near branch
-            d2 = ppc64_asm::DecodedInstruction(dest);
             if (!d2.setFarBranchTarget(new_target)) {
               always_assert(false && "Widen branch relocation failed");
             }

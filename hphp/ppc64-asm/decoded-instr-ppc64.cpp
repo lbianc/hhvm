@@ -120,10 +120,10 @@ void DecodedInstruction::widenBranch() {
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
     // target will be patched later
-    a.branchAuto(m_ip, bp);
+    a.branchFar(m_ip, bp, false);
 
-    // adjust size
-    m_size = a.frontier() - a.base();
+    // refresh m_size and other parameters
+    decode();
   }
 }
 
