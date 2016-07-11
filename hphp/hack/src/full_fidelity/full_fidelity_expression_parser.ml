@@ -16,6 +16,7 @@ module SourceText = Full_fidelity_source_text
 module SyntaxError = Full_fidelity_syntax_error
 module Operator = Full_fidelity_operator
 module PrecedenceParser = Full_fidelity_precedence_parser
+module TypeParser = Full_fidelity_type_parser
 
 open TokenKind
 open Syntax
@@ -28,15 +29,42 @@ module WithStatementAndDeclParser
   include PrecedenceParser
   include Full_fidelity_parser_helpers.WithParser(PrecedenceParser)
 
+  let parse_type_specifier parser =
+    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let (type_parser, node) = TypeParser.parse_type_specifier type_parser in
+    let lexer = TypeParser.lexer type_parser in
+    let errors = TypeParser.errors type_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
+  let parse_parameter_list_opt parser =
+    let decl_parser = DeclParser.make parser.lexer parser.errors in
+    let (decl_parser, node) = DeclParser.parse_parameter_list_opt decl_parser in
+    let lexer = DeclParser.lexer decl_parser in
+    let errors = DeclParser.errors decl_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
+  let parse_compound_statement parser =
+    let statement_parser = StatementParser.make parser.lexer parser.errors in
+    let (statement_parser, node) =
+      StatementParser.parse_compound_statement statement_parser in
+    let lexer = StatementParser.lexer statement_parser in
+    let errors = StatementParser.errors statement_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
   let rec parse_expression parser =
     let (parser, term) = parse_term parser in
     parse_remaining_expression parser term
 
   (* try to parse an expression. If parser cannot make progress, return None *)
-  and parse_expression_optional parser =
+  and parse_expression_optional parser ~reset_prec =
     let module Lexer = PrecedenceParser.Lexer in
     let offset = Lexer.start_offset (lexer parser) in
-    let (parser, expr) = parse_expression parser in
+    let (parser, expr) =
+      if reset_prec then with_reset_precedence parser parse_expression
+      else parse_expression parser in
     let offset1 = Lexer.start_offset (lexer parser) in
     if offset1 = offset then None else Some (parser, expr)
 
@@ -90,12 +118,13 @@ module WithStatementAndDeclParser
 
     | List  -> parse_list_expression parser
     | New -> parse_object_creation_expression parser
-    | Shape (* TODO: Parse shape *)
-    | Async (* TODO: Parse lambda *)
-    | Function  (* TODO: Parse local function *)
+    | Array -> parse_array_intrinsic_expression parser
+    | LeftBracket (* TODO: ? one situation is array. any other situations? *)
+      -> parse_array_creation_expression parser
+    | Shape -> parse_shape_expression parser
+    | Function -> parse_anon parser
+    | Async   (* TODO: anon or lambda *)
 
-
-    | LeftBracket (* TODO: ? *)
     | Dollar (* TODO: ? *)
     | DollarDollar (* TODO: ? *)
 
@@ -392,7 +421,8 @@ module WithStatementAndDeclParser
     let parser, keyword_token = next_token parser in
     let parser, left_paren =
       expect_token parser LeftParen SyntaxError.error1019 in
-    let parser, members = parse_list_expression_list parser in
+    let parser, members =
+      with_reset_precedence parser parse_list_expression_list in
     let parser, right_paren =
       expect_token parser RightParen SyntaxError.error1011 in
     let syntax = make_listlike_expression
@@ -403,18 +433,232 @@ module WithStatementAndDeclParser
       let (parser1, token) = next_token parser in
       match Token.kind token with
       | Comma ->
-        aux parser1 ((make_token token) :: acc)
+        let missing_expr = make_missing () in
+        let item = make_list_item missing_expr (make_token token) in
+        aux parser1 (item :: acc)
       | RightParen
       | Equal -> (* list intrinsic appears only on LHS of equal sign *)
         (parser, make_list (List.rev acc))
       | _ -> begin
-        (* ERROR RECOVERY if parser makes no progress, make an error *)
-        match parse_expression_optional parser with
+        match parse_expression_optional parser ~reset_prec:false with
         | None ->
+          (* ERROR RECOVERY if parser makes no progress, make an error *)
           let parser = with_error parser SyntaxError.error1015 in
-          (parser, make_missing ())
-        | Some (parser, expr) -> aux parser (expr :: acc)
+          (parser, make_missing () :: acc |> List.rev |> make_list)
+        | Some (parser, expr) ->
+          let (parser1, token) = next_token parser in
+          let parser, trailing = begin
+            match Token.kind token with
+            | Comma -> parser1, make_list_item expr (make_token token)
+            | RightParen -> parser, make_list_item expr (make_missing ())
+            | _ ->
+              (* ERROR RECOVERY: require a comma or right paren *)
+              let parser = with_error parser SyntaxError.error1009 in
+              parser, make_list_item expr (make_missing ())
+          end in
+          aux parser (trailing :: acc)
+    end in
+    aux parser []
+  (* grammar:
+   * array_intrinsic := array ( array-initializer-opt )
+   *)
+  and parse_array_intrinsic_expression parser =
+    let (parser, array_keyword) =
+      assert_token parser Array in
+    let (parser, left_paren) =
+      expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, members) = parse_array_initializer_opt parser true in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let syntax = make_array_intrinsic_expression array_keyword left_paren
+      members right_paren in
+    (parser, syntax)
+  (* array_creation_expression := [ array-initializer-opt ] *)
+  and parse_array_creation_expression parser =
+    let (parser, left_bracket) =
+      expect_token parser LeftBracket SyntaxError.error1026 in
+    let (parser, members) = parse_array_initializer_opt parser false in
+    let (parser, right_bracket) =
+      expect_token parser RightBracket SyntaxError.error1032 in
+    let syntax = make_array_creation_expression left_bracket
+      members right_bracket in
+    (parser, syntax)
+  (* array-initializer := array-initializer-list ,-opt *)
+  and parse_array_initializer_opt parser is_intrinsic =
+    let token = peek_token parser in
+    match Token.kind token with
+    | RightParen when is_intrinsic -> (parser, make_missing ())
+    | RightBracket when not is_intrinsic -> (parser, make_missing ())
+    | _ ->  parse_array_init_list parser is_intrinsic
+  (* array-initializer-list :=
+   * array-element-initializer
+   * array-element-initializer , array-initializer-list *)
+  and parse_array_init_list parser is_intrinsic =
+    let rec aux parser acc =
+      let parser, element = parse_array_element_init_opt parser in
+      let parser1, token = next_token parser in
+      match Token.kind token with
+      | Comma ->
+        let item = make_list_item element (make_token token) in
+        let acc = item :: acc in
+        let next_token = peek_token parser1 in
+        begin
+          match Token.kind next_token with
+          (* special case when comma finishes the array definition *)
+          | RightParen when is_intrinsic ->
+            (parser1, make_list (List.rev acc))
+          | RightBracket when not is_intrinsic ->
+            (parser1, make_list (List.rev acc))
+          | _ -> aux parser1 acc
         end
+      (* end of array definition *)
+      | RightParen when is_intrinsic ->
+        let item = make_list_item element (make_missing ()) in
+        (parser, make_list (List.rev (item :: acc)))
+      | RightBracket when not is_intrinsic ->
+        let item = make_list_item element (make_missing ()) in
+        (parser, make_list (List.rev (item :: acc)))
+      | _ -> (* ERROR RECOVERY *)
+        let error = if is_intrinsic then SyntaxError.error1009
+                    else SyntaxError.error1031 in
+        let parser = with_error parser error in
+        (* do not eat token here *)
+        (parser, element :: acc |> List.rev |> make_list)
     in
     aux parser []
+
+  (* array-element-initializer :=
+   * expression
+   * expression => expression
+   *)
+  and parse_array_element_init_opt parser =
+    let parser, expr1 =
+      with_reset_precedence parser parse_expression in
+    let parser1, token = next_token parser in
+    match Token.kind token with
+    | EqualGreaterThan ->
+      let parser, expr2 =
+      with_reset_precedence parser1 parse_expression in
+      (parser, make_list [expr1; make_token token; expr2])
+    | _ -> (parser, expr1)
+
+  and parse_field_initializer parser =
+    (* SPEC
+      field-initializer:
+        single-quoted-string-literal  =>  expression
+        integer-literal  =>  expression
+        qualified-name  =>  expression
+        *)
+    let (parser1, token) = next_token parser in
+    let (parser, name) = match Token.kind token with
+    | SingleQuotedStringLiteral
+    | DecimalLiteral
+    | OctalLiteral
+    | HexadecimalLiteral
+    | BinaryLiteral
+    | Name
+    | QualifiedName -> (parser1, make_token token)
+    | EqualGreaterThan ->
+      (* ERROR RECOVERY: We're missing the name. *)
+      (with_error parser SyntaxError.error1025, make_missing())
+    | _ ->
+      (* ERROR RECOVERY: We're missing the name and we have no arrow either.
+         Just eat the token and hope we get an arrow next. *)
+      (with_error parser1 SyntaxError.error1025, make_missing()) in
+    let (parser, arrow) =
+      expect_token parser EqualGreaterThan SyntaxError.error1028 in
+    let (parser, value) = with_reset_precedence parser parse_expression in
+    let result = make_field_initializer name arrow value in
+    (parser, result)
+
+  and parse_field_initializer_list_opt parser =
+    (* SPEC
+      field-initializer-list:
+        field-initializer
+        field-initializer-list    ,  field-initializer
+    *)
+    parse_comma_list_opt
+      parser RightParen SyntaxError.error1025 parse_field_initializer
+
+  and parse_shape_expression parser =
+    (* SPEC
+      shape-literal:
+        shape  (  field-initializer-list-opt  )
+    *)
+    let (parser, shape) = assert_token parser Shape in
+    let (parser, left_paren) =
+     expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, fields) = parse_field_initializer_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let result = make_shape_expression shape left_paren fields right_paren in
+    (parser, result)
+
+  and parse_anon_return_type parser =
+    let (parser, noreturn) = optional_token parser Noreturn in
+    if is_missing noreturn then
+      parse_type_specifier parser
+    else
+      (parser, noreturn)
+
+  and parse_variable parser =
+    (* Note that the use clause is a list of variable *tokens, not
+       *expressions*. *)
+    expect_token parser Variable SyntaxError.error1008
+
+  and parse_variable_list parser =
+    (* SPEC:
+      use-variable-name-list:
+        variable-name
+        use-variable-name-list  ,  variable-name
+    *)
+    parse_comma_list_opt
+      parser RightParen SyntaxError.error1025 parse_variable
+
+  and parse_anon_use_opt parser =
+    (* SPEC:
+      anonymous-function-use-clause:
+        use  (  use-variable-name-list  )
+    *)
+    let (parser, use_token) = optional_token parser Use in
+    if is_missing use_token then
+      (parser, use_token)
+    else
+      let (parser, left_paren) =
+       expect_token parser LeftParen SyntaxError.error1019 in
+      let (parser, variables) = parse_variable_list parser in
+      let (parser, right_paren) =
+        expect_token parser RightParen SyntaxError.error1011 in
+      let result = make_anonymous_function_use_clause use_token
+        left_paren variables right_paren in
+      (parser, result)
+
+  and parse_anon parser =
+    (* SPEC
+      anonymous-function-creation-expression:
+        async-opt  function
+        ( anonymous-function-parameter-declaration-list-opt  )
+        anonymous-function-return-opt
+        anonymous-function-use-clauseopt
+        compound-statement
+    *)
+    let (parser, async) = optional_token parser Async in
+    let (parser, fn) = assert_token parser Function in
+    let (parser, left_paren) =
+     expect_token parser LeftParen SyntaxError.error1019 in
+    let (parser, params) = parse_parameter_list_opt parser in
+    let (parser, right_paren) =
+      expect_token parser RightParen SyntaxError.error1011 in
+    let (parser, colon) = optional_token parser Colon in
+    let (parser, return_type) =
+      if is_missing colon then
+        (parser, (make_missing()))
+      else
+        parse_anon_return_type parser in
+    let (parser, use_clause) = parse_anon_use_opt parser in
+    let (parser, body) = parse_compound_statement parser in
+    let result = make_anonymous_function async fn left_paren params
+      right_paren colon return_type use_clause body in
+    (parser, result)
+
 end

@@ -195,6 +195,7 @@ MemoryManager::MemoryManager() {
 #endif
   resetStatsImpl(true);
   setMemoryLimit(std::numeric_limits<int64_t>::max());
+  resetGC(); // so each thread has unique req_num at startup
   // make the circular-lists empty.
   m_strings.next = m_strings.prev = &m_strings;
   m_bypassSlabAlloc = RuntimeOption::DisableSmallAllocator;
@@ -528,7 +529,7 @@ void MemoryManager::resetAllocator() {
   m_sweeping = false;
   m_exiting = false;
   resetStatsImpl(true);
-  updateNextGc();
+  resetGC();
   FTRACE(1, "reset: strings {}\n", nstrings);
   if (debug) resetEagerGC();
 }
@@ -589,8 +590,8 @@ void MemoryManager::flush() {
  */
 
 const char* header_names[] = {
-  "PackedArray", "StructArray", "MixedArray", "EmptyArray", "ApcArray",
-  "GlobalsArray", "ProxyArray", "DictArray", "VecArray",
+  "PackedArray", "MixedArray", "EmptyArray", "ApcArray",
+  "GlobalsArray", "ProxyArray", "DictArray", "VecArray", "KeysetArray",
   "String", "Resource", "Ref", "Object", "WaitHandle", "ResumableObj",
   "AwaitAllWH", "Vector", "Map", "Set", "Pair", "ImmVector", "ImmMap", "ImmSet",
   "ResumableFrame", "NativeData", "SmallMalloc", "BigMalloc", "BigObj",
@@ -661,11 +662,11 @@ void MemoryManager::checkHeap(const char* phase) {
         if (h->str_.isProxy()) apc_strings.insert(h);
         break;
       case HeaderKind::Packed:
-      case HeaderKind::Struct:
       case HeaderKind::Mixed:
       case HeaderKind::Dict:
       case HeaderKind::Empty:
       case HeaderKind::VecArray:
+      case HeaderKind::Keyset:
       case HeaderKind::Globals:
       case HeaderKind::Proxy:
       case HeaderKind::Object:

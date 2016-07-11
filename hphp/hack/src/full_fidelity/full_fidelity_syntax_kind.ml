@@ -18,9 +18,21 @@ type t =
 (* Declarations *)
 | ScriptHeader
 | Script
+| NamespaceDeclaration
+| NamespaceBody
+| NamespaceUseDeclaration
+| NamespaceUseClause
 | FunctionDeclaration
+| ClassishDeclaration
+| ClassishBody
 | ParameterDeclaration
 | DefaultArgumentSpecifier
+| AttributeSpecification
+| Attribute
+| InclusionDirective
+| EnumDeclaration
+| Enumerator
+| AliasDeclaration
 
 (* Statements *)
 | CompoundStatement
@@ -42,8 +54,13 @@ type t =
 | ThrowStatement
 | BreakStatement
 | ContinueStatement
+| FunctionStaticStatement
+| StaticDeclarator
+| StaticInitializer
 
 (* Expressions *)
+| AnonymousFunction
+| AnonymousFunctionUseClause
 | LiteralExpression
 | VariableExpression
 | QualifiedNameExpression
@@ -58,6 +75,8 @@ type t =
 | ObjectCreationExpression
 | ShapeExpression
 | FieldInitializer
+| ArrayCreationExpression
+| ArrayIntrinsicExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -65,6 +84,8 @@ type t =
 (* Types *)
 | SimpleTypeSpecifier
 | NullableTypeSpecifier
+| TypeConstraint
+| TypeParameter
 | TypeConstant
 | GenericTypeSpecifier
 | TypeArguments
@@ -80,6 +101,8 @@ let to_string kind =
   match kind with
   | Missing -> "missing"
   | Token -> "token"
+  | AnonymousFunction -> "anonymous_function"
+  | AnonymousFunctionUseClause -> "anonymous_function_use_clause"
   | LiteralExpression -> "literal"
   | VariableExpression -> "variable"
   | QualifiedNameExpression -> "qualified_name"
@@ -88,8 +111,16 @@ let to_string kind =
   | ListItem -> "list_item"
   | ScriptHeader -> "header"
   | Script -> "script"
+  | NamespaceDeclaration -> "namespace_declaration"
+  | NamespaceBody -> "namespace_body"
+  | NamespaceUseDeclaration -> "namespace_use_declaration"
+  | NamespaceUseClause -> "namespace_use_clause"
   | FunctionDeclaration -> "function_declaration"
+  | ClassishDeclaration -> "classish_declaration"
+  | ClassishBody -> "classish_body"
   | ParameterDeclaration -> "parameter_declaration"
+  | AttributeSpecification -> "attribute_specification"
+  | Attribute -> "attribute"
   | CompoundStatement -> "compound_statement"
   | ExpressionStatement -> "expression_statement"
   | WhileStatement -> "while_statement"
@@ -109,6 +140,9 @@ let to_string kind =
   | ThrowStatement -> "throw_statement"
   | BreakStatement -> "break_statement"
   | ContinueStatement -> "continue_statement"
+  | FunctionStaticStatement -> "function_static_statement"
+  | StaticDeclarator -> "static_declarator"
+  | StaticInitializer -> "static_initializer"
   | PrefixUnaryOperator -> "prefix_unary_operator"
   | PostfixUnaryOperator -> "postfix_unary_operator"
   | BinaryOperator -> "binary_operator"
@@ -120,8 +154,12 @@ let to_string kind =
   | ObjectCreationExpression -> "object_creation_expression"
   | ShapeExpression -> "shape_expression"
   | FieldInitializer -> "field_initializer"
+  | ArrayCreationExpression -> "array_creation_expression"
+  | ArrayIntrinsicExpression -> "array_intrinsic_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
+  | TypeConstraint -> "type_constraint"
+  | TypeParameter -> "type_parameter"
   | NullableTypeSpecifier -> "nullable_type_specifier"
   | GenericTypeSpecifier -> "generic_type_specifier"
   | TupleTypeSpecifier -> "tuple_type_specifier"
@@ -133,6 +171,10 @@ let to_string kind =
   | FieldSpecifier -> "field_specifier"
   | TypeArguments -> "type_arguments"
   | DefaultArgumentSpecifier -> "default_argument_specifier"
+  | InclusionDirective -> "inclusion_directive"
+  | EnumDeclaration -> "enum_declaration"
+  | Enumerator -> "enumerator"
+  | AliasDeclaration -> "alias_declaration"
   | XHPExpression -> "xhp_expression"
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"

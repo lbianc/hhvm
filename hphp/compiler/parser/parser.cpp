@@ -179,7 +179,7 @@ Parser::Parser(Scanner &scanner, const char *fileName,
       m_nsAliasTable(getAutoAliasedClasses(),
                      [&] { return getAliasFlags(); }) {
   auto const md5str = mangleUnitMd5(scanner.getMd5());
-  MD5 md5 = MD5(md5str.c_str());
+  auto const md5 = MD5{md5str};
 
   m_file = std::make_shared<FileScope>(m_fileName, fileSize, md5);
 
@@ -921,7 +921,6 @@ void Parser::onNewObject(Token &out, Token &name, Token &args) {
 }
 
 void Parser::onUnaryOpExp(Token &out, Token &operand, int op, bool front) {
-  if (op == T_KEYSET) op = T_VEC;
   switch (op) {
   case T_INCLUDE:
   case T_INCLUDE_ONCE:
