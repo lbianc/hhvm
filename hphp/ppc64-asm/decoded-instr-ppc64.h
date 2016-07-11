@@ -69,7 +69,7 @@ struct DecodedInstruction {
   // shrink : branch by offset up to 16bits. Return true if success.
   // wide   : branch by absolute address.
   bool shrinkBranch();
-  void widenBranch();
+  void widenBranch(uint8_t* target);
 
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }

@@ -105,7 +105,7 @@ bool DecodedInstruction::shrinkBranch() {
   return false;
 }
 
-void DecodedInstruction::widenBranch() {
+void DecodedInstruction::widenBranch(uint8_t* target) {
   // currently, it should be a Near branch, else don't do anything if it's Far.
   assertx(isBranch() && "Can't widen instruction that is not a branch.");
 
@@ -119,8 +119,7 @@ void DecodedInstruction::widenBranch() {
     cb.init(m_ip, max_branch_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    // target will be patched later
-    a.branchFar(m_ip, bp, false);
+    a.branchFar(target, bp, false);
 
     // refresh m_size and other parameters
     decode();

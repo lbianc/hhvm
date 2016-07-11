@@ -104,13 +104,18 @@ size_t relocateImpl(RelocationInfo& rel,
         if (di.isBranch(false)) {
           target = di.nearBranchTarget();
         }
+        // Relative branch needs always to be readjusted
+        internal_refs_need_update = true;
 
         if (far_jmps.count(src)) {
+          TCA old_target = di.nearBranchTarget();
+          TCA adjusted_target = rel.adjustedAddressAfter(old_target);
+          TCA new_target = (adjusted_target) ? adjusted_target : old_target;
+
           // Near branch will be widen to Far branch. Update d2 in order to be
           // able to read more bytes than only the Near branch
           d2 = ppc64_asm::DecodedInstruction(dest);
-          d2.widenBranch();
-          internal_refs_need_update = true;
+          d2.widenBranch(new_target);
 
           // widening a branch makes the dest instruction bigger
           dest_block.setFrontier(dest + d2.size());
@@ -125,9 +130,6 @@ size_t relocateImpl(RelocationInfo& rel,
               "relocate: instruction at {} has target 0x{:x} "
               "which is too far away for a near branch after relocation\n",
               dest, di.nearBranchTarget());
-
-          // It'll be widen afterwards
-          internal_refs_need_update = true;
         }
       }
       if (di.isImmediate()) {
