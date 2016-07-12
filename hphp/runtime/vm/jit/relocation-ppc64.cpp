@@ -94,6 +94,13 @@ size_t relocateImpl(RelocationInfo& rel,
     while (src != end) {
       assertx(src < end);
       ppc64_asm::DecodedInstruction di(src);
+
+      // avoid copying nops
+      if (di.isNop()) {
+        src += di.size();
+        continue;
+      }
+
       asm_count++;
 
       TCA target = nullptr;
@@ -210,6 +217,13 @@ size_t relocateImpl(RelocationInfo& rel,
       bool ok = true;
       while (src != end) {
         ppc64_asm::DecodedInstruction di(src);
+
+        // Nops were not copied, skip it
+        if (di.isNop()) {
+          src += di.size();
+          continue;
+        }
+
         TCA dest = rel.adjustedAddressAfter(src);
         // Avoid set max_size as it would fail when a branch is widen.
         ppc64_asm::DecodedInstruction d2(dest);
