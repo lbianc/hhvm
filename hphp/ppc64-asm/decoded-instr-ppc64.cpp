@@ -149,7 +149,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
   if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return ret;
 
   // only read bytes up to the smallest of @max_read or @bytes.
-  auto can_read = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
+  auto canRead = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
     if (max_read)
 #define MIN(a, b)    (((a) < (b)) ? (a) : (b))
       return n < MIN(max_read, bytes);
@@ -163,7 +163,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
 
   // Search for a register branch instruction like bctr. Return when found.
   for (ret.m_offset = 0;
-      can_read(ret.m_offset, m_max_size, Assembler::kJccLen);
+      canRead(ret.m_offset, m_max_size, Assembler::kJccLen);
       ret.m_offset += instr_size_in_bytes) {
     // skip the preparation instructions that are not actually the branch.
     auto far_branch_instr = m_ip + ret.m_offset;
