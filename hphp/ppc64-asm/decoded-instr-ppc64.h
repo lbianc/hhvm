@@ -39,7 +39,9 @@ struct DecodedInstruction {
   size_t size() const           { return size_t{m_size}; }
 
   int32_t offset() const        { return dinfo->offset(); }
+  int32_t offsetDS() const        { return dinfo->offsetDS(); }
   bool isNop() const            { return dinfo->isNop(); }
+  bool isLdTOC() const          {return dinfo->isLdTOC(); }
   // if it's conditional branch, it's not a jmp
   bool isJmp() const            { return isBranch(false); }
   bool isSpOffsetInstr() const  { return dinfo->isSpOffsetInstr(); }

@@ -243,6 +243,13 @@ public:
    * this is done so signed offsets could be used */
   intptr_t getPtrVector();
 
+  /* return a value previously pushed */
+  int64_t getValue(uint16_t index) {
+    union conv16 {int16_t i16v; uint16_t u16v;} val;
+    val.u16v = index;
+    return m_funcaddrs[val.i16v + kTOCSize/2];
+  }
+
   /* number of elements in TOC vector
    * ld can address an 16bit offset */
   static constexpr int kTOCSize = 8192;
@@ -1901,9 +1908,24 @@ struct Assembler {
   }
 
 //////////////////////////////////////////////////////////////////////
+  // Auxiliary for loading immediates in the best way
+  void limmediate(const Reg64& rt, int64_t imm64, bool fixedSize = false,
+      Reg64 rtoc = reg::r2);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
+
+  static int64_t getLimmediate(PPC64Instr* pinstr) {
+    if(Decoder::GetDecoder().decode(*pinstr)->isLdTOC()) {
+      auto indexTOC = Decoder::GetDecoder().decode(*pinstr)->offsetDS() >> 3;
+      return VMTOC::getInstance().getValue(indexTOC);
+    }
+    else
+      return getLi64(pinstr);
+  }
+  static int64_t getLimmediate(CodeAddress pinstr) {
+    return getLimmediate(reinterpret_cast<PPC64Instr*>(pinstr));
+  }
 
   // Retrieve the target defined by li64 instruction
   static int64_t getLi64(PPC64Instr* pinstr);
@@ -1915,6 +1937,20 @@ struct Assembler {
   static Reg64 getLi64Reg(PPC64Instr* instr);
   static Reg64 getLi64Reg(CodeAddress instr) {
     return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
+  }
+
+  static Reg64 getLimmediateReg(PPC64Instr* instr) {
+    if(Decoder::GetDecoder().decode(*instr)->isLdTOC()) {
+      DS_form_t ds_instr;
+      ds_instr.instruction = *instr;
+      return Reg64(ds_instr.RT);
+    }
+    else
+      return getLi64Reg(instr);
+  }
+
+  static Reg64 getLimmediateReg(CodeAddress instr) {
+    return getLimmediateReg(reinterpret_cast<PPC64Instr*>(instr));
   }
 
   // Auxiliary for loading a 32bits immediate into a register

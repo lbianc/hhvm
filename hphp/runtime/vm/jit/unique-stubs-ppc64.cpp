@@ -217,7 +217,8 @@ void assert_tc_saved_rip(void* saved_lr_pointer) {
 
   ppc64_asm::DecodedInstruction di(branch_instr);
   if (di.isJmp()) {
-    auto const jmp_target = TCA(ppc64_asm::Assembler::getLi64(branch_block));
+    auto imm = ppc64_asm::Assembler::getLimmediate(branch_block);
+    auto const jmp_target = TCA(imm);
     always_assert(di.isJmp() && jmp_target == exittc);
   } else {
     always_assert(saved_lr == exittc);

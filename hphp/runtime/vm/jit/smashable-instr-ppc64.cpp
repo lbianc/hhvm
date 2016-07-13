@@ -97,9 +97,9 @@ void smashMovq(TCA inst, uint64_t imm) {
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
-  Reg64 reg = Assembler::getLi64Reg(inst);
+  Reg64 reg = Assembler::getLimmediateReg(inst);
 
-  a.li64(reg, imm);
+  a.limmediate(reg, imm);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
@@ -160,7 +160,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  return static_cast<uint64_t>(Assembler::getLi64(inst));
+  return static_cast<uint64_t>(Assembler::getLimmediate(inst));
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
@@ -171,14 +171,14 @@ TCA smashableCallTarget(TCA inst) {
   if (!Assembler::isCall(inst)) return nullptr;
 
   return reinterpret_cast<TCA>(
-      Assembler::getLi64(inst));
+      Assembler::getLimmediate(inst));
 }
 
 static TCA smashableBranchTarget(TCA inst, bool allowCond) {
   ppc64_asm::DecodedInstruction di(inst);
   if (!di.isBranch(allowCond)) return nullptr;
 
-  return reinterpret_cast<TCA>(Assembler::getLi64(inst));
+  return reinterpret_cast<TCA>(Assembler::getLimmediate(inst));
 }
 
 TCA smashableJmpTarget(TCA inst) {

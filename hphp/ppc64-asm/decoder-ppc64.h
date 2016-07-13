@@ -1533,6 +1533,7 @@ struct DecoderInfo {
   }
 
   bool isNop() const;
+  bool isLdTOC() const;
   bool isOffsetBranch(bool allowCond = true) const;
   bool isAbsoluteBranch(bool allowCond = true) const;
   bool isRegisterBranch(bool allowCond = true) const;
@@ -1540,6 +1541,7 @@ struct DecoderInfo {
   bool isClearSignBit() const;
   bool isSpOffsetInstr() const;
   int32_t offset() const;
+  int16_t offsetDS() const;
 
 private:
   // opcode enumeration identifier

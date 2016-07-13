@@ -16,6 +16,7 @@
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/ppc64-asm/decoder-ppc64.h"
+#include "hphp/runtime/base/runtime-option.h"
 
 namespace ppc64_asm {
 
@@ -870,7 +871,7 @@ static void patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLi64InstrLen, "patched bctr");
   Assembler a{ cb };
-  a.li64(reg::r12, ssize_t(dest), true);
+  a.limmediate(reg::r12, ssize_t(dest), true);
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest, bool cond) {
@@ -1115,14 +1116,31 @@ int32_t Assembler::getLi32(PPC64Instr* pinstr) {
   return static_cast<int32_t>(imm32);
 }
 
+void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize,
+    Reg64 rtoc) {
+  always_assert(HPHP::RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
+    HPHP::RuntimeOption::Evalppc64minTOCImmSize <= 64);
+
+  auto fits = [](int64_t imm64, uint16_t shift_n) {
+     return (static_cast<uint64_t>(imm64) >> shift_n) == 0 ? true : false;
+  };
+
+  if (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize) ||
+      VMTOC::getInstance().checkFull())
+    li64(rt, imm64, fixedSize);
+  else {
+    ld(rt, rtoc[VMTOC::getInstance().pushElem(imm64) << 3]);
+    if (fixedSize)
+      emitNop(4 * instr_size_in_bytes);
+  }
+  return;
+}
+
 //////////////////////////////////////////////////////////////////////
 // Label
 //////////////////////////////////////////////////////////////////////
 
 Label::~Label() {
-  if (!m_toPatch.empty()) {
-    assert(m_a && m_address && "Label had jumps but was never set");
-  }
   for (auto& ji : m_toPatch) {
     bool cond = ((BranchType::bc == ji.type) ||
         (BranchType::bcctr == ji.type));
@@ -1176,7 +1194,7 @@ void Label::branchFar(Assembler& a, BranchConditions bc, LinkReg lr) {
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.li64(reg::r12, address, true);
+  a.limmediate(reg::r12, address, true);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).

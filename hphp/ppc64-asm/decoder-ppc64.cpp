@@ -321,6 +321,18 @@ bool DecoderInfo::isNop() const {
   return false;
 }
 
+bool DecoderInfo::isLdTOC() const {
+  // no-op is a mnemonic of ori 0,0,0
+  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld)) {
+    DS_form_t dsform;
+    dsform.instruction = m_image;
+    if (dsform.RA == 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
 
 bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
   // allowCond: true
@@ -477,6 +489,18 @@ int32_t DecoderInfo::offset() const {
   // As the instruction is known, the immediate is a signed number of
   // 16bits, so to consider the sign, it must be casted to int16_t.
   return static_cast<int16_t>(instr_d.D);
+}
+
+/**
+ * Look for the offset from instructions like ld, which was created by
+ * limmediate.
+ */
+int16_t DecoderInfo::offsetDS() const {
+  always_assert(m_form == Form::kDS && "Instruction not expected.");
+  DS_form_t instr_d;
+  instr_d.instruction = m_image;
+
+  return static_cast<int16_t>(instr_d.DS << 2);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
