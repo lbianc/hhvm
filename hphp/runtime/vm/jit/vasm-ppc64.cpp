@@ -680,8 +680,8 @@ void Vgen::emit(const jmp& i) {
 }
 
 void Vgen::emit(const jmpr& i) {
-  a.mr(ppc64_asm::reg::r12, i.target.asReg());
-  a.mtctr(ppc64_asm::reg::r12);
+  a.mr(rfuncentry(), i.target.asReg());
+  a.mtctr(rfuncentry());
   a.bctr();
 }
 
@@ -771,8 +771,8 @@ void Vgen::emit(const calltc& i) {
   a.mtlr(rfuncln());
 
   // and jump. When it returns, it'll be to enterTCExit
-  a.mr(ppc64_asm::reg::r12, i.target.asReg());
-  a.mtctr(ppc64_asm::reg::r12);
+  a.mr(rfuncentry(), i.target.asReg());
+  a.mtctr(rfuncentry());
   a.bctr();
 }
 
@@ -786,8 +786,8 @@ void Vgen::emit(const resumetc& i) {
   emit(push{rAsm});
 
   // and jump. When it returns, it'll be to enterTCExit
-  a.mr(ppc64_asm::reg::r12, i.target.asReg());
-  a.mtctr(ppc64_asm::reg::r12);
+  a.mr(rfuncentry(), i.target.asReg());
+  a.mtctr(rfuncentry());
   a.bctr();
 }
 
@@ -808,10 +808,10 @@ void Vgen::emit(const lea& i) {
 
 void Vgen::emit(const call& i) {
   // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
-  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  a.addi(rsfp(), rsp(), -min_frame_size);
+  a.std(rvmfp(), rsfp()[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
   a.call(i.target, Assembler::CallArg::External);
   if (i.watch) {
     // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
@@ -822,10 +822,10 @@ void Vgen::emit(const call& i) {
 
 void Vgen::emit(const callr& i) {
   // Setup r1 with a valid frame in order to allow LR save by callee's prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
-  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  a.addi(rsfp(), rsp(), -min_frame_size);
+  a.std(rvmfp(), rsfp()[AROFF(m_sfp)]);
   // TOC save/restore is required by ABI for external functions.
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
   a.call(i.target.asReg(), Assembler::CallArg::External);
 }
 
@@ -833,8 +833,8 @@ void Vgen::emit(const calls& i) {
   // calls is used to call c++ function like handlePrimeCacheInit so setup the
   // r1 pointer to a valid frame in order to allow LR save by callee's
   // prologue.
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
-  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  a.addi(rsfp(), rsp(), -min_frame_size);
+  a.std(rvmfp(), rsfp()[AROFF(m_sfp)]);
   emitSmashableCall(a.code(), env.meta, i.target);
 }
 
@@ -853,8 +853,8 @@ void Vgen::emit(const callstub& i) {
   // Build a minimal call frame in order to save the LR but avoid writing to
   // rsp() directly as there are stubs that are called that doesn't have a
   // stublogue/stubret (e.g: freeLocalsHelpers)
-  a.addi(ppc64_asm::reg::r1, rsp(), -min_frame_size);
-  a.std(rvmfp(), ppc64_asm::reg::r1[AROFF(m_sfp)]);
+  a.addi(rsfp(), rsp(), -min_frame_size);
+  a.std(rvmfp(), rsfp()[AROFF(m_sfp)]);
   a.call(i.target);
 }
 
@@ -869,12 +869,12 @@ void Vgen::emit(const callfaststub& i) {
  */
 void Vgen::emit(const stublogue& i) {
   // Recover the frame created on callstub.
-  a.mr(rsp(), ppc64_asm::reg::r1);
-  if (i.saveframe) a.std(rvmfp(), rsp()[0]);
+  a.mr(rsp(), rsfp());
+  if (i.saveframe) a.std(rvmfp(), rsp()[AROFF(m_sfp)]);
 
   // save return address on this frame
   a.mflr(rfuncln());
-  a.std(rfuncln(), rsp()[AROFF(m_savedRip)]);
+  a.std(rfuncln(), rsfp()[AROFF(m_savedRip)]);
 }
 
 void Vgen::emit(const stubret& i) {
@@ -895,7 +895,7 @@ void Vgen::emit(const tailcallstub& i) {
   // frame and undo stublogue allocation.
   a.ld(rfuncln(), rsp()[AROFF(m_savedRip)]);
   a.mtlr(rfuncln());
-  a.mr(ppc64_asm::reg::r1, rsp());
+  a.mr(rsfp(), rsp());
   emit(jmpi{i.target, i.args});
 }
 
