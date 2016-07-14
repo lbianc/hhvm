@@ -145,7 +145,7 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
     // Allocate enough space that the relocated cold code doesn't overlap the
     // emitted cold code.
     static unsigned seed = 42;
-    auto code_alignment = [](void) {
+    auto code_alignment = [](void) -> uint8_t {
       switch (arch()) {
         case Arch::X64:
           return 1;
@@ -153,6 +153,7 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
         case Arch::ARM:
           return 4;
       }
+      not_reached();
     }();
     auto off = rand_r(&seed) & (cache_line_size() - code_alignment);
 
