@@ -22,18 +22,6 @@ type config = {
   log_level        : int;
 }
 
-let default_config =
-  let gig = 1024 * 1024 * 1024 in
-  {
-    global_size    = gig;
-    heap_size      = 20 * gig;
-    dep_table_pow  = 17; (* 1 << 17 *)
-    hash_table_pow = 18; (* 1 << 18 *)
-    shm_dirs       = [GlobalConfig.shm_dir; GlobalConfig.tmp_dir;];
-    shm_min_avail  = gig / 2; (* Half a gig by default *)
-    log_level      = 0;
-  }
-
 (* Allocated in C only. *)
 type handle = private {
   h_fd: Unix.file_descr;
@@ -133,9 +121,6 @@ let init config =
     if !Utils.debug
     then Hh_logger.log "Failed to use anonymous memfd init";
     shm_dir_init config config.shm_dirs
-
-let init_default () : handle =
-  init default_config
 
 external connect : handle -> is_master:bool -> unit = "hh_connect"
 
@@ -340,8 +325,11 @@ end
 module Serial: functor(Value:Value.Type) -> sig
   type t
 
+  (* Serialize a value and log stats *)
   val make : Value.t -> t
-  val get  : t -> Value.t
+
+  (* Log stats for the number of bytes given *)
+  val log_deserialize  : int -> Obj.t -> unit
 
 end = functor(Value:Value.Type) -> struct
   type t = string
@@ -358,33 +346,30 @@ end = functor(Value:Value.Type) -> struct
     end;
     s
 
-  let get x  =
-    let r = Marshal.from_string x 0 in
-    if hh_log_level() > 0
-    then begin
-      let sharedheap = float (String.length x) in
-      let localheap = float (value_size (Obj.repr r)) in
+  let log_deserialize l r =
+    let sharedheap = float l in
+    let localheap = float (value_size r) in
+    begin
       Measure.sample (Value.description
         ^ " (bytes deserialized from shared heap)") sharedheap;
       Measure.sample ("ALL bytes deserialized from shared heap") sharedheap;
       Measure.sample (Value.description
         ^ " (bytes allocated for deserialized value)") localheap;
       Measure.sample ("ALL bytes allocated for deserialized value") localheap
-   end;
-   r
+    end
 end
-
 
 (*****************************************************************************)
 (* Raw interface to shared memory (cf hh_shared.c for the underlying
  * representation).
  *)
 (*****************************************************************************)
-module Raw (Key: Key) (Value: sig type t end) = struct
+module Raw (Key: Key) (SerializedValue: sig type t end) (Value:Value.Type) = struct
 
-  external hh_add         : Key.md5 -> Value.t -> unit = "hh_add"
+  external hh_add         : Key.md5 -> SerializedValue.t -> unit = "hh_add"
   external hh_mem         : Key.md5 -> bool            = "hh_mem"
-  external hh_get         : Key.md5 -> Value.t         = "hh_get"
+  external hh_get_size    : Key.md5 -> int             = "hh_get_size"
+  external hh_get_and_deserialize: Key.md5 -> Value.t = "hh_get_and_deserialize"
   external hh_remove      : Key.md5 -> unit            = "hh_remove"
   external hh_move        : Key.md5 -> Key.md5 -> unit = "hh_move"
 end
@@ -423,7 +408,7 @@ module New : functor (Key : Key) -> functor(Value: Value.Type) -> sig
 end = functor (Key : Key) -> functor (Value : Value.Type) -> struct
 
   module Data = Serial(Value)
-  module Raw = Raw (Key) (Data)
+  module Raw = Raw (Key) (Data) (Value)
 
   let add key value = Raw.hh_add (Key.md5 key) (Data.make value)
   let mem key = Raw.hh_mem (Key.md5 key)
@@ -431,7 +416,11 @@ end = functor (Key : Key) -> functor (Value : Value.Type) -> struct
   let get key =
     let key = Key.md5 key in
     if Raw.hh_mem key
-    then Some (Data.get (Raw.hh_get key))
+    then
+      let v = Raw.hh_get_and_deserialize key in
+      if hh_log_level() > 0
+      then (Data.log_deserialize (Raw.hh_get_size key) (Obj.repr v));
+      Some v
     else None
 
   let find_unsafe key =
@@ -471,12 +460,16 @@ module Old : functor (Key : Key) -> functor (Value : Value.Type) -> sig
 end = functor (Key : Key) -> functor (Value: Value.Type) -> struct
 
   module Data = Serial(Value)
-  module Raw = Raw (Key) (Data)
+  module Raw = Raw (Key) (Data) (Value)
 
   let get key =
     let key = Key.md5_old key in
     if Raw.hh_mem key
-    then Some (Data.get (Raw.hh_get key))
+    then
+      let v = Raw.hh_get_and_deserialize key in
+      if hh_log_level() > 0
+      then Data.log_deserialize (Raw.hh_get_size key) (Obj.repr v);
+      Some v
     else None
 
   let mem key = Raw.hh_mem (Key.md5_old key)

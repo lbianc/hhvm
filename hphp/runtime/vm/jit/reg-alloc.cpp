@@ -78,7 +78,7 @@ bool storesCell(const IRInstruction& inst, uint32_t srcIdx) {
   switch (arch()) {
   case Arch::X64: break;
   case Arch::ARM: break;
-  case Arch::PPC64: return false; break;
+  case Arch::PPC64: return false;
   }
 
   // If this function returns true for an operand, then the register allocator

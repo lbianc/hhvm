@@ -32,6 +32,7 @@
 #include "hphp/util/trace.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 
 #include <folly/MoveWrapper.h>
 
@@ -97,14 +98,13 @@ void clearTCMaps(TCA start, TCA end) {
   auto& catchMap = mcg->catchTraceMap();
   auto const profData = jit::profData();
   while (start < end) {
-
-    #if defined(__powerpc64__)
+#if defined(__powerpc64__)
     ppc64_asm::DecodedInstruction di(start);
-    #elif defined(__x86_64__)
+#elif defined(__x86_64__)
     x64::DecodedInstruction di(start);
-    #else
+#else
     not_implemented();
-    #endif
+#endif
     if (profData && di.isBranch()) {
       profData->clearJmpTransID(start);
     }

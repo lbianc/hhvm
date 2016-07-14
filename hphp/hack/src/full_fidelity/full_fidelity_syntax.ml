@@ -410,11 +410,6 @@ module WithToken(Token: TokenType) = struct
       xhp_open_attrs : t;
       xhp_open_right_angle : t;
     }
-    and xhp_embedded_expression = {
-      xhp_embed_open_brace : t;
-      xhp_embed_expr : t;
-      xhp_embed_close_brace : t;
-    }
     and xhp_expression = {
       xhp_open : t;
       xhp_body : t;
@@ -559,6 +554,7 @@ module WithToken(Token: TokenType) = struct
     | LiteralExpression of t
     | VariableExpression of t
     | QualifiedNameExpression of t
+    | PipeVariableExpression of t
     | PrefixUnaryOperator of unary_operator
     | PostfixUnaryOperator of unary_operator
     | BinaryOperator of binary_operator
@@ -575,6 +571,7 @@ module WithToken(Token: TokenType) = struct
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
+    | XHPClose of xhp_close
 
     | SimpleTypeSpecifier of t
     | NullableTypeSpecifier of nullable_type_specifier
@@ -611,6 +608,7 @@ module WithToken(Token: TokenType) = struct
       | LiteralExpression _ -> SyntaxKind.LiteralExpression
       | VariableExpression _ -> SyntaxKind.VariableExpression
       | QualifiedNameExpression _ -> SyntaxKind.QualifiedNameExpression
+      | PipeVariableExpression _ -> SyntaxKind.PipeVariableExpression
       | Error _ -> SyntaxKind.Error
       | SyntaxList _ -> SyntaxKind.SyntaxList
       | ListItem _ -> SyntaxKind.ListItem
@@ -668,6 +666,7 @@ module WithToken(Token: TokenType) = struct
       | ArrayIntrinsicExpression _ -> SyntaxKind.ArrayIntrinsicExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
+      | XHPClose _ -> SyntaxKind.XHPClose
       | XHPAttribute _ -> SyntaxKind.XHPAttribute
       | TypeConstant _ ->  SyntaxKind.TypeConstant
       | SimpleTypeSpecifier _ -> SyntaxKind.SimpleTypeSpecifier
@@ -695,6 +694,7 @@ module WithToken(Token: TokenType) = struct
     let is_literal node = kind node = SyntaxKind.LiteralExpression
     let is_variable node = kind node = SyntaxKind.VariableExpression
     let is_qualified_name node = kind node = SyntaxKind.QualifiedNameExpression
+    let is_pipe_variable node = kind node = SyntaxKind.PipeVariableExpression
     let is_error node = kind node = SyntaxKind.Error
     let is_list node = kind node = SyntaxKind.SyntaxList
     let is_list_item node = kind node = SyntaxKind.ListItem
@@ -793,6 +793,7 @@ module WithToken(Token: TokenType) = struct
       | LiteralExpression x -> [x]
       | VariableExpression x -> [x]
       | QualifiedNameExpression x -> [x]
+      | PipeVariableExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
       | AnonymousFunction
@@ -1026,6 +1027,9 @@ module WithToken(Token: TokenType) = struct
       | XHPOpen
         { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
         [ xhp_open_name; xhp_open_attrs; xhp_open_right_angle ]
+      | XHPClose
+        { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle } ->
+        [ xhp_close_left_angle; xhp_close_name; xhp_close_right_angle ]
       | XHPAttribute
         { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
         [ xhp_attr_name; xhp_attr_equal; xhp_attr_expr ]
@@ -1091,6 +1095,7 @@ module WithToken(Token: TokenType) = struct
       | LiteralExpression _ -> [ "literal_expression" ]
       | VariableExpression _ -> [ "variable_expression" ]
       | QualifiedNameExpression _ -> [ "qualified_name_expression" ]
+      | PipeVariableExpression _ -> ["pipe_variable_expression"]
       | Error _ -> []
       | SyntaxList _ -> []
       | AnonymousFunction
@@ -1331,6 +1336,9 @@ module WithToken(Token: TokenType) = struct
       | XHPOpen
         { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
         [ "xhp_open_name"; "xhp_open_attrs"; "xhp_open_right_angle" ]
+      | XHPClose
+        { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle } ->
+        [ "xhp_close_left_angle"; "xhp_close_name"; "xhp_close_right_angle" ]
       | XHPAttribute
         { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
         [ "xhp_attr_name"; "xhp_attr_equal"; "xhp_attr_expr" ]
@@ -1559,6 +1567,9 @@ module WithToken(Token: TokenType) = struct
     let xhp_open_name x = x.xhp_open_name
     let xhp_open_attrs x = x.xhp_open_attrs
     let xhp_open_right_angle x = x.xhp_open_right_angle
+    let xhp_close_left_angle x = x.xhp_close_left_angle
+    let xhp_close_name x = x.xhp_close_name
+    let xhp_close_right_angle x = x.xhp_close_right_angle
     let xhp_attr_name x = x.xhp_attr_name
     let xhp_attr_equal x = x.xhp_attr_equal
     let xhp_attr_expr x = x.xhp_attr_expr
@@ -1640,6 +1651,7 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.LiteralExpression, [x]) -> LiteralExpression x
       | (SyntaxKind.VariableExpression, [x]) -> VariableExpression x
       | (SyntaxKind.QualifiedNameExpression,[x]) -> QualifiedNameExpression x
+      | (SyntaxKind.PipeVariableExpression, [x]) -> PipeVariableExpression x
       | (SyntaxKind.SimpleTypeSpecifier, [x]) -> SimpleTypeSpecifier x
       | (SyntaxKind.ScriptHeader,
         [ header_less_than; header_question; header_language ]) ->
@@ -1875,6 +1887,9 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
           xhp_open_right_angle ]) ->
         XHPOpen { xhp_open_name; xhp_open_attrs; xhp_open_right_angle }
+      | (SyntaxKind.XHPClose, [ xhp_close_left_angle; xhp_close_name;
+          xhp_close_right_angle ]) ->
+        XHPClose { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle }
       | (SyntaxKind.XHPAttribute, [ xhp_attr_name; xhp_attr_equal;
           xhp_attr_expr ]) ->
         XHPAttribute { xhp_attr_name; xhp_attr_equal; xhp_attr_expr }
@@ -2060,6 +2075,11 @@ module WithToken(Token: TokenType) = struct
       let make_xhp_open xhp_open_name xhp_open_attrs xhp_open_right_angle =
         from_children SyntaxKind.XHPOpen
           [xhp_open_name; xhp_open_attrs; xhp_open_right_angle ]
+
+      let make_xhp_close
+          xhp_close_left_angle xhp_close_name xhp_close_right_angle =
+        from_children SyntaxKind.XHPClose
+          [xhp_close_left_angle; xhp_close_name; xhp_close_right_angle ]
 
       let make_xhp_attr xhp_attr_name xhp_attr_equal xhp_attr_expr =
         from_children SyntaxKind.XHPAttribute
@@ -2345,6 +2365,9 @@ module WithToken(Token: TokenType) = struct
 
       let make_qualified_name_expression name =
         from_children SyntaxKind.QualifiedNameExpression [ name ]
+
+      let make_pipe_variable_expression variable =
+        from_children SyntaxKind.PipeVariableExpression [ variable ]
 
     end (* WithValueBuilder *)
   end (* WithSyntaxValue *)

@@ -64,6 +64,7 @@ type t =
 | LiteralExpression
 | VariableExpression
 | QualifiedNameExpression
+| PipeVariableExpression
 | PrefixUnaryOperator
 | PostfixUnaryOperator
 | BinaryOperator
@@ -80,6 +81,7 @@ type t =
 | XHPExpression
 | XHPOpen
 | XHPAttribute
+| XHPClose
 
 (* Types *)
 | SimpleTypeSpecifier
@@ -106,6 +108,7 @@ let to_string kind =
   | LiteralExpression -> "literal"
   | VariableExpression -> "variable"
   | QualifiedNameExpression -> "qualified_name"
+  | PipeVariableExpression -> "pipe_variable"
   | Error -> "error"
   | SyntaxList -> "list"
   | ListItem -> "list_item"
@@ -178,3 +181,4 @@ let to_string kind =
   | XHPExpression -> "xhp_expression"
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"
+  | XHPClose -> "xhp_close"

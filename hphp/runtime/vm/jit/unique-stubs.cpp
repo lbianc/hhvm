@@ -1154,7 +1154,7 @@ TCA emitEnterTCHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
     // Native func prologue.
     v << stublogue{true};
 
-    // Architecture-specific setup to enter on TC.
+    // Architecture-specific setup for entering the TC.
     v << inittc{};
 
 #if defined(__CYGWIN__) || defined(__MINGW__) || defined(_MSC_VER)
