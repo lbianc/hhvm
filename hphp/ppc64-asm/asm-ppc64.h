@@ -250,6 +250,11 @@ public:
     return m_funcaddrs[val.i16v + kTOCSize/2];
   }
 
+  void resetTOC() {
+    m_last_elem_pos = 0;
+    m_map.clear();
+  }
+
   /* number of elements in TOC vector
    * ld can address an 16bit offset */
   static constexpr int kTOCSize = 8192;
@@ -270,7 +275,7 @@ struct Assembler {
   friend struct Label;
 
   explicit Assembler(HPHP::CodeBlock& cb) : codeBlock(cb) {}
-  ~Assembler(){}
+  ~Assembler(){VMTOC::getInstance().resetTOC();}
 
   HPHP::CodeBlock& code() const { return codeBlock; }
 
