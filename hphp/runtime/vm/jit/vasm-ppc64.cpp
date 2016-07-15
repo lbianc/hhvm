@@ -554,11 +554,9 @@ void Vgen::emit(const ldimmq& i) {
   auto val = i.s.q();
   if (i.d.isGP()) {
     a.limmediate(i.d, val);
-    //a.li64(i.d, val);
   } else {
     assertx(i.d.isSIMD());
-    a.li64(rAsm, val);
-    //a.limmediate(i.d, val);
+    a.limmediate(rAsm, val);
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
