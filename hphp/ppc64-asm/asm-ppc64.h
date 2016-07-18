@@ -21,6 +21,7 @@
 #include <cassert>
 #include <vector>
 #include <iostream>
+#include <fstream>
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
@@ -32,6 +33,7 @@
 #include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
+#include "hphp/runtime/base/runtime-option.h"
 
 namespace ppc64_asm {
 
@@ -223,7 +225,17 @@ private:
     , m_funcaddrs(kTOCSize)
   {}
 
-  ~VMTOC(){}
+  ~VMTOC(){
+    if (HPHP::RuntimeOption::Evalppc64dumpTOCnElements) {
+     pid_t pid = getpid();
+     std::string dumpedfile = "/tmp/nelements." + std::to_string(pid);
+     std::ofstream nelemdumped;
+     nelemdumped.open(dumpedfile);
+     if (nelemdumped.is_open())
+       nelemdumped << m_last_elem_pos;
+       nelemdumped.close();
+    }
+  }
 
 public:
   VMTOC(VMTOC const&) = delete;
