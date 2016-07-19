@@ -226,13 +226,15 @@ private:
   {}
 
   ~VMTOC(){
-    if (HPHP::RuntimeOption::Evalppc64dumpTOCnElements) {
+    if (HPHP::RuntimeOption::Evalppc64dumpTOCNelements) {
      pid_t pid = getpid();
      std::string dumpedfile = "/tmp/nelements." + std::to_string(pid);
      std::ofstream nelemdumped;
      nelemdumped.open(dumpedfile);
      if (nelemdumped.is_open())
-       nelemdumped << m_last_elem_pos;
+       nelemdumped << "Number of values stored in TOC: ";
+       nelemdumped << std::to_string(m_last_elem_pos);
+       nelemdumped << "\n";
        nelemdumped.close();
     }
   }

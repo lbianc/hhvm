@@ -587,7 +587,7 @@ struct RuntimeOption {
   /* PPC64 Option: minimum immediate size to use TOC */                 \
   F(uint16_t, ppc64minTOCImmSize,      64)                              \
   /* PPC64 Option: dump the number of elements stored in TOC */         \
-  F(bool, ppc64dumpTOCnElements,      false)                            \
+  F(bool, ppc64dumpTOCNelements,      false)                            \
   /* */
 
 private:
