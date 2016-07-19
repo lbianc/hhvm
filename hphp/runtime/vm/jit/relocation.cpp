@@ -91,13 +91,16 @@ struct CodeSmasher {
         case Arch::PPC64: {
           ppc64_asm::Assembler a{cb};
           a.emitExceptions(cb.available());
+          break;
         }
         case Arch::X64: {
           X64Assembler a{cb};
           a.emitExceptions(cb.available());
+          break;
         }
         case Arch::ARM:
           not_implemented();
+          break;
       }
     }
     okToRelocate = true;
@@ -814,13 +817,16 @@ bool relocateNewTranslation(TransLoc& loc, CodeCache::View cache,
         case Arch::PPC64: {
           ppc64_asm::Assembler a{cb};
           a.emitExceptions(cb.available());
+          break;
         }
         case Arch::X64: {
           X64Assembler a{cb};
           a.emitExceptions(cb.available());
+          break;
         }
         case Arch::ARM:
           not_implemented();
+          break;
       }
       always_assert(!cb.available());
     };
@@ -872,8 +878,10 @@ void adjustForRelocation(RelocationInfo& rel) {
   switch (arch()) {
   case Arch::X64:
     x64::adjustForRelocation(rel);
+    break;
   case Arch::PPC64:
     ppc64::adjustForRelocation(rel);
+    break;
   case Arch::ARM:
     break;
   }
@@ -882,8 +890,10 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
   switch (arch()) {
   case Arch::X64:
     x64::adjustForRelocation(rel, srcStart, srcEnd);
+    break;
   case Arch::PPC64:
     ppc64::adjustForRelocation(rel, srcStart, srcEnd);
+    break;
   case Arch::ARM:
     break;
   }
@@ -892,8 +902,10 @@ void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
   switch (arch()) {
   case Arch::X64:
     x64::adjustCodeForRelocation(rel, fixups);
+    break;
   case Arch::PPC64:
     ppc64::adjustCodeForRelocation(rel, fixups);
+    break;
   case Arch::ARM:
     break;
   }
@@ -904,8 +916,10 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
   switch (arch()) {
   case Arch::X64:
     x64::adjustMetaDataForRelocation(rel, asmInfo, fixups);
+    break;
   case Arch::PPC64:
     ppc64::adjustMetaDataForRelocation(rel, asmInfo, fixups);
+    break;
   case Arch::ARM:
     break;
   }
@@ -914,8 +928,10 @@ void findFixups(TCA start, TCA end, CGMeta& fixups) {
   switch (arch()) {
   case Arch::X64:
     x64::findFixups(start, end, fixups);
+    break;
   case Arch::PPC64:
     ppc64::findFixups(start, end, fixups);
+    break;
   case Arch::ARM:
     break;
   }
@@ -928,8 +944,10 @@ size_t relocate(RelocationInfo& rel,
   switch (arch()) {
   case Arch::X64:
     return x64::relocate(rel, destBlock, start, end, fixups, exitAddr);
+    break;
   case Arch::PPC64:
     return ppc64::relocate(rel, destBlock, start, end, fixups, exitAddr);
+    break;
   case Arch::ARM:
     return 0;
   }
