@@ -88,7 +88,7 @@ void smashMovq(TCA inst, uint64_t imm) {
   const ppc64_asm::DecodedInstruction di(inst);
   Reg64 reg = di.getLi64Reg();
 
-  a.li64(reg, imm);
+  a.li64(reg, imm, true);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
@@ -115,7 +115,7 @@ void smashCall(TCA inst, TCA target) {
 
   a.setFrontier(inst);
 
-  a.li64(rfuncentry(), reinterpret_cast<uint64_t>(target));
+  a.li64(rfuncentry(), reinterpret_cast<uint64_t>(target), true);
 }
 
 void smashJmp(TCA inst, TCA target) {
