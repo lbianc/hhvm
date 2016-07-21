@@ -23,16 +23,24 @@ type t =
 | NamespaceUseDeclaration
 | NamespaceUseClause
 | FunctionDeclaration
+| FunctionDeclarationHeader
+| MethodishDeclaration
 | ClassishDeclaration
 | ClassishBody
+| TraitUse
+| RequireClause
+| ConstDeclaration
+| ConstantDeclarator
+| TypeConstDeclaration
 | ParameterDeclaration
-| DefaultArgumentSpecifier
 | AttributeSpecification
 | Attribute
 | InclusionDirective
 | EnumDeclaration
 | Enumerator
 | AliasDeclaration
+| PropertyDeclaration
+| PropertyDeclarator
 
 (* Statements *)
 | CompoundStatement
@@ -56,7 +64,7 @@ type t =
 | ContinueStatement
 | FunctionStaticStatement
 | StaticDeclarator
-| StaticInitializer
+| SimpleInitializer
 
 (* Expressions *)
 | AnonymousFunction
@@ -119,8 +127,15 @@ let to_string kind =
   | NamespaceUseDeclaration -> "namespace_use_declaration"
   | NamespaceUseClause -> "namespace_use_clause"
   | FunctionDeclaration -> "function_declaration"
+  | FunctionDeclarationHeader -> "function_declaration_header"
+  | MethodishDeclaration -> "methodish_declaration"
   | ClassishDeclaration -> "classish_declaration"
   | ClassishBody -> "classish_body"
+  | TraitUse -> "trait_use"
+  | RequireClause -> "require_clause"
+  | ConstDeclaration -> "const_declaration"
+  | ConstantDeclarator -> "constant_declarator"
+  | TypeConstDeclaration -> "type_const_declaration"
   | ParameterDeclaration -> "parameter_declaration"
   | AttributeSpecification -> "attribute_specification"
   | Attribute -> "attribute"
@@ -145,7 +160,7 @@ let to_string kind =
   | ContinueStatement -> "continue_statement"
   | FunctionStaticStatement -> "function_static_statement"
   | StaticDeclarator -> "static_declarator"
-  | StaticInitializer -> "static_initializer"
+  | SimpleInitializer -> "simple_initializer"
   | PrefixUnaryOperator -> "prefix_unary_operator"
   | PostfixUnaryOperator -> "postfix_unary_operator"
   | BinaryOperator -> "binary_operator"
@@ -173,11 +188,12 @@ let to_string kind =
   | ShapeTypeSpecifier -> "shape_type_specifier"
   | FieldSpecifier -> "field_specifier"
   | TypeArguments -> "type_arguments"
-  | DefaultArgumentSpecifier -> "default_argument_specifier"
   | InclusionDirective -> "inclusion_directive"
   | EnumDeclaration -> "enum_declaration"
   | Enumerator -> "enumerator"
   | AliasDeclaration -> "alias_declaration"
+  | PropertyDeclaration -> "property_declaration"
+  | PropertyDeclarator -> "property_declarator"
   | XHPExpression -> "xhp_expression"
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"

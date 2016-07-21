@@ -27,6 +27,7 @@
 #include <folly/String.h>
 #include <folly/portability/SysResource.h>
 #include <folly/portability/SysTime.h>
+#include <folly/portability/Unistd.h>
 
 #include "hphp/util/build-info.h"
 #include "hphp/util/hdf.h"
@@ -188,6 +189,7 @@ int RuntimeOption::ServerPreShutdownWait = 0;
 int RuntimeOption::ServerShutdownListenWait = 0;
 int RuntimeOption::ServerShutdownEOMWait = 0;
 int RuntimeOption::ServerPrepareToStopTimeout = 0;
+int RuntimeOption::ServerPartialPostStatusCode = -1;
 bool RuntimeOption::StopOldServer = false;
 int RuntimeOption::OldServerWait = 30;
 int RuntimeOption::CacheFreeFactor = 50;
@@ -408,6 +410,7 @@ bool RuntimeOption::PHP7_NoHexNumerics = false;
 bool RuntimeOption::PHP7_ReportVersion = false;
 bool RuntimeOption::PHP7_ScalarTypes = false;
 bool RuntimeOption::PHP7_Substr = false;
+bool RuntimeOption::PHP7_InfNanFloatParse = false;
 bool RuntimeOption::PHP7_UVS = false;
 
 std::map<std::string, std::string> RuntimeOption::AliasedNamespaces;
@@ -1250,6 +1253,8 @@ void RuntimeOption::Load(
                  s_PHP7_master);
     Config::Bind(PHP7_Substr, ini, config, "PHP7.Substr",
                  s_PHP7_master);
+    Config::Bind(PHP7_InfNanFloatParse, ini, config, "PHP7.InfNanFloatParse",
+                 s_PHP7_master);
     Config::Bind(PHP7_UVS, ini, config, "PHP7.UVS", s_PHP7_master);
   }
   {
@@ -1332,6 +1337,8 @@ void RuntimeOption::Load(
                  "Server.ShutdownEOMWait", 0);
     Config::Bind(ServerPrepareToStopTimeout, ini, config,
                  "Server.PrepareToStopTimeout", 240);
+    Config::Bind(ServerPartialPostStatusCode, ini, config,
+                 "Server.PartialPostStatusCode", -1);
     Config::Bind(StopOldServer, ini, config, "Server.StopOld", false);
     Config::Bind(OldServerWait, ini, config, "Server.StopOldWait", 30);
     Config::Bind(ServerRSSNeededMb, ini, config, "Server.RSSNeededMb", 4096);
@@ -1654,7 +1661,7 @@ void RuntimeOption::Load(
                  "Debug.CoreDumpReportDirectory", CoreDumpReportDirectory);
     std::ostringstream stack_trace_stream;
     stack_trace_stream << CoreDumpReportDirectory << "/stacktrace."
-                       << Process::GetProcessId() << ".log";
+                       << (int64_t)getpid() << ".log";
     StackTraceFilename = stack_trace_stream.str();
 
     Config::Bind(StackTraceTimeout, ini, config, "Debug.StackTraceTimeout", 0);

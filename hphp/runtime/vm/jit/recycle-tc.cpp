@@ -100,10 +100,8 @@ void clearTCMaps(TCA start, TCA end) {
   while (start < end) {
 #if defined(__powerpc64__)
     ppc64_asm::DecodedInstruction di(start);
-#elif defined(__x86_64__)
-    x64::DecodedInstruction di(start);
 #else
-    not_implemented();
+    x64::DecodedInstruction di(start);
 #endif
     if (profData && di.isBranch()) {
       profData->clearJmpTransID(start);
@@ -138,6 +136,7 @@ void clearTCMaps(TCA start, TCA end) {
  */
 void reclaimSrcRec(const SrcRec* rec) {
   mcg->assertOwnsCodeLock();
+  mcg->assertOwnsMetadataLock();
 
   ITRACE(1, "Reclaiming SrcRec addr={} anchor={}\n", (void*)rec,
          rec->getFallbackTranslation());
@@ -200,8 +199,8 @@ void recordJump(TCA toSmash, SrcRec* sr) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void reclaimTranslation(TransLoc loc) {
-  auto codeLock = mcg->lockCode();
-  auto metaLock = mcg->lockMetadata();
+  mcg->assertOwnsCodeLock();
+  mcg->assertOwnsMetadataLock();
 
   ITRACE(1, "Reclaiming translation M[{}, {}] C[{}, {}] F[{}, {}]\n",
          loc.mainStart(), loc.mainEnd(), loc.coldStart(), loc.coldEnd(),
@@ -291,7 +290,7 @@ void reclaimFunction(const Func* func) {
     // through an immutable stub, as this would imply the function is still
     // reachable.
     auto addr = caller.second.isGuard ? us.bindCallStub
-                                      : nullptr;
+                                      : caller.first;
     smashCall(caller.first, addr);
     s_smashedCalls.erase(caller.first);
   }

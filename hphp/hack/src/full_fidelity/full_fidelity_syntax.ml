@@ -104,7 +104,8 @@ module WithToken(Token: TokenType) = struct
     and enumerator = {
       enumerator_name : t;
       enumerator_equal : t;
-      enumerator_value : t
+      enumerator_value : t;
+      enumerator_semicolon : t
     }
     and alias_declaration = {
       alias_token : t;
@@ -113,6 +114,16 @@ module WithToken(Token: TokenType) = struct
       alias_equal : t;
       alias_type : t;
       alias_semicolon : t
+    }
+    and property_declaration = {
+      prop_modifiers : t;
+      prop_type : t;
+      prop_declarators : t;
+      prop_semicolon : t
+    }
+    and property_declarator = {
+      prop_name : t;
+      prop_init : t
     }
     and namespace_declaration = {
       namespace_token : t;
@@ -135,7 +146,11 @@ module WithToken(Token: TokenType) = struct
       namespace_use_alias : t
     }
     and function_declaration = {
-      function_attr : t;
+      function_attribute_spec : t;
+      function_declaration_header : t;
+      function_body : t
+    }
+    and function_declaration_header = {
       function_async : t;
       function_token : t;
       function_name : t;
@@ -145,7 +160,14 @@ module WithToken(Token: TokenType) = struct
       function_right_paren : t;
       function_colon : t;
       function_type : t;
-      function_body : t
+    }
+    and methodish_declaration = {
+        methodish_attr : t;
+        methodish_modifiers : t;
+        methodish_function_decl_header : t;
+        (* Only one of function body and semicolon can be used *)
+        methodish_function_body : t;
+        methodish_semicolon : t;
     }
     and classish_declaration = {
       classish_attr : t;
@@ -165,15 +187,44 @@ module WithToken(Token: TokenType) = struct
       classish_body_elements : t;
       classish_body_right_brace : t;
     }
+    and trait_use = {
+      trait_use_token : t;
+      trait_use_name_list : t;
+      trait_use_semicolon : t;
+    }
+    and require_clause = {
+      require_token : t;
+      require_kind : t;
+      require_name : t;
+      require_semicolon : t
+    }
+    and const_declaration = {
+      const_abstract : t;
+      const_token : t;
+      const_type_specifier : t;
+      const_declarator_list : t;
+      const_semicolon : t;
+    }
+    and constant_declarator = {
+      constant_declarator_name : t;
+      constant_declarator_initializer : t;
+    }
+    and type_const_declaration = {
+      type_const_abstract : t;
+      type_const_const_token : t;
+      type_const_type_token : t;
+      type_const_name : t;
+      type_const_type_constraint : t;
+      type_const_equal : t;
+      type_const_type_specifier : t;
+      type_const_semicolon : t;
+    }
     and parameter_declaration = {
       param_attr : t;
+      param_visibility : t;
       param_type : t;
       param_name : t;
       param_default : t
-    }
-    and default_argument_specifier = {
-      default_equal : t;
-      default_value : t
     }
     and attribute_specification = {
       attribute_spec_left_double_angle : t;
@@ -323,9 +374,9 @@ module WithToken(Token: TokenType) = struct
       static_name : t;
       static_init : t
     }
-    and static_initializer = {
-      static_init_equal : t;
-      static_init_value : t
+    and simple_initializer = {
+      simple_init_equal : t;
+      simple_init_value : t
     }
     and anonymous_function = {
       anonymous_async : t;
@@ -516,13 +567,21 @@ module WithToken(Token: TokenType) = struct
     | NamespaceUseDeclaration of namespace_use_declaration
     | NamespaceUseClause of namespace_use_clause
     | FunctionDeclaration of function_declaration
+    | FunctionDeclarationHeader of function_declaration_header
+    | MethodishDeclaration of methodish_declaration
     | ClassishDeclaration of classish_declaration
     | ClassishBody of classish_body
+    | TraitUse of trait_use
+    | RequireClause of require_clause
+    | ConstDeclaration of const_declaration
+    | ConstantDeclarator of constant_declarator
+    | TypeConstDeclaration of type_const_declaration
     | EnumDeclaration of enum_declaration
     | Enumerator of enumerator
     | AliasDeclaration of alias_declaration
+    | PropertyDeclaration of property_declaration
+    | PropertyDeclarator of property_declarator
     | ParameterDeclaration of parameter_declaration
-    | DefaultArgumentSpecifier of default_argument_specifier
     | AttributeSpecification of attribute_specification
     | Attribute of attribute
     | InclusionDirective of inclusion_directive
@@ -546,7 +605,7 @@ module WithToken(Token: TokenType) = struct
     | BreakStatement of break_statement
     | ContinueStatement of continue_statement
     | FunctionStaticStatement of function_static_statement
-    | StaticInitializer of static_initializer
+    | SimpleInitializer of simple_initializer
     | StaticDeclarator of static_declarator
 
     | AnonymousFunction of anonymous_function
@@ -617,15 +676,23 @@ module WithToken(Token: TokenType) = struct
       | EnumDeclaration _ -> SyntaxKind.EnumDeclaration
       | Enumerator _ -> SyntaxKind.Enumerator
       | AliasDeclaration _ -> SyntaxKind.AliasDeclaration
+      | PropertyDeclaration _ -> SyntaxKind.PropertyDeclaration
+      | PropertyDeclarator _ -> SyntaxKind.PropertyDeclarator
       | NamespaceDeclaration _ -> SyntaxKind.NamespaceDeclaration
       | NamespaceBody _ -> SyntaxKind.NamespaceBody
       | NamespaceUseDeclaration _ -> SyntaxKind.NamespaceUseDeclaration
       | NamespaceUseClause _ -> SyntaxKind.NamespaceUseClause
       | FunctionDeclaration _ -> SyntaxKind.FunctionDeclaration
+      | FunctionDeclarationHeader _ -> SyntaxKind.FunctionDeclarationHeader
+      | MethodishDeclaration _ -> SyntaxKind.MethodishDeclaration
       | ClassishDeclaration _ -> SyntaxKind.ClassishDeclaration
       | ClassishBody _ -> SyntaxKind.ClassishBody
+      | TraitUse _ -> SyntaxKind.TraitUse
+      | RequireClause _ -> SyntaxKind.RequireClause
+      | ConstDeclaration _ -> SyntaxKind.ConstDeclaration
+      | ConstantDeclarator _ -> SyntaxKind.ConstantDeclarator
+      | TypeConstDeclaration _ -> SyntaxKind.TypeConstDeclaration
       | ParameterDeclaration _ -> SyntaxKind.ParameterDeclaration
-      | DefaultArgumentSpecifier _ -> SyntaxKind.DefaultArgumentSpecifier
       | AttributeSpecification _ -> SyntaxKind.AttributeSpecification
       | Attribute _ -> SyntaxKind.Attribute
       | InclusionDirective _ -> SyntaxKind.InclusionDirective
@@ -649,7 +716,7 @@ module WithToken(Token: TokenType) = struct
       | BreakStatement _ -> SyntaxKind.BreakStatement
       | ContinueStatement _ -> SyntaxKind.ContinueStatement
       | FunctionStaticStatement _ -> SyntaxKind.FunctionStaticStatement
-      | StaticInitializer _ -> SyntaxKind.StaticInitializer
+      | SimpleInitializer _ -> SyntaxKind.SimpleInitializer
       | StaticDeclarator _ -> SyntaxKind.StaticDeclarator
       | PrefixUnaryOperator _ -> SyntaxKind.PrefixUnaryOperator
       | PostfixUnaryOperator _ -> SyntaxKind.PostfixUnaryOperator
@@ -703,16 +770,25 @@ module WithToken(Token: TokenType) = struct
     let is_enum node = kind node = SyntaxKind.EnumDeclaration
     let is_enumerator node = kind node = SyntaxKind.Enumerator
     let is_alias node = kind node = SyntaxKind.AliasDeclaration
+    let is_property_declaration node =
+      kind node = SyntaxKind.PropertyDeclaration
+    let is_property_declarator node =
+      kind node = SyntaxKind.PropertyDeclarator
     let is_namespace node = kind node = SyntaxKind.NamespaceDeclaration
     let is_namespace_body node = kind node = SyntaxKind.NamespaceBody
     let is_namespace_use node = kind node = SyntaxKind.NamespaceUseDeclaration
     let is_namespace_use_clause node = kind node = SyntaxKind.NamespaceUseClause
     let is_function node = kind node = SyntaxKind.FunctionDeclaration
+    let is_method node = kind node = SyntaxKind.MethodishDeclaration
     let is_classish node = kind node = SyntaxKind.ClassishDeclaration
     let is_classish_body node = kind node = SyntaxKind.ClassishBody
+    let is_trait_use node = kind node = SyntaxKind.TraitUse
+    let is_require_clause node = kind node = SyntaxKind.RequireClause
+    let is_const_declaration node = kind node = SyntaxKind.ConstDeclaration
+    let is_constant_declarator node = kind node = SyntaxKind.ConstantDeclarator
+    let is_type_const_declaration node =
+      kind node = SyntaxKind.TypeConstDeclaration
     let is_parameter node = kind node = SyntaxKind.ParameterDeclaration
-    let is_default_arg_specifier node =
-      kind node = SyntaxKind.DefaultArgumentSpecifier
     let is_attribute_specification node =
       kind node = SyntaxKind.AttributeSpecification
     let is_attribute node = kind node = SyntaxKind.Attribute
@@ -720,6 +796,7 @@ module WithToken(Token: TokenType) = struct
     let is_compound_statement node = kind node = SyntaxKind.CompoundStatement
     let is_expression_statement node =
       kind node = SyntaxKind.ExpressionStatement
+    let is_for_statement node = kind node = SyntaxKind.ForStatement
     let is_foreach_statement node = kind node = SyntaxKind.ForeachStatement
     let is_while_statement node = kind node = SyntaxKind.WhileStatement
     let is_if_statement node = kind node = SyntaxKind.IfStatement
@@ -731,7 +808,7 @@ module WithToken(Token: TokenType) = struct
     let is_do_statement node = kind node = SyntaxKind.DoStatement
     let is_function_static_statement node =
       kind node = SyntaxKind.FunctionStaticStatement
-    let is_static_initializer node = kind node = SyntaxKind.StaticInitializer
+    let is_simple_initializer node = kind node = SyntaxKind.SimpleInitializer
     let is_static_declarator node = kind node = SyntaxKind.StaticDeclarator
     let is_switch_statement node = kind node = SyntaxKind.SwitchStatement
     let is_prefix_operator node = kind node = SyntaxKind.PrefixUnaryOperator
@@ -778,6 +855,12 @@ module WithToken(Token: TokenType) = struct
     let is_field_specifier node =
       kind node = SyntaxKind.FieldSpecifier
 
+    let is_loop_statement node =
+      is_for_statement node ||
+      is_foreach_statement node ||
+      is_while_statement node ||
+      is_do_statement node
+
     let is_separable_prefix node =
       match syntax node with
       | Token t -> begin
@@ -785,6 +868,23 @@ module WithToken(Token: TokenType) = struct
         | PlusPlus | MinusMinus -> false
         | _ -> true) end
       | _ -> true
+
+    let is_specific_token kind node =
+      match syntax node with
+      | Token t -> Token.kind t = kind
+      | _ -> false
+
+
+    let is_semicolon = is_specific_token Full_fidelity_token_kind.Semicolon
+    let is_name = is_specific_token Full_fidelity_token_kind.Name
+    let is_construct = is_specific_token Full_fidelity_token_kind.Construct
+    let is_destruct = is_specific_token Full_fidelity_token_kind.Destruct
+    let is_static = is_specific_token Full_fidelity_token_kind.Static
+    let is_private = is_specific_token Full_fidelity_token_kind.Private
+    let is_public = is_specific_token Full_fidelity_token_kind.Public
+    let is_protected = is_specific_token Full_fidelity_token_kind.Protected
+    let is_abstract = is_specific_token Full_fidelity_token_kind.Abstract
+    let is_final = is_specific_token Full_fidelity_token_kind.Final
 
     let children node =
       match node.syntax with
@@ -823,13 +923,21 @@ module WithToken(Token: TokenType) = struct
         [ enum_enum; enum_name; enum_colon; enum_base; enum_type;
           enum_left_brace; enum_enumerators; enum_right_brace ]
       | Enumerator
-        { enumerator_name; enumerator_equal; enumerator_value } ->
-        [ enumerator_name; enumerator_equal; enumerator_value ]
+        { enumerator_name; enumerator_equal; enumerator_value;
+          enumerator_semicolon } ->
+        [ enumerator_name; enumerator_equal; enumerator_value;
+          enumerator_semicolon ]
       | AliasDeclaration
         { alias_token; alias_name; alias_constraint;
           alias_equal; alias_type; alias_semicolon } ->
         [ alias_token; alias_name; alias_constraint;
           alias_equal; alias_type; alias_semicolon ]
+      | PropertyDeclaration
+        { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
+        [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]
+      | PropertyDeclarator
+        { prop_name; prop_init } ->
+        [ prop_name; prop_init ]
       | NamespaceDeclaration
         { namespace_token; namespace_name; namespace_body } ->
         [ namespace_token; namespace_name; namespace_body ]
@@ -845,12 +953,21 @@ module WithToken(Token: TokenType) = struct
         { namespace_use_name; namespace_use_as; namespace_use_alias } ->
         [ namespace_use_name; namespace_use_as; namespace_use_alias ]
       | FunctionDeclaration
-        { function_attr; function_async; function_token; function_name;
+        { function_attribute_spec; function_declaration_header; function_body}
+        ->
+        [ function_attribute_spec; function_declaration_header; function_body]
+      | FunctionDeclarationHeader
+        { function_async; function_token; function_name;
           function_type_params; function_left_paren; function_params;
-          function_right_paren; function_colon; function_type; function_body} ->
-        [ function_attr; function_async; function_token; function_name;
+          function_right_paren; function_colon; function_type } ->
+        [ function_async; function_token; function_name;
           function_type_params; function_left_paren; function_params;
-          function_right_paren; function_colon; function_type; function_body]
+          function_right_paren; function_colon; function_type ]
+      | MethodishDeclaration
+        { methodish_attr; methodish_modifiers; methodish_function_decl_header;
+          methodish_function_body; methodish_semicolon } ->
+        [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
+          methodish_function_body; methodish_semicolon ]
       | ClassishDeclaration
         { classish_attr; classish_abstract; classish_final; classish_token;
           classish_name; classish_type_params; classish_extends;
@@ -865,12 +982,31 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ classish_body_left_brace; classish_body_elements;
           classish_body_right_brace ]
+      | TraitUse
+        { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
+        [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]
+      | RequireClause
+        { require_token; require_kind; require_name; require_semicolon } ->
+        [ require_token; require_kind; require_name; require_semicolon ]
+      | ConstDeclaration
+        { const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; } ->
+        [ const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; ]
+      | ConstantDeclarator
+        { constant_declarator_name; constant_declarator_initializer; } ->
+        [ constant_declarator_name; constant_declarator_initializer; ]
+      | TypeConstDeclaration
+        { type_const_abstract; type_const_const_token; type_const_type_token;
+          type_const_name; type_const_type_constraint; type_const_equal;
+          type_const_type_specifier; type_const_semicolon; } ->
+        [ type_const_abstract; type_const_const_token; type_const_type_token;
+          type_const_name; type_const_type_constraint; type_const_equal;
+          type_const_type_specifier; type_const_semicolon; ]
       | ParameterDeclaration
-        { param_attr; param_type; param_name; param_default } ->
-        [ param_attr; param_type; param_name; param_default ]
-      | DefaultArgumentSpecifier
-        { default_equal; default_value } ->
-        [ default_equal; default_value ]
+        { param_attr; param_visibility; param_type; param_name; param_default }
+        ->
+        [ param_attr; param_visibility; param_type; param_name; param_default ]
       | AttributeSpecification
         { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
           attribute_spec_right_double_angle } ->
@@ -964,9 +1100,9 @@ module WithToken(Token: TokenType) = struct
       | FunctionStaticStatement
         { static_static; static_declarations; static_semicolon } ->
         [ static_static; static_declarations; static_semicolon ]
-      | StaticInitializer
-        { static_init_equal; static_init_value } ->
-        [ static_init_equal; static_init_value ]
+      | SimpleInitializer
+        { simple_init_equal; simple_init_value } ->
+        [ simple_init_equal; simple_init_value ]
       | StaticDeclarator
         { static_name; static_init } ->
         [ static_name; static_init ]
@@ -1125,13 +1261,21 @@ module WithToken(Token: TokenType) = struct
         [ "enum_enum"; "enum_name"; "enum_colon"; "enum_base"; "enum_type";
           "enum_left_brace"; "enum_enumerators"; "enum_right_brace" ]
       | Enumerator
-        { enumerator_name; enumerator_equal; enumerator_value } ->
-        [ "enumerator_name"; "enumerator_equal"; "enumerator_value" ]
+        { enumerator_name; enumerator_equal; enumerator_value;
+          enumerator_semicolon } ->
+        [ "enumerator_name"; "enumerator_equal"; "enumerator_value";
+          "enumerator_semicolon" ]
       | AliasDeclaration
         { alias_token; alias_name; alias_constraint;
           alias_equal; alias_type; alias_semicolon } ->
         [ "alias_token"; "alias_name"; "alias_constraint";
           "alias_equal"; "alias_type"; "alias_semicolon" ]
+      | PropertyDeclaration
+        { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
+        [ "prop_modifiers"; "prop_type"; "prop_declarators"; "prop_semicolon" ]
+      | PropertyDeclarator
+        { prop_name; prop_init } ->
+        [ "prop_name"; "prop_init" ]
       | NamespaceDeclaration
         { namespace_token; namespace_name; namespace_body } ->
         [ "namespace_token"; "namespace_name"; "namespace_body" ]
@@ -1147,14 +1291,22 @@ module WithToken(Token: TokenType) = struct
         { namespace_use_name; namespace_use_as; namespace_use_alias } ->
         [ "namespace_use_name"; "namespace_use_as"; "namespace_use_alias" ]
       | FunctionDeclaration
-        { function_attr; function_async; function_token; function_name;
+        { function_attribute_spec; function_declaration_header; function_body }
+        -> [ "function_attribute_spec"; "function_declaration_header";
+        "function_body" ]
+      | FunctionDeclarationHeader
+        { function_async; function_token; function_name;
           function_type_params; function_left_paren; function_params;
-          function_right_paren; function_colon; function_type;
-          function_body} ->
-        [ "function_attr"; "function_async"; "function_token"; "function_name";
+          function_right_paren; function_colon; function_type; } ->
+        [ "function_async"; "function_token"; "function_name";
           "function_type_params"; "function_left_paren"; "function_params";
-          "function_right_paren"; "function_colon"; "function_type";
-          "function_body" ]
+          "function_right_paren"; "function_colon"; "function_type"; ]
+      | MethodishDeclaration
+        { methodish_attr; methodish_modifiers; methodish_function_decl_header;
+          methodish_function_body; methodish_semicolon } ->
+        [ "methodish_attr"; "methodish_modifiers";
+          "methodish_function_decl_header"; "methodish_function_body";
+          "methodish_semicolon" ]
       | ClassishDeclaration
         { classish_attr; classish_abstract; classish_final; classish_token;
           classish_name; classish_type_params; classish_extends;
@@ -1169,12 +1321,33 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ "classish_body_left_brace"; "classish_body_elements";
           "classish_body_right_brace" ]
+      | TraitUse
+        { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
+        [ "trait_use_token"; "trait_use_name_list"; "trait_use_semicolon"; ]
+      | RequireClause
+        { require_token; require_kind; require_name; require_semicolon } ->
+        [ "require_token"; "require_kind"; "require_name"; "require_semicolon" ]
+      | ConstDeclaration
+        { const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; } ->
+        [ "const_abstract"; "const_token"; "const_type_specifier";
+          "const_declarator_list"; "const_semicolon"; ]
+      | ConstantDeclarator
+        { constant_declarator_name; constant_declarator_initializer; } ->
+        [ "constant_declarator_name"; "constant_declarator_initializer"; ]
+      | TypeConstDeclaration
+        { type_const_abstract; type_const_const_token; type_const_type_token;
+          type_const_name; type_const_type_constraint; type_const_equal;
+          type_const_type_specifier; type_const_semicolon; } ->
+        [ "type_const_abstract"; "type_const_const_token";
+          "type_const_type_token"; "type_const_name";
+          "type_const_type_constraint"; "type_const_equal";
+          "type_const_type_specifier"; "type_const_semicolon"; ]
       | ParameterDeclaration
-        { param_attr; param_type; param_name; param_default } ->
-        [ "param_attr"; "param_type"; "param_name"; "param_default" ]
-      | DefaultArgumentSpecifier
-        { default_equal; default_value } ->
-        [ "default_equal"; "default_value" ]
+        { param_attr; param_visibility; param_type; param_name; param_default }
+        ->
+        [ "param_attr"; "param_visibility"; "param_type"; "param_name";
+          "param_default" ]
       | AttributeSpecification
         { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
           attribute_spec_right_double_angle } ->
@@ -1270,9 +1443,9 @@ module WithToken(Token: TokenType) = struct
       | FunctionStaticStatement
         { static_static; static_declarations; static_semicolon } ->
         [ "static_static"; "static_declarations"; "static_semicolon" ]
-      | StaticInitializer
-        { static_init_equal; static_init_value } ->
-        [ "static_init_equal"; "static_init_value" ]
+      | SimpleInitializer
+        { simple_init_equal; simple_init_value } ->
+        [ "simple_init_equal"; "simple_init_value" ]
       | StaticDeclarator
         { static_name; static_init } ->
         [ "static_name"; "static_init" ]
@@ -1421,7 +1594,6 @@ module WithToken(Token: TokenType) = struct
     let header_less_than x = x.header_less_than
     let header_question x = x.header_question
     let header_language x = x.header_language
-    let function_attr x = x.function_attr
     let function_async x = x.function_async
     let function_token x = x.function_token
     let function_name x = x.function_name
@@ -1431,7 +1603,15 @@ module WithToken(Token: TokenType) = struct
     let function_right_paren x = x.function_right_paren
     let function_colon x = x.function_colon
     let function_type x = x.function_type
+    let function_attribute_spec x = x.function_attribute_spec
+    let function_declaration_header x = x.function_declaration_header
     let function_body x = x.function_body
+    let methodish_attr x = x.methodish_attr
+    let methodish_modifiers x = x.methodish_modifiers
+    let methodish_function_decl_header x = x.methodish_function_decl_header
+    let methodish_function_body x =
+      x.methodish_function_body
+    let methodish_semicolon x = x.methodish_semicolon
     let classish_attr x = x.classish_attr
     let classish_abstract x = x.classish_abstract
     let classish_final x = x.classish_final
@@ -1446,12 +1626,29 @@ module WithToken(Token: TokenType) = struct
     let classish_body_left_brace x = x.classish_body_left_brace
     let classish_body_elements x = x.classish_body_elements
     let classish_body_right_brace x = x.classish_body_right_brace
+    let trait_use_token x = x.trait_use_token
+    let trait_use_name_list x = x.trait_use_name_list
+    let trait_use_semicolon x = x.trait_use_semicolon
+    let const_abstract x = x.const_abstract
+    let const_token x = x.const_token
+    let const_type_specifier x = x.const_type_specifier
+    let const_declarator_list x = x.const_declarator_list
+    let const_semicolon x = x.const_semicolon
+    let constant_declarator_name x = x.constant_declarator_name
+    let constant_declarator_initializer x = x.constant_declarator_initializer
+    let type_const_abstract x = x.type_const_abstract
+    let type_const_const_token x = x.type_const_const_token
+    let type_const_type_token x = x.type_const_type_token
+    let type_const_name x = x.type_const_name
+    let type_const_type_constraint x = x.type_const_type_constraint
+    let type_const_equal x = x.type_const_equal
+    let type_const_type_specifier x = x.type_const_type_specifier
+    let type_const_semicolon x = x.type_const_semicolon
     let param_attr x = x.param_attr
+    let param_visibility x = x.param_visibility
     let param_type x = x.param_type
     let param_name x = x.param_name
     let param_default x = x.param_default
-    let default_equal x = x.default_equal
-    let default_value x = x.default_value
     let attribute_spec_left_double_angle x = x.attribute_spec_left_double_angle
     let attribute_spec_attribute_list x = x.attribute_spec_attribute_list
     let attribute_spec_right_double_angle x =
@@ -1665,16 +1862,25 @@ module WithToken(Token: TokenType) = struct
           { enum_enum; enum_name; enum_colon; enum_base; enum_type;
             enum_left_brace; enum_enumerators; enum_right_brace }
       | (SyntaxKind.Enumerator,
-        [ enumerator_name; enumerator_equal; enumerator_value ]) ->
+        [ enumerator_name; enumerator_equal; enumerator_value;
+          enumerator_semicolon ]) ->
         Enumerator
-        { enumerator_name; enumerator_equal; enumerator_value }
+        { enumerator_name; enumerator_equal; enumerator_value;
+          enumerator_semicolon }
       | (SyntaxKind.AliasDeclaration,
         [ alias_token; alias_name; alias_constraint;
           alias_equal; alias_type; alias_semicolon ]) ->
         AliasDeclaration
         { alias_token; alias_name; alias_constraint;
           alias_equal; alias_type; alias_semicolon }
-
+      | (SyntaxKind.PropertyDeclaration,
+        [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]) ->
+        PropertyDeclaration
+        { prop_modifiers; prop_type; prop_declarators; prop_semicolon }
+      | (SyntaxKind.PropertyDeclarator,
+        [prop_name; prop_init ]) ->
+        PropertyDeclarator
+        { prop_name; prop_init }
       | (SyntaxKind.NamespaceDeclaration,
         [ namespace_token; namespace_name; namespace_body ]) ->
         NamespaceDeclaration
@@ -1693,14 +1899,24 @@ module WithToken(Token: TokenType) = struct
         [ namespace_use_name; namespace_use_as; namespace_use_alias ]) ->
         NamespaceUseClause
         { namespace_use_name; namespace_use_as; namespace_use_alias }
-      | (SyntaxKind.FunctionDeclaration, [ function_attr; function_async;
+      | (SyntaxKind.FunctionDeclaration,
+        [ function_attribute_spec; function_declaration_header; function_body ])
+        -> FunctionDeclaration
+        { function_attribute_spec; function_declaration_header; function_body }
+      | (SyntaxKind.FunctionDeclarationHeader, [ function_async;
         function_token; function_name; function_type_params;
         function_left_paren; function_params; function_right_paren;
-        function_colon; function_type; function_body]) ->
-            FunctionDeclaration { function_attr; function_async;
+        function_colon; function_type ]) ->
+            FunctionDeclarationHeader { function_async;
               function_token; function_name; function_type_params;
               function_left_paren; function_params; function_right_paren;
-              function_colon; function_type; function_body }
+              function_colon; function_type }
+      | (SyntaxKind.MethodishDeclaration,
+        [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
+          methodish_function_body; methodish_semicolon ]) ->
+        MethodishDeclaration { methodish_attr; methodish_modifiers;
+          methodish_function_decl_header; methodish_function_body;
+          methodish_semicolon }
       | (SyntaxKind.ClassishDeclaration,
         [ classish_attr; classish_abstract; classish_final; classish_token;
           classish_name; classish_type_params; classish_extends;
@@ -1717,13 +1933,33 @@ module WithToken(Token: TokenType) = struct
         ClassishBody {
           classish_body_left_brace; classish_body_elements;
           classish_body_right_brace }
-      | (SyntaxKind.ParameterDeclaration, [ param_attr; param_type; param_name;
-        param_default ]) ->
-        ParameterDeclaration { param_attr; param_type; param_name;
-          param_default }
-      | (SyntaxKind.DefaultArgumentSpecifier, [ default_equal;
-        default_value ]) ->
-        DefaultArgumentSpecifier { default_equal; default_value }
+      | (SyntaxKind.TraitUse,
+        [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]) ->
+        TraitUse { trait_use_token; trait_use_name_list; trait_use_semicolon; }
+      | (SyntaxKind.ConstDeclaration,
+        [ const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; ]) ->
+        ConstDeclaration { const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; }
+      | (SyntaxKind.ConstantDeclarator,
+        [ constant_declarator_name; constant_declarator_initializer; ]) ->
+        ConstantDeclarator { constant_declarator_name;
+          constant_declarator_initializer; }
+      | (SyntaxKind.TypeConstDeclaration,
+        [ type_const_abstract; type_const_const_token; type_const_type_token;
+          type_const_name; type_const_type_constraint; type_const_equal;
+          type_const_type_specifier; type_const_semicolon; ]) ->
+        TypeConstDeclaration { type_const_abstract; type_const_const_token;
+          type_const_type_token; type_const_name; type_const_type_constraint;
+          type_const_equal; type_const_type_specifier; type_const_semicolon; }
+      | (SyntaxKind.ParameterDeclaration, [ param_attr; param_visibility;
+        param_type; param_name; param_default ]) ->
+        ParameterDeclaration { param_attr; param_visibility; param_type;
+          param_name; param_default }
+      | (SyntaxKind.RequireClause,
+        [ require_token; require_kind; require_name; require_semicolon ]) ->
+        RequireClause
+        { require_token; require_kind; require_name; require_semicolon }
       | SyntaxKind.AttributeSpecification, [ attribute_spec_left_double_angle;
         attribute_spec_attribute_list; attribute_spec_right_double_angle ] ->
         AttributeSpecification { attribute_spec_left_double_angle;
@@ -1818,10 +2054,10 @@ module WithToken(Token: TokenType) = struct
         [ static_static; static_declarations; static_semicolon ]) ->
         FunctionStaticStatement
         { static_static; static_declarations; static_semicolon }
-      | (SyntaxKind.StaticInitializer,
-        [ static_init_equal; static_init_value ]) ->
-        StaticInitializer
-        { static_init_equal; static_init_value }
+      | (SyntaxKind.SimpleInitializer,
+        [ simple_init_equal; simple_init_value ]) ->
+        SimpleInitializer
+        { simple_init_equal; simple_init_value }
       | (SyntaxKind.StaticDeclarator,
         [ static_name; static_init ]) ->
         StaticDeclarator
@@ -2109,12 +2345,20 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.EnumDeclaration
           [ enum; name; colon; base; enum_type; left_brace; items; right_brace ]
 
-      let make_enumerator name equal value =
-        from_children SyntaxKind.Enumerator [ name; equal; value ]
+      let make_enumerator name equal value semicolon =
+        from_children SyntaxKind.Enumerator [ name; equal; value; semicolon ]
 
       let make_alias token name constr equal ty semi =
         from_children SyntaxKind.AliasDeclaration
           [ token; name; constr; equal; ty; semi ]
+
+      let make_property_declaration mods ty decls semi =
+        from_children SyntaxKind.PropertyDeclaration
+        [ mods; ty; decls; semi ]
+
+      let make_property_declarator name equal value =
+        from_children SyntaxKind.PropertyDeclarator
+        [ name; equal; value ]
 
       let make_namespace token name body =
         from_children SyntaxKind.NamespaceDeclaration
@@ -2131,13 +2375,26 @@ module WithToken(Token: TokenType) = struct
       let make_namespace_use_clause name as_token alias =
         from_children SyntaxKind.NamespaceUseClause [ name; as_token; alias ]
 
-      let make_function function_attr function_async function_token
+      let make_function function_attribute_spec function_declaration_header
+        function_body =
+        from_children SyntaxKind.FunctionDeclaration
+          [ function_attribute_spec; function_declaration_header;
+          function_body ]
+
+      let make_function_header function_async function_token
         function_name function_type_params function_left_paren function_params
-        function_right_paren function_colon function_type function_body =
-      from_children SyntaxKind.FunctionDeclaration [
-        function_attr; function_async; function_token; function_name;
+        function_right_paren function_colon function_type =
+      from_children SyntaxKind.FunctionDeclarationHeader [
+        function_async; function_token; function_name;
         function_type_params; function_left_paren; function_params;
-        function_right_paren; function_colon; function_type; function_body ]
+        function_right_paren; function_colon; function_type ]
+
+      let make_methodish methodish_attr methodish_modifiers
+        methodish_function_decl_header methodish_function_body
+        methodish_semicolon =
+        from_children SyntaxKind.MethodishDeclaration
+          [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
+            methodish_function_body; methodish_semicolon ]
 
     let make_classish classish_attr classish_abstract classish_final
       classish_token classish_name classish_type_params classish_extends
@@ -2149,20 +2406,44 @@ module WithToken(Token: TokenType) = struct
         classish_extends_list; classish_implements; classish_implements_list;
         classish_body ]
 
-    let make_classish_body classish_body_left_brace classish_body_elements
-      classish_body_right_brace =
-      from_children SyntaxKind.ClassishBody [
-        classish_body_left_brace; classish_body_elements;
-        classish_body_right_brace ]
+      let make_classish_body classish_body_left_brace classish_body_elements
+        classish_body_right_brace =
+        from_children SyntaxKind.ClassishBody [
+          classish_body_left_brace; classish_body_elements;
+          classish_body_right_brace ]
+
+      let make_trait_use trait_use_token trait_use_name_list
+        trait_use_semicolon =
+        from_children SyntaxKind.TraitUse [
+          trait_use_token; trait_use_name_list; trait_use_semicolon; ]
+
+      let make_require_clause require kind name semi =
+        from_children SyntaxKind.RequireClause [ require; kind; name; semi ]
+
+      let make_const_declaration const_abstract const_token const_type_specifier
+        const_declarator_list const_semicolon =
+        from_children SyntaxKind.ConstDeclaration [
+          const_abstract; const_token; const_type_specifier;
+          const_declarator_list; const_semicolon; ]
+
+      let make_constant_declarator constant_declarator_name
+        constant_declarator_initializer =
+        from_children SyntaxKind.ConstantDeclarator
+          [ constant_declarator_name; constant_declarator_initializer; ]
+
+      let make_type_const_declaration type_const_abstract type_const_const_token
+        type_const_type_token type_const_name type_const_type_constraint
+        type_const_equal type_const_type_specifier type_const_semicolon =
+        from_children SyntaxKind.TypeConstDeclaration
+          [ type_const_abstract; type_const_const_token; type_const_type_token;
+            type_const_name; type_const_type_constraint; type_const_equal;
+            type_const_type_specifier; type_const_semicolon; ]
 
       let make_parameter_declaration
-        param_attr param_type param_name param_default =
+        param_attr param_visibility param_type param_name param_default =
         from_children SyntaxKind.ParameterDeclaration
-          [ param_attr; param_type; param_name; param_default ]
-
-      let make_default_argument_specifier default_equal default_value =
-        from_children SyntaxKind.DefaultArgumentSpecifier
-          [ default_equal; default_value ]
+          [ param_attr; param_visibility; param_type; param_name;
+          param_default ]
 
       let make_attribute_specification attribute_spec_left_double_angle
         attribute_spec_attribute_list attribute_spec_right_double_angle =
@@ -2288,8 +2569,8 @@ module WithToken(Token: TokenType) = struct
       let make_function_static_statement static decls semi =
         from_children SyntaxKind.FunctionStaticStatement [ static; decls; semi ]
 
-      let make_static_initializer equal value =
-        from_children SyntaxKind.StaticInitializer [ equal; value ]
+      let make_simple_initializer equal value =
+        from_children SyntaxKind.SimpleInitializer [ equal; value ]
 
       let make_static_declarator variable init =
         from_children SyntaxKind.StaticDeclarator [ variable; init ]
@@ -2346,6 +2627,7 @@ module WithToken(Token: TokenType) = struct
             closure_inner_left_paren; closure_parameter_types;
             closure_inner_right_paren; closure_colon; closure_return_type;
             closure_outer_right_paren ]
+
       let make_classname_type_specifier classname left classname_type right =
         from_children SyntaxKind.ClassnameTypeSpecifier
           [ classname; left; classname_type; right ]

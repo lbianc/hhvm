@@ -32,6 +32,7 @@
 #include <iterator>
 #include <vector>
 #include <folly/Range.h>
+#include <folly/portability/Unistd.h>
 #include <boost/dynamic_bitset.hpp>
 
 namespace HPHP {
@@ -742,7 +743,7 @@ constexpr bool kHaveTypeIds =
 
 StructuredLogEntry logCommon() {
   StructuredLogEntry sample;
-  sample.setInt("pid", Process::GetProcessId());
+  sample.setInt("pid", (int64_t)getpid());
   sample.setInt("req_num", t_req_num);
   // MemoryUsageStats
   sample.setInt("max_usage", t_pre_stats.maxUsage);
@@ -809,6 +810,7 @@ void collectImpl(const char* phase) {
     if (t_surprise_filter.test(pc)) return;
     t_surprise_filter.insert(pc);
     TRACE(2, "eager gc %s at %p\n", phase, pc);
+    phase = "eager";
   } else {
     TRACE(2, "normal gc %s at %p\n", phase, vmpc());
   }
@@ -818,6 +820,9 @@ void collectImpl(const char* phase) {
   mkr.traceRoots();
   mkr.trace();
   mkr.sweep();
+  if (t_gc_num == 0) {
+    t_enable_samples = StructuredLog::coinflip(RuntimeOption::EvalGCSampleRate);
+  }
   if (t_enable_samples) logCollection(phase, mkr);
   ++t_gc_num;
 }
@@ -827,7 +832,6 @@ void collectImpl(const char* phase) {
 void MemoryManager::resetGC() {
   t_req_num = ++g_req_num;
   t_gc_num = 0;
-  t_enable_samples = StructuredLog::coinflip(RuntimeOption::EvalGCSampleRate);
   updateNextGc();
 }
 

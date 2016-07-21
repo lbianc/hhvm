@@ -64,6 +64,10 @@ struct RuntimeOption {
     return strcmp(ExecutionMode, "cli") == 0;
   }
 
+  static bool GcSamplingEnabled() {
+    return EvalEnableGC && EvalGCSampleRate > 0;
+  }
+
   static void ReadSatelliteInfo(
     const IniSettingMap& ini,
     const Hdf& hdf,
@@ -167,6 +171,7 @@ struct RuntimeOption {
   static int ServerShutdownListenWait;
   static int ServerShutdownEOMWait;
   static int ServerPrepareToStopTimeout;
+  static int ServerPartialPostStatusCode;
   // If `StopOldServer` is set, we try to stop the old server running
   // on the local host earlier when we initialize, and we do not start
   // serving requests until we are confident that the system can give
@@ -399,6 +404,7 @@ struct RuntimeOption {
   static bool PHP7_ScalarTypes;
   static bool PHP7_EngineExceptions;
   static bool PHP7_Substr;
+  static bool PHP7_InfNanFloatParse;
   static bool PHP7_UVS;
 
   static int64_t HeapSizeMB;
@@ -584,6 +590,7 @@ struct RuntimeOption {
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(uint32_t, ReusableTCPadding, 128)                                   \
+  F(int64_t,  StressUnitCacheFreq, 0)                                   \
   /* */
 
 private:
@@ -597,7 +604,6 @@ public:
 #define F(type, name, unused) \
   static type Eval ## name;
   EVALFLAGS()
-
 #undef F
 
   static bool RecordCodeCoverage;
