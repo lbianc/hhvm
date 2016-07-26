@@ -35,27 +35,58 @@ namespace ppc64_asm {
 const size_t kDecoderSize = 1381;
 
 // Instruction type decoder masks
-// Sorted from more specific (more bits) to less specific (less bits)
+// The masks are sorted by number of bits needed to decode the instruction
+// from more to less bits. Notice that some of those masks overlap instruction
+// type so the table must be ordered in a way that return the
+// correct instruction because the decoder will return the first exact match.
+
+// TODO(rcardoso): Check those mask and create a better format so we can
+// change those names to something more readable like: kXOFormMask, kXFXForm...
+
+// EVX-FORM or EVS-FORM or VX-FORM [OP:6 XO:11]
 const PPC64Instr kDecoderMask1  = (0x3F << 26) | (0x7FF);
+// XFX-FORM [OP:6 [0x0 | 0x1] XO:10]
 const PPC64Instr kDecoderMask2  = (0x3F << 26) | (0x3FF << 1) | (0x1 << 20);
+// X-FORM or XL-FORM or XX1-FORM or X22-FORM or XFL-FORM
+// [OP:6 XO:10 [EH:1|Rc:1|LK:1]]
 const PPC64Instr kDecoderMask3  = (0x3F << 26) | (0x3FF << 1) | (0x1);
+// VC-FORM [OP:6 Rc:1 XO:10]
 const PPC64Instr kDecoderMask4  = (0x3F << 26) | (0x3FF)      | (0x1 << 10);
+// XX1-FORM or XFX-FORM [OP:6 XO:10]
 const PPC64Instr kDecoderMask5  = (0x3F << 26) | (0x3FF << 1);
+// Z22-FORM or XS-FORM [OP:6 XO:10 Rc:1]
 const PPC64Instr kDecoderMask6  = (0x3F << 26) | (0x1FF << 1) | (0x1);
+// XX2-FORM [OP:6 XO:9]
 const PPC64Instr kDecoderMask7  = (0x3F << 26) | (0x1FF << 2);
+// Z23-FORM or XO-FORM [OP:6 XO:9 Rc:1]
 const PPC64Instr kDecoderMask8  = (0x3F << 26) | (0xFF << 1)  | (0x1);
+// TODO(rcardoso): check if this mask is correct
+// XX3-FORM [OP:6 XO:8]
 const PPC64Instr kDecoderMask9  = (0x3F << 26) | (0xFF << 3);
+// VA-FORM or A-FORM [OP:6 [XO:8 |XO:8 Rc:1]]
 const PPC64Instr kDecoderMask10 = (0x3F << 26) | (0x3F);
+// M-FORM [OP:6 ME:5 Rc:1]
 const PPC64Instr kDecoderMask11 = (0x3F << 26) | (0x1F << 2)  | (0x1);
+// MDS-FORM [OP:6 XO:5 Rc:1 ]
 const PPC64Instr kDecoderMask12 = (0x3F << 26) | (0x1F << 1);
+// XX3-FORM [OP:6 XO1:1 XO2:4]
 const PPC64Instr kDecoderMask13 = (0x3F << 26) | (0xF << 3)   | (0x1 << 10);
+// MDS FORM [OP:6 XO:4 Rc:1]
 const PPC64Instr kDecoderMask14 = (0x3F << 26) | (0xF << 1)   | (0x1);
+// MD FORM [OP:6 XO:2 Rc:1]
 const PPC64Instr kDecoderMask15 = (0x3F << 26) | (0x7 << 2)   | (0x1);
+// XX4-FORM [OP:6 XO:2]
 const PPC64Instr kDecoderMask16 = (0x3F << 26) | (0x3 << 4);
+// I-FORM or B-FORM or DS-FORM [OP:6 [AA:1 LK:1 | XO:2]]
 const PPC64Instr kDecoderMask17 = (0x3F << 26) | (0x3);
+// TODO(rcardoso): maybe useless
+// (?????) [OP:6 XO:2]
 const PPC64Instr kDecoderMask18 = (0x3F << 26) | (0x1 << 2)   | (0x1 << 1);
+ // SC-FORM [OP:6 0x1:1]
 const PPC64Instr kDecoderMask19 = (0x3F << 26) | (0x1 << 1);
+// M-FORM [OP:6 Rc:1]
 const PPC64Instr kDecoderMask20 = (0x3F << 26) | (0x1);
+// DQ-FORM or D-FORM [OP:6]
 const PPC64Instr kDecoderMask21 = (0x3F << 26);
 
 // Decoder List
