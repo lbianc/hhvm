@@ -13,7 +13,6 @@ open Core
 open Hh_json
 open Result
 open Result.Monad_infix
-open Utils
 open File_content
 
 let server_busy_error_code = 1
@@ -47,7 +46,7 @@ let string_positions_to_content_pos line column =
  * This function translates those command and args into a call_type structure.
 *)
 let to_call cmd args =
-  let get_field fields field_name =
+  let get_field (fields : (string * json) list) (field_name : string) =
     match List.find fields (fun (x, _) -> x = field_name) with
     | Some (_, x) -> Some x
     | None -> None in
@@ -66,26 +65,25 @@ let to_call cmd args =
       | _ -> raise Not_found in
     string_positions_to_content_pos line column in
 
-  let parse_span span =
+  let parse_span : (string * json) list -> content_range = fun span ->
     let st = match get_field span "start" with
       | Some (JSON_Object st) -> st
       | _ -> raise Not_found in
-    let st = parse_position st in
+    let st : content_pos = parse_position st in
     let ed = match get_field span "end" with
       | Some (JSON_Object ed) -> ed
       | _ -> raise Not_found in
-    let ed = parse_position ed in
-    st, ed in
+    let ed : content_pos = parse_position ed in
+    {st; ed} in
 
-  let parse_edit edit =
-    let span = match get_field edit "span" with
-      | Some (JSON_Object span) -> span
-      | _ -> raise Not_found in
-    let st, ed = parse_span span in
+  let parse_edit : (string * json) list -> code_edit = fun edit ->
+    let range : content_range option = match get_field edit "range" with
+      | Some (JSON_Object span) -> Some (parse_span span)
+      | _ -> None in
     let text = match get_field edit "text" with
       | Some (JSON_String text) -> text
       | _ -> raise Not_found in
-    {st; ed; text} in
+    {range; text} in
 
   let parse_edits : json list -> code_edit list = fun edits ->
     List.fold ~init:[] ~f:(fun l e ->
@@ -102,13 +100,13 @@ let to_call cmd args =
       | _ -> raise Not_found in
     let pos = parse_position pos in
     Auto_complete_call (path, pos)
-  | "open" ->
+  | "didOpenFile" ->
     Open_file_call (get_filename ())
-  | "close" ->
+  | "didCloseFile" ->
     Close_file_call (get_filename ())
-  | "edit" ->
+  | "didChangeFile" ->
     let path = get_filename () in
-    let edits = match get_field args "edits" with
+    let edits = match get_field args "changes" with
       | Some (JSON_Array edits) -> edits
       | _ -> raise Not_found in
     let edits = parse_edits edits in
@@ -210,61 +208,15 @@ let call_of_string s =
 
 let build_response_json id result_field =
   JSON_Object [
+    ("protocol", JSON_String "service_framework3_rpc");
     ("type", JSON_String "response");
-    ("id", JSON_Number (string_of_int id));
+    ("id", int_ id);
     ("result", result_field);
   ]
 
 let json_string_of_response id response =
   let result_field = match response with
     | Auto_complete_response r -> r
-    | Identify_function_response s -> JSON_String s
-    | Search_call_response r -> r
-    | Status_response r -> r
-    | Find_refs_response r -> ServerFindRefs.to_json r
-    | Colour_response r -> r
-    | Find_lvar_refs_response pos_list ->
-      let res_list = List.map pos_list (compose Pos.json Pos.to_absolute) in
-      JSON_Object [
-        "positions",      JSON_Array res_list;
-        "internal_error", JSON_Bool false
-      ]
-    | Type_at_pos_response (pos, ty) -> ServerInferType.to_json pos ty
-    | Format_response result ->
-      let error_text, result, is_error = match result with
-        | Format_hack.Disabled_mode -> "Php_or_decl", "", false
-        | Format_hack.Parsing_error _ -> "Parsing_error", "", false
-        | Format_hack.Internal_error -> "", "", true
-        | Format_hack.Success s -> "", s, false
-      in
-      JSON_Object [
-        "error_message",  JSON_String error_text;
-        "result",         JSON_String result;
-        "internal_error", JSON_Bool is_error;
-      ]
-    | Get_method_name_response result ->
-      begin match result with
-      | Some res ->
-        let result_type =
-          match res.SymbolOccurrence.type_ with
-          | SymbolOccurrence.Class -> "class"
-          | SymbolOccurrence.Method _ -> "method"
-          | SymbolOccurrence.Function -> "function"
-          | SymbolOccurrence.LocalVar -> "local"
-          | SymbolOccurrence.Property _ -> "property"
-          | SymbolOccurrence.ClassConst _ -> "class_const"
-          | SymbolOccurrence.Typeconst _ -> "typeconst"
-          | SymbolOccurrence.GConst -> "global_const"
-        in
-        JSON_Object [
-          "name",        JSON_String res.SymbolOccurrence.name;
-          "result_type", JSON_String result_type;
-          "pos",         Pos.json (Pos.to_absolute res.SymbolOccurrence.pos);
-        ]
-      | _ -> JSON_Object []
-      end
-    | Outline_response result ->
-      FileOutline.to_json_legacy result
   in
   json_to_string (build_response_json id result_field)
 

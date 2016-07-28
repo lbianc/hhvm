@@ -577,6 +577,7 @@ bool isAlwaysNop(Op op) {
   case Op::Nop:
   case Op::UnboxRNop:
   case Op::RGetCNop:
+  case Op::EntryNop:
     return true;
   case Op::VerifyRetTypeC:
   case Op::VerifyRetTypeV:
@@ -996,6 +997,7 @@ bool dontGuardAnyInputs(Op op) {
   // These are instructions that are always interp-one'd, or are always no-ops.
   case Op::LowInvalid:
   case Op::Nop:
+  case Op::EntryNop:
   case Op::Box:
   case Op::BoxR:
   case Op::BoxRNop:
@@ -1327,7 +1329,7 @@ const Func* lookupImmutableMethod(const Class* cls, const StringData* name,
 
   if (res == LookupResult::MethodNotFound) return nullptr;
 
-  if (func->isAbstract()) return nullptr;
+  if (func->isAbstract() && exactClass) return nullptr;
 
   assertx(res == LookupResult::MethodFoundWithThis ||
           res == LookupResult::MethodFoundNoThis ||
@@ -1350,16 +1352,12 @@ const Func* lookupImmutableMethod(const Class* cls, const StringData* name,
         // there might be a derived class which defines the method
         return nullptr;
       }
-    } else if (!exactClass) {
-      if (!func->isImmutableFrom(cls)) return nullptr;
     }
   } else if (!exactClass && !(func->attrs() & AttrPrivate)) {
     if (magicCall) {
       if (!(cls->attrs() & AttrNoOverride)) {
         return nullptr;
       }
-    } else if (!func->isImmutableFrom(cls)) {
-      return nullptr;
     }
   }
   return func;

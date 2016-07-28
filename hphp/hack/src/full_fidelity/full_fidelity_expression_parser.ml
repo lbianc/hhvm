@@ -39,11 +39,12 @@ module WithStatementAndDeclParser
 
   let parse_parameter_list_opt parser =
     let decl_parser = DeclParser.make parser.lexer parser.errors in
-    let (decl_parser, node) = DeclParser.parse_parameter_list_opt decl_parser in
+    let (decl_parser, right, params, left ) =
+      DeclParser.parse_parameter_list_opt decl_parser in
     let lexer = DeclParser.lexer decl_parser in
     let errors = DeclParser.errors decl_parser in
     let parser = { parser with lexer; errors } in
-    (parser, node)
+    (parser, right, params, left)
 
   let parse_compound_statement parser =
     let statement_parser = StatementParser.make parser.lexer parser.errors in
@@ -109,7 +110,7 @@ module WithStatementAndDeclParser
       parse_prefix_unary_expression parser
 
     | LeftParen ->
-      parse_parenthesized_or_lambda_expression parser
+      parse_cast_or_parenthesized_or_lambda_expression parser
 
     | LessThan ->
         parse_possible_xhp_expression parser
@@ -120,8 +121,8 @@ module WithStatementAndDeclParser
     | List  -> parse_list_expression parser
     | New -> parse_object_creation_expression parser
     | Array -> parse_array_intrinsic_expression parser
-    | LeftBracket (* TODO: ? one situation is array. any other situations? *)
-      -> parse_array_creation_expression parser
+    | Echo -> parse_echo_intrinsic_expression parser
+    | LeftBracket -> parse_array_creation_expression parser
     | Shape -> parse_shape_expression parser
     | Function -> parse_anon parser
     | DollarDollar ->
@@ -130,8 +131,6 @@ module WithStatementAndDeclParser
 
     | Dollar (* TODO: ? *)
 
-
-    (* TODO: Array *)
     (* TODO: Collections *)
     (* TODO: List *)
     (* TODO: imports *)
@@ -202,35 +201,37 @@ module WithStatementAndDeclParser
     | MinusMinus -> parse_postfix_unary parser term
     | LeftParen -> parse_function_call parser term
     | LeftBracket
-    | LeftBrace -> (* TODO indexers *) (* TODO: Produce an error for brace *)
-      (parser1, make_token token)
+    | LeftBrace -> parse_subscript parser term
     | Question -> parse_conditional_expression parser1 term (make_token token)
     | _ -> (parser, term)
 
-  and parse_designator parser =
+  and parse_subscript parser term =
     (* SPEC
-      class-type-designator:
-        static
-        qualified-name
-        variable-name
+      subscript-expression:
+        postfix-expression  [  expression-opt  ]
+        postfix-expression  {  expression-opt  }   [Deprecated form]
     *)
-
-    let (parser1, token) = next_token parser in
-    match Token.kind token with
-    | Name
-    | QualifiedName
-    | Variable
-    | Static -> parser1, (make_token token)
-    | LeftParen ->
-      (* ERROR RECOVERY: We have "new (", so the type is almost certainly
-         missing. Mark the type as missing, don't eat the token, and we'll
-         try to parse the parameter list. *)
-      (with_error parser SyntaxError.error1027, (make_missing()))
+    (* TODO: Produce an error for brace case in a later pass *)
+    let (parser, left) = next_token parser in
+    let (parser1, right) = next_token parser in
+    match (Token.kind left, Token.kind right) with
+    | (LeftBracket, RightBracket)
+    | (LeftBrace, RightBrace) ->
+      let left = make_token left in
+      let index = make_missing() in
+      let right = make_token right in
+      let result = make_subscript_expression term left index right in
+      (parser1, result)
     | _ ->
-      (* ERROR RECOVERY: We have "new " followed by something not recognizable
-         as a type name. Take the token as the name and hope that what follows
-         is the parameter list. *)
-      (with_error parser1 SyntaxError.error1027, (make_token token))
+    begin
+      let (parser, index) = with_reset_precedence parser parse_expression in
+      let (parser, right) = match Token.kind left with
+      | LeftBracket -> expect_right_bracket parser
+      | _ -> expect_right_brace parser in
+      let left = make_token left in
+      let result = make_subscript_expression term left index right in
+      (parser, result)
+    end
 
   and parse_expression_list parser =
     (* SPEC
@@ -265,14 +266,41 @@ module WithStatementAndDeclParser
     (* SPEC
       object-creation-expression:
         new  class-type-designator  (  argument-expression-listopt  )
+
+      class-type-designator:
+        static
+        qualified-name
+        variable-name
     *)
     let (parser, new_token) = next_token parser in
-    let (parser, designator) = parse_designator parser in
-    let (parser, left_paren) = expect_left_paren parser in
-    let (parser, args) = parse_expression_list_opt parser in
-    let (parser, right_paren) = expect_right_paren parser in
+    let (parser1, token) = next_token parser in
+    (* TODO: handle error reporting:
+      not all types of expressions are allowed
+      dynamic calls are not allowed in strict mode
+    *)
+    let (parser, designator, left, args, right) = match Token.kind token with
+    | Static ->
+        let (parser, designator) = parser1, (make_token token) in
+        let (parser, lparen) = expect_left_paren parser in
+        let (parser, args) = parse_expression_list_opt parser in
+        let (parser, rparen) = expect_right_paren parser in
+        (parser, designator, lparen, args, rparen)
+    | _ ->
+      let (parser, expr) = parse_expression parser in
+      match syntax expr with
+        | FunctionCallExpression fce -> (
+            parser,
+            fce.function_call_receiver,
+            fce.function_call_lparen,
+            fce.function_call_arguments,
+            fce.function_call_rparen
+          )
+        | _ ->
+          (parser, expr, make_missing(), make_missing(), make_missing())
+    in
+
     let result = make_object_creation_expression (make_token new_token)
-      designator left_paren args right_paren in
+      designator left args right in
     (parser, result)
 
   and parse_function_call parser receiver =
@@ -287,14 +315,65 @@ module WithStatementAndDeclParser
       args right_paren in
     parse_remaining_expression parser result
 
-  and parse_parenthesized_or_lambda_expression parser =
-    (*TODO: Does not yet deal with lambdas *)
-    let (parser, left_paren) = next_token parser in
+  and parse_cast_or_parenthesized_or_lambda_expression parser =
+    (* We need to disambiguate between casts, lambdas and ordinary
+      parenthesized expressions. There are only four possible casts:
+      (int), (float), (bool) and (string), so those are the easiest
+      to detect.  Lambdas are a lot harder; a lambda which begins
+      with a left paren could be:
+      (<<foo>> $bar) ==> ...
+      ($bar) ==> ...
+      ($bar, $blah) ==> ...
+      (int $bar) ==> ...
+   *)
+
+    if is_cast_expression parser then
+      parse_cast_expression parser
+    else if is_lambda_expression parser then
+      parse_lambda_expression parser
+    else
+      parse_parenthesized_expression parser
+
+  and is_cast_expression parser =
+    let (parser, left_paren) = assert_token parser LeftParen in
+    let (parser, type_token) = next_token parser in
+    match Token.kind type_token with
+    | Bool
+    | Interface
+    | Float
+    | String ->
+      peek_token_kind parser = RightParen
+    | _ -> false
+
+  and parse_cast_expression parser =
+    (* SPEC:
+      cast-expression:
+        (  cast-type  ) unary-expression
+      cast-type: one of
+        bool  int  float  string
+    *)
+    (* We don't get here unless we have a legal cast, thanks to the
+       previous call to is_cast_expression. *)
+    let (parser, left) = assert_token parser LeftParen in
+    let (parser, cast_type) = next_token parser in
+    let cast_type = make_token cast_type in
+    let (parser, right) = assert_token parser RightParen in
+    let (parser, operand) = parse_expression parser in
+    let result = make_cast_expression left cast_type right operand in
+    (parser, result)
+
+  and is_lambda_expression parser =
+    false (* TODO *)
+
+  and parse_lambda_expression parser =
+    (parser, make_missing()) (* TODO *)
+
+  and parse_parenthesized_expression parser =
+    let (parser, left_paren) = assert_token parser LeftParen in
     let (parser, expression) = with_reset_precedence parser parse_expression in
     let (parser, right_paren) = expect_right_paren parser in
     let syntax =
-      make_parenthesized_expression
-        (make_token left_paren) expression right_paren in
+      make_parenthesized_expression left_paren expression right_paren in
     (parser, syntax)
 
   and parse_postfix_unary parser term =
@@ -459,14 +538,31 @@ module WithStatementAndDeclParser
    * array_intrinsic := array ( array-initializer-opt )
    *)
   and parse_array_intrinsic_expression parser =
-    let (parser, array_keyword) =
-      assert_token parser Array in
+    let (parser, array_keyword) = assert_token parser Array in
     let (parser, left_paren) = expect_left_paren parser in
     let (parser, members) = parse_array_initializer_opt parser true in
     let (parser, right_paren) = expect_right_paren parser in
     let syntax = make_array_intrinsic_expression array_keyword left_paren
       members right_paren in
     (parser, syntax)
+
+  (* SPEC:
+    echo-intrinsic:
+      echo  expression
+      echo  (  expression  )
+      echo  expression-list-two-or-more
+
+    expression-list-two-or-more:
+      expression  ,  expression
+      expression-list-two-or-more  ,  expression
+  *)
+  and parse_echo_intrinsic_expression parser =
+    let (parser, echo_token) = assert_token parser Echo in
+    let (parser, expression_list) = parse_comma_list
+      parser Semicolon SyntaxError.error1015 parse_expression
+    in
+    (parser, make_echo_intrinsic_expression echo_token expression_list)
+
   (* array_creation_expression := [ array-initializer-opt ] *)
   and parse_array_creation_expression parser =
     let (parser, left_bracket) = expect_left_bracket parser in
@@ -612,16 +708,20 @@ module WithStatementAndDeclParser
     (* SPEC
       anonymous-function-creation-expression:
         async-opt  function
-        ( anonymous-function-parameter-declaration-list-opt  )
+        ( anonymous-function-parameter-list-opt  )
         anonymous-function-return-opt
         anonymous-function-use-clauseopt
         compound-statement
     *)
+    (* An anonymous function's formal parameter list is the same as a named
+       function's formal parameter list except that types are optional.
+       The "..." syntax and trailing commas are supported. We'll simply
+       parse an optional parameter list; it already takes care of making the
+       type annotations optional. *)
     let (parser, async) = optional_token parser Async in
     let (parser, fn) = assert_token parser Function in
-    let (parser, left_paren) = expect_left_paren parser in
-    let (parser, params) = parse_parameter_list_opt parser in
-    let (parser, right_paren) = expect_right_paren parser in
+    let (parser, left_paren, params, right_paren) =
+      parse_parameter_list_opt parser in
     let (parser, colon) = optional_token parser Colon in
     let (parser, return_type) =
       if is_missing colon then

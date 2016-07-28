@@ -67,6 +67,9 @@ type t =
 | SimpleInitializer
 
 (* Expressions *)
+| CastExpression
+| LambdaExpression
+| LambdaSignature
 | AnonymousFunction
 | AnonymousFunctionUseClause
 | LiteralExpression
@@ -86,6 +89,8 @@ type t =
 | FieldInitializer
 | ArrayCreationExpression
 | ArrayIntrinsicExpression
+| SubscriptExpression
+| EchoIntrinsicExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -111,6 +116,9 @@ let to_string kind =
   match kind with
   | Missing -> "missing"
   | Token -> "token"
+  | CastExpression -> "cast_expression"
+  | LambdaExpression -> "lambda_expression"
+  | LambdaSignature -> "lambda_signature"
   | AnonymousFunction -> "anonymous_function"
   | AnonymousFunctionUseClause -> "anonymous_function_use_clause"
   | LiteralExpression -> "literal"
@@ -174,6 +182,8 @@ let to_string kind =
   | FieldInitializer -> "field_initializer"
   | ArrayCreationExpression -> "array_creation_expression"
   | ArrayIntrinsicExpression -> "array_intrinsic_expression"
+  | SubscriptExpression -> "subscript_expression"
+  | EchoIntrinsicExpression -> "echo_intrinsic_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | TypeConstraint -> "type_constraint"

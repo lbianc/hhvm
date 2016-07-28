@@ -479,13 +479,15 @@ let rec get_doc node =
     group_doc (try_part ^| catch_clauses ^| finally_clause)
     |> add_break
   | CatchClause x ->
-    let keyword = get_doc (catch_keyword x) in
-    let left = get_doc (catch_left_paren x) in
-    let params = get_doc (catch_params x) in
-    let right = get_doc (catch_right_paren x) in
-    let stmt = catch_compound_statement x in
+    let keyword = get_doc x.catch_keyword in
+    let left = get_doc x.catch_left_paren in
+    let ty = get_doc x.catch_type in
+    let var = get_doc x.catch_variable in
+    let param = ty ^| var in
+    let right = get_doc x.catch_right_paren in
+    let stmt = x.catch_compound_statement in
     let front_part = group_doc (keyword ^| left) in
-    let before_stmt = indent_block_no_space front_part params right indt in
+    let before_stmt = indent_block_no_space front_part param right indt in
     handle_compound_brace_prefix_indent before_stmt stmt indt
     |> add_break
   | FinallyClause x ->
@@ -558,6 +560,25 @@ let rec get_doc node =
     let start_block = indent_block_no_space left_part expr right indt in
     handle_switch start_block x
     (* group_doc (start_block ^| statement) *)
+  | CastExpression x ->
+    let l = get_doc x.cast_left_paren in
+    let t = get_doc x.cast_type in
+    let r = get_doc x.cast_right_paren in
+    let o = get_doc x.cast_operand in
+    group_doc (l ^^^ t ^^^ r ^^^ o)
+  | LambdaExpression x ->
+    let async = get_doc x.lambda_async in
+    let signature = get_doc x.lambda_signature in
+    let arrow = get_doc x.lambda_arrow in
+    let body = get_doc x.lambda_body in
+    group_doc (async ^| signature ^| arrow ^| body)
+  | LambdaSignature x ->
+    let left = get_doc x.lambda_left_paren in
+    let params = get_doc x.lambda_params in
+    let right = get_doc x.lambda_right_paren in
+    let colon = get_doc x.lambda_colon in
+    let ty = get_doc x.lambda_type in
+    group_doc (left ^| params ^| right ^| colon ^| ty)
   | AnonymousFunction x ->
     let async = get_doc x.anonymous_async in
     let fn = get_doc x.anonymous_function in
@@ -657,6 +678,16 @@ let rec get_doc node =
     let members = get_doc (array_intrinsic_members x) in
     let left_part = group_doc (keyword ^^| left) in
     indent_block_no_space left_part members right indt
+  | SubscriptExpression x ->
+    let receiver = get_doc x.subscript_receiver in
+    let left = get_doc x.subscript_left in
+    let index = get_doc x.subscript_index in
+    let right = get_doc x.subscript_right in
+    receiver ^^^ left ^^^ index ^^^ right
+  | EchoIntrinsicExpression x ->
+    let echo = get_doc (echo_intrinsic_token x) in
+    let expr_list = get_doc (echo_intrinsic_expression_list x) in
+    echo ^| expr_list
   | XHPExpression x ->
     let left = get_doc (xhp_open x) in
     let expr = get_doc (xhp_body x) in

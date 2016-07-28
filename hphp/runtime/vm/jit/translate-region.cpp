@@ -173,6 +173,10 @@ bool blockHasUnprocessedPred(
  */
 void emitEntryAssertions(irgen::IRGS& irgs, const Func* func, SrcKey sk) {
   if (sk.offset() != func->base()) return;
+
+  // The assertions inserted here are only valid if the first bytecode
+  // instruction does not have unprocessed predecessors.  This invariant is
+  // ensured by the emitter using an EntryNop instruction when necessary.
   for (auto& pinfo : func->params()) {
     if (pinfo.hasDefaultValue()) return;
   }
@@ -796,6 +800,8 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
 
           // Don't emit the FCall
           skipTrans = true;
+        } else {
+          inl.registerEndInlining(callee);
         }
       }
 
@@ -956,8 +962,10 @@ std::unique_ptr<IRUnit> irGenInlineRegion(const TransContext& ctx,
 
     SCOPE_ASSERT_DETAIL("Inline-IRUnit") { return show(*unit); };
     irb.startBlock(entry, false /* hasUnprocPred */);
-    irgen::conjureBeginInlining(irgs, func, ctxType, argTypes,
-                                irgen::ReturnTarget{returnBlock});
+    if (!irgen::conjureBeginInlining(irgs, func, ctxType, argTypes,
+                                     irgen::ReturnTarget{returnBlock})) {
+      return nullptr;
+    }
 
     int32_t budgetBcInstrs = RuntimeOption::EvalJitMaxRegionInstrs;
     try {

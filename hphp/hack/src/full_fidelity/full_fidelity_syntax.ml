@@ -289,7 +289,8 @@ module WithToken(Token: TokenType) = struct
     and catch_clause = {
       catch_keyword: t;
       catch_left_paren: t;
-      catch_params: t;
+      catch_type: t;
+      catch_variable: t;
       catch_right_paren: t;
       catch_compound_statement: t;
     }
@@ -395,6 +396,25 @@ module WithToken(Token: TokenType) = struct
       anonymous_use_variables : t;
       anonymous_use_right_paren : t
     }
+    and lambda_expression = {
+      lambda_async : t;
+      lambda_signature : t;
+      lambda_arrow : t;
+      lambda_body : t
+    }
+    and lambda_signature = {
+      lambda_left_paren : t;
+      lambda_params : t;
+      lambda_right_paren : t;
+      lambda_colon : t;
+      lambda_type : t
+    }
+    and cast_expression = {
+      cast_left_paren : t;
+      cast_type : t;
+      cast_right_paren : t;
+      cast_operand : t
+    }
     and unary_operator = {
       unary_operator : t;
       unary_operand : t
@@ -450,6 +470,16 @@ module WithToken(Token: TokenType) = struct
       array_intrinsic_left_paren: t;
       array_intrinsic_members: t;
       array_intrinsic_right_paren: t;
+    }
+    and subscript_expression = {
+      subscript_receiver : t;
+      subscript_left : t;
+      subscript_index : t;
+      subscript_right : t
+    }
+    and echo_intrinsic_expression = {
+      echo_intrinsic_token : t;
+      echo_intrinsic_expression_list : t;
     }
     and xhp_attribute = {
       xhp_attr_name : t;
@@ -608,6 +638,9 @@ module WithToken(Token: TokenType) = struct
     | SimpleInitializer of simple_initializer
     | StaticDeclarator of static_declarator
 
+    | CastExpression of cast_expression
+    | LambdaExpression of lambda_expression
+    | LambdaSignature of lambda_signature
     | AnonymousFunction of anonymous_function
     | AnonymousFunctionUseClause of anonymous_use
     | LiteralExpression of t
@@ -627,6 +660,8 @@ module WithToken(Token: TokenType) = struct
     | FieldInitializer of field_initializer
     | ArrayCreationExpression of array_creation_expression
     | ArrayIntrinsicExpression of array_intrinsic_expression
+    | SubscriptExpression of subscript_expression
+    | EchoIntrinsicExpression of echo_intrinsic_expression
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -662,6 +697,9 @@ module WithToken(Token: TokenType) = struct
       match syntax with
       | Missing -> SyntaxKind.Missing
       | Token _  -> SyntaxKind.Token
+      | CastExpression _ -> SyntaxKind.CastExpression
+      | LambdaExpression _ -> SyntaxKind.LambdaExpression
+      | LambdaSignature _ -> SyntaxKind.LambdaSignature
       | AnonymousFunction _ -> SyntaxKind.AnonymousFunction
       | AnonymousFunctionUseClause _ -> SyntaxKind.AnonymousFunctionUseClause
       | LiteralExpression _ -> SyntaxKind.LiteralExpression
@@ -731,6 +769,8 @@ module WithToken(Token: TokenType) = struct
       | FieldInitializer _ -> SyntaxKind.FieldInitializer
       | ArrayCreationExpression _ -> SyntaxKind.ArrayCreationExpression
       | ArrayIntrinsicExpression _ -> SyntaxKind.ArrayIntrinsicExpression
+      | SubscriptExpression _ -> SyntaxKind.SubscriptExpression
+      | EchoIntrinsicExpression _ -> SyntaxKind.EchoIntrinsicExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPClose _ -> SyntaxKind.XHPClose
@@ -755,6 +795,9 @@ module WithToken(Token: TokenType) = struct
 
     let is_missing node = kind node = SyntaxKind.Missing
     let is_token node = kind node = SyntaxKind.Token
+    let is_cast_expression node = kind node = SyntaxKind.CastExpression
+    let is_lambda_expression node = kind node = SyntaxKind.LambdaExpression
+    let is_lambda_signature node = kind node = SyntaxKind.LambdaSignature
     let is_anonymous_function node = kind node = SyntaxKind.AnonymousFunction
     let is_anonymous_function_use_clause node =
       kind node = SyntaxKind.AnonymousFunctionUseClause
@@ -832,6 +875,10 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ArrayCreationExpression
     let is_array_intrinsic_expression node =
       kind node = SyntaxKind.ArrayIntrinsicExpression
+    let is_subscript_expression node =
+      kind node = SyntaxKind.SubscriptExpression
+    let is_echo_intrinsic_expression node =
+      kind node = SyntaxKind.EchoIntrinsicExpression
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -885,6 +932,10 @@ module WithToken(Token: TokenType) = struct
     let is_protected = is_specific_token Full_fidelity_token_kind.Protected
     let is_abstract = is_specific_token Full_fidelity_token_kind.Abstract
     let is_final = is_specific_token Full_fidelity_token_kind.Final
+    let is_void = is_specific_token Full_fidelity_token_kind.Void
+    let is_left_brace = is_specific_token Full_fidelity_token_kind.LeftBrace
+    let is_ellipsis = is_specific_token Full_fidelity_token_kind.DotDotDot
+    let is_comma = is_specific_token Full_fidelity_token_kind.Comma
 
     let children node =
       match node.syntax with
@@ -896,6 +947,17 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
+      | CastExpression
+        { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
+        [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]
+      | LambdaExpression
+        { lambda_async; lambda_signature; lambda_arrow; lambda_body } ->
+        [ lambda_async; lambda_signature; lambda_arrow; lambda_body ]
+      | LambdaSignature
+        { lambda_left_paren; lambda_params; lambda_right_paren;
+          lambda_colon; lambda_type } ->
+        [ lambda_left_paren; lambda_params; lambda_right_paren;
+          lambda_colon; lambda_type ]
       | AnonymousFunction
         { anonymous_async; anonymous_function; anonymous_left_paren;
           anonymous_params; anonymous_right_paren; anonymous_colon;
@@ -1049,10 +1111,11 @@ module WithToken(Token: TokenType) = struct
       | TryStatement {try_keyword; try_compound_statement; catch_clauses;
                       finally_clause} ->
         [try_keyword; try_compound_statement; catch_clauses; finally_clause]
-      | CatchClause {catch_keyword; catch_left_paren; catch_params;
-                     catch_right_paren; catch_compound_statement} ->
-        [catch_keyword; catch_left_paren; catch_params; catch_right_paren;
-         catch_compound_statement]
+      | CatchClause
+        { catch_keyword; catch_left_paren; catch_type; catch_variable;
+          catch_right_paren; catch_compound_statement} ->
+        [ catch_keyword; catch_left_paren; catch_type; catch_variable;
+          catch_right_paren; catch_compound_statement]
       | FinallyClause {finally_keyword; finally_compound_statement} ->
         [finally_keyword; finally_compound_statement]
       | DoStatement
@@ -1157,6 +1220,14 @@ module WithToken(Token: TokenType) = struct
          array_intrinsic_members; array_intrinsic_right_paren } ->
        [ array_intrinsic_keyword; array_intrinsic_left_paren;
          array_intrinsic_members; array_intrinsic_right_paren ]
+      | SubscriptExpression
+        { subscript_receiver; subscript_left;
+          subscript_index; subscript_right } ->
+        [ subscript_receiver; subscript_left;
+          subscript_index; subscript_right ]
+      | EchoIntrinsicExpression
+        { echo_intrinsic_token; echo_intrinsic_expression_list; } ->
+        [ echo_intrinsic_token; echo_intrinsic_expression_list; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -1234,6 +1305,17 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression _ -> ["pipe_variable_expression"]
       | Error _ -> []
       | SyntaxList _ -> []
+      | CastExpression
+        { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
+        [ "cast_left_paren"; "cast_type"; "cast_right_paren"; "cast_operand" ]
+      | LambdaExpression
+        { lambda_async; lambda_signature; lambda_arrow; lambda_body } ->
+        [ "lambda_async"; "lambda_signature"; "lambda_arrow"; "lambda_body" ]
+      | LambdaSignature
+        { lambda_left_paren; lambda_params; lambda_right_paren;
+          lambda_colon; lambda_type } ->
+        [ "lambda_left_paren"; "lambda_params"; "lambda_right_paren";
+          "lambda_colon"; "lambda_type" ]
       | AnonymousFunction
         { anonymous_async; anonymous_function; anonymous_left_paren;
           anonymous_params; anonymous_right_paren; anonymous_colon;
@@ -1391,10 +1473,11 @@ module WithToken(Token: TokenType) = struct
                       finally_clause} ->
         ["try_keyword"; "try_compound_statement"; "catch_clauses";
         "finally_clause"]
-      | CatchClause {catch_keyword; catch_left_paren; catch_params;
-                     catch_right_paren; catch_compound_statement} ->
-        ["catch_keyword"; "catch_left_paren"; "catch_params";
-        "catch_right_paren"; "catch_compound_statement"]
+      | CatchClause
+        { catch_keyword; catch_left_paren; catch_type; catch_variable;
+          catch_right_paren; catch_compound_statement} ->
+        [ "catch_keyword"; "catch_left_paren"; "catch_type"; "catch_variable";
+          "catch_right_paren"; "catch_compound_statement" ]
       | FinallyClause {finally_keyword; finally_compound_statement} ->
         ["finally_keyword"; "finally_compound_statement"]
       | DoStatement
@@ -1503,6 +1586,14 @@ module WithToken(Token: TokenType) = struct
          array_intrinsic_members; array_intrinsic_right_paren } ->
        [ "array_intrinsic_keyword"; "array_intrinsic_left_paren";
          "array_intrinsic_members"; "array_intrinsic_right_paren" ]
+      | SubscriptExpression
+        { subscript_receiver; subscript_left;
+          subscript_index; subscript_right } ->
+        [ "subscript_receiver"; "subscript_left";
+          "subscript_index"; "subscript_right" ]
+      | EchoIntrinsicExpression
+        { echo_intrinsic_token; echo_intrinsic_expression_list; } ->
+        [ "echo_intrinsic_token"; "echo_intrinsic_expression_list"; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -1693,11 +1784,6 @@ module WithToken(Token: TokenType) = struct
     let try_compound_statement x = x.try_compound_statement
     let try_catch_clauses x = x.catch_clauses
     let try_finally_clause x = x.finally_clause
-    let catch_keyword x = x.catch_keyword
-    let catch_left_paren x = x.catch_left_paren
-    let catch_params x = x.catch_params
-    let catch_right_paren x = x.catch_right_paren
-    let catch_compound_statement x = x.catch_compound_statement
     let finally_keyword x = x.finally_keyword
     let finally_compound_statement x = x.finally_compound_statement
     let do_keyword x = x.do_keyword
@@ -1758,6 +1844,8 @@ module WithToken(Token: TokenType) = struct
     let array_intrinsic_left_paren x = x.array_intrinsic_left_paren
     let array_intrinsic_members x = x.array_intrinsic_members
     let array_intrinsic_right_paren x = x.array_intrinsic_right_paren
+    let echo_intrinsic_token x = x.echo_intrinsic_token
+    let echo_intrinsic_expression_list x = x.echo_intrinsic_expression_list
     let xhp_open x = x.xhp_open
     let xhp_body x = x.xhp_body
     let xhp_close x = x.xhp_close
@@ -1828,6 +1916,20 @@ module WithToken(Token: TokenType) = struct
       match kind, ts with
       | (SyntaxKind.Missing, []) -> Missing
       | (SyntaxKind.SyntaxList, x) -> SyntaxList x
+      | (SyntaxKind.CastExpression,
+        [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]) ->
+        CastExpression
+        { cast_left_paren; cast_type; cast_right_paren; cast_operand }
+      | (SyntaxKind.LambdaExpression,
+        [ lambda_async; lambda_signature; lambda_arrow; lambda_body ]) ->
+        LambdaExpression
+        { lambda_async; lambda_signature; lambda_arrow; lambda_body }
+      | (SyntaxKind.LambdaSignature,
+        [ lambda_left_paren; lambda_params; lambda_right_paren;
+          lambda_colon; lambda_type ]) ->
+        LambdaSignature
+        { lambda_left_paren; lambda_params; lambda_right_paren;
+          lambda_colon; lambda_type }
       | (SyntaxKind.AnonymousFunction,
         [ anonymous_async; anonymous_function; anonymous_left_paren;
           anonymous_params; anonymous_right_paren; anonymous_colon;
@@ -2000,10 +2102,12 @@ module WithToken(Token: TokenType) = struct
         catch_clauses; finally_clause] ->
         TryStatement {try_keyword; try_compound_statement; catch_clauses;
           finally_clause}
-      | SyntaxKind.CatchClause, [catch_keyword; catch_left_paren; catch_params;
-        catch_right_paren; catch_compound_statement] ->
-        CatchClause {catch_keyword; catch_left_paren; catch_params;
-          catch_right_paren; catch_compound_statement}
+      | SyntaxKind.CatchClause,
+        [ catch_keyword; catch_left_paren; catch_type; catch_variable;
+          catch_right_paren; catch_compound_statement ] ->
+        CatchClause
+        { catch_keyword; catch_left_paren; catch_type; catch_variable;
+          catch_right_paren; catch_compound_statement }
       | SyntaxKind.FinallyClause, [finally_keyword;
         finally_compound_statement] ->
         FinallyClause {finally_keyword; finally_compound_statement}
@@ -2118,6 +2222,16 @@ module WithToken(Token: TokenType) = struct
         ArrayIntrinsicExpression { array_intrinsic_keyword;
           array_intrinsic_left_paren; array_intrinsic_members;
           array_intrinsic_right_paren }
+      | SyntaxKind.SubscriptExpression,
+        [ subscript_receiver; subscript_left;
+          subscript_index; subscript_right ] ->
+        SubscriptExpression
+        { subscript_receiver; subscript_left;
+          subscript_index; subscript_right }
+      | (SyntaxKind.EchoIntrinsicExpression,
+        [ echo_intrinsic_token; echo_intrinsic_expression_list; ]) ->
+        EchoIntrinsicExpression
+          { echo_intrinsic_token; echo_intrinsic_expression_list; }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -2251,6 +2365,18 @@ module WithToken(Token: TokenType) = struct
           [ function_call_receiver; function_call_lparen;
             function_call_arguments; function_call_rparen ]
 
+      let make_cast_expression left cast_type right operand =
+        from_children SyntaxKind.CastExpression
+          [ left; cast_type; right; operand ]
+
+      let make_lambda_expression async signature arrow body =
+        from_children SyntaxKind.LambdaExpression
+          [async; signature; arrow; body ]
+
+      let make_lambda_signature left params right colon lambda_type =
+        from_children SyntaxKind.LambdaSignature
+        [ left; params; right; colon; lambda_type ]
+
       let make_anonymous_function
           async func left params right colon return_type uses body =
         from_children SyntaxKind.AnonymousFunction
@@ -2304,6 +2430,15 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.ArrayIntrinsicExpression
           [ array_intrinsic_keyword; array_intrinsic_left_paren;
           array_intrinsic_members; array_intrinsic_right_paren ]
+
+      let make_subscript_expression receiver left index right =
+        from_children SyntaxKind.SubscriptExpression
+        [ receiver; left; index; right ]
+
+      let make_echo_intrinsic_expression
+        echo_intrinsic_token echo_intrinsic_expression_list =
+        from_children SyntaxKind.EchoIntrinsicExpression
+          [ echo_intrinsic_token; echo_intrinsic_expression_list; ]
 
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
@@ -2501,11 +2636,9 @@ module WithToken(Token: TokenType) = struct
           from_children SyntaxKind.TryStatement
           [ try_keyword; try_compound_statement; catch_clauses; finally_clause ]
 
-      let make_catch_clause catch_keyword catch_left_paren catch_params
-        catch_right_paren catch_compound_statement =
+      let make_catch_clause keyword left catch_type catch_var right body =
         from_children SyntaxKind.CatchClause
-          [ catch_keyword; catch_left_paren; catch_params; catch_right_paren;
-          catch_compound_statement ]
+          [ keyword; left; catch_type; catch_var; right; body ]
 
       let make_finally_clause finally_keyword finally_compound_statement =
         from_children SyntaxKind.FinallyClause

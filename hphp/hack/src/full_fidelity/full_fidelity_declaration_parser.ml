@@ -424,14 +424,15 @@ module WithExpressionAndStatementParser
         let (parser, syntax) = parse_methodish_or_property parser attr_spec in
         aux parser (syntax :: acc)
       | LessThanLessThan ->
-        (* Parse methods. *)
+        (* Parse "methodish" declarations: methods, ctors and dtors *)
+        (* TODO: Consider whether properties ought to allow attributes. *)
         let (parser, attr) = parse_attribute_specification_opt parser in
         let (parser, modifiers) = parse_modifiers parser in
         let (parser, syntax) = parse_methodish parser attr modifiers in
         aux parser (syntax :: acc)
       | Require ->
-          (* TODO: Give an error if these are found where they should not be,
-             TODO: in a later pass. *)
+          (* We give an error if these are found where they should not be,
+             in a later pass. *)
          let (parser, require) = parse_require_clause parser in
          aux parser (require :: acc)
       | _ ->
@@ -516,22 +517,20 @@ module WithExpressionAndStatementParser
         property-declaration:
           property-modifier  type-specifier  property-declarator-list  ;
 
-        property-declarator-list:
-          property-declarator
-          property-declarator-list  ,  property-declarator
-    *)
-    (* The type specifier is optional in non-strict mode and required in
-       strict mode.
-       TODO: Give an error in a later pass if the type specifier is missing
-       TODO: in strict mode. *)
-    let (parser, prop_type) = match peek_token_kind parser with
-    | Variable -> (parser, make_missing())
-    | _ -> parse_type_specifier parser in
-    let (parser, decls) = parse_comma_list
-      parser Semicolon SyntaxError.error1008 parse_property_declarator in
-    let (parser, semi) = expect_semicolon parser in
-    let result = make_property_declaration modifiers prop_type decls semi in
-    (parser, result)
+       property-declarator-list:
+         property-declarator
+         property-declarator-list  ,  property-declarator
+     *)
+     (* The type specifier is optional in non-strict mode and required in
+        strict mode. We give an error in a later pass. *)
+     let (parser, prop_type) = match peek_token_kind parser with
+     | Variable -> (parser, make_missing())
+     | _ -> parse_type_specifier parser in
+     let (parser, decls) = parse_comma_list
+       parser Semicolon SyntaxError.error1008 parse_property_declarator in
+     let (parser, semi) = expect_semicolon parser in
+     let result = make_property_declaration modifiers prop_type decls semi in
+     (parser, result)
 
   and parse_property_declarator parser =
     (* SPEC:
@@ -563,9 +562,21 @@ module WithExpressionAndStatementParser
       =  const-expression
   *)
   and parse_const_declaration parser abstr const =
+    (* After abstract and const, the next synatx could be a type spec or a
+     * constant-declarator.
+     * In both cases, the syntax starts with a name. Thus the immediate next
+     * token is useless to distinguish between the two cases.
+     * Thus, we skip the immediate next token, and look at the following one.
+     * There are three cases:
+     * 1. There is no type. If there is no type, in constant-declarator, After
+     *    the name there should be an equal sign.
+     * 2. There is a simple type. A simple type is just one token, thus the
+     *    token after needs to be a name belonging to constant-declarator.
+     * 3. There is a generic type, then the token should be '<' .
+     *)
     let next_token_is_type =
       peek_token_kind (skip_token parser) = Name ||
-      peek_token_kind (skip_token parser) = GreaterThan
+      peek_token_kind (skip_token parser) = LessThan
     in
 
     let (parser, type_spec) = if next_token_is_type then
@@ -727,50 +738,29 @@ module WithExpressionAndStatementParser
     else
       (parser, make_missing(), make_missing())
 
-   (* SPEC
-      parameter-list:
+  and parse_parameter_list_opt parser =
+      (* SPEC
+        parameter-list:
           ...
           parameter-declaration-list
+          parameter-declaration-list  ,
           parameter-declaration-list  ,  ...
 
         parameter-declaration-list:
           parameter-declaration
           parameter-declaration-list  ,  parameter-declaration
-  *)
-  and parse_parameter_list parser =
-    (* TODO: Update this to produce a sequence of list_item elements. *)
-    let rec aux parser parameters =
-      let (parser, parameter) = parse_parameter parser in
-      let parameters = parameter :: parameters in
-      let (parser1, token) = next_token parser in
-      match (Token.kind token) with
-      | Comma ->
-        aux parser1 ((make_token token) :: parameters )
-      | RightParen ->
-        (parser, parameters)
-      | EndOfFile
-      | _ ->
-        (* ERROR RECOVERY TODO: How to recover? *)
-        let parser = with_error parser SyntaxError.error1009 in
-        (parser, parameters) in
-    let (parser, parameters) = aux parser [] in
-    (parser, make_list (List.rev parameters))
-
-  and parse_parameter_list_opt parser =
-    let token = peek_token parser in
-    if (Token.kind token) = RightParen then (parser, make_missing())
-    else parse_parameter_list parser
+     *)
+     (* This function parses the parens as well. *)
+     (* TODO: Add an error checking pass that ensures that the "..." parameter
+              only appears at the end, and is not trailed by a comma. *)
+      parse_parenthesized_comma_list_opt_allow_trailing parser parse_parameter
 
   and parse_parameter parser =
+
     let (parser1, token) = next_token parser in
     match (Token.kind token) with
-    | DotDotDot ->
-      (parser1, make_token token)
-    | Comma ->
-      (* ERROR RECOVERY *)
-      (parser, make_missing())
-    | _ ->
-      parse_parameter_declaration parser
+    | DotDotDot -> (parser1, make_token token)
+    | _ -> parse_parameter_declaration parser
 
   (* SPEC
     parameter-declaration:
@@ -778,8 +768,7 @@ module WithExpressionAndStatementParser
       default-argument-specifieropt
   *)
   and parse_parameter_declaration parser =
-    (* ERROR RECOVERY
-       In strict mode, we require a type specifier. This error is not caught
+    (* In strict mode, we require a type specifier. This error is not caught
        at parse time but rather by a later pass. *)
     let (parser, attrs) = parse_attribute_specification_opt parser in
     let (parser, visibility) = parse_visibility_modifier_opt parser in
@@ -824,8 +813,12 @@ module WithExpressionAndStatementParser
     (parser, syntax)
 
   and parse_function_declaration_header parser =
-    (* ERROR RECOVERY
-       In strict mode, we require a type specifier. This error is not caught
+    (* SPEC
+      function-definition-header:
+        attribute-specification-opt  asyncopt  function  name  /
+        generic-type-parameter-list-opt  (  parameter-listopt  ) :  return-type
+    *)
+    (* In strict mode, we require a type specifier. This error is not caught
        at parse time but rather by a later pass. *)
     let (parser, async_token) = optional_token parser Async in
     let (parser, function_token) = expect_function parser in
@@ -833,9 +826,8 @@ module WithExpressionAndStatementParser
       parse_function_label parser in
     let (parser, generic_type_parameter_list) =
       parse_generic_type_parameter_list_opt parser in
-    let (parser, left_paren_token) = expect_left_paren parser in
-    let (parser, parameter_list) = parse_parameter_list_opt parser in
-    let (parser, right_paren_token) = expect_right_paren parser in
+    let (parser, left_paren_token, parameter_list, right_paren_token) =
+      parse_parameter_list_opt parser in
     let (parser, colon_token, return_type) =
       parse_return_type_hint_opt parser in
     let syntax = make_function_header async_token
@@ -895,9 +887,6 @@ module WithExpressionAndStatementParser
       let parser = with_error parser1 SyntaxError.error1041 in
       (parser, make_error [make_token token])
 
-  (* TODO it is unclear what the modifier requirements are. Specifically, is it
-   * required for constructors and destructors to have a visibility modifier?
-   * Does the order of the modifiers matter? *)
   and parse_modifiers parser =
     let rec aux acc parser =
       (* In reality some modifiers cannot occur together, check this in a later
@@ -929,6 +918,8 @@ module WithExpressionAndStatementParser
     match Token.kind token with
     | Async | Function ->
       parse_function_declaration parser attribute_specification
+    | Abstract
+    | Final
     | Class -> parse_classish_declaration parser attribute_specification
     | _ ->
       (* TODO *)
