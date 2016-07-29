@@ -556,17 +556,22 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
 ///////////////////////////////////////////////////////////////////////////////
 
 const DecoderInfo Decoder::decode(PPC64Instr instr) {
+  int32_t position;
+  PPC64Instr decoded_instr, operand, opcode_index, opcode_size;
+  PPC64Instr opcode = instr & kOpcodeMask;
+
+  // Get index and size for the opcode.
+  opcode_index = (opcode_index_map.find(opcode))->second;
+  opcode_size = (opcode_size_map.find(opcode))->second;
+
   // To decode a instruction we extract the decoder fields
   // masking the instruction and test if it 'hits' the decoder table.
   for (size_t i = 0; i < sizeof(DecoderList)/sizeof(PPC64Instr); i++) {
-    auto decoded_instr = instr & DecoderList[i];
-    auto opcode = decoded_instr & kOpcodeMask;
-    auto operand = decoded_instr & kOperandMask;
-    auto opcode_index = (opcode_index_map.find(opcode))->second;
-    auto opcode_size = (opcode_size_map.find(opcode))->second;
+    decoded_instr = instr & DecoderList[i];
+    operand = decoded_instr & kOperandMask;
 
     // Search the instruction for the current mask
-    auto position = searchInstr(opcode_index, opcode_size, operand);
+    position = searchInstr(opcode_index, opcode_size, operand);
 
     // If instruction found, return it.
     if (position != -1) {
@@ -584,12 +589,13 @@ const DecoderInfo Decoder::decode(PPC64Instr instr) {
  * Binary search when looking for the operand
  */
 int32_t Decoder::searchInstr(int32_t opd_index, int32_t opc_size, PPC64Instr search) const {
+  PPC64Instr operand;
   auto first = opd_index;
   auto last = opd_index + opc_size -1;
   auto middle = (first + last)/2;
 
   while (first <= last) {
-    auto operand = m_decoder_table[middle]->opcode() & kOperandMask;
+    operand = m_decoder_table[middle]->opcode() & kOperandMask;
     if (operand < search) {
       first = middle + 1;
     }
