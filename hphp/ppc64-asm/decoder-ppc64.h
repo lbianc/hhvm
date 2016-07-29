@@ -786,7 +786,6 @@ DE(lxsiwzx,       0x7C000018, Form::kXX1, lxsiwzx,     { XT, RA, RB })        \
 DE(isel,          0x7C00001E, Form::kA,   isel,        { RT, RA, RB, CRB })   \
 DE(tlbilx,        0x7C000024, Form::kX,   tlbilx,      { RA, RB })            \
 DE(mfcr,          0x7C000026, Form::kXFX, mfcr,        { RT })                \
-DE(mfocrf,        0x7C100026, Form::kXFX, mfocrf,      { RT, FXM })           \
 DE(lwarx,         0x7C000028, Form::kX,   lwarx,       { RT, RA0, RB, EH })   \
 DE(ldx,           0x7C00002A, Form::kX,   ldx,         { RT, RA0, RB })       \
 DE(icbt,          0x7C00002C, Form::kX,   icbt,        { CT, RA, RB })        \
@@ -852,7 +851,6 @@ DE(addedot,       0x7C000115, Form::kXO,  adde.,       { RT, RA, RB })        \
 DE(stxsiwx,       0x7C000118, Form::kXX1, stxsiwx,     { XS, RA, RB })        \
 DE(msgsndp,       0x7C00011C, Form::kX,   msgsndp,     { RB})                 \
 DE(mtcrf,         0x7C000120, Form::kXFX, mtcrf,       { FXM, RS })           \
-DE(mtocrf,        0x7C100120, Form::kXFX, mtocrf,      { FXM, RS })           \
 DE(mtmsr,         0x7C000124, Form::kX,   mtmsr,       { RS })                \
 DE(stdx,          0x7C00012A, Form::kX,   stdx,        { RS, RA0, RB })       \
 DE(stwcxdot,      0x7C00012D, Form::kX,   stwcx.,      { RS, RA0, RB })       \
@@ -1130,6 +1128,8 @@ DE(trechkptdot,   0x7C0007DD, Form::kX,   trechkpt.,   { UN })                \
 DE(stdcix,        0x7C0007EA, Form::kX,   stdcix,      { RS, RA0, RB })       \
 DE(dcbz,          0x7C0007EC, Form::kX,   dcbz,        { RA, RB })            \
 DE(dcbzep,        0x7C0007FE, Form::kX,   dcbzep,      { RA, RB })            \
+DE(mfocrf,        0x7C100026, Form::kXFX, mfocrf,      { RT, FXM })           \
+DE(mtocrf,        0x7C100120, Form::kXFX, mtocrf,      { FXM, RS })           \
 DE(lwz,           0x80000000, Form::kD,   lwz,         { RT, D, RA0 })        \
 DE(lwzu,          0x84000000, Form::kD,   lwzu,        { RT, D, RAL })        \
 DE(lbz,           0x88000000, Form::kD,   lbz,         { RT, D, RA0 })        \
