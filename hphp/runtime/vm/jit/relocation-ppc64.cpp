@@ -180,12 +180,21 @@ size_t relocateImpl(RelocationInfo& rel,
             internal_refs_need_update = true;
           } else {
             // It asked to be patched but it couldn't, then something is odd...
-            assertx(false && "couldn't change Far -> Near branch");
+            assertx(false && "Couldn't change Far -> Near branch");
           }
         } else if ((size_t(di.farBranchTarget() - (uint64_t)start) < range) ||
             (di.couldBeNearBranch())) {
           // It can be done with a Near branch
           internal_refs_need_update = true;
+        } else {
+          // re-emit it without nops
+          TCA old_target = di.farBranchTarget();
+          TCA adjusted_target = rel.adjustedAddressAfter(old_target);
+          TCA new_target = (adjusted_target) ? adjusted_target : old_target;
+
+          if (!d2.setFarBranchTarget(new_target)) {
+            assertx(false && "Couldn't set Far branch target");
+          }
         }
       }
 
@@ -272,8 +281,10 @@ size_t relocateImpl(RelocationInfo& rel,
             insert_near_jmp = true;
           } else if (new_far_target) {
             // Far target will be relocated.
-            if (d2.setFarBranchTarget(new_far_target) &&
-                d2.couldBeNearBranch()) {
+            if (!d2.setFarBranchTarget(new_far_target)) {
+              assert(false && "Far branch target setting failed");
+            }
+            if (d2.couldBeNearBranch()) {
               // target is close enough, convert it to Near branch
               insert_near_jmp = true;
             }

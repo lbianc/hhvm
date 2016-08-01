@@ -187,6 +187,11 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
   // avoid nops
   a.branchFar(target, bp, false);
 
+  // Check if something was overwritten
+  if ((a.frontier() - m_ip) > m_size) {
+    return false;
+  }
+
   // refresh m_imm and other parameters
   decode();
   return true;
