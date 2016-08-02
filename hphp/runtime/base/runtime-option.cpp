@@ -495,7 +495,7 @@ const uint32_t kEvalVMInitialGlobalTableSizeDefault = 512;
 static const int kDefaultProfileInterpRequests = debug ? 1 : 11;
 static const uint64_t kJitRelocationSizeDefault =
 #if defined(__powerpc64__)
-  4 << 20
+  16 << 20
 #else
   1 << 20
 #endif
