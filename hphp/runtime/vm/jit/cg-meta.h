@@ -23,6 +23,7 @@
 #include "hphp/runtime/vm/jit/trans-rec.h"
 #include "hphp/runtime/vm/jit/types.h"
 
+#include "hphp/util/hash-map-typedefs.h"
 #include "hphp/util/growable-vector.h"
 
 #include <map>
@@ -101,6 +102,12 @@ struct CGMeta {
    * see cgReqRetranslate().
    */
   GrowableVector<IncomingBranch> inProgressTailJumps;
+
+  /*
+   * Smashable locations. Used on relocation to be sure a smashable instruction
+   * is not optimized in size.
+   */
+  hphp_hash_set<TCA> smashableLocations;
 
   /*
    * Debug-only map from bytecode to machine code address.

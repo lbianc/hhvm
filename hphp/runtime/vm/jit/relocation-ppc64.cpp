@@ -289,7 +289,8 @@ size_t relocateImpl(RelocationInfo& rel,
               insert_near_jmp = true;
             }
           }
-          if (insert_near_jmp) {
+          // shrinkBranch is only allowed for non-smashable branches
+          if (insert_near_jmp && !fixups.smashableLocations.count(src)) {
             // Mark it as Near branch and run this again
 #ifdef SHRINK_FAR_BRANCHES
             near_jmps.insert(src);

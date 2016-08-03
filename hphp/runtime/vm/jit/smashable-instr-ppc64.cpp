@@ -18,6 +18,7 @@
 
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/align-ppc64.h"
+#include "hphp/runtime/vm/jit/cg-meta.h"
 #include "hphp/runtime/vm/jit/mc-generator.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
@@ -33,22 +34,24 @@ using ppc64_asm::Assembler;
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#define EMIT_BODY(cb, inst, ...)        \
-  ([&] {                                \
-    auto const start = cb.frontier();   \
-    Assembler a { cb };                 \
-    a.inst(__VA_ARGS__);                \
-    return start;                       \
+#define EMIT_BODY(cb, meta, inst, ...)      \
+  ([&] {                                    \
+    auto const start = cb.frontier();       \
+    meta.smashableLocations.insert(start);  \
+    Assembler a { cb };                     \
+    a.inst(__VA_ARGS__);                    \
+    return start;                           \
   }())
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, li64, d, imm, true);
+  return EMIT_BODY(cb, fixups, li64, d, imm, true);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
                       PhysReg r, int8_t disp) {
   auto const start = cb.frontier();
+  fixups.smashableLocations.insert(start);
   Assembler a { cb };
 
   // don't use cmpqim because of smashableCmpqImm implementation. A "load 32bits
@@ -61,17 +64,17 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, call, target, Assembler::CallArg::Smashable);
+  return EMIT_BODY(cb, fixups, call, target, Assembler::CallArg::Smashable);
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, branchFar, target);
+  return EMIT_BODY(cb, fixups, branchFar, target);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
   assertx(cc != CC_None);
-  return EMIT_BODY(cb, branchFar, target, cc);
+  return EMIT_BODY(cb, fixups, branchFar, target, cc);
 }
 
 #undef EMIT_BODY
