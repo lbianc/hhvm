@@ -575,9 +575,11 @@ const DecoderInfo Decoder::decode(PPC64Instr* ip) {
 
     // If instruction found, return it.
     if (position != -1) {
-      assert(m_decoder_table[position]->opcode() == decoded_instr);
-      m_decoder_table[position]->instruction_image(*ip);
-      return *m_decoder_table[position];
+      auto pdi = m_decoder_table[position];
+      assert(pdi->opcode() == decoded_instr);
+      pdi->instruction_image(*ip);
+      pdi->setIp(ip);
+      return *pdi;
     }
   }
 
