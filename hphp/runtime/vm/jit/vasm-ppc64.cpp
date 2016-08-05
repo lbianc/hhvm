@@ -1680,8 +1680,6 @@ void fixVptrsForPPC64(Vunit& unit) {
 ///////////////////////////////////////////////////////////////////////////////
 } // anonymous namespace
 
-#include "hphp/util/logger.h"
-
 Signs signNeeds(const ConditionCode cc) {
   Signs ret = neither;
   switch (cc) {
