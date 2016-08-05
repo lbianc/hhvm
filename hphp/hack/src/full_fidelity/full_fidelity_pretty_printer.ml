@@ -218,8 +218,7 @@ let rec get_doc node =
     let attr = add_break (get_doc (classish_attr x)) in
 
     let preface = group_doc (
-      get_doc (classish_abstract x) ^|
-      get_doc (classish_final x) ^|
+      get_doc (classish_modifiers x) ^|
       get_doc (classish_token x)
     ) in
 
@@ -560,6 +559,14 @@ let rec get_doc node =
     let start_block = indent_block_no_space left_part expr right indt in
     handle_switch start_block x
     (* group_doc (start_block ^| statement) *)
+  | YieldExpression x ->
+    let y = get_doc x.yield_token in
+    let o = get_doc x.yield_operand in
+    group_doc (y ^| o)
+  | PrintExpression x ->
+    let t = get_doc x.print_token in
+    let e = get_doc x.print_expr in
+    group_doc (t ^| e)
   | CastExpression x ->
     let l = get_doc x.cast_left_paren in
     let t = get_doc x.cast_type in
@@ -648,6 +655,12 @@ let rec get_doc node =
     let members = get_doc (listlike_members x) in
     let left = group_doc (keyword ^| left_paren) in
     indent_block_no_space left members right_paren indt
+  | CollectionLiteralExpression x ->
+    let token = get_doc (collection_literal_name x) in
+    let left_brace = get_doc (collection_literal_left_brace x) in
+    let expression_list = get_doc (collection_literal_initialization_list x) in
+    let right_brace = get_doc (collection_literal_right_brace x) in
+    token ^| left_brace ^| expression_list ^| right_brace
   | ObjectCreationExpression x ->
     let n = get_doc x.object_creation_new in
     let c = get_doc x.object_creation_class in
@@ -678,16 +691,17 @@ let rec get_doc node =
     let members = get_doc (array_intrinsic_members x) in
     let left_part = group_doc (keyword ^^| left) in
     indent_block_no_space left_part members right indt
+  | ElementInitializer x ->
+    let k = get_doc x.element_key in
+    let a = get_doc x.element_arrow in
+    let v = get_doc x.element_value in
+    k ^| a ^| v
   | SubscriptExpression x ->
     let receiver = get_doc x.subscript_receiver in
     let left = get_doc x.subscript_left in
     let index = get_doc x.subscript_index in
     let right = get_doc x.subscript_right in
     receiver ^^^ left ^^^ index ^^^ right
-  | EchoIntrinsicExpression x ->
-    let echo = get_doc (echo_intrinsic_token x) in
-    let expr_list = get_doc (echo_intrinsic_expression_list x) in
-    echo ^| expr_list
   | XHPExpression x ->
     let left = get_doc (xhp_open x) in
     let expr = get_doc (xhp_body x) in
@@ -825,6 +839,11 @@ let rec get_doc node =
     let n = get_doc x.static_name in
     let i = get_doc x.static_init in
     group_doc (n ^| i)
+  | EchoStatement x ->
+    let echo = get_doc (echo_token x) in
+    let expr_list = get_doc (echo_expression_list x) in
+    let semicolon = get_doc (echo_semicolon x) in
+    echo ^| expr_list ^^^ semicolon
   | SimpleInitializer x ->
     let e = get_doc x.simple_init_equal in
     let v = get_doc x.simple_init_value in
@@ -913,5 +932,8 @@ and handle_compound_brace_prefix_indent prefix statement indt =
     group_doc (indent_doc prefix (get_doc statement) indt)
 
 let pretty_print node =
-  let to_print = combine (get_doc node) in
+  let empty_string = make_simple (text "") in
+  let to_print = node |> get_doc |> add_break in
+  let to_print = to_print ^| empty_string in
+  let to_print = combine to_print in
   pretty 0 to_print

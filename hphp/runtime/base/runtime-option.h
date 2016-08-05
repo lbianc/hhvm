@@ -68,6 +68,10 @@ struct RuntimeOption {
     return EvalEnableGC && EvalGCSampleRate > 0;
   }
 
+  static bool JitSamplingEnabled() {
+    return EvalJit && EvalJitSampleRate > 0;
+  }
+
   static void ReadSatelliteInfo(
     const IniSettingMap& ini,
     const Hdf& hdf,
@@ -445,8 +449,8 @@ struct RuntimeOption {
   F(uint64_t, JitRelocationSize,       kJitRelocationSizeDefault)       \
   F(uint64_t, JitMatureSize,           25 << 20)                        \
   F(bool, JitTimer,                    kJitTimerDefault)                \
-  F(int, JitConcurrently,              0)                               \
-  F(int, JitThreads,                   6)                               \
+  F(int, JitConcurrently,              1)                               \
+  F(int, JitThreads,                   4)                               \
   F(bool, RecordSubprocessTimes,       false)                           \
   F(bool, AllowHhas,                   false)                           \
   F(string, UseExternalEmitter,        "")                              \
@@ -501,6 +505,7 @@ struct RuntimeOption {
   F(bool, JitProfileWarmupRequests,    false)                           \
   F(uint32_t, NumSingleJitRequests,    nsjrDefault())                   \
   F(uint32_t, JitProfileRequests,      profileRequestsDefault())        \
+  F(uint32_t, JitProfileBCSize,        profileBCSizeDefault())          \
   F(uint32_t, JitResetProfCountersRequest, resetProfCountersDefault())  \
   F(bool, JitProfileRecord,            false)                           \
   F(uint32_t, GdbSyncChunks,           128)                             \
@@ -566,6 +571,7 @@ struct RuntimeOption {
   F(bool, DumpTCAnnotationsForAllTrans,debug)                           \
   F(uint32_t, DumpRegion,              0)                               \
   F(bool, DumpAst,                     false)                           \
+  F(bool, DumpTargetProfiles,          false)                           \
   F(bool, MapTgtCacheHuge,             false)                           \
   F(uint32_t, MaxHotTextHugePages,     hugePagesSoundNice() ? 1 : 0)    \
   F(int32_t, MaxLowMemHugePages,       hugePagesSoundNice() ? 8 : 0)    \
@@ -578,6 +584,7 @@ struct RuntimeOption {
   F(bool, Quarantine,                  false)                           \
   F(bool, EnableGCTypeScan,            false)                           \
   F(uint32_t, GCSampleRate,                1)                           \
+  F(uint32_t, JitSampleRate,               0)                           \
   F(bool, DisableSomeRepoAuthNotices,  true)                            \
   F(uint32_t, InitialNamedEntityTableSize,  30000)                      \
   F(uint32_t, InitialStaticStringTableSize,                             \

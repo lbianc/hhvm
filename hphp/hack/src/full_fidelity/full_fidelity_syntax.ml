@@ -171,8 +171,7 @@ module WithToken(Token: TokenType) = struct
     }
     and classish_declaration = {
       classish_attr : t;
-      classish_abstract : t;
-      classish_final : t;
+      classish_modifiers : t;
       classish_token : t;
       classish_name : t;
       classish_type_params : t;
@@ -375,6 +374,11 @@ module WithToken(Token: TokenType) = struct
       static_name : t;
       static_init : t
     }
+    and echo_statement = {
+      echo_token : t;
+      echo_expression_list: t;
+      echo_semicolon: t;
+    }
     and simple_initializer = {
       simple_init_equal : t;
       simple_init_value : t
@@ -415,6 +419,14 @@ module WithToken(Token: TokenType) = struct
       cast_right_paren : t;
       cast_operand : t
     }
+    and yield_expression = {
+      yield_token : t;
+      yield_operand : t
+    }
+    and print_expression = {
+      print_token : t;
+      print_expr : t;
+    }
     and unary_operator = {
       unary_operator : t;
       unary_operand : t
@@ -453,6 +465,12 @@ module WithToken(Token: TokenType) = struct
       listlike_members: t;
       listlike_right_paren: t;
     }
+    and collection_literal_expression = {
+      collection_literal_name : t;
+      collection_literal_left_brace : t;
+      collection_literal_initialization_list : t;
+      collection_literal_right_brace : t;
+    }
     and object_creation_expression = {
       object_creation_new : t;
       object_creation_class : t;
@@ -471,15 +489,16 @@ module WithToken(Token: TokenType) = struct
       array_intrinsic_members: t;
       array_intrinsic_right_paren: t;
     }
+    and element_initializer = {
+      element_key : t;
+      element_arrow : t;
+      element_value : t
+    }
     and subscript_expression = {
       subscript_receiver : t;
       subscript_left : t;
       subscript_index : t;
       subscript_right : t
-    }
-    and echo_intrinsic_expression = {
-      echo_intrinsic_token : t;
-      echo_intrinsic_expression_list : t;
     }
     and xhp_attribute = {
       xhp_attr_name : t;
@@ -637,7 +656,10 @@ module WithToken(Token: TokenType) = struct
     | FunctionStaticStatement of function_static_statement
     | SimpleInitializer of simple_initializer
     | StaticDeclarator of static_declarator
+    | EchoStatement of echo_statement
 
+    | YieldExpression of yield_expression
+    | PrintExpression of print_expression
     | CastExpression of cast_expression
     | LambdaExpression of lambda_expression
     | LambdaSignature of lambda_signature
@@ -655,13 +677,14 @@ module WithToken(Token: TokenType) = struct
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
     | ListExpression of listlike_expression
+    | CollectionLiteralExpression of collection_literal_expression
     | ObjectCreationExpression of object_creation_expression
     | ShapeExpression of shape
     | FieldInitializer of field_initializer
     | ArrayCreationExpression of array_creation_expression
     | ArrayIntrinsicExpression of array_intrinsic_expression
+    | ElementInitializer of element_initializer
     | SubscriptExpression of subscript_expression
-    | EchoIntrinsicExpression of echo_intrinsic_expression
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -697,6 +720,8 @@ module WithToken(Token: TokenType) = struct
       match syntax with
       | Missing -> SyntaxKind.Missing
       | Token _  -> SyntaxKind.Token
+      | YieldExpression _ -> SyntaxKind.YieldExpression
+      | PrintExpression _ -> SyntaxKind.PrintExpression
       | CastExpression _ -> SyntaxKind.CastExpression
       | LambdaExpression _ -> SyntaxKind.LambdaExpression
       | LambdaSignature _ -> SyntaxKind.LambdaSignature
@@ -756,6 +781,7 @@ module WithToken(Token: TokenType) = struct
       | FunctionStaticStatement _ -> SyntaxKind.FunctionStaticStatement
       | SimpleInitializer _ -> SyntaxKind.SimpleInitializer
       | StaticDeclarator _ -> SyntaxKind.StaticDeclarator
+      | EchoStatement _ -> SyntaxKind.EchoStatement
       | PrefixUnaryOperator _ -> SyntaxKind.PrefixUnaryOperator
       | PostfixUnaryOperator _ -> SyntaxKind.PostfixUnaryOperator
       | BinaryOperator _ -> SyntaxKind.BinaryOperator
@@ -764,13 +790,14 @@ module WithToken(Token: TokenType) = struct
       | ParenthesizedExpression _ -> SyntaxKind.ParenthesizedExpression
       | BracedExpression _ -> SyntaxKind.BracedExpression
       | ListExpression _ -> SyntaxKind.ListExpression
+      | CollectionLiteralExpression _ -> SyntaxKind.CollectionLiteralExpression
       | ObjectCreationExpression _ -> SyntaxKind.ObjectCreationExpression
       | ShapeExpression _ -> SyntaxKind.ShapeExpression
       | FieldInitializer _ -> SyntaxKind.FieldInitializer
       | ArrayCreationExpression _ -> SyntaxKind.ArrayCreationExpression
       | ArrayIntrinsicExpression _ -> SyntaxKind.ArrayIntrinsicExpression
+      | ElementInitializer _ -> SyntaxKind.ElementInitializer
       | SubscriptExpression _ -> SyntaxKind.SubscriptExpression
-      | EchoIntrinsicExpression _ -> SyntaxKind.EchoIntrinsicExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPClose _ -> SyntaxKind.XHPClose
@@ -795,6 +822,8 @@ module WithToken(Token: TokenType) = struct
 
     let is_missing node = kind node = SyntaxKind.Missing
     let is_token node = kind node = SyntaxKind.Token
+    let is_yield_expression node = kind node = SyntaxKind.YieldExpression
+    let is_print_expression node = kind node = SyntaxKind.PrintExpression
     let is_cast_expression node = kind node = SyntaxKind.CastExpression
     let is_lambda_expression node = kind node = SyntaxKind.LambdaExpression
     let is_lambda_signature node = kind node = SyntaxKind.LambdaSignature
@@ -853,6 +882,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.FunctionStaticStatement
     let is_simple_initializer node = kind node = SyntaxKind.SimpleInitializer
     let is_static_declarator node = kind node = SyntaxKind.StaticDeclarator
+    let is_echo_statement node =
+      kind node = SyntaxKind.EchoStatement
     let is_switch_statement node = kind node = SyntaxKind.SwitchStatement
     let is_prefix_operator node = kind node = SyntaxKind.PrefixUnaryOperator
     let is_postfix_operator node = kind node = SyntaxKind.PostfixUnaryOperator
@@ -867,6 +898,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node = kind node = SyntaxKind.BracedExpression
     let is_listlike_expression node = kind node = SyntaxKind.ListExpression
+    let is_collection_literal_expression node =
+      kind node = SyntaxKind.CollectionLiteralExpression
     let is_object_creation_expression node =
       kind node = SyntaxKind.ObjectCreationExpression
     let is_shape_expression node = kind node = SyntaxKind.ShapeExpression
@@ -875,10 +908,9 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ArrayCreationExpression
     let is_array_intrinsic_expression node =
       kind node = SyntaxKind.ArrayIntrinsicExpression
+    let is_element_initializer node = kind node = SyntaxKind.ElementInitializer
     let is_subscript_expression node =
       kind node = SyntaxKind.SubscriptExpression
-    let is_echo_intrinsic_expression node =
-      kind node = SyntaxKind.EchoIntrinsicExpression
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -947,6 +979,12 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
+      | YieldExpression
+        { yield_token; yield_operand } ->
+        [ yield_token; yield_operand ]
+      | PrintExpression
+        { print_token; print_expr; } ->
+        [ print_token; print_expr; ]
       | CastExpression
         { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
         [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]
@@ -1031,11 +1069,11 @@ module WithToken(Token: TokenType) = struct
         [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
           methodish_function_body; methodish_semicolon ]
       | ClassishDeclaration
-        { classish_attr; classish_abstract; classish_final; classish_token;
+        { classish_attr; classish_modifiers; classish_token;
           classish_name; classish_type_params; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body } ->
-        [ classish_attr; classish_abstract; classish_final; classish_token;
+        [ classish_attr; classish_modifiers; classish_token;
           classish_name; classish_type_params; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body ]
@@ -1169,6 +1207,9 @@ module WithToken(Token: TokenType) = struct
       | StaticDeclarator
         { static_name; static_init } ->
         [ static_name; static_init ]
+      | EchoStatement
+        { echo_token; echo_expression_list; echo_semicolon; } ->
+        [ echo_token; echo_expression_list; echo_semicolon; ]
       | PrefixUnaryOperator
         { unary_operator; unary_operand } ->
         [ unary_operator; unary_operand ]
@@ -1199,6 +1240,13 @@ module WithToken(Token: TokenType) = struct
           listlike_right_paren } ->
         [ listlike_keyword; listlike_left_paren; listlike_members;
           listlike_right_paren ]
+      | CollectionLiteralExpression
+        { collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; } ->
+        [ collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; ]
       | ObjectCreationExpression
         { object_creation_new; object_creation_class; object_creation_lparen;
           object_creation_arguments; object_creation_rparen } ->
@@ -1220,14 +1268,14 @@ module WithToken(Token: TokenType) = struct
          array_intrinsic_members; array_intrinsic_right_paren } ->
        [ array_intrinsic_keyword; array_intrinsic_left_paren;
          array_intrinsic_members; array_intrinsic_right_paren ]
+      | ElementInitializer
+        { element_key; element_arrow; element_value } ->
+        [ element_key; element_arrow; element_value ]
       | SubscriptExpression
         { subscript_receiver; subscript_left;
           subscript_index; subscript_right } ->
         [ subscript_receiver; subscript_left;
           subscript_index; subscript_right ]
-      | EchoIntrinsicExpression
-        { echo_intrinsic_token; echo_intrinsic_expression_list; } ->
-        [ echo_intrinsic_token; echo_intrinsic_expression_list; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -1305,6 +1353,12 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression _ -> ["pipe_variable_expression"]
       | Error _ -> []
       | SyntaxList _ -> []
+      | YieldExpression
+        { yield_token; yield_operand } ->
+        [ "yield_token"; "yield_operand" ]
+      | PrintExpression
+        { print_token; print_expr; } ->
+        [ "print_token"; "print_expr"; ]
       | CastExpression
         { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
         [ "cast_left_paren"; "cast_type"; "cast_right_paren"; "cast_operand" ]
@@ -1390,11 +1444,11 @@ module WithToken(Token: TokenType) = struct
           "methodish_function_decl_header"; "methodish_function_body";
           "methodish_semicolon" ]
       | ClassishDeclaration
-        { classish_attr; classish_abstract; classish_final; classish_token;
+        { classish_attr; classish_modifiers; classish_token;
           classish_name; classish_type_params; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body } ->
-        [ "classish_attr"; "classish_abstract"; "classish_final";
+        [ "classish_attr"; "classish_modifiers";
           "classish_token"; "classish_name"; "classish_type_params";
           "classish_extends"; "classish_extends_list"; "classish_implements";
           "classish_implements_list"; "classish_body" ]
@@ -1532,6 +1586,9 @@ module WithToken(Token: TokenType) = struct
       | StaticDeclarator
         { static_name; static_init } ->
         [ "static_name"; "static_init" ]
+      | EchoStatement
+        { echo_token; echo_expression_list; echo_semicolon; } ->
+        [ "echo_token"; "echo_expression_list"; "echo_semicolon"; ]
       | PrefixUnaryOperator
         { unary_operator; unary_operand } ->
         [ "unary_operator"; "unary_operand" ]
@@ -1562,6 +1619,13 @@ module WithToken(Token: TokenType) = struct
           listlike_right_paren } ->
         [ "listlike_keyword"; "listlike_left_paren"; "listlike_members";
           "listlike_right_paren" ]
+      | CollectionLiteralExpression
+        { collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; } ->
+        [ "collection_literal_name"; "collection_literal_left_brace";
+          "collection_literal_initialization_list";
+          "collection_literal_right_brace"; ]
       | ObjectCreationExpression
         { object_creation_new; object_creation_class;
           object_creation_lparen; object_creation_arguments;
@@ -1586,14 +1650,14 @@ module WithToken(Token: TokenType) = struct
          array_intrinsic_members; array_intrinsic_right_paren } ->
        [ "array_intrinsic_keyword"; "array_intrinsic_left_paren";
          "array_intrinsic_members"; "array_intrinsic_right_paren" ]
+     | ElementInitializer
+       { element_key; element_arrow; element_value } ->
+       [ "element_key"; "element_arrow"; "element_value" ]
       | SubscriptExpression
         { subscript_receiver; subscript_left;
           subscript_index; subscript_right } ->
         [ "subscript_receiver"; "subscript_left";
           "subscript_index"; "subscript_right" ]
-      | EchoIntrinsicExpression
-        { echo_intrinsic_token; echo_intrinsic_expression_list; } ->
-        [ "echo_intrinsic_token"; "echo_intrinsic_expression_list"; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -1704,8 +1768,7 @@ module WithToken(Token: TokenType) = struct
       x.methodish_function_body
     let methodish_semicolon x = x.methodish_semicolon
     let classish_attr x = x.classish_attr
-    let classish_abstract x = x.classish_abstract
-    let classish_final x = x.classish_final
+    let classish_modifiers x = x.classish_modifiers
     let classish_token x = x.classish_token
     let classish_name x = x.classish_name
     let classish_type_params x = x.classish_type_params
@@ -1815,6 +1878,9 @@ module WithToken(Token: TokenType) = struct
     let break_semicolon x = x.break_semicolon
     let continue_keyword x = x.continue_keyword
     let continue_semicolon x = x.continue_semicolon
+    let echo_token x = x.echo_token
+    let echo_expression_list x = x.echo_expression_list
+    let echo_semicolon x = x.echo_semicolon
     let expr_statement_expr x = x.expr_statement_expr
     let expr_statement_semicolon x = x.expr_statement_semicolon
     let unary_operator x = x.unary_operator
@@ -1833,10 +1899,17 @@ module WithToken(Token: TokenType) = struct
     let braced_expr_left_brace x = x.braced_expr_left_brace
     let braced_expr x = x.braced_expr
     let braced_expr_right_brace x = x.braced_expr_right_brace
+    let print_token x = x.print_token
+    let print_expr x = x.print_expr
     let listlike_keyword x = x.listlike_keyword
     let listlike_left_paren x = x.listlike_left_paren
     let listlike_members x = x.listlike_members
     let listlike_right_paren x = x.listlike_right_paren
+    let collection_literal_name x = x.collection_literal_name
+    let collection_literal_left_brace x = x.collection_literal_left_brace
+    let collection_literal_initialization_list x =
+      x.collection_literal_initialization_list
+    let collection_literal_right_brace x = x.collection_literal_right_brace
     let array_creation_left_bracket x = x.array_creation_left_bracket
     let array_creation_members x = x.array_creation_members
     let array_creation_right_bracket x = x.array_creation_right_bracket
@@ -1844,8 +1917,6 @@ module WithToken(Token: TokenType) = struct
     let array_intrinsic_left_paren x = x.array_intrinsic_left_paren
     let array_intrinsic_members x = x.array_intrinsic_members
     let array_intrinsic_right_paren x = x.array_intrinsic_right_paren
-    let echo_intrinsic_token x = x.echo_intrinsic_token
-    let echo_intrinsic_expression_list x = x.echo_intrinsic_expression_list
     let xhp_open x = x.xhp_open
     let xhp_body x = x.xhp_body
     let xhp_close x = x.xhp_close
@@ -1916,6 +1987,13 @@ module WithToken(Token: TokenType) = struct
       match kind, ts with
       | (SyntaxKind.Missing, []) -> Missing
       | (SyntaxKind.SyntaxList, x) -> SyntaxList x
+      | (SyntaxKind.YieldExpression,
+        [ yield_token; yield_operand ]) ->
+        YieldExpression
+        { yield_token; yield_operand }
+      | (SyntaxKind.PrintExpression,
+        [ print_token; print_expr; ]) ->
+        PrintExpression { print_token; print_expr; }
       | (SyntaxKind.CastExpression,
         [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]) ->
         CastExpression
@@ -2020,12 +2098,12 @@ module WithToken(Token: TokenType) = struct
           methodish_function_decl_header; methodish_function_body;
           methodish_semicolon }
       | (SyntaxKind.ClassishDeclaration,
-        [ classish_attr; classish_abstract; classish_final; classish_token;
+        [ classish_attr; classish_modifiers; classish_token;
           classish_name; classish_type_params; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body ]) ->
         ClassishDeclaration {
-          classish_attr; classish_abstract; classish_final; classish_token;
+          classish_attr; classish_modifiers; classish_token;
           classish_name; classish_type_params; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body }
@@ -2166,6 +2244,10 @@ module WithToken(Token: TokenType) = struct
         [ static_name; static_init ]) ->
         StaticDeclarator
         { static_name; static_init }
+      | (SyntaxKind.EchoStatement,
+        [ echo_token; echo_expression_list; echo_semicolon; ]) ->
+        EchoStatement
+        { echo_token; echo_expression_list; echo_semicolon; }
       | (SyntaxKind.PrefixUnaryOperator, [ unary_operator; unary_operand ]) ->
         PrefixUnaryOperator { unary_operator; unary_operand }
       | (SyntaxKind.PostfixUnaryOperator, [ unary_operand; unary_operator ]) ->
@@ -2198,6 +2280,14 @@ module WithToken(Token: TokenType) = struct
         listlike_members; listlike_right_paren ]) ->
         ListExpression { listlike_keyword; listlike_left_paren;
           listlike_members; listlike_right_paren }
+      | (SyntaxKind.CollectionLiteralExpression,
+        [ collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; ]) ->
+        CollectionLiteralExpression
+        { collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; }
       | (SyntaxKind.ObjectCreationExpression,
         [ object_creation_new; object_creation_class; object_creation_lparen;
           object_creation_arguments; object_creation_rparen ]) ->
@@ -2216,6 +2306,10 @@ module WithToken(Token: TokenType) = struct
         array_creation_members; array_creation_right_bracket ] ->
         ArrayCreationExpression { array_creation_left_bracket;
           array_creation_members; array_creation_right_bracket }
+      | (SyntaxKind.ElementInitializer,
+        [ element_key; element_arrow; element_value ]) ->
+        ElementInitializer
+        { element_key; element_arrow; element_value }
       | SyntaxKind.ArrayIntrinsicExpression, [ array_intrinsic_keyword;
         array_intrinsic_left_paren; array_intrinsic_members;
         array_intrinsic_right_paren ] ->
@@ -2228,10 +2322,6 @@ module WithToken(Token: TokenType) = struct
         SubscriptExpression
         { subscript_receiver; subscript_left;
           subscript_index; subscript_right }
-      | (SyntaxKind.EchoIntrinsicExpression,
-        [ echo_intrinsic_token; echo_intrinsic_expression_list; ]) ->
-        EchoIntrinsicExpression
-          { echo_intrinsic_token; echo_intrinsic_expression_list; }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -2365,6 +2455,13 @@ module WithToken(Token: TokenType) = struct
           [ function_call_receiver; function_call_lparen;
             function_call_arguments; function_call_rparen ]
 
+      let make_yield_expression token operand =
+        from_children SyntaxKind.YieldExpression [ token; operand ]
+
+      let make_print_expression print_token print_expr =
+        from_children SyntaxKind.PrintExpression
+          [ print_token; print_expr; ]
+
       let make_cast_expression left cast_type right operand =
         from_children SyntaxKind.CastExpression
           [ left; cast_type; right; operand ]
@@ -2403,6 +2500,14 @@ module WithToken(Token: TokenType) = struct
           [ listlike_keyword; listlike_left_paren; listlike_members;
           listlike_right_paren ]
 
+      let make_collection_literal_expression
+        collection_literal_name collection_literal_left_brace
+        collection_literal_initialization_list collection_literal_right_brace =
+        from_children SyntaxKind.CollectionLiteralExpression
+          [ collection_literal_name; collection_literal_left_brace;
+          collection_literal_initialization_list;
+          collection_literal_right_brace; ]
+
       let make_object_creation_expression
         object_creation_new object_creation_class object_creation_lparen
         object_creation_arguments object_creation_rparen =
@@ -2416,6 +2521,9 @@ module WithToken(Token: TokenType) = struct
       let make_shape_expression shape lparen fields rparen =
         from_children SyntaxKind.ShapeExpression
           [ shape; lparen; fields; rparen ]
+
+      let make_element_initializer key arrow value =
+        from_children SyntaxKind.ElementInitializer [ key; arrow; value ]
 
       let make_array_creation_expression
         array_creation_left_bracket array_creation_members
@@ -2434,11 +2542,6 @@ module WithToken(Token: TokenType) = struct
       let make_subscript_expression receiver left index right =
         from_children SyntaxKind.SubscriptExpression
         [ receiver; left; index; right ]
-
-      let make_echo_intrinsic_expression
-        echo_intrinsic_token echo_intrinsic_expression_list =
-        from_children SyntaxKind.EchoIntrinsicExpression
-          [ echo_intrinsic_token; echo_intrinsic_expression_list; ]
 
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
@@ -2531,12 +2634,12 @@ module WithToken(Token: TokenType) = struct
           [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
             methodish_function_body; methodish_semicolon ]
 
-    let make_classish classish_attr classish_abstract classish_final
+    let make_classish classish_attr classish_modifiers
       classish_token classish_name classish_type_params classish_extends
       classish_extends_list classish_implements classish_implements_list
       classish_body =
       from_children SyntaxKind.ClassishDeclaration [
-        classish_attr; classish_abstract; classish_final; classish_token;
+        classish_attr; classish_modifiers; classish_token;
         classish_name; classish_type_params; classish_extends;
         classish_extends_list; classish_implements; classish_implements_list;
         classish_body ]
@@ -2707,6 +2810,11 @@ module WithToken(Token: TokenType) = struct
 
       let make_static_declarator variable init =
         from_children SyntaxKind.StaticDeclarator [ variable; init ]
+
+      let make_echo_statement
+        echo_token echo_expression_list echo_semicolon =
+        from_children SyntaxKind.EchoStatement
+        [ echo_token; echo_expression_list; echo_semicolon; ]
 
       let make_type_constant type_constant_left_type type_constant_separator
           type_constant_right_type =

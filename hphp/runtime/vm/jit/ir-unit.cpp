@@ -36,6 +36,7 @@ IRUnit::IRUnit(TransContext context) : m_context(context)
   // For Optimize translations, the entry block's profCount is
   // adjusted later in translateRegion.
   m_entry = defBlock();
+  m_startNanos = Timer::getCPUTimeNanos();
 }
 
 IRInstruction* IRUnit::defLabel(unsigned numDst, BCMarker marker) {
@@ -123,6 +124,7 @@ static bool endsUnitAtSrcKey(const Block* block, SrcKey sk) {
     case ThrowArithmeticError:
     case ThrowDivisionByZeroError:
     case VerifyParamFailHard:
+    case Halt:
       return instSk == sk;
 
     // The RetCtrl is generally ending a bytecode instruction, with the

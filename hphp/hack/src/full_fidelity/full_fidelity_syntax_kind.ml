@@ -64,9 +64,12 @@ type t =
 | ContinueStatement
 | FunctionStaticStatement
 | StaticDeclarator
+| EchoStatement
 | SimpleInitializer
 
 (* Expressions *)
+| YieldExpression
+| PrintExpression
 | CastExpression
 | LambdaExpression
 | LambdaSignature
@@ -84,13 +87,14 @@ type t =
 | ParenthesizedExpression
 | BracedExpression
 | ListExpression
+| CollectionLiteralExpression
 | ObjectCreationExpression
 | ShapeExpression
 | FieldInitializer
 | ArrayCreationExpression
 | ArrayIntrinsicExpression
+| ElementInitializer
 | SubscriptExpression
-| EchoIntrinsicExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -116,6 +120,8 @@ let to_string kind =
   match kind with
   | Missing -> "missing"
   | Token -> "token"
+  | YieldExpression -> "yield_expression"
+  | PrintExpression -> "print_expression"
   | CastExpression -> "cast_expression"
   | LambdaExpression -> "lambda_expression"
   | LambdaSignature -> "lambda_signature"
@@ -168,6 +174,7 @@ let to_string kind =
   | ContinueStatement -> "continue_statement"
   | FunctionStaticStatement -> "function_static_statement"
   | StaticDeclarator -> "static_declarator"
+  | EchoStatement -> "echo_statement"
   | SimpleInitializer -> "simple_initializer"
   | PrefixUnaryOperator -> "prefix_unary_operator"
   | PostfixUnaryOperator -> "postfix_unary_operator"
@@ -177,13 +184,14 @@ let to_string kind =
   | ParenthesizedExpression -> "parenthesized_expression"
   | BracedExpression -> "braced_expression"
   | ListExpression -> "list_expression"
+  | CollectionLiteralExpression -> "collection_literal_expression"
   | ObjectCreationExpression -> "object_creation_expression"
   | ShapeExpression -> "shape_expression"
   | FieldInitializer -> "field_initializer"
   | ArrayCreationExpression -> "array_creation_expression"
   | ArrayIntrinsicExpression -> "array_intrinsic_expression"
+  | ElementInitializer -> "element_initializer"
   | SubscriptExpression -> "subscript_expression"
-  | EchoIntrinsicExpression -> "echo_intrinsic_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | TypeConstraint -> "type_constraint"

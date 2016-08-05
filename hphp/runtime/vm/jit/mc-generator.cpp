@@ -52,7 +52,6 @@
 #include "hphp/util/eh-frame.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/maphuge.h"
-#include "hphp/util/meta.h"
 #include "hphp/util/process.h"
 #include "hphp/util/rank.h"
 #include "hphp/util/build-info.h"
@@ -253,6 +252,16 @@ bool MCGenerator::profileSrcKey(SrcKey sk) const {
     return false;
   }
 
+  // We have two knobs to control the number of functions we're allowed to
+  // profile: Eval.JitProfileRequests and Eval.JitProfileBCSize. We profile new
+  // functions until either of these limits is exceeded. In practice we expect
+  // to hit the bytecode size limit first but we keep the request limit around
+  // as a safety net.
+  if (RuntimeOption::EvalJitProfileBCSize > 0 &&
+      profData()->profilingBCSize() >= RuntimeOption::EvalJitProfileBCSize) {
+    return false;
+  }
+
   return requestCount() <= RuntimeOption::EvalJitProfileRequests;
 }
 
@@ -289,9 +298,20 @@ TransResult MCGenerator::retranslate(TransArgs args) {
   auto kind = [&] {
     return profileSrcKey(args.sk) ? TransKind::Profile : TransKind::Live;
   };
-  LeaseHolder writer(Translator::WriteLease(), args.sk.func(), kind());
-  if (!writer ||
-      !shouldTranslate(args.sk.func(), kind())) {
+  args.kind = kind();
+
+  // Only start profiling new functions at their entry point. This reduces the
+  // chances of profiling the body of a function but not its entry (where we
+  // trigger retranslation) and helps remove bias towards larger functions that
+  // can cause variations in the size of code.prof.
+  if (args.kind == TransKind::Profile &&
+      !profData()->profiling(args.sk.funcID()) &&
+      !args.sk.func()->isEntry(args.sk.offset())) {
+    return nullptr;
+  }
+
+  LeaseHolder writer(Translator::WriteLease(), args.sk.func(), args.kind);
+  if (!writer || !shouldTranslate(args.sk.func(), kind())) {
     return nullptr;
   }
 
@@ -377,10 +397,16 @@ void MCGenerator::checkFreeProfData() {
   // In PGO mode, we free all the profiling data once the main area code reaches
   // its maximum usage and either the hot area is also full or all the functions
   // that were profiled have already been optimized.
+  //
+  // However, we keep the data around indefinitely in a few special modes:
+  // * Eval.EnableReusableTC
+  // * TC dumping enabled (Eval.DumpTC/DumpIR/etc.)
   if (profData() &&
       !RuntimeOption::EvalEnableReusableTC &&
       m_code.main().used() >= CodeCache::AMaxUsage &&
-      (!m_code.hotEnabled() || profData()->optimizedAllProfiledFuncs())) {
+      (!m_code.hotEnabled() ||
+       profData()->profilingFuncs() == profData()->optimizedFuncs()) &&
+      !Translator::isTransDBEnabled()) {
     discardProfData();
   }
 }
@@ -485,10 +511,11 @@ static void populateLiveContext(RegionContext& ctx) {
 
   always_assert(ctx.func == fp->m_func);
 
+  auto const ctxClass = ctx.func->cls();
   // Track local types.
   for (uint32_t i = 0; i < fp->m_func->numLocals(); ++i) {
     ctx.liveTypes.push_back(
-      { Location::Local{i}, typeFromTV(frame_local(fp, i)) }
+      { Location::Local{i}, typeFromTV(frame_local(fp, i), ctxClass) }
     );
     FTRACE(2, "added live type {}\n", show(ctx.liveTypes.back()));
   }
@@ -509,7 +536,7 @@ static void populateLiveContext(RegionContext& ctx) {
     },
     [&] (const TypedValue* tv) {
       ctx.liveTypes.push_back(
-        { Location::Stack{ctx.spOffset - stackOff}, typeFromTV(tv) }
+        { Location::Stack{ctx.spOffset - stackOff}, typeFromTV(tv, ctxClass) }
       );
       stackOff++;
       FTRACE(2, "added live type {}\n", show(ctx.liveTypes.back()));
@@ -735,7 +762,6 @@ TransResult MCGenerator::translate(TransArgs args) {
   if (args.allowPartial && !Translator::WriteLease().amOwner()) {
     return std::move(env);
   }
-
   timer.stop();
   return finishTranslation(std::move(env));
 }
@@ -1696,6 +1722,55 @@ void reportJitMaturity(const CodeCache& code) {
     StructuredLog::log("hhvm_warmup", cols);
   }
 }
+
+// send stats about this translation to StructuredLog
+void logTranslation(const TransEnv& env) {
+  auto nanos = Timer::getCPUTimeNanos() - env.unit->startNanos();
+  StructuredLogEntry cols;
+  auto& context = env.unit->context();
+  auto kind = show(context.kind);
+  cols.setStr("trans_kind", !debug ? kind : kind + "_debug");
+  if (context.func) {
+    cols.setStr("func", context.func->fullName()->data());
+  }
+  cols.setInt("jit_sample_rate", RuntimeOption::EvalJitSampleRate);
+  // timing info
+  cols.setInt("jit_micros", nanos / 1000);
+  // hhir stats
+  cols.setInt("max_tmps", env.unit->numTmps());
+  cols.setInt("max_blocks", env.unit->numBlocks());
+  cols.setInt("max_insts", env.unit->numInsts());
+  auto hhir_blocks = rpoSortCfg(*env.unit);
+  cols.setInt("num_blocks", hhir_blocks.size());
+  size_t num_insts = 0;
+  for (auto b : hhir_blocks) num_insts += b->instrs().size();
+  cols.setInt("num_insts", num_insts);
+  // vasm stats
+  cols.setInt("max_vreg", env.vunit->next_vr);
+  cols.setInt("max_vblocks", env.vunit->blocks.size());
+  cols.setInt("max_vcalls", env.vunit->vcallArgs.size());
+  size_t max_vinstr = 0;
+  for (auto& blk : env.vunit->blocks) max_vinstr += blk.code.size();
+  cols.setInt("max_vinstr", max_vinstr);
+  cols.setInt("num_vconst", env.vunit->constToReg.size());
+  auto vblocks = sortBlocks(*env.vunit);
+  size_t num_vinstr[kNumAreas] = {0, 0, 0};
+  size_t num_vblocks[kNumAreas] = {0, 0, 0};
+  for (auto b : vblocks) {
+    const auto& block = env.vunit->blocks[b];
+    num_vinstr[(int)block.area_idx] += block.code.size();
+    num_vblocks[(int)block.area_idx]++;
+  }
+  cols.setInt("num_vinstr_main", num_vinstr[(int)AreaIndex::Main]);
+  cols.setInt("num_vinstr_cold", num_vinstr[(int)AreaIndex::Cold]);
+  cols.setInt("num_vinstr_frozen", num_vinstr[(int)AreaIndex::Frozen]);
+  cols.setInt("num_vblocks_main", num_vblocks[(int)AreaIndex::Main]);
+  cols.setInt("num_vblocks_cold", num_vblocks[(int)AreaIndex::Cold]);
+  cols.setInt("num_vblocks_frozen", num_vblocks[(int)AreaIndex::Frozen]);
+  // finish & log
+  StructuredLog::log("hhvm_jit", cols);
+}
+
 }
 
 TCA MCGenerator::finishTranslation(TransEnv env) {
@@ -1713,6 +1788,7 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   TransLocMaker maker{code};
   maker.markStart();
 
+  // mcGenUnit emits machine code from vasm
   if (env.vunit && !mcGenUnit(env, code, fixups)) {
     // mcGenUnit() failed. Roll back, drop the unit and region, and clear
     // fixups.
@@ -1799,6 +1875,13 @@ TCA MCGenerator::finishTranslation(TransEnv env) {
   }
 
   reportJitMaturity(m_code);
+
+  if (env.unit) {
+    auto func = env.unit->context().func;
+    auto enable = func ? func->shouldSampleJit() :
+                  StructuredLog::coinflip(RuntimeOption::EvalJitSampleRate);
+    if (enable) logTranslation(env);
+  }
 
   return loc.mainStart();
 }
@@ -2095,14 +2178,27 @@ bool MCGenerator::dumpTCData() {
   }
 
   if (!gzprintf(tcDataFile, "total_translations = %zu\n\n",
-                m_tx.getCurrentTransID())) {
+                m_tx.getNumTranslations())) {
     return false;
   }
 
-  for (TransID t = 0; t < m_tx.getCurrentTransID(); t++) {
-    if (gzputs(tcDataFile,
-               m_tx.getTransRec(t)->print(m_tx.getTransCounter(t)).c_str()) ==
-        -1) {
+  // Print all translations, including their execution counters. If global
+  // counters are disabled (default), fall back to using ProfData, covering
+  // only profiling translations.
+  if (!RuntimeOption::EvalJitTransCounters && Translator::isTransDBEnabled()) {
+    // Admin requests do not automatically init ProfData, so do it explicitly.
+    // No need for matching exit call; data is immortal with trans DB enabled.
+    requestInitProfData();
+  }
+  for (TransID t = 0; t < m_tx.getNumTranslations(); t++) {
+    int64_t count = 0;
+    if (RuntimeOption::EvalJitTransCounters) {
+      count = m_tx.getTransCounter(t);
+    } else if (auto prof = profData()) {
+      assertx(m_tx.getTransCounter(t) == 0);
+      count = prof->transCounter(t);
+    }
+    if (gzputs(tcDataFile, m_tx.getTransRec(t)->print(count).c_str()) == -1) {
       return false;
     }
   }

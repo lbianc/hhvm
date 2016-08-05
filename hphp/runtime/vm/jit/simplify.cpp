@@ -74,7 +74,7 @@ struct State {
 
 SSATmp* simplifyWork(State&, const IRInstruction*);
 
-bool mightRelax(State& env, SSATmp* tmp) {
+bool mightRelax(State& env, const SSATmp* tmp) {
   if (!env.typesMightRelax) return false;
   return irgen::typeMightRelax(tmp);
 }
@@ -1487,12 +1487,24 @@ SSATmp* instanceOfImpl(State& env, ClassSpec spec1, ClassSpec spec2) {
   auto const cls1 = spec1.cls();
   auto const cls2 = spec2.cls();
 
-  if (spec1.exact() && spec2.exact()) {
-    return cns(env, cls1->classof(cls2));
+  if (cls1->classof(cls2)) {
+    return spec2.exact() ? cns(env, true) : nullptr;
   }
 
-  if (spec2.exact() && cls1->classof(cls2)) {
-    return cns(env, true);
+  if (isInterface(cls1)) return nullptr;
+
+  if (spec1.exact()) return cns(env, false);
+
+  // At this point cls1 is not a cls2, and its not exact, so:
+  //
+  //  - If cls2 is an interface, a descendent of cls1 could implement
+  //    that interface
+  //  - If cls2 is a descendent of cls1, then (clearly) a descendent
+  //    of cls1 could be a cls2
+  //  - Otherwise no descendent of cls1 can be a cls2 or any class
+  //    that isa cls2
+  if (!isInterface(cls2) && !cls2->classof(cls1)) {
+    return cns(env, false);
   }
 
   return nullptr;
@@ -1502,11 +1514,11 @@ SSATmp* simplifyInstanceOf(State& env, const IRInstruction* inst) {
   auto const src1 = inst->src(0);
   auto const src2 = inst->src(1);
 
-  auto const spec2 = src2->type().clsSpec();
-
   if (src2->isA(TNullptr)) {
     return cns(env, false);
   }
+
+  auto const spec2 = src2->type().clsSpec();
 
   if (mightRelax(env, src1) || mightRelax(env, src2)) {
     return nullptr;
@@ -1537,7 +1549,8 @@ SSATmp* simplifyInstanceOfIface(State& env, const IRInstruction* inst) {
   auto const src1 = inst->src(0);
   auto const src2 = inst->src(1);
 
-  auto const cls2 = Unit::lookupClassOrUniqueClass(src2->strVal());
+  auto const cls2 = Unit::lookupUniqueClassInContext(src2->strVal(),
+                                                     inst->ctx());
   assertx(cls2 && isInterface(cls2));
   auto const spec2 = ClassSpec{cls2, ClassSpec::ExactTag{}};
 
@@ -2023,9 +2036,14 @@ SSATmp* simplifyCheckTypeMem(State& env, const IRInstruction* inst) {
 SSATmp* simplifyAssertType(State& env, const IRInstruction* inst) {
   auto const src = inst->src(0);
 
-  return canSimplifyAssertType(inst, src->type(), mightRelax(env, src))
-    ? src
-    : nullptr;
+  if (canSimplifyAssertType(inst, src->type(), mightRelax(env, src))) {
+    if (!src->type().maybe(inst->typeParam())) {
+      gen(env, Halt);
+      return cns(env, TBottom);
+    }
+    return src;
+  }
+  return nullptr;
 }
 
 SSATmp* simplifyCheckLoc(State& env, const IRInstruction* inst) {
@@ -2372,97 +2390,102 @@ SSATmp* simplifyLdClsName(State& env, const IRInstruction* inst) {
   return src->hasConstVal(TCls) ? cns(env, src->clsVal()->name()) : nullptr;
 }
 
+SSATmp* simplifyLookupClsRDS(State& env, const IRInstruction* inst) {
+  SSATmp* name = inst->src(0);
+  if (name->inst()->is(LdClsName)) {
+    return name->inst()->src(0);
+  }
+  return nullptr;
+}
+
 SSATmp* simplifyLdStrLen(State& env, const IRInstruction* inst) {
   auto const src = inst->src(0);
   return src->hasConstVal(TStr) ? cns(env, src->strVal()->size()) : nullptr;
 }
 
-SSATmp* simplifyCallBuiltin(State& env, const IRInstruction* inst) {
-  auto const callee = inst->extra<CallBuiltin>()->callee;
-  auto const args = inst->srcs();
-
-
-  bool const arg2IsCollection = args.size() == 3 &&
-    args[2]->isA(TObj) &&
-    args[2]->type().clsSpec() &&
-    args[2]->type().clsSpec().cls()->isCollectionClass() &&
-    !mightRelax(env, args[2]);
-
-  if (arg2IsCollection) {
-    if (callee->name()->isame(s_isEmpty.get())) {
-      FTRACE(3, "simplifying collection: {}\n", callee->name()->data());
-      return gen(env, ColIsEmpty, args[2]);
-    }
-    if (callee->name()->isame(s_count.get())) {
-      FTRACE(3, "simplifying collection: {}\n", callee->name()->data());
-      return gen(env, CountCollection, args[2]);
-    }
+template <class F>
+SSATmp* simplifyByClass(State& env, const SSATmp* src, F f) {
+  if (!src->isA(TObj) || mightRelax(env, src)) return nullptr;
+  if (auto const spec = src->type().clsSpec()) {
+    return f(spec.cls(), spec.exact());
   }
-
-  bool const arg2IsWaitHandle = !arg2IsCollection &&
-    args.size() == 3 &&
-    args[2]->isA(TObj) &&
-    args[2]->type().clsSpec() &&
-    args[2]->type().clsSpec().cls()->classof(c_WaitHandle::classof()) &&
-    !mightRelax(env, args[2]);
-
-  if (arg2IsWaitHandle) {
-    const auto genState = [&] (Opcode op, int64_t whstate) -> SSATmp* {
-      // these methods all spring from the base class
-      assert(callee->cls()->name()->isame(s_WaitHandle.get()));
-      const auto state = gen(env, LdWHState, args[2]);
-      return gen(env, op, state, cns(env, whstate));
-    };
-    const auto methName = callee->name();
-    if (methName->isame(s_isFinished.get())) {
-      return genState(LteInt, int64_t{c_WaitHandle::STATE_FAILED});
-    }
-    if (methName->isame(s_isSucceeded.get())) {
-      return genState(EqInt, int64_t{c_WaitHandle::STATE_SUCCEEDED});
-    }
-    if (methName->isame(s_isFailed.get())) {
-      return genState(EqInt, int64_t{c_WaitHandle::STATE_FAILED});
-    }
-  }
-
   return nullptr;
+}
+
+SSATmp* simplifyCallBuiltin(State& env, const IRInstruction* inst) {
+  if (inst->numSrcs() != 3) return nullptr;
+
+  auto const thiz = inst->src(2);
+  return simplifyByClass(
+    env, thiz,
+    [&](const Class* cls, bool) -> SSATmp* {
+      auto const callee = inst->extra<CallBuiltin>()->callee;
+      if (cls->isCollectionClass()) {
+        if (callee->name()->isame(s_isEmpty.get())) {
+          FTRACE(3, "simplifying collection: {}\n", callee->name()->data());
+          return gen(env, ColIsEmpty, thiz);
+        }
+        if (callee->name()->isame(s_count.get())) {
+          FTRACE(3, "simplifying collection: {}\n", callee->name()->data());
+          return gen(env, CountCollection, thiz);
+        }
+        return nullptr;
+      }
+
+      if (cls->classof(c_WaitHandle::classof())) {
+        const auto genState = [&] (Opcode op, int64_t whstate) -> SSATmp* {
+          // these methods all spring from the base class
+          assert(callee->cls()->name()->isame(s_WaitHandle.get()));
+          const auto state = gen(env, LdWHState, thiz);
+          return gen(env, op, state, cns(env, whstate));
+        };
+        const auto methName = callee->name();
+        if (methName->isame(s_isFinished.get())) {
+          return genState(LteInt, int64_t{c_WaitHandle::STATE_FAILED});
+        }
+        if (methName->isame(s_isSucceeded.get())) {
+          return genState(EqInt, int64_t{c_WaitHandle::STATE_SUCCEEDED});
+        }
+        if (methName->isame(s_isFailed.get())) {
+          return genState(EqInt, int64_t{c_WaitHandle::STATE_FAILED});
+        }
+      }
+
+      return nullptr;
+    });
 }
 
 SSATmp* simplifyIsWaitHandle(State& env, const IRInstruction* inst) {
-  if (mightRelax(env, inst->src(0))) return nullptr;
-
-  bool baseIsWaitHandle = inst->src(0)->isA(TObj) &&
-    inst->src(0)->type().clsSpec() &&
-    inst->src(0)->type().clsSpec().cls()->classof(c_WaitHandle::classof());
-  if (baseIsWaitHandle) {
-    return cns(env, true);
-  }
-  return nullptr;
+  return simplifyByClass(
+    env, inst->src(0),
+    [&](const Class* cls, bool) -> SSATmp* {
+      if (cls->classof(c_WaitHandle::classof())) return cns(env, true);
+      if (!isInterface(cls) &&
+          !c_WaitHandle::classof()->classof(cls)) {
+        return cns(env, false);
+      }
+      return nullptr;
+    });
 }
 
 SSATmp* simplifyIsCol(State& env, const IRInstruction* inst) {
-  auto const ty = inst->src(0)->type();
-
-  if (!irgen::typeMightRelax(inst->src(0)) &&
-      ty < TObj &&
-      ty.clsSpec().cls()) {
-    return cns(env, ty.clsSpec().cls()->isCollectionClass());
-  }
-  return nullptr;
+  return simplifyByClass(
+    env, inst->src(0),
+    [&](const Class* cls, bool) -> SSATmp* {
+      if (cls->isCollectionClass()) return cns(env, true);
+      if (!isInterface(cls)) return cns(env, false);
+      return nullptr;
+    });
 }
 
 SSATmp* simplifyHasToString(State& env, const IRInstruction* inst) {
-  auto const src = inst->src(0);
-
-  if (!mightRelax(env, src) &&
-      src->isA(TObj) &&
-      src->type().clsSpec()) {
-    return cns(
-      env,
-      src->type().clsSpec().cls()->getToString() != nullptr
-    );
-  }
-  return nullptr;
+  return simplifyByClass(
+    env, inst->src(0),
+    [&](const Class* cls, bool exact) -> SSATmp* {
+      if (cls->getToString() != nullptr) return cns(env, true);
+      if (exact) return cns(env, false);
+      return nullptr;
+    });
 }
 
 SSATmp* simplifyOrdStr(State& env, const IRInstruction* inst) {
@@ -2617,6 +2640,7 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
   X(HasToString)
   X(LdClsCtx)
   X(LdClsName)
+  X(LookupClsRDS)
   X(LdClsMethod)
   X(LdStrLen)
   X(MethodExists)
@@ -2726,22 +2750,7 @@ bool canSimplifyAssertType(const IRInstruction* inst,
   auto const typeParam = inst->typeParam();
 
   if (!srcType.maybe(typeParam)) {
-    // If both types are boxed, this is okay and even expected as a means to
-    // update the hint for the inner type.
-    if (srcType <= TBoxedCell &&
-        typeParam <= TBoxedCell) {
-      return false;
-    }
-
-    // We got external information (probably from static analysis) that
-    // conflicts with what we've built up so far.  There's no reasonable way to
-    // continue here: we can't properly fatal the request because we can't make
-    // a catch trace or SpillStack without IRGS, and we can't punt on
-    // just this instruction because we might not be in the initial translation
-    // phase, and we can't just plow on forward since we'll probably generate
-    // malformed IR.  Since this case is very rare, just punt on the whole
-    // trace so it gets interpreted.
-    TRACE_PUNT("Invalid AssertTypeOp");
+    return true;
   }
 
   // Asserting in these situations doesn't add any information.
@@ -2979,7 +2988,7 @@ PackedBounds packedArrayBoundsStaticCheck(Type arrayType, int64_t idxVal) {
   return PackedBounds::Unknown;
 }
 
-Type packedArrayElemType(SSATmp* arr, SSATmp* idx) {
+Type packedArrayElemType(SSATmp* arr, SSATmp* idx, const Class* ctx) {
   assertx(arr->isA(TArr) &&
           arr->type().arrSpec().kind() == ArrayData::kPackedKind &&
           idx->isA(TInt));
@@ -3003,18 +3012,18 @@ Type packedArrayElemType(SSATmp* arr, SSATmp* idx) {
       if (idx->hasConstVal(TInt)) {
         auto const idxVal = idx->intVal();
         if (idxVal >= 0 && idxVal < at->size()) {
-          return typeFromRAT(at->packedElem(idxVal)) & t;
+          return typeFromRAT(at->packedElem(idxVal), ctx) & t;
         }
         return TInitNull;
       }
       Type elemType = TBottom;
       for (uint32_t i = 0; i < at->size(); ++i) {
-        elemType |= typeFromRAT(at->packedElem(i));
+        elemType |= typeFromRAT(at->packedElem(i), ctx);
       }
       return elemType & t;
     }
     case RepoAuthType::Array::Tag::PackedN:
-      return typeFromRAT(at->elemType()) & t;
+      return typeFromRAT(at->elemType(), ctx) & t;
   }
   not_reached();
 }

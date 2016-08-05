@@ -226,9 +226,8 @@ Unit::~Unit() {
   free(m_mergeInfo);
 
   if (m_pseudoMainCache) {
-    for (auto it = m_pseudoMainCache->begin();
-         it != m_pseudoMainCache->end(); ++it) {
-      Func::destroy(it->second);
+    for (auto& kv : *m_pseudoMainCache) {
+      Func::destroy(kv.second);
     }
     delete m_pseudoMainCache;
   }
@@ -551,9 +550,8 @@ void Unit::renameFunc(const StringData* oldName, const StringData* newName) {
   assert(oldName && oldName->isStatic());
   assert(newName && newName->isStatic());
 
-  for (MutableFuncRange fr(m_mergeInfo->hoistableFuncs()); !fr.empty(); ) {
-    Func* func = fr.popFront();
-    const StringData* name = func->name();
+  for (auto& func : m_mergeInfo->hoistableFuncs()) {
+    auto const name = func->name();
     assert(name);
     if (name->same(oldName)) {
       func->rename(newName);
@@ -1101,7 +1099,7 @@ void Unit::defTypeAlias(Id id) {
       raise_error("The type %s is already defined to an incompatible type",
                   thisType->name->data());
     };
-    if (thisType->attrs & AttrPersistent) {
+    if (nameList->isPersistentTypeAlias()) {
       // We may have cached the fully resolved type in a previous request.
       if (resolveTypeAlias(thisType) != *current) {
         raiseIncompatible();
@@ -1121,20 +1119,26 @@ void Unit::defTypeAlias(Id id) {
     return;
   }
 
+  auto resolved = resolveTypeAlias(thisType);
+  if (resolved.invalid) {
+    raise_error("Unknown type or class %s", typeName->data());
+    return;
+  }
+
   if (!nameList->m_cachedTypeAlias.bound()) {
-    auto rdsMode = (thisType->attrs & AttrPersistent)
-      ? rds::Mode::Persistent : rds::Mode::Normal;
+    auto rdsMode = [&] {
+      if (!(thisType->attrs & AttrPersistent)) return rds::Mode::Normal;
+      if (resolved.klass && !classHasPersistentRDS(resolved.klass)) {
+        return rds::Mode::Normal;
+      }
+      return rds::Mode::Persistent;
+    }();
     nameList->m_cachedTypeAlias.bind(rdsMode);
     rds::recordRds(nameList->m_cachedTypeAlias.handle(),
                    sizeof(TypeAliasReq),
                    "TypeAlias", typeName->data());
   }
 
-  auto resolved = resolveTypeAlias(thisType);
-  if (resolved.invalid) {
-    raise_error("Unknown type or class %s", typeName->data());
-    return;
-  }
   nameList->setCachedTypeAlias(resolved);
 }
 
@@ -1175,13 +1179,12 @@ void Unit::initialMerge() {
   m_mergeState = MergeState::Merging;
 
   bool allFuncsUnique = RuntimeOption::RepoAuthoritative;
-  for (MutableFuncRange fr(m_mergeInfo->nonMainFuncs()); !fr.empty();) {
-    Func* f = fr.popFront();
+  for (auto& func : m_mergeInfo->nonMainFuncs()) {
     if (allFuncsUnique) {
-      allFuncsUnique = (f->attrs() & AttrUnique);
+      allFuncsUnique = (func->attrs() & AttrUnique);
     }
-    loadFunc(f);
-    if (rds::isPersistentHandle(f->funcHandle())) {
+    loadFunc(func);
+    if (rds::isPersistentHandle(func->funcHandle())) {
       needsCompact = true;
     }
   }
@@ -1822,9 +1825,8 @@ void Unit::prettyPrint(std::ostream& out, PrintOpts opts) const {
     ? opts.stopOffset : m_bclen;
 
   std::map<Offset,const Func*> funcMap;
-  for (FuncRange fr(funcs()); !fr.empty();) {
-    const Func* f = fr.popFront();
-    funcMap[f->base()] = f;
+  for (auto& func : funcs()) {
+    funcMap[func->base()] = func;
   }
   for (auto it = m_preClasses.begin();
       it != m_preClasses.end(); ++it) {
@@ -1872,8 +1874,8 @@ std::string Unit::toString() const {
   for (auto& pc : m_preClasses) {
     pc->prettyPrint(ss);
   }
-  for (FuncRange fr(funcs()); !fr.empty();) {
-    fr.popFront()->prettyPrint(ss);
+  for (auto& func : funcs()) {
+    func->prettyPrint(ss);
   }
   return ss.str();
 }

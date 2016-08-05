@@ -471,13 +471,17 @@ static inline int nsjrDefault() {
 }
 
 static inline uint32_t profileRequestsDefault() {
-  return debug ? 1 << 31
-       : RuntimeOption::EvalJitConcurrently ? 100
-       : 2000;
+  return debug ? std::numeric_limits<uint32_t>::max() : 2500;
+}
+
+static inline uint32_t profileBCSizeDefault() {
+  return debug ? std::numeric_limits<uint32_t>::max()
+    : RuntimeOption::EvalJitConcurrently ? 3750000
+    : 4300000;
 }
 
 static inline uint32_t resetProfCountersDefault() {
-  return RuntimeOption::EvalJitConcurrently ? 500 : 1000;
+  return RuntimeOption::EvalJitConcurrently ? 250 : 1000;
 }
 
 uint64_t ahotDefault() {
@@ -1100,6 +1104,11 @@ void RuntimeOption::Load(
     if (EvalJit && RecordCodeCoverage) {
       throw std::runtime_error("Code coverage is not supported with "
         "Eval.Jit=true");
+    }
+    if (EvalJitConcurrently && EvalJitTransCounters) {
+      // TODO(12493872): Make thread-safe or remove counters.
+      throw std::runtime_error("Translation counters are not supported with "
+        "Eval.JitConcurrently != 0");
     }
     Config::Bind(DisableSmallAllocator, ini, config,
                  "Eval.DisableSmallAllocator", DisableSmallAllocator);

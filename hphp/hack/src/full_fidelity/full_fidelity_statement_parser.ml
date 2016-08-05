@@ -45,6 +45,7 @@ module WithExpressionParser
     | Case -> parse_case_label_statement parser
     | LeftBrace -> parse_compound_statement parser
     | Static -> parse_function_static_declaration parser
+    | Echo -> parse_echo_statement parser
     | _ -> parse_expression_statement parser
 
   (* Helper: parses ( expr ) *)
@@ -313,18 +314,36 @@ module WithExpressionParser
     (parser, make_throw_statement throw_token expr semi_token)
 
   and parse_default_label_statement parser =
+    (* SPEC:
+      default-label:
+        default  :  statement
+    TODO: The spec is wrong; it implies that a statement must always follow
+          the default:, but in fact
+          switch($x) { default: }
+          is legal. Fix the spec. *)
     (* We detect if we are not inside a switch in a later pass. *)
     let (parser, default_token) = assert_token parser Default in
     let (parser, colon_token) = expect_colon parser in
-    let (parser, stmt) = parse_statement parser in
+    let (parser, stmt) =
+      if peek_token_kind parser = RightBrace then (parser, make_missing())
+      else parse_statement parser in
     (parser, make_default_statement default_token colon_token stmt)
 
   and parse_case_label_statement parser =
     (* We detect if we are not inside a switch in a later pass. *)
+    (* SPEC:
+      case-label:
+        case expression  :  statement
+    TODO: The spec is wrong; it implies that a statement must always follow
+          the case, but in fact
+          switch($x) { case 10: }
+          is legal. Fix the spec. *)
     let (parser, case_token) = assert_token parser Case in
     let (parser, expr) = parse_expression parser in
     let (parser, colon_token) = expect_colon parser in
-    let (parser, stmt) = parse_statement parser in
+    let (parser, stmt) =
+      if peek_token_kind parser = RightBrace then (parser, make_missing())
+      else parse_statement parser in
     (parser, make_case_statement case_token expr colon_token stmt)
 
   and parse_function_static_declaration parser =
@@ -369,6 +388,26 @@ module WithExpressionParser
       let (parser, value) = parse_expression parser1 in
       (parser, make_simple_initializer equal value)
     | _ -> (parser, make_missing())
+
+  (* SPEC:
+    TODO: update the spec to reflect that echo and print must be a statement
+    echo-intrinsic:
+      echo  expression
+      echo  (  expression  )
+      echo  expression-list-two-or-more
+
+    expression-list-two-or-more:
+      expression  ,  expression
+      expression-list-two-or-more  ,  expression
+  *)
+  and parse_echo_statement parser =
+    let parser, token = assert_token parser Echo in
+    let parser, expression_list = parse_comma_list
+      parser Semicolon SyntaxError.error1015 parse_expression
+    in
+    let parser, semicolon = expect_semicolon parser in
+    let syntax = make_echo_statement token expression_list semicolon in
+    (parser, syntax)
 
   and parse_expression_statement parser =
     let (parser1, token) = next_token parser in

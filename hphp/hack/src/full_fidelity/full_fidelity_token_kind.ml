@@ -34,6 +34,7 @@ type t =
 | Default
 | Destruct
 | Do
+| Double
 | Echo
 | Else
 | Elseif
@@ -58,7 +59,9 @@ type t =
 | Newtype
 | Noreturn
 | Num
+| Object
 | Parent
+| Print
 | Private
 | Protected
 | Public
@@ -78,6 +81,7 @@ type t =
 | Try
 | Tuple
 | Type
+| Unset
 | Use
 | Void
 | While
@@ -186,6 +190,7 @@ let from_string keyword =
   | "default" -> Some Default
   | "__destruct" -> Some Destruct
   | "do" -> Some Do
+  | "double" -> Some Double
   | "echo" -> Some Echo
   | "else" -> Some Else
   | "elseif" -> Some Elseif
@@ -212,7 +217,9 @@ let from_string keyword =
   | "noreturn" -> Some Noreturn
   | "null" -> Some NullLiteral
   | "num" -> Some Num
+  | "object" -> Some Object
   | "parent" -> Some Parent
+  | "print" -> Some Print
   | "private" -> Some Private
   | "protected" -> Some Protected
   | "public" -> Some Public
@@ -233,6 +240,7 @@ let from_string keyword =
   | "try" -> Some Try
   | "tuple" -> Some Tuple
   | "type" -> Some Type
+  | "unset" -> Some Unset
   | "use" -> Some Use
   | "void" -> Some Void
   | "while" -> Some While
@@ -260,6 +268,7 @@ let to_string kind =
   | Default -> "default"
   | Destruct -> "__destruct"
   | Do -> "do"
+  | Double -> "double"
   | Echo -> "echo"
   | Else -> "else"
   | Elseif -> "elseif"
@@ -284,7 +293,9 @@ let to_string kind =
   | Newtype -> "newtype"
   | Noreturn -> "noreturn"
   | Num -> "num"
+  | Object -> "object"
   | Parent -> "parent"
+  | Print -> "print"
   | Private -> "private"
   | Protected -> "protected"
   | Public -> "public"
@@ -304,6 +315,7 @@ let to_string kind =
   | Try -> "try"
   | Tuple -> "tuple"
   | Type -> "type"
+  | Unset -> "unset"
   | Use -> "use"
   | Void -> "void"
   | While -> "while"

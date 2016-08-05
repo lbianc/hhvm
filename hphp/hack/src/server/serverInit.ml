@@ -200,7 +200,7 @@ let indexing genv =
 
 let parsing genv env ~get_next t =
   let files_info, errorl, failed =
-    Parsing_service.go genv.workers ~get_next in
+    Parsing_service.go genv.workers SMap.empty ~get_next in
   let files_info = Relative_path.Map.union files_info env.files_info in
   let hs = SharedMem.heap_size () in
   Hh_logger.log "Heap size: %d" hs;
@@ -255,12 +255,18 @@ let type_check genv env fast t =
   if ServerArgs.ai_mode genv.options = None || not (is_check_mode genv.options)
   then begin
     let count = Relative_path.Map.cardinal fast in
-    let errorl, failed = Typing_check_service.go genv.workers env.tcopt fast in
+    let errorl, err_info =
+      Typing_check_service.go genv.workers env.tcopt fast in
+    let { Decl_service.
+      errs = failed;
+      lazy_decl_errs = lazy_decl_failed;
+    } = err_info in
     let hs = SharedMem.heap_size () in
     Hh_logger.log "Heap size: %d" hs;
     HackEventLogger.type_check_end count t;
     let env = { env with
       errorl = Errors.merge errorl env.errorl;
+      failed_decl = Relative_path.Set.union env.failed_decl lazy_decl_failed;
       failed_check = failed;
     } in
     env, (Hh_logger.log_duration "Type-check" t)

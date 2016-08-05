@@ -64,16 +64,20 @@ module WithExpressionAndStatementParser
 
 
   (* Statements *)
-
-  let parse_compound_statement parser =
+  let parse_in_statement_parser parser statement_parser_function =
     let statement_parser = StatementParser.make parser.lexer parser.errors in
-    let (statement_parser, node) =
-      StatementParser.parse_compound_statement statement_parser in
+    let (statement_parser, node) = statement_parser_function
+       statement_parser in
     let lexer = StatementParser.lexer statement_parser in
     let errors = StatementParser.errors statement_parser in
     let parser = { lexer; errors } in
     (parser, node)
 
+  let parse_compound_statement parser =
+    parse_in_statement_parser parser StatementParser.parse_compound_statement
+
+  let parse_statement parser =
+    parse_in_statement_parser parser StatementParser.parse_statement
 
   (* Declarations *)
 
@@ -279,8 +283,8 @@ module WithExpressionAndStatementParser
     (parser, result)
 
   and parse_classish_declaration parser attribute_spec =
-    let (parser, abstract, final) =
-      parse_classish_modifier_opt parser in
+    let (parser, modifiers) =
+      parse_classish_modifiers parser in
     let (parser, token) =
       parse_classish_token parser in
     let (parser, name) = expect_name parser in
@@ -292,17 +296,24 @@ module WithExpressionAndStatementParser
       parse_classish_implements_opt parser in
     let (parser, body) = parse_classish_body parser in
     let syntax = make_classish
-      attribute_spec abstract final token name generic_type_parameter_list
+      attribute_spec modifiers token name generic_type_parameter_list
       classish_extends classish_extends_list classish_implements
       classish_implements_list
       body
     in
     (parser, syntax)
 
-  and parse_classish_modifier_opt parser =
-    let (parser, abstract) = optional_token parser Abstract in
-    let (parser, final) = optional_token parser Final in
-    (parser, abstract, final)
+  and parse_classish_modifiers parser =
+    let rec parse_classish_modifier_opt parser acc =
+      let (parser1, token) = next_token parser in
+      match Token.kind token with
+        | Abstract
+        | Final ->
+          let acc = (make_token token)::acc in
+          parse_classish_modifier_opt parser1 acc
+        | _ -> (parser, make_list (List.rev acc))
+    in
+    parse_classish_modifier_opt parser []
 
   and parse_classish_token parser =
     let (parser1, token) = next_token parser in
@@ -445,6 +456,14 @@ module WithExpressionAndStatementParser
     let classish_elements = List.rev classish_elements in
     (parser, make_list classish_elements)
 
+  and parse_qualified_name_type parser =
+    (* Here we're parsing a name followed by an optional generic type
+       argument list; if we don't have a name, give an error. *)
+    match peek_token_kind parser with
+    | Name
+    | QualifiedName -> parse_possible_generic_specifier parser
+    | _ -> expect_qualified_name parser
+
   and parse_require_clause parser =
     (* SPEC
         require-extends-clause:
@@ -453,6 +472,10 @@ module WithExpressionAndStatementParser
         require-implements-clause:
           require  implements  qualified-name  ;
     *)
+    (* TODO: The spec is incomplete; we need to be able to parse
+       require extends Foo<int>;
+       Fix the spec.
+       *)
     (* ERROR RECOVERY: Detect if the implements/extends, name and semi are
        missing. *)
     let (parser, req) = assert_token parser Require in
@@ -461,7 +484,7 @@ module WithExpressionAndStatementParser
     | Implements
     | Extends -> (parser1, make_token req_kind_token)
     | _ -> (with_error parser SyntaxError.error1045, make_missing()) in
-    let (parser, name) = expect_qualified_name parser in
+    let (parser, name) = parse_qualified_name_type parser in
     let (parser, semi) = expect_semicolon parser in
     let result = make_require_clause req req_kind name semi in
     (parser, result)
@@ -492,18 +515,9 @@ module WithExpressionAndStatementParser
   and parse_trait_use parser =
     let (parser, use_token) = assert_token parser Use in
     let (parser, trait_name_list) = parse_comma_list
-      parser Semicolon SyntaxError.error1004 parse_trait_name in
+      parser Semicolon SyntaxError.error1004 parse_qualified_name_type in
     let (parser, semi) = expect_semicolon parser in
     (parser, make_trait_use use_token trait_name_list semi)
-
-  and parse_trait_name parser =
-    let (parser1, token) = next_token parser in
-    match (Token.kind token) with
-    | Name
-    | QualifiedName -> parse_possible_generic_specifier parser
-    | _ ->
-       let parser = with_error parser1 SyntaxError.error1004 in
-       (parser, make_error [make_token token])
 
   and parse_const_or_type_const_declaration parser abstr =
     let (parser, const) = assert_token parser Const in
@@ -562,33 +576,22 @@ module WithExpressionAndStatementParser
       =  const-expression
   *)
   and parse_const_declaration parser abstr const =
-    (* After abstract and const, the next synatx could be a type spec or a
-     * constant-declarator.
-     * In both cases, the syntax starts with a name. Thus the immediate next
-     * token is useless to distinguish between the two cases.
-     * Thus, we skip the immediate next token, and look at the following one.
-     * There are three cases:
-     * 1. There is no type. If there is no type, in constant-declarator, After
-     *    the name there should be an equal sign.
-     * 2. There is a simple type. A simple type is just one token, thus the
-     *    token after needs to be a name belonging to constant-declarator.
-     * 3. There is a generic type, then the token should be '<' .
-     *)
-    let next_token_is_type =
-      peek_token_kind (skip_token parser) = Name ||
-      peek_token_kind (skip_token parser) = LessThan
-    in
-
-    let (parser, type_spec) = if next_token_is_type then
+    let (parser, type_spec) = if is_type_in_const parser then
       parse_type_specifier parser
     else
       parser, make_missing ()
     in
-
     let (parser, const_list) = parse_comma_list
       parser Semicolon SyntaxError.error1004 parse_constant_declarator in
     let (parser, semi) = expect_semicolon parser in
     (parser, make_const_declaration abstr const type_spec const_list semi)
+
+  and is_type_in_const parser =
+    (* TODO Use Eric's helper here to assert length of errors *)
+    let before = List.length (errors parser) in
+    let (parser1, _) = parse_type_specifier parser in
+    let (parser1, _) = expect_name parser1 in
+    List.length (errors parser1) = before
 
   and parse_constant_declarator parser =
     let (parser, const_name) = expect_name parser in
@@ -920,6 +923,8 @@ module WithExpressionAndStatementParser
       parse_function_declaration parser attribute_specification
     | Abstract
     | Final
+    | Interface
+    | Trait
     | Class -> parse_classish_declaration parser attribute_specification
     | _ ->
       (* TODO *)
@@ -945,11 +950,7 @@ module WithExpressionAndStatementParser
     | LessThanLessThan ->
       parse_classish_or_function_declaration parser
     | _ ->
-      (* ERROR RECOVERY: Skip the token, try again. *)
-      (* TODO: Better policy would be to skip ahead to
-         the first token that makes a legal declaration. *)
-      let parser = with_error parser1 SyntaxError.error1002 in
-      (parser, make_error [make_token token])
+      parse_statement parser
 
   and parse_declarations parser expect_brace =
     let rec aux parser declarations =

@@ -44,13 +44,11 @@ const StaticString s_WaitHandle("HH\\WaitHandle");
  */
 SSATmp* ldClassSafe(IRGS& env, const StringData* className,
                     const Class* knownCls = nullptr) {
-  if (!knownCls) knownCls = Unit::lookupClassOrUniqueClass(className);
+  if (!knownCls) {
+    knownCls = Unit::lookupUniqueClassInContext(className, curClass(env));
+  }
 
-  // We can only burn in the Class* if it's unique or in the inheritance
-  // hierarchy of our context.  If we can't burn in the class, use
-  // LdClsCachedSafe---InstanceOfD and Verify(Ret|Param)Type don't invoke
-  // autoload.
-  if (classIsUniqueOrCtxParent(env, knownCls)) {
+  if (knownCls) {
     return cns(env, knownCls);
   }
 
@@ -272,11 +270,11 @@ void verifyTypeImpl(IRGS& env, int32_t const id) {
     if (RuntimeOption::RepoAuthoritative && td &&
         tc.namedEntity()->isPersistentTypeAlias() &&
         td->klass) {
+      assertx(classHasPersistentRDS(td->klass));
       clsName = td->klass->name();
       knownConstraint = td->klass;
     } else {
       clsName = tc.typeName();
-      knownConstraint = Unit::lookupClassOrUniqueClass(clsName);
     }
   } else {
     if (tc.isSelf()) {
@@ -383,19 +381,13 @@ folly::Optional<Type> ratToAssertType(IRGS& env, RepoAuthType rat) {
     case T::Ref:
     case T::InitUnc:
     case T::Unc:
-      return typeFromRAT(rat);
+      return typeFromRAT(rat, nullptr);
 
     case T::OptExactObj:
     case T::OptSubObj:
     case T::ExactObj:
     case T::SubObj: {
-      auto ty = typeFromRAT(rat);
-      auto const cls = Unit::lookupClassOrUniqueClass(rat.clsName());
-
-      if (!classIsUniqueOrCtxParent(env, cls)) {
-        ty |= TObj; // Kill specialization.
-      }
-      return ty;
+      return typeFromRAT(rat, curClass(env));
     }
 
     // Type assertions can't currently handle Init-ness.
@@ -485,14 +477,18 @@ void emitInstanceOf(IRGS& env) {
     return;
   }
 
-  push(
-    env,
-    t2->isA(TArr) ? gen(env, InterfaceSupportsArr, t1) :
-    t2->isA(TInt) ? gen(env, InterfaceSupportsInt, t1) :
-    t2->isA(TStr) ? gen(env, InterfaceSupportsStr, t1) :
-    t2->isA(TDbl) ? gen(env, InterfaceSupportsDbl, t1) :
-    cns(env, false)
-  );
+  auto const res = [&]() -> SSATmp* {
+    if (t2->isA(TArr)) return gen(env, InterfaceSupportsArr, t1);
+    if (t2->isA(TInt)) return gen(env, InterfaceSupportsInt, t1);
+    if (t2->isA(TStr)) return gen(env, InterfaceSupportsStr, t1);
+    if (t2->isA(TDbl)) return gen(env, InterfaceSupportsDbl, t1);
+    if (!t2->type().maybe(TObj|TArr|TInt|TStr|TDbl)) return cns(env, false);
+    return nullptr;
+  }();
+
+  if (!res) PUNT(InstanceOf-Unknown);
+
+  push(env, res);
   decRef(env, t2);
   decRef(env, t1);
 }

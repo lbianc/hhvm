@@ -101,6 +101,7 @@ let error1042 = "A visibility modifier, static, abstract, or final keyword is "^
 let error1043 = "A function header is expected here."
 let error1044 = "A name, __construct, or __destruct keyword is expected here."
 let error1045 = "An 'extends' or 'implements' keyword is expected here."
+let error1046 = "A lambda arrow ('==>') is expected here."
 
 let error2001 = "A type annotation is required in strict mode."
 let error2002 = "An XHP attribute name may not contain '-' or ':'."
@@ -133,3 +134,5 @@ let error2022 = "An ellipsis '...' may not be followed by a comma ','."
 
 let error2029 = "Only traits and interfaces may use 'require extends'."
 let error2030 = "Only traits may use 'require implements'."
+let error2031 =
+  "A class, interface, or trait declaration cannot have duplicate modifiers."

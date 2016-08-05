@@ -15,6 +15,7 @@
  * consistent) *)
 open Autocomplete
 open Core
+open Decl_defs
 open Nast
 open Typing_defs
 open Utils
@@ -1045,7 +1046,7 @@ and expr_
       | None -> (* The static method wasn't found. *)
         smember_not_found p ~is_const:false ~is_method:true class_ (snd meth);
         env, (Reason.Rnone, Tany)
-      | Some smethod ->
+      | Some { ce_type = lazy ty; ce_visibility; _ } ->
         let cid = CI c in
         let env, cid_ty = static_class_id (fst c) env cid in
         let ety_env = {
@@ -1054,11 +1055,11 @@ and expr_
           this_ty = cid_ty;
           from_class = Some cid;
         } in
-        let env, smethod_type = Phase.localize ~ety_env env smethod.ce_type in
+        let env, smethod_type = Phase.localize ~ety_env env ty in
         (match smethod_type with
         | _, Tfun fty -> check_deprecated p fty
         | _ -> ());
-        (match smethod_type, smethod.ce_visibility with
+        (match smethod_type, ce_visibility with
         | (r, (Tfun _ as ty)), Vpublic ->
           env, (r, ty)
         | (r, Tfun _), Vprivate _ ->
@@ -1524,14 +1525,14 @@ and new_object ~check_not_abstract p env c el uel =
           env, (r_witness, TUtils.this_of obj_ty)
         | CIparent ->
           (match (fst class_.tc_construct) with
-            | Some ce ->
+            | Some {ce_type = lazy ty; _ } ->
               let ety_env = {
                 type_expansions = [];
                 substs = SMap.empty;
                 this_ty = obj_ty;
                 from_class = None;
               } in
-              let _, ce_type = Phase.localize ~ety_env env ce.ce_type in
+              let _, ce_type = Phase.localize ~ety_env env ty in
               ignore (check_abstract_parent_meth SN.Members.__construct p ce_type)
             | None -> ());
           env, obj_ty
@@ -2728,7 +2729,7 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
               | None ->
                 smember_not_found p ~is_const ~is_method class_ mid;
                 env, (Reason.Rnone, Tany)
-              | Some {ce_visibility = vis; ce_type = (r, Tfun ft); _} ->
+              | Some {ce_visibility = vis; ce_type = lazy (r, Tfun ft); _} ->
                 let p_vis = Reason.to_pos r in
                 TVis.check_class_access p env (p_vis, vis) cid class_;
                 let env, ft = Phase.localize_ft ~ety_env env ft in
@@ -2738,7 +2739,7 @@ and class_get_ ~is_method ~is_const ~ety_env ?(incl_tc=false) env cid cty
                 } in
                 env, (r, Tfun ft)
               | _ -> assert false)
-          | Some { ce_visibility = vis; ce_type = method_; _ } ->
+          | Some { ce_visibility = vis; ce_type = lazy method_; _ } ->
             let p_vis = Reason.to_pos (fst method_) in
             TVis.check_class_access p env (p_vis, vis) cid class_;
             let env, method_ =
@@ -2860,7 +2861,7 @@ and obj_get_ ~is_method ~nullsafe env ty1 cid (p, s as id)
                   | None ->
                     member_not_found p ~is_method class_ s (fst ety1);
                     env, (Reason.Rnone, Tany), None
-                  | Some {ce_visibility = vis; ce_type = (r, Tfun ft); _}  ->
+                  | Some {ce_visibility = vis; ce_type = lazy (r, Tfun ft); _}  ->
                     let mem_pos = Reason.to_pos r in
                     TVis.check_obj_access p env (mem_pos, vis);
                     (* the return type of __call can depend on the
@@ -2888,7 +2889,7 @@ and obj_get_ ~is_method ~nullsafe env ty1 cid (p, s as id)
                     env, member_, Some (mem_pos, vis)
                   | _ -> assert false
                 )
-              | Some ({ce_visibility = vis; ce_type = member_; _ } as member_ce) ->
+              | Some ({ce_visibility = vis; ce_type = lazy member_; _ } as member_ce) ->
                 let mem_pos = Reason.to_pos (fst member_) in
                 TVis.check_obj_access p env (mem_pos, vis);
                 let member_ = Typing_enum.member_type env member_ce in
@@ -3139,7 +3140,7 @@ and call_construct p env class_ params el uel cid =
         class_.tc_members_fully_known
       then Errors.constructor_no_args p;
       fst (List.map_env env el expr)
-    | Some { ce_visibility = vis; ce_type = m; _ } ->
+    | Some { ce_visibility = vis; ce_type = lazy m; _ } ->
       TVis.check_obj_access p env (Reason.to_pos (fst m), vis);
       let cid = if cid = CIparent then CIstatic else cid in
       let env, cid_ty = static_class_id p env cid in
@@ -3795,16 +3796,16 @@ and string2 env idl =
  * the type parameters. *)
 and check_implements_tparaml (env: Env.env) ht =
   let _r, (p, c), paraml = TUtils.unwrap_class_type ht in
-  let class_ = Env.get_class_dep env c in
+  let class_ = Decl_env.get_class_dep env.Env.decl_env c in
   match class_ with
   | None ->
       (* The class lives in PHP land *)
       ()
   | Some class_ ->
-      let size1 = List.length class_.tc_tparams in
+      let size1 = List.length class_.dc_tparams in
       let size2 = List.length paraml in
-      if size1 <> size2 then Errors.class_arity p class_.tc_pos c size1;
-      let subst = Inst.make_subst class_.tc_tparams paraml in
+      if size1 <> size2 then Errors.class_arity p class_.dc_pos c size1;
+      let subst = Inst.make_subst class_.dc_tparams paraml in
       iter2_shortest begin fun (_, (p, _), cstrl) ty ->
         List.iter cstrl begin fun (ck, cstr) ->
           (* Constraint might contain uses of generic type parameters *)
@@ -3815,7 +3816,7 @@ and check_implements_tparaml (env: Env.env) ht =
           | Ast.Constraint_super ->
             ignore (Type.sub_type_decl p Reason.URnone env cstr ty)
         end
-      end class_.tc_tparams paraml
+      end class_.dc_tparams paraml
 
 (* In order to type-check a class, we need to know what "parent"
  * refers to. Sometimes people write "parent::", when that happens,
@@ -3824,7 +3825,7 @@ and check_implements_tparaml (env: Env.env) ht =
 and class_def_parent env class_def class_type =
   match class_def.c_extends with
   | (_, Happly ((_, x), _) as parent_ty) :: _ ->
-      let parent_type = Env.get_class_dep env x in
+      let parent_type = Decl_env.get_class_dep env.Env.decl_env x in
       (match parent_type with
       | Some parent_type -> check_parent class_def class_type parent_type
       | None -> ());
@@ -3843,13 +3844,13 @@ and check_parent class_def class_type parent_type =
    *)
   if class_type.tc_members_fully_known
   then check_parent_abstract position parent_type class_type;
-  if parent_type.tc_final
-  then Errors.extend_final position parent_type.tc_pos parent_type.tc_name
+  if parent_type.dc_final
+  then Errors.extend_final position parent_type.dc_pos parent_type.dc_name
   else ()
 
 and check_parent_abstract position parent_type class_type =
   let is_final = class_type.tc_final in
-  if parent_type.tc_kind = Ast.Cabstract &&
+  if parent_type.dc_kind = Ast.Cabstract &&
     (class_type.tc_kind <> Ast.Cabstract || is_final)
   then begin
     check_extend_abstract_meth ~is_final position class_type.tc_methods;
@@ -3951,12 +3952,9 @@ and class_def_ env c tc =
 and check_extend_abstract_meth ~is_final p smap =
   SMap.iter begin fun x ce ->
     match ce.ce_type with
-    | r, Tfun { ft_abstract = true; _ } ->
+    | lazy (r, Tfun { ft_abstract = true; _ }) ->
         Errors.implement_abstract ~is_final p (Reason.to_pos r) "method" x
-    | _, (Tany | Tmixed | Tarray (_, _) | Tgeneric (_,_) | Toption _ | Tprim _
-          | Tfun _ | Tapply (_, _) | Ttuple _ | Tshape _ | Taccess (_, _)
-          | Tthis
-         ) -> ()
+    | _ -> ()
   end smap
 
 (* Type constants must be bound to a concrete type for non-abstract classes.
