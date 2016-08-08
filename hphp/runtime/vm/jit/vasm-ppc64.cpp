@@ -80,13 +80,11 @@ struct Vgen {
   static void patch(Venv& env) {
     for (auto& p : env.jmps) {
       assertx(env.addrs[p.target]);
-      // unconditional branch
-      Assembler::patchBranch(p.instr, env.addrs[p.target], false);
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
     for (auto& p : env.jccs) {
       assertx(env.addrs[p.target]);
-      // conditional branch
-      Assembler::patchBranch(p.instr, env.addrs[p.target], true);
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
   }
 

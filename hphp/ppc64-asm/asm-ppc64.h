@@ -195,21 +195,13 @@ struct Label {
                   bool fixedSize = true);
   void asm_label(Assembler& a);
 
-  enum class BranchType {
-    b,    // unconditional branch up to 26 bits offset
-    bc,   // conditional branch up to 16 bits offset
-    bctr, // unconditional branch by using a 64 bits absolute address
-    bcctr // conditional branch by using a 64 bits absolute address
-  };
-
 private:
   struct JumpInfo {
-    BranchType type;
     Assembler* a;
     CodeAddress addr;
   };
 
-  void addJump(Assembler* a, BranchType type);
+  void addJump(Assembler* a);
 
   Assembler* m_a;
   CodeAddress m_address;
@@ -1868,10 +1860,9 @@ struct Assembler {
    * Patch a branch to the correct target.
    *
    * It decodes the branch @jmp to decide whether it's an absolute branch or an
-   * offset branch and patches it properly. The @cond argument is used to skip
-   * the overflow handling, if it's unconditional branch.
+   * offset branch and patches it properly.
    */
-  static void patchBranch(CodeAddress jmp, CodeAddress dest, bool cond);
+  static void patchBranch(CodeAddress jmp, CodeAddress dest);
   static void patchAbsolute(CodeAddress jmp, CodeAddress dest);
 
 //////////////////////////////////////////////////////////////////////

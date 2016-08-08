@@ -791,11 +791,11 @@ void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   a.li64(reg::r12, ssize_t(dest), true);
 }
 
-void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest, bool cond) {
+void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
   auto di = DecodedInstruction(jmp);
 
   // Detect Far branch
-  if (di.isFarBranch(cond)) {
+  if (di.isFarBranch()) {
     patchAbsolute(jmp, dest);
     return;
   }
@@ -894,9 +894,7 @@ Label::~Label() {
     assert(m_a && m_address && "Label had jumps but was never set");
   }
   for (auto& ji : m_toPatch) {
-    bool cond = ((BranchType::bc == ji.type) ||
-        (BranchType::bcctr == ji.type));
-    ji.a->patchBranch(ji.addr, m_address, cond);
+    ji.a->patchBranch(ji.addr, m_address);
   }
 }
 
@@ -910,7 +908,7 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
       if (BranchConditions::Always == bc) {
         // unconditional branch
         if (HPHP::jit::deltaFitsBits(diff, 26)) {
-          addJump(&a, BranchType::b);
+          addJump(&a);
           if (LinkReg::Save == lr) a.bl(diff);
           else                     a.b (diff);
           return;
@@ -919,7 +917,7 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
         // conditional branch
         if (HPHP::jit::deltaFits(diff, HPHP::sz::word)) {
           BranchParams bp(bc);
-          addJump(&a, BranchType::bc);
+          addJump(&a);
           assert(LinkReg::DoNotTouch == lr &&
               "Conditional call is NOT supported.");
 
@@ -944,8 +942,7 @@ void Label::branchFar(Assembler& a,
                   LinkReg lr,
                   bool fixedSize /* = true */) {
   // Marking current address for patchAbsolute
-  bool cond = (BranchConditions::Always != bc);
-  addJump(&a, cond ? BranchType::bcctr : BranchType::bctr);
+  addJump(&a);
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
@@ -956,6 +953,7 @@ void Label::branchFar(Assembler& a,
   a.mtctr(reg::r12);
 
   // Special code for overflow handling
+  bool cond = (BranchConditions::Always != bc);
   if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
     a.xor(reg::r0, reg::r0, reg::r0,false);
     a.mtspr(Assembler::SpecialReg::XER, reg::r0);
@@ -980,10 +978,9 @@ void Label::asm_label(Assembler& a) {
   m_address = a.frontier();
 }
 
-void Label::addJump(Assembler* a, BranchType type) {
+void Label::addJump(Assembler* a) {
   if (m_address) return;
   JumpInfo info;
-  info.type = type;
   info.a = a;
   info.addr = a->codeBlock.frontier();
   m_toPatch.push_back(info);
