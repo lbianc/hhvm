@@ -375,17 +375,11 @@ struct Assembler {
   void andi(const Reg64& ra, const Reg64& rs, Immed imm);
   void andis(const Reg64& ra, const Reg64& rs, Immed imm);
   void b(int32_t offset);
-  void ba(uint32_t target_addr);
   void bl(int32_t offset);
-  void bla(uint32_t target_addr);
   void bc(uint8_t bo, uint8_t bi, int16_t offset);
-  void bca(uint8_t bo, uint8_t bi, uint16_t target_addr);
   void bcctr(uint8_t bo, uint8_t bi, uint16_t bh);
-  void bcctrl(uint8_t bo, uint8_t bi, uint16_t bh);
-  void bcl(uint8_t bo, uint8_t bi, int16_t offset);
-  void bcla(uint8_t bo, uint8_t bi, uint16_t target_addr);
-  void bclr(uint8_t bo, uint8_t bi, uint16_t bh);
-  void bclrl(uint8_t bo, uint8_t bi, uint16_t bh);
+  void bctrl();
+  void blr();
   void bctar(uint8_t bo, uint8_t bi, uint16_t bh);
   void bctarl(uint8_t bo, uint8_t bi, uint16_t bh);
   void bpermd(const Reg64& ra, const Reg64& rs, const Reg64& rv);
@@ -1606,22 +1600,11 @@ struct Assembler {
   void blt()            { not_implemented(); }  //Extended bc 12,0,target
   void bne()            { not_implemented(); }  //Extended bc 4,10,target
   void bdnz()           { not_implemented(); }  //Extended bc 16,0,target
-  void blr() {
-    BranchParams bp(BranchConditions::Always);
-    bclr(bp.bo(), bp.bi(), 0);
-  }
-  void bltlr()          { not_implemented(); }  //Extended bclr 12,0,0
-  void bnelr()          { not_implemented(); }  //Extended bclr 4,10,0
-  void bdnzlr()         { not_implemented(); }  //Extended bclr 16,0,0
   void bltctr()         { not_implemented(); }  //Extended bcctr 12,0,0
   void bnectr()         { not_implemented(); }  //Extended bcctr 4,10,0
   void bctr() {
     BranchParams bp(BranchConditions::Always);
     bcctr(bp.bo(), bp.bi(), 0);
-  }
-  void bctrl() {
-    BranchParams bp(BranchConditions::Always);
-    bcctrl(bp.bo(), bp.bi(), 0);
   }
   void crmov()          { not_implemented(); }  //Extended cror Bx,By,By
   void crclr()          { not_implemented(); }  //Extended crxor Bx,Bx,BX
@@ -1748,7 +1731,6 @@ struct Assembler {
 
   // Simplify to conditional branch that always branch
   void b(Label& l)  { bc(l, BranchConditions::Always); }
-  void bl(Label& l)  { bcl(l, BranchConditions::Always); }
 
   void bc(Label& l, BranchConditions bc) {
     l.branch(*this, bc, LinkReg::DoNotTouch);
@@ -1756,8 +1738,8 @@ struct Assembler {
   void bc(Label& l, ConditionCode cc) {
     l.branch(*this, BranchParams::convertCC(cc), LinkReg::DoNotTouch);
   }
-  void bcl(Label& l, BranchConditions bc) {
-    l.branch(*this, bc, LinkReg::Save);
+  void bl(Label& l) {
+    l.branch(*this, BranchConditions::Always, LinkReg::Save);
   }
 
   void branchAuto(Label& l,

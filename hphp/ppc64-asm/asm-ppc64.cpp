@@ -23,15 +23,11 @@ void BranchParams::decodeInstr(PPC64Instr* pinstr) {
   const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
   switch (dinfo.opcode_name()) {
     case OpcodeNames::op_b:
-    case OpcodeNames::op_ba:
     case OpcodeNames::op_bl:
-    case OpcodeNames::op_bla:
       assert(dinfo.form() == Form::kI);
       defineBoBi(BranchConditions::Always);
       break;
     case OpcodeNames::op_bc:
-    case OpcodeNames::op_bca:
-    case OpcodeNames::op_bclr:
       assert(dinfo.form() == Form::kB);
       B_form_t bform;
       bform.instruction = dinfo.instruction_image();
@@ -55,7 +51,6 @@ void BranchParams::decodeInstr(PPC64Instr* pinstr) {
   // Set m_lr accordingly for all 'call' flavors used
   switch (dinfo.opcode_name()) {
     case OpcodeNames::op_bl:
-    case OpcodeNames::op_bla:
     case OpcodeNames::op_bcctrl:
       m_lr = true;
       break;
@@ -191,56 +186,32 @@ void Assembler::b(int32_t offset) {
   EmitIForm(18, uint32_t(offset));
 }
 
-void Assembler::ba(uint32_t target_addr) {
-  EmitIForm(18, target_addr, 1, 0);
-}
-
 void Assembler::bl(int32_t offset) {
   EmitIForm(18, uint32_t(offset), 0, 1);
-}
-
-void Assembler::bla(uint32_t target_addr) {
-  EmitIForm(18, target_addr, 1, 1);
 }
 
 void Assembler::bc(uint8_t bo, uint8_t bi, int16_t offset) {
   EmitBForm(16, bo, bi, uint32_t(offset), 0, 0);
 }
 
-void Assembler::bca(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-  EmitBForm(16, bo, bi, target_addr, 1, 0);
-}
-
 void Assembler::bcctr(uint8_t bo, uint8_t bi, uint16_t bh) {
   EmitXLForm(19, bo, bi, (bh & 0x3), 528);
 }
 
-void Assembler::bcctrl(uint8_t bo, uint8_t bi, uint16_t bh) {
-  EmitXLForm(19, bo, bi, (bh & 0x3), 528, 1);
+void Assembler::bctrl() {
+  // The concept of a conditional call is not existent for upper layers.
+  // Therefore no bcctrl is defined despite being possible.
+  // Only bctrl is defined.
+  BranchParams bp(BranchConditions::Always);
+  EmitXLForm(19, bp.bo(), bp.bi(), (0 /*bh*/ & 0x3), 528, 1);
 }
 
-void Assembler::bcl(uint8_t bo, uint8_t bi, int16_t offset) {
-  EmitBForm(16, bo, bi, offset, 0, 1);
-}
-
-void Assembler::bcla(uint8_t bo, uint8_t bi, uint16_t target_addr) {
-  EmitBForm(16, bo, bi, target_addr, 1, 1);
-}
-
-void Assembler::bclr(uint8_t bo, uint8_t bi, uint16_t bh) {
-  EmitXLForm(19, bo, bi, (bh & 0x3), 16, 0);
-}
-
-void Assembler::bclrl(uint8_t bo, uint8_t bi, uint16_t bh) {
-  EmitXLForm(19, bo, bi, (bh & 0x3), 16, 1);
-}
-
-void Assembler::bctar(uint8_t bo, uint8_t bi, uint16_t bh) {
-  EmitXLForm(19, bo, bi, (bh & 0x3), 560, 0);
-}
-
-void Assembler::bctarl(uint8_t bo, uint8_t bi, uint16_t bh) {
-  EmitXLForm(19, bo, bi, (bh & 0x3), 560, 1);
+void Assembler::blr() {
+  // The concept of a conditional return is not existent for upper layers.
+  // Therefore no bclr is defined despite being possible.
+  // Only blr is defined.
+  BranchParams bp(BranchConditions::Always);
+  EmitXLForm(19, bp.bo(), bp.bi(), (0 /*bh*/ & 0x3), 16, 0);
 }
 
 void Assembler::bpermd(const Reg64& ra, const Reg64& rs, const Reg64& rv) {
@@ -994,8 +965,13 @@ void Label::branchFar(Assembler& a,
   }
 
   BranchParams bp(bc);
-  if (LinkReg::Save == lr) a.bcctrl(bp.bo(), bp.bi(), 0);
-  else                     a.bcctr (bp.bo(), bp.bi(), 0);
+  if (LinkReg::Save == lr) {
+    // call
+    a.bctrl();
+  } else {
+    // jcc
+    a.bcctr(bp.bo(), bp.bi(), 0);
+  }
 }
 
 void Label::asm_label(Assembler& a) {
