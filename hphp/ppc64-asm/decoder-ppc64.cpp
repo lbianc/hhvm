@@ -376,43 +376,6 @@ bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
   return false;
 }
 
-bool DecoderInfo::isAbsoluteBranch(bool allowCond /* = true */) const {
-  // allowCond: true
-  //   ba, bla - unconditional branches
-  //   bca, bcla
-  //
-  // allowCond: false
-  //   ba, bla - unconditional branches
-  //  And also, if condition is "branch always" (BO field is 1x1xx):
-  //   bca, bcla
-  //
-  // (based on the branch instructions defined on this Decoder)
-  switch (m_opn) {
-    case OpcodeNames::op_ba:
-    case OpcodeNames::op_bla:
-      return true;
-      break;
-    case OpcodeNames::op_bca:
-    case OpcodeNames::op_bcla:
-      {
-        if (!allowCond) {
-          // checking if the condition is "always branch", then it counts as an
-          // unconditional branch
-          assert(m_form == Form::kB);
-          B_form_t bform;
-          bform.instruction = m_image;
-          BranchParams uncondition_bp(BranchConditions::Always);
-          return bform.BO == uncondition_bp.bo();
-        }
-        return true;
-      }
-      break;
-    default:
-      break;
-  }
-  return false;
-}
-
 bool DecoderInfo::isRegisterBranch(bool allowCond /* = true */) const {
   // allowCond: true
   //   bcctr, bcctrl, bctar, bctarl
