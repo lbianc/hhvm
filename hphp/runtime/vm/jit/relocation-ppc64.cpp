@@ -103,13 +103,12 @@ size_t relocateImpl(RelocationInfo& rel,
 
       asm_count++;
 
-      TCA target = nullptr;
       TCA dest = dest_block.frontier();
       dest_block.bytes(di.size(), src);
       ppc64_asm::DecodedInstruction d2(dest, di.size());
       if (di.isNearBranch()) {
         if (di.isBranch(false)) {
-          target = di.nearBranchTarget();
+          jmp_dest = di.nearBranchTarget();
         }
         // Relative branch needs always to be readjusted
         internal_refs_need_update = true;
@@ -211,7 +210,6 @@ size_t relocateImpl(RelocationInfo& rel,
         rel.recordAddress(src, dest, 0);
       }
       dest += d2.size();
-      jmp_dest = target;
       assertx(dest <= dest_block.frontier());
       dest_block.setFrontier(dest);
       src += di.size();
