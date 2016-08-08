@@ -248,7 +248,7 @@ extern "C" {
 #  if defined WIN32 || defined _WIN32
 #    define CDECL __cdecl
 #  else /* defined WIN32 || defined _WIN32 */
-#    if defined _M_X64 || defined _M_AMD64 || defined __x86_64_ || defined __ppc64___
+#    if defined _M_X64 || defined _M_AMD64 || defined __x86_64_
 #      define CDECL /* not actual on x86_64 platform */
 #    else  /* _M_X64 || _M_AMD64 || __x86_64__ */
 #      define CDECL __attribute__ ((__cdecl__))
@@ -256,7 +256,11 @@ extern "C" {
 #  endif /* defined WIN32 || defined _WIN32 */
 #endif /* CDECL */
 
-#define JITAPI CDECL
+#ifdef __PPC64__
+  #define JITAPI /* __cdecl__ not supported on ppc64 */
+#else /* __PPC64__ */
+  #define JITAPI CDECL
+#endif /* __PPC64__ */
 
 /* called when the settings are changed with new settings */
 typedef void (*iJIT_ModeChangedEx)(void *UserData, iJIT_ModeFlags Flags);
