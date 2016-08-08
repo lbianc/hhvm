@@ -57,7 +57,7 @@ struct DecodedInstruction {
   // Conditional branch: up to 16bits.
   // Unconditional branch: up to 26bits (b instruction)
   // (aka Near branch)
-  bool isNearBranch(bool allowCond = true) const;
+  bool isNearBranch(AllowCond ac = AllowCond::Any) const;
   uint8_t* nearBranchTarget() const;
   bool setNearBranchTarget(uint8_t* target);
 
@@ -75,16 +75,16 @@ struct DecodedInstruction {
   bool isException() const      { return m_dinfo.isException(); }
   bool isNop() const            { return m_dinfo.isNop(); }
   // if it's conditional branch, it's not a jmp
-  bool isJmp() const            { return isBranch(false); }
+  bool isJmp() const            { return isBranch(AllowCond::OnlyUncond); }
   bool isSpOffsetInstr() const  { return m_dinfo.isSpOffsetInstr(); }
   bool isClearSignBit() const   { return m_dinfo.isClearSignBit(); }
 
   // True if it's Near or Far type.
-  bool isBranch(bool allowCond = true) const;
+  bool isBranch(AllowCond ac = AllowCond::Any) const;
 
-  bool isFarBranch(bool allowCond = true) const;
-  DecoderInfo getFarBranch(bool allowCond = true) const;
-  DecInfoOffset getFarBranchLength(bool allowCond = true) const;
+  bool isFarBranch(AllowCond ac = AllowCond::Any) const;
+  DecoderInfo getFarBranch(AllowCond ac = AllowCond::Any) const;
+  DecInfoOffset getFarBranchLength(AllowCond ac = AllowCond::Any) const;
   uint8_t* farBranchTarget() const { return (uint8_t*)m_imm; }
   bool setFarBranchTarget(uint8_t* target, bool fixedSize);
 

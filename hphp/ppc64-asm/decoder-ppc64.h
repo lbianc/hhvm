@@ -1532,6 +1532,12 @@ enum class OpcodeNames {
 // appropriate cast for array manipulation
 constexpr size_t kTotalOpcodes = static_cast<size_t>(OpcodeNames::op_last);
 
+enum class AllowCond {
+  OnlyUncond,
+  Any,
+  OnlyCond
+};
+
 struct DecoderInfo {
   DecoderInfo(OpcodeNames opn, PPC64Instr op, Form form,
       std::string mnemonic, std::initializer_list<Operands> oper)
@@ -1578,8 +1584,9 @@ struct DecoderInfo {
   }
   bool isException() const;
   bool isNop() const;
-  bool isOffsetBranch(bool allowCond = true) const;
-  bool isRegisterBranch(bool allowCond = true) const;
+  bool isOffsetBranch(AllowCond ac = AllowCond::Any) const;
+  bool isRegisterBranch(AllowCond ac = AllowCond::Any) const;
+  bool isBranchWithLR() const;
   bool isClearSignBit() const;
   bool isSpOffsetInstr() const;
   int32_t offset() const;

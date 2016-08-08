@@ -28,8 +28,10 @@ namespace ppc64_asm {
 bool DecodedInstruction::couldBeNearBranch() {
   assert(isFarBranch());
   ptrdiff_t diff = farBranchTarget() - m_ip;
-  bool uncond = isCall();
-  return fitsOnNearBranch(diff, uncond);
+
+  // assert already stated it's a Far branch, but depending if it's conditional
+  // or not, an additional range can be used.
+  return fitsOnNearBranch(diff, isFarBranch(AllowCond::OnlyUncond));
 }
 
 uint8_t* DecodedInstruction::nearBranchTarget() const {
@@ -41,7 +43,7 @@ uint8_t* DecodedInstruction::nearBranchTarget() const {
 bool DecodedInstruction::setNearBranchTarget(uint8_t* target) {
   if (!isNearBranch()) return false;
   ptrdiff_t diff = target - m_ip;
-  bool uncond = m_dinfo.isOffsetBranch(false);
+  bool uncond = m_dinfo.isOffsetBranch(AllowCond::OnlyUncond);
   if (fitsOnNearBranch(diff, uncond)) {
     auto pinstr = reinterpret_cast<PPC64Instr*>(m_ip);
     *pinstr = m_dinfo.setBranchOffset(int32_t(diff));
@@ -76,9 +78,9 @@ bool DecodedInstruction::shrinkBranch() {
   // It should be a Far branch, otherwise don't do anything if it's Near.
   assertx(isBranch() && "Can't shrink instruction that is not a branch.");
 
-  auto uncondBranch = isFarBranch(false);
+  auto uncondBranch = isFarBranch(AllowCond::OnlyUncond);
   auto call = isCall();
-  auto condBranch = isFarBranch(true);
+  auto condBranch = isFarBranch(AllowCond::OnlyCond);
 
   if (uncondBranch || call || condBranch) {
     HPHP::CodeBlock cb;
@@ -126,25 +128,25 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
   }
 }
 
-bool DecodedInstruction::isBranch(bool allowCond /* = true */) const {
-  return isFarBranch(allowCond) || isNearBranch(allowCond);
+bool DecodedInstruction::isBranch(AllowCond ac /* = AllowCond::Any */) const {
+  return isFarBranch(ac) || isNearBranch(ac);
 }
 
-bool DecodedInstruction::isNearBranch(bool allowCond /* = true */) const {
-  return m_dinfo.isOffsetBranch(allowCond);
+bool DecodedInstruction::isNearBranch(AllowCond ac /* = Any */) const {
+  return m_dinfo.isOffsetBranch(ac);
 }
 
-bool DecodedInstruction::isFarBranch(bool allowCond /* = true */) const {
-  return !getFarBranch(allowCond).isInvalid();
+bool DecodedInstruction::isFarBranch(AllowCond ac /* = Any */) const {
+  return !getFarBranch(ac).isInvalid();
 }
 
-DecoderInfo DecodedInstruction::getFarBranch(bool allowCond) const {
-  return getFarBranchLength(allowCond).m_di;
+DecoderInfo DecodedInstruction::getFarBranch(AllowCond ac /* = Any */) const {
+  return getFarBranchLength(ac).m_di;
 }
 
 // Returns -1 if not found, otherwise the offset from m_ip that a register
 // branch instruction is found
-DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
+DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   DecInfoOffset ret;
   if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return ret;
 
@@ -158,17 +160,24 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
       return n < bytes;
   };
 
-  // guarantee that the worst case is being analysed
-  assertx(Assembler::kJccLen > Assembler::kCallLen);
+#define MAX(a, b)    (((a) > (b)) ? (a) : (b))
+  auto branch_size = ((ac == AllowCond::OnlyCond)
+      ? Assembler::kJccLen
+      : ((ac == AllowCond::OnlyUncond)
+        ? Assembler::kCallLen
+        : MAX(Assembler::kCallLen, Assembler::kJccLen)
+        )
+      );
+#undef MAX
 
   // Search for a register branch instruction like bctr. Return when found.
   for (ret.m_offset = 0;
-      canRead(ret.m_offset, m_max_size, Assembler::kJccLen);
+      canRead(ret.m_offset, m_max_size, branch_size);
       ret.m_offset += instr_size_in_bytes) {
     // skip the preparation instructions that are not actually the branch.
     auto far_branch_instr = m_ip + ret.m_offset;
     ret.m_di = Decoder::GetDecoder().decode(far_branch_instr);
-    if (ret.m_di.isRegisterBranch(allowCond)) return ret;
+    if (ret.m_di.isRegisterBranch(ac)) return ret;
   }
   return DecInfoOffset();
 }
@@ -197,7 +206,16 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool fixedSize) {
 }
 
 bool DecodedInstruction::isCall() const {
-  return isFarBranch(false);
+  // Near branch
+  if (m_dinfo.isBranchWithLR()) return true;
+
+  // Far branch: get first register branch instruction in the range.
+  // Note: a call is always unconditional
+  DecoderInfo branch_di = getFarBranch(AllowCond::OnlyUncond);
+
+  // A Call sets the Link Register when branching
+  if (branch_di.isInvalid()) return false;
+  return branch_di.isBranchWithLR();
 }
 
 Reg64 DecodedInstruction::getLi64Reg() const {

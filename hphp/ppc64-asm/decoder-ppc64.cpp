@@ -339,35 +339,42 @@ bool DecoderInfo::isNop() const {
 }
 
 
-bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
-  // allowCond: true
-  //   b, bl - unconditional branches
-  //   bc, bcl
-  //
-  // allowCond: false
-  //   b, bl - unconditional branches
+bool DecoderInfo::isOffsetBranch(AllowCond ac /* = AllowCond::Any */) const {
+  // ac: OnlyUncond
+  //   b, bl   - unconditional branches
   //  And also, if condition is "branch always" (BO field is 1x1xx):
   //   bc, bcl
+  //
+  // ac: Any
+  //   b, bl   - unconditional branches
+  //   bc, bcl - conditional branches
+  //
+  // ac: OnlyCond
+  //   bc, bcl - conditional branches and it can't be "branch always"
   //
   // (based on the branch instructions defined on this Decoder)
   switch (m_opn) {
     case OpcodeNames::op_b:
     case OpcodeNames::op_bl:
-      return true;
+      return (AllowCond::OnlyCond != ac);
       break;
     case OpcodeNames::op_bc:
     case OpcodeNames::op_bcl:
       {
-        if (!allowCond) {
-          // checking if the condition is "always branch", then it counts as an
-          // unconditional branch
-          assert(m_form == Form::kB);
-          B_form_t bform;
-          bform.instruction = m_image;
-          BranchParams uncondition_bp(BranchConditions::Always);
-          return bform.BO == uncondition_bp.bo();
+        // checking if the condition is "always branch", then it counts as an
+        // unconditional branch
+        assert(m_form == Form::kB);
+        B_form_t bform;
+        bform.instruction = m_image;
+        BranchParams uncondition_bp(BranchConditions::Always);
+
+        if (uncondition_bp.bo() == bform.BO) {
+          // not acceptable if it was required to have a condition
+          return (AllowCond::OnlyCond != ac);
+        } else {
+          // it's a conditional branch
+          return (AllowCond::OnlyUncond != ac);
         }
-        return true;
         break;
       }
     default:
@@ -376,30 +383,61 @@ bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
   return false;
 }
 
-bool DecoderInfo::isRegisterBranch(bool allowCond /* = true */) const {
-  // allowCond: true
-  //   bcctr, bcctrl, bctar, bctarl
+/*
+ * True if bcctrl (as "branch always" condition) or bl
+ * False otherwise
+ */
+bool DecoderInfo::isBranchWithLR() const {
+  switch (m_opn) {
+    case OpcodeNames::op_bcctrl:
+      {
+        // checking if the condition is "always branch", then it counts as an
+        // unconditional branch
+        assert(m_form == Form::kXL);
+        XL_form_t xlform;
+        xlform.instruction = m_image;
+        BranchParams uncondition_bp(BranchConditions::Always);
+        return xlform.BT == uncondition_bp.bo();
+      }
+      break;
+    case OpcodeNames::op_bl:
+      return true;
+      break;
+    default:
+      break;
+  }
+  return false;
+}
+
+bool DecoderInfo::isRegisterBranch(AllowCond ac /* = AllowCond::Any */) const {
+  // ac: Any
+  //   bcctr, bcctrl
   //
-  // allowCond: false - Same if condition is "branch always" (BO field: 1x1xx)
+  // ac: OnlyUncond
+  //   bcctr, bcctrl - only if condition is "branch always" (BO field: 1x1xx)
+  //
+  // ac: OnlyCond
+  //   bcctr, bcctrl - only if condition is NOT "branch always" (BO field)
   //
   // NOTE: not considering bclr as it's more like a return than a branch
   switch (m_opn) {
     case OpcodeNames::op_bcctr:
     case OpcodeNames::op_bcctrl:
-    case OpcodeNames::op_bctar:
-    case OpcodeNames::op_bctarl:
       {
-        if (!allowCond) {
-          // checking if the condition is "always branch", then it counts as an
-          // unconditional branch
-          assert(m_form == Form::kXL);
-          XL_form_t xlform;
-          xlform.instruction = m_image;
-          BranchParams uncondition_bp(BranchConditions::Always);
-          return xlform.BT == uncondition_bp.bo();
+        // checking if the condition is "always branch", then it counts as an
+        // unconditional branch
+        assert(m_form == Form::kXL);
+        XL_form_t xlform;
+        xlform.instruction = m_image;
+        BranchParams uncondition_bp(BranchConditions::Always);
+        if (uncondition_bp.bo() == xlform.BT) {
+          // unconditional is only allowed if it's not OnlyCond
+          return (AllowCond::OnlyCond != ac);
+        } else {
+          // it's a conditional branch
+          return (AllowCond::OnlyUncond != ac);
         }
       }
-      return true;
       break;
     default:
       break;

@@ -107,7 +107,7 @@ size_t relocateImpl(RelocationInfo& rel,
       dest_block.bytes(di.size(), src);
       ppc64_asm::DecodedInstruction d2(dest, di.size());
       if (di.isNearBranch()) {
-        if (di.isBranch(false)) {
+        if (di.isBranch(ppc64_asm::AllowCond::OnlyUncond)) {
           jmp_dest = di.nearBranchTarget();
         }
         // Relative branch needs always to be readjusted
