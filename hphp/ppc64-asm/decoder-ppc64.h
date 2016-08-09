@@ -1644,10 +1644,11 @@ class Decoder : private boost::noncopyable {
   }
 
   /*
-   * Disable optimizations for this constructor.  In release mode -O3 causes
-   * compilation to hang due the huge initialization list.  This is a static
-   * singleton constructor, it's only called once and, when trace is enabled so
-   * optimization here is not a big issue.
+   * Disable optimizations for this constructor. In release mode (-O3) causes
+   * compilation freezes due a bug on gcc for POWER. The gcc paramenter:
+   * --param early-inlining-insns=200 causes the problem when used here.
+   * This is a static singleton constructor and we don't identify
+   * any performance issues disabling optimizations hre.
    */
   NO_OPT Decoder();
 
