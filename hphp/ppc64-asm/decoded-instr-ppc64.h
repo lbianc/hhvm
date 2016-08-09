@@ -86,7 +86,7 @@ struct DecodedInstruction {
   DecoderInfo getFarBranch(bool allowCond = true) const;
   DecInfoOffset getFarBranchLength(bool allowCond = true) const;
   uint8_t* farBranchTarget() const { return (uint8_t*)m_imm; }
-  bool setFarBranchTarget(uint8_t* target);
+  bool setFarBranchTarget(uint8_t* target, bool fixedSize);
 
   bool isCall() const;
 

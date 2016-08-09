@@ -173,7 +173,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(bool allowCond) const {
   return DecInfoOffset();
 }
 
-bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
+bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool fixedSize) {
   DecoderInfo di = getFarBranch();
   if (di.isInvalid()) return false;
 
@@ -184,8 +184,7 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target) {
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  // avoid nops
-  a.branchFar(target, bp, false);
+  a.branchFar(target, bp, fixedSize);
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {
