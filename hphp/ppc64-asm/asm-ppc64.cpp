@@ -47,7 +47,11 @@ VMTOC& VMTOC::getInstance() {
 }
 
 bool VMTOC::checkFull() {
-  return m_last_elem_pos > 16382;
+  /*
+   * As the maximum value of m_last_elem_pos is kTOCSize-2, the TOC may be left
+   * with one unfilled 32 bit slot.
+   */
+  return m_last_elem_pos > (kTOCSize-2) ;
 }
 
 intptr_t VMTOC::getPtrVector() {
@@ -1166,16 +1170,20 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize,
   };
 
   if (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize) ||
-      VMTOC::getInstance().checkFull())
+      VMTOC::getInstance().checkFull()) {
     li64(rt, imm64, fixedSize);
+  }
   else {
-    if (fits(imm64, 32) && HPHP::RuntimeOption::Evalppc64useTOCLwz)
+    if (HPHP::RuntimeOption::Evalppc64useTOCLwz && fits(imm64, 32)) {
       lwz(rt,rtoc[VMTOC::getInstance().pushElem(
               static_cast<int32_t>(imm64 & 0xffffffff)) << 2]);
-    else
+    }
+    else {
       ld(rt, rtoc[VMTOC::getInstance().pushElem(imm64) << 2]);
-    if (fixedSize)
+    }
+    if (fixedSize) {
       emitNop(4 * instr_size_in_bytes);
+    }
   }
   return;
 }

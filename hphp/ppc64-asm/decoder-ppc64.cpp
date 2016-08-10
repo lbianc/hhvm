@@ -322,7 +322,6 @@ bool DecoderInfo::isNop() const {
 }
 
 bool DecoderInfo::isLdTOC() const {
-  // no-op is a mnemonic of ori 0,0,0
   if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld)) {
     DS_form_t dsform;
     dsform.instruction = m_image;
@@ -334,7 +333,6 @@ bool DecoderInfo::isLdTOC() const {
 }
 
 bool DecoderInfo::isLwzTOC() const {
-  // no-op is a mnemonic of ori 0,0,0
   if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz)) {
     D_form_t dform;
     dform.instruction = m_image;
