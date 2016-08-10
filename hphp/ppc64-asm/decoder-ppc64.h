@@ -1650,7 +1650,7 @@ class Decoder : private boost::noncopyable {
    * This is a static singleton constructor and we don't identify
    * any performance issues disabling optimizations hre.
    */
-  NO_OPT Decoder();
+  Decoder();
 
   ~Decoder() {
     for(int i = 0; i < kDecoderSize; i++)
