@@ -333,6 +333,17 @@ bool DecoderInfo::isLdTOC() const {
   return false;
 }
 
+bool DecoderInfo::isLwzTOC() const {
+  // no-op is a mnemonic of ori 0,0,0
+  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz)) {
+    D_form_t dform;
+    dform.instruction = m_image;
+    if (dform.RA == 2) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool DecoderInfo::isOffsetBranch(bool allowCond /* = true */) const {
   // allowCond: true
@@ -501,6 +512,17 @@ int16_t DecoderInfo::offsetDS() const {
   instr_d.instruction = m_image;
 
   return static_cast<int16_t>(instr_d.DS << 2);
+}
+
+/**
+ * Look for the offset from instructions like lwz
+ */
+int16_t DecoderInfo::offsetD() const {
+  always_assert(m_form == Form::kDS && "Instruction not expected.");
+  D_form_t instr_d;
+  instr_d.instruction = m_image;
+
+  return static_cast<int16_t>(instr_d.D);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

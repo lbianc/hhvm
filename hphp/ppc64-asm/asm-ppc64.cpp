@@ -24,7 +24,19 @@ uint64_t VMTOC::pushElem(int64_t elem) {
   if (m_map.find(elem) != m_map.end()) {
     return m_map[elem] - kTOCSize / 2;
   }
-  m_map.insert({elem, m_last_elem_pos});
+  m_map.insert( { elem, m_last_elem_pos });
+  m_funcaddrs[m_last_elem_pos] = static_cast<int32_t>(elem & 0xffffffff);
+  m_funcaddrs[m_last_elem_pos + 1] = static_cast<int32_t>((elem
+      & 0xffffffff00000000) >> 32);
+  m_last_elem_pos += 2;
+  return m_last_elem_pos - 2 - kTOCSize / 2;
+}
+
+uint64_t VMTOC::pushElem(int32_t elem) {
+  if (m_map.find(elem) != m_map.end()) {
+    return m_map[elem] - kTOCSize / 2;
+  }
+  m_map.insert( { elem, m_last_elem_pos });
   m_funcaddrs[m_last_elem_pos] = elem;
   return m_last_elem_pos++ - kTOCSize / 2;
 }
@@ -35,7 +47,7 @@ VMTOC& VMTOC::getInstance() {
 }
 
 bool VMTOC::checkFull() {
-  return m_last_elem_pos > 8191;
+  return m_last_elem_pos > 16382;
 }
 
 intptr_t VMTOC::getPtrVector() {
@@ -1067,6 +1079,19 @@ int64_t Assembler::getLi64(PPC64Instr* pinstr) {
   return static_cast<int64_t>(imm64);
 }
 
+int64_t Assembler::getLimmediate(PPC64Instr* pinstr) {
+  if (Decoder::GetDecoder().decode(*pinstr)->isLdTOC()) {
+    auto indexTOC = Decoder::GetDecoder().decode(*pinstr)->offsetDS() >> 2;
+    return VMTOC::getInstance().getValue(indexTOC);
+  }
+  else if (Decoder::GetDecoder().decode(*pinstr)->isLwzTOC()) {
+    auto indexTOC = Decoder::GetDecoder().decode(*pinstr)->offsetD() >> 2;
+    return VMTOC::getInstance().getValue(indexTOC);
+  }
+  else
+    return getLi64(pinstr);
+}
+
 Reg64 Assembler::getLi64Reg(PPC64Instr* instr) {
   // First instruction is always either li or lis, both are D-form
   D_form_t d_instr;
@@ -1074,7 +1099,22 @@ Reg64 Assembler::getLi64Reg(PPC64Instr* instr) {
   return Reg64(d_instr.RT);
 }
 
-void Assembler::li32 (const Reg64& rt, int32_t imm32) {
+Reg64 Assembler::getLimmediateReg(PPC64Instr* instr) {
+  if (Decoder::GetDecoder().decode(*instr)->isLdTOC()) {
+    DS_form_t ds_instr;
+    ds_instr.instruction = *instr;
+    return Reg64(ds_instr.RT);
+  }
+  else if (Decoder::GetDecoder().decode(*instr)->isLwzTOC()) {
+    D_form_t d_instr;
+    d_instr.instruction = *instr;
+    return Reg64(d_instr.RT);
+  }
+  else
+    return getLi64Reg(instr);
+}
+
+void Assembler::li32(const Reg64& rt, int32_t imm32) {
 
   if (HPHP::jit::deltaFits(imm32, HPHP::sz::word)) {
     // immediate has only low 16 bits set, use simple load immediate
@@ -1129,7 +1169,11 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize,
       VMTOC::getInstance().checkFull())
     li64(rt, imm64, fixedSize);
   else {
-    ld(rt, rtoc[VMTOC::getInstance().pushElem(imm64) << 3]);
+    if (fits(imm64, 32) && HPHP::RuntimeOption::Evalppc64useTOCLwz)
+      lwz(rt,rtoc[VMTOC::getInstance().pushElem(
+              static_cast<int32_t>(imm64 & 0xffffffff)) << 2]);
+    else
+      ld(rt, rtoc[VMTOC::getInstance().pushElem(imm64) << 2]);
     if (fixedSize)
       emitNop(4 * instr_size_in_bytes);
   }

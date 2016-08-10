@@ -588,6 +588,8 @@ struct RuntimeOption {
   F(uint16_t, ppc64minTOCImmSize,      64)                              \
   /* PPC64 Option: dump the number of elements stored in TOC */         \
   F(bool, ppc64dumpTOCNelements,      false)                            \
+  /* PPC64 Option: use lwz and ld in order to load TOC elements */      \
+  F(bool, ppc64useTOCLwz,     false)                                    \
   /* */
 
 private:

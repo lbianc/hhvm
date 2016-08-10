@@ -244,8 +244,11 @@ public:
 
   VMTOC operator=(VMTOC const&) = delete;
 
-  /* push an element into the stack and return its index */
+  /* push a 64 bit element into the stack and return its index */
   uint64_t pushElem(int64_t elem);
+
+  /* push a 32 bit element into the stack and return its index */
+  uint64_t pushElem(int32_t elem);
 
   /* get the singleton instance */
   static VMTOC& getInstance();
@@ -266,14 +269,14 @@ public:
 
   /* number of elements in TOC vector
    * ld can address an 16bit offset */
-  static constexpr int kTOCSize = 8192;
+  static constexpr int kTOCSize = 16384;
 
 private:
   /* vector position of the last element */
   uint64_t m_last_elem_pos;
 
   /* vector of function addresses */
-  std::vector<int64_t> m_funcaddrs;
+  std::vector<int32_t> m_funcaddrs;
 
   /* map used to avoid insertion of duplicates */
   std::map<int64_t, uint64_t> m_map;
@@ -1929,14 +1932,8 @@ struct Assembler {
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
-  static int64_t getLimmediate(PPC64Instr* pinstr) {
-    if(Decoder::GetDecoder().decode(*pinstr)->isLdTOC()) {
-      auto indexTOC = Decoder::GetDecoder().decode(*pinstr)->offsetDS() >> 3;
-      return VMTOC::getInstance().getValue(indexTOC);
-    }
-    else
-      return getLi64(pinstr);
-  }
+  // Retrieve the target defined by limmediate instruction
+  static int64_t getLimmediate(PPC64Instr* pinstr);
   static int64_t getLimmediate(CodeAddress pinstr) {
     return getLimmediate(reinterpret_cast<PPC64Instr*>(pinstr));
   }
@@ -1953,15 +1950,7 @@ struct Assembler {
     return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
   }
 
-  static Reg64 getLimmediateReg(PPC64Instr* instr) {
-    if(Decoder::GetDecoder().decode(*instr)->isLdTOC()) {
-      DS_form_t ds_instr;
-      ds_instr.instruction = *instr;
-      return Reg64(ds_instr.RT);
-    }
-    else
-      return getLi64Reg(instr);
-  }
+  static Reg64 getLimmediateReg(PPC64Instr* instr);
 
   static Reg64 getLimmediateReg(CodeAddress instr) {
     return getLimmediateReg(reinterpret_cast<PPC64Instr*>(instr));
