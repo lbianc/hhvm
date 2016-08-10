@@ -1643,13 +1643,6 @@ class Decoder : private boost::noncopyable {
     }
   }
 
-  /*
-   * Disable optimizations for this constructor. In release mode (-O3) causes
-   * compilation freezes due a bug on gcc for POWER. The gcc paramenter:
-   * --param early-inlining-insns=200 causes the problem when used here.
-   * This is a static singleton constructor and we don't identify
-   * any performance issues disabling optimizations hre.
-   */
   Decoder();
 
   ~Decoder() {
