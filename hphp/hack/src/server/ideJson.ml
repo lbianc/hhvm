@@ -15,13 +15,21 @@ type call_id = int
 
 type call_type =
   | Auto_complete_call of string * File_content.content_pos
+  | Highlight_ref_call of string * File_content.content_pos
+  | Identify_function_call of string * File_content.content_pos
   | Open_file_call of string
   | Close_file_call of string
   | Edit_file_call of string * (File_content.code_edit list)
   | Disconnect_call
+  | Subscribe_diagnostic_call
+  | Unsubscribe_diagnostic_call
+  | Sleep_for_test
 
 type response_type =
   | Auto_complete_response of Hh_json.json
+  | Idetify_function_response of Hh_json.json
+  | Diagnostic_response of call_id * Hh_json.json
+  | Highlight_ref_response of Hh_json.json
 
 type parsing_result =
   (* Parsing_error means that message was unrecoverably mangled (eg. no ID, or
@@ -35,7 +43,12 @@ type parsing_result =
 let to_string call =
   match call with
   | Auto_complete_call _ -> "getCompletions"
-  | Open_file_call _ -> "open"
-  | Close_file_call _ -> "close"
-  | Edit_file_call _ -> "edit"
+  | Highlight_ref_call _ -> "getSourceHighlights"
+  | Identify_function_call _ -> "getDefinition"
+  | Open_file_call _ -> "didOpenFile"
+  | Close_file_call _ -> "didCloseFile"
+  | Edit_file_call _ -> "didChangeFile"
   | Disconnect_call -> "disconnect"
+  | Subscribe_diagnostic_call -> "notifyDiagnostics"
+  | Unsubscribe_diagnostic_call -> "unsubscribe"
+  | Sleep_for_test -> "sleep"

@@ -110,6 +110,7 @@ module WithToken(Token: TokenType) = struct
     and alias_declaration = {
       alias_token : t;
       alias_name : t;
+      alias_generic_parameter : t;
       alias_constraint : t;
       alias_equal : t;
       alias_type : t;
@@ -217,6 +218,10 @@ module WithToken(Token: TokenType) = struct
       type_const_equal : t;
       type_const_type_specifier : t;
       type_const_semicolon : t;
+    }
+    and decorated_expression = {
+      decorated_expression_decorator: t;
+      decorated_expression_expression: t;
     }
     and parameter_declaration = {
       param_attr : t;
@@ -500,6 +505,10 @@ module WithToken(Token: TokenType) = struct
       subscript_index : t;
       subscript_right : t
     }
+    and awaitable_creation_expression = {
+      awaitable_async : t;
+      awaitable_compound_statement : t;
+    }
     and xhp_attribute = {
       xhp_attr_name : t;
       xhp_attr_equal : t;
@@ -630,6 +639,7 @@ module WithToken(Token: TokenType) = struct
     | AliasDeclaration of alias_declaration
     | PropertyDeclaration of property_declaration
     | PropertyDeclarator of property_declarator
+    | DecoratedExpression of decorated_expression
     | ParameterDeclaration of parameter_declaration
     | AttributeSpecification of attribute_specification
     | Attribute of attribute
@@ -685,6 +695,7 @@ module WithToken(Token: TokenType) = struct
     | ArrayIntrinsicExpression of array_intrinsic_expression
     | ElementInitializer of element_initializer
     | SubscriptExpression of subscript_expression
+    | AwaitableCreationExpression of awaitable_creation_expression
     | XHPExpression of xhp_expression
     | XHPOpen of xhp_open
     | XHPAttribute of xhp_attribute
@@ -755,6 +766,7 @@ module WithToken(Token: TokenType) = struct
       | ConstDeclaration _ -> SyntaxKind.ConstDeclaration
       | ConstantDeclarator _ -> SyntaxKind.ConstantDeclarator
       | TypeConstDeclaration _ -> SyntaxKind.TypeConstDeclaration
+      | DecoratedExpression _ -> SyntaxKind.DecoratedExpression
       | ParameterDeclaration _ -> SyntaxKind.ParameterDeclaration
       | AttributeSpecification _ -> SyntaxKind.AttributeSpecification
       | Attribute _ -> SyntaxKind.Attribute
@@ -798,6 +810,7 @@ module WithToken(Token: TokenType) = struct
       | ArrayIntrinsicExpression _ -> SyntaxKind.ArrayIntrinsicExpression
       | ElementInitializer _ -> SyntaxKind.ElementInitializer
       | SubscriptExpression _ -> SyntaxKind.SubscriptExpression
+      | AwaitableCreationExpression _ -> SyntaxKind.AwaitableCreationExpression
       | XHPExpression _ -> SyntaxKind.XHPExpression
       | XHPOpen _ -> SyntaxKind.XHPOpen
       | XHPClose _ -> SyntaxKind.XHPClose
@@ -834,6 +847,8 @@ module WithToken(Token: TokenType) = struct
     let is_variable node = kind node = SyntaxKind.VariableExpression
     let is_qualified_name node = kind node = SyntaxKind.QualifiedNameExpression
     let is_pipe_variable node = kind node = SyntaxKind.PipeVariableExpression
+    let is_awaitable_creation node =
+      kind node = SyntaxKind.AwaitableCreationExpression
     let is_error node = kind node = SyntaxKind.Error
     let is_list node = kind node = SyntaxKind.SyntaxList
     let is_list_item node = kind node = SyntaxKind.ListItem
@@ -860,6 +875,8 @@ module WithToken(Token: TokenType) = struct
     let is_constant_declarator node = kind node = SyntaxKind.ConstantDeclarator
     let is_type_const_declaration node =
       kind node = SyntaxKind.TypeConstDeclaration
+    let is_decorated_expression node =
+      kind node = SyntaxKind.DecoratedExpression
     let is_parameter node = kind node = SyntaxKind.ParameterDeclaration
     let is_attribute_specification node =
       kind node = SyntaxKind.AttributeSpecification
@@ -968,6 +985,7 @@ module WithToken(Token: TokenType) = struct
     let is_left_brace = is_specific_token Full_fidelity_token_kind.LeftBrace
     let is_ellipsis = is_specific_token Full_fidelity_token_kind.DotDotDot
     let is_comma = is_specific_token Full_fidelity_token_kind.Comma
+    let is_array = is_specific_token Full_fidelity_token_kind.Array
 
     let children node =
       match node.syntax with
@@ -1028,9 +1046,9 @@ module WithToken(Token: TokenType) = struct
         [ enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon ]
       | AliasDeclaration
-        { alias_token; alias_name; alias_constraint;
+        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
           alias_equal; alias_type; alias_semicolon } ->
-        [ alias_token; alias_name; alias_constraint;
+        [ alias_token; alias_name; alias_generic_parameter; alias_constraint;
           alias_equal; alias_type; alias_semicolon ]
       | PropertyDeclaration
         { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
@@ -1103,6 +1121,9 @@ module WithToken(Token: TokenType) = struct
         [ type_const_abstract; type_const_const_token; type_const_type_token;
           type_const_name; type_const_type_constraint; type_const_equal;
           type_const_type_specifier; type_const_semicolon; ]
+      | DecoratedExpression
+        { decorated_expression_decorator; decorated_expression_expression; } ->
+        [ decorated_expression_decorator; decorated_expression_expression; ]
       | ParameterDeclaration
         { param_attr; param_visibility; param_type; param_name; param_default }
         ->
@@ -1276,6 +1297,9 @@ module WithToken(Token: TokenType) = struct
           subscript_index; subscript_right } ->
         [ subscript_receiver; subscript_left;
           subscript_index; subscript_right ]
+      | AwaitableCreationExpression
+        { awaitable_async; awaitable_compound_statement; } ->
+        [ awaitable_async; awaitable_compound_statement; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
@@ -1402,10 +1426,10 @@ module WithToken(Token: TokenType) = struct
         [ "enumerator_name"; "enumerator_equal"; "enumerator_value";
           "enumerator_semicolon" ]
       | AliasDeclaration
-        { alias_token; alias_name; alias_constraint;
+        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
           alias_equal; alias_type; alias_semicolon } ->
-        [ "alias_token"; "alias_name"; "alias_constraint";
-          "alias_equal"; "alias_type"; "alias_semicolon" ]
+        [ "alias_token"; "alias_name"; "alias_generic_parameter";
+          "alias_constraint"; "alias_equal"; "alias_type"; "alias_semicolon" ]
       | PropertyDeclaration
         { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
         [ "prop_modifiers"; "prop_type"; "prop_declarators"; "prop_semicolon" ]
@@ -1479,6 +1503,9 @@ module WithToken(Token: TokenType) = struct
           "type_const_type_token"; "type_const_name";
           "type_const_type_constraint"; "type_const_equal";
           "type_const_type_specifier"; "type_const_semicolon"; ]
+      | DecoratedExpression
+        { decorated_expression_decorator; decorated_expression_expression; } ->
+        [ "decorated_expression_decorator"; "decorated_expression_expression"; ]
       | ParameterDeclaration
         { param_attr; param_visibility; param_type; param_name; param_default }
         ->
@@ -1658,6 +1685,9 @@ module WithToken(Token: TokenType) = struct
           subscript_index; subscript_right } ->
         [ "subscript_receiver"; "subscript_left";
           "subscript_index"; "subscript_right" ]
+      | AwaitableCreationExpression
+        { awaitable_async; awaitable_compound_statement; } ->
+        [ "awaitable_async"; "awaitable_compound_statement"; ]
       | XHPExpression
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
@@ -1798,6 +1828,8 @@ module WithToken(Token: TokenType) = struct
     let type_const_equal x = x.type_const_equal
     let type_const_type_specifier x = x.type_const_type_specifier
     let type_const_semicolon x = x.type_const_semicolon
+    let decorated_expression_decorator x = x.decorated_expression_decorator
+    let decorated_expression_expression x = x.decorated_expression_expression
     let param_attr x = x.param_attr
     let param_visibility x = x.param_visibility
     let param_type x = x.param_type
@@ -1917,6 +1949,8 @@ module WithToken(Token: TokenType) = struct
     let array_intrinsic_left_paren x = x.array_intrinsic_left_paren
     let array_intrinsic_members x = x.array_intrinsic_members
     let array_intrinsic_right_paren x = x.array_intrinsic_right_paren
+    let awaitable_async x = x.awaitable_async
+    let awaitable_compound_statement x = x.awaitable_compound_statement
     let xhp_open x = x.xhp_open
     let xhp_body x = x.xhp_body
     let xhp_close x = x.xhp_close
@@ -2048,10 +2082,10 @@ module WithToken(Token: TokenType) = struct
         { enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon }
       | (SyntaxKind.AliasDeclaration,
-        [ alias_token; alias_name; alias_constraint;
+        [ alias_token; alias_name; alias_generic_parameter; alias_constraint;
           alias_equal; alias_type; alias_semicolon ]) ->
         AliasDeclaration
-        { alias_token; alias_name; alias_constraint;
+        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
           alias_equal; alias_type; alias_semicolon }
       | (SyntaxKind.PropertyDeclaration,
         [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]) ->
@@ -2132,6 +2166,10 @@ module WithToken(Token: TokenType) = struct
         TypeConstDeclaration { type_const_abstract; type_const_const_token;
           type_const_type_token; type_const_name; type_const_type_constraint;
           type_const_equal; type_const_type_specifier; type_const_semicolon; }
+      | (SyntaxKind.DecoratedExpression,
+        [ decorated_expression_decorator; decorated_expression_expression; ]) ->
+        DecoratedExpression
+        { decorated_expression_decorator; decorated_expression_expression; }
       | (SyntaxKind.ParameterDeclaration, [ param_attr; param_visibility;
         param_type; param_name; param_default ]) ->
         ParameterDeclaration { param_attr; param_visibility; param_type;
@@ -2322,6 +2360,10 @@ module WithToken(Token: TokenType) = struct
         SubscriptExpression
         { subscript_receiver; subscript_left;
           subscript_index; subscript_right }
+      | SyntaxKind.AwaitableCreationExpression,
+        [ awaitable_async; awaitable_compound_statement; ] ->
+        AwaitableCreationExpression
+        { awaitable_async; awaitable_compound_statement; }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
       | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
@@ -2543,6 +2585,10 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.SubscriptExpression
         [ receiver; left; index; right ]
 
+      let make_awaitable_creation_expression async compound_stmt =
+        from_children SyntaxKind.AwaitableCreationExpression
+          [ async; compound_stmt; ]
+
       let make_xhp xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
 
@@ -2586,9 +2632,9 @@ module WithToken(Token: TokenType) = struct
       let make_enumerator name equal value semicolon =
         from_children SyntaxKind.Enumerator [ name; equal; value; semicolon ]
 
-      let make_alias token name constr equal ty semi =
+      let make_alias token name generic constr equal ty semi =
         from_children SyntaxKind.AliasDeclaration
-          [ token; name; constr; equal; ty; semi ]
+          [ token; name; generic; constr; equal; ty; semi ]
 
       let make_property_declaration mods ty decls semi =
         from_children SyntaxKind.PropertyDeclaration
@@ -2676,6 +2722,9 @@ module WithToken(Token: TokenType) = struct
           [ type_const_abstract; type_const_const_token; type_const_type_token;
             type_const_name; type_const_type_constraint; type_const_equal;
             type_const_type_specifier; type_const_semicolon; ]
+
+      let make_decorated_expression decorator expression =
+        from_children SyntaxKind.DecoratedExpression [ decorator; expression ]
 
       let make_parameter_declaration
         param_attr param_visibility param_type param_name param_default =

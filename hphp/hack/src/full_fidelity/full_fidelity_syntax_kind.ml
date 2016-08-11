@@ -32,6 +32,7 @@ type t =
 | ConstDeclaration
 | ConstantDeclarator
 | TypeConstDeclaration
+| DecoratedExpression
 | ParameterDeclaration
 | AttributeSpecification
 | Attribute
@@ -95,6 +96,7 @@ type t =
 | ArrayIntrinsicExpression
 | ElementInitializer
 | SubscriptExpression
+| AwaitableCreationExpression
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -150,6 +152,7 @@ let to_string kind =
   | ConstDeclaration -> "const_declaration"
   | ConstantDeclarator -> "constant_declarator"
   | TypeConstDeclaration -> "type_const_declaration"
+  | DecoratedExpression -> "decorated_expression"
   | ParameterDeclaration -> "parameter_declaration"
   | AttributeSpecification -> "attribute_specification"
   | Attribute -> "attribute"
@@ -212,6 +215,7 @@ let to_string kind =
   | AliasDeclaration -> "alias_declaration"
   | PropertyDeclaration -> "property_declaration"
   | PropertyDeclarator -> "property_declarator"
+  | AwaitableCreationExpression -> "awaitable_creation_expression"
   | XHPExpression -> "xhp_expression"
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"

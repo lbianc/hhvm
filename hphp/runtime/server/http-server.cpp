@@ -92,8 +92,8 @@ HttpServer::HttpServer()
       (RuntimeOption::ServerType);
   const std::string address = RuntimeOption::ServerFileSocket.empty()
     ? RuntimeOption::ServerIP : RuntimeOption::ServerFileSocket;
-  ServerOptions options(
-      address, RuntimeOption::ServerPort, startingThreadCount);
+  ServerOptions options(address, RuntimeOption::ServerPort,
+    RuntimeOption::ServerThreadCount, startingThreadCount);
   options.m_useFileSocket = !RuntimeOption::ServerFileSocket.empty();
   options.m_serverFD = RuntimeOption::ServerPortFd;
   options.m_sslFD = RuntimeOption::SSLPortFd;
@@ -150,29 +150,6 @@ HttpServer::HttpServer()
   signal(SIGTERM, on_kill);
   signal(SIGUSR1, on_kill);
   signal(SIGHUP, on_kill);
-
-  if (!RuntimeOption::StartupDocument.empty()) {
-    Hdf hdf;
-    hdf["cmd"] = static_cast<int>(Transport::Method::GET);
-    hdf["url"] = RuntimeOption::StartupDocument;
-    hdf["remote_host"] = RuntimeOption::ServerIP;
-
-    ReplayTransport rt;
-    rt.replayInput(hdf);
-    HttpRequestHandler handler(0);
-    handler.run(&rt);
-    int code = rt.getResponseCode();
-    if (code == 200) {
-      Logger::Info("StartupDocument %s returned 200 OK: %s",
-                   RuntimeOption::StartupDocument.c_str(),
-                   rt.getResponse().c_str());
-    } else {
-      Logger::Error("StartupDocument %s failed %d: %s",
-                    RuntimeOption::StartupDocument.c_str(),
-                    code, rt.getResponse().data());
-      return;
-    }
-  }
 }
 
 // Synchronously stop satellites

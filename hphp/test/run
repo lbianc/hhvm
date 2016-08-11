@@ -795,6 +795,23 @@ function hhvm_cmd($options, $test, $test_run = null) {
   }
 
   $env = $_ENV;
+  // If there's an <test name>.env file then inject the contents of that into
+  // the test environment.
+  $env_file = find_test_ext($test, 'env');
+  if ($env_file !== null) {
+    $extra_env = explode("\n", trim(file_get_contents($env_file)));
+    foreach ($extra_env as $arg) {
+      $i = strpos($arg, '=');
+      if ($i) {
+        $key = substr($arg, 0, $i);
+        $val = substr($arg, $i + 1);
+        $env[$key] = $val;
+      } else {
+        unset($env[$arg]);
+      }
+    }
+  }
+
   $in = find_test_ext($test, 'in');
   if ($in !== null) {
     $cmd .= ' < ' . escapeshellarg($in);
@@ -2100,7 +2117,9 @@ function print_failure($argv, $results, $options) {
     if ($option === "threads") {
       // e.g., For a small number of failed tests, we don't need max threads.
       $rerun .= " --" . $option . ' ' . get_num_threads($options, $failed);
-    } else if ($option === "typechecker" || $option === "verbose") {
+    } else if ($option === "typechecker" ||
+               $option === "verbose" ||
+               $option === "repo") {
       // The escapeshellarg($value) of these is 1, but there is no real value
       // associated with these two options.
       $rerun .= " --" . $option;
