@@ -122,7 +122,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     # The params bellow causes problem on GCC 4.8 4.8 and 5.4 on PPC64
     # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=72855
     if(NOT IS_PPC64)
-      list(APPEND_RELEASE_CXX_OPTIONS
+      list(APPEND RELEASE_CXX_OPTIONS
         "-param early-inlining-insns=200"
         "-param max-early-inliner-iterations=50"
     )
