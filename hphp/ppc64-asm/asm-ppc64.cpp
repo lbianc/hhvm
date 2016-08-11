@@ -24,6 +24,9 @@ uint64_t VMTOC::pushElem(int64_t elem) {
   if (m_map.find(elem) != m_map.end()) {
     return m_map[elem] - kTOCSize / 2;
   }
+  if (m_last_elem_pos % 2 != 0) {
+    m_last_elem_pos += 1;
+  }
   m_map.insert( { elem, m_last_elem_pos });
   m_funcaddrs[m_last_elem_pos] = static_cast<int32_t>(elem & 0xffffffff);
   m_funcaddrs[m_last_elem_pos + 1] = static_cast<int32_t>((elem
