@@ -317,11 +317,12 @@ let rec get_doc node =
   | AliasDeclaration x ->
     let a = get_doc x.alias_token in
     let n = get_doc x.alias_name in
+    let generic = get_doc x.alias_generic_parameter in
     let c = get_doc x.alias_constraint in
     let e = get_doc x.alias_equal in
     let t = get_doc x.alias_type in
     let s = get_doc x.alias_semicolon in
-    a ^| n ^| c ^| e ^| t ^^^ s
+    a ^| n ^| generic ^| c ^| e ^| t ^^^ s
   | PropertyDeclaration x ->
     let m = get_doc x.prop_modifiers in
     let t = get_doc x.prop_type in
@@ -392,6 +393,10 @@ let rec get_doc node =
       handle_compound_inline_brace before_body body_node missing in
     let after_attr = after_attr ^^^ semicolon in
     group_doc (methodish_attr ^| after_attr)
+  | DecoratedExpression x ->
+    let decorator = get_doc (decorated_expression_decorator x) in
+    let expression = get_doc (decorated_expression_expression x) in
+    group_doc (decorator ^^^ expression)
   | ParameterDeclaration x ->
     let attr = get_doc (param_attr x) in
     let visibility = get_doc (param_visibility x) in
@@ -702,6 +707,10 @@ let rec get_doc node =
     let index = get_doc x.subscript_index in
     let right = get_doc x.subscript_right in
     receiver ^^^ left ^^^ index ^^^ right
+  | AwaitableCreationExpression x ->
+    let async = get_doc x.awaitable_async in
+    let stmt = x.awaitable_compound_statement in
+    handle_compound_brace_prefix_indent async stmt indt
   | XHPExpression x ->
     let left = get_doc (xhp_open x) in
     let expr = get_doc (xhp_body x) in

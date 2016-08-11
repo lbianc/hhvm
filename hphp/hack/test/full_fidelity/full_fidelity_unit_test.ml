@@ -127,6 +127,10 @@ let minimal_tests =
     "test_trait";
     "test_type_const";
     "test_class_const";
+    "test_type_alias";
+    "test_global_constant";
+    "test_closure_type";
+    "test_awaitable_creation";
   ] ~f:mapper
 
 let error_tests =
@@ -142,6 +146,8 @@ let error_tests =
     "test_errors_method";
     "test_declaration_errors";
     "test_errors_class";
+    "test_errors_array_type";
+    "test_errors_variadic_param";
   ] ~f:mapper
 
 let test_data = minimal_tests @ error_tests @

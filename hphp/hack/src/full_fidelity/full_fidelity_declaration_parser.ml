@@ -39,6 +39,9 @@ module WithExpressionAndStatementParser
     let parser = { lexer; errors } in
     (parser, node)
 
+  let parse_generic_parameter_list_opt parser =
+    parse_in_type_parser parser TypeParser.parse_generic_parameter_list_opt
+
   let parse_possible_generic_specifier parser =
     parse_in_type_parser parser TypeParser.parse_possible_generic_specifier
 
@@ -52,16 +55,16 @@ module WithExpressionAndStatementParser
     parse_in_type_parser parser TypeParser.parse_type_constraint_opt
 
   (* Expressions *)
-
-  let parse_expression parser =
-    let expression_parser = ExpressionParser.make parser.lexer parser.errors in
-    let (expression_parser, node) =
-      ExpressionParser.parse_expression expression_parser in
-    let lexer = ExpressionParser.lexer expression_parser in
-    let errors = ExpressionParser.errors expression_parser in
+  let parse_in_expression_parser parser expression_parser_function =
+    let expr_parser = ExpressionParser.make parser.lexer parser.errors in
+    let (expr_parser, node) = expression_parser_function expr_parser in
+    let lexer = ExpressionParser.lexer expr_parser in
+    let errors = ExpressionParser.errors expr_parser in
     let parser = { lexer; errors } in
     (parser, node)
 
+  let parse_expression parser =
+    parse_in_expression_parser parser ExpressionParser.parse_expression
 
   (* Statements *)
   let parse_in_statement_parser parser statement_parser_function =
@@ -122,6 +125,9 @@ module WithExpressionAndStatementParser
       type-to-be-aliased:
         type-specifier
         qualified-name
+        NOTE alias name can contain generics.
+        TODO figure out the grammar for this add add second error pass to
+        report illegal names
     *)
 
     (* TODO: Produce an error if the "type" version has a constraint. *)
@@ -129,11 +135,12 @@ module WithExpressionAndStatementParser
     let (parser, token) = next_token parser in
     let token = make_token token in
     let (parser, name) = expect_name parser in
+    let (parser, generic) = parse_generic_parameter_list_opt parser in
     let (parser, constr) = parse_type_constraint_opt parser in
     let (parser, equal) = expect_equal parser in
     let (parser, ty) = parse_type_specifier parser in
     let (parser, semi) = expect_semicolon parser in
-    let result = make_alias token name constr equal ty semi in
+    let result = make_alias token name generic constr equal ty semi in
     (parser, result)
 
   and parse_enumerator parser =
@@ -762,7 +769,10 @@ module WithExpressionAndStatementParser
 
     let (parser1, token) = next_token parser in
     match (Token.kind token) with
-    | DotDotDot -> (parser1, make_token token)
+    | DotDotDot ->
+      let next_kind = peek_token_kind parser1 in
+      if next_kind = Variable then parse_parameter_declaration parser
+      else (parser1, make_token token)
     | _ -> parse_parameter_declaration parser
 
   (* SPEC
@@ -777,14 +787,26 @@ module WithExpressionAndStatementParser
     let (parser, visibility) = parse_visibility_modifier_opt parser in
     let token = peek_token parser in
     let (parser, type_specifier) =
-      if (Token.kind token) = Variable then (parser, make_missing())
-      else parse_type_specifier parser in
-    let (parser, variable_name) = expect_variable parser in
+      match Token.kind token with
+        | Variable | DotDotDot | Ampersand -> (parser, make_missing())
+        | _ -> parse_type_specifier parser in
+    let (parser, name) = parse_decorated_variable_opt parser in
     let (parser, default) = parse_simple_initializer parser in
     let syntax =
-      make_parameter_declaration attrs visibility type_specifier variable_name
-      default in
+      make_parameter_declaration attrs visibility type_specifier name default in
     (parser, syntax)
+
+  and parse_decorated_variable_opt parser =
+    match peek_token_kind parser with
+    | DotDotDot
+    | Ampersand -> parse_decorated_variable parser
+    | _ -> expect_variable parser
+
+  and parse_decorated_variable parser =
+    let (parser, decorator) = next_token parser in
+    let (parser, variable) = expect_variable parser in
+    let decorator = make_token decorator in
+    parser, make_decorated_expression decorator variable
 
   and parse_visibility_modifier_opt parser =
     let (parser1, token) = next_token parser in
@@ -949,6 +971,9 @@ module WithExpressionAndStatementParser
     | Function -> parse_function_declaration parser (make_missing())
     | LessThanLessThan ->
       parse_classish_or_function_declaration parser
+      (* TODO figure out what global const differs from class const *)
+    | Const -> parse_const_declaration parser1 (make_missing ())
+              (make_token token)
     | _ ->
       parse_statement parser
 

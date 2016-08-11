@@ -151,7 +151,6 @@ int RuntimeOption::ServerBacklog = 128;
 int RuntimeOption::ServerConnectionLimit = 0;
 int RuntimeOption::ServerThreadCount = 50;
 int RuntimeOption::QueuedJobsReleaseRate = 3;
-bool RuntimeOption::ServerThreadRoundRobin = false;
 int RuntimeOption::ServerWarmupThrottleRequestCount = 0;
 int RuntimeOption::ServerThreadDropCacheTimeoutSeconds = 0;
 int RuntimeOption::ServerThreadJobLIFOSwitchThreshold = INT_MAX;
@@ -168,7 +167,6 @@ boost::container::flat_set<std::string>
 RuntimeOption::ServerHighPriorityEndPoints;
 bool RuntimeOption::ServerExitOnBindFail;
 int RuntimeOption::PageletServerThreadCount = 0;
-bool RuntimeOption::PageletServerThreadRoundRobin = false;
 int RuntimeOption::PageletServerThreadDropCacheTimeoutSeconds = 0;
 int RuntimeOption::PageletServerQueueLimit = 0;
 bool RuntimeOption::PageletServerThreadDropStack = false;
@@ -281,7 +279,6 @@ bool RuntimeOption::EnableStaticContentMMap = true;
 
 bool RuntimeOption::Utf8izeReplace = true;
 
-std::string RuntimeOption::StartupDocument;
 std::string RuntimeOption::RequestInitFunction;
 std::string RuntimeOption::RequestInitDocument;
 std::string RuntimeOption::AutoPrependFile;
@@ -1282,8 +1279,6 @@ void RuntimeOption::Load(
                  "Server.ConnectionLimit", 0);
     Config::Bind(ServerThreadCount, ini, config, "Server.ThreadCount",
                  Process::GetCPUCount() * 2);
-    Config::Bind(ServerThreadRoundRobin, ini, config,
-                 "Server.ThreadRoundRobin");
     Config::Bind(ServerWarmupThrottleRequestCount, ini, config,
                  "Server.WarmupThrottleRequestCount",
                  ServerWarmupThrottleRequestCount);
@@ -1445,8 +1440,6 @@ void RuntimeOption::Load(
     }
     Config::Bind(Utf8izeReplace, ini, config, "Server.Utf8izeReplace", true);
 
-    Config::Bind(StartupDocument, ini, config, "Server.StartupDocument");
-    normalizePath(StartupDocument);
     Config::Bind(RequestInitFunction, ini, config,
                  "Server.RequestInitFunction");
     Config::Bind(RequestInitDocument, ini, config,
@@ -1579,8 +1572,6 @@ void RuntimeOption::Load(
     // Pagelet Server
     Config::Bind(PageletServerThreadCount, ini, config,
                  "PageletServer.ThreadCount", 0);
-    Config::Bind(PageletServerThreadRoundRobin, ini, config,
-                 "PageletServer.ThreadRoundRobin");
     Config::Bind(PageletServerThreadDropStack, ini, config,
                  "PageletServer.ThreadDropStack");
     Config::Bind(PageletServerThreadDropCacheTimeoutSeconds, ini, config,

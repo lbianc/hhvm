@@ -47,16 +47,40 @@ let syntax_to_list include_separators node  =
 let syntax_to_list_no_separators = syntax_to_list false
 let syntax_to_list_with_separators = syntax_to_list true
 
+let assert_last_in_list assert_fun node =
+  let rec aux lst =
+    match lst with
+    | []
+    | _ :: [] -> None
+    | h :: _ when assert_fun h -> Some h
+    | _ :: t -> aux t in
+  aux (syntax_to_list_no_separators node)
+
 (* If an ellipsis appears in a position other than the last element in the
    list then return it. *)
 let misplaced_ellipsis params =
-  let rec aux params =
-    match params with
-    | []
-    | _ :: [] -> None
-    | h :: _ when is_ellipsis h -> Some h
-    | _ :: t -> aux t in
-  aux (syntax_to_list_no_separators params)
+  assert_last_in_list is_ellipsis params
+
+let is_variadic node =
+  begin match syntax node with
+    | DecoratedExpression { decorated_expression_decorator; _; } ->
+      is_ellipsis decorated_expression_decorator
+    | _ -> false
+  end
+
+let misplaced_variadic_param params =
+  let is_variadic node =
+    begin match syntax node with
+    | ParameterDeclaration { param_attr; param_visibility; param_type;
+      param_name; param_default } ->
+        is_variadic param_name
+    | _ -> false
+    end
+  in
+  assert_last_in_list is_variadic params
+
+let misplaced_variadic_arg args =
+  assert_last_in_list is_variadic args
 
 (* If a list ends with an ellipsis followed by a comma, return it *)
 let ends_with_ellipsis_comma params =
@@ -334,6 +358,9 @@ let xhp_errors node _parents =
 let classish_duplicate_modifiers node =
   list_contains_duplicate node
 
+let type_contains_array_in_strict is_strict node =
+  is_array node && is_strict
+
 (* helper since there are so many kinds of errors *)
 let produce_error acc check node error error_node =
   if check node then
@@ -418,15 +445,23 @@ let params_errors params =
     let s = start_offset ellipsis in
     let e = end_offset ellipsis in
     [ SyntaxError.make s e SyntaxError.error2021 ] in
-  if errors = [] then
-    match ends_with_ellipsis_comma params with
-    | None -> []
-    | Some comma ->
-      let s = start_offset comma in
-      let e = end_offset comma in
-      [ SyntaxError.make s e SyntaxError.error2022 ]
-  else
-    errors
+  let errors =
+    if errors = [] then
+      match ends_with_ellipsis_comma params with
+      | None -> []
+      | Some comma ->
+        let s = start_offset comma in
+        let e = end_offset comma in
+        [ SyntaxError.make s e SyntaxError.error2022 ]
+    else
+      errors
+  in
+    match misplaced_variadic_param params with
+    | None -> errors
+    | Some param ->
+      let s = start_offset param in
+      let e = end_offset param in
+      ( SyntaxError.make s e SyntaxError.error2033 ) :: errors
 
 let parameter_errors node parents is_strict =
   match syntax node with
@@ -500,6 +535,14 @@ let expression_errors node =
     let s = start_offset node in
     let e = end_offset node in
     [ SyntaxError.make s e SyntaxError.error2020 ]
+  | FunctionCallExpression s ->
+    begin match misplaced_variadic_arg s.function_call_arguments with
+      | Some h ->
+        let s = start_offset h in
+        let e = end_offset h in
+        [ SyntaxError.make s e SyntaxError.error2033 ]
+      | None -> [ ]
+    end
   | _ -> []
 
 let require_errors node parents =
@@ -531,6 +574,14 @@ let classish_errors node parents =
     end
   | _ -> [ ]
 
+let type_errors node parents is_strict =
+  match syntax node with
+  | SimpleTypeSpecifier t ->
+    let acc = [ ] in
+    produce_error acc (type_contains_array_in_strict is_strict) t
+    SyntaxError.error2032 t
+  | _ -> [ ]
+
 let find_syntax_errors node is_strict =
   let folder acc node parents =
     let param_errs = parameter_errors node parents is_strict in
@@ -542,9 +593,10 @@ let find_syntax_errors node is_strict =
     let expr_errs = expression_errors node in
     let require_errs = require_errors node parents in
     let classish_errors = classish_errors node parents in
+    let type_errors = type_errors node parents is_strict in
     let errors = acc.errors @ param_errs @ func_errs @
       xhp_errs @ statement_errs @ methodish_errs @ property_errs @
-      expr_errs @ require_errs @ classish_errors in
+      expr_errs @ require_errs @ classish_errors @ type_errors in
     { errors } in
   let acc = SyntaxUtilities.parented_fold_pre folder { errors = [] } node in
   List.sort SyntaxError.compare acc.errors
