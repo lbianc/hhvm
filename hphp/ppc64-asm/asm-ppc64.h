@@ -1863,8 +1863,14 @@ struct Assembler {
    * It decodes the branch @jmp to decide whether it's an absolute branch or an
    * offset branch and patches it properly.
    */
-  static void patchBranch(CodeAddress jmp, CodeAddress dest);
-  static void patchAbsolute(CodeAddress jmp, CodeAddress dest);
+  static void patchBranch(CodeAddress jmp,
+                          CodeAddress dest,
+                          int64_t tocOffset);
+  static void patchAbsolute(CodeAddress jmp,
+                            CodeAddress dest,
+                            int64_t tocOffset);
+
+  static void emitLoadTOC(Assembler a, int64_t tocOffset);
 
 //////////////////////////////////////////////////////////////////////
 

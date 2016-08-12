@@ -64,7 +64,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, call, Call, target, Assembler::CallArg::SmashInt);
+  return EMIT_BODY(cb, fixups, call, target, Assembler::CallArg::SmashInt);
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
@@ -135,7 +135,7 @@ void smashJmp(TCA inst, TCA target) {
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   if (cc == CC_None) {
-    Assembler::patchBranch(inst, target);
+    Assembler::patchBranch(inst, target, -1);
   } else {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };

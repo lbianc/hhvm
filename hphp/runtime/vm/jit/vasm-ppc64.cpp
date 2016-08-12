@@ -80,12 +80,32 @@ struct Vgen {
   static void patch(Venv& env) {
     for (auto& p : env.jmps) {
       assertx(env.addrs[p.target]);
-      Assembler::patchBranch(p.instr, env.addrs[p.target]);
+      // Alloc and set the target address in TOC memory
+      uint64_t tocOffset = -1;
+      if (!env.meta.smashableLocations.count(p.instr)) {
+        tocOffset = allocTOC(env.text, env.addrs[p.target]);
+      }
+      Assembler::patchBranch(p.instr, env.addrs[p.target], tocOffset);
     }
     for (auto& p : env.jccs) {
       assertx(env.addrs[p.target]);
-      Assembler::patchBranch(p.instr, env.addrs[p.target]);
+      // Alloc and set the target address in TOC memory
+      uint64_t tocOffset = -1;
+      if (!env.meta.smashableLocations.count(p.instr)) {
+        tocOffset = allocTOC(env.text, env.addrs[p.target]);
+      }
+      Assembler::patchBranch(p.instr, env.addrs[p.target], tocOffset);
     }
+  }
+
+  static uint64_t allocTOC (Vtext& text, CodeAddress target) {
+    if (!text.data().canEmit(sizeof(CodeAddress))) {
+      return -1;
+    }
+
+    Address addr = text.data().frontier();
+    text.data().qword(reinterpret_cast<uint64_t>(target));
+    return addr - (text.data().base() + INT16_MAX + 1);
   }
 
   static void pad(CodeBlock& cb) {
@@ -757,6 +777,9 @@ void Vgen::emit(const mcprep& i) {
 void Vgen::emit(const inittc&) {
   // initialize our rone register
   a.li(ppc64::rone(), 1);
+  a.li64(ppc64::rtoc(),
+         reinterpret_cast<int64_t>(env.text.data().base() + INT16_MAX + 1),
+         false);
 }
 
 void Vgen::emit(const leavetc&) {

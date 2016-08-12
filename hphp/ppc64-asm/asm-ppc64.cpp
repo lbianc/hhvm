@@ -783,26 +783,47 @@ void Assembler::unimplemented(){
 
 //////////////////////////////////////////////////////////////////////
 
-void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
+void Assembler::patchAbsolute(CodeAddress jmp,
+                              CodeAddress dest,
+                              int64_t tocOffset) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLi64Len, "patched bctr");
   Assembler a{ cb };
-  a.li64(reg::r12, ssize_t(dest), true);
+  if (tocOffset == -1) {
+    a.li64(reg::r12, ssize_t(dest), true);
+  }
+  else {
+    emitLoadTOC(a, tocOffset);
+  }
 }
 
-void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
+void Assembler::patchBranch(CodeAddress jmp,
+                            CodeAddress dest,
+                            int64_t tocOffset) {
   auto di = DecodedInstruction(jmp);
 
   // Detect Far branch
   if (di.isFarBranch()) {
-    patchAbsolute(jmp, dest);
+    patchAbsolute(jmp, dest, tocOffset);
     return;
   }
 
   // Regular patch for branch by offset type
   if (!di.setNearBranchTarget(dest))
     assert(false && "Can't patch a branch with such a big offset");
+}
+
+void Assembler::emitLoadTOC(Assembler a, int64_t tocOffset) {
+  if (tocOffset > UINT16_MAX) {
+    a.addis(Reg64(12), Reg64(2), static_cast<int16_t>(tocOffset >> 16));
+    a.ld(Reg64(12), Reg64(12)[tocOffset & UINT16_MAX]);
+  }
+  else {
+    a.ld(Reg64(12), Reg64(2)[tocOffset]);
+    a.emitNop(4);
+  }
+  a.emitNop(12);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -894,7 +915,7 @@ Label::~Label() {
     assert(m_a && m_address && "Label had jumps but was never set");
   }
   for (auto& ji : m_toPatch) {
-    ji.a->patchBranch(ji.addr, m_address);
+    ji.a->patchBranch(ji.addr, m_address, -1);
   }
 }
 
