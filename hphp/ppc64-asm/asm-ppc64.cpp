@@ -19,7 +19,7 @@
 
 namespace ppc64_asm {
 
-void BranchParams::decodeInstr(PPC64Instr* pinstr) {
+void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
   const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
   switch (dinfo.opcode_name()) {
     case OpcodeNames::op_b:

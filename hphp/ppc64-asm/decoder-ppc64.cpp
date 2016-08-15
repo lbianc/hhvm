@@ -572,7 +572,7 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const DecoderInfo Decoder::decode(PPC64Instr* ip) {
+const DecoderInfo Decoder::decode(const PPC64Instr* const ip) {
   int32_t position;
   PPC64Instr decoded_instr, operand, opcode_index, opcode_size;
   PPC64Instr opcode = *ip & kOpcodeMask;

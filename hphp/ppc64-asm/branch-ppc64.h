@@ -247,12 +247,12 @@ struct BranchParams {
      * Get the BranchParams from an emitted conditional branch
      * Also set m_lr accordingly.
      */
-    BranchParams(PPC64Instr* pinstr) { decodeInstr(pinstr); }
-    BranchParams(uint8_t* pinstr) {
-      decodeInstr(reinterpret_cast<PPC64Instr*>(pinstr));
+    BranchParams(const PPC64Instr* const pinstr) { decodeInstr(pinstr); }
+    BranchParams(const uint8_t* const pinstr) {
+      decodeInstr(reinterpret_cast<const PPC64Instr* const>(pinstr));
     }
 
-    void decodeInstr(PPC64Instr* pinstr);
+    void decodeInstr(const PPC64Instr* const pinstr);
 
     ~BranchParams() {}
 
