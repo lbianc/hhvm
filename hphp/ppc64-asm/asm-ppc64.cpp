@@ -815,8 +815,11 @@ void Assembler::patchBranch(CodeAddress jmp,
 }
 
 void Assembler::emitLoadTOC(Assembler a, int64_t tocOffset) {
-  if (tocOffset > UINT16_MAX) {
-    a.addis(Reg64(12), Reg64(2), static_cast<int16_t>(tocOffset >> 16));
+  if (tocOffset > INT16_MAX) {
+    int16_t complement = 0;
+    // If last four bytes is still bigger than a signed 16bits, uses as two complement.
+    if ((tocOffset & UINT16_MAX) > INT16_MAX) complement = 1;
+    a.addis(Reg64(12), Reg64(2), static_cast<int16_t>((tocOffset >> 16) + complement));
     a.ld(Reg64(12), Reg64(12)[tocOffset & UINT16_MAX]);
   }
   else {
