@@ -32,9 +32,6 @@ void Disassembler::disassembly(std::ostream& out, uint8_t* instr) {
      out << ' ';
   }
 
-  // print memory address
-  out << folly::format("{:#16x}: \t", reinterpret_cast<uint64_t>(instr));
-
   int pos;
   uint32_t instruction = 0;
 
