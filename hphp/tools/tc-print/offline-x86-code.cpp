@@ -357,7 +357,7 @@ void OfflineX86Code::disasm(FILE* file,
     std::ostringstream codeStr;
     ppc64_asm::Disassembler disasm(false, false, kIndent + 4,
                                    color(ANSI_COLOR_BROWN));
-    disasm.disassembly(codeStr, frontier);
+    disasm.disassembly(codeStr, frontier, ip);
 
     // Annotate the x86 with its bytecode.
     currBC = printBCMapping(bcMappingInfo, currBC, (TCA)ip);

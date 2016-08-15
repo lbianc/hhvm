@@ -23,7 +23,9 @@
 
 namespace ppc64_asm {
 
-void Disassembler::disassembly(std::ostream& out, uint8_t* instr) {
+void Disassembler::disassembly(std::ostream& out,
+                               const uint8_t* const instr,
+                               const uint8_t* const address) {
   if (!color_.empty()) {
     out << color_;
   }
@@ -42,7 +44,8 @@ void Disassembler::disassembly(std::ostream& out, uint8_t* instr) {
   }
   out << "\t";
   // Decode instruction and get mnemonic representation
-  const DecoderInfo dec_info = Decoder::GetDecoder().decode(&instruction);
+  DecoderInfo dec_info = Decoder::GetDecoder().decode(instr);
+  if (address) dec_info.setIp(address);
   out << dec_info.toString();
   out << "\n";
 }

@@ -40,7 +40,9 @@ struct Disassembler {
 
   ~Disassembler() {}
 
-  void disassembly(std::ostream& out, uint8_t* instr);
+  void disassembly(std::ostream& out,
+                   const uint8_t* const instr,
+                   const uint8_t* const address = nullptr);
 
  private:
   bool print_encoding_;
