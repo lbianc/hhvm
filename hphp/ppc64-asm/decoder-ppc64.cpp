@@ -47,7 +47,8 @@ Decoder* Decoder::s_decoder = nullptr;
 #define A_L       { 0x20, 0x0 }
 #define BA        { 0x001f0000, 0x0 }
 #define BB        { 0x0000f800, 0x0 }
-#define BD        { 0x0000fffc, 0x0 }
+#define BD        { 0x0000fffc, PPC_OPERAND_RELATIVE | PPC_OPERAND_SIGNED | \
+                                PPC_OPERAND_NOSHIFT }
 #define BDA       { 0xfffc, PPC_OPERAND_ABSOLUTE | PPC_OPERAND_SIGNED }
 #define BF        BDA
 #define BFA       { 0x1c0000, PPC_OPERAND_CR }
@@ -295,7 +296,7 @@ std::string DecoderInfo::toString() const {
   for (auto oper : m_operands) {
     auto op = m_image & oper.m_mask;
     if (!(oper.m_flags & PPC_OPERAND_NOSHIFT)) op >>= oper.operandShift();
-    auto toHex = [] (std::string& instr, int n) {
+    auto toHex = [] (std::string& instr, intptr_t n) {
       std::stringstream stringStream;
       if (n < 0) {
           stringStream << "-0x";
@@ -308,7 +309,11 @@ std::string DecoderInfo::toString() const {
     if (oper.m_flags & PPC_OPERAND_GPR_0) { if (op != 0) instr += "r"; }
     if (oper.m_flags & PPC_OPERAND_FPR)   { instr += "f"; }
     if (oper.m_flags & PPC_OPERAND_VR)    { instr += "vs"; }
-    if (oper.m_flags & PPC_OPERAND_SIGNED) {
+    if (oper.m_flags & PPC_OPERAND_RELATIVE) {
+      // print branch target instead of the relative offset
+      int32_t n = static_cast<int32_t>(op << 6) >> 6; // extend sign
+      toHex(instr, reinterpret_cast<intptr_t>(m_ip) + n);
+    } else if (oper.m_flags & PPC_OPERAND_SIGNED) {
       int16_t n = static_cast<int16_t>(op);
       toHex(instr, n);
     } else if (oper.m_flags & PPC_OPERAND_UNSIGNED) {
