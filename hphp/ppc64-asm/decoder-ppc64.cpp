@@ -573,6 +573,7 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
       return 0;
       break;
   }
+}
 /**
  * Look for the offset from instructions like ld, which was created by
  * limmediate.
