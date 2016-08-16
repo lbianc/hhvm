@@ -14,6 +14,8 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/base/runtime-option.h"
+
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
@@ -80,32 +82,22 @@ struct Vgen {
   static void patch(Venv& env) {
     for (auto& p : env.jmps) {
       assertx(env.addrs[p.target]);
-      // Alloc and set the target address in TOC memory
-      uint64_t tocOffset = -1;
-      if (!env.meta.smashableLocations.count(p.instr)) {
-        tocOffset = allocTOC(env.text, env.addrs[p.target]);
+      if (env.meta.smashableLocations.count(p.instr)) {
+        Assembler::patchBranch(p.instr, env.addrs[p.target], false);
       }
-      Assembler::patchBranch(p.instr, env.addrs[p.target], tocOffset);
+      else{
+        Assembler::patchBranch(p.instr, env.addrs[p.target]);
+      }
     }
     for (auto& p : env.jccs) {
       assertx(env.addrs[p.target]);
-      // Alloc and set the target address in TOC memory
-      uint64_t tocOffset = -1;
-      if (!env.meta.smashableLocations.count(p.instr)) {
-        tocOffset = allocTOC(env.text, env.addrs[p.target]);
+      if (env.meta.smashableLocations.count(p.instr)) {
+        Assembler::patchBranch(p.instr, env.addrs[p.target], false);
       }
-      Assembler::patchBranch(p.instr, env.addrs[p.target], tocOffset);
+      else {
+        Assembler::patchBranch(p.instr, env.addrs[p.target]);
+      }
     }
-  }
-
-  static uint64_t allocTOC (Vtext& text, CodeAddress target) {
-    if (!text.data().canEmit(sizeof(CodeAddress))) {
-      return -1;
-    }
-
-    Address addr = text.data().frontier();
-    text.data().qword(reinterpret_cast<uint64_t>(target));
-    return addr - (text.data().base() + INT16_MAX + 1);
   }
 
   static void pad(CodeBlock& cb) {
@@ -120,8 +112,8 @@ struct Vgen {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
   }
-  void copyCR0toCR1(Assembler a, Reg64 raux)
-  {
+
+  void copyCR0toCR1(Assembler a, Reg64 raux) {
     a.mfcr(raux);
     a.sradi(raux,raux,4);
     a.mtocrf(0x40,raux);
@@ -298,8 +290,8 @@ struct Vgen {
     }
     a.lxvd2x(i.d, p);
   }
-  void emit(const leap& i) { a.li64(i.d, i.s.r.disp, false); }
-  void emit(const lead& i) { a.li64(i.d, (int64_t)i.s.get(), false); }
+  void emit(const leap& i) { a.limmediate(i.d, i.s.r.disp); }
+  void emit(const lead& i) { a.limmediate(i.d, (int64_t)i.s.get()); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
   void emit(const mflr& i) { a.mflr(i.d); }
   void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
@@ -424,7 +416,7 @@ struct Vgen {
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lower byte
   }
   void emit(const orqi& i) {
-    a.li64(rAsm, i.s0.l());
+    a.limmediate(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
     if (i.signFlags == unsignedOnly || i.signFlags == both)
       copyCR0toCR1(a, rAsm);
@@ -478,7 +470,7 @@ struct Vgen {
     }
   }
   void emit(const xorqi& i) {
-    a.li64(rAsm, i.s0.l());
+    a.limmediate(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
     if (i.signFlags == unsignedOnly || i.signFlags == both)
       copyCR0toCR1(a, rAsm);
@@ -586,7 +578,7 @@ void Vgen::emit(const ucomisd& i) {
   a.bc(notNAN, BranchConditions::CR0_NoOverflow);
   {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
-    a.li64(rAsm, 0x99000000);
+    a.limmediate(rAsm, 0x99000000);
     a.mtcrf(0xC0, rAsm);
     copyCR0toCR1(a, rAsm);
   }
@@ -618,10 +610,10 @@ void Vgen::emit(const ldimml& i) {
 void Vgen::emit(const ldimmq& i) {
   auto val = i.s.q();
   if (i.d.isGP()) {
-    a.li64(i.d, val);
+    a.limmediate(i.d, val);
   } else {
     assertx(i.d.isSIMD());
-    a.li64(rAsm, i.s.q());
+    a.limmediate(rAsm, val);
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
@@ -674,7 +666,7 @@ void Vgen::emit(const load& i) {
       a.ldx(i.d, i.s);
     } else if (i.s.disp & 0x3) {     // Unaligned memory access
       Vptr p = i.s;
-      a.li64(rAsm, (int64_t)p.disp); // Load disp to reg
+      a.limmediate(rAsm, (int64_t)p.disp); // Load disp to reg
       p.disp = 0;                    // Remove disp
       p.index = rAsm;                // Set disp reg as index
       a.ldx(i.d, p);                 // Use ldx for unaligned memory access
@@ -689,7 +681,7 @@ void Vgen::emit(const load& i) {
 
 // This function can't be lowered as i.get() may not be bound that early.
 void Vgen::emit(const loadqd& i) {
-  a.li64(rAsm, (int64_t)i.s.get());
+  a.limmediate(rAsm, (int64_t)i.s.get());
   a.ld(i.d, rAsm[0]);
 }
 
@@ -705,7 +697,7 @@ void Vgen::emit(const jmp& i) {
   jmps.push_back({a.frontier(), i.target});
 
   // offset to be determined by a.patchBranch
-  a.branchAuto(a.frontier());
+  a.branchAuto(0x0);
 }
 
 void Vgen::emit(const jmpr& i) {
@@ -723,7 +715,7 @@ void Vgen::emit(const jcc& i) {
     jccs.push_back({a.frontier(), taken});
 
     // offset to be determined by a.patchBranch
-    a.branchAuto(a.frontier(), i.cc);
+    a.branchAuto(0x0, i.cc);
   }
   emit(jmp{i.targets[0]});
 }
@@ -777,9 +769,15 @@ void Vgen::emit(const mcprep& i) {
 void Vgen::emit(const inittc&) {
   // initialize our rone register
   a.li(ppc64::rone(), 1);
-  a.li64(ppc64::rtoc(),
-         reinterpret_cast<int64_t>(env.text.data().base() + INT16_MAX + 1),
-         false);
+
+  // Set DataBlock on VMTOC
+  VMTOC::getInstance().setTOCDataBlock(&(env.text.data()));
+
+  // Save TOC pointer in r2
+  // First, assert the ppc64minTOCImmSize.
+  always_assert(RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
+    RuntimeOption::Evalppc64minTOCImmSize <= 64);
+  a.li64(ppc64::rtoc(), VMTOC::getInstance().getPtrVector(), false);
 }
 
 void Vgen::emit(const leavetc&) {
@@ -795,7 +793,7 @@ void Vgen::emit(const calltc& i) {
   a.bl(instr_size_in_bytes);  // jump to next instruction
 
   // this will be verified by emitCallToExit
-  a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
+  a.limmediate(rAsm, reinterpret_cast<int64_t>(i.exittc));
   emit(push{rAsm});
 
   // keep the return address as initialized by the vm frame
@@ -814,7 +812,7 @@ void Vgen::emit(const resumetc& i) {
   a.bl(instr_size_in_bytes);  // jump to next instruction
 
   // this will be verified by emitCallToExit
-  a.li64(rAsm, reinterpret_cast<int64_t>(i.exittc), false);
+  a.limmediate(rAsm, reinterpret_cast<int64_t>(i.exittc));
   emit(push{rAsm});
 
   // and jump. When it returns, it'll be to enterTCExit

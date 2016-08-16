@@ -55,6 +55,7 @@ constexpr PhysReg rfuncentry() { return ppc64_asm::reg::r12; }
  * The TOC section is accessed via the dedicated TOC pointer register, r2.
  */
 constexpr PhysReg rtoc()       { return ppc64_asm::reg::r2;  }
+constexpr PhysReg rbigtoc()    { return ppc64_asm::reg::r26; }
 
 /*
  * The native stack frame pointer, which has to be handled according to ABI.

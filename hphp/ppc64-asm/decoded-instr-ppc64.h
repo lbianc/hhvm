@@ -36,6 +36,15 @@ struct DecInfoOffset {
 };
 
 struct DecodedInstruction {
+  explicit DecodedInstruction(PPC64Instr* ip, uint8_t max_size = 0)
+    : m_ip(reinterpret_cast<uint8_t*>(ip))
+    , m_imm(0)
+    , m_dinfo(Decoder::GetDecoder().decode(ip))
+    , m_size(instr_size_in_bytes)
+    , m_max_size(max_size)
+  {
+    decode();
+  }
   // 0 as @max_size means unlimited size
   explicit DecodedInstruction(uint8_t* ip, uint8_t max_size = 0)
     : m_ip(ip)
@@ -70,7 +79,11 @@ struct DecodedInstruction {
   // wide   : branch by absolute address.
   bool shrinkBranch();
   void widenBranch(uint8_t* target);
-
+  int32_t offsetDS() const      { return m_dinfo.offsetDS(); }
+  int16_t offsetD()             { return m_dinfo.offsetD(); }
+  bool isLdTOC() const          {return m_dinfo.isLdTOC(); }
+  bool isLwzTOC() const         {return m_dinfo.isLwzTOC(); }
+  // if it's conditional branch, it's not a jmp
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }
   bool isNop() const            { return m_dinfo.isNop(); }

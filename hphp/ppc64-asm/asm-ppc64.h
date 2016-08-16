@@ -21,17 +21,20 @@
 #include <cassert>
 #include <vector>
 #include <iostream>
+#include <fstream>
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
 #include "hphp/util/data-block.h"
 
+#include "hphp/runtime/vm/jit/code-cache.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/ppc64-asm/branch-ppc64.h"
 #include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
+#include "hphp/runtime/base/runtime-option.h"
 
 namespace ppc64_asm {
 
@@ -206,6 +209,73 @@ private:
   Assembler* m_a;
   CodeAddress m_address;
   std::vector<JumpInfo> m_toPatch;
+};
+
+/* Class that represents a virtual TOC */
+struct VMTOC {
+
+private:
+  // VMTOC is a singleton
+  VMTOC()
+    : m_tocvector(nullptr)
+    , m_last_elem_pos(0)
+
+  {}
+
+  ~VMTOC(){
+    if (HPHP::RuntimeOption::Evalppc64dumpTOCNelements) {
+     pid_t pid = getpid();
+     std::string dumpedfile = "/tmp/nelements." + std::to_string(pid);
+     std::ofstream nelemdumped;
+     nelemdumped.open(dumpedfile);
+     if (nelemdumped.is_open())
+       nelemdumped << "Number of values stored in TOC: ";
+       nelemdumped << std::to_string(m_last_elem_pos);
+       nelemdumped << "\n";
+       nelemdumped.close();
+    }
+  }
+
+public:
+  VMTOC(VMTOC const&) = delete;
+
+  VMTOC operator=(VMTOC const&) = delete;
+
+  void setTOCDataBlock(HPHP::DataBlock *db){
+    m_tocvector = db;
+  }
+
+  /* push a 64 bit element into the stack and return its index */
+  int64_t pushElem(int64_t elem);
+
+  /* push a 32 bit element into the stack and return its index */
+  int64_t pushElem(int32_t elem);
+
+  /* get the singleton instance */
+  static VMTOC& getInstance();
+
+  /* return the address of the middle element from the vector
+   * this is done so signed offsets could be used */
+  intptr_t getPtrVector();
+
+  /* return a value previously pushed */
+  /*int64_t getValue(uint16_t index) {
+    union conv16 {int16_t i16v; uint16_t u16v;} val;
+    val.u16v = index;
+    return m_funcaddrs[val.i16v + kTOCSize/2];
+  }*/
+
+private:
+  int64_t allocTOC (int32_t target, bool align = false);
+
+  HPHP::DataBlock *m_tocvector;
+
+  /* vector position of the last element */
+  uint64_t m_last_elem_pos;
+
+
+  /* map used to avoid insertion of duplicates */
+  std::map<int64_t, uint64_t> m_map;
 };
 
 struct Assembler {
@@ -1828,9 +1898,35 @@ struct Assembler {
   }
 
 //////////////////////////////////////////////////////////////////////
+  // Auxiliary for loading immediates in the best way
+  void limmediate(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
+
+  // Retrieve the target defined by limmediate instruction
+  /*static int64_t getLimmediate(PPC64Instr* pinstr);
+  static int64_t getLimmediate(CodeAddress pinstr) {
+    return getLimmediate(reinterpret_cast<PPC64Instr*>(pinstr));
+  }*/
+
+  // Retrieve the target defined by li64 instruction
+  static int64_t getLi64(PPC64Instr* pinstr);
+  static int64_t getLi64(CodeAddress pinstr) {
+    return getLi64(reinterpret_cast<PPC64Instr*>(pinstr));
+  }
+
+  // Retrieve the register used by li64 instruction
+  static Reg64 getLi64Reg(PPC64Instr* instr);
+  static Reg64 getLi64Reg(CodeAddress instr) {
+    return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
+  }
+
+  /*static Reg64 getLimmediateReg(PPC64Instr* instr);
+
+  static Reg64 getLimmediateReg(CodeAddress instr) {
+    return getLimmediateReg(reinterpret_cast<PPC64Instr*>(instr));
+  }*/
 
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, int32_t imm32);
@@ -1865,12 +1961,10 @@ struct Assembler {
    */
   static void patchBranch(CodeAddress jmp,
                           CodeAddress dest,
-                          int64_t tocOffset);
+                          bool useTOC = true);
   static void patchAbsolute(CodeAddress jmp,
                             CodeAddress dest,
-                            int64_t tocOffset);
-
-  static void emitLoadTOC(Assembler a, int64_t tocOffset);
+                            bool useTOC = true);
 
 //////////////////////////////////////////////////////////////////////
 
