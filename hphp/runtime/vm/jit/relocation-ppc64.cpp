@@ -184,8 +184,10 @@ size_t relocateImpl(RelocationInfo& rel,
           TCA adjusted_target = rel.adjustedAddressAfter(old_target);
           TCA new_target = (adjusted_target) ? adjusted_target : old_target;
 
-          // if it's smashable, don't remove nops (leave it as fixed size)
+          // if it's smashable, don't remove nops (leave it as fixed size) and
+          // mark this relocated address to be used on adjustForRelocation
           bool keep_nops = (0 != fixups.smashableLocations.count(src));
+          if (keep_nops) rel.markSmashableRelocation(dest);
           if (!d2.setFarBranchTarget(new_target, keep_nops)) {
             assertx(false && "Couldn't set Far branch target");
           }
@@ -267,7 +269,8 @@ size_t relocateImpl(RelocationInfo& rel,
             insert_near_jmp = true;
           } else if (new_far_target) {
             // Far target will be relocated.
-            if (!d2.setFarBranchTarget(new_far_target, false)) {
+            bool keep_nops = rel.isSmashableRelocation(dest);
+            if (!d2.setFarBranchTarget(new_far_target, keep_nops)) {
               assert(false && "Far branch target setting failed");
             }
             if (d2.couldBeNearBranch()) {
@@ -359,7 +362,8 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
 
     if (di.isFarBranch()) {
       if (TCA adjusted = rel.adjustedAddressAfter(di.farBranchTarget())) {
-        if (!di.setFarBranchTarget(adjusted, false)) {
+        bool keep_nops = rel.isSmashableRelocation(start);
+        if (!di.setFarBranchTarget(adjusted, keep_nops)) {
           always_assert(false && "Not an expected Far branch.");
         }
       }
