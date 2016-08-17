@@ -57,7 +57,7 @@ int64_t VMTOC::allocTOC (int32_t target, bool align) {
   }
 
   HPHP::Address addr = m_tocvector->frontier();
-  if (align && reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
+  while (align && reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
     m_tocvector->dword(reinterpret_cast<int32_t>(0xF0F0));
     addr = m_tocvector->frontier();
   }
