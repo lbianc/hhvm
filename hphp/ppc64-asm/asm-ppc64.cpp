@@ -66,7 +66,7 @@ int64_t VMTOC::allocTOC (int32_t target, bool align) {
   return addr - (m_tocvector->base() + INT16_MAX + 1);
 }
 
-void BranchParams::decodeInstr(PPC64Instr* pinstr) {
+void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
   const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
   switch (dinfo.opcode_name()) {
     case OpcodeNames::op_b:

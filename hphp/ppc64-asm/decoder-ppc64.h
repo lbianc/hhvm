@@ -1557,15 +1557,15 @@ struct DecoderInfo {
 
   DecoderInfo() = delete;
 
-  inline uint8_t* ip() const              { return m_ip; }
-  inline Form form() const                { return m_form; }
-  inline OpcodeNames opcode_name() const  { return m_opn; }
-  inline PPC64Instr opcode() const        { return m_op; }
-  inline std::string mnemonic() const     { return m_mnemonic; }
+  inline const uint8_t* ip() const            { return m_ip; }
+  inline Form form() const                    { return m_form; }
+  inline OpcodeNames opcode_name() const      { return m_opn; }
+  inline PPC64Instr opcode() const            { return m_op; }
+  inline std::string mnemonic() const         { return m_mnemonic; }
   std::string toString() const;
 
-  PPC64Instr instruction_image() const    { return m_image; }
-  void instruction_image(PPC64Instr i)    { m_image = i; }
+  const PPC64Instr instruction_image() const  { return m_image; }
+  void instruction_image(const PPC64Instr i)  { m_image = i; }
 
   inline bool operator==(const DecoderInfo& i) {
     return (i.form() == m_form &&
@@ -1592,9 +1592,9 @@ struct DecoderInfo {
   int32_t offset() const;
   int32_t branchOffset() const;
   PPC64Instr setBranchOffset(int32_t offset) const;
-  void setIp(uint8_t* ip)                 { m_ip = ip; }
-  void setIp(PPC64Instr* ip) {
-    setIp(reinterpret_cast<uint8_t*>(ip));
+  void setIp(const uint8_t* const ip)     { m_ip = ip; }
+  void setIp(const PPC64Instr* const ip) {
+    setIp(reinterpret_cast<const uint8_t* const>(ip));
   }
   bool isLdTOC() const;
   bool isLwzTOC() const;
@@ -1605,7 +1605,7 @@ private:
   // opcode enumeration identifier
   OpcodeNames m_opn;
   // pointer to the decoded instruction in the memory
-  uint8_t* m_ip;
+  const uint8_t* m_ip;
   // the opcode part of the instruction
   PPC64Instr m_op;
   // points out which -Form the instruction is
@@ -1674,15 +1674,15 @@ public:
     return *s_decoder;
   }
 
-  const DecoderInfo decode(PPC64Instr* ip);
+  const DecoderInfo decode(const PPC64Instr* const ip);
 
   int32_t searchInstr(
       int32_t opc_index,
       int32_t opc_size,
       PPC64Instr instr) const;
 
-  inline const DecoderInfo decode(uint8_t* ip) {
-    return decode(reinterpret_cast<PPC64Instr*>(ip));
+  inline const DecoderInfo decode(const uint8_t* const ip) {
+    return decode(reinterpret_cast<const PPC64Instr* const>(ip));
   }
 };
 
