@@ -1018,7 +1018,7 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
   }
   else {
     loadTOC(rt, Reg64(2), imm64, TOCoffset, fixedSize, fits32);
-    emitNop(1 * instr_size_in_bytes);
+    if (fixedSize) emitNop(1 * instr_size_in_bytes);
   }
 
   return;
