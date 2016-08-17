@@ -121,7 +121,7 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
     cb.init(m_ip, max_branch_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp, false);
+    a.branchFar(target, bp, true);
 
     // refresh m_size and other parameters
     decode();
