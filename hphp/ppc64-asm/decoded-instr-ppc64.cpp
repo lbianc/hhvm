@@ -23,6 +23,10 @@
 
 #include "hphp/util/data-block.h"
 
+#ifndef MIN
+#define MIN(x,y)        (((x) < (y)) ? (x) : (y))
+#endif
+
 namespace ppc64_asm {
 
 bool DecodedInstruction::couldBeNearBranch() {
@@ -153,9 +157,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   // only read bytes up to the smallest of @max_read or @bytes.
   auto canRead = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
     if (max_read)
-#define MIN(a, b)    (((a) < (b)) ? (a) : (b))
       return n < MIN(max_read, bytes);
-#undef MIN
     else
       return n < bytes;
   };
