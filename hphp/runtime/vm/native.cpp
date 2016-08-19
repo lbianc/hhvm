@@ -229,6 +229,12 @@ void callFunc(const Func* func, void *ctx,
 
     case KindOfPersistentString:
     case KindOfString:
+    case KindOfPersistentVec:
+    case KindOfVec:
+    case KindOfPersistentDict:
+    case KindOfDict:
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:
     case KindOfPersistentArray:
     case KindOfArray:
     case KindOfObject:
@@ -302,15 +308,10 @@ bool coerceFCallArgs(TypedValue* args,
       targetType = tc.underlyingDataType();
     }
 
-    // Skip tvCoerceParamTo*() call if we're already the right type
-    if (args[-i].m_type == targetType ||
-        (isStringType(args[-i].m_type) && isStringType(targetType)) ||
-        (isArrayType(args[-i].m_type) && isArrayType(targetType))) {
-      continue;
-    }
+    // Skip tvCoerceParamTo*() call if we're already the right type, or if its a
+    // Variant.
+    if (!targetType || equivDataTypes(args[-i].m_type, *targetType)) continue;
 
-    // No coercion or cast for Variants.
-    if (!targetType) continue;
     if (RuntimeOption::PHP7_ScalarTypes && useStrictTypes) {
       tc.verifyParam(&args[-i], func, i, true);
       return true;
@@ -321,6 +322,9 @@ bool coerceFCallArgs(TypedValue* args,
       CASE(Int64)
       CASE(Double)
       CASE(String)
+      CASE(Vec)
+      CASE(Dict)
+      CASE(Keyset)
       CASE(Array)
       CASE(Resource)
 
@@ -336,6 +340,9 @@ bool coerceFCallArgs(TypedValue* args,
       case KindOfUninit:
       case KindOfNull:
       case KindOfPersistentString:
+      case KindOfPersistentVec:
+      case KindOfPersistentDict:
+      case KindOfPersistentKeyset:
       case KindOfPersistentArray:
       case KindOfRef:
       case KindOfClass:
@@ -557,6 +564,12 @@ static bool tcCheckNative(const TypeConstraint& tc, const NativeSig::Type ty) {
     case KindOfObject:       return ty == T::Object   || ty == T::ObjectArg;
     case KindOfPersistentString:
     case KindOfString:       return ty == T::String   || ty == T::StringArg;
+    case KindOfPersistentVec:
+    case KindOfVec:          return ty == T::Array    || ty == T::ArrayArg;
+    case KindOfPersistentDict:
+    case KindOfDict:         return ty == T::Array    || ty == T::ArrayArg;
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:       return ty == T::Array    || ty == T::ArrayArg;
     case KindOfPersistentArray:
     case KindOfArray:        return ty == T::Array    || ty == T::ArrayArg;
     case KindOfResource:     return ty == T::Resource || ty == T::ResourceArg;

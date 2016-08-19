@@ -975,8 +975,7 @@ public:
   void postponeCinit(InterfaceStatementPtr m, FuncEmitter* fe, NonScalarVec* v);
   void emitPostponedMeths();
   void bindUserAttributes(MethodStatementPtr meth,
-                          FuncEmitter *fe,
-                          bool &allowOverride);
+                          FuncEmitter *fe);
   void bindNativeFunc(MethodStatementPtr meth, FuncEmitter *fe);
   int32_t emitNativeOpCodeImpl(MethodStatementPtr meth,
                                const char* funcName,
@@ -5197,22 +5196,53 @@ bool EmitterVisitor::visit(ConstructPtr node) {
         makeStaticString(call->getClassScope()->getScopeName());
       e.String(name);
       return true;
-    } else if (call->isCallToFunction("dict") &&
-               (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) {
-      emitFuncCall(e, call, "HH\\dict", params);
+    } else if (((call->isCallToFunction("dict") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\dict")) &&
+               params && params->getCount() == 1) {
+      visit((*params)[0]);
+      emitConvertToCell(e);
+      e.CastDict();
       return true;
-    } else if (call->isCallToFunction("vec") &&
-               (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) {
-      emitFuncCall(e, call, "HH\\vec", params);
+    } else if (((call->isCallToFunction("vec") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\vec")) &&
+               params && params->getCount() == 1) {
+      visit((*params)[0]);
+      emitConvertToCell(e);
+      e.CastVec();
       return true;
-    } else if (call->isCallToFunction("is_vec") &&
-               (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) {
-      emitFuncCall(e, call, "HH\\is_vec", params);
+    } else if (((call->isCallToFunction("keyset") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\keyset")) &&
+               params && params->getCount() == 1) {
+      visit((*params)[0]);
+      emitConvertToCell(e);
+      e.CastKeyset();
       return true;
-    } else if (emitConstantFuncCall(e, call)) {
+    } else if (((call->isCallToFunction("is_vec") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\is_vec")) &&
+               params && params->getCount() == 1) {
+      visit((*call->getParams())[0]);
+      emitIsType(e, IsTypeOp::Vec);
+      return true;
+    } else if (((call->isCallToFunction("is_dict") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\is_dict")) &&
+               params && params->getCount() == 1) {
+      visit((*call->getParams())[0]);
+      emitIsType(e, IsTypeOp::Dict);
+      return true;
+    } else if (((call->isCallToFunction("is_keyset") &&
+                 (m_ue.m_isHHFile || Option::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\is_keyset")) &&
+               params && params->getCount() == 1) {
+      visit((*call->getParams())[0]);
+      emitIsType(e, IsTypeOp::Keyset);
       return true;
     }
-#define TYPE_CONVERT_INSTR(what, What)                             \
+  #define TYPE_CONVERT_INSTR(what, What)                             \
     else if (call->isCallToFunction(#what"val") &&                 \
              params && params->getCount() == 1) {                  \
       visit((*params)[0]);                                         \
@@ -5248,8 +5278,11 @@ bool EmitterVisitor::visit(ConstructPtr node) {
   TYPE_CHECK_INSTR(float, Dbl)
   TYPE_CHECK_INSTR(scalar, Scalar)
 #undef TYPE_CHECK_INSTR
-    // fall through
+    else if (emitConstantFuncCall(e, call)) {
+      return true;
+    }
   }
+  // fall through
   case Construct::KindOfDynamicFunctionCall: {
     emitFuncCall(e, static_pointer_cast<FunctionCall>(node));
     return true;
@@ -5921,8 +5954,27 @@ bool EmitterVisitor::emitScalarValue(Emitter& e, const Variant& v) {
       e.String(makeStaticString(v.getStringData()));
       return true;
 
+    case KindOfPersistentVec:
+    case KindOfVec:
+      assert(v.isVecArray());
+      e.Vec(ArrayData::GetScalarArray(v.getArrayData()));
+      return true;
+
+    case KindOfPersistentDict:
+    case KindOfDict:
+      assert(v.isDict());
+      e.Dict(ArrayData::GetScalarArray(v.getArrayData()));
+      return true;
+
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:
+      assert(v.isKeyset());
+      e.Keyset(ArrayData::GetScalarArray(v.getArrayData()));
+      return true;
+
     case KindOfPersistentArray:
     case KindOfArray:
+      assert(v.isPHPArray());
       e.Array(ArrayData::GetScalarArray(v.getArrayData()));
       return true;
 
@@ -6667,7 +6719,7 @@ bool EmitterVisitor::emitVGet(Emitter& e, bool skipCells) {
     }
   } else {
     auto const stackCount =
-      emitMOp(i, iLast, e, MInstrOpts{MOpFlags::DefineReffy});
+      emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Define});
     e.VGetM(stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
   return false;
@@ -6836,6 +6888,12 @@ void EmitterVisitor::emitBuiltinDefaultArg(Emitter& e, Variant& v,
           switch (*t) {
             case KindOfPersistentString:
             case KindOfString:
+            case KindOfPersistentVec:
+            case KindOfVec:
+            case KindOfPersistentDict:
+            case KindOfDict:
+            case KindOfPersistentKeyset:
+            case KindOfKeyset:
             case KindOfPersistentArray:
             case KindOfArray:
             case KindOfObject:
@@ -6881,8 +6939,27 @@ void EmitterVisitor::emitBuiltinDefaultArg(Emitter& e, Variant& v,
       return;
     }
 
+    case KindOfPersistentVec:
+    case KindOfVec:
+      assert(v.isVecArray());
+      e.Vec(v.getArrayData());
+      return;
+
+    case KindOfPersistentDict:
+    case KindOfDict:
+      assert(v.isDict());
+      e.Dict(v.getArrayData());
+      return;
+
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:
+      assert(v.isKeyset());
+      e.Keyset(v.getArrayData());
+      return;
+
     case KindOfPersistentArray:
     case KindOfArray:
+      assert(v.isPHPArray());
       e.Array(v.getArrayData());
       return;
 
@@ -7196,7 +7273,7 @@ void EmitterVisitor::emitBind(Emitter& e) {
     }
   } else {
     auto const stackCount =
-      emitMOp(i, iLast, e, MInstrOpts{MOpFlags::DefineReffy}.rhs());
+      emitMOp(i, iLast, e, MInstrOpts{MOpFlags::Define}.rhs());
     e.BindM(stackCount, symToMemberKey(e, iLast, true /* allowW */));
   }
 }
@@ -7732,14 +7809,10 @@ static void parseUserAttributes(FuncEmitter* fe, Attr& attrs) {
 }
 
 static Attr buildMethodAttrs(MethodStatementPtr meth, FuncEmitter* fe,
-                             bool top, bool allowOverride) {
+                             bool top) {
   FunctionScopePtr funcScope = meth->getFunctionScope();
   ModifierExpressionPtr mod(meth->getModifiers());
   Attr attrs = buildAttrs(mod, meth->isRef());
-
-  if (allowOverride) {
-    attrs = attrs | AttrAllowOverride;
-  }
 
   // if hasCallToGetArgs() or if mayUseVV
   if (meth->hasCallToGetArgs() || funcScope->mayUseVV()) {
@@ -7989,14 +8062,9 @@ void EmitterVisitor::emitPostponedMeths() {
 }
 
 void EmitterVisitor::bindUserAttributes(MethodStatementPtr meth,
-                                        FuncEmitter *fe,
-                                        bool &allowOverride) {
+                                        FuncEmitter *fe) {
   auto const& userAttrs = meth->getFunctionScope()->userAttributes();
   for (auto& attr : userAttrs) {
-    if (attr.first == "__Overridable") {
-      allowOverride = true;
-      continue;
-    }
     const StringData* uaName = makeStaticString(attr.first);
     ExpressionPtr uaValue = attr.second;
     assert(uaValue);
@@ -8020,10 +8088,9 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
   }
 
   auto modifiers = meth->getModifiers();
-  bool allowOverride = false;
-  bindUserAttributes(meth, fe, allowOverride);
+  bindUserAttributes(meth, fe);
 
-  Attr attributes = AttrBuiltin | AttrNative | AttrUnique | AttrPersistent;
+  Attr attributes = AttrBuiltin | AttrUnique | AttrPersistent;
   if (meth->isRef()) {
     attributes = attributes | AttrReference;
   }
@@ -8043,10 +8110,6 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
     } else {
       attributes = attributes | (modifiers->isProtected()
                               ? AttrProtected : AttrPublic);
-    }
-  } else {
-    if (allowOverride) {
-      attributes = attributes | AttrAllowOverride;
     }
   }
   parseUserAttributes(fe, attributes);
@@ -8104,7 +8167,7 @@ void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
     emitDeprecationWarning(e, meth);
   }
 
-  fe->setBuiltinFunc(bif, nif, attributes, base);
+  fe->setBuiltinFunc(attributes, base);
   fillFuncEmitterParams(fe, meth->getParams(), true);
   if (nativeAttrs & Native::AttrOpCodeImpl) {
     ff.setStackPad(emitNativeOpCodeImpl(meth, funcname, classname, fe));
@@ -8118,8 +8181,7 @@ void EmitterVisitor::emitMethodMetadata(MethodStatementPtr meth,
                                         ClosureUseVarVec* useVars,
                                         bool top) {
   FuncEmitter* fe = m_curFunc;
-  bool allowOverride = false;
-  bindUserAttributes(meth, fe, allowOverride);
+  bindUserAttributes(meth, fe);
 
   // assign ids to parameters (all methods)
   int numParam = meth->getParams() ? meth->getParams()->getCount() : 0;
@@ -8190,7 +8252,7 @@ void EmitterVisitor::emitMethodMetadata(MethodStatementPtr meth,
   fe->init(meth->line0(),
            meth->line1(),
            m_ue.bcPos(),
-           buildMethodAttrs(meth, fe, top, allowOverride),
+           buildMethodAttrs(meth, fe, top),
            top,
            methDoc);
 
@@ -9008,13 +9070,6 @@ Func* EmitterVisitor::canEmitBuiltinCall(const std::string& name,
   if ((f->returnType() == KindOfDouble) &&
        !Native::allowFCallBuiltinDoubles()) return nullptr;
 
-  if (!(f->attrs() & AttrNative)) {
-    // HNI only enables Variable args via ActRec which in turn
-    // is captured by the f->nativeFuncPtr() == nullptr,
-    // so there's nothing additional to check in the HNI case
-    return nullptr;
-  }
-
   bool allowDoubleArgs = Native::allowFCallBuiltinDoubles();
   auto concrete_params = f->numParams();
   if (variadic) {
@@ -9097,16 +9152,6 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
         (!fcallBuiltin->hasVariadicCaptureParam() ||
          numParams != fcallBuiltin->numParams())) {
       fcallBuiltin = nullptr;
-    }
-    if (fcallBuiltin && (fcallBuiltin->attrs() & AttrAllowOverride)) {
-      if (!Option::WholeProgram ||
-          (node->getFuncScope() && node->getFuncScope()->isUserFunction())) {
-        // In non-WholeProgram mode, we can't tell whether the function
-        // will be overridden, so never use FCallBuiltin.
-        // In WholeProgram mode, don't use FCallBuiltin if it *has* been
-        // overridden.
-        fcallBuiltin = nullptr;
-      }
     }
     StringData* nsName = nullptr;
     if (!node->hadBackslash() && !nameOverride) {
@@ -10145,7 +10190,7 @@ void EmitterVisitor::initScalar(TypedValue& tvVal, ExpressionPtr val,
     }
     m_staticColType.push_back(k);
     visit(el);
-    tvVal = make_tv<KindOfPersistentArray>(
+    tvVal = make_array_like_tv(
       ArrayData::GetScalarArray(m_staticArrays.back().get())
     );
     m_staticArrays.pop_back();
@@ -10233,15 +10278,15 @@ void EmitterVisitor::emitArrayInit(Emitter& e, ExpressionListPtr el,
 
   if (el == nullptr) {
     if (isDict) {
-      e.Array(staticEmptyDictArray());
+      e.Dict(staticEmptyDictArray());
       return;
     }
     if (isVec) {
-      e.Array(staticEmptyVecArray());
+      e.Vec(staticEmptyVecArray());
       return;
     }
     if (isKeyset) {
-      e.Array(staticEmptyKeysetArray());
+      e.Keyset(staticEmptyKeysetArray());
       return;
     }
     e.Array(staticEmptyArray());
@@ -10256,6 +10301,22 @@ void EmitterVisitor::emitArrayInit(Emitter& e, ExpressionListPtr el,
     TypedValue tv;
     tvWriteUninit(&tv);
     initScalar(tv, el, kind);
+    if (isDict) {
+      assert(tv.m_data.parr->isDict());
+      e.Dict(tv.m_data.parr);
+      return;
+    }
+    if (isVec) {
+      assert(tv.m_data.parr->isVecArray());
+      e.Vec(tv.m_data.parr);
+      return;
+    }
+    if (isKeyset) {
+      assert(tv.m_data.parr->isKeyset());
+      e.Keyset(tv.m_data.parr);
+      return;
+    }
+    assert(tv.m_data.parr->isPHPArray());
     e.Array(tv.m_data.parr);
     return;
   }
@@ -10685,7 +10746,7 @@ static int32_t emitGeneratorMethod(UnitEmitter& ue,
                                    bool isAsync) {
   Attr attrs = (Attr)(AttrBuiltin | AttrPublic);
   fe->init(0, 0, ue.bcPos(), attrs, false, staticEmptyString());
-
+  fe->isNative = false;
   if (!isAsync && RuntimeOption::AutoprimeGenerators) {
     // Create a dummy Emitter, so it's possible to emit jump instructions
     EmitterVisitor ev(ue);

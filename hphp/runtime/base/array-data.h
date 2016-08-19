@@ -132,9 +132,7 @@ public:
    * Should int-like string keys be implicitly converted to integers before they
    * are inserted?
    */
-  bool useWeakKeys() const {
-    return !isDict() && !isVecArray() && !isKeyset();
-  }
+  bool useWeakKeys() const { return isPHPArray(); }
 
   bool convertKey(const StringData* key, int64_t& i) const;
 
@@ -188,8 +186,27 @@ public:
   bool isKeyset() const { return kind() == kKeysetKind; }
 
   bool isPackedLayout() const { return isPacked() || isVecArray(); }
-
   bool isMixedLayout() const { return isMixed() || isDict() || isKeyset(); }
+
+  bool isPHPArray() const { return kind() < kDictKind; }
+  bool isHackArray() const { return kind() >= kDictKind; }
+
+  DataType toDataType() const {
+    auto const k = kind();
+    if (k < kDictKind) return KindOfArray;
+    if (k == kVecKind) return KindOfVec;
+    if (k == kDictKind) return KindOfDict;
+    assert(k == kKeysetKind);
+    return KindOfKeyset;
+  }
+  DataType toPersistentDataType() const {
+    auto const k = kind();
+    if (k < kDictKind) return KindOfPersistentArray;
+    if (k == kVecKind) return KindOfPersistentVec;
+    if (k == kDictKind) return KindOfPersistentDict;
+    assert(k == kKeysetKind);
+    return KindOfPersistentKeyset;
+  }
 
   /*
    * Returns whether or not this array contains "vector-like" data.
@@ -395,11 +412,12 @@ public:
   ArrayData* prepend(Cell v, bool copy);
 
   /**
-   * Convert array to hack array types.
+   * Convert array to Hack arrays and vice-versa.
    */
-  ArrayData* toDict();
-  ArrayData* toVec() const;
-  ArrayData* toKeyset();
+  ArrayData* toPHPArray(bool copy);
+  ArrayData* toDict(bool copy);
+  ArrayData* toVec(bool copy);
+  ArrayData* toKeyset(bool copy);
 
   /**
    * Only map classes need this. Re-index all numeric keys to start from 0.
@@ -413,6 +431,16 @@ public:
    */
   int compare(const ArrayData *v2) const;
   bool equal(const ArrayData *v2, bool strict) const;
+
+  static bool Equal(const ArrayData*, const ArrayData*);
+  static bool NotEqual(const ArrayData*, const ArrayData*);
+  static bool Same(const ArrayData*, const ArrayData*);
+  static bool NotSame(const ArrayData*, const ArrayData*);
+  static bool Lt(const ArrayData*, const ArrayData*);
+  static bool Lte(const ArrayData*, const ArrayData*);
+  static bool Gt(const ArrayData*, const ArrayData*);
+  static bool Gte(const ArrayData*, const ArrayData*);
+  static int64_t Compare(const ArrayData*, const ArrayData*);
 
   void setPosition(int32_t p) {
     assert(m_pos == p || !isStatic());
@@ -478,6 +506,9 @@ private:
   static void compileTimeAssertions() {
     static_assert(offsetof(ArrayData, m_hdr) == HeaderOffset, "");
   }
+
+  static bool EqualHelper(const ArrayData*, const ArrayData*, bool);
+  static int64_t CompareHelper(const ArrayData*, const ArrayData*);
 
 protected:
   // error-handling helpers
@@ -624,9 +655,10 @@ struct ArrayFunctions {
   ArrayData* (*zSetInt[NK])(ArrayData*, int64_t k, RefData* v);
   ArrayData* (*zSetStr[NK])(ArrayData*, StringData* k, RefData* v);
   ArrayData* (*zAppend[NK])(ArrayData*, RefData* v, int64_t* key_ptr);
-  ArrayData* (*toDict[NK])(ArrayData*);
-  ArrayData* (*toVec[NK])(const ArrayData*);
-  ArrayData* (*toKeyset[NK])(ArrayData*);
+  ArrayData* (*toPHPArray[NK])(ArrayData*, bool);
+  ArrayData* (*toDict[NK])(ArrayData*, bool);
+  ArrayData* (*toVec[NK])(ArrayData*, bool);
+  ArrayData* (*toKeyset[NK])(ArrayData*, bool);
 };
 
 extern const ArrayFunctions g_array_funcs;
@@ -640,11 +672,17 @@ void decRefArr(ArrayData* arr) {
                                                 const ArrayData* ad);
 [[noreturn]] void throwInvalidArrayKeyException(const StringData* key,
                                                 const ArrayData* ad);
-[[noreturn]] void throwOOBArrayKeyException(TypedValue key);
-[[noreturn]] void throwOOBArrayKeyException(int64_t key);
-[[noreturn]] void throwOOBArrayKeyException(const StringData* key);
+[[noreturn]] void throwOOBArrayKeyException(TypedValue key,
+                                            const ArrayData* ad);
+[[noreturn]] void throwOOBArrayKeyException(int64_t key,
+                                            const ArrayData* ad);
+[[noreturn]] void throwOOBArrayKeyException(const StringData* key,
+                                            const ArrayData* ad);
 [[noreturn]] void throwRefInvalidArrayValueException(const ArrayData* ad);
 [[noreturn]] void throwRefInvalidArrayValueException(const Array& arr);
+[[noreturn]] void throwInvalidKeysetOperation();
+[[noreturn]] void throwInvalidAdditionException(const ArrayData* ad);
+[[noreturn]] void throwInvalidMergeException(const ArrayData* ad);
 
 ///////////////////////////////////////////////////////////////////////////////
 }

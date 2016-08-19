@@ -50,6 +50,7 @@
 #include "hphp/runtime/base/apc-stats.h"
 #include "hphp/runtime/base/apc-typed-value.h"
 #include "hphp/runtime/base/extended-logger.h"
+#include "hphp/runtime/base/zend-math.h"
 #include "hphp/runtime/debugger/debugger.h"
 #include "hphp/runtime/ext/std/ext_std_output.h"
 #include "hphp/runtime/ext/string/ext_string.h"
@@ -1649,6 +1650,7 @@ void ExecutionContext::requestExit() {
   profileRequestEnd();
   EventHook::Disable();
   EnvConstants::requestExit();
+  zend_rand_unseed();
   tl_miter_table.clear();
 
   if (m_globalVarEnv) {
@@ -2123,8 +2125,7 @@ void ExecutionContext::clearLastError() {
 }
 
 void ExecutionContext::enqueueAPCHandle(APCHandle* handle, size_t size) {
-  assert(handle->kind() == APCKind::UncountedString ||
-         handle->kind() == APCKind::UncountedArray);
+  assert(handle->isUncounted());
   m_apcHandles.push_back(handle);
   m_apcMemSize += size;
 }

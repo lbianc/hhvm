@@ -225,6 +225,13 @@ void MixedArray::getArrayElm(ssize_t pos, TypedValue* valOut) const {
 }
 
 ALWAYS_INLINE
+const TypedValue& MixedArray::getArrayElmRef(ssize_t pos) const {
+  assert(size_t(pos) < m_used);
+  auto& elm = data()[pos];
+  return elm.data;
+}
+
+ALWAYS_INLINE
 void MixedArray::dupArrayElmWithRef(ssize_t pos,
                                    TypedValue* valOut,
                                    TypedValue* keyOut) const {
@@ -242,20 +249,6 @@ MixedArray::Elm& MixedArray::allocElm(int32_t* ei) {
   (*ei) = i;
   m_used = i + 1;
   return data()[i];
-}
-
-inline MixedArray* MixedArray::asMixed(ArrayData* ad) {
-  assert(ad->isMixed() || ad->isDict() || ad->isKeyset());
-  auto a = static_cast<MixedArray*>(ad);
-  assert(a->checkInvariants());
-  return a;
-}
-
-inline const MixedArray* MixedArray::asMixed(const ArrayData* ad) {
-  assert(ad->isMixed() || ad->isDict() || ad->isKeyset());
-  auto a = static_cast<const MixedArray*>(ad);
-  assert(a->checkInvariants());
-  return a;
 }
 
 inline size_t MixedArray::hashSize() const {
@@ -465,11 +458,48 @@ void ConvertTvToUncounted(TypedValue* source) {
       else str = StringData::MakeUncounted(str->slice());
       break;
     }
+    case KindOfVec:
+      source->m_type = KindOfPersistentVec;
+      // Fall-through.
+    case KindOfPersistentVec: {
+      auto& ad = source->m_data.parr;
+      assert(ad->isVecArray());
+      if (ad->isStatic()) break;
+      else if (ad->empty()) ad = staticEmptyVecArray();
+      else ad = PackedArray::MakeUncounted(ad);
+      break;
+    }
+
+    case KindOfDict:
+      source->m_type = KindOfPersistentDict;
+      // Fall-through.
+    case KindOfPersistentDict: {
+      auto& ad = source->m_data.parr;
+      assert(ad->isDict());
+      if (ad->isStatic()) break;
+      else if (ad->empty()) ad = staticEmptyDictArray();
+      else ad = MixedArray::MakeUncounted(ad);
+      break;
+    }
+
+    case KindOfKeyset:
+      source->m_type = KindOfPersistentKeyset;
+      // Fall-through.
+    case KindOfPersistentKeyset: {
+      auto& ad = source->m_data.parr;
+      assert(ad->isKeyset());
+      if (ad->isStatic()) break;
+      else if (ad->empty()) ad = staticEmptyKeysetArray();
+      else ad = MixedArray::MakeUncounted(ad);
+      break;
+    }
+
     case KindOfArray:
       source->m_type = KindOfPersistentArray;
       // Fall-through.
     case KindOfPersistentArray: {
       auto& ad = source->m_data.parr;
+      assert(ad->isPHPArray());
       if (ad->isStatic()) break;
       else if (ad->empty()) ad = staticEmptyArray();
       else if (ad->isPackedLayout()) ad = PackedArray::MakeUncounted(ad);
@@ -503,7 +533,7 @@ void ReleaseUncountedTv(TypedValue& tv) {
     }
     return;
   }
-  if (isArrayType(tv.m_type)) {
+  if (isArrayLikeType(tv.m_type)) {
     auto arr = tv.m_data.parr;
     assert(!arr->isRefCounted());
     if (!arr->isStatic()) {

@@ -185,6 +185,11 @@ struct Func final {
   static void destroy(Func* func);
 
   /*
+   * Address of the end of the Func's variable-length memory allocation.
+   */
+  const void* mallocEnd() const;
+
+  /*
    * Duplicate this function.
    *
    * Funcs are cloned for a number of reasons---most notably, methods on
@@ -649,17 +654,6 @@ struct Func final {
   bool isCPPBuiltin() const;
 
   /*
-   * Is this an HNI function?
-   *
-   * Note that "Native" here refers to a different concept than nativeFuncPtr.
-   * In fact, the only functions that may not have nativeFuncPtr's are Native
-   * (i.e., HNI) functions declared with NeedsActRec.
-   *
-   * FIXME(#4497824): This naming is pretty bad.
-   */
-  bool isNative() const;
-
-  /*
    * The builtinFuncPtr takes an ActRec*, unpacks it, and usually dispatches to
    * a nativeFuncPtr.
    *
@@ -846,11 +840,6 @@ struct Func final {
    * Whether to ignore this function's frame in backtraces.
    */
   bool isNoInjection() const;
-
-  /*
-   * Whether this builtin may be replaced by user-defined functions.
-   */
-  bool isAllowOverride() const;
 
   /*
    * Whether this function's frame should be skipped when searching for context

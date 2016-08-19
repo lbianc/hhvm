@@ -68,6 +68,12 @@ inline bool Func::ParamInfo::isVariadic() const {
 ///////////////////////////////////////////////////////////////////////////////
 // Func.
 
+inline const void* Func::mallocEnd() const {
+  return reinterpret_cast<const char*>(this)
+         + Func::prologueTableOff()
+         + numPrologues() * sizeof(m_prologueTable[0]);
+}
+
 inline void Func::validate() const {
 #ifdef DEBUG
   assert(m_magic == kMagic);
@@ -360,10 +366,6 @@ inline bool Func::isCPPBuiltin() const {
   return UNLIKELY(!!ex) && ex->m_builtinFuncPtr;
 }
 
-inline bool Func::isNative() const {
-  return m_attrs & AttrNative;
-}
-
 inline BuiltinFunction Func::builtinFuncPtr() const {
   if (auto const ex = extShared()) {
     return ex->m_builtinFuncPtr;
@@ -476,10 +478,6 @@ inline bool Func::isPersistent() const {
 
 inline bool Func::isNoInjection() const {
   return m_attrs & AttrNoInjection;
-}
-
-inline bool Func::isAllowOverride() const {
-  return m_attrs & AttrAllowOverride;
 }
 
 inline bool Func::isSkipFrame() const {

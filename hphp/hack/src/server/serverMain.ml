@@ -10,7 +10,6 @@
 
 open Core
 open ServerEnv
-open ServerUtils
 open Reordered_argument_collections
 open String_utils
 
@@ -22,6 +21,8 @@ type recheck_loop_stats = {
   reparsed_files : Relative_path.Set.t;
   check_later : SSet.t;
 }
+
+type main_loop_stats = recheck_loop_stats ref * string ref
 
 let empty_recheck_loop_stats = {
   rechecked_batches = 0;
@@ -120,52 +121,42 @@ module Program =
 (* The main loop *)
 (*****************************************************************************)
 
-let sleep_and_check in_fd per_in_fd =
-  let l = match per_in_fd with
-  | Some fd -> [in_fd ; fd]
-  | None -> [in_fd] in
-  let ready_fd_l, _, _ = Unix.select l [] [] (0.5) in
-  match ready_fd_l with
-  | [_; _] -> true, true
-  | [fd] -> if (fd <> in_fd) then false, true else true, false
-  | _ -> false, false
-
-let handle_connection_ genv env ic oc =
+let handle_connection_ genv env client =
+  let open ServerCommandTypes in
   try
-    ServerCommand.say_hello oc;
-    match ServerCommand.read_connection_type ic with
-    | ServerCommand.Persistent ->
-      let fd = Unix.descr_of_out_channel oc in
+    match ClientProvider.read_connection_type client with
+    | Persistent ->
       (match env.persistent_client_fd with
       | Some _ ->
-        ServerCommand.send_response_to_client fd
-          ServerCommand.Persistent_client_alredy_exists;
+        ClientProvider.send_response_to_client client
+          Persistent_client_alredy_exists;
         env
       | None ->
-        ServerCommand.send_response_to_client fd
-          ServerCommand.Persistent_client_connected;
+        ClientProvider.send_response_to_client client
+          Persistent_client_connected;
+        let ic, _ = ClientProvider.get_channels client in
         { env with persistent_client_fd =
           Some (Timeout.descr_of_in_channel ic)})
-    | ServerCommand.Non_persistent ->
-      ServerCommand.handle genv env (ic, oc)
+    | Non_persistent ->
+      ServerCommand.handle genv env client
   with
-  | Sys_error("Broken pipe") | ServerCommand.Read_command_timeout ->
-    shutdown_client (ic, oc);
+  | Sys_error("Broken pipe") | Read_command_timeout ->
+    ClientProvider.shutdown_client client;
     env
   | e ->
     let msg = Printexc.to_string e in
     EventLogger.master_exception msg;
     Printf.fprintf stderr "Error: %s\n%!" msg;
     Printexc.print_backtrace stderr;
-    shutdown_client (ic, oc);
+    ClientProvider.shutdown_client client;
     env
 
-let handle_persistent_connection_ genv env ic oc =
+let handle_persistent_connection_ genv env client =
    try
-     ServerCommand.handle genv env (ic, oc)
+     ServerCommand.handle genv env client
    with
-   | Sys_error("Broken pipe") | ServerCommand.Read_command_timeout ->
-     shutdown_client (ic, oc);
+   | Sys_error("Broken pipe") | ServerCommandTypes.Read_command_timeout ->
+     ClientProvider.shutdown_client client;
      {env with
      persistent_client_fd = None;
      edited_files = SMap.empty;
@@ -176,18 +167,18 @@ let handle_persistent_connection_ genv env ic oc =
      EventLogger.master_exception msg;
      Printf.fprintf stderr "Error: %s\n%!" msg;
      Printexc.print_backtrace stderr;
-     shutdown_client (ic, oc);
+     ClientProvider.shutdown_client client;
      {env with
      persistent_client_fd = None;
      edited_files = SMap.empty;
      diag_subscribe = Diagnostic_subscription.empty;
      symbols_cache = SMap.empty}
 
-let handle_connection genv env ic oc is_persistent =
+let handle_connection genv env client is_persistent =
   ServerIdle.stamp_connection ();
   try match is_persistent with
-    | true -> handle_persistent_connection_ genv env ic oc
-    | false -> handle_connection_ genv env ic oc
+    | true -> handle_persistent_connection_ genv env client
+    | false -> handle_connection_ genv env client
   with
   | Unix.Unix_error (e, _, _) ->
      Printf.fprintf stderr "Unix error: %s\n" (Unix.error_message e);
@@ -257,74 +248,85 @@ let rec recheck_loop acc genv env =
 
 let recheck_loop = recheck_loop empty_recheck_loop_stats
 
-(** Retrieve channels to client from monitor process. *)
-let get_client_channels parent_in_fd =
-  let socket = Libancillary.ancil_recv_fd parent_in_fd in
-  (Timeout.in_channel_of_descr socket), (Unix.out_channel_of_descr socket)
+let serve_one_iteration genv env client_provider stats_refs =
+  let last_stats, recheck_id = stats_refs in
+  ServerMonitorUtils.exit_if_parent_dead ();
+  let per_fd = env.persistent_client_fd in
+  let has_client, has_persistent =
+    ClientProvider.sleep_and_check client_provider per_fd in
+  let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
+  if not has_persistent && not has_client && not has_parsing_hook
+  then begin
+    (* Ugly hack: We want GC_SHAREDMEM_RAN to record the last rechecked
+     * count so that we can figure out if the largest reclamations
+     * correspond to massive rebases. However, the logging call is done in
+     * the SharedMem module, which doesn't know anything about Server stuff.
+     * So we wrap the call here. *)
+    HackEventLogger.with_rechecked_stats
+      !last_stats.rechecked_batches
+      !last_stats.rechecked_count
+      !last_stats.total_rechecked_count
+      ServerIdle.go;
+    recheck_id := Random_id.short_string ();
+  end;
+  let start_t = Unix.gettimeofday () in
+  HackEventLogger.with_id ~stage:`Recheck !recheck_id @@ fun () ->
+  let stats, env = recheck_loop genv env in
+  if stats.rechecked_count > 0 then begin
+    HackEventLogger.recheck_end start_t has_parsing_hook
+      stats.rechecked_batches
+      stats.rechecked_count
+      stats.total_rechecked_count;
+    Hh_logger.log "Recheck id: %s" !recheck_id;
+  end;
+  last_stats := stats;
+  let env = if has_client then
+    (try
+      let client = ClientProvider.accept_client client_provider in
+      HackEventLogger.got_client_channels start_t;
+      (try
+        let env = handle_connection genv env client false in
+        HackEventLogger.handled_connection start_t;
+        env
+      with
+      | e ->
+        HackEventLogger.handle_connection_exception e;
+        Hh_logger.log "Handling client failed. Ignoring.";
+        env)
+    with
+    | e ->
+      HackEventLogger.get_client_channels_exception e;
+      Hh_logger.log
+        "Getting Client FDs failed. Ignoring.";
+      env)
+  else env in
+  if has_persistent then
+    let fd = ServerCommand.get_persistent_fds env in
+    let ic, oc =
+      Timeout.in_channel_of_descr fd, Unix.out_channel_of_descr fd in
+    let client = ClientProvider.client_from_channel_pair (ic, oc) in
+    HackEventLogger.got_persistent_client_channels start_t;
+    (try
+      let env = handle_connection genv env client true in
+      HackEventLogger.handled_persistent_connection start_t;
+      env
+    with
+    | e ->
+      HackEventLogger.handle_persistent_connection_exception e;
+      Hh_logger.log "Handling persistent client failed. Ignoring.";
+      env)
+  else env
+
+let empty_stats () =
+  (ref empty_recheck_loop_stats,
+  ref (Random_id.short_string ()))
 
 let serve genv env in_fd _ =
+  let client_provider = ClientProvider.provider_from_file_descriptor in_fd in
   let env = ref env in
-  let last_stats = ref empty_recheck_loop_stats in
-  let recheck_id = ref (Random_id.short_string ()) in
+  let stats = empty_stats () in
   while true do
-    ServerMonitorUtils.exit_if_parent_dead ();
-    let per_fd = !env.persistent_client_fd in
-    let has_client, has_persistent = sleep_and_check in_fd per_fd in
-    let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
-    if not has_persistent && not has_client && not has_parsing_hook
-    then begin
-      (* Ugly hack: We want GC_SHAREDMEM_RAN to record the last rechecked
-       * count so that we can figure out if the largest reclamations
-       * correspond to massive rebases. However, the logging call is done in
-       * the SharedMem module, which doesn't know anything about Server stuff.
-       * So we wrap the call here. *)
-      HackEventLogger.with_rechecked_stats
-        !last_stats.rechecked_batches
-        !last_stats.rechecked_count
-        !last_stats.total_rechecked_count
-        ServerIdle.go;
-      recheck_id := Random_id.short_string ();
-    end;
-    let start_t = Unix.gettimeofday () in
-    HackEventLogger.with_id ~stage:`Recheck !recheck_id @@ fun () ->
-    let stats, new_env = recheck_loop genv !env in
-    if stats.rechecked_count > 0 then begin
-      HackEventLogger.recheck_end start_t has_parsing_hook
-        stats.rechecked_batches
-        stats.rechecked_count
-        stats.total_rechecked_count;
-      Hh_logger.log "Recheck id: %s" !recheck_id;
-    end;
-    env := new_env;
-    last_stats := stats;
-    if has_client then
-      (try
-        let ic, oc = get_client_channels in_fd in
-        HackEventLogger.got_client_channels start_t;
-        (try
-          env := handle_connection genv !env ic oc false;
-          HackEventLogger.handled_connection start_t;
-        with
-        | e ->
-          HackEventLogger.handle_connection_exception e;
-          Hh_logger.log "Handling client failed. Ignoring.")
-      with
-      | e ->
-        HackEventLogger.get_client_channels_exception e;
-        Hh_logger.log
-          "Getting Client FDs failed. Ignoring.");
-    if has_persistent then
-      let fd = ServerCommand.get_persistent_fds !env in
-      let ic, oc =
-        Timeout.in_channel_of_descr fd, Unix.out_channel_of_descr fd in
-      HackEventLogger.got_persistent_client_channels start_t;
-      (try
-        env := handle_connection genv !env ic oc true;
-        HackEventLogger.handled_persistent_connection start_t;
-      with
-      | e ->
-        HackEventLogger.handle_persistent_connection_exception e;
-        Hh_logger.log "Handling persistent client failed. Ignoring.");
+    env := serve_one_iteration genv !env client_provider stats;
   done
 
 let program_init genv =
@@ -418,9 +420,13 @@ let daemon_main (state, handle, options) (ic, oc) =
   SharedMem.connect handle ~is_master:true;
   ServerGlobalState.restore state;
   try daemon_main_exn (handle, options) (ic, oc)
-  with SharedMem.Out_of_shared_memory ->
+  with
+  | SharedMem.Out_of_shared_memory ->
     Printf.eprintf "Error: failed to allocate in the shared heap.\n%!";
     Exit_status.(exit Out_of_shared_memory)
+  | SharedMem.Hash_table_full ->
+    Printf.eprintf "Error: failed to allocate in the shared hashtable.\n%!";
+    Exit_status.(exit Hash_table_full)
 
 let entry =
   Daemon.register_entry_point "ServerMain.daemon_main" daemon_main

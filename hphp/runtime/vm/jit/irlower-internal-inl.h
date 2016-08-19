@@ -180,7 +180,7 @@ void emitTypeTest(Vout& v, IRLS& env, Type type,
   // negativeCheckType() to indicate whether it is precise or not.
   always_assert(!type.hasConstVal());
   always_assert_flog(
-    !type.subtypeOfAny(TCls, TCountedStr, TPersistentArr),
+    !type.subtypeOfAny(TCls, TCountedStr, TPersistentArrLike),
     "Unsupported type in emitTypeTest(): {}", type
   );
 
@@ -188,6 +188,13 @@ void emitTypeTest(Vout& v, IRLS& env, Type type,
   if (type == TGen) return;
 
   auto const cc = [&] {
+
+    auto const mask_cmp = [&] (int mask, int bits, ConditionCode cc) {
+      auto const masked = emitMaskTVType(v, mask, typeSrc);
+      emitCmpTVType(v, sf, bits, masked);
+      return cc;
+    };
+
     auto const cmp = [&] (DataType kind, ConditionCode cc) {
       emitCmpTVType(v, sf, kind, typeSrc);
       return cc;
@@ -201,18 +208,27 @@ void emitTypeTest(Vout& v, IRLS& env, Type type,
     if (type <= TPersistentStr) return cmp(KindOfPersistentString, CC_E);
     if (type <= TStr)           return test(KindOfStringBit, CC_NZ);
     if (type <= TArr)           return test(KindOfArrayBit, CC_NZ);
+    if (type <= TVec)           return mask_cmp(kDataTypeEquivalentMask,
+                                                KindOfHackArrayVecType,
+                                                CC_E);
+    if (type <= TDict)          return mask_cmp(kDataTypeEquivalentMask,
+                                                KindOfHackArrayDictType,
+                                                CC_E);
+    if (type <= TKeyset)        return mask_cmp(kDataTypeEquivalentMask,
+                                                KindOfHackArrayKeysetType,
+                                                CC_E);
+    if (type <= TArrLike)       return test(KindOfArrayLikeMask, CC_NZ);
 
     // These are intentionally == and not <=.
     if (type == TNull)          return cmp(KindOfNull, CC_LE);
     if (type == TUncountedInit) return test(KindOfUncountedInitBit, CC_NZ);
     if (type == TUncounted)     return cmp(KindOfRefCountThreshold, CC_LE);
-    if (type == TCell)          return cmp(KindOfRef, CC_L);
+    if (type == TCell)          return cmp(KindOfRef, CC_NE);
 
     always_assert(type.isKnownDataType());
     always_assert(!(type < TBoxedInitCell));
 
     auto const dt = type.toDataType();
-    assertx(dt == KindOfRef || (dt >= KindOfUninit && dt <= KindOfResource));
     return cmp(dt, CC_E);
   }();
 

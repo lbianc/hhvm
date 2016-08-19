@@ -44,9 +44,6 @@ const StaticString
   s_string("string"),
   s_object("object"),
   s_array("array"),
-  s_dict("dict"),
-  s_vec("vec"),
-  s_keyset("keyset"),
   s_NULL("NULL"),
   s_null("null");
 
@@ -59,11 +56,6 @@ String HHVM_FUNCTION(gettype, const Variant& v) {
    * gettype(). So we make an exception here. */
   if (v.isNull()) {
     return s_NULL;
-  }
-  if (v.isArray()) {
-    if (v.toArray()->isDict()) return s_dict;
-    if (v.toArray()->isVecArray()) return s_vec;
-    if (v.toArray()->isKeyset()) return s_keyset;
   }
   return getDataTypeString(v.getType());
 }
@@ -235,7 +227,8 @@ const StaticString
   s_Res("i:0;"),
   s_EmptyArray("a:0:{}"),
   s_EmptyVecArray("v:0:{}"),
-  s_EmptyDictArray("D:0:{}");
+  s_EmptyDictArray("D:0:{}"),
+  s_EmptyKeysetArray("k:0:{}");
 
 String HHVM_FUNCTION(serialize, const Variant& value) {
   switch (value.getType()) {
@@ -264,15 +257,41 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
     }
     case KindOfResource:
       return s_Res;
+
+    case KindOfPersistentVec:
+    case KindOfVec: {
+      ArrayData* arr = value.getArrayData();
+      assert(arr->isVecArray());
+      if (arr->empty()) return s_EmptyVecArray;
+      VariableSerializer vs(VariableSerializer::Type::Serialize);
+      return vs.serialize(value, true);
+    }
+
+    case KindOfPersistentDict:
+    case KindOfDict: {
+      ArrayData* arr = value.getArrayData();
+      assert(arr->isDict());
+      if (arr->empty()) return s_EmptyDictArray;
+      VariableSerializer vs(VariableSerializer::Type::Serialize);
+      return vs.serialize(value, true);
+    }
+
+    case KindOfPersistentKeyset:
+    case KindOfKeyset: {
+      ArrayData* arr = value.getArrayData();
+      assert(arr->isKeyset());
+      if (arr->empty()) return s_EmptyKeysetArray;
+      VariableSerializer vs(VariableSerializer::Type::Serialize);
+      return vs.serialize(value, true);
+    }
+
     case KindOfPersistentArray:
     case KindOfArray: {
       ArrayData *arr = value.getArrayData();
-      if (arr->empty()) {
-        if (arr->isVecArray()) return s_EmptyVecArray;
-        if (arr->isDict()) return s_EmptyDictArray;
-        return s_EmptyArray;
-      }
-      // fall-through
+      assert(arr->isPHPArray());
+      if (arr->empty()) return s_EmptyArray;
+      VariableSerializer vs(VariableSerializer::Type::Serialize);
+      return vs.serialize(value, true);
     }
     case KindOfDouble:
     case KindOfObject: {
@@ -406,7 +425,7 @@ int64_t extract_impl(VRefParam vref_array,
     arr_tv = arr_tv->m_data.pref->tv();
     arrByRef = true;
   }
-  if (!isArrayType(arr_tv->m_type)) {
+  if (!isArrayLikeType(arr_tv->m_type)) {
     raise_warning("extract() expects parameter 1 to be array");
     return 0;
   }

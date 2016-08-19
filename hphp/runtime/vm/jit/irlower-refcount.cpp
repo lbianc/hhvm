@@ -76,13 +76,20 @@ void ifNonPersistent(Vout& v, Type ty, Vloc loc, Then then) {
 template<class Then>
 void ifRefCountedType(Vout& v, Vout& vtaken, Type ty, Vloc loc, Then then) {
   if (!ty.maybe(TCounted)) return;
-  if (ty.isKnownDataType()) {
+  if (ty <= TStkElem && ty.isKnownDataType()) {
     if (isRefcountedType(ty.toDataType())) then(v);
     return;
   }
   auto const sf = v.makeReg();
-  emitCmpTVType(v, sf, KindOfRefCountThreshold, loc.reg(1));
-  unlikelyIfThen(v, vtaken, CC_NLE, sf, then);
+  auto cond = CC_NLE;
+  if (ty <= TCtx) {
+    v << testqi{ActRec::kHasClassBit, loc.reg(0), sf};
+    cond = CC_E;
+  } else {
+    assert(ty <= TStkElem);
+    emitCmpTVType(v, sf, KindOfRefCountThreshold, loc.reg(1));
+  }
+  unlikelyIfThen(v, vtaken, cond, sf, then);
 }
 
 template<class Then>
@@ -130,7 +137,7 @@ void cgIncRef(IRLS& env, const IRInstruction* inst) {
   if (ty.maybe(TCctx)) {
     always_assert(ty <= TCtx && ty.maybe(TObj));
     auto const sf = v.makeReg();
-    v << testqi{0x1, loc.reg(), sf};
+    v << testqi{ActRec::kHasClassBit, loc.reg(), sf};
     ifThen(v, CC_Z, sf, [&] (Vout& v) { emitIncRef(v, loc.reg()); });
     return;
   }
@@ -261,6 +268,12 @@ CallSpec getDtorCallSpec(DataType type) {
       return CallSpec::method(&StringData::release);
     case KindOfArray:
       return CallSpec::method(&ArrayData::release);
+    case KindOfVec:
+      return CallSpec::direct(PackedArray::Release);
+    case KindOfDict:
+      return CallSpec::direct(MixedArray::Release);
+    case KindOfKeyset:
+      return CallSpec::direct(MixedArray::Release);
     case KindOfObject:
       return CallSpec::method(
         RuntimeOption::EnableObjDestructCall
@@ -280,14 +293,10 @@ CallSpec getDtorCallSpec(DataType type) {
 
 CallSpec makeDtorCall(Type ty, Vloc loc, ArgGroup& args) {
   static auto const TPackedArr = Type::Array(ArrayData::kPackedKind);
-  static auto const TVecArr = Type::Array(ArrayData::kVecKind);
-  static auto const TDictArr = Type::Array(ArrayData::kDictKind);
   static auto const TMixedArr = Type::Array(ArrayData::kMixedKind);
   static auto const TAPCArr = Type::Array(ArrayData::kApcKind);
 
   if (ty <= TPackedArr) return CallSpec::direct(PackedArray::Release);
-  if (ty <= TVecArr)    return CallSpec::direct(PackedArray::Release);
-  if (ty <= TDictArr)   return CallSpec::direct(MixedArray::Release);
   if (ty <= TMixedArr)  return CallSpec::direct(MixedArray::Release);
   if (ty <= TAPCArr)    return CallSpec::direct(APCLocalArray::Release);
   if (ty <= TArr)       return CallSpec::array(&g_array_funcs.release);
@@ -409,7 +418,7 @@ void cgDecRef(IRLS& env, const IRInstruction *inst) {
     always_assert(ty <= TCtx && ty.maybe(TObj));
     auto const loc = srcLoc(env, inst, 0);
     auto const sf = v.makeReg();
-    v << testqi{0x1, loc.reg(), sf};
+    v << testqi{ActRec::kHasClassBit, loc.reg(), sf};
     ifThen(v, CC_Z, sf, [&] (Vout& v) {
         impl(v, TObj);
       });
@@ -456,7 +465,7 @@ void cgDecRefNZ(IRLS& env, const IRInstruction* inst) {
     if (ty.maybe(TObj)) {
       auto const loc = srcLoc(env, inst, 0);
       auto const sf = v.makeReg();
-      v << testqi{0x1, loc.reg(), sf};
+      v << testqi{ActRec::kHasClassBit, loc.reg(), sf};
       ifThen(v, CC_Z, sf, [&] (Vout& v) { emitDecRef(v, loc.reg()); });
     }
     return;
