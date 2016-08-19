@@ -1596,8 +1596,9 @@ struct DecoderInfo {
   void setIp(const PPC64Instr* const ip) {
     setIp(reinterpret_cast<const uint8_t* const>(ip));
   }
-  bool isLdTOC() const;
-  bool isLwzTOC() const;
+  bool isAddis(bool toc = false) const;
+  bool isLd(bool toc = false) const;
+  bool isLwz(bool toc = false) const;
   int16_t offsetDS() const;
   int16_t offsetD() const;
 

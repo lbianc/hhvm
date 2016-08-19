@@ -259,11 +259,7 @@ public:
   intptr_t getPtrVector();
 
   /* return a value previously pushed */
-  /*int64_t getValue(uint16_t index) {
-    union conv16 {int16_t i16v; uint16_t u16v;} val;
-    val.u16v = index;
-    return m_funcaddrs[val.i16v + kTOCSize/2];
-  }*/
+  int64_t getValue(int64_t index, bool qword = false);
 
 private:
   int64_t allocTOC (int32_t target, bool align = false);
@@ -1904,30 +1900,6 @@ struct Assembler {
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
-  // Retrieve the target defined by limmediate instruction
-  /*static int64_t getLimmediate(PPC64Instr* pinstr);
-  static int64_t getLimmediate(CodeAddress pinstr) {
-    return getLimmediate(reinterpret_cast<PPC64Instr*>(pinstr));
-  }*/
-
-  // Retrieve the target defined by li64 instruction
-  static int64_t getLi64(PPC64Instr* pinstr);
-  static int64_t getLi64(CodeAddress pinstr) {
-    return getLi64(reinterpret_cast<PPC64Instr*>(pinstr));
-  }
-
-  // Retrieve the register used by li64 instruction
-  static Reg64 getLi64Reg(PPC64Instr* instr);
-  static Reg64 getLi64Reg(CodeAddress instr) {
-    return getLi64Reg(reinterpret_cast<PPC64Instr*>(instr));
-  }
-
-  /*static Reg64 getLimmediateReg(PPC64Instr* instr);
-
-  static Reg64 getLimmediateReg(CodeAddress instr) {
-    return getLimmediateReg(reinterpret_cast<PPC64Instr*>(instr));
-  }*/
-
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, int32_t imm32);
 
@@ -1960,11 +1932,9 @@ struct Assembler {
    * offset branch and patches it properly.
    */
   static void patchBranch(CodeAddress jmp,
-                          CodeAddress dest,
-                          bool useTOC = true);
+                          CodeAddress dest);
   static void patchAbsolute(CodeAddress jmp,
-                            CodeAddress dest,
-                            bool useTOC = true);
+                            CodeAddress dest);
 
 //////////////////////////////////////////////////////////////////////
 

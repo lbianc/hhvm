@@ -89,9 +89,9 @@ void smashMovq(TCA inst, uint64_t imm) {
   Assembler a { cb };
 
   const ppc64_asm::DecodedInstruction di(inst);
-  Reg64 reg = di.getLi64Reg();
+  Reg64 reg = di.getLimmediateReg();
 
-  a.li64(reg, imm, true);
+  a.limmediate(reg, imm, true);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
@@ -101,7 +101,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
 
   // the first instruction is a vasm ldimml, which is a li32
   const ppc64_asm::DecodedInstruction di(inst);
-  Reg64 reg = di.getLi32Reg();
+  Reg64 reg = di.getLimmediateReg();
 
   a.li32(reg, imm);
 }
@@ -135,7 +135,7 @@ void smashJmp(TCA inst, TCA target) {
 
 void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   if (cc == CC_None) {
-    Assembler::patchBranch(inst, target, false);
+    Assembler::patchBranch(inst, target);
   } else {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };

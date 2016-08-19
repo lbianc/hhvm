@@ -148,7 +148,10 @@ DecoderInfo DecodedInstruction::getFarBranch(AllowCond ac /* = Any */) const {
 // branch instruction is found
 DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   DecInfoOffset ret;
-  if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return ret;
+  bool isTOCins = m_dinfo.isLwz(true) || m_dinfo.isLd(true) ||
+      m_dinfo.isAddis(true);
+  if (!isTOCins && (
+      !isLi64Possible() || (reg::r12 != getLimmediateReg()))) return ret;
 
   // only read bytes up to the smallest of @max_read or @bytes.
   auto canRead = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
@@ -218,6 +221,29 @@ bool DecodedInstruction::isCall() const {
   return branch_di.isBranchWithLR();
 }
 
+Reg64 DecodedInstruction::getLimmediateReg() const {
+  auto di = Decoder::GetDecoder().decode(m_ip);
+  if (m_dinfo.isLd()) {
+    DS_form_t ds_instr;
+    ds_instr.instruction = m_dinfo.instruction_image();;
+    return Reg64(ds_instr.RT);
+  }
+  else if (m_dinfo.isLwz()) {
+    D_form_t d_instr;
+    d_instr.instruction = m_dinfo.instruction_image();;
+    return Reg64(d_instr.RT);
+  }
+  else if (m_dinfo.isAddis()) {
+    auto di = Decoder::GetDecoder().decode(m_ip+4);
+    if(di.isLwz() || di.isLd()) {
+      D_form_t d_instr;
+      d_instr.instruction = *(m_ip+4);
+      return Reg64(d_instr.RT);
+    }
+  }
+  return getLi64Reg();
+}
+
 Reg64 DecodedInstruction::getLi64Reg() const {
   // First instruction is always either li or lis, both are D-form
   assertx(isLi64Possible());
@@ -232,8 +258,30 @@ Reg64 DecodedInstruction::getLi64Reg() const {
 
 void DecodedInstruction::decode() {
   m_dinfo = Decoder::GetDecoder().decode(m_ip);
+  auto calcIndex = [&](int16_t indexBigTOC, int16_t indexTOC) {
+    return static_cast<int64_t>(static_cast<int64_t>(indexTOC) +
+              static_cast<int64_t>(indexBigTOC << 16));
+  };
 
-  if (isLi64Possible() && (reg::r12 == getLi64Reg())) {
+  if (m_dinfo.isLd(true)) {
+    m_size = instr_size_in_bytes;
+    m_imm = VMTOC::getInstance().getValue(calcIndex(0, m_dinfo.offsetDS()),
+        true);
+  } else if (m_dinfo.isLwz(true)) {
+    m_imm = VMTOC::getInstance().getValue(calcIndex(0, m_dinfo.offsetD()));
+  } else if (m_dinfo.isAddis(true)) {
+    m_size += instr_size_in_bytes;
+    auto bigIndexTOC = m_dinfo.offsetD();
+    // Get next instruction
+    auto di = Decoder::GetDecoder().decode(m_ip+4);
+    if (di.isLd()) {
+      m_imm = VMTOC::getInstance().getValue(calcIndex(bigIndexTOC,
+          di.offsetDS()), true);
+    } else if (di.isLwz()) {
+      m_imm = VMTOC::getInstance().getValue(calcIndex(bigIndexTOC,
+          di.offsetDS()));
+    }
+  } else if (isLi64Possible() && (reg::r12 == getLi64Reg())) {
     // Compute the whole branch on the m_size. Used on relocation to skip
     // instructions
     DecInfoOffset dio = getFarBranchLength();

@@ -21,6 +21,8 @@
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
+
 namespace ppc64_asm {
 
 Decoder* Decoder::s_decoder = nullptr;
@@ -359,22 +361,39 @@ bool DecoderInfo::isNop() const {
   return false;
 }
 
-bool DecoderInfo::isLdTOC() const {
-  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld)) {
+bool DecoderInfo::isLd(bool toc) const {
+  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld) && !toc) {
+    return true;
+  } else if((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld) && toc) {
     DS_form_t dsform;
     dsform.instruction = m_image;
-    if (dsform.RA == 2) {
+    if (Reg64(dsform.RA) == reg::r2) {
       return true;
     }
   }
   return false;
 }
 
-bool DecoderInfo::isLwzTOC() const {
-  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz)) {
+bool DecoderInfo::isLwz(bool toc) const {
+  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz) && !toc) {
+    return true;
+  } else if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz) && toc) {
     D_form_t dform;
     dform.instruction = m_image;
-    if (dform.RA == 2) {
+    if (Reg64(dform.RA) == reg::r2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DecoderInfo::isAddis(bool toc) const {
+  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_addis) && !toc) {
+    return true;
+  } else if((m_form == Form::kD) && (m_opn == OpcodeNames::op_addis) && toc) {
+    D_form_t dform;
+    dform.instruction = m_image;
+    if (Reg64(dform.RA) == reg::r2) {
       return true;
     }
   }
@@ -596,7 +615,7 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
   }
 }
 /**
- * Look for the offset from instructions like ld, which was created by
+ * Find the offset from instructions like ld, which was created by
  * limmediate.
  */
 int16_t DecoderInfo::offsetDS() const {
@@ -608,10 +627,10 @@ int16_t DecoderInfo::offsetDS() const {
 }
 
 /**
- * Look for the offset from instructions like lwz
+ * Find the offset from instructions like lwz
  */
 int16_t DecoderInfo::offsetD() const {
-  always_assert(m_form == Form::kDS && "Instruction not expected.");
+  always_assert(m_form == Form::kD && "Instruction not expected.");
   D_form_t instr_d;
   instr_d.instruction = m_image;
 

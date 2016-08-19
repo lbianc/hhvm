@@ -51,6 +51,17 @@ intptr_t VMTOC::getPtrVector() {
   return reinterpret_cast<intptr_t>(m_tocvector->base() + INT16_MAX + 1);
 }
 
+int64_t VMTOC::getValue(int64_t index, bool qword) {
+  HPHP::Address addr = reinterpret_cast<HPHP::Address>(
+      reinterpret_cast<intptr_t>(index) + getPtrVector());
+  int64_t ret_val;
+  int max_elem = qword ? 8 : 4;
+  for (int i = 0; i < max_elem; i++) {
+    ret_val = addr[i] + (ret_val << 8);
+  }
+  return ret_val;
+}
+
 int64_t VMTOC::allocTOC (int32_t target, bool align) {
   if (!m_tocvector->canEmit(sizeof(int32_t))) {
     return 0x0;
@@ -831,28 +842,21 @@ void Assembler::unimplemented(){
 //////////////////////////////////////////////////////////////////////
 
 void Assembler::patchAbsolute(CodeAddress jmp,
-                              CodeAddress dest,
-                              bool useTOC) {
+                              CodeAddress dest) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLi64Len, "patched bctr");
   Assembler a{ cb };
-  if (!useTOC) {
-    a.li64(reg::r12, ssize_t(dest), true);
-  }
-  else {
-    a.limmediate(reg::r12, ssize_t(dest), true);
-  }
+  a.limmediate(reg::r12, ssize_t(dest), true);
 }
 
 void Assembler::patchBranch(CodeAddress jmp,
-                            CodeAddress dest,
-                            bool useTOC) {
+                            CodeAddress dest) {
   auto di = DecodedInstruction(jmp);
 
   // Detect Far branch
   if (di.isFarBranch()) {
-    patchAbsolute(jmp, dest, useTOC);
+    patchAbsolute(jmp, dest);
     return;
   }
 
@@ -921,37 +925,6 @@ void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
     assert(kLi64Len == frontier() - li64StartPos);
   }
 }
-
-/*int64_t Assembler::getLimmediate(PPC64Instr* pinstr) {
-  auto di = Decoder::GetDecoder().decode(pinstr);
-  if (di.isLdTOC()) {
-    auto indexTOC = di.offsetDS() >> 2;
-    return VMTOC::getInstance().getValue(indexTOC);
-  }
-  else if (di.isLwzTOC()) {
-    auto indexTOC = di.offsetD() >> 2;
-    return VMTOC::getInstance().getValue(indexTOC);
-  }
-
-  DecodedInstruction dinstr(pinstr);
-  return dinstr.immediate();
-}
-
-Reg64 Assembler::getLimmediateReg(PPC64Instr* pinstr) {
-  auto di = Decoder::GetDecoder().decode(pinstr);
-  if (di.isLdTOC()) {
-    DS_form_t ds_instr;
-    ds_instr.instruction = *pinstr;
-    return Reg64(ds_instr.RT);
-  }
-  else if (di.isLwzTOC()) {
-    D_form_t d_instr;
-    d_instr.instruction = *pinstr;
-    return Reg64(d_instr.RT);
-  }
-  DecodedInstruction dinstr(pinstr);
-  return dinstr.getLi64Reg();
-}*/
 
 void Assembler::li32(const Reg64& rt, int32_t imm32) {
 
@@ -1030,7 +1003,7 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
 
 Label::~Label() {
   for (auto& ji : m_toPatch) {
-    ji.a->patchBranch(ji.addr, m_address, false);
+    ji.a->patchBranch(ji.addr, m_address);
   }
 }
 
@@ -1082,7 +1055,7 @@ void Label::branchFar(Assembler& a,
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.li64(reg::r12, address, fixedSize);
+  a.limmediate(reg::r12, address, fixedSize);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).

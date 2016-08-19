@@ -39,7 +39,7 @@ struct DecodedInstruction {
   explicit DecodedInstruction(PPC64Instr* ip, uint8_t max_size = 0)
     : m_ip(reinterpret_cast<uint8_t*>(ip))
     , m_imm(0)
-    , m_dinfo(Decoder::GetDecoder().decode(ip))
+    , m_dinfo(Decoder::GetDecoder().getInvalid())
     , m_size(instr_size_in_bytes)
     , m_max_size(max_size)
   {
@@ -49,7 +49,7 @@ struct DecodedInstruction {
   explicit DecodedInstruction(uint8_t* ip, uint8_t max_size = 0)
     : m_ip(ip)
     , m_imm(0)
-    , m_dinfo(Decoder::GetDecoder().decode(ip))
+    , m_dinfo(Decoder::GetDecoder().getInvalid())
     , m_size(instr_size_in_bytes)
     , m_max_size(max_size)
   {
@@ -81,8 +81,9 @@ struct DecodedInstruction {
   void widenBranch(uint8_t* target);
   int32_t offsetDS() const      { return m_dinfo.offsetDS(); }
   int16_t offsetD()             { return m_dinfo.offsetD(); }
-  bool isLdTOC() const          {return m_dinfo.isLdTOC(); }
-  bool isLwzTOC() const         {return m_dinfo.isLwzTOC(); }
+  bool isLd(bool toc) const             {return m_dinfo.isLd(toc); }
+  bool isLwz(bool toc) const            {return m_dinfo.isLwz(toc); }
+  bool isAddis(bool toc) const             {return m_dinfo.isAddis(toc); }
   // if it's conditional branch, it's not a jmp
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }
@@ -105,6 +106,9 @@ struct DecodedInstruction {
 
   // Retrieve the register used by li64 instruction
   HPHP::jit::Reg64 getLi64Reg() const;
+
+  // Retrieve the register used by limmediate instruction
+  HPHP::jit::Reg64 getLimmediateReg() const;
 
   // Retrieve the register used by li32 instruction
   HPHP::jit::Reg64 getLi32Reg() const { return getLi64Reg(); }

@@ -82,21 +82,11 @@ struct Vgen {
   static void patch(Venv& env) {
     for (auto& p : env.jmps) {
       assertx(env.addrs[p.target]);
-      if (env.meta.smashableLocations.count(p.instr)) {
-        Assembler::patchBranch(p.instr, env.addrs[p.target], false);
-      }
-      else{
-        Assembler::patchBranch(p.instr, env.addrs[p.target]);
-      }
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
     for (auto& p : env.jccs) {
       assertx(env.addrs[p.target]);
-      if (env.meta.smashableLocations.count(p.instr)) {
-        Assembler::patchBranch(p.instr, env.addrs[p.target], false);
-      }
-      else {
-        Assembler::patchBranch(p.instr, env.addrs[p.target]);
-      }
+      Assembler::patchBranch(p.instr, env.addrs[p.target]);
     }
   }
 
