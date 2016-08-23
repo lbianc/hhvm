@@ -318,8 +318,7 @@ and fun_def tcopt f =
   (* Fresh type environment is actually unnecessary, but I prefer to
    * have a guarantee that we are using a clean typing environment. *)
   Env.fresh_tenv env (
-    fun env_up ->
-      let env = { env_up with Env.lenv = Env.empty_local } in
+    fun env ->
       let env = Env.set_mode env f.f_mode in
       let env = Phase.localize_generic_parameters_with_bounds env f.f_tparams
                   ~ety_env:(Phase.env_with_self env) in
@@ -588,16 +587,30 @@ and stmt env = function
   | Break _ -> env
 
 and check_exhaustiveness env pos ty caselist =
+  check_exhaustiveness_ env pos ty caselist false
+
+and check_exhaustiveness_ env pos ty caselist enum_coming_from_unresolved =
   (* Right now we only do exhaustiveness checking for enums. *)
+  (* This function has a built in hack where if Tunresolved has an enum
+     inside then it tells the enum exhaustiveness checker to
+     not punish for extra default *)
   let env, (_, ty) = Env.expand_type env ty in
   match ty with
     | Tunresolved tyl ->
+      let new_enum = enum_coming_from_unresolved ||
+        (List.length tyl> 1 && List.exists tyl ~f:begin fun cur_ty ->
+        let _, (_, cur_ty) = Env.expand_type env cur_ty in
+        match cur_ty with
+          | Tabstract (AKenum _, _) -> true
+          | _ -> false
+      end) in
       List.fold_left tyl ~init:env ~f:begin fun env ty ->
-        check_exhaustiveness env pos ty caselist
+        check_exhaustiveness_ env pos ty caselist new_enum
       end
     | Tabstract (AKenum id, _) ->
       let tc = unsafe_opt @@ Env.get_enum env id in
-      Typing_enum.check_enum_exhaustiveness pos tc caselist;
+      Typing_enum.check_enum_exhaustiveness pos tc
+        caselist enum_coming_from_unresolved;
       env
     | Tany | Tmixed | Tarraykind _ | Tclass _ | Toption _ | Tprim _
     | Tvar _ | Tfun _ | Tabstract (_, _) | Ttuple _ | Tanon (_, _)
@@ -776,7 +789,8 @@ and lvalue env e =
 and eif env ~coalesce ~in_cond p c e1 e2 =
   let env, tyc = raw_expr in_cond env c in
   Async.enforce_not_awaitable env (fst c) tyc;
-  let _, parent_locals as lenv = env.Env.lenv in
+  let parent_lenv = env.Env.lenv in
+  let parent_locals = parent_lenv.Env.local_types in
   let c = if coalesce then (p, Binop (Ast.Diff2, c, (p, Null))) else c in
   let env = condition env true c in
   let env, ty1 = match e1 with
@@ -785,15 +799,21 @@ and eif env ~coalesce ~in_cond p c e1 e2 =
     | Some e1 ->
         expr env e1
     in
-  let fake1, _locals1 = env.Env.lenv in
-  let env = { env with Env.lenv = lenv } in
+  let lenv1 = env.Env.lenv in
+  let env = { env with Env.lenv = parent_lenv } in
   let env = condition env false c in
   let env, ty2 = expr env e2 in
-  let fake2, _locals2 = env.Env.lenv in
-  let fake_members = LEnv.intersect_fake fake1 fake2 in
+  let lenv2 = env.Env.lenv in
+  let fake_members =
+    LEnv.intersect_fake lenv1.Env.fake_members lenv2.Env.fake_members in
   (* we restore the locals to their parent state so as not to leak the
    * effects of the `condition` calls above *)
-  let env = { env with Env.lenv = fake_members, parent_locals } in
+  let env = { env with Env.lenv =
+                         { Env.fake_members = fake_members;
+                           Env.local_types = parent_locals;
+                           Env.tpenv = parent_lenv.Env.tpenv
+                         }
+            } in
   (* This is a shortened form of what we do in Typing_lenv.intersect. The
    * latter takes local environments as arguments, but our types here
    * aren't assigned to local variables in an environment *)
@@ -1739,8 +1759,8 @@ and assign p env e1 ty2 =
       )
   | _, Class_get _
   | _, Obj_get _ ->
-      let _, locals as lenv = env.Env.lenv in
-      let no_fakes = Env.empty_fake_members, locals in
+      let lenv = env.Env.lenv in
+      let no_fakes = LEnv.env_with_empty_fakes env in
       (* In this section, we check that the assignment is compatible with
        * the real type of a member. Remember that members can change
        * type (cf fake_members). But when we assign a value to $this->x,
@@ -1750,7 +1770,7 @@ and assign p env e1 ty2 =
        * check that the assignment is compatible with the type of
        * the member.
        *)
-      let env, real_type = lvalue { env with Env.lenv = no_fakes } e1 in
+      let env, real_type = lvalue no_fakes e1 in
       let env, exp_real_type = Env.expand_type env real_type in
       let env = { env with Env.lenv = lenv } in
       let env, ety2 = Env.expand_type env ty2 in
@@ -3630,9 +3650,18 @@ and condition env tparamet =
       let env = condition env false e1 in
       let env = condition env false e2 in
       env
-  | _, Call (Cnormal, (_, Id (_, f)), [lv], [])
+  | _, Call (Cnormal, (p, Id (_, f)), [lv], [])
     when tparamet && f = SN.StdlibFunctions.is_array ->
-      is_array env lv
+      is_array env `PHPArray p f lv
+  | _, Call (Cnormal, (p, Id (_, f)), [lv], [])
+    when tparamet && f = SN.StdlibFunctions.is_vec ->
+      is_array env `HackVec p f lv
+  | _, Call (Cnormal, (p, Id (_, f)), [lv], [])
+    when tparamet && f = SN.StdlibFunctions.is_dict ->
+      is_array env `HackDict p f lv
+  | _, Call (Cnormal, (p, Id (_, f)), [lv], [])
+    when tparamet && f = SN.StdlibFunctions.is_keyset ->
+      is_array env `HackKeyset p f lv
   | _, Call (Cnormal, (_, Id (_, f)), [lv], [])
     when tparamet && f = SN.StdlibFunctions.is_int ->
       is_type env lv Tint
@@ -3772,15 +3801,29 @@ and is_type env e tprim =
       Env.set_local env x (Reason.Rwitness p, Tprim tprim)
     | _ -> env
 
-and is_array env = function
-  | p, Class_get (cname, (_, member_name)) ->
+and is_array env ty p pf (_, lv) =
+  let r = Reason.Rpredicated (p, pf) in
+  let tarrkey () = Env.fresh_abstract_type ~constr:(r, Tprim Tarraykey) r in
+  let tfresh () = Env.fresh_abstract_type r in
+  let ty =
+    match ty with
+    | `HackDict ->
+      Tclass ((Pos.none, SN.Collections.cDict), [tarrkey (); tfresh ()])
+    | `HackVec ->
+      Tclass ((Pos.none, SN.Collections.cVec), [tfresh ()])
+    | `HackKeyset ->
+      Tclass ((Pos.none, SN.Collections.cKeyset), [tarrkey ()])
+    | `PHPArray ->
+      Tarraykind AKany in
+  match lv with
+  | Class_get (cname, (_, member_name)) ->
       let env, local = Env.FakeMembers.make_static p env cname member_name in
-      Env.set_local env local (Reason.Rwitness p, Tarraykind AKany)
-  | p, Obj_get ((_, This | _, Lvar _ as obj), (_, Id (_, member_name)), _) ->
+      Env.set_local env local (r, ty)
+  | Obj_get ((_, This | _, Lvar _ as obj), (_, Id (_, member_name)), _) ->
       let env, local = Env.FakeMembers.make p env obj member_name in
-      Env.set_local env local (Reason.Rwitness p, Tarraykind AKany)
-  | _, Lvar (p, x) ->
-      Env.set_local env x (Reason.Rwitness p, Tarraykind AKany)
+      Env.set_local env local (r, ty)
+  | Lvar (_, x) ->
+      Env.set_local env x (r, ty)
   | _ -> env
 
 and string2 env idl =
@@ -3900,7 +3943,7 @@ and class_def_ env c tc =
     (Decl_hint.hint env.Env.decl_env) in
   TI.check_tparams_instantiable env (fst c.c_tparams);
   let env = Phase.localize_generic_parameters_with_bounds env (fst c.c_tparams)
-              ~ety_env:(Phase.env_with_self env) in
+      ~ety_env:(Phase.env_with_self env) in
   Typing_variance.class_ (Env.get_options env) (snd c.c_name) tc impl;
   List.iter impl (check_implements_tparaml env);
 
@@ -3937,6 +3980,7 @@ and class_def_ env c tc =
       Errors.internal_error pc "The parser should not parse final on enums"
     | Ast.Cnormal -> ()
   end;
+  SMap.iter (check_static_method tc.tc_methods) tc.tc_smethods;
   List.iter impl (class_implements_type env c);
   List.iter c.c_vars (class_var_def env ~is_static:false c);
   List.iter c.c_methods (method_def env);
@@ -3948,6 +3992,19 @@ and class_def_ env c tc =
   List.iter c.c_static_vars (class_var_def env ~is_static:true c);
   List.iter c.c_static_methods (method_def env);
   Typing_hooks.dispatch_exit_class_def_hook c tc
+
+and check_static_method obj method_name static_method =
+  if SMap.mem method_name obj
+  then begin
+    let lazy (static_method_reason, _) = static_method.ce_type in
+    let dyn_method = SMap.find_unsafe method_name obj in
+    let lazy (dyn_method_reason, _) = dyn_method.ce_type in
+    Errors.static_dynamic
+      (Reason.to_pos static_method_reason)
+      (Reason.to_pos dyn_method_reason)
+      method_name
+  end
+  else ()
 
 and check_extend_abstract_meth ~is_final p smap =
   SMap.iter begin fun x ce ->
@@ -4060,7 +4117,7 @@ and method_def env m =
   (* reset the expression dependent display ids for each method body *)
   Reason.expr_display_id_map := IMap.empty;
   Typing_hooks.dispatch_enter_method_def_hook m;
-  let env = { env with Env.lenv = Env.empty_local } in
+  let env = Env.env_with_locals env Local_id.Map.empty in
   let env = Phase.localize_generic_parameters_with_bounds env m.m_tparams
     ~ety_env:({ (Phase.env_with_self env) with from_class = Some CIstatic; }) in
   TI.check_tparams_instantiable env m.m_tparams;

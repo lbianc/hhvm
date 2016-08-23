@@ -23,6 +23,10 @@
 
 #include "hphp/util/data-block.h"
 
+#ifndef MIN
+#define MIN(x,y)        (((x) < (y)) ? (x) : (y))
+#endif
+
 namespace ppc64_asm {
 
 bool DecodedInstruction::couldBeNearBranch() {
@@ -121,7 +125,7 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
     cb.init(m_ip, max_branch_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp, false);
+    a.branchFar(target, bp, true);
 
     // refresh m_size and other parameters
     decode();
@@ -156,9 +160,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   // only read bytes up to the smallest of @max_read or @bytes.
   auto canRead = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
     if (max_read)
-#define MIN(a, b)    (((a) < (b)) ? (a) : (b))
       return n < MIN(max_read, bytes);
-#undef MIN
     else
       return n < bytes;
   };

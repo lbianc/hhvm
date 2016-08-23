@@ -2070,6 +2070,12 @@ Type Index::lookup_constraint(Context ctx, const TypeConstraint& tc) const {
         case KindOfDouble:       return TDbl;
         case KindOfPersistentString:
         case KindOfString:       return TStr;
+        case KindOfPersistentVec:
+        case KindOfVec:          return TVec;
+        case KindOfPersistentDict:
+        case KindOfDict:         return TDict;
+        case KindOfPersistentKeyset:
+        case KindOfKeyset:       return TKeyset;
         case KindOfPersistentArray:
         case KindOfArray:        return TArr;
         case KindOfResource:     return TRes;
@@ -2110,12 +2116,6 @@ Type Index::lookup_constraint(Context ctx, const TypeConstraint& tc) const {
        * typehints (ex. "(function(..): ..)" typehints).
        */
       return TCell;
-    case AnnotMetaType::Dict:
-      return TDict;
-    case AnnotMetaType::Vec:
-      return TVec;
-    case AnnotMetaType::Keyset:
-      return TKeyset;
     case AnnotMetaType::Self:
     case AnnotMetaType::Parent:
     case AnnotMetaType::Callable:
@@ -2154,6 +2154,12 @@ Type Index::satisfies_constraint_helper(Context ctx,
         case KindOfDouble:       return TDbl;
         case KindOfPersistentString:
         case KindOfString:       return TStr;
+        case KindOfPersistentVec:
+        case KindOfVec:          return TVec;
+        case KindOfPersistentDict:
+        case KindOfDict:         return TDict;
+        case KindOfPersistentKeyset:
+        case KindOfKeyset:       return TKeyset;
         case KindOfPersistentArray:
         case KindOfArray:        return TArr;
         case KindOfResource:     return TRes;
@@ -2188,10 +2194,6 @@ Type Index::satisfies_constraint_helper(Context ctx,
     case AnnotMetaType::Parent:
     case AnnotMetaType::Callable:
       break;
-    case AnnotMetaType::Dict:
-    case AnnotMetaType::Vec:
-    case AnnotMetaType::Keyset:
-      return TArr;
     case AnnotMetaType::Number:
       return tc.isNullable() ? TOptNum : TNum;
     case AnnotMetaType::ArrayKey:

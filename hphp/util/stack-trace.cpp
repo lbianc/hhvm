@@ -32,6 +32,7 @@
 #include <fcntl.h>
 
 #include <folly/Conv.h>
+#include <folly/FileUtil.h>
 #include <folly/Format.h>
 #include <folly/ScopeGuard.h>
 #include <folly/String.h>
@@ -226,8 +227,8 @@ BfdCache* get_bfd_cache(folly::StringPiece filename, NamedBfdRange bfds) {
   auto probe = hash_string(filename.begin()) % bfds.size();
 
   // Match on the end of filename instead of the beginning, if necessary.
-  if (filename.size() > MaxKey) {
-    filename = filename.subpiece(filename.size() - MaxKey);
+  if (filename.size() >= MaxKey) {
+    filename = filename.subpiece(filename.size() - MaxKey + 1);
   }
 
   while (bfds[probe].key[0] && strcmp(filename.begin(), bfds[probe].key) != 0) {
@@ -237,9 +238,10 @@ BfdCache* get_bfd_cache(folly::StringPiece filename, NamedBfdRange bfds) {
   auto p = &bfds[probe].bc;
   if (bfds[probe].key[0]) return p;
 
+  assert(filename.size() < MaxKey);
+  assert(filename.begin()[filename.size()] == 0);
   // Accept the rare collision on keys (requires probe collision too).
-  // FIXME: This is a NUL terminator bug waiting to blow up.
-  strncpy(bfds[probe].key, filename.begin(), filename.size());
+  memcpy(bfds[probe].key, filename.begin(), filename.size() + 1);
   fill_bfd_cache(filename, *p);
   return p;
 }
@@ -359,6 +361,29 @@ void demangle(int fd, const char* mangled) {
 }
 
 /*
+ * Writes a file path to a file while folding any consecutive forward slashes.
+ */
+void write_path(int fd, folly::StringPiece path) {
+  while (!path.empty()) {
+    auto const pos = path.find('/');
+    if (pos == std::string::npos) {
+      folly::writeNoInt(fd, path.data(), path.size());
+      break;
+    }
+
+    auto const left = path.subpiece(0, pos + 1);
+    folly::writeNoInt(fd, left.data(), left.size());
+
+    auto right = path.subpiece(pos);
+    while (!right.empty() && right[0] == '/') {
+      right = right.subpiece(1);
+    }
+
+    path = right;
+  }
+}
+
+/*
  * Variant of translate() used by StackTraceNoHeap.
  */
 bool translate(int fd, void* frame_addr, int frame_num, NamedBfdRange bfds) {
@@ -385,7 +410,9 @@ bool translate(int fd, void* frame_addr, int frame_num, NamedBfdRange bfds) {
 
   dprintf(fd, "# %d%s ", frame_num, frame_num < 10 ? " " : "");
   demangle(fd, funcname);
-  dprintf(fd, " at %s:%u\n", filename, frame.lineno);
+  dprintf(fd, " at ");
+  write_path(fd, filename);
+  dprintf(fd, ":%u\n", frame.lineno);
 
   return true;
 }

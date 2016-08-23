@@ -32,6 +32,9 @@ extern const StaticString s_parent;
 extern const StaticString s_static;
 
 extern const StaticString s_cmpWithCollection;
+extern const StaticString s_cmpWithVec;
+extern const StaticString s_cmpWithDict;
+extern const StaticString s_cmpWithKeyset;
 
 ///////////////////////////////////////////////////////////////////////////////
 // operators
@@ -62,16 +65,10 @@ inline bool is_bool(const Variant& v)   { return v.is(KindOfBoolean);}
 inline bool is_int(const Variant& v)    { return v.isInteger();}
 inline bool is_double(const Variant& v) { return v.is(KindOfDouble);}
 inline bool is_string(const Variant& v) { return v.isString();}
-inline bool is_array(const Variant& v)  { return v.isArray();}
-inline bool is_vec(const Variant& v) {
-  return v.isArray() && v.toCArrRef()->isVecArray();
-}
-inline bool is_dict(const Variant& v) {
-  return v.isArray() && v.toCArrRef()->isDict();
-}
-inline bool is_keyset(const Variant& v) {
-  return v.isArray() && v.toCArrRef()->isKeyset();
-}
+inline bool is_array(const Variant& v)  { return v.isPHPArray();}
+inline bool is_vec(const Variant& v)    { return v.isVecArray();}
+inline bool is_dict(const Variant& v)   { return v.isDict();}
+inline bool is_keyset(const Variant& v) { return v.isKeyset();}
 
 inline bool is_object(const Variant& var) {
   if (!var.is(KindOfObject)) {
@@ -139,6 +136,9 @@ void throw_instance_method_fatal(const char *name);
 [[noreturn]] void throw_collection_modified();
 [[noreturn]] void throw_collection_property_exception();
 [[noreturn]] void throw_collection_compare_exception();
+[[noreturn]] void throw_vec_compare_exception();
+[[noreturn]] void throw_dict_compare_exception();
+[[noreturn]] void throw_keyset_compare_exception();
 [[noreturn]] void throw_param_is_not_container();
 [[noreturn]]
 void throw_cannot_modify_immutable_object(const char* className);

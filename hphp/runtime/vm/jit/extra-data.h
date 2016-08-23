@@ -1,4 +1,4 @@
-  /*
+/*
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
@@ -1009,6 +1009,20 @@ struct InitPackedArrayLoopData : IRExtraData {
   uint32_t size;
 };
 
+struct NewKeysetArrayData : IRExtraData {
+  explicit NewKeysetArrayData(IRSPRelOffset offset, uint32_t size)
+    : offset(offset)
+    , size(size)
+  {}
+
+  std::string show() const {
+    return folly::format("{},{}", offset.offset, size).str();
+  }
+
+  IRSPRelOffset offset;
+  uint32_t size;
+};
+
 struct MOpFlagsData : IRExtraData {
   explicit MOpFlagsData(MOpFlags flags) : flags{flags} {}
 
@@ -1218,13 +1232,22 @@ X(OODeclExists,                 ClassKindData);
 X(NewStructArray,               NewStructData);
 X(AllocPackedArray,             PackedArrayData);
 X(AllocVecArray,                PackedArrayData);
-X(InitPackedArrayLoop,          InitPackedArrayLoopData);
-X(InitPackedArray,              IndexData);
+X(NewKeysetArray,               NewKeysetArrayData);
+X(InitPackedLayoutArrayLoop,    InitPackedArrayLoopData);
+X(InitPackedLayoutArray,        IndexData);
 X(CheckMixedArrayOffset,        IndexData);
+X(CheckDictOffset,              IndexData);
+X(CheckKeysetOffset,            IndexData);
 X(ElemMixedArrayK,              IndexData);
 X(MixedArrayGetK,               IndexData);
+X(DictGetK,                     IndexData);
+X(KeysetGetK,                   IndexData);
+X(ElemDictK,                    IndexData);
+X(ElemKeysetK,                  IndexData);
 X(ProfileArrayKind,             RDSHandleData);
 X(ProfileMixedArrayOffset,      RDSHandleData);
+X(ProfileDictOffset,            RDSHandleData);
+X(ProfileKeysetOffset,          RDSHandleData);
 X(ProfileType,                  RDSHandleData);
 X(ProfileMethod,                ProfileMethodData);
 X(LdRDSAddr,                    RDSHandleData);

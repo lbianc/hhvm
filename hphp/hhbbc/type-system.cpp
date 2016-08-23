@@ -2084,10 +2084,13 @@ folly::Optional<Cell> tv(Type t) {
   case BSArrE:       return make_tv<KindOfPersistentArray>(staticEmptyArray());
   case BCVecE:
   case BSVecE:
-    return make_tv<KindOfPersistentArray>(staticEmptyVecArray());
+    return make_tv<KindOfPersistentVec>(staticEmptyVecArray());
   case BCDictE:
   case BSDictE:
-    return make_tv<KindOfPersistentArray>(staticEmptyDictArray());
+    return make_tv<KindOfPersistentDict>(staticEmptyDictArray());
+  case BCKeysetE:
+  case BSKeysetE:
+    return make_tv<KindOfPersistentKeyset>(staticEmptyKeysetArray());
   default:
     if (is_opt(t)) {
       break;
@@ -2100,11 +2103,20 @@ folly::Optional<Cell> tv(Type t) {
     case DataTag::DictVal:
     case DataTag::KeysetVal:
     case DataTag::ArrVal:
-      if ((t.m_bits & BArrN) == t.m_bits ||
-          (t.m_bits & BVecN) == t.m_bits ||
-          (t.m_bits & BDictN) == t.m_bits ||
-          (t.m_bits & BKeysetN) == t.m_bits) {
+      if ((t.m_bits & BArrN) == t.m_bits) {
         return make_tv<KindOfPersistentArray>(
+          const_cast<ArrayData*>(t.m_data.aval)
+        );
+      } else if ((t.m_bits & BVecN) == t.m_bits) {
+        return make_tv<KindOfPersistentVec>(
+          const_cast<ArrayData*>(t.m_data.aval)
+        );
+      } else if ((t.m_bits & BDictN) == t.m_bits) {
+        return make_tv<KindOfPersistentDict>(
+          const_cast<ArrayData*>(t.m_data.aval)
+        );
+      } else if ((t.m_bits & BKeysetN) == t.m_bits) {
+        return make_tv<KindOfPersistentKeyset>(
           const_cast<ArrayData*>(t.m_data.aval)
         );
       }
@@ -2139,6 +2151,9 @@ Type type_of_istype(IsTypeOp op) {
   case IsTypeOp::Dbl:    return TDbl;
   case IsTypeOp::Str:    return TStr;
   case IsTypeOp::Arr:    return TArr;
+  case IsTypeOp::Vec:    return TVec;
+  case IsTypeOp::Dict:   return TDict;
+  case IsTypeOp::Keyset: return TKeyset;
   case IsTypeOp::Obj:    return TObj;
   case IsTypeOp::Scalar: always_assert(0);
   }
@@ -2172,15 +2187,29 @@ Type from_cell(Cell cell) {
     always_assert(cell.m_data.pstr->isStatic());
     return sval(cell.m_data.pstr);
 
+  case KindOfPersistentVec:
+  case KindOfVec:
+    always_assert(cell.m_data.parr->isStatic());
+    always_assert(cell.m_data.parr->isVecArray());
+    return vec_val(cell.m_data.parr);
+
+  case KindOfPersistentDict:
+  case KindOfDict:
+    always_assert(cell.m_data.parr->isStatic());
+    always_assert(cell.m_data.parr->isDict());
+    return dict_val(cell.m_data.parr);
+
+  case KindOfPersistentKeyset:
+  case KindOfKeyset:
+    always_assert(cell.m_data.parr->isStatic());
+    always_assert(cell.m_data.parr->isKeyset());
+    return keyset_val(cell.m_data.parr);
+
   case KindOfPersistentArray:
   case KindOfArray:
     always_assert(cell.m_data.parr->isStatic());
-    switch (cell.m_data.parr->kind()) {
-    case ArrayData::kDictKind:   return dict_val(cell.m_data.parr);
-    case ArrayData::kVecKind:    return vec_val(cell.m_data.parr);
-    case ArrayData::kKeysetKind: return keyset_val(cell.m_data.parr);
-    default:                     return aval(cell.m_data.parr);
-    }
+    always_assert(cell.m_data.parr->isPHPArray());
+    return aval(cell.m_data.parr);
 
   case KindOfClass:
   case KindOfRef:
@@ -2200,6 +2229,12 @@ Type from_DataType(DataType dt) {
   case KindOfDouble:   return TDbl;
   case KindOfPersistentString:
   case KindOfString:   return TStr;
+  case KindOfPersistentVec:
+  case KindOfVec:      return TVec;
+  case KindOfPersistentDict:
+  case KindOfDict:     return TDict;
+  case KindOfPersistentKeyset:
+  case KindOfKeyset:   return TKeyset;
   case KindOfPersistentArray:
   case KindOfArray:    return TArr;
   case KindOfRef:      return TRef;
@@ -3508,18 +3543,6 @@ RepoAuthType make_repo_type(ArrayTypeTable::Builder& arrTable, const Type& t) {
     return make_repo_type_arr(arrTable, t);
   }
 
-  // TODO(#11221250): support separate runtime types for vec/dict/keyset
-#define X(p)                                               \
-  if (t.subtypeOf(T##p##Vec) || t.subtypeOf(T##p##Dict) || \
-      t.subtypeOf(T##p##Keyset)) {                         \
-    return RepoAuthType{T::p##Arr};                        \
-  }
-  X(S)
-  X()
-  X(OptS)
-  X(Opt)
-#undef X
-
 #define X(x) if (t.subtypeOf(T##x)) return RepoAuthType{T::x};
   X(Uninit)
   X(InitNull)
@@ -3540,6 +3563,18 @@ RepoAuthType make_repo_type(ArrayTypeTable::Builder& arrTable, const Type& t) {
   X(OptSArr)
   X(Arr)
   X(OptArr)
+  X(SVec)
+  X(OptSVec)
+  X(Vec)
+  X(OptVec)
+  X(SDict)
+  X(OptSDict)
+  X(Dict)
+  X(OptDict)
+  X(SKeyset)
+  X(OptSKeyset)
+  X(Keyset)
+  X(OptKeyset)
   X(Obj)
   X(OptObj)
   X(InitUnc)

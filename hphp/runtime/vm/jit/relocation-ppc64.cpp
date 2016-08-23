@@ -29,9 +29,13 @@
 
 /*
  * Allow a Far branch be converted to a Near branch.
- * Drawback: no smashability guaranteed afterwards
  */
 //#define SHRINK_FAR_BRANCHES
+
+/*
+ * Remove nops from a Far branch.
+ */
+//#define REMOVE_FAR_BRANCHES_NOPS
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -184,10 +188,14 @@ size_t relocateImpl(RelocationInfo& rel,
           TCA adjusted_target = rel.adjustedAddressAfter(old_target);
           TCA new_target = (adjusted_target) ? adjusted_target : old_target;
 
+#ifdef REMOVE_FAR_BRANCHES_NOPS
           // if it's smashable, don't remove nops (leave it as fixed size) and
           // mark this relocated address to be used on adjustForRelocation
           bool keep_nops = (0 != fixups.smashableLocations.count(src));
           if (keep_nops) rel.markSmashableRelocation(dest);
+#else
+          bool keep_nops = true;
+#endif
           if (!d2.setFarBranchTarget(new_target, keep_nops)) {
             assertx(false && "Couldn't set Far branch target");
           }
@@ -235,7 +243,14 @@ size_t relocateImpl(RelocationInfo& rel,
               ok = false;
             }
           } else {
-            if (!d2.setFarBranchTarget(new_target, false)) {
+            bool keep_nops =
+#ifdef REMOVE_FAR_BRANCHES_NOPS
+              false
+#else
+              true
+#endif
+              ;
+            if (!d2.setFarBranchTarget(new_target, keep_nops)) {
               always_assert(false && "Widen branch relocation failed");
             }
           }
@@ -269,7 +284,13 @@ size_t relocateImpl(RelocationInfo& rel,
             insert_near_jmp = true;
           } else if (new_far_target) {
             // Far target will be relocated.
-            bool keep_nops = rel.isSmashableRelocation(dest);
+            bool keep_nops =
+#ifdef REMOVE_FAR_BRANCHES_NOPS
+              rel.isSmashableRelocation(dest);
+#else
+              true
+#endif
+              ;
             if (!d2.setFarBranchTarget(new_far_target, keep_nops)) {
               assert(false && "Far branch target setting failed");
             }
@@ -362,7 +383,13 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
 
     if (di.isFarBranch()) {
       if (TCA adjusted = rel.adjustedAddressAfter(di.farBranchTarget())) {
-        bool keep_nops = rel.isSmashableRelocation(start);
+        bool keep_nops =
+#ifdef REMOVE_FAR_BRANCHES_NOPS
+          rel.isSmashableRelocation(start);
+#else
+          true
+#endif
+          ;
         if (!di.setFarBranchTarget(adjusted, keep_nops)) {
           always_assert(false && "Not an expected Far branch.");
         }

@@ -757,6 +757,14 @@ void Vgen::emit(const mcprep& i) {
 }
 
 void Vgen::emit(const inittc&) {
+  // Set info in the frame created on the caller
+  a.mflr(rfuncln());
+  a.std(rfuncln(), rsfp()[AROFF(m_savedRip)]);
+
+  // follow the ABI and create the calle frame and set its info
+  a.addi(rsfp(), rsfp(), -min_frame_size);
+  emitSaveTOC();
+
   // initialize our rone register
   a.li(ppc64::rone(), 1);
 

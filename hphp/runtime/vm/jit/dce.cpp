@@ -63,6 +63,7 @@ bool canDCE(IRInstruction* inst) {
   case ConvStrToArr:
   case ConvVecToArr:
   case ConvDictToArr:
+  case ConvKeysetToArr:
   case ConvArrToBool:
   case ConvDblToBool:
   case ConvIntToBool:
@@ -82,6 +83,13 @@ bool canDCE(IRInstruction* inst) {
   case ConvBoolToStr:
   case ConvDblToStr:
   case ConvIntToStr:
+  case ConvDictToVec:
+  case ConvKeysetToVec:
+  case ConvVecToDict:
+  case ConvKeysetToDict:
+  case ConvArrToKeyset:
+  case ConvVecToKeyset:
+  case ConvDictToKeyset:
   case ConvClsToCctx:
   case NewColFromArray:
   case GtInt:
@@ -125,6 +133,12 @@ bool canDCE(IRInstruction* inst) {
   case NSameObj:
   case SameArr:
   case NSameArr:
+  case SameVec:
+  case NSameVec:
+  case SameDict:
+  case NSameDict:
+  case EqKeyset:
+  case NeqKeyset:
   case GtRes:
   case GteRes:
   case LtRes:
@@ -141,6 +155,9 @@ bool canDCE(IRInstruction* inst) {
   case InstanceOfBitmask:
   case NInstanceOfBitmask:
   case InterfaceSupportsArr:
+  case InterfaceSupportsVec:
+  case InterfaceSupportsDict:
+  case InterfaceSupportsKeyset:
   case InterfaceSupportsStr:
   case InterfaceSupportsInt:
   case InterfaceSupportsDbl:
@@ -186,6 +203,8 @@ bool canDCE(IRInstruction* inst) {
   case LdARNumParams:
   case LdFuncNumParams:
   case LdStrLen:
+  case LdVecElem:
+  case LdVecElemAddr:
   case LdClosureStaticLoc:
   case NewInstanceRaw:
   case NewArray:
@@ -200,9 +219,14 @@ bool canDCE(IRInstruction* inst) {
   case Mov:
   case CountArray:
   case CountArrayFast:
+  case CountVec:
+  case CountDict:
+  case CountKeyset:
   case CountCollection:
   case Nop:
   case AKExistsArr:
+  case AKExistsDict:
+  case AKExistsKeyset:
   case LdBindAddr:
   case LdSwitchDblIndex:
   case LdSwitchStrIndex:
@@ -230,6 +254,18 @@ bool canDCE(IRInstruction* inst) {
   case LdMBase:
   case MethodExists:
   case LdTVAux:
+  case ArrayIdx:
+  case ArrayIsset:
+  case DictGetQuiet:
+  case DictGetK:
+  case DictIsset:
+  case DictEmptyElem:
+  case DictIdx:
+  case KeysetGetQuiet:
+  case KeysetGetK:
+  case KeysetIsset:
+  case KeysetEmptyElem:
+  case KeysetIdx:
     assertx(!inst->isControlFlow());
     return true;
 
@@ -278,6 +314,11 @@ bool canDCE(IRInstruction* inst) {
   case ConvObjToStr:
   case ConvResToStr:
   case ConvCellToStr:
+  case ConvArrToVec:
+  case ConvArrToDict:
+  case ConvObjToVec:
+  case ConvObjToDict:
+  case ConvObjToKeyset:
   case GtObj:
   case GteObj:
   case LtObj:
@@ -292,6 +333,15 @@ bool canDCE(IRInstruction* inst) {
   case EqArr:
   case NeqArr:
   case CmpArr:
+  case GtVec:
+  case GteVec:
+  case LtVec:
+  case LteVec:
+  case EqVec:
+  case NeqVec:
+  case CmpVec:
+  case EqDict:
+  case NeqDict:
   case JmpZero:
   case JmpNZero:
   case JmpSSwitchDest:
@@ -349,8 +399,9 @@ bool canDCE(IRInstruction* inst) {
   case ConstructInstance:
   case AllocPackedArray:
   case AllocVecArray:
-  case InitPackedArray:
-  case InitPackedArrayLoop:
+  case InitPackedLayoutArray:
+  case InitPackedLayoutArrayLoop:
+  case NewKeysetArray:
   case NewStructArray:
   case Clone:
   case InlineReturn:
@@ -406,8 +457,9 @@ bool canDCE(IRInstruction* inst) {
   case AddElemStrKey:
   case AddElemIntKey:
   case AddNewElem:
+  case DictAddElemStrKey:
+  case DictAddElemIntKey:
   case ArrayAdd:
-  case ArrayIdx:
   case GetMemoKey:
   case LdSwitchObjIndex:
   case LdSSwitchDestSlow:
@@ -484,15 +536,32 @@ bool canDCE(IRInstruction* inst) {
   case ProfileMixedArrayOffset:
   case CheckMixedArrayOffset:
   case CheckArrayCOW:
+  case ProfileDictOffset:
+  case CheckDictOffset:
+  case ProfileKeysetOffset:
+  case CheckKeysetOffset:
   case ElemArray:
   case ElemArrayD:
   case ElemArrayW:
   case ElemArrayU:
   case ElemMixedArrayK:
+  case ElemVecD:
+  case ElemVecU:
+  case ElemDict:
+  case ElemDictD:
+  case ElemDictW:
+  case ElemDictU:
+  case ElemDictK:
+  case ElemKeyset:
+  case ElemKeysetW:
+  case ElemKeysetU:
+  case ElemKeysetK:
   case ElemDX:
   case ElemUX:
   case ArrayGet:
   case MixedArrayGetK:
+  case DictGet:
+  case KeysetGet:
   case StringGet:
   case OrdStrIdx:
   case MapGet:
@@ -501,6 +570,10 @@ bool canDCE(IRInstruction* inst) {
   case BindElem:
   case ArraySet:
   case ArraySetRef:
+  case VecSet:
+  case VecSetRef:
+  case DictSet:
+  case DictSetRef:
   case MapSet:
   case SetElem:
   case SetWithRefElem:
@@ -509,8 +582,9 @@ bool canDCE(IRInstruction* inst) {
   case IncDecElem:
   case SetNewElem:
   case SetNewElemArray:
+  case SetNewElemVec:
+  case SetNewElemKeyset:
   case BindNewElem:
-  case ArrayIsset:
   case VectorIsset:
   case PairIsset:
   case MapIsset:
@@ -543,6 +617,7 @@ bool canDCE(IRInstruction* inst) {
   case StARInvName:
   case ExitPlaceholder:
   case ThrowOutOfBounds:
+  case ThrowInvalidArrayKey:
   case ThrowInvalidOperation:
   case ThrowArithmeticError:
   case ThrowDivisionByZeroError:

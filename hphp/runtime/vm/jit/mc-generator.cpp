@@ -781,6 +781,21 @@ TCA MCGenerator::getFuncBody(Func* func) {
     auto codeLock = mcg->lockCode();
     tca = genFuncBodyDispatch(func, dvs, m_code.view());
     func->setFuncBody(tca);
+    if (!RuntimeOption::EvalJitNoGdb) {
+      m_debugInfo.recordStub(
+        Debug::TCRange(tca, m_code.view().main().frontier(), false),
+        Debug::lookupFunction(func, false, false, true));
+    }
+    if (RuntimeOption::EvalJitUseVtuneAPI) {
+      reportHelperToVtune(func->fullName()->data(),
+                          tca,
+                          m_code.view().main().frontier());
+    }
+    if (RuntimeOption::EvalPerfPidMap) {
+      m_debugInfo.recordPerfMap(
+        Debug::TCRange(tca, m_code.view().main().frontier(), false),
+        SrcKey{}, func, false, false);
+    }
   } else {
     SrcKey sk(func, func->base(), false);
     tca = mcg->getTranslation(TransArgs{sk}).tca();
@@ -1725,7 +1740,7 @@ void reportJitMaturity(const CodeCache& code) {
 
 // send stats about this translation to StructuredLog
 void logTranslation(const TransEnv& env) {
-  auto nanos = Timer::getCPUTimeNanos() - env.unit->startNanos();
+  auto nanos = HPHP::Timer::GetThreadCPUTimeNanos() - env.unit->startNanos();
   StructuredLogEntry cols;
   auto& context = env.unit->context();
   auto kind = show(context.kind);

@@ -143,6 +143,8 @@ NOOP_OPCODE(FinishMemberOp)
 CALL_OPCODE(AddElemStrKey)
 CALL_OPCODE(AddElemIntKey)
 CALL_OPCODE(AddNewElem)
+CALL_OPCODE(DictAddElemStrKey)
+CALL_OPCODE(DictAddElemIntKey)
 CALL_OPCODE(ArrayAdd)
 CALL_OPCODE(MapAddElemC)
 CALL_OPCODE(ColAddNewElemC)
@@ -154,7 +156,23 @@ CALL_OPCODE(ConvObjToArr);
 CALL_OPCODE(ConvStrToArr);
 CALL_OPCODE(ConvVecToArr);
 CALL_OPCODE(ConvDictToArr);
+CALL_OPCODE(ConvKeysetToArr);
 CALL_OPCODE(ConvCellToArr);
+
+CALL_OPCODE(ConvArrToVec);
+CALL_OPCODE(ConvDictToVec);
+CALL_OPCODE(ConvKeysetToVec);
+CALL_OPCODE(ConvObjToVec);
+
+CALL_OPCODE(ConvArrToDict);
+CALL_OPCODE(ConvVecToDict);
+CALL_OPCODE(ConvKeysetToDict);
+CALL_OPCODE(ConvObjToDict);
+
+CALL_OPCODE(ConvArrToKeyset);
+CALL_OPCODE(ConvVecToKeyset);
+CALL_OPCODE(ConvDictToKeyset);
+CALL_OPCODE(ConvObjToKeyset);
 
 CALL_OPCODE(ConvCellToBool);
 
@@ -195,6 +213,7 @@ CALL_OPCODE(SetOpElem)
 CALL_OPCODE(IncDecElem)
 CALL_OPCODE(SetNewElem)
 CALL_OPCODE(SetNewElemArray)
+CALL_OPCODE(SetNewElemVec)
 CALL_OPCODE(BindNewElem)
 CALL_OPCODE(VectorIsset)
 CALL_OPCODE(PairIsset)
@@ -225,6 +244,9 @@ DELEGATE_OPCODE(IncStatGrouped)
 DELEGATE_OPCODE(IncTransCounter)
 DELEGATE_OPCODE(IncProfCounter)
 DELEGATE_OPCODE(CheckCold)
+
+CALL_OPCODE(ElemVecD)
+CALL_OPCODE(ElemVecU)
 
 DELEGATE_OPCODE(Box)
 DELEGATE_OPCODE(BoxPtr)
@@ -309,6 +331,21 @@ DELEGATE_OPCODE(NeqArr);
 DELEGATE_OPCODE(SameArr);
 DELEGATE_OPCODE(NSameArr);
 DELEGATE_OPCODE(CmpArr);
+DELEGATE_OPCODE(GtVec);
+DELEGATE_OPCODE(GteVec);
+DELEGATE_OPCODE(LtVec);
+DELEGATE_OPCODE(LteVec);
+DELEGATE_OPCODE(EqVec);
+DELEGATE_OPCODE(NeqVec);
+DELEGATE_OPCODE(SameVec);
+DELEGATE_OPCODE(NSameVec);
+DELEGATE_OPCODE(CmpVec);
+DELEGATE_OPCODE(EqDict);
+DELEGATE_OPCODE(NeqDict);
+DELEGATE_OPCODE(SameDict);
+DELEGATE_OPCODE(NSameDict);
+DELEGATE_OPCODE(EqKeyset);
+DELEGATE_OPCODE(NeqKeyset);
 DELEGATE_OPCODE(GtRes);
 DELEGATE_OPCODE(GteRes);
 DELEGATE_OPCODE(LtRes);
@@ -327,6 +364,9 @@ DELEGATE_OPCODE(ExtendsClass)
 DELEGATE_OPCODE(InstanceOfBitmask)
 DELEGATE_OPCODE(NInstanceOfBitmask)
 DELEGATE_OPCODE(InterfaceSupportsArr)
+DELEGATE_OPCODE(InterfaceSupportsVec)
+DELEGATE_OPCODE(InterfaceSupportsDict)
+DELEGATE_OPCODE(InterfaceSupportsKeyset)
 DELEGATE_OPCODE(InterfaceSupportsStr)
 DELEGATE_OPCODE(InterfaceSupportsInt)
 DELEGATE_OPCODE(InterfaceSupportsDbl)
@@ -470,17 +510,47 @@ DELEGATE_OPCODE(EmptyElem)
 DELEGATE_OPCODE(ProfileMixedArrayOffset)
 DELEGATE_OPCODE(CheckMixedArrayOffset)
 DELEGATE_OPCODE(CheckArrayCOW)
+DELEGATE_OPCODE(ProfileDictOffset)
+DELEGATE_OPCODE(CheckDictOffset)
+DELEGATE_OPCODE(ProfileKeysetOffset)
+DELEGATE_OPCODE(CheckKeysetOffset)
 DELEGATE_OPCODE(ElemArray)
 DELEGATE_OPCODE(ElemArrayW)
 DELEGATE_OPCODE(ElemArrayD)
 DELEGATE_OPCODE(ElemArrayU)
 DELEGATE_OPCODE(ElemMixedArrayK)
+DELEGATE_OPCODE(ElemDict)
+DELEGATE_OPCODE(ElemDictW)
+DELEGATE_OPCODE(ElemDictD)
+DELEGATE_OPCODE(ElemDictU)
+DELEGATE_OPCODE(ElemDictK)
+DELEGATE_OPCODE(ElemKeyset)
+DELEGATE_OPCODE(ElemKeysetW)
+DELEGATE_OPCODE(ElemKeysetU)
+DELEGATE_OPCODE(ElemKeysetK)
 DELEGATE_OPCODE(ArrayGet)
-DELEGATE_OPCODE(MixedArrayGetK)
 DELEGATE_OPCODE(ArraySet)
 DELEGATE_OPCODE(ArraySetRef)
 DELEGATE_OPCODE(ArrayIsset)
 DELEGATE_OPCODE(ArrayIdx)
+DELEGATE_OPCODE(MixedArrayGetK)
+DELEGATE_OPCODE(DictGet)
+DELEGATE_OPCODE(DictGetQuiet)
+DELEGATE_OPCODE(DictGetK)
+DELEGATE_OPCODE(DictIsset)
+DELEGATE_OPCODE(DictEmptyElem)
+DELEGATE_OPCODE(DictSet)
+DELEGATE_OPCODE(DictSetRef)
+DELEGATE_OPCODE(DictIdx)
+DELEGATE_OPCODE(VecSet)
+DELEGATE_OPCODE(VecSetRef)
+DELEGATE_OPCODE(KeysetGet)
+DELEGATE_OPCODE(KeysetGetQuiet)
+DELEGATE_OPCODE(KeysetGetK)
+DELEGATE_OPCODE(SetNewElemKeyset)
+DELEGATE_OPCODE(KeysetIsset)
+DELEGATE_OPCODE(KeysetEmptyElem)
+DELEGATE_OPCODE(KeysetIdx)
 DELEGATE_OPCODE(MapGet)
 DELEGATE_OPCODE(MapSet)
 DELEGATE_OPCODE(MapIsset)
@@ -573,6 +643,7 @@ DELEGATE_OPCODE(RaiseUninitLoc)
 DELEGATE_OPCODE(RaiseWarning)
 DELEGATE_OPCODE(ThrowArithmeticError)
 DELEGATE_OPCODE(ThrowDivisionByZeroError)
+DELEGATE_OPCODE(ThrowInvalidArrayKey)
 DELEGATE_OPCODE(ThrowInvalidOperation);
 DELEGATE_OPCODE(ThrowOutOfBounds)
 
@@ -1025,26 +1096,27 @@ void CodeGenerator::cgCheckPackedArrayBounds(IRInstruction* inst) {
   v << jcc{CC_BE, sf, {label(inst->next()), label(inst->taken())}};
 }
 
-void CodeGenerator::cgLdPackedArrayElemAddr(IRInstruction* inst) {
-  auto const idx = inst->src(1);
-  auto const rArr = srcLoc(inst, 0).reg();
-  auto const rIdx = srcLoc(inst, 1).reg();
-  auto const dst = dstLoc(inst, 0).reg();
+Vptr CodeGenerator::emitPackedLayoutAddr(SSATmp* idx, Vloc idxLoc,
+                                         Vloc arrLoc) {
+  auto const rArr = arrLoc.reg();
+  auto const rIdx = idxLoc.reg();
   auto& v = vmain();
 
+  static_assert(sizeof(TypedValue) == 16, "");
+
   if (idx->hasConstVal()) {
-    auto const offset = sizeof(ArrayData) + idx->intVal() * sizeof(TypedValue);
+    auto const offset =
+      PackedArray::entriesOffset() + idx->intVal() * sizeof(TypedValue);
     if (deltaFits(offset, sz::dword)) {
-      v << lea{rArr[offset], dst};
-      return;
+      return rArr[offset];
     }
   }
 
-  static_assert(sizeof(TypedValue) == 16 && sizeof(ArrayData) == 16, "");
   /*
-   * This computes `rArr + rIdx * sizeof(TypedValue) + sizeof(ArrayData)`. The
-   * logic of `scaledIdx * 16` is split in the following two instructions, in
-   * order to save a byte in the shl instruction.
+   * This computes `rArr + rIdx * sizeof(TypedValue) +
+   * PackedArray::entriesOffset()`. The logic of `scaledIdx * 16` is split in
+   * the following two instructions, in order to save a byte in the shl
+   * instruction.
    *
    * TODO(#7728856): We should really move this into vasm-x64.cpp...
    */
@@ -1054,8 +1126,27 @@ void CodeGenerator::cgLdPackedArrayElemAddr(IRInstruction* inst) {
   v << movtql{rIdx, idxl};
   v << shlli{1, idxl, scaled_idxl, v.makeReg()};
   v << movzlq{scaled_idxl, scaled_idx};
-  v << lea{rArr[scaled_idx * int(sizeof(TypedValue) / 2) +
-                int(sizeof(ArrayData))], dst};
+  return rArr[scaled_idx * int(sizeof(TypedValue) / 2)
+              + PackedArray::entriesOffset()];
+}
+
+void CodeGenerator::cgLdPackedArrayElemAddr(IRInstruction* inst) {
+  auto const addr =
+    emitPackedLayoutAddr(inst->src(1), srcLoc(inst, 1), srcLoc(inst, 0));
+  vmain() << lea{addr, dstLoc(inst, 0).reg()};
+}
+
+
+void CodeGenerator::cgLdVecElem(IRInstruction* inst) {
+  auto const addr =
+    emitPackedLayoutAddr(inst->src(1), srcLoc(inst, 1), srcLoc(inst, 0));
+  loadTV(vmain(), inst->dst(), dstLoc(inst, 0), addr);
+}
+
+void CodeGenerator::cgLdVecElemAddr(IRInstruction* inst) {
+  auto const addr =
+    emitPackedLayoutAddr(inst->src(1), srcLoc(inst, 1), srcLoc(inst, 0));
+  vmain() << lea{addr, dstLoc(inst, 0).reg()};
 }
 
 void CodeGenerator::cgLdVectorSize(IRInstruction* inst) {
@@ -1279,6 +1370,40 @@ void CodeGenerator::cgAKExistsArr(IRInstruction* inst) {
   );
 }
 
+void CodeGenerator::cgAKExistsDict(IRInstruction* inst) {
+  auto const keyTy = inst->src(1)->type();
+  auto& v = vmain();
+
+  auto const target = (keyTy <= TInt)
+    ? CallSpec::direct(MixedArray::ExistsIntDict)
+    : CallSpec::direct(MixedArray::ExistsStrDict);
+
+  cgCallHelper(
+    v,
+    target,
+    callDest(inst),
+    SyncOptions::None,
+    argGroup(inst).ssa(0).ssa(1)
+  );
+}
+
+void CodeGenerator::cgAKExistsKeyset(IRInstruction* inst) {
+  auto const keyTy = inst->src(1)->type();
+  auto& v = vmain();
+
+  auto const target = (keyTy <= TInt)
+    ? CallSpec::direct(MixedArray::ExistsIntKeyset)
+    : CallSpec::direct(MixedArray::ExistsStrKeyset);
+
+  cgCallHelper(
+    v,
+    target,
+    callDest(inst),
+    SyncOptions::None,
+    argGroup(inst).ssa(0).ssa(1)
+  );
+}
+
 void CodeGenerator::cgAKExistsObj(IRInstruction* inst) {
   auto const keyTy = inst->src(1)->type();
   auto& v = vmain();
@@ -1341,6 +1466,19 @@ void CodeGenerator::cgNewStructArray(IRInstruction* inst) {
   );
 }
 
+void CodeGenerator::cgNewKeysetArray(IRInstruction* inst) {
+  auto const data = inst->extra<NewKeysetArray>();
+  cgCallHelper(
+    vmain(),
+    CallSpec::direct(MixedArray::MakeKeyset),
+    callDest(inst),
+    SyncOptions::Sync,
+    argGroup(inst)
+      .imm(data->size)
+      .addr(srcLoc(inst, 0).reg(), cellsToBytes(data->offset.offset))
+  );
+}
+
 void CodeGenerator::cgCountArray(IRInstruction* inst) {
   auto const baseReg = srcLoc(inst, 0).reg();
   auto const dstReg  = dstLoc(inst, 0).reg();
@@ -1365,11 +1503,28 @@ void CodeGenerator::cgCountArray(IRInstruction* inst) {
   );
 }
 
+void CodeGenerator::arrayLikeCountImpl(IRInstruction* inst) {
+  static_assert(ArrayData::sizeofSize() == 4, "");
+  vmain() << loadzlq{
+    srcLoc(inst, 0).reg()[ArrayData::offsetofSize()],
+    dstLoc(inst, 0).reg()
+  };
+}
+
 void CodeGenerator::cgCountArrayFast(IRInstruction* inst) {
-  auto const baseReg = srcLoc(inst, 0).reg();
-  auto const dstReg  = dstLoc(inst, 0).reg();
-  auto& v = vmain();
-  v << loadzlq{baseReg[ArrayData::offsetofSize()], dstReg};
+  arrayLikeCountImpl(inst);
+}
+
+void CodeGenerator::cgCountVec(IRInstruction* inst) {
+  arrayLikeCountImpl(inst);
+}
+
+void CodeGenerator::cgCountDict(IRInstruction* inst) {
+  arrayLikeCountImpl(inst);
+}
+
+void CodeGenerator::cgCountKeyset(IRInstruction* inst) {
+  arrayLikeCountImpl(inst);
 }
 
 void CodeGenerator::cgCountCollection(IRInstruction* inst) {
@@ -1379,18 +1534,18 @@ void CodeGenerator::cgCountCollection(IRInstruction* inst) {
   v << loadzlq{baseReg[collections::FAST_SIZE_OFFSET], dstReg};
 }
 
-void CodeGenerator::cgInitPackedArray(IRInstruction* inst) {
+void CodeGenerator::cgInitPackedLayoutArray(IRInstruction* inst) {
   auto const arrReg = srcLoc(inst, 0).reg();
-  auto const index = inst->extra<InitPackedArray>()->index;
+  auto const index = inst->extra<InitPackedLayoutArray>()->index;
 
   auto slotOffset = PackedArray::entriesOffset() + index * sizeof(TypedValue);
   storeTV(vmain(), arrReg[slotOffset], srcLoc(inst, 1), inst->src(1));
 }
 
-void CodeGenerator::cgInitPackedArrayLoop(IRInstruction* inst) {
+void CodeGenerator::cgInitPackedLayoutArrayLoop(IRInstruction* inst) {
   auto const arrReg = srcLoc(inst, 0).reg();
-  int const count = inst->extra<InitPackedArrayLoop>()->size;
-  auto const offset = inst->extra<InitPackedArrayLoop>()->offset;
+  int const count = inst->extra<InitPackedLayoutArrayLoop>()->size;
+  auto const offset = inst->extra<InitPackedLayoutArrayLoop>()->offset;
   auto const spIn = srcLoc(inst, 1).reg();
 
   auto& v = vmain();

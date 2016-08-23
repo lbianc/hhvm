@@ -582,6 +582,7 @@ struct RuntimeOption {
   F(bool, EnableGCTypeScan,            false)                           \
   F(uint32_t, GCSampleRate,                1)                           \
   F(uint32_t, JitSampleRate,               0)                           \
+  F(uint32_t, JitFilterLease,              1)                           \
   F(bool, DisableSomeRepoAuthNotices,  true)                            \
   F(uint32_t, InitialNamedEntityTableSize,  30000)                      \
   F(uint32_t, InitialStaticStringTableSize,                             \
@@ -595,6 +596,8 @@ struct RuntimeOption {
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
+  /* Profiling flags */                                                 \
+  F(bool, EnableReverseDataMap, false)                                  \
   /* PPC64 Option: minimum immediate size to use TOC */                 \
   F(uint16_t, ppc64minTOCImmSize,      64)                              \
   /* PPC64 Option: dump the number of elements stored in TOC */         \

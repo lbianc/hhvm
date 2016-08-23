@@ -69,8 +69,6 @@ uint32_t getRequestHeapFlags() {
  return mmapFlags;
 }
 
-static auto s_mmapFlags = getRequestHeapFlags();
-
 #ifdef USE_JEMALLOC
 bool MemoryManager::s_statsEnabled = false;
 size_t MemoryManager::s_cactiveLimitCeiling = 0;
@@ -206,8 +204,8 @@ MemoryManager::~MemoryManager() {
   if (debug) {
     // Check that every allocation in heap has been freed before destruction.
     forEachHeader([&](Header* h) {
-        assert(h->kind() == HeaderKind::Free);
-      });
+      assert(h->kind() == HeaderKind::Free);
+    });
   }
   // ~BigHeap releases its slabs/bigs.
 }
@@ -279,9 +277,6 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
     // This is only set by the jemalloc stats sync which we don't enable until
     // after this has been called.
     assert(m_stats.totalAlloc == 0);
-#ifdef USE_JEMALLOC
-    assert(m_stats.mallocDebt >= m_stats.capacity);
-#endif
 
     // The effect of this call is simply to ignore anything we've done *outside*
     // the MemoryManager allocator after we initialized to avoid attributing
@@ -425,8 +420,8 @@ void MemoryManager::refreshStatsImpl(MemoryUsageStats& stats) {
       stats.usage(), stats.totalAlloc);
   }
 #endif
-  assert(stats.maxUsage > 0);
-  if (live && stats.usage() > stats.maxUsage && m_couldOOM) {
+  assert(stats.limit > 0);
+  if (live && stats.usage() > stats.limit && m_couldOOM) {
     refreshStatsHelperExceeded();
   }
   if (stats.usage() > stats.peakUsage) {
@@ -795,7 +790,7 @@ inline void MemoryManager::splitTail(void* tail, uint32_t tailBytes,
  * slab list.  Return the newly allocated nbytes-sized block.
  */
 NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
-  if (UNLIKELY(m_stats.usage() > m_stats.maxUsage)) {
+  if (UNLIKELY(m_stats.usage() > m_stats.limit)) {
     refreshStats();
   }
   requestGC();
@@ -892,7 +887,7 @@ inline void MemoryManager::updateBigStats() {
   // was too large for one of the existing slabs. When we're not using jemalloc
   // this check won't do anything so avoid the extra overhead.
   if (debug) requestEagerGC();
-  if (use_jemalloc || UNLIKELY(m_stats.usage() > m_stats.maxUsage)) {
+  if (use_jemalloc || UNLIKELY(m_stats.usage() > m_stats.limit)) {
     refreshStats();
   }
 }
@@ -1256,8 +1251,8 @@ MemBlock BigHeap::resizeBig(void* ptr, size_t newsize) {
 Header* BigHeap::find(const void* p) {
   std::sort(std::begin(m_slabs), std::end(m_slabs),
     [] (const MemBlock& l, const MemBlock& r) {
-      assertx(static_cast<char*>(l.ptr) + l.size < r.ptr ||
-              static_cast<char*>(r.ptr) + r.size < l.ptr);
+      assertx(static_cast<char*>(l.ptr) + l.size <= r.ptr ||
+              static_cast<char*>(r.ptr) + r.size <= l.ptr);
       return l.ptr < r.ptr;
     }
   );

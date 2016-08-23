@@ -291,11 +291,14 @@ ArrayData* EmptyArray::AppendWithRef(ArrayData*, const Variant& v, bool copy) {
 //////////////////////////////////////////////////////////////////////
 
 ArrayData* EmptyArray::PlusEq(ArrayData*, const ArrayData* elems) {
+  if (!elems->isPHPArray()) throwInvalidAdditionException(elems);
   elems->incRefCount();
   return const_cast<ArrayData*>(elems);
 }
 
 ArrayData* EmptyArray::Merge(ArrayData*, const ArrayData* elems) {
+  if (!elems->isPHPArray()) throwInvalidMergeException(elems);
+
   // Packed arrays don't need renumbering, so don't make a copy.
   if (elems->isPackedLayout()) {
     elems->incRefCount();
@@ -324,15 +327,15 @@ ArrayData* EmptyArray::Prepend(ArrayData*, Cell v, bool) {
   return EmptyArray::MakePacked(v).first;
 }
 
-ArrayData* EmptyArray::ToDict(ArrayData*) {
+ArrayData* EmptyArray::ToDict(ArrayData*, bool) {
   return staticEmptyDictArray();
 }
 
-ArrayData* EmptyArray::ToVec(const ArrayData*) {
+ArrayData* EmptyArray::ToVec(ArrayData*, bool) {
   return staticEmptyVecArray();
 }
 
-ArrayData* EmptyArray::ToKeyset(ArrayData*) {
+ArrayData* EmptyArray::ToKeyset(ArrayData*, bool) {
   return staticEmptyKeysetArray();
 }
 
