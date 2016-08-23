@@ -124,6 +124,9 @@ private:
   // Check if m_ip points to the beginning of a li64 instruction (relaxed
   // constraint, only checks a part of it)
   bool isLi64Possible() const;
+  // Check if m_ip points to the beginning of a limmediate instruction (relaxed
+  // constraint, only checks a part of it)
+  bool isLimmediatePossible() const;
 
   uint8_t* m_ip;
   int64_t m_imm;
