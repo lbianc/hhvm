@@ -263,9 +263,6 @@ GeneralEffects may_reenter(const IRInstruction& inst, GeneralEffects x) {
   auto const may_reenter_is_ok =
     (inst.taken() && inst.taken()->isCatch()) ||
     inst.is(DecRef,
-            ConvArrToKeyset,
-            ConvVecToKeyset,
-            ConvDictToKeyset,
             ReleaseVVAndSkip,
             CIterFree,
             MIterFree,
@@ -1302,6 +1299,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LdStaticLoc:
   case LdClsCns:
   case CheckCtxThis:
+  case CheckFuncStatic:
   case CastCtxThis:
   case LdARNumParams:
   case LdRDSAddr:
@@ -1338,6 +1336,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ConvStrToInt:
   case ConvResToInt:
   case OrdStr:
+  case ChrInt:
   case CreateSSWH:
   case NewLikeArray:
   case CheckRefs:
@@ -1430,7 +1429,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case EagerSyncVMRegs:
   case ExtendsClass:
   case LdUnwinderValue:
-  case GetCtxFwdCall:
   case LdCtx:
   case LdCctx:
   case LdClosure:
@@ -1451,6 +1449,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LdClsMethodCacheCls:
   case LdClsMethodCacheFunc:
   case LdClsMethodFCacheFunc:
+  case FwdCtxStaticCall:
   case ProfileArrayKind:
   case ProfileSwitchDest:
   case LdFuncCachedSafe:
@@ -1467,7 +1466,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case LdWHResult:
   case LdWHState:
   case LookupClsRDS:
-  case GetCtxFwdCallDyn:
   case DbgTraceCall:
   case InitCtx:
   case PackMagicArgs:
@@ -1559,6 +1557,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case RaiseError:
   case RaiseNotice:
   case RaiseWarning:
+  case RaiseMissingThis:
   case ConvCellToStr:
   case ConvObjToStr:
   case Count:      // re-enters on CountableClass
@@ -1669,8 +1668,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case ConvArrToKeyset: // Decrefs input values
   case ConvVecToKeyset:
   case ConvDictToKeyset:
-    return may_reenter(inst,
-                       may_load_store(AElemAny, AEmpty));
+    return may_raise(inst, may_load_store(AElemAny, AEmpty));
 
   case ConvVecToArr:
   case ConvDictToArr:

@@ -29,6 +29,7 @@
 #include <folly/portability/SysTime.h>
 #include <folly/portability/Unistd.h>
 
+#include "hphp/util/atomic-vector.h"
 #include "hphp/util/build-info.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/text-util.h"
@@ -399,7 +400,7 @@ bool RuntimeOption::AutoTypecheck = true;
 // granular options instead. (It can't be a local since Config::Bind will take
 // and store a pointer to it.)
 static bool s_PHP7_master = false;
-bool RuntimeOption::PHP7_DeprecateOldStyleCtors = false;
+bool RuntimeOption::PHP7_DeprecationWarnings = false;
 bool RuntimeOption::PHP7_EngineExceptions = false;
 bool RuntimeOption::PHP7_IntSemantics = false;
 bool RuntimeOption::PHP7_LTR_assign = false;
@@ -492,9 +493,10 @@ const uint64_t kEvalVMStackElmsDefault =
  0x4000
 #endif
  ;
-const uint32_t kEvalVMInitialGlobalTableSizeDefault = 512;
-static const int kDefaultProfileInterpRequests = debug ? 1 : 11;
-static const uint64_t kJitRelocationSizeDefault = 1 << 20;
+
+constexpr uint32_t kEvalVMInitialGlobalTableSizeDefault = 512;
+constexpr int kDefaultProfileInterpRequests = debug ? 1 : 11;
+constexpr uint64_t kJitRelocationSizeDefault = 1 << 20;
 
 static const bool kJitTimerDefault =
 #ifdef ENABLE_JIT_TIMER_DEFAULT
@@ -555,6 +557,7 @@ int RuntimeOption::DebuggerDefaultRpcTimeout = 30;
 std::string RuntimeOption::DebuggerDefaultSandboxPath;
 std::string RuntimeOption::DebuggerStartupDocument;
 int RuntimeOption::DebuggerSignalTimeout = 1;
+std::string RuntimeOption::DebuggerAuthTokenScript;
 
 std::string RuntimeOption::SendmailPath = "sendmail -t -i";
 std::string RuntimeOption::MailForceExtraParameters;
@@ -1144,6 +1147,8 @@ void RuntimeOption::Load(
                    "Eval.Debugger.RPC.HostDomain");
       Config::Bind(DebuggerDefaultRpcTimeout, ini, config,
                    "Eval.Debugger.RPC.DefaultTimeout", 30);
+      Config::Bind(DebuggerAuthTokenScript, ini, config,
+                   "Eval.Debugger.Auth.TokenScript");
     }
   }
   {
@@ -1236,8 +1241,8 @@ void RuntimeOption::Load(
     // get-go, but threading that through turns out to be kind of annoying and
     // of questionable value, so just doing this for now.
     Config::Bind(s_PHP7_master, ini, config, "PHP7.all", false);
-    Config::Bind(PHP7_DeprecateOldStyleCtors, ini, config,
-                 "PHP7.DeprecateOldStyleCtors", s_PHP7_master);
+    Config::Bind(PHP7_DeprecationWarnings, ini, config,
+                 "PHP7.DeprecationWarnings", s_PHP7_master);
     Config::Bind(PHP7_EngineExceptions, ini, config, "PHP7.EngineExceptions",
                  s_PHP7_master);
     Config::Bind(PHP7_IntSemantics, ini, config, "PHP7.IntSemantics",
@@ -1767,6 +1772,11 @@ void RuntimeOption::Load(
   Config::Bind(CustomSettings, ini, config, "CustomSettings");
 
   refineStaticStringTableSize();
+
+  // Reconstruct AtomicVectors keyed by FuncId, making sure we haven't created
+  // any Funcs yet.
+  always_assert(Func::nextFuncId() == 0);
+  AtomicVectorInit::runAll();
 
 
   // **************************************************************************

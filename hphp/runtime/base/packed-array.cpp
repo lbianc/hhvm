@@ -54,7 +54,7 @@ PackedArray::VecInitializer PackedArray::s_initializer;
 //////////////////////////////////////////////////////////////////////
 
 bool PackedArray::checkInvariants(const ArrayData* arr) {
-  assert(arr->isPackedLayout());
+  assert(arr->hasPackedLayout());
   assert(arr->checkCount());
   assert(arr->m_size <= arr->cap());
   assert(arr->m_pos >= 0 && arr->m_pos <= arr->m_size);
@@ -905,7 +905,7 @@ PackedArray::SetRefStrVec(ArrayData* adIn, StringData* k, Variant&, bool) {
 }
 
 static void adjustMArrayIter(ArrayData* ad, ssize_t pos) {
-  assert(ad->isPackedLayout());
+  assert(ad->hasPackedLayout());
   for_each_strong_iterator([&] (MIterTable::Ent& miEnt) {
     if (miEnt.array != ad) return;
     auto const iter = miEnt.iter;
@@ -1281,15 +1281,6 @@ ArrayData* PackedArray::ToVec(ArrayData* adIn, bool copy) {
   assert(ad->hasExactlyOneRef());
   assert(checkInvariants(ad));
   return ad;
-}
-
-ArrayData* PackedArray::ToKeyset(ArrayData* ad, bool copy) {
-  assert(checkInvariants(ad));
-  if (ad->empty()) return staticEmptyKeysetArray();
-  auto const size = ad->getSize();
-  KeysetInit ai{size};
-  for (uint32_t i = 0; i < size; ++i) ai.add(i);
-  return ai.create();
 }
 
 ArrayData* PackedArray::ToVecVec(ArrayData* ad, bool) {

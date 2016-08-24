@@ -87,9 +87,6 @@ bool canDCE(IRInstruction* inst) {
   case ConvKeysetToVec:
   case ConvVecToDict:
   case ConvKeysetToDict:
-  case ConvArrToKeyset:
-  case ConvVecToKeyset:
-  case ConvDictToKeyset:
   case ConvClsToCctx:
   case NewColFromArray:
   case GtInt:
@@ -186,12 +183,11 @@ bool canDCE(IRInstruction* inst) {
   case CastCtxThis:
   case LdClsCtx:
   case LdClsCctx:
+  case FwdCtxStaticCall:
   case DefConst:
   case Conjure:
   case LdClsInitData:
   case LookupClsRDS:
-  case GetCtxFwdCallDyn:
-  case GetCtxFwdCall:
   case LdClsMethodCacheCls:
   case LdFuncVecLen:
   case LdClsMethod:
@@ -248,6 +244,7 @@ bool canDCE(IRInstruction* inst) {
   case LdUnwinderValue:
   case LdColArray:
   case OrdStr:
+  case ChrInt:
   case CheckRange:
   case LdARInvName:
   case PackMagicArgs:
@@ -318,6 +315,9 @@ bool canDCE(IRInstruction* inst) {
   case ConvArrToDict:
   case ConvObjToVec:
   case ConvObjToDict:
+  case ConvArrToKeyset:
+  case ConvVecToKeyset:
+  case ConvDictToKeyset:
   case ConvObjToKeyset:
   case GtObj:
   case GteObj:
@@ -361,6 +361,7 @@ bool canDCE(IRInstruction* inst) {
   case LdPairBase:
   case CheckRefInner:
   case CheckCtxThis:
+  case CheckFuncStatic:
   case LdClsCtor:
   case LdCls:
   case LdClsCached:
@@ -441,6 +442,7 @@ bool canDCE(IRInstruction* inst) {
   case RaiseMissingArg:
   case RaiseError:
   case RaiseWarning:
+  case RaiseMissingThis:
   case RaiseNotice:
   case RaiseArrayIndexNotice:
   case RaiseArrayKeyNotice:
