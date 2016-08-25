@@ -39,6 +39,8 @@
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
+/* using override */ using ppc64_asm::DecodedInstruction;
+
 namespace {
 
 TRACE_SET_MOD(hhir);
@@ -97,12 +99,12 @@ size_t relocateImpl(RelocationInfo& rel,
   try {
     while (src != end) {
       assertx(src < end);
-      ppc64_asm::DecodedInstruction di(src);
+      DecodedInstruction di(src);
       asm_count++;
 
       TCA dest = dest_block.frontier();
       dest_block.bytes(di.size(), src);
-      ppc64_asm::DecodedInstruction d2(dest, di.size());
+      DecodedInstruction d2(dest, di.size());
       if (di.isNearBranch()) {
         if (di.isBranch(ppc64_asm::AllowCond::OnlyUncond)) {
           jmp_dest = di.nearBranchTarget();
@@ -117,7 +119,7 @@ size_t relocateImpl(RelocationInfo& rel,
 
           // Near branch will be widen to Far branch. Update d2 in order to be
           // able to read more bytes than only the Near branch
-          d2 = ppc64_asm::DecodedInstruction(dest);
+          d2 = DecodedInstruction(dest);
           d2.widenBranch(new_target);
 
           // widening a branch makes the dest instruction bigger
@@ -228,10 +230,10 @@ size_t relocateImpl(RelocationInfo& rel,
       src = start;
       bool ok = true;
       while (src != end) {
-        ppc64_asm::DecodedInstruction di(src);
+        DecodedInstruction di(src);
         TCA dest = rel.adjustedAddressAfter(src);
         // Avoid set max_size as it would fail when a branch is widen.
-        ppc64_asm::DecodedInstruction d2(dest);
+        DecodedInstruction d2(dest);
         if (di.isNearBranch()) {
           TCA old_target = di.nearBranchTarget();
           TCA adjusted_target = rel.adjustedAddressAfter(old_target);
@@ -327,6 +329,43 @@ size_t relocateImpl(RelocationInfo& rel,
 
 }
 
+void adjustInstruction(RelocationInfo& rel, DecodedInstruction& di) {
+  if (di.isNearBranch()) {
+    /*
+     * A pointer into something that has been relocated needs to be
+     * updated.
+     */
+    if (TCA adjusted = rel.adjustedAddressAfter(di.nearBranchTarget())) {
+      if (!di.setNearBranchTarget(adjusted)) {
+        assertx(false && "Tried to patch near branch but it doesn't fit.");
+      }
+    }
+  } else if (di.isImmediate()) {
+    /*
+     * Similarly for addressImmediates - and see comment above
+     * for non-address immediates.
+     */
+    if (TCA adjusted = rel.adjustedAddressAfter((TCA)di.immediate())) {
+      if (!di.setImmediate((int64_t)adjusted)) {
+        always_assert(false && "Immediate couldn't be adjusted.");
+      }
+    }
+  } else if (di.isFarBranch()) {
+    if (TCA adjusted = rel.adjustedAddressAfter(di.farBranchTarget())) {
+      bool keep_nops =
+#ifdef REMOVE_FAR_BRANCHES_NOPS
+        rel.isSmashableRelocation(start);
+#else
+      true
+#endif
+        ;
+      if (!di.setFarBranchTarget(adjusted, keep_nops)) {
+        always_assert(false && "Not an expected Far branch.");
+      }
+    }
+  }
+}
+
 /*
  * This should be called after calling relocate on all relevant ranges. It
  * will adjust all references into the original src ranges to point into the
@@ -355,46 +394,9 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
   }
   while (start != end) {
     assertx(start < end);
-    ppc64_asm::DecodedInstruction di(start);
+    DecodedInstruction di(start);
 
-    if (di.isNearBranch()) {
-      /*
-       * A pointer into something that has been relocated needs to be
-       * updated.
-       */
-      if (TCA adjusted = rel.adjustedAddressAfter(di.nearBranchTarget())) {
-        if (!di.setNearBranchTarget(adjusted)) {
-          assertx(false && "Tried to patch near branch but it doesn't fit.");
-        }
-      }
-    }
-
-    if (di.isImmediate()) {
-      /*
-       * Similarly for addressImmediates - and see comment above
-       * for non-address immediates.
-       */
-      if (TCA adjusted = rel.adjustedAddressAfter((TCA)di.immediate())) {
-        if (!di.setImmediate((int64_t)adjusted)) {
-          always_assert(false && "Immediate couldn't be adjusted.");
-        }
-      }
-    }
-
-    if (di.isFarBranch()) {
-      if (TCA adjusted = rel.adjustedAddressAfter(di.farBranchTarget())) {
-        bool keep_nops =
-#ifdef REMOVE_FAR_BRANCHES_NOPS
-          rel.isSmashableRelocation(start);
-#else
-          true
-#endif
-          ;
-        if (!di.setFarBranchTarget(adjusted, keep_nops)) {
-          always_assert(false && "Not an expected Far branch.");
-        }
-      }
-    }
+    adjustInstruction(rel, di);
 
     start += di.size();
 
@@ -532,16 +534,11 @@ void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
     /*
      * The stubs are terminated by a trap. Check for it.
      */
-    for (auto di = ppc64_asm::DecodedInstruction(addr); !di.isException(); ) {
-      if (di.isNearBranch()) {
-        if (TCA adjusted = rel.adjustedAddressAfter(di.nearBranchTarget())) {
-          if (!di.setNearBranchTarget(adjusted)) {
-            assertx(false && "Tried to patch near branch but it doesn't fit.");
-          }
-        }
-      }
+    for (auto di = DecodedInstruction(addr); !di.isException(); ) {
+      adjustInstruction(rel, di);
+
       addr += di.size();
-      di = ppc64_asm::DecodedInstruction(addr);
+      di = DecodedInstruction(addr);
     }
   }
 
@@ -555,7 +552,7 @@ void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
 void findFixups(TCA start, TCA end, CGMeta& meta) {
   while (start != end) {
     assert(start < end);
-    ppc64_asm::DecodedInstruction di(start);
+    DecodedInstruction di(start);
     start += di.size();
 
     if (di.isCall()) {
