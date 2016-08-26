@@ -71,6 +71,7 @@ struct DecodedInstruction {
   bool shrinkBranch();
   void widenBranch(uint8_t* target);
 
+  uint8_t* ip() const           { return m_ip; }
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }
   bool isNop() const            { return m_dinfo.isNop(); }
