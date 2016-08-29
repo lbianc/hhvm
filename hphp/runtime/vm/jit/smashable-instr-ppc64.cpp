@@ -45,7 +45,7 @@ using ppc64_asm::Assembler;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, fixups, li64, d, imm, true);
+  return EMIT_BODY(cb, fixups, limmediate, d, imm, true);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
@@ -56,7 +56,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 
   // don't use cmpqim because of smashableCmpqImm implementation. A "load 32bits
   // immediate" is mandatory
-  a.li32 (rfuncln(), imm);
+  a.limmediate (rfuncln(), imm);
   a.lwz  (rAsm, r[disp]); // base + displacement
   a.extsw(rAsm, rAsm);
   a.cmpd (rfuncln(), rAsm);
@@ -103,7 +103,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
   const ppc64_asm::DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
-  a.li32(reg, imm);
+  a.limmediate(reg, imm);
 }
 
 void smashCall(TCA inst, TCA target) {
@@ -118,7 +118,7 @@ void smashCall(TCA inst, TCA target) {
 
   a.setFrontier(inst);
 
-  a.li64(rfuncentry(), reinterpret_cast<uint64_t>(target), true);
+  a.limmediate(rfuncentry(), reinterpret_cast<uint64_t>(target), true);
 }
 
 void smashJmp(TCA inst, TCA target) {

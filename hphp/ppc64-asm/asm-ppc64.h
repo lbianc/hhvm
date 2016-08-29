@@ -241,9 +241,7 @@ public:
 
   VMTOC operator=(VMTOC const&) = delete;
 
-  void setTOCDataBlock(HPHP::DataBlock *db){
-    m_tocvector = db;
-  }
+  void setTOCDataBlock(HPHP::DataBlock *db);
 
   /* push a 64 bit element into the stack and return its index */
   int64_t pushElem(int64_t elem);
@@ -1896,6 +1894,9 @@ struct Assembler {
 //////////////////////////////////////////////////////////////////////
   // Auxiliary for loading immediates in the best way
   void limmediate(const Reg64& rt, int64_t imm64, bool fixedSize = false);
+
+  void loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
+      uint64_t offset, bool fixedSize, bool fits32);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);

@@ -588,10 +588,10 @@ void Vgen::emit(const ldimmb& i) {
 
 void Vgen::emit(const ldimml& i) {
   if (i.d.isGP()) {
-    a.li32(i.d, i.s.l());
+    a.limmediate(i.d, i.s.l());
   } else {
     assertx(i.d.isSIMD());
-    a.li32(rAsm, i.s.l());
+    a.limmediate(rAsm, i.s.l());
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
@@ -929,7 +929,7 @@ void Vgen::emit(const testqi& i) {
   if (i.s0.fits(sz::word)) {
     a.li(rAsm, i.s0);
   } else {
-    a.li32(rAsm, i.s0.l());
+    a.limmediate(rAsm, i.s0.l());
   }
   emit(testq{rAsm, i.s1, i.sf});
 }

@@ -69,12 +69,29 @@ int64_t VMTOC::allocTOC (int32_t target, bool align) {
 
   HPHP::Address addr = m_tocvector->frontier();
   while (align && reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
-    m_tocvector->dword(reinterpret_cast<int32_t>(0xF0F0));
+    uint8_t f0 = 0xf0;
+    m_tocvector->byte(reinterpret_cast<uint8_t>(f0));
     addr = m_tocvector->frontier();
   }
 
+  if (align) always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
+
   m_tocvector->dword(reinterpret_cast<int32_t>(target));
   return addr - (m_tocvector->base() + INT16_MAX + 1);
+}
+
+void VMTOC::setTOCDataBlock(HPHP::DataBlock *db) {
+  if(m_tocvector == nullptr) {
+     m_tocvector = db;
+
+    HPHP::Address addr = m_tocvector->frontier();
+    while (reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
+      uint8_t f0 = 0xf0;
+      m_tocvector->byte(reinterpret_cast<uint8_t>(f0));
+      addr = m_tocvector->frontier();
+    }
+  }
+  return;
 }
 
 void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
@@ -945,6 +962,20 @@ void Assembler::li32(const Reg64& rt, int32_t imm32) {
   }
 }
 
+void Assembler::loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
+      uint64_t offset, bool fixedSize, bool fits32) {
+  if (fits32) {
+    Assembler::lwz(rt,rttoc[offset]);
+  }
+  else {
+    Assembler::ld(rt, rttoc[offset]);
+  }
+  if (fixedSize) {
+    emitNop(3 * instr_size_in_bytes);
+  }
+  return;
+}
+
 void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
   always_assert(HPHP::RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
     HPHP::RuntimeOption::Evalppc64minTOCImmSize <= 64);
@@ -958,9 +989,9 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
     return;
   }
 
-  bool fits32 = fits(imm64, 32);
+  bool fits32 = HPHP::RuntimeOption::Evalppc64useTOCLwz && fits(imm64, 32);
   int64_t TOCoffset;
-  if (HPHP::RuntimeOption::Evalppc64useTOCLwz && fits32) {
+  if (fits32) {
     TOCoffset = VMTOC::getInstance().pushElem(
         static_cast<int32_t>(0xffffffff & imm64));
   }
@@ -968,29 +999,15 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
     TOCoffset = VMTOC::getInstance().pushElem(imm64);
   }
 
-  auto loadTOC = [&](const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
-      uint64_t offset, bool fixedSize, bool fits32) {
-
-    if (HPHP::RuntimeOption::Evalppc64useTOCLwz && fits32) {
-      lwz(rt,rttoc[offset]);
-    }
-    else {
-      ld(rt, rttoc[offset]);
-    }
-    if (fixedSize) {
-      emitNop(3 * instr_size_in_bytes);
-    }
-  };
-
   if (TOCoffset > INT16_MAX) {
     int16_t complement = 0;
     // If last four bytes is still bigger than a signed 16bits, uses as two complement.
     if ((TOCoffset & UINT16_MAX) > INT16_MAX) complement = 1;
-    addis(Reg64(26), Reg64(2), static_cast<int16_t>((TOCoffset >> 16) + complement));
-    loadTOC(rt, Reg64(26), imm64, TOCoffset & UINT16_MAX, fixedSize, fits32);
+    addis(reg::r26, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
+    loadTOC(rt, reg::r26, imm64, TOCoffset & UINT16_MAX, fixedSize, fits32);
   }
   else {
-    loadTOC(rt, Reg64(2), imm64, TOCoffset, fixedSize, fits32);
+    loadTOC(rt, reg::r2, imm64, TOCoffset, fixedSize, fits32);
     if (fixedSize) emitNop(1 * instr_size_in_bytes);
   }
 
