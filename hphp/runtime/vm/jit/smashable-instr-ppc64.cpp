@@ -129,7 +129,7 @@ void smashJmp(TCA inst, TCA target) {
   if (target > inst && target - inst <= smashableJmpLen()) {
     a.emitNop(target - inst);
   } else {
-    a.branchAuto(target);
+    a.branchFar(target);
   }
 }
 
@@ -140,7 +140,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
     auto& cb = mcg->code().blockFor(inst);
     CodeCursor cursor { cb, inst };
     Assembler a { cb };
-    a.branchAuto(target, cc);
+    a.branchFar(target, cc);
   }
 }
 
