@@ -993,7 +993,7 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
   int64_t TOCoffset;
   if (fits32) {
     TOCoffset = VMTOC::getInstance().pushElem(
-        static_cast<int32_t>(0xffffffff & imm64));
+        static_cast<int32_t>(UINT32_MAX & imm64));
   }
   else {
     TOCoffset = VMTOC::getInstance().pushElem(imm64);

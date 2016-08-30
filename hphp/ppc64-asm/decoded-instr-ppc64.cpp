@@ -24,7 +24,11 @@
 #include "hphp/util/data-block.h"
 
 #ifndef MIN
-#define MIN(x,y)        (((x) < (y)) ? (x) : (y))
+#define MIN(a, b)       (((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a, b)       (((a) > (b)) ? (a) : (b))
 #endif
 
 namespace ppc64_asm {
@@ -162,7 +166,6 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
       return n < bytes;
   };
 
-#define MAX(a, b)    (((a) > (b)) ? (a) : (b))
   auto branch_size = ((ac == AllowCond::OnlyCond)
       ? Assembler::kJccLen
       : ((ac == AllowCond::OnlyUncond)
@@ -170,7 +173,6 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
         : MAX(Assembler::kCallLen, Assembler::kJccLen)
         )
       );
-#undef MAX
 
   // Search for a register branch instruction like bctr. Return when found.
   for (ret.m_offset = 0;
@@ -412,10 +414,7 @@ bool DecodedInstruction::isLimmediatePossible() const {
   if (m_dinfo.isLd(true) || m_dinfo.isLwz(true) || m_dinfo.isAddis(true)) {
     return true;
   }
-  else {
-    return isLi64Possible();
-  }
-  return false;
+  return isLi64Possible();
 }
 
 bool DecodedInstruction::isLi64Possible() const {
