@@ -687,7 +687,7 @@ void Vgen::emit(const jmp& i) {
   jmps.push_back({a.frontier(), i.target});
 
   // offset to be determined by a.patchBranch
-  a.branchAuto(0x0);
+  a.branchAuto(reinterpret_cast<CodeAddress>(-1));
 }
 
 void Vgen::emit(const jmpr& i) {
@@ -705,7 +705,7 @@ void Vgen::emit(const jcc& i) {
     jccs.push_back({a.frontier(), taken});
 
     // offset to be determined by a.patchBranch
-    a.branchAuto(0x0, i.cc);
+    a.branchAuto(reinterpret_cast<CodeAddress>(-1), i.cc);
   }
   emit(jmp{i.targets[0]});
 }
