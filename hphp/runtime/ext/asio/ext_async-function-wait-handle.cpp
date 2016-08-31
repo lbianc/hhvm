@@ -38,7 +38,7 @@ c_AsyncFunctionWaitHandle::~c_AsyncFunctionWaitHandle() {
   }
 
   assert(!isRunning());
-  frame_free_locals_inl_no_hook<false>(actRec(), actRec()->func()->numLocals());
+  frame_free_locals_inl_no_hook(actRec(), actRec()->func()->numLocals());
   decRefObj(m_children[0].getChild());
 }
 
@@ -61,8 +61,7 @@ c_AsyncFunctionWaitHandle::Create(const ActRec* fp,
   assert(!child->isFinished());
 
   const size_t frameSize = Resumable::getFrameSize(numSlots);
-  const size_t totalSize = sizeof(ResumableNode) + frameSize +
-                           sizeof(Resumable) +
+  const size_t totalSize = sizeof(NativeNode) + frameSize + sizeof(Resumable) +
                            sizeof(c_AsyncFunctionWaitHandle);
   auto const resumable = Resumable::Create(frameSize, totalSize);
   resumable->initialize<false, mayUseVV>(fp,
@@ -208,8 +207,9 @@ String c_AsyncFunctionWaitHandle::getName() {
     case STATE_READY:
     case STATE_RUNNING: {
       auto func = actRec()->func();
-      if (!actRec()->getThisOrClass() ||
-          func->cls()->attrs() & AttrNoOverride) {
+      if (!func->cls() ||
+          func->cls()->attrs() & AttrNoOverride ||
+          actRec()->localsDecRefd()) {
         auto name = func->fullName();
         if (func->isClosureBody()) {
           const char* p = strchr(name->data(), ':');
@@ -223,25 +223,18 @@ String c_AsyncFunctionWaitHandle::getName() {
         }
         return String{const_cast<StringData*>(name)};
       }
-      String funcName;
-      if (actRec()->func()->isClosureBody()) {
-        // Can we do better than this?
-        funcName = s__closure_;
-      } else {
-        funcName = const_cast<StringData*>(actRec()->func()->name());
+
+      auto const cls = actRec()->hasThis() ?
+        actRec()->getThis()->getVMClass() :
+        actRec()->getClass();
+
+      if (cls == func->cls() && !func->isClosureBody()) {
+        return String{const_cast<StringData*>(func->fullName())};
       }
 
-      String clsName;
-      if (actRec()->hasThis()) {
-        clsName = const_cast<StringData*>(actRec()->getThis()->
-                                          getVMClass()->name());
-      } else if (actRec()->hasClass()) {
-        clsName = const_cast<StringData*>(actRec()->getClass()->name());
-      } else {
-        return funcName;
-      }
+      StrNR funcName(func->isClosureBody() ? s__closure_.get() : func->name());
 
-      return concat3(clsName, "::", funcName);
+      return concat3(cls->nameStr(), "::", funcName);
     }
 
     default:

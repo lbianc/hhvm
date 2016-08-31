@@ -165,9 +165,10 @@ private:
     auto h = reinterpret_cast<const Header*>(p);
     assert(h &&
            h->kind() <= HeaderKind::BigMalloc &&
-           h->kind() != HeaderKind::ResumableFrame &&
+           h->kind() != HeaderKind::AsyncFuncFrame &&
            h->kind() != HeaderKind::NativeData);
     work_.push_back(h);
+    max_worklist_ = std::max(max_worklist_, work_.size());
   }
 
   // Whether the object with the given type-index should be recorded as an
@@ -181,6 +182,7 @@ public:
   Counter allocd_, marked_, ambig_, freed_, unknown_; // bytes
   Counter cscanned_roots_, cscanned_; // bytes
   size_t init_us_, initfree_us_, roots_us_, mark_us_, unknown_us_, sweep_us_;
+  size_t max_worklist_{0}; // max size of work_
 private:
   PtrMap ptrs_;
   type_scan::Scanner type_scanner_;
@@ -194,7 +196,7 @@ inline bool Marker::mark(const void* p, GCBits marks) {
   assert(p && ptrs_.isHeader(p));
   auto h = static_cast<const Header*>(p);
   assert(h->kind() <= HeaderKind::BigMalloc &&
-         h->kind() != HeaderKind::ResumableObj);
+         h->kind() != HeaderKind::AsyncFuncWH);
   auto old_marks = h->hdr_.marks;
   h->hdr_.marks = old_marks | marks;
   return old_marks == GCBits::Unmarked;
@@ -209,17 +211,15 @@ void Marker::operator()(const ObjectData* p) {
   if (!p) return;
   assert(isObjectKind(p->headerKind()));
   auto kind = p->headerKind();
-  if (kind == HeaderKind::ResumableObj) {
-    // Resumable object, prefixed by a ResumableNode header, which is what
-    // we need to mark.
-    // [ResumableNode][locals][Resumable][ObjectData<ResumableObj>]
+  if (kind == HeaderKind::AsyncFuncWH) {
+    // [NativeNode][locals][Resumable][c_AsyncFunctionWaitHandle]
     auto r = Resumable::FromObj(p);
     auto frame = reinterpret_cast<const TypedValue*>(r) -
                  r->actRec()->func()->numSlotsInFrame();
-    auto node = reinterpret_cast<const ResumableNode*>(frame) - 1;
-    assert(node->hdr.kind == HeaderKind::ResumableFrame);
+    auto node = reinterpret_cast<const NativeNode*>(frame) - 1;
+    assert(node->hdr.kind == HeaderKind::AsyncFuncFrame);
     if (mark(node)) {
-      // mark the ResumableFrame prefix, but enqueue the ObjectData* to scan
+      // mark the AsyncFuncFrame prefix, but enqueue the ObjectData* to scan
       enqueue(p);
     }
     assert(!p->getVMClass()->getNativeDataInfo());
@@ -374,8 +374,8 @@ void Marker::checkedEnqueue(const void* p, GCBits bits) {
       assert(!h->obj_.getAttribute(ObjectData::HasNativeData));
       enqueue(h);
       break;
-    case HeaderKind::ResumableFrame:
-      enqueue(h->resumableObj());
+    case HeaderKind::AsyncFuncFrame:
+      enqueue(h->asyncFuncWH());
       break;
     case HeaderKind::NativeData:
       enqueue(h->nativeObj());
@@ -383,7 +383,7 @@ void Marker::checkedEnqueue(const void* p, GCBits bits) {
     case HeaderKind::String:
       // nothing to queue since strings don't have pointers
       break;
-    case HeaderKind::ResumableObj:
+    case HeaderKind::AsyncFuncWH:
     case HeaderKind::BigObj:
     case HeaderKind::Free:
     case HeaderKind::Hole:
@@ -461,10 +461,10 @@ NEVER_INLINE void Marker::init() {
                "object with NativeData from forEachHeader");
         ptrs_.insert(h);
         break;
-      case HeaderKind::ResumableFrame: {
+      case HeaderKind::AsyncFuncFrame: {
         // Pointers to either the frame or object will be mapped to the frame.
         ptrs_.insert(h);
-        auto obj = reinterpret_cast<const Header*>(h->resumableObj());
+        auto obj = reinterpret_cast<const Header*>(h->asyncFuncWH());
         obj->hdr_.marks = GCBits::Unmarked;
         break;
       }
@@ -483,9 +483,9 @@ NEVER_INLINE void Marker::init() {
           unknown_objects_.emplace_back(h);
         }
         break;
-      case HeaderKind::ResumableObj:
-        // ResumableObj should not be encountered on their own, they should
-        // always be prefixed by a ResumableFrame allocation.
+      case HeaderKind::AsyncFuncWH:
+        // AsyncFuncWH should not be encountered on their own while scanning.
+        // They should always be prefixed by an AsyncFuncFrame allocation.
       case HeaderKind::Free:
       case HeaderKind::Hole:
       case HeaderKind::BigObj:
@@ -612,7 +612,7 @@ DEBUG_ONLY bool check_sweep_header(const Header* h) {
       // objects; should not have native-data
       assert(!h->obj_.getAttribute(ObjectData::HasNativeData));
       break;
-    case HeaderKind::ResumableFrame:
+    case HeaderKind::AsyncFuncFrame:
     case HeaderKind::NativeData:
       // not counted but marked when embedded object is marked
       break;
@@ -624,7 +624,7 @@ DEBUG_ONLY bool check_sweep_header(const Header* h) {
       // free memory; these should not be marked.
       assert(!(h->hdr_.marks & GCBits::Mark));
       break;
-    case HeaderKind::ResumableObj:
+    case HeaderKind::AsyncFuncWH:
     case HeaderKind::BigObj:
     case HeaderKind::Hole:
       // These should never be encountered because they don't represent
@@ -679,7 +679,7 @@ NEVER_INLINE void Marker::sweep() {
       case HeaderKind::ImmVector:
       case HeaderKind::ImmMap:
       case HeaderKind::ImmSet:
-      case HeaderKind::ResumableFrame:
+      case HeaderKind::AsyncFuncFrame:
       case HeaderKind::NativeData: {
         freed_ += h_size;
         auto obj = h->obj();
@@ -707,7 +707,7 @@ NEVER_INLINE void Marker::sweep() {
         // should not be in ptrmap; fall through to assert
       case HeaderKind::Hole:
       case HeaderKind::BigObj:
-      case HeaderKind::ResumableObj:
+      case HeaderKind::AsyncFuncWH:
         assert(false && "skipped by forEachHeader()");
         break;
     }
@@ -812,6 +812,7 @@ void logCollection(const char* phase, const Marker& mkr) {
   sample.setInt("cscanned_roots", mkr.cscanned_roots_.bytes);
   sample.setInt("cscanned_heap",
                 mkr.cscanned_.bytes - mkr.cscanned_roots_.bytes);
+  sample.setInt("max_worklist", mkr.max_worklist_);
   StructuredLog::log("hhvm_gc", sample);
 }
 

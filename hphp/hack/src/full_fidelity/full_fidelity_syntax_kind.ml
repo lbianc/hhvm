@@ -69,6 +69,9 @@ type t =
 | SimpleInitializer
 
 (* Expressions *)
+| MemberSelectionExpression
+| SafeMemberSelectionExpression
+| ScopeResolutionExpression
 | YieldExpression
 | PrintExpression
 | CastExpression
@@ -101,6 +104,7 @@ type t =
 | XHPOpen
 | XHPAttribute
 | XHPClose
+| XHPClassAttributeDeclaration
 
 (* Types *)
 | SimpleTypeSpecifier
@@ -122,6 +126,9 @@ let to_string kind =
   match kind with
   | Missing -> "missing"
   | Token -> "token"
+  | MemberSelectionExpression -> "member_selection_expression"
+  | SafeMemberSelectionExpression -> "safe_member_selection_expression"
+  | ScopeResolutionExpression -> "scope_resolution_expression"
   | YieldExpression -> "yield_expression"
   | PrintExpression -> "print_expression"
   | CastExpression -> "cast_expression"
@@ -220,3 +227,4 @@ let to_string kind =
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"
   | XHPClose -> "xhp_close"
+  | XHPClassAttributeDeclaration -> "xhp_class_attribute_declaration"

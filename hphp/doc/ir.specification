@@ -757,6 +757,11 @@ To string conversions:
 
   Checks if two Func values are equal.
 
+| EqStrPtr,                    D(Bool), S(Str) S(Str),                    NF
+
+  Checks if two string values represent the same underlying string. That is,
+  that they point at the same underlying storage.
+
 | InstanceOf, D(Bool), S(Cls) S(Cls|Nullptr), NF
 
   Sets D based on whether S0 is a descendant of the class, interface, or trait
@@ -1251,10 +1256,12 @@ To string conversions:
 
   Load the name of the Class* in S0.
 
-| LdFunc, D(Func), S(Str), CRc|Er
+| LdFunc<offset>, ND, S(Str) S(StkPtr) S(FramePtr), Er
 
-  Loads the Func whose name is S0. Fatal if the named function is not defined,
-  and the function autoloader fails to define it.
+  Loads the Func whose name is S0 into the partially constructed ActRec pointed
+  to by S1 + `offset` (in cells). Also populate the m_this/m_cls field if
+  necessary.  Fatal if the named function is not defined, and the autoloader
+  fails to define it.
 
 | LdFuncCached<funcName>, D(Func), NA, Er
 

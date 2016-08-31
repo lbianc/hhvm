@@ -90,7 +90,11 @@ let monitor_daemon_main (options: ServerArgs.options) =
 
   Relative_path.set_path_prefix Relative_path.Root www_root;
 
-  let config = ServerConfig.(sharedmem_config (load filename options)) in
+  let config, local_config  =
+    ServerConfig.(load filename options) in
+  let config = ServerConfig.(sharedmem_config config) in
+  HackEventLogger.set_lazy_decl
+    local_config.ServerLocalConfig.lazy_decl;
   let handle = SharedMem.init config in
   let first_init = ref true in
 
@@ -112,7 +116,9 @@ let monitor_daemon_main (options: ServerArgs.options) =
     ServerMonitor.start_monitoring ~waiting_client ServerMonitorUtils.({
       socket_file = ServerFiles.socket_file www_root;
       lock_file = ServerFiles.lock_file www_root;
-      log_file = ServerFiles.log_link www_root;
+      server_log_file = ServerFiles.log_link www_root;
+      monitor_log_file = ServerFiles.monitor_log_link www_root;
+      load_script_log_file = ServerFiles.load_log www_root;
     }) hh_server_monitor_starter
 
 let daemon_entry =

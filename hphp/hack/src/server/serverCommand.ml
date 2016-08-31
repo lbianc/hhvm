@@ -10,14 +10,13 @@
 
 open Utils
 open ServerCommandTypes
-open ServerEnv
 
 module TLazyHeap = Typing_lazy_heap
 
 (****************************************************************************)
 (* Called by the client *)
 (****************************************************************************)
-let rpc : type a. Timeout.in_channel * out_channel -> a ServerRpc.t -> a
+let rpc : type a. Timeout.in_channel * out_channel -> a t -> a
 = fun (_, oc) cmd ->
   Marshal.to_channel oc (Rpc cmd) [];
   flush oc;
@@ -148,15 +147,6 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
           )
       end)
 
-let get_persistent_fds env =
-  match env.persistent_client_fd with
-  | Some fd -> fd
-  | None ->
-    failwith ("Persistent channel not found!")
-
-let send_response_to_client fd response =
-  Marshal_tools.to_fd_with_preamble fd response
-
 let handle genv env client =
   let msg = ClientProvider.read_client_msg client in
   match msg with
@@ -166,10 +156,10 @@ let handle genv env client =
       let cmd_string = ServerRpc.to_string cmd in
       HackEventLogger.handled_command cmd_string t;
       ClientProvider.send_response_to_client client response;
-      if cmd = ServerRpc.DISCONNECT ||
-          not @@ (ClientProvider.is_persistent client env)
+      if cmd = ServerCommandTypes.DISCONNECT ||
+          not @@ (ClientProvider.is_persistent client)
         then ClientProvider.shutdown_client client;
-      if cmd = ServerRpc.KILL then ServerUtils.die_nicely ();
+      if cmd = ServerCommandTypes.KILL then ServerUtils.die_nicely ();
       new_env
   | Stream cmd ->
       let ic, oc = ClientProvider.get_channels client in

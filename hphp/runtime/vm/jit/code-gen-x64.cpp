@@ -355,6 +355,7 @@ DELEGATE_OPCODE(NeqRes)
 DELEGATE_OPCODE(CmpRes);
 DELEGATE_OPCODE(EqFunc)
 DELEGATE_OPCODE(DbgAssertFunc)
+DELEGATE_OPCODE(EqStrPtr)
 
 DELEGATE_OPCODE(EqCls)
 DELEGATE_OPCODE(InstanceOf)
@@ -1394,8 +1395,8 @@ void CodeGenerator::cgAKExistsKeyset(IRInstruction* inst) {
   auto& v = vmain();
 
   auto const target = (keyTy <= TInt)
-    ? CallSpec::direct(MixedArray::ExistsIntKeyset)
-    : CallSpec::direct(MixedArray::ExistsStrKeyset);
+    ? CallSpec::direct(SetArray::ExistsInt)
+    : CallSpec::direct(SetArray::ExistsStr);
 
   cgCallHelper(
     v,
@@ -1472,7 +1473,7 @@ void CodeGenerator::cgNewKeysetArray(IRInstruction* inst) {
   auto const data = inst->extra<NewKeysetArray>();
   cgCallHelper(
     vmain(),
-    CallSpec::direct(MixedArray::MakeKeyset),
+    CallSpec::direct(SetArray::MakeSet),
     callDest(inst),
     SyncOptions::Sync,
     argGroup(inst)

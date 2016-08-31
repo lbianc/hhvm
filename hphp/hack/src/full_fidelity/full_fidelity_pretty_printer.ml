@@ -260,6 +260,11 @@ let rec get_doc node =
     let right = get_doc (classish_body_right_brace x) in
     let body = get_doc (classish_body_elements x) in
     indent_block_no_space left body right indt
+  | XHPClassAttributeDeclaration x ->
+    let attr = get_doc x.xhp_attr_token in
+    let attrs = get_doc x.xhp_attr_list in
+    let semi = get_doc x.xhp_attr_semicolon in
+    group_doc (attr ^| attrs ^^^ semi)
   | TraitUse x ->
     let use = get_doc (trait_use_token x) in
     let name_list = get_doc (trait_use_name_list x) in
@@ -565,6 +570,17 @@ let rec get_doc node =
     let start_block = indent_block_no_space left_part expr right indt in
     handle_switch start_block x
     (* group_doc (start_block ^| statement) *)
+  | ScopeResolutionExpression x ->
+    let q = get_doc x.scope_resolution_qualifier in
+    let o = get_doc x.scope_resolution_operator in
+    let n = get_doc x.scope_resolution_name in
+    group_doc (q ^^^ o ^^^ n)
+  | MemberSelectionExpression x
+  | SafeMemberSelectionExpression x ->
+    let ob = get_doc x.member_object in
+    let op = get_doc x.member_operator in
+    let nm = get_doc x.member_name in
+    group_doc (ob ^^^ op ^^^ nm)
   | YieldExpression x ->
     let y = get_doc x.yield_token in
     let o = get_doc x.yield_operand in

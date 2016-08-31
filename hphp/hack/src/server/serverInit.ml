@@ -200,7 +200,7 @@ let indexing genv =
 
 let parsing genv env ~get_next t =
   let files_info, errorl, failed =
-    Parsing_service.go genv.workers SMap.empty ~get_next in
+    Parsing_service.go genv.workers Relative_path.Map.empty ~get_next in
   let files_info = Relative_path.Map.union files_info env.files_info in
   let hs = SharedMem.heap_size () in
   Hh_logger.log "Heap size: %d" hs;
@@ -358,7 +358,6 @@ let init ?load_mini_script genv =
   (* Log lazy declarations *)
   let lazy_decl = genv.local_config.SLC.lazy_decl
     && Option.is_none (ServerArgs.ai_mode genv.options) in
-  HackEventLogger.set_lazy_decl lazy_decl;
   let env = ServerEnvBuild.make_env genv.config in
   let root = ServerArgs.root genv.options in
 
@@ -384,7 +383,7 @@ let init ?load_mini_script genv =
   let env, t = naming env t in
   let fast = FileInfo.simplify_fast env.files_info in
   let fast = Relative_path.Set.fold env.failed_parsing
-    ~f:Relative_path.Map.remove ~init:fast in
+    ~f:(fun x m -> Relative_path.Map.remove m x) ~init:fast in
   let env, t =
     if lazy_decl then env, t
     else type_decl genv env fast t in
