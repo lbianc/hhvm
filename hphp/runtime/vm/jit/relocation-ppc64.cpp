@@ -35,7 +35,7 @@
 /*
  * Remove nops from a Far branch.
  */
-//#define REMOVE_FAR_BRANCHES_NOPS
+#define REMOVE_FAR_BRANCHES_NOPS
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
@@ -354,7 +354,7 @@ void adjustInstruction(RelocationInfo& rel, DecodedInstruction& di) {
     if (TCA adjusted = rel.adjustedAddressAfter(di.farBranchTarget())) {
       bool keep_nops =
 #ifdef REMOVE_FAR_BRANCHES_NOPS
-        rel.isSmashableRelocation(start);
+        rel.isSmashableRelocation(di.ip());
 #else
       true
 #endif

@@ -1187,7 +1187,7 @@ LookupResult ExecutionContext::lookupObjMethod(const Func*& f,
     }
     return LookupResult::MagicCallFound;
   }
-  if (f->attrs() & AttrStatic && !f->isClosureBody()) {
+  if (f->isStaticInProlog()) {
     return LookupResult::MethodFoundNoThis;
   }
   return LookupResult::MethodFoundWithThis;
@@ -1584,7 +1584,7 @@ StaticString
 void ExecutionContext::requestInit() {
   assert(SystemLib::s_unit);
 
-  EnvConstants::requestInit(req::make_raw<EnvConstants>());
+  initBlackHole();
   VarEnv::createGlobal();
   vmStack().requestInit();
   ObjectData::resetMaxId();
@@ -1649,8 +1649,8 @@ void ExecutionContext::requestExit() {
   vmStack().requestExit();
   profileRequestEnd();
   EventHook::Disable();
-  EnvConstants::requestExit();
   zend_rand_unseed();
+  clearBlackHole();
   tl_miter_table.clear();
 
   if (m_globalVarEnv) {
@@ -1691,7 +1691,7 @@ void ExecutionContext::invokeFuncImpl(TypedValue* retptr, const Func* f,
   // If `f' is a method, either `thiz' or `cls' must be non-null.
   assert(IMPLIES(f->preClass(), thiz || cls));
   // If `f' is a static method, thiz must be null.
-  assert(IMPLIES(f->isStatic(), f->isClosureBody() || !thiz));
+  assert(IMPLIES(f->isStaticInProlog(), !thiz));
   // invName should only be non-null if we are calling __call or __callStatic.
   assert(IMPLIES(invName, f->name()->isame(s___call.get()) ||
                           f->name()->isame(s___callStatic.get())));

@@ -1852,6 +1852,9 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
 
   fixVptrsForPPC64(unit);
 
+  // 2nd lower call to affect new vasms
+  lowerForPPC64(unit);
+
   if (unit.needsRegAlloc()) {
     removeDeadCode(unit);
     if (regalloc) allocateRegisters(unit, abi);

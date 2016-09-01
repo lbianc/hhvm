@@ -14,6 +14,8 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/runtime/base/static-string-table.h"
+
+#include "hphp/runtime/base/perf-warning.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/vm/debug/debug.h"
@@ -145,8 +147,6 @@ StringData** precompute_chars() {
   return raw;
 }
 
-StringData** precomputed_chars = precompute_chars();
-
 StringData* insertStaticString(StringData* sd) {
   assert(sd->isStatic());
   auto pair = s_stringDataMap->insert(
@@ -157,11 +157,14 @@ StringData* insertStaticString(StringData* sd) {
   if (!pair.second) {
     sd->destructStatic();
   } else {
-    MemoryStats::GetInstance()->LogStaticStringAlloc(sd->size()
-        + sizeof(StringData));
+    MemoryStats::GetInstance()->LogStaticStringAlloc(
+      sd->size() + sizeof(StringData)
+    );
     if (RuntimeOption::EvalEnableReverseDataMap) {
       data_map::register_start(sd);
     }
+    static std::atomic<bool> signaled{false};
+    checkAHMSubMaps(*s_stringDataMap, "static string table", signaled);
   }
   assert(to_sdata(pair.first->first) != nullptr);
 
@@ -187,6 +190,8 @@ void create_string_data_map() {
 }
 
 //////////////////////////////////////////////////////////////////////
+
+StringData** precomputed_chars = precompute_chars();
 
 size_t makeStaticStringCount() {
   if (!s_stringDataMap) return 0;
@@ -360,7 +365,7 @@ size_t countStaticStringConstants() {
 void refineStaticStringTableSize() {
   if (RuntimeOption::EvalInitialStaticStringTableSize ==
       kDefaultInitialStaticStringTableSize ||
-     !s_stringDataMap) {
+      !s_stringDataMap) {
     return;
   }
 

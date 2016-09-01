@@ -72,9 +72,9 @@ bool loadsCell(Opcode op) {
   case KeysetIdx:
   case LdVecElem:
     switch (arch()) {
-      case Arch::X64: return true;
-      case Arch::ARM: return true;
-      case Arch::PPC64: return false;
+    case Arch::X64: return true;
+    case Arch::ARM: return true;
+    case Arch::PPC64: return true;
     }
     not_reached();
 

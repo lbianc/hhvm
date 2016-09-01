@@ -120,16 +120,6 @@ module NonTracingErrors: Errors_modes = struct
   let in_lazy_decl = ref false
   let has_lazy_decl_error = ref false
 
-  let add_error error =
-    if !accumulate_errors then
-      begin
-        error_list := error :: !error_list;
-        has_lazy_decl_error := !has_lazy_decl_error || !in_lazy_decl
-      end
-    else
-      (* We have an error, but haven't handled it in any way *)
-      assert_false_log_backtrace ()
-
   let try_with_result f1 f2 =
     Common.try_with_result f1 f2 error_list accumulate_errors
 
@@ -184,6 +174,17 @@ module NonTracingErrors: Errors_modes = struct
       Pos.compare (get_pos x) (get_pos y)
     end err
 
+  let add_error error =
+    if !accumulate_errors then
+      begin
+        error_list := error :: !error_list;
+        has_lazy_decl_error := !has_lazy_decl_error || !in_lazy_decl
+      end
+    else
+      (* We have an error, but haven't handled it in any way *)
+      let msg = error |> to_absolute |> to_string in
+      assert_false_log_backtrace (Some msg)
+
 end
 
 (** Errors with backtraces embedded. They are revealed with to_string. *)
@@ -199,16 +200,6 @@ module TracingErrors: Errors_modes = struct
   let accumulate_errors = ref false
   let in_lazy_decl = ref false
   let has_lazy_decl_error = ref false
-
-  let add_error error =
-    if !accumulate_errors then
-      begin
-        error_list := error :: !error_list;
-        has_lazy_decl_error := !has_lazy_decl_error || !in_lazy_decl
-      end
-    else
-    (* We have an error, but haven't handled it in any way *)
-      assert_false_log_backtrace ()
 
   let try_with_result f1 f2 =
     Common.try_with_result f1 f2 error_list accumulate_errors
@@ -265,6 +256,17 @@ module TracingErrors: Errors_modes = struct
         end
     );
     Buffer.contents buf
+
+  let add_error error =
+    if !accumulate_errors then
+      begin
+        error_list := error :: !error_list;
+        has_lazy_decl_error := !has_lazy_decl_error || !in_lazy_decl
+      end
+    else
+    (* We have an error, but haven't handled it in any way *)
+      let msg = error |> to_absolute |> to_string in
+      assert_false_log_backtrace (Some msg)
 
   let get_sorted_error_list (err,_) =
     List.sort ~cmp:begin fun x y ->
@@ -627,6 +629,7 @@ module Typing                               = struct
   let unification_cycle                     = 4155 (* DONT MODIFY!!!! *)
   let keyset_set                            = 4156 (* DONT MODIFY!!!! *)
   let eq_incompatible_types                 = 4157 (* DONT MODIFY!!!! *)
+  let contravariant_this                    = 4158 (* DONT MODIFY!!!! *)
   (* EXTEND HERE WITH NEW VALUES IF NEEDED *)
 end
 
@@ -1905,6 +1908,12 @@ let declared_contravariant pos1 pos2 emsg =
    pos1, "This is where the parameter was declared as contravariant (-)"
  ] @ emsg
  )
+
+let contravariant_this pos class_name tp =
+  add Typing.contravariant_this pos (
+    "The \"this\" type cannot be used in this " ^
+    "contravariant position because its enclosing class \"" ^ class_name ^
+    "\" " ^ "is final and has a variant type parameter \"" ^ tp ^ "\"")
 
 let cyclic_typeconst pos sl =
   let sl = List.map sl strip_ns in

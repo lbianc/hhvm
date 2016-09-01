@@ -398,14 +398,23 @@ CAMLprim value hh_log_level(void) {
 
 CAMLprim value hh_hash_used_slots(void) {
   CAMLparam0();
-  uint64_t count = 0;
+  uint64_t filled_slots = 0;
+  uint64_t nonempty_slots = 0;
   uintptr_t i = 0;
   for (i = 0; i < hashtbl_size; ++i) {
     if (hashtbl[i].addr != NULL) {
-      count++;
+      filled_slots++;
+    }
+    if (hashtbl[i].hash != 0) {
+      nonempty_slots++;
     }
   }
-  CAMLreturn(Val_long(count));
+
+  value connector = caml_alloc_tuple(2);
+  Field(connector, 0) = Val_long(filled_slots);
+  Field(connector, 1) = Val_long(nonempty_slots);
+
+  CAMLreturn(connector);
 }
 
 CAMLprim value hh_hash_slots(void) {
@@ -481,7 +490,7 @@ static void raise_failed_anonymous_memfd_init() {
 }
 
 static void raise_less_than_minimum_available(uint64_t avail) {
-  CAMLlocal1(arg);
+  value arg;
   static value *exn = NULL;
   if (!exn) exn = caml_named_value("less_than_minimum_available");
   arg = Val_long(avail);

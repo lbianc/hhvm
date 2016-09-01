@@ -458,11 +458,11 @@ To dict conversions:
 
 To keyset conversions:
 
-| ConvArrToKeyset,              D(Keyset), S(Arr),                   PRc|CRc
+| ConvArrToKeyset,              D(Keyset), S(Arr),                Er|PRc|CRc
 
-| ConvVecToKeyset,              D(Keyset), S(Vec),                   PRc|CRc
+| ConvVecToKeyset,              D(Keyset), S(Vec),                Er|PRc|CRc
 
-| ConvDictToKeyset,             D(Keyset), S(Dict),                  PRc|CRc
+| ConvDictToKeyset,             D(Keyset), S(Dict),               Er|PRc|CRc
 
 | ConvObjToKeyset,              D(Keyset), S(Obj),                Er|PRc|CRc
 
@@ -553,6 +553,11 @@ To string conversions:
   Convert the character at position S1 in base string S0 to an unsigned
   integer.  Raises a notice if the position is out of bounds.
   Intended as an optimization for ord($str[$idx]).
+
+| ChrInt,                      D(StaticStr), S(Int),                      NF
+
+  Convert the integer S0 to a the one character string with ascii code
+  S0 & 255.
 
 4. Boolean predicates
 
@@ -1125,19 +1130,16 @@ To string conversions:
   indicating that a more complete lookup path should be taken. May throw if the
   method does not exist.
 
-| GetCtxFwdCallDyn<clsName,methodName>, D(Ctx), S(Ctx), PRc
+| CheckFuncStatic, ND, S(Func), B
 
-  If S0 is a Cctx, return S0. If S0 is an object, check if clsName::methodName
-  is a static method. If it is, return S0's class as a Ctx pointer. If not,
-  return S0. If S0 is a Ctx, dynamically check if it is a non-null object
-  pointer or Cctx at runtime and perform the operations described above. This
-  instruction must only be used when the value is known to not be empty.
+  Tests to see if Func::m_attrs & AttrStatic, and if so branch to B.
+  This instruction is intended to be used in forwarding calls, where we know
+  that Func is not a closure.
 
-| GetCtxFwdCall, D(Ctx), S(Ctx) C(Func), PRc
+| FwdCtxStaticCall, D(Cctx), S(Ctx), NF
 
-  If S0 is an object and S1 is static, this opcode returns S0's class with the
-  low bit set (i.e., as a Cctx). If S0 is an object and S1 is not static, this
-  opcode increfs S0 and returns it. If S0 is a Cctx, this opcode returns S0.
+  If S0 is an object, this opcode returns S0's class with the low bit set
+  (i.e., as a Cctx). Otherwise this instruction returns S0.
 
 | LdClsMethodCacheFunc<clsName,methodName>, D(Func), NA, B
 
@@ -1837,6 +1839,12 @@ To string conversions:
 | RaiseArrayKeyNotice, ND, S(StaticStr), Er
 
   Raises a notice that S0 is an undefined key for an array.
+
+| RaiseMissingThis, ND, S(Func), Er
+
+  Raises an appropriate notice or fatal to indicate that Func was
+  called with null $this. In most cases its a notice, but for
+  builtins and special class methods its a fatal.
 
 | InitClosureStaticLoc, ND, S(BoxedCell) S(Cell), NF
 

@@ -85,6 +85,7 @@ struct DecodedInstruction {
   bool isLwz(bool toc) const            {return m_dinfo.isLwz(toc); }
   bool isAddis(bool toc) const             {return m_dinfo.isAddis(toc); }
   // if it's conditional branch, it's not a jmp
+  uint8_t* ip() const           { return m_ip; }
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }
   bool isNop() const            { return m_dinfo.isNop(); }

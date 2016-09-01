@@ -397,7 +397,7 @@ struct RuntimeOption {
   static bool AutoprimeGenerators;
 
   // ENABLED (1) selects PHP7 behavior.
-  static bool PHP7_DeprecateOldStyleCtors;
+  static bool PHP7_DeprecationWarnings;
   static bool PHP7_IntSemantics;
   static bool PHP7_LTR_assign;
   static bool PHP7_NoHexNumerics;
@@ -557,6 +557,8 @@ struct RuntimeOption {
   F(double,   JitPGOMinArcProbability, 0.0)                             \
   F(uint32_t, JitPGOMaxFuncSizeDupBody, 80)                             \
   F(uint32_t, JitPGORelaxPercent,      100)                             \
+  F(uint64_t, FuncCountHint,           10000)                           \
+  F(uint64_t, PGOFuncCountHint,        1000)                            \
   F(uint32_t, HotFuncCount,            4100)                            \
   F(bool, RegionRelaxGuards,           true)                            \
   /* DumpBytecode =1 dumps user php, =2 dumps systemlib & user php */   \
@@ -580,6 +582,8 @@ struct RuntimeOption {
   F(bool, FilterGCPoints,              true)                            \
   F(bool, Quarantine,                  false)                           \
   F(bool, EnableGCTypeScan,            false)                           \
+  F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
+  F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
   F(uint32_t, GCSampleRate,                1)                           \
   F(uint32_t, JitSampleRate,               0)                           \
   F(uint32_t, JitFilterLease,              1)                           \
@@ -596,6 +600,7 @@ struct RuntimeOption {
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
+  F(int64_t, PerfWarningSampleRate, 1)                                  \
   /* Profiling flags */                                                 \
   F(bool, EnableReverseDataMap, false)                                  \
   /* PPC64 Option: minimum immediate size to use TOC */                 \
@@ -669,6 +674,7 @@ public:
   static std::string DebuggerDefaultSandboxPath;
   static std::string DebuggerStartupDocument;
   static int DebuggerSignalTimeout;
+  static std::string DebuggerAuthTokenScript;
 
   // Mail options
   static std::string SendmailPath;

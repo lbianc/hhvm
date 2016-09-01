@@ -26,6 +26,7 @@
 #include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/base/hhprof.h"
 #include "hphp/runtime/base/ini-setting.h"
+#include "hphp/runtime/base/member-reflection.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/php-globals.h"
 #include "hphp/runtime/base/plain-file.h"
@@ -74,6 +75,7 @@
 #include "hphp/util/abi-cxx.h"
 #include "hphp/util/arch.h"
 #include "hphp/util/boot_timer.h"
+#include "hphp/util/build-info.h"
 #include "hphp/util/compatibility.h"
 #include "hphp/util/capability.h"
 #include "hphp/util/embedded-data.h"
@@ -84,7 +86,7 @@
 #include "hphp/util/light-process.h"
 #endif
 #include "hphp/util/process-exec.h"
-#include "hphp/util/build-info.h"
+#include "hphp/util/process.h"
 #include "hphp/util/service-data.h"
 #include "hphp/util/shm-counter.h"
 #include "hphp/util/stack-trace.h"
@@ -1708,6 +1710,9 @@ static int execute_program_impl(int argc, char** argv) {
     }
   }
 
+  // It's okay if this fails.
+  init_member_reflection();
+
   if (!ShmCounters::initialize(true, Logger::Error)) {
     exit(HPHP_EXIT_FAILURE);
   }
@@ -2365,8 +2370,6 @@ void hphp_session_exit() {
     ServerStatsHelper ssh("rollback");
 
     hphp_memory_cleanup();
-    // Do any post-sweep cleanup necessary for global variables
-    free_global_variables_after_sweep();
   }
 
   assert(MM().empty());
