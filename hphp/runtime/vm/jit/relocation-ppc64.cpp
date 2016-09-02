@@ -35,7 +35,7 @@
 /*
  * Remove nops from a Far branch.
  */
-#define REMOVE_FAR_BRANCHES_NOPS
+//#define REMOVE_FAR_BRANCHES_NOPS
 
 namespace HPHP { namespace jit { namespace ppc64 {
 
