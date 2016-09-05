@@ -1003,8 +1003,8 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
     int16_t complement = 0;
     // If last four bytes is still bigger than a signed 16bits, uses as two complement.
     if ((TOCoffset & UINT16_MAX) > INT16_MAX) complement = 1;
-    addis(reg::r26, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
-    loadTOC(rt, reg::r26, imm64, TOCoffset & UINT16_MAX, fixedSize, fits32);
+    addis(rt, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
+    loadTOC(rt, rt, imm64, TOCoffset & UINT16_MAX, fixedSize, fits32);
   }
   else {
     loadTOC(rt, reg::r2, imm64, TOCoffset, fixedSize, fits32);
