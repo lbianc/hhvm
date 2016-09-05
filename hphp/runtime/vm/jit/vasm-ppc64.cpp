@@ -280,7 +280,13 @@ struct Vgen {
     }
     a.lxvd2x(i.d, p);
   }
-  void emit(const leap& i) { a.limmediate(i.d, i.s.r.disp); }
+  void emit(const leap& i) {
+    // It can happen that when rellocating, the TOC will need to store the new
+    // pointer and it doesn't fit on a single instruction as the TOC is too big
+    // now. Therefore, emit this limmediate as fixed_size to avoid overlapping.
+    bool toc_may_grow = RuntimeOption::EvalJitRelocationSize != 0;
+    a.limmediate(i.d, i.s.r.disp, toc_may_grow);
+  }
   void emit(const lead& i) { a.limmediate(i.d, (int64_t)i.s.get()); }
   void emit(const mfcr& i) { a.mfcr(i.d); }
   void emit(const mflr& i) { a.mflr(i.d); }
@@ -598,12 +604,14 @@ void Vgen::emit(const ldimml& i) {
 }
 
 void Vgen::emit(const ldimmq& i) {
+  // See leap to better understand the necessity of toc_may_grow
+  bool toc_may_grow = RuntimeOption::EvalJitRelocationSize != 0;
   auto val = i.s.q();
   if (i.d.isGP()) {
-    a.limmediate(i.d, val);
+    a.limmediate(i.d, val, toc_may_grow);
   } else {
     assertx(i.d.isSIMD());
-    a.limmediate(rAsm, val);
+    a.limmediate(rAsm, val, toc_may_grow);
     // no conversion necessary. The i.s already comes converted to FP
     emit(copy{rAsm, i.d});
   }
