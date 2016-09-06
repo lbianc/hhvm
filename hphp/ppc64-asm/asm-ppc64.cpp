@@ -1006,7 +1006,10 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
   }
   else {
     loadTOC(rt, reg::r2, imm64, TOCoffset, fixedSize, fits32);
-    if (fixedSize) emitNop(1 * instr_size_in_bytes);
+    if (fixedSize ||
+        (!fixedSize && HPHP::RuntimeOption::EvalJitRelocationSize != 0)) {
+      emitNop(1 * instr_size_in_bytes);
+    }
   }
 
   return;
