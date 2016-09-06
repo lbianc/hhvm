@@ -63,19 +63,17 @@ int64_t VMTOC::getValue(int64_t index, bool qword) {
 }
 
 int64_t VMTOC::allocTOC (int32_t target, bool align) {
-  if (!m_tocvector->canEmit(sizeof(int32_t))) {
-    return 0x0;
-  }
-
   HPHP::Address addr = m_tocvector->frontier();
   while (align && reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
     uint8_t f0 = 0xf0;
+    m_tocvector->assertCanEmit(sizeof(uint8_t));
     m_tocvector->byte(reinterpret_cast<uint8_t>(f0));
     addr = m_tocvector->frontier();
   }
 
   if (align) always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
 
+  m_tocvector->assertCanEmit(sizeof(int32_t));
   m_tocvector->dword(reinterpret_cast<int32_t>(target));
   return addr - (m_tocvector->base() + INT16_MAX + 1);
 }
