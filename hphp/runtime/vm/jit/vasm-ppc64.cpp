@@ -1603,6 +1603,14 @@ void fixVptrsForPPC64(Vunit& unit) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// Sign conditions
+enum Signs {
+  signedOnly,
+  unsignedOnly,
+  both,
+  neither
+};
+
 /*
  * Fix condition to testq instruction.
  */

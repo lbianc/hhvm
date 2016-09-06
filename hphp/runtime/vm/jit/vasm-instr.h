@@ -902,13 +902,6 @@ struct divint { Vreg s0, s1, d; };
  * can do whatever they please with the upper bits.
  */
 
-enum Signs {
-  signedOnly,
-  unsignedOnly,
-  both,
-  neither
-};
- 
 /*
  * Nop and trap.
  */
