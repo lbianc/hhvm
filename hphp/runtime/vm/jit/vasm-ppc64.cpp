@@ -152,8 +152,6 @@ struct Vgen {
   }
   void emit(const addl& i) {
     a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
@@ -165,56 +163,42 @@ struct Vgen {
   }
 
   // instructions
-  void emit(const addq& i) {
-    a.addo(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const addq& i) { a.addo(i.d, i.s0, i.s1, true); }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
-  void emit(const andq& i) {
-    a.and(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const andqi& i) {
-    a.andi(i.d, i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  } // andi changes CR0
+  void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
+  void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
+  void emit(const cmpd& i) { a.cmpd(i.s1, i.s0); }
+  void emit(const cmpdi& i) { a.cmpdi(i.s1, i.s0); }
   void emit(const cmpl& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpw(Reg64(i.s1), Reg64(i.s0));
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+    a.cmpw(Reg64(i.s1), Reg64(i.s0));
+    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
+  void emit(const cmpld& i) { a.cmpld(i.s1, i.s0, Assembler::CR::CR1); }
+  void emit(const cmpldi& i) { a.cmpldi(i.s1, i.s0, Assembler::CR::CR1); }
   void emit(const cmpli& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpwi(Reg64(i.s1), i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+    a.cmpwi(Reg64(i.s1), i.s0);
+    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+  }
+  void emit(const cmplw& i) {
+    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+  }
+  void emit(const cmplwi& i) {
+    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpq& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpd(i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
+    a.cmpd(i.s1, i.s0);
+    a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpqi& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpdi(i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
+    a.cmpdi(i.s1, i.s0);
+    a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
   }
-  void emit(const decl& i) {
-    a.subfo(Reg64(i.d), rone(), Reg64(i.s), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
+  void emit(const cmpwi& i) {
+    a.cmpwi(i.s1, i.s0);
   }
-  void emit(const decq& i) {
-    a.subfo(i.d, rone(), i.s, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const copycr0tocr1& i) { copyCR0toCR1(a, rAsm); }
+  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
   void emit(const extrb& i ) {
@@ -234,26 +218,10 @@ struct Vgen {
     a.fcmpu(i.sf, i.s0, i.s1);
     copyCR0toCR1(a, rAsm);
   }
-  void emit(const imul& i) {
-    a.mulldo(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incl& i) {
-    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incq& i) {
-    a.addo(i.d, i.s, rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incw& i) {
-    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
+  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
+  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
@@ -286,55 +254,21 @@ struct Vgen {
   void emit(const mtlr& i) { a.mtlr(i.s); }
   void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
-  void emit(const neg& i) {
-    a.neg(i.d, i.s, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const neg& i) { a.neg(i.d, i.s, true); }
   void emit(const nop& i) { a.nop(); } // no-op form
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
-  void emit(const orq& i) {
-    a.or(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
   void emit(const ret& i) { a.blr(); }
   void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
-  void emit(const sar& i) {
-    a.srad(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a,rAsm);
-  }
-  void emit(const sarqi& i) {
-    a.sradi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shl& i) {
-    a.sld(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
+  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
   void emit(const shlli& i) {
     a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
-  void emit(const shlqi& i) {
-    a.sldi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shrli& i) {
-    a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shrqi& i) {
-    a.srdi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shrli& i) { a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true); }
+  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
   void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
   void emit(const storeups& i) {
@@ -357,28 +291,16 @@ struct Vgen {
   }
 
   // Subtractions: d = s1 - s0
-  void emit(const subq& i) {
-    a.subfo(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const ud2& i) { a.trap(); }
   void emit(const xorb& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorl& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
-  void emit(const xorq& i) {
-    a.xor(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
@@ -406,8 +328,6 @@ struct Vgen {
   void emit(const orqi& i) {
     a.li64(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -448,20 +368,15 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
-      if (i.signFlags == unsignedOnly || i.signFlags == both)
-        copyCR0toCR1(a, rAsm);
+      copyCR0toCR1(a, rAsm);
     } else {
-      if (i.signFlags == signedOnly || i.signFlags == both)
-	a.cmpdi(i.s0, Immed(0));
-      if (i.signFlags == unsignedOnly || i.signFlags == both)
-        a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
+      a.cmpdi(i.s0, Immed(0));
+      a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
     }
   }
   void emit(const xorqi& i) {
     a.li64(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
 
   void emit(const conjure& i) { always_assert(false); }
@@ -1687,7 +1602,81 @@ void fixVptrsForPPC64(Vunit& unit) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-} // anonymous namespace
+
+/*
+ * Fix condition to testq instruction.
+ */
+void fixCond_testq (Vout& v, testq& i, Signs blockSigns) {
+  if (i.s0 != i.s1) {
+    v << andq { i.s0, i.s1, rAsm, i.sf };
+
+    if (blockSigns == unsignedOnly || blockSigns == both) {
+      v << copycr0tocr1{};
+    }
+  } else {
+    if (blockSigns == signedOnly || blockSigns == both) {
+      v << cmpdi{ Immed(0), i.s0, i.sf };
+    }
+    if (blockSigns == unsignedOnly || blockSigns == both) {
+      v << cmpldi{ Immed(0), i.s0, i.sf };
+    }
+  }
+}
+
+/*
+ * Fix condition to common instruction
+ */
+void fixCond (Vout& v, Vinstr inst, Signs blockSigns) {
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << inst;
+    v << copycr0tocr1{};
+  }
+}
+
+/*
+ * Fix condition to cmpl
+ */
+void fixCond_cmpl (Vout& v, cmpl& i, Signs blockSigns) {
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmplw { i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * Fix condition to cmpli
+ */
+void fixCond_cmpli (Vout& v, cmpli& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpwi{ i.s0, Reg64(i.s1), i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmplwi{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * Fix condition to cmpq
+ */
+void fixCond_cmpq (Vout& v, cmpq& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpd{ i.s0, i.s1, i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmpld{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * Fix condition to cmpqi
+ */
+void fixCond_cmpqi (Vout& v, cmpqi& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpdi{ i.s0, i.s1, i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmpldi{ i.s0, i.s1, i.sf };
+  }
+}
 
 Signs signNeeds(const ConditionCode cc) {
   Signs ret = neither;
@@ -1722,45 +1711,43 @@ Signs signNeeds(const ConditionCode cc) {
 }
 
 static inline Signs addSigns(Signs a, Signs b) {
-  if (a==both || b==both) {
-    return both;
-  } else if (a == neither) {
-    return b;
-  } else if (b == neither) {
-    return a;
-  } else if (a == signedOnly) { // by now, a, b are either signed or unsigned
-    if (b != signedOnly) {
-      return both;
-    }
+  if (a==both || b==both) return both;
+  else if (a == neither) return b;
+  else if (b == neither) return a;
+  else if (a == signedOnly) {
+    // by now, a, b are either signed or unsigned
+    if (b != signedOnly) return both;
     return signedOnly;
   } else if (a == unsignedOnly) {
-    if (b != unsignedOnly)
-      return both;
+    if (b != unsignedOnly) return both;
     return unsignedOnly;
   }
   always_assert(false);
   return both;
 }
-    
-#define extractCC(name)					  \
-    case Vinstr::name:					  \
-      blockSigns = addSigns(blockSigns,			  \
-			    signNeeds(inst.name##_.cc));  \
-      break						  \
 
-#define updateSignFlags(name)		   \
-    case Vinstr::name:			   \
-      inst.name##_.signFlags = blockSigns; \
-      break
-    
-void learnConditions(Vunit& unit) {
-  auto blocks = sortBlocks(unit);
+#define extractCC(name)                                   \
+    case Vinstr::name:                                    \
+      blockSigns = addSigns(blockSigns,                   \
+                signNeeds(inst.name##_.cc));              \
+      break                                               \
 
-  for (auto blockIt = blocks.begin(); blockIt != blocks.end(); blockIt++) {
-    auto b = *blockIt;
-    auto& block = unit.blocks[b];
+/*
+ * Check all comparison instructions in order to set the correct flags
+ * according with parameter's signs.
+ */
+void fixConditions(Vunit& unit) {
+  // Scratch block can change blocks allocation, hence cannot use regular
+  // iterators.
+  auto& blocks = unit.blocks;
+
+  PostorderWalker{unit}.dfs([&] (Vlabel ib) {
+    assertx(!blocks[ib].code.empty());
+
     Signs blockSigns = neither;
-    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+
+    // Extract signs from comparisons
+    for (auto i = blocks[ib].code.begin(); i != blocks[ib].code.end(); i++) {
       auto& inst = *i;
       switch (inst.op) {
       extractCC(jcc);
@@ -1775,48 +1762,71 @@ void learnConditions(Vunit& unit) {
       extractCC(cmovq);
       extractCC(setcc);
       default:
-	break;
-      }
-    }
-    for (auto i = block.code.begin(); i != block.code.end(); i++) {
-      auto& inst = *i;
-      switch (inst.op) {
-      updateSignFlags(addl);
-      updateSignFlags(addq);
-      updateSignFlags(andq);
-      updateSignFlags(andqi);
-      updateSignFlags(decl);
-      updateSignFlags(decq);
-      updateSignFlags(incw);
-      updateSignFlags(incl);
-      updateSignFlags(incq);
-      updateSignFlags(imul);
-      updateSignFlags(neg);
-      updateSignFlags(orq);
-      updateSignFlags(orqi);
-      updateSignFlags(sar);
-      updateSignFlags(shl);
-      updateSignFlags(sarqi);
-      updateSignFlags(shlli);
-      updateSignFlags(shlqi);
-      updateSignFlags(shrli);
-      updateSignFlags(shrqi);
-      updateSignFlags(subq);
-      updateSignFlags(xorb);
-      updateSignFlags(xorl);
-      updateSignFlags(xorq);
-      updateSignFlags(xorqi);
-      updateSignFlags(testq);
-      updateSignFlags(cmpl);
-      updateSignFlags(cmpli);
-      updateSignFlags(cmpq);
-      updateSignFlags(cmpqi);
-      default:
         break;
       }
     }
-  }
+
+    if (blockSigns == neither) return;
+
+    for (size_t ii = 0; ii < blocks[ib].code.size(); ++ii) {
+
+      auto scratch = unit.makeScratchBlock();
+      auto& inst = blocks[ib].code[ii];
+      SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+      Vout v(unit, scratch, inst.origin);
+
+      switch (inst.op) {
+      case Vinstr::addl:
+      case Vinstr::addq:
+      case Vinstr::andq:
+      case Vinstr::andqi:
+      case Vinstr::decl:
+      case Vinstr::decq:
+      case Vinstr::imul:
+      case Vinstr::incw:
+      case Vinstr::incq:
+      case Vinstr::incl:
+      case Vinstr::neg:
+      case Vinstr::orq:
+      case Vinstr::sar:
+      case Vinstr::sarqi:
+      case Vinstr::shl:
+      case Vinstr::shlli:
+      case Vinstr::shlqi:
+      case Vinstr::shrli:
+      case Vinstr::shrqi:
+      case Vinstr::subq:
+      case Vinstr::xorb:
+      case Vinstr::xorl:
+      case Vinstr::xorq:
+      case Vinstr::orqi:
+      case Vinstr::xorqi: fixCond(v, inst, blockSigns);
+        break;
+      case Vinstr::testq: fixCond_testq(v, inst.testq_, blockSigns);
+        break;
+      case Vinstr::cmpl: fixCond_cmpl(v, inst.cmpl_, blockSigns);
+        break;
+      case Vinstr::cmpli: fixCond_cmpli(v, inst.cmpli_, blockSigns);
+        break;
+      case Vinstr::cmpq: fixCond_cmpq(v, inst.cmpq_, blockSigns);
+        break;
+      case Vinstr::cmpqi: fixCond_cmpqi(v, inst.cmpqi_, blockSigns);
+        break;
+      default:
+        break;
+      }
+
+      if (!v.empty()) {
+        vector_splice(unit.blocks[ib].code, ii, 1,
+                      unit.blocks[scratch].code);
+      }
+    }
+  });
 }
+
+///////////////////////////////////////////////////////////////////////////////
+} // anonymous namespace
+
 
     
 void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
@@ -1846,7 +1856,7 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
     optimizeJmps(unit);
   }
 
-  learnConditions(unit);
+  fixConditions(unit);
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, CGMeta& fixups,
