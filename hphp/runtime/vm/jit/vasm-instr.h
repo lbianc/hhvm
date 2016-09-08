@@ -317,8 +317,9 @@ struct Vunit;
   O(cmpdi, I(s0), U(s1), D(sf))\
   O(cmpld, Inone, U(s0) U(s1), D(sf))\
   O(cmpldi, I(s0), U(s1), D(sf))\
-  O(cmplwi, I(s0), U(s1), D(sf))\
   O(cmplw, Inone, U(s0) U(s1), D(sf))\
+  O(cmplwi, I(s0), U(s1), D(sf))\
+  O(cmpw, Inone, U(s0) U(s1), D(sf))\
   O(cmpwi, I(s0), U(s1), D(sf))\
   O(copycr0tocr1, Inone, Un, Dn)\
   O(extrb, Inone, UH(s,d), DH(d,s))\
@@ -1163,8 +1164,9 @@ struct cmpd { Vreg64 s0; Vreg64 s1; VregSF sf; };
 struct cmpdi { Immed s0; Vreg64 s1; VregSF sf; };
 struct cmpld { Vreg64 s0; Vreg64 s1; VregSF sf; };
 struct cmpldi { Immed s0; Vreg64 s1; VregSF sf; };
-struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
 struct cmplw { Vreg32 s0; Vreg32 s1; VregSF sf; };
+struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
+struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
 struct copycr0tocr1 {};
 struct extrb { Vreg8 s; Vreg8 d; };   // Extract and zeros the upper bits

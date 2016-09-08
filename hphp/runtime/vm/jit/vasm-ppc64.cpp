@@ -168,29 +168,14 @@ struct Vgen {
   void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
   void emit(const cmpd& i) { a.cmpd(i.s1, i.s0); }
   void emit(const cmpdi& i) { a.cmpdi(i.s1, i.s0); }
-  void emit(const cmpl& i) {
-    a.cmpw(Reg64(i.s1), Reg64(i.s0));
-    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
-  }
+  void emit(const cmpw& i) { a.cmpw(Reg64(i.s1), Reg64(i.s0)); }
   void emit(const cmpld& i) { a.cmpld(i.s1, i.s0, Assembler::CR::CR1); }
   void emit(const cmpldi& i) { a.cmpldi(i.s1, i.s0, Assembler::CR::CR1); }
-  void emit(const cmpli& i) {
-    a.cmpwi(Reg64(i.s1), i.s0);
-    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
-  }
   void emit(const cmplw& i) {
     a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
   void emit(const cmplwi& i) {
     a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
-  }
-  void emit(const cmpq& i) {
-    a.cmpd(i.s1, i.s0);
-    a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
-  }
-  void emit(const cmpqi& i) {
-    a.cmpdi(i.s1, i.s0);
-    a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
   }
   void emit(const cmpwi& i) {
     a.cmpwi(i.s1, i.s0);
@@ -1609,9 +1594,11 @@ enum Signs {
 };
 
 /*
- * Fix condition to testq instruction.
+ * Define condition to testq instruction.
  */
-void fixCond_testq (Vout& v, testq& i, Signs blockSigns) {
+void defCond_testq (Vout& v, testq& i, Signs blockSigns) {
+  // More information on:
+  // https://goo.gl/F1wrbO
   if (i.s0 != i.s1) {
     v << andq { i.s0, i.s1, rAsm, i.sf };
 
@@ -1629,9 +1616,11 @@ void fixCond_testq (Vout& v, testq& i, Signs blockSigns) {
 }
 
 /*
- * Fix condition to common instruction
+ * If for the current block there is at least one logical comparison,
+ * the flags from cr0 must be copied to cr1 in order to use it on the
+ * next comparison instruction
  */
-void fixCond (Vout& v, Vinstr inst, Signs blockSigns) {
+void defCond (Vout& v, Vinstr inst, Signs blockSigns) {
   if (blockSigns == unsignedOnly || blockSigns == both) {
     v << inst;
     v << copycr0tocr1{};
@@ -1639,18 +1628,25 @@ void fixCond (Vout& v, Vinstr inst, Signs blockSigns) {
 }
 
 /*
- * Fix condition to cmpl
+ * If in the current block there are only signed comparisons, use
+ * the cmpw instruction, if has only unsigned, use cmplw, otherwise
+ * use both to cover signed and unsigned instructions.
  */
-void fixCond_cmpl (Vout& v, cmpl& i, Signs blockSigns) {
+void defCond_cmpl (Vout& v, cmpl& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpw{ i.s0, i.s1, i.sf };
+  }
   if (blockSigns == unsignedOnly || blockSigns == both) {
-    v << cmplw { i.s0, i.s1, i.sf };
+    v << cmplw{ i.s0, i.s1, i.sf };
   }
 }
 
 /*
- * Fix condition to cmpli
+ * If in the current block there are only signed comparisons, use
+ * the cmpwi instruction, if has only unsigned, use cmplwi, otherwise
+ * use both to cover signed and unsigned instructions.
  */
-void fixCond_cmpli (Vout& v, cmpli& i, Signs blockSigns) {
+void defCond_cmpli (Vout& v, cmpli& i, Signs blockSigns) {
   if (blockSigns == signedOnly || blockSigns == both) {
     v << cmpwi{ i.s0, Reg64(i.s1), i.sf };
   }
@@ -1660,9 +1656,11 @@ void fixCond_cmpli (Vout& v, cmpli& i, Signs blockSigns) {
 }
 
 /*
- * Fix condition to cmpq
+ * If in the current block there are only signed comparisons, use
+ * the cmpd instruction, if has only unsigned, use cmpld, otherwise
+ * use both to cover signed and unsigned instructions.
  */
-void fixCond_cmpq (Vout& v, cmpq& i, Signs blockSigns) {
+void defCond_cmpq (Vout& v, cmpq& i, Signs blockSigns) {
   if (blockSigns == signedOnly || blockSigns == both) {
     v << cmpd{ i.s0, i.s1, i.sf };
   }
@@ -1672,9 +1670,11 @@ void fixCond_cmpq (Vout& v, cmpq& i, Signs blockSigns) {
 }
 
 /*
- * Fix condition to cmpqi
+ * If in the current block there are only signed comparisons, use
+ * the cmpdi instruction, if has only unsigned, use cmpldi, otherwise
+ * use both to cover signed and unsigned instructions.
  */
-void fixCond_cmpqi (Vout& v, cmpqi& i, Signs blockSigns) {
+void defCond_cmpqi (Vout& v, cmpqi& i, Signs blockSigns) {
   if (blockSigns == signedOnly || blockSigns == both) {
     v << cmpdi{ i.s0, i.s1, i.sf };
   }
@@ -1683,6 +1683,9 @@ void fixCond_cmpqi (Vout& v, cmpqi& i, Signs blockSigns) {
   }
 }
 
+/*
+ * Check signs for each kind of comparison
+ */
 Signs signNeeds(const ConditionCode cc) {
   Signs ret = neither;
   switch (cc) {
@@ -1715,16 +1718,19 @@ Signs signNeeds(const ConditionCode cc) {
   return ret;
 }
 
-static inline Signs addSigns(Signs a, Signs b) {
-  if (a==both || b==both) return both;
-  else if (a == neither) return b;
-  else if (b == neither) return a;
-  else if (a == signedOnly) {
+/*
+ * Merge sign flags of current block signs with the current instruction sign.
+ */
+static inline Signs addSigns(Signs blockSigns, Signs currentSigns) {
+  if (blockSigns == both || currentSigns == both) return both;
+  else if (blockSigns == neither) return currentSigns;
+  else if (currentSigns == neither) return blockSigns;
+  else if (blockSigns == signedOnly) {
     // by now, a, b are either signed or unsigned
-    if (b != signedOnly) return both;
+    if (currentSigns != signedOnly) return both;
     return signedOnly;
-  } else if (a == unsignedOnly) {
-    if (b != unsignedOnly) return both;
+  } else if (blockSigns == unsignedOnly) {
+    if (currentSigns != unsignedOnly) return both;
     return unsignedOnly;
   }
   always_assert(false);
@@ -1741,7 +1747,7 @@ static inline Signs addSigns(Signs a, Signs b) {
  * Check all comparison instructions in order to set the correct flags
  * according with parameter's signs.
  */
-void fixConditions(Vunit& unit) {
+void defConditions(Vunit& unit) {
   // Scratch block can change blocks allocation, hence cannot use regular
   // iterators.
   auto& blocks = unit.blocks;
@@ -1805,17 +1811,17 @@ void fixConditions(Vunit& unit) {
       case Vinstr::xorl:
       case Vinstr::xorq:
       case Vinstr::orqi:
-      case Vinstr::xorqi: fixCond(v, inst, blockSigns);
+      case Vinstr::xorqi: defCond(v, inst, blockSigns);
         break;
-      case Vinstr::testq: fixCond_testq(v, inst.testq_, blockSigns);
+      case Vinstr::testq: defCond_testq(v, inst.testq_, blockSigns);
         break;
-      case Vinstr::cmpl: fixCond_cmpl(v, inst.cmpl_, blockSigns);
+      case Vinstr::cmpl: defCond_cmpl(v, inst.cmpl_, blockSigns);
         break;
-      case Vinstr::cmpli: fixCond_cmpli(v, inst.cmpli_, blockSigns);
+      case Vinstr::cmpli: defCond_cmpli(v, inst.cmpli_, blockSigns);
         break;
-      case Vinstr::cmpq: fixCond_cmpq(v, inst.cmpq_, blockSigns);
+      case Vinstr::cmpq: defCond_cmpq(v, inst.cmpq_, blockSigns);
         break;
-      case Vinstr::cmpqi: fixCond_cmpqi(v, inst.cmpqi_, blockSigns);
+      case Vinstr::cmpqi: defCond_cmpqi(v, inst.cmpqi_, blockSigns);
         break;
       default:
         break;
@@ -1861,7 +1867,7 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
     optimizeJmps(unit);
   }
 
-  fixConditions(unit);
+  defConditions(unit);
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, CGMeta& fixups,
