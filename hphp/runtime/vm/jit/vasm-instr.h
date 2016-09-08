@@ -321,7 +321,7 @@ struct Vunit;
   O(cmplwi, I(s0), U(s1), D(sf))\
   O(cmpw, Inone, U(s0) U(s1), D(sf))\
   O(cmpwi, I(s0), U(s1), D(sf))\
-  O(copycr0tocr1, Inone, Un, Dn)\
+  O(copycr, Inone, Un, Dn)\
   O(extrb, Inone, UH(s,d), DH(d,s))\
   O(extsb, Inone, UH(s,d), DH(d,s))\
   O(extsw, Inone, UH(s,d), DH(d,s))\
@@ -1168,7 +1168,7 @@ struct cmplw { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
 struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
-struct copycr0tocr1 {};
+struct copycr {};
 struct extrb { Vreg8 s; Vreg8 d; };   // Extract and zeros the upper bits
 struct extsb { Vreg64 s; Vreg64 d; }; // Extend byte sign
 struct extsw { Vreg64 s; Vreg64 d; }; // Extend word sign

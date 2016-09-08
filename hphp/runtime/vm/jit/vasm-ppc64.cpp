@@ -99,12 +99,6 @@ struct Vgen {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
   }
-  void copyCR0toCR1(Assembler a, Reg64 raux)
-  {
-    a.mfcr(raux);
-    a.sradi(raux,raux,4);
-    a.mtocrf(0x40,raux);
-  }
 
   // intrinsics
   void emit(const copy& i) {
@@ -180,7 +174,11 @@ struct Vgen {
   void emit(const cmpwi& i) {
     a.cmpwi(i.s1, i.s0);
   }
-  void emit(const copycr0tocr1& i) { copyCR0toCR1(a, rAsm); }
+  void emit(const copycr& i) {
+    a.mfcr(rAsm);
+    a.sradi(rAsm,rAsm,4);
+    a.mtocrf(0x40,rAsm);
+  }
   void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
@@ -196,11 +194,11 @@ struct Vgen {
   void emit(const fallthru& i) {}
   void emit(const fcmpo& i) {
     a.fcmpo(i.sf, i.s0, i.s1);
-    copyCR0toCR1(a, rAsm); //todo: guarding this broke 3 tests
+    emit(copycr{});//todo: guarding this broke 3 tests
   }
   void emit(const fcmpu& i) {
     a.fcmpu(i.sf, i.s0, i.s1);
-    copyCR0toCR1(a, rAsm);
+    emit(copycr{});
   }
   void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
   void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
@@ -352,7 +350,7 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
-      copyCR0toCR1(a, rAsm);
+      emit(copycr{});
     } else {
       a.cmpdi(i.s0, Immed(0));
       a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
@@ -467,7 +465,7 @@ void Vgen::emit(const ucomisd& i) {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
     a.li64(rAsm, 0x99000000);
     a.mtcrf(0xC0, rAsm);
-    copyCR0toCR1(a, rAsm);
+    emit(copycr{});
   }
   notNAN.asm_label(a);
 }
@@ -1603,7 +1601,7 @@ void defCond_testq (Vout& v, testq& i, Signs blockSigns) {
     v << andq { i.s0, i.s1, rAsm, i.sf };
 
     if (blockSigns == unsignedOnly || blockSigns == both) {
-      v << copycr0tocr1{};
+      v << copycr{};
     }
   } else {
     if (blockSigns == signedOnly || blockSigns == both) {
@@ -1623,7 +1621,7 @@ void defCond_testq (Vout& v, testq& i, Signs blockSigns) {
 void defCond (Vout& v, Vinstr inst, Signs blockSigns) {
   if (blockSigns == unsignedOnly || blockSigns == both) {
     v << inst;
-    v << copycr0tocr1{};
+    v << copycr{};
   }
 }
 
@@ -1787,6 +1785,235 @@ void defConditions(Vunit& unit) {
       Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
+      case Vinstr::absdbl:
+      case Vinstr::addli:
+      case Vinstr::addlim:
+      case Vinstr::addlm:
+      case Vinstr::addqi:
+      case Vinstr::addqim:
+      case Vinstr::addsd:
+      case Vinstr::addxi:
+      case Vinstr::andb:
+      case Vinstr::andbi:
+      case Vinstr::andbim:
+      case Vinstr::andl:
+      case Vinstr::andli:
+      case Vinstr::asrxi:
+      case Vinstr::asrxis:
+      case Vinstr::bindaddr:
+      case Vinstr::bindjcc:
+      case Vinstr::bindjmp:
+      case Vinstr::bln:
+      case Vinstr::call:
+      case Vinstr::callarray:
+      case Vinstr::callfaststub:
+      case Vinstr::callm:
+      case Vinstr::callphp:
+      case Vinstr::callr:
+      case Vinstr::calls:
+      case Vinstr::callstub:
+      case Vinstr::calltc:
+      case Vinstr::cloadq:
+      case Vinstr::cmovb:
+      case Vinstr::cmovl:
+      case Vinstr::cmovq:
+      case Vinstr::cmovw:
+      case Vinstr::cmpb:
+      case Vinstr::cmpbi:
+      case Vinstr::cmpbim:
+      case Vinstr::cmpbm:
+      case Vinstr::cmpd:
+      case Vinstr::cmpdi:
+      case Vinstr::cmpld:
+      case Vinstr::cmpldi:
+      case Vinstr::cmplim:
+      case Vinstr::cmplims:
+      case Vinstr::cmplm:
+      case Vinstr::cmplw:
+      case Vinstr::cmplwi:
+      case Vinstr::cmpqim:
+      case Vinstr::cmpqm:
+      case Vinstr::cmpsd:
+      case Vinstr::cmpsds:
+      case Vinstr::cmpw:
+      case Vinstr::cmpwi:
+      case Vinstr::cmpwim:
+      case Vinstr::cmpwm:
+      case Vinstr::conjure:
+      case Vinstr::conjureuse:
+      case Vinstr::contenter:
+      case Vinstr::copy2:
+      case Vinstr::copy:
+      case Vinstr::copyargs:
+      case Vinstr::copycr:
+      case Vinstr::cqo:
+      case Vinstr::cvtsi2sd:
+      case Vinstr::cvtsi2sdm:
+      case Vinstr::cvttsd2siq:
+      case Vinstr::debugtrap:
+      case Vinstr::declm:
+      case Vinstr::decqm:
+      case Vinstr::decqmlock:
+      case Vinstr::defvmret:
+      case Vinstr::defvmsp:
+      case Vinstr::divint:
+      case Vinstr::divsd:
+      case Vinstr::extrb:
+      case Vinstr::extsb:
+      case Vinstr::extsw:
+      case Vinstr::fabs:
+      case Vinstr::fallback:
+      case Vinstr::fallbackcc:
+      case Vinstr::fallthru:
+      case Vinstr::fcmpo:
+      case Vinstr::fcmpu:
+      case Vinstr::fctidz:
+      case Vinstr::fcvtzs:
+      case Vinstr::idiv:
+      case Vinstr::inclm:
+      case Vinstr::incqm:
+      case Vinstr::incqmlock:
+      case Vinstr::incwm:
+      case Vinstr::inittc:
+      case Vinstr::jcc:
+      case Vinstr::jcci:
+      case Vinstr::jmp:
+      case Vinstr::jmpi:
+      case Vinstr::jmpm:
+      case Vinstr::jmpr:
+      case Vinstr::landingpad:
+      case Vinstr::ldarx:
+      case Vinstr::ldimmb:
+      case Vinstr::ldimml:
+      case Vinstr::ldimmq:
+      case Vinstr::ldimmqs:
+      case Vinstr::ldimmw:
+      case Vinstr::lea:
+      case Vinstr::lead:
+      case Vinstr::leap:
+      case Vinstr::leavetc:
+      case Vinstr::load:
+      case Vinstr::loadb:
+      case Vinstr::loadl:
+      case Vinstr::loadqd:
+      case Vinstr::loadqp:
+      case Vinstr::loadsd:
+      case Vinstr::loadstubret:
+      case Vinstr::loadtqb:
+      case Vinstr::loadups:
+      case Vinstr::loadw:
+      case Vinstr::loadzbl:
+      case Vinstr::loadzbq:
+      case Vinstr::loadzlq:
+      case Vinstr::lslwi:
+      case Vinstr::lslwis:
+      case Vinstr::lslxi:
+      case Vinstr::lslxis:
+      case Vinstr::lsrwi:
+      case Vinstr::lsrwis:
+      case Vinstr::lsrxi:
+      case Vinstr::lsrxis:
+      case Vinstr::mcprep:
+      case Vinstr::mfcr:
+      case Vinstr::mflr:
+      case Vinstr::mfvsrd:
+      case Vinstr::movb:
+      case Vinstr::movl:
+      case Vinstr::movtdb:
+      case Vinstr::movtdq:
+      case Vinstr::movtqb:
+      case Vinstr::movtql:
+      case Vinstr::movw:
+      case Vinstr::movzbl:
+      case Vinstr::movzbq:
+      case Vinstr::movzbw:
+      case Vinstr::movzlq:
+      case Vinstr::mrs:
+      case Vinstr::msr:
+      case Vinstr::mtlr:
+      case Vinstr::mtvsrd:
+      case Vinstr::mulsd:
+      case Vinstr::nop:
+      case Vinstr::not:
+      case Vinstr::notb:
+      case Vinstr::nothrow:
+      case Vinstr::orbim:
+      case Vinstr::orqim:
+      case Vinstr::orsw:
+      case Vinstr::orswi:
+      case Vinstr::orwim:
+      case Vinstr::phidef:
+      case Vinstr::phijcc:
+      case Vinstr::phijmp:
+      case Vinstr::phplogue:
+      case Vinstr::phpret:
+      case Vinstr::pop:
+      case Vinstr::popm:
+      case Vinstr::popp:
+      case Vinstr::psllq:
+      case Vinstr::psrlq:
+      case Vinstr::push:
+      case Vinstr::pushm:
+      case Vinstr::pushp:
+      case Vinstr::resumetc:
+      case Vinstr::ret:
+      case Vinstr::retransopt:
+      case Vinstr::roundsd:
+      case Vinstr::sarq:
+      case Vinstr::setcc:
+      case Vinstr::shlq:
+      case Vinstr::sqrtsd:
+      case Vinstr::srem:
+      case Vinstr::stdcx:
+      case Vinstr::store:
+      case Vinstr::storeb:
+      case Vinstr::storebi:
+      case Vinstr::storel:
+      case Vinstr::storeli:
+      case Vinstr::storeqi:
+      case Vinstr::storesd:
+      case Vinstr::storeups:
+      case Vinstr::storew:
+      case Vinstr::storewi:
+      case Vinstr::stublogue:
+      case Vinstr::stubret:
+      case Vinstr::stubtophp:
+      case Vinstr::stubunwind:
+      case Vinstr::subbi:
+      case Vinstr::subl:
+      case Vinstr::subli:
+      case Vinstr::subqi:
+      case Vinstr::subsb:
+      case Vinstr::subsd:
+      case Vinstr::syncpoint:
+      case Vinstr::syncvmret:
+      case Vinstr::syncvmsp:
+      case Vinstr::tailcallphp:
+      case Vinstr::tailcallstub:
+      case Vinstr::testb:
+      case Vinstr::testbi:
+      case Vinstr::testbim:
+      case Vinstr::testl:
+      case Vinstr::testli:
+      case Vinstr::testlim:
+      case Vinstr::testqi:
+      case Vinstr::testqim:
+      case Vinstr::testqm:
+      case Vinstr::testwim:
+      case Vinstr::ucomisd:
+      case Vinstr::ud2:
+      case Vinstr::unpcklpd:
+      case Vinstr::unwind:
+      case Vinstr::uxth:
+      case Vinstr::vcall:
+      case Vinstr::vcallarray:
+      case Vinstr::vinvoke:
+      case Vinstr::xorbi:
+      case Vinstr::xscvdpsxds:
+      case Vinstr::xscvsxddp:
+      case Vinstr::xxlxor:
+      case Vinstr::xxpermdi:
+        break;
       case Vinstr::addl:
       case Vinstr::addq:
       case Vinstr::andq:
@@ -1794,11 +2021,12 @@ void defConditions(Vunit& unit) {
       case Vinstr::decl:
       case Vinstr::decq:
       case Vinstr::imul:
-      case Vinstr::incw:
-      case Vinstr::incq:
       case Vinstr::incl:
+      case Vinstr::incq:
+      case Vinstr::incw:
       case Vinstr::neg:
       case Vinstr::orq:
+      case Vinstr::orqi:
       case Vinstr::sar:
       case Vinstr::sarqi:
       case Vinstr::shl:
@@ -1810,7 +2038,6 @@ void defConditions(Vunit& unit) {
       case Vinstr::xorb:
       case Vinstr::xorl:
       case Vinstr::xorq:
-      case Vinstr::orqi:
       case Vinstr::xorqi: defCond(v, inst, blockSigns);
         break;
       case Vinstr::testq: defCond_testq(v, inst.testq_, blockSigns);
@@ -1822,8 +2049,6 @@ void defConditions(Vunit& unit) {
       case Vinstr::cmpq: defCond_cmpq(v, inst.cmpq_, blockSigns);
         break;
       case Vinstr::cmpqi: defCond_cmpqi(v, inst.cmpqi_, blockSigns);
-        break;
-      default:
         break;
       }
 

@@ -84,7 +84,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::copy:
     case Vinstr::copy2:
     case Vinstr::copyargs:
-    case Vinstr::copycr0tocr1:
+    case Vinstr::copycr:
     case Vinstr::cvtsi2sd:
     case Vinstr::cvtsi2sdm:
     case Vinstr::cvttsd2siq:
