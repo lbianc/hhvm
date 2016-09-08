@@ -101,7 +101,7 @@ struct DecodedInstruction {
   DecoderInfo getFarBranch(AllowCond ac = AllowCond::Any) const;
   DecInfoOffset getFarBranchLength(AllowCond ac = AllowCond::Any) const;
   uint8_t* farBranchTarget() const { return (uint8_t*)m_imm; }
-  bool setFarBranchTarget(uint8_t* target, bool fixedSize);
+  bool setFarBranchTarget(uint8_t* target, bool smashable);
 
   bool isCall() const;
 

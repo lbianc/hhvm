@@ -30,6 +30,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
 
 using ppc64_asm::PPC64Instr;
 using ppc64_asm::Assembler;
+using ppc64_asm::ImmType;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,7 +46,7 @@ using ppc64_asm::Assembler;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, fixups, limmediate, d, imm, true);
+  return EMIT_BODY(cb, fixups, limmediate, d, imm, ImmType::TocOnly);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
@@ -56,7 +57,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 
   // don't use cmpqim because of smashableCmpqImm implementation. A "load 32bits
   // immediate" is mandatory
-  a.limmediate (rfuncln(), imm);
+  a.limmediate (rfuncln(), imm, ImmType::TocOnly);
   a.lwz  (rAsm, r[disp]); // base + displacement
   a.extsw(rAsm, rAsm);
   a.cmpd (rfuncln(), rAsm);
@@ -92,7 +93,7 @@ void smashMovq(TCA inst, uint64_t imm) {
   const ppc64_asm::DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
-  a.limmediate(reg, imm, true);
+  a.limmediate(reg, imm, ImmType::TocOnly);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
@@ -104,7 +105,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
   const ppc64_asm::DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
-  a.limmediate(reg, imm);
+  a.limmediate(reg, imm, ImmType::TocOnly);
 }
 
 void smashCall(TCA inst, TCA target) {
@@ -119,7 +120,8 @@ void smashCall(TCA inst, TCA target) {
 
   a.setFrontier(inst);
 
-  a.limmediate(rfuncentry(), reinterpret_cast<uint64_t>(target), true);
+  a.limmediate(rfuncentry(), reinterpret_cast<uint64_t>(target),
+      ImmType::TocOnly);
 }
 
 void smashJmp(TCA inst, TCA target) {

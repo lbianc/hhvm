@@ -176,6 +176,14 @@ namespace reg {
 // Forward declaration to be used in Label
 struct Assembler;
 
+enum class ImmType {
+              // Supports TOC? | Supports li64? | Fixed size?
+              // -------------------------------------------
+  AnyCompact, // Yes           | Yes            | No
+  AnyFixed,   // Yes           | Yes            | Yes (5 instr)
+  TocOnly,    // Yes           | No             | Yes (2 instr)
+};
+
 enum class LinkReg {
   Save,
   DoNotTouch
@@ -195,7 +203,7 @@ struct Label {
   void branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  bool fixedSize = true);
+                  ImmType immt = ImmType::AnyFixed);
   void asm_label(Assembler& a);
 
 private:
@@ -366,14 +374,20 @@ struct Assembler {
     CR7      = 7,
   };
 
+  // Total amount of bytes that a li64 function emits as fixed size
+  static const uint8_t kLi64Len = instr_size_in_bytes * 5;
+  // TOC emit length: (ld/lwz + nop) or (addis + ld/lwz)
+  static const uint8_t kTocLen = instr_size_in_bytes * 2;
+
   // Jcc length: li64 + mtctr + nop + nop + bcctr
-  static const uint8_t kJccLen = instr_size_in_bytes * 9;
+  static const uint8_t kJccLen = kLi64Len + instr_size_in_bytes * 4;
+  // Jcc using TOC length: kTocLen + mtctr + nop + nop + bcctr
+  static const uint8_t kJccTocLen = kTocLen + instr_size_in_bytes * 4;
 
   // Call length: li64 + mtctr + bctr
-  static const uint8_t kCallLen = instr_size_in_bytes * 7;
-
-  // Total ammount of bytes that a li64 function emits as fixed size
-  static const uint8_t kLi64Len = instr_size_in_bytes * 5;
+  static const uint8_t kCallLen = kLi64Len + instr_size_in_bytes * 2;
+  // Call using TOC length: kTocLen + mtctr + bctr
+  static const uint8_t kCallTocLen = kTocLen + instr_size_in_bytes * 2;
 
   // TODO(rcardoso): Must create a macro for these similar instructions.
   // This will make code more clean.
@@ -1820,28 +1834,29 @@ struct Assembler {
   void branchFar(Label& l,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  bool fixedSize = true) {
-    l.branchFar(*this, bc, lr, fixedSize);
+                  ImmType immt = ImmType::AnyFixed) {
+    l.branchFar(*this, bc, lr, immt);
   }
 
   void branchFar(CodeAddress c,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  bool fixedSize = true) {
+                  ImmType immt = ImmType::AnyFixed) {
     Label l(c);
-    l.branchFar(*this, bc, lr, fixedSize);
+    l.branchFar(*this, bc, lr, immt);
   }
 
   void branchFar(CodeAddress c,
                   ConditionCode cc,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  bool fixedSize = true) {
-    branchFar(c, BranchParams::convertCC(cc), lr, fixedSize);
+                  ImmType immt = ImmType::AnyFixed) {
+    branchFar(c, BranchParams::convertCC(cc), lr, immt);
   }
 
-  void branchFar(CodeAddress c, BranchParams bp, bool fixedSize = true) {
+  void branchFar(CodeAddress c, BranchParams bp,
+                  ImmType immt = ImmType::AnyFixed) {
     LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
-    branchFar(c, static_cast<BranchConditions>(bp), lr, fixedSize);
+    branchFar(c, static_cast<BranchConditions>(bp), lr, immt);
   }
 
   // ConditionCode variants
@@ -1873,9 +1888,9 @@ struct Assembler {
   template <typename T>
   void call(T& target, CallArg ca = CallArg::Internal) {
     if ((CallArg::SmashInt == ca) || (CallArg::SmashExt == ca)) {
-      // To make a branch smashable, the most conservative method needs to be
-      // used so the target can be changed later or on bindCall. Also keep nops
-      branchFar(target, BranchConditions::Always, LinkReg::Save, true);
+      // Smashable instructions use toc for storing immediates.
+      branchFar(target, BranchConditions::Always, LinkReg::Save,
+          ImmType::TocOnly);
     } else {
       // tries best performance possible
       branchAuto(target, BranchConditions::Always, LinkReg::Save);
@@ -1893,10 +1908,15 @@ struct Assembler {
 
 //////////////////////////////////////////////////////////////////////
   // Auxiliary for loading immediates in the best way
-  void limmediate(const Reg64& rt, int64_t imm64, bool fixedSize = false);
 
+private:
   void loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
       uint64_t offset, bool fixedSize, bool fits32);
+
+public:
+  void limmediate(const Reg64& rt,
+                  int64_t imm64,
+                  ImmType immt = ImmType::AnyCompact);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);

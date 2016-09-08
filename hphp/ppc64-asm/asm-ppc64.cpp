@@ -862,7 +862,7 @@ void Assembler::patchAbsolute(CodeAddress jmp,
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLi64Len, "patched bctr");
   Assembler a{ cb };
-  a.limmediate(reg::r12, ssize_t(dest), true);
+  a.limmediate(reg::r12, ssize_t(dest), ImmType::AnyFixed);
 }
 
 void Assembler::patchBranch(CodeAddress jmp,
@@ -974,7 +974,7 @@ void Assembler::loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
   return;
 }
 
-void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
+void Assembler::limmediate (const Reg64& rt, int64_t imm64, ImmType immt) {
   always_assert(HPHP::RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
     HPHP::RuntimeOption::Evalppc64minTOCImmSize <= 64);
 
@@ -983,7 +983,7 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
   };
 
   if (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize)) {
-    li64(rt, imm64, fixedSize);
+    li64(rt, imm64, immt != ImmType::AnyCompact);
     return;
   }
 
@@ -999,15 +999,17 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, bool fixedSize) {
 
   if (TOCoffset > INT16_MAX) {
     int16_t complement = 0;
-    // If last four bytes is still bigger than a signed 16bits, uses as two complement.
+    // If last four bytes is still bigger than a signed 16bits, uses as two
+    // complement.
     if ((TOCoffset & UINT16_MAX) > INT16_MAX) complement = 1;
     addis(rt, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
-    loadTOC(rt, rt, imm64, TOCoffset & UINT16_MAX, fixedSize, fits32);
+    loadTOC(rt, rt, imm64, TOCoffset & UINT16_MAX,
+        immt == ImmType::AnyFixed, fits32);
   }
   else {
-    loadTOC(rt, reg::r2, imm64, TOCoffset, fixedSize, fits32);
-    if (fixedSize ||
-        (!fixedSize && HPHP::RuntimeOption::EvalJitRelocationSize != 0)) {
+    loadTOC(rt, reg::r2, imm64, TOCoffset, immt == ImmType::AnyFixed, fits32);
+    bool toc_may_grow = HPHP::RuntimeOption::EvalJitRelocationSize != 0;
+    if ((immt != ImmType::AnyCompact) || toc_may_grow) {
       emitNop(1 * instr_size_in_bytes);
     }
   }
@@ -1067,13 +1069,13 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
 void Label::branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  bool fixedSize /* = true */) {
+                  ImmType immt) {
   // Marking current address for patchAbsolute
   addJump(&a);
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.limmediate(reg::r12, address, fixedSize);
+  a.limmediate(reg::r12, address, immt);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).
@@ -1084,7 +1086,7 @@ void Label::branchFar(Assembler& a,
   if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
     a.xor(reg::r0, reg::r0, reg::r0,false);
     a.mtspr(Assembler::SpecialReg::XER, reg::r0);
-  } else if (cond && fixedSize) {
+  } else if (cond && immt != ImmType::AnyCompact) {
     // Unconditional branch (jmp or call) doesn't need this reserve bytes
     a.emitNop(2 * instr_size_in_bytes);
   }

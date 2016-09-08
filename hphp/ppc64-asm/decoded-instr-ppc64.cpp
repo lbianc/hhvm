@@ -129,7 +129,7 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
     cb.init(m_ip, max_branch_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp, true);
+    a.branchFar(target, bp, ImmType::AnyFixed);
 
     // refresh m_size and other parameters
     decode();
@@ -186,7 +186,7 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   return DecInfoOffset();
 }
 
-bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool fixedSize) {
+bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool smashable) {
   DecoderInfo di = getFarBranch();
   if (di.isInvalid()) return false;
 
@@ -197,7 +197,8 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool fixedSize) {
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  a.branchFar(target, bp, fixedSize);
+  ImmType immt = smashable ? ImmType::TocOnly : ImmType::AnyFixed;
+  a.branchFar(target, bp, immt);
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {
