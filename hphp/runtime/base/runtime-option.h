@@ -331,6 +331,7 @@ struct RuntimeOption {
   static std::string CoreDumpReportDirectory;
   static std::string StackTraceFilename;
   static int StackTraceTimeout;
+  static std::string RemoteTraceOutputDir;
 
   static bool EnableStats;
   static bool EnableAPCStats;
@@ -625,6 +626,9 @@ public:
   static std::string RepoLocalMode;
   static std::string RepoLocalPath;
   static std::string RepoCentralPath;
+  static int32_t RepoCentralFileMode;
+  static std::string RepoCentralFileUser;
+  static std::string RepoCentralFileGroup;
   static std::string RepoEvalMode;
   static std::string RepoJournal;
   static bool RepoCommit;

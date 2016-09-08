@@ -335,6 +335,7 @@ std::string RuntimeOption::CoreDumpReportDirectory =
 #endif
 std::string RuntimeOption::StackTraceFilename;
 int RuntimeOption::StackTraceTimeout = 0; // seconds; 0 means unlimited
+std::string RuntimeOption::RemoteTraceOutputDir = "/tmp";
 
 bool RuntimeOption::EnableStats = false;
 bool RuntimeOption::EnableAPCStats = false;
@@ -518,6 +519,9 @@ std::string RuntimeOption::CodeCoverageOutputFile;
 std::string RuntimeOption::RepoLocalMode;
 std::string RuntimeOption::RepoLocalPath;
 std::string RuntimeOption::RepoCentralPath;
+int32_t RuntimeOption::RepoCentralFileMode;
+std::string RuntimeOption::RepoCentralFileUser;
+std::string RuntimeOption::RepoCentralFileGroup;
 std::string RuntimeOption::RepoEvalMode;
 std::string RuntimeOption::RepoJournal = "delete";
 bool RuntimeOption::RepoCommit = true;
@@ -1014,6 +1018,9 @@ void RuntimeOption::Load(
           RepoLocalPath = HHVM_REPO_LOCAL_PATH;
         }
       }
+      Config::Bind(RepoCentralFileMode, ini, config, "Repo.Central.FileMode");
+      Config::Bind(RepoCentralFileUser, ini, config, "Repo.Central.FileUser");
+      Config::Bind(RepoCentralFileGroup, ini, config, "Repo.Central.FileGroup");
     }
     {
       // Central Repo
@@ -1663,6 +1670,8 @@ void RuntimeOption::Load(
     StackTraceFilename = stack_trace_stream.str();
 
     Config::Bind(StackTraceTimeout, ini, config, "Debug.StackTraceTimeout", 0);
+    Config::Bind(RemoteTraceOutputDir, ini, config,
+                 "Debug.RemoteTraceOutputDir", "/tmp");
 
     {
       // Debug SimpleCounter

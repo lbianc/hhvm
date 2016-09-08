@@ -7,7 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  *
  *)
- 
+
 open Core
 open Integration_test_base_types
 open ServerCommandTypes
@@ -64,10 +64,12 @@ let run_loop_once env inputs =
   let env = ServerMain.serve_one_iteration genv env client_provider stats in
   env, {
     did_read_disk_changes = !did_read_disk_changes_ref;
+    rechecked_count = ServerMain.get_rechecked_count stats;
     new_client_response =
       TestClientProvider.get_client_response Non_persistent;
     persistent_client_response =
       TestClientProvider.get_client_response Persistent;
+    push_message = TestClientProvider.get_push_message ();
   }
 
 let fail x =

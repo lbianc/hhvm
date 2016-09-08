@@ -13,21 +13,46 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_DEBUG_GUARDS_H
-#define incl_HPHP_JIT_DEBUG_GUARDS_H
 
-#include "hphp/runtime/vm/srckey.h"
+#ifndef incl_HPHP_JIT_MCGEN_TRANSLATE_H_
+#define incl_HPHP_JIT_MCGEN_TRANSLATE_H_
 
-#include "hphp/util/data-block.h"
+#include "hphp/runtime/vm/jit/types.h"
 
 namespace HPHP { namespace jit {
 
-struct SrcRec;
-struct CGMeta;
+struct TransArgs;
 
-void addDbgGuardImpl(SrcKey sk, SrcRec* srcRec, CodeBlock& cb,
-                     DataBlock& data, CGMeta& fixup);
+namespace mcgen {
 
-}}
+/*
+ * Create a new translation based on args.
+ *
+ * The SrcKey and kind of this translation must be specified in args. The
+ * TransID and region may optionally be specified as well. If the kind of region
+ * requested is TransOptimize a TransID must be specified.
+ *
+ * Should the region be absent, an appropriate region for the designated kind
+ * will be selected.
+ */
+TCA translate(TransArgs args);
+
+/*
+ * Create a translation for the SrcKey specified in args.
+ *
+ * If a translation for this SrcKey already exists it will be returned. The kind
+ * of translation created will be selected based on the SrcKey specified.
+ */
+TCA createTranslation(TransArgs args);
+
+/*
+ * Find the translation for the SrcKey specified in args.
+ *
+ * If no translation exists or the current VM frame is a pseudomain then return
+ * nullptr.
+ */
+TCA findTranslation(const TransArgs& args);
+
+}}}
 
 #endif

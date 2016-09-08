@@ -57,7 +57,9 @@
 #include "hphp/runtime/ext/reflection/ext_reflection.h"
 #include "hphp/runtime/ext/apc/ext_apc.h"
 #include "hphp/runtime/server/server-stats.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/debug/debug.h"
+#include "hphp/runtime/vm/jit/enter-tc.h"
+#include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/debugger-hook.h"
@@ -1488,7 +1490,7 @@ void ExecutionContext::invokeUnit(TypedValue* retval, const Unit* unit) {
 
 void ExecutionContext::syncGdbState() {
   if (RuntimeOption::EvalJit && !RuntimeOption::EvalJitNoGdb) {
-    jit::mcg->debugInfo()->debugSync();
+    Debug::DebugInfo::Get()->debugSync();
   }
 }
 
@@ -1589,7 +1591,7 @@ void ExecutionContext::requestInit() {
   vmStack().requestInit();
   ObjectData::resetMaxId();
   ResourceHdr::resetMaxId();
-  jit::mcg->requestInit();
+  jit::tc::requestInit();
 
   if (RuntimeOption::EvalJitEnableRenameFunction) {
     assert(SystemLib::s_anyNonPersistentBuiltins);
@@ -1952,7 +1954,7 @@ void ExecutionContext::resumeAsyncFunc(Resumable* resumable,
     const bool useJit = RID().getJit();
     if (LIKELY(useJit && resumable->resumeAddr())) {
       Stats::inc(Stats::VMEnter);
-      jit::mcg->enterTCAfterPrologue(resumable->resumeAddr());
+      jit::enterTCAfterPrologue(resumable->resumeAddr());
     } else {
       enterVMAtCurPC();
     }
@@ -2056,7 +2058,7 @@ bool ExecutionContext::evalUnit(Unit* unit, PC& pc, int funcType) {
   }
   ar->initNumArgs(0);
   assert(vmfp());
-  ar->setReturn(vmfp(), pc, jit::mcg->ustubs().retHelper);
+  ar->setReturn(vmfp(), pc, jit::tc::ustubs().retHelper);
   pushLocalsAndIterators(func);
   assert(vmfp()->func()->attrs() & AttrMayUseVV);
   if (!vmfp()->hasVarEnv()) {

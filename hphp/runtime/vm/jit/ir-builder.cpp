@@ -28,7 +28,6 @@
 #include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/mutation.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/punt.h"
 #include "hphp/runtime/vm/jit/simplify.h"
@@ -89,6 +88,7 @@ SSATmp* fwdGuardSource(IRInstruction* inst) {
 #define DCol           return false; // fixed in bytecode
 #define DThis          return false; // fixed type from ctx class
 #define DCtx           return false;
+#define DCtxCls        return false;
 #define DMulti         return true;  // DefLabel; value could be anything
 #define DSetElem       return false; // fixed type
 #define DBuiltin       return false; // from immutable typeParam

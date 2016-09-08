@@ -19,7 +19,6 @@
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/frame-state.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/util/timer.h"
 
 namespace HPHP { namespace jit {
@@ -126,6 +125,7 @@ static bool endsUnitAtSrcKey(const Block* block, SrcKey sk) {
     case ThrowDivisionByZeroError:
     case VerifyParamFailHard:
     case Halt:
+    case FatalMissingThis:
       return instSk == sk;
 
     // The RetCtrl is generally ending a bytecode instruction, with the

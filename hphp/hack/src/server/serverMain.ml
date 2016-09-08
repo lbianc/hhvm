@@ -18,7 +18,6 @@ type recheck_loop_stats = {
   rechecked_count : int;
   (* includes dependencies *)
   total_rechecked_count : int;
-  reparsed_files : Relative_path.Set.t;
 }
 
 type main_loop_stats = recheck_loop_stats ref * string ref
@@ -27,8 +26,9 @@ let empty_recheck_loop_stats = {
   rechecked_batches = 0;
   rechecked_count = 0;
   total_rechecked_count = 0;
-  reparsed_files = Relative_path.Set.empty;
 }
+
+let get_rechecked_count (stats_ref, _) = !stats_ref.rechecked_count
 
 (*****************************************************************************)
 (* Main initialization *)
@@ -63,6 +63,7 @@ module Program =
          be 'restored' in the workers, because they are not 'forked'
          anymore. See `ServerWorker.{save/restore}_state`. *)
       HackSearchService.attach_hooks ();
+
       Sys_utils.set_signal Sys.sigusr1
         (Sys.Signal_handle Typing.debug_print_last_pos);
       Sys_utils.set_signal Sys.sigusr2
@@ -102,13 +103,13 @@ module Program =
         let new_env, total_rechecked = ServerTypeCheck.check genv check_env in
         ServerStamp.touch_stamp_errors (Errors.get_error_list old_env.errorl)
                                        (Errors.get_error_list new_env.errorl);
-        if not @@ Diagnostic_subscription.is_empty new_env.diag_subscribe
-        then begin
-          let id = Diagnostic_subscription.get_id new_env.diag_subscribe in
-          let errors_json = ServerError.get_errorl_json_array new_env.errorl in
-          let res = IdeJson.Diagnostic_response (id, errors_json) in
+        Option.iter new_env.diag_subscribe ~f:begin fun sub ->
+          let id = Diagnostic_subscription.get_id sub in
+          let errors = Errors.get_error_list new_env.errorl in
+          let errors = List.map ~f:Errors.to_absolute errors in
+          let res = ServerCommandTypes.DIAGNOSTIC (id, errors) in
           let client = Utils.unsafe_opt new_env.persistent_client in
-          ClientProvider.send_response_to_client client res;
+          ClientProvider.send_push_message_to_client client res;
         end;
         new_env, total_rechecked
       end
@@ -157,7 +158,7 @@ let handle_persistent_connection_ genv env client =
      {env with
      persistent_client = None;
      edited_files = Relative_path.Map.empty;
-     diag_subscribe = Diagnostic_subscription.empty;
+     diag_subscribe = None;
      symbols_cache = SMap.empty}
    | e ->
      let msg = Printexc.to_string e in
@@ -168,7 +169,7 @@ let handle_persistent_connection_ genv env client =
      {env with
      persistent_client = None;
      edited_files = Relative_path.Map.empty;
-     diag_subscribe = Diagnostic_subscription.empty;
+     diag_subscribe = None;
      symbols_cache = SMap.empty}
 
 let handle_connection genv env client is_persistent =
@@ -237,7 +238,6 @@ let rec recheck_loop acc genv env =
       rechecked_count =
         acc.rechecked_count + Relative_path.Set.cardinal rechecked;
       total_rechecked_count = acc.total_rechecked_count + total_rechecked;
-      reparsed_files = Relative_path.Set.union updates acc.reparsed_files;
     } in
     recheck_loop acc genv env
   end
@@ -396,9 +396,12 @@ let run_once options handle =
  * The server monitor will pass client connections to this process
  * via ic.
  *)
-let daemon_main_exn (handle, options) (ic, oc) =
+let daemon_main_exn options (ic, oc) =
   let in_fd = Daemon.descr_of_in_channel ic in
   let out_fd = Daemon.descr_of_out_channel oc in
+  let config, _ = ServerConfig.(load filename options) in
+  let handle = SharedMem.init (ServerConfig.sharedmem_config config) in
+  SharedMem.connect handle ~is_master:true;
 
   let genv = setup_server options handle in
   if ServerArgs.check_mode genv.options then
@@ -407,12 +410,10 @@ let daemon_main_exn (handle, options) (ic, oc) =
   let env = MainInit.go options (fun () -> program_init genv) in
   serve genv env in_fd out_fd
 
-let daemon_main (state, handle, options) (ic, oc) =
-  (* Even though the server monitor set up the shared memory, the server daemon
-   * is master here *)
-  SharedMem.connect handle ~is_master:true;
+let daemon_main (state, options) (ic, oc) =
+  (* Restore the root directory and other global states from monitor *)
   ServerGlobalState.restore state;
-  try daemon_main_exn (handle, options) (ic, oc)
+  try daemon_main_exn options (ic, oc)
   with
   | SharedMem.Out_of_shared_memory ->
     ServerInit.print_hash_stats ();

@@ -18,7 +18,6 @@
 
 #include "hphp/runtime/vm/jit/abi-arm.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/reg-algorithms.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
@@ -139,7 +138,15 @@ struct Vgen {
   }
 
   static void patch(Venv& env);
-  static void pad(CodeBlock& cb) {}
+
+  static void pad(CodeBlock& cb) {
+    vixl::MacroAssembler a { cb };
+    auto const begin = reinterpret_cast<char*>(cb.frontier());
+    while (cb.available() >= 4) a.Brk(1);
+    assertx(cb.available() == 0);
+    auto const end = reinterpret_cast<char*>(cb.frontier());
+    __builtin___clear_cache(begin, end);
+  }
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -343,12 +350,18 @@ void Vgen::patch(Venv& env) {
   for (auto& p : env.jmps) {
     assertx(env.addrs[p.target]);
     // 'jmp' is 2 instructions, load followed by branch
-    *reinterpret_cast<TCA*>(p.instr + 2 * 4) = env.addrs[p.target];
+    auto const begin = reinterpret_cast<char*>(p.instr + 2 * 4);
+    auto const end = begin + sizeof(env.addrs[p.target]);
+    *reinterpret_cast<TCA*>(begin) = env.addrs[p.target];
+    __builtin___clear_cache(begin, end);
   }
   for (auto& p : env.jccs) {
     assertx(env.addrs[p.target]);
     // 'jcc' is 3 instructions, b.!cc + load followed by branch
-    *reinterpret_cast<TCA*>(p.instr + 3 * 4) = env.addrs[p.target];
+    auto const begin = reinterpret_cast<char*>(p.instr + 3 * 4);
+    auto const end = begin + sizeof(env.addrs[p.target]);
+    *reinterpret_cast<TCA*>(begin) = env.addrs[p.target];
+    __builtin___clear_cache(begin, end);
   }
 }
 
@@ -1469,7 +1482,7 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   auto& code = unit.blocks[b].code;
   // vcallarray can only appear at the end of a block.
   auto const inst = code.back().get<vcallarray>();
-  auto const origin = code.back().origin;
+  auto const irctx = code.back().irctx();
 
   auto argRegs = inst.args;
   auto const& srcs = unit.tuples[inst.extraArgs];
@@ -1480,10 +1493,8 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   }
 
   code.back() = copyargs{unit.makeTuple(srcs), unit.makeTuple(std::move(dsts))};
-  code.emplace_back(callarray{inst.target, argRegs});
-  code.back().origin = origin;
-  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}});
-  code.back().origin = origin;
+  code.emplace_back(callarray{inst.target, argRegs}, irctx);
+  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}}, irctx);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

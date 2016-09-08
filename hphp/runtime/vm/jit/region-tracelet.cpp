@@ -19,7 +19,6 @@
 #include "hphp/runtime/vm/jit/annotation.h"
 #include "hphp/runtime/vm/jit/inlining-decider.h"
 #include "hphp/runtime/vm/jit/location.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/punt.h"
@@ -51,6 +50,8 @@ typedef hphp_hash_set<SrcKey, SrcKey::Hasher> InterpSet;
 namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
+
+constexpr int MaxJmpsTracedThrough = 5;
 
 struct Env {
   Env(const RegionContext& ctx,
@@ -275,7 +276,7 @@ bool traceThroughJmp(Env& env) {
   // Don't trace through too many jumps, unless we're inlining. We want to make
   // sure we don't break a tracelet in the middle of an inlined call; if the
   // inlined callee becomes too big that's caught in shouldIRInline.
-  if (env.numJmps == Translator::MaxJmpsTracedThrough && !env.inlining) {
+  if (env.numJmps == MaxJmpsTracedThrough && !env.inlining) {
     return false;
   }
 

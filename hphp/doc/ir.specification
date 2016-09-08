@@ -1037,12 +1037,12 @@ To string conversions:
   Convert a Ctx known to contain a $this pointer to a specific object type,
   based on the marker func for this instruction.
 
-| LdClsCtx, D(Cls), S(Ctx), NF
+| LdClsCtx, DCtxCls, S(Ctx), NF
 
   Loads into D the class representing the current context. Extracts the class
   from S0, which can be either the this pointer or the context class.
 
-| LdClsCctx, D(Cls), S(Cctx), NF
+| LdClsCctx, DCtxCls, S(Cctx), NF
 
   Loads into D the class representing the current context. Extracts the class
   from the S0, which is a context class.
@@ -1852,6 +1852,10 @@ To string conversions:
   Raises an appropriate notice or fatal to indicate that Func was
   called with null $this. In most cases its a notice, but for
   builtins and special class methods its a fatal.
+
+| FatalMissingThis, ND, S(Func), T|Er
+
+  Similar to RaiseMissingThis, but for cases where we know it will fatal.
 
 | InitClosureStaticLoc, ND, S(BoxedCell) S(Cell), NF
 

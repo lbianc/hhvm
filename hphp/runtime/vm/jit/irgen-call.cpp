@@ -18,7 +18,6 @@
 #include "hphp/runtime/base/stats.h"
 
 #include "hphp/runtime/vm/jit/func-effects.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
 #include "hphp/runtime/vm/jit/type-constraint.h"
@@ -626,6 +625,7 @@ SSATmp* forwardCtx(IRGS& env, SSATmp* ctx, SSATmp* funcTmp) {
                  gen(env, IncRef, obj);
                },
                [&] {
+                 hint(env, Block::Hint::Unlikely);
                  gen(env, RaiseMissingThis, funcTmp);
                });
     return ctx;
@@ -798,7 +798,7 @@ void emitFPushCtorD(IRGS& env,
                     int32_t numParams,
                     const StringData* className) {
   auto const cls = Unit::lookupUniqueClassInContext(className, curClass(env));
-  bool const persistentCls = classHasPersistentRDS(cls);
+  bool const persistentCls = classIsPersistentOrCtxParent(env, cls);
   bool const canInstantiate = canInstantiateClass(cls);
   bool const fastAlloc =
     persistentCls &&
@@ -986,17 +986,6 @@ void emitFPushClsMethod(IRGS& env, int32_t numParams) {
     if (auto clsSpec = clsVal->type().clsSpec()) {
       cls = clsSpec.cls();
       exact = clsSpec.exact();
-    } else if (clsVal->inst()->is(LdClsCtx, LdClsCctx)) {
-      /*
-       * Optimize FPushClsMethod when the method is a known static
-       * string and the input class is the context.  The common bytecode
-       * pattern here is LateBoundCls ; FPushClsMethod.
-       *
-       * This logic feels like it belongs in the simplifier, but the
-       * generated code for this case is pretty different, since we
-       * don't need the pre-live ActRec trick.
-       */
-      cls = curClass(env);
     }
 
     if (cls) {

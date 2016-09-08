@@ -20,7 +20,6 @@
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/func-guard-ppc64.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
@@ -1320,7 +1319,7 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   auto& code = unit.blocks[b].code;
   // vcallarray can only appear at the end of a block.
   auto const inst = code.back().get<vcallarray>();
-  auto const origin = code.back().origin;
+  auto const irctx = code.back().irctx();
 
   auto argRegs = inst.args;
   auto const& srcs = unit.tuples[inst.extraArgs];
@@ -1331,10 +1330,8 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   }
 
   code.back() = copyargs{unit.makeTuple(srcs), unit.makeTuple(std::move(dsts))};
-  code.emplace_back(callarray{inst.target, argRegs});
-  code.back().origin = origin;
-  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}});
-  code.back().origin = origin;
+  code.emplace_back(callarray{inst.target, argRegs}, irctx);
+  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}}, irctx);
 }
 
 /*
@@ -1367,7 +1364,7 @@ void lowerForPPC64(Vunit& unit) {
       auto scratch = unit.makeScratchBlock();
       auto& inst = blocks[ib].code[ii];
       SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-      Vout v(unit, scratch, inst.origin);
+      Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
         /*
@@ -1573,7 +1570,7 @@ void fixVptrsForPPC64(Vunit& unit) {
       auto scratch = unit.makeScratchBlock();
       auto& inst = blocks[ib].code[ii];
       SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-      Vout v(unit, scratch, inst.origin);
+      Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
         /*
@@ -1781,7 +1778,7 @@ void fixConditions(Vunit& unit) {
       auto scratch = unit.makeScratchBlock();
       auto& inst = blocks[ib].code[ii];
       SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-      Vout v(unit, scratch, inst.origin);
+      Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
       case Vinstr::addl:

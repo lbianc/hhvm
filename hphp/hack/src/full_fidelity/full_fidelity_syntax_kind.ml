@@ -105,6 +105,8 @@ type t =
 | XHPAttribute
 | XHPClose
 | XHPClassAttributeDeclaration
+| XHPClassAttribute
+| XHPEnumType
 
 (* Types *)
 | SimpleTypeSpecifier
@@ -228,3 +230,5 @@ let to_string kind =
   | XHPAttribute -> "xhp_attribute"
   | XHPClose -> "xhp_close"
   | XHPClassAttributeDeclaration -> "xhp_class_attribute_declaration"
+  | XHPClassAttribute -> "xhp_class_attribute"
+  | XHPEnumType -> "xhp_enum_type"
