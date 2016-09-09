@@ -13,19 +13,32 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_CODE_RELOCATION_PPC64_H_
-#define incl_HPHP_CODE_RELOCATION_PPC64_H_
+#ifndef incl_HPHP_CODE_RELOCATION_ARM_H_
+#define incl_HPHP_CODE_RELOCATION_ARM_H_
 
 #include "hphp/runtime/vm/jit/relocation.h"
 
-namespace HPHP { namespace jit { namespace ppc64 {
+namespace HPHP { namespace jit { namespace arm {
 
-void adjustForRelocation(RelocationInfo&);
-void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd);
-void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups);
-void adjustMetaDataForRelocation(RelocationInfo&, AsmInfo*, CGMeta&);
-void findFixups(TCA start, TCA end, CGMeta& fixups);
-size_t relocate(RelocationInfo&, CodeBlock&, TCA, TCA, CGMeta&, TCA*);
+void adjustForRelocation(RelocationInfo&) {
+  not_implemented();
+}
+void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
+  not_implemented();
+}
+void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
+  not_implemented();
+}
+void adjustMetaDataForRelocation(RelocationInfo&, AsmInfo*, CGMeta&) {
+  not_implemented();
+}
+void findFixups(TCA start, TCA end, CGMeta& fixups) {
+  not_implemented();
+}
+size_t relocate(RelocationInfo&, CodeBlock&, TCA, TCA, CGMeta&, TCA*) {
+  not_implemented();
+  return 0;
+}
 
 }}}
 
