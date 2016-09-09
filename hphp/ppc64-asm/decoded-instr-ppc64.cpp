@@ -71,11 +71,11 @@ bool DecodedInstruction::setImmediate(int64_t value) {
 
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(m_ip, Assembler::kLi64Len, "setImmediate relocation");
+  cb.init(m_ip, Assembler::kTocLen, "setImmediate relocation");
   HPHP::CodeCursor cursor { cb, m_ip };
   Assembler a{ cb };
 
-  a.limmediate(getLimmediateReg(), ssize_t(value));
+  a.limmediate(getLimmediateReg(), ssize_t(value), ImmType::TocOnly);
 
   // refresh m_imm and other parameters
   decode();
