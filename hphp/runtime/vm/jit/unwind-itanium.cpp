@@ -362,7 +362,7 @@ void write_tc_cie(EHFrameWriter& ehfw) {
   ehfw.offset_extended_sf(dw_reg::FP, (record_size - AROFF(m_sfp)) / 8);
 
 #if defined(__powerpc64__)
-  ehfw.offset_extended_sf(dw_reg::TOC, (record_size - 24) / 8);
+  ehfw.offset_extended_sf(dw_reg::TOC, (record_size - AROFF(m_savedToc)) / 8);
 #endif
 
   // It's not actually the case that %rsp keeps the same value across all TC
