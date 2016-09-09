@@ -334,6 +334,9 @@ Type thisReturn(const IRInstruction* inst) {
 Type ctxReturn(const IRInstruction* inst) {
   auto const func = inst->func();
   if (!func) return TCtx;
+  if (func->requiresThisInBody()) {
+    return thisReturn(inst);
+  }
   if (func->hasForeignThis()) {
     return func->isStatic() ? TCctx : TCtx;
   }
@@ -345,6 +348,12 @@ Type ctxReturn(const IRInstruction* inst) {
     return TCctx;
   }
   return thisReturn(inst) | TCctx;
+}
+
+Type ctxClsReturn(const IRInstruction* inst) {
+  auto const func = inst->func();
+  if (!func || func->hasForeignThis()) return TCls;
+  return Type::SubCls(inst->ctx());
 }
 
 Type setElemReturn(const IRInstruction* inst) {
@@ -421,6 +430,7 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #define DCol            return newColReturn(inst);
 #define DThis           return thisReturn(inst);
 #define DCtx            return ctxReturn(inst);
+#define DCtxCls         return ctxClsReturn(inst);
 #define DMulti          return TBottom;
 #define DSetElem        return setElemReturn(inst);
 #define DBuiltin        return builtinReturn(inst);
@@ -456,6 +466,7 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #undef DCol
 #undef DThis
 #undef DCtx
+#undef DCtxCls
 #undef DMulti
 #undef DSetElem
 #undef DBuiltin

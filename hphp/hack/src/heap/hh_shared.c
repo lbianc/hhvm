@@ -87,8 +87,6 @@
 #include <caml/unixsupport.h>
 #include <caml/intext.h>
 
-#include <assert.h>
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -115,6 +113,17 @@
 #else
 #define Handle_val(fd) (Long_val(fd))
 #define Val_handle(fd) (Val_long(fd))
+#endif
+
+#if !defined _CUSTOM_ASSERT_FUNCTIONS_
+#define _CUSTOM_ASSERT_FUNCTIONS_
+/**
+ * Concatenate the __LINE__ and __FILE__ strings in a macro.
+ */
+#define S1(x) #x
+#define S2(x) S1(x)
+#define LOCATION __FILE__ " : " S2(__LINE__)
+#define assert(f) (f ? 0 : caml_failwith("assertion failed: " LOCATION))
 #endif
 
 /****************************************************************************
@@ -409,7 +418,7 @@ CAMLprim value hh_hash_used_slots(void) {
       nonempty_slots++;
     }
   }
-
+  assert(nonempty_slots == *hcounter);
   value connector = caml_alloc_tuple(2);
   Field(connector, 0) = Val_long(filled_slots);
   Field(connector, 1) = Val_long(nonempty_slots);
@@ -879,15 +888,6 @@ CAMLprim value hh_shared_init(
   Field(connector, 4) = config_hash_table_pow_val;
 
   CAMLreturn(connector);
-}
-
-void hh_shared_reset() {
-#ifndef _WIN32
-  assert(shared_mem);
-  early_counter = 1;
-  memset(shared_mem, 0, heap_init - shared_mem);
-  init_shared_globals(0);
-#endif
 }
 
 /* Must be called by every worker before any operation is performed */
@@ -1452,7 +1452,7 @@ static void raise_hash_table_full() {
 void hh_add(value key, value data) {
   uint64_t hash = get_hash(key);
   unsigned int slot = hash & (hashtbl_size - 1);
-
+  unsigned int init_slot = slot;
   while(1) {
     uint64_t slot_hash = hashtbl[slot].hash;
 
@@ -1496,6 +1496,10 @@ void hh_add(value key, value data) {
     }
 
     slot = (slot + 1) & (hashtbl_size - 1);
+    if (slot == init_slot) {
+      // We're never going to find a spot
+      raise_hash_table_full();
+    }
   }
 }
 
@@ -1507,7 +1511,7 @@ void hh_add(value key, value data) {
 static unsigned int find_slot(value key) {
   uint64_t hash = get_hash(key);
   unsigned int slot = hash & (hashtbl_size - 1);
-
+  unsigned int init_slot = slot;
   while(1) {
     if(hashtbl[slot].hash == hash) {
       return slot;
@@ -1516,6 +1520,10 @@ static unsigned int find_slot(value key) {
       return slot;
     }
     slot = (slot + 1) & (hashtbl_size - 1);
+
+    if (slot == init_slot) {
+      raise_hash_table_full();
+    }
   }
 }
 
@@ -1589,6 +1597,10 @@ void hh_move(value key1, value key2) {
   assert_master();
   assert(hashtbl[slot1].hash == get_hash(key1));
   assert(hashtbl[slot2].addr == NULL);
+  // We are taking up a previously empty slot. Let's increment the counter.
+  if (hashtbl[slot2].hash == 0) {
+    __sync_fetch_and_add(hcounter, 1);
+  }
   hashtbl[slot2].hash = get_hash(key2);
   hashtbl[slot2].addr = hashtbl[slot1].addr;
   hashtbl[slot1].addr = NULL;
@@ -1605,7 +1617,6 @@ void hh_remove(value key) {
   assert_master();
   assert(hashtbl[slot].hash == get_hash(key));
   hashtbl[slot].addr = NULL;
-  __sync_fetch_and_sub(hcounter, 1);
 }
 
 /*****************************************************************************/

@@ -1223,6 +1223,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case EqBool:
   case EqCls:
   case EqFunc:
+  case EqStrPtr:
   case EqDbl:
   case EqInt:
   case GteBool:
@@ -1558,6 +1559,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case RaiseNotice:
   case RaiseWarning:
   case RaiseMissingThis:
+  case FatalMissingThis:
   case ConvCellToStr:
   case ConvObjToStr:
   case Count:      // re-enters on CountableClass

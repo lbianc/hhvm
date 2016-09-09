@@ -145,6 +145,7 @@ bool canDCE(IRInstruction* inst) {
   case CmpRes:
   case EqCls:
   case EqFunc:
+  case EqStrPtr:
   case InstanceOf:
   case InstanceOfIface:
   case InstanceOfIfaceVtable:
@@ -443,6 +444,7 @@ bool canDCE(IRInstruction* inst) {
   case RaiseError:
   case RaiseWarning:
   case RaiseMissingThis:
+  case FatalMissingThis:
   case RaiseNotice:
   case RaiseArrayIndexNotice:
   case RaiseArrayKeyNotice:

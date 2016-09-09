@@ -20,6 +20,7 @@ type t =
 | Arraykey
 | As
 | Async
+| Attribute
 | Await
 | Bool
 | Break
@@ -48,6 +49,8 @@ type t =
 | Function
 | If
 | Implements
+| Include
+| Include_once
 | Instanceof
 | Insteadof
 | Int
@@ -162,6 +165,7 @@ type t =
 | NullLiteral
 (* XHP *)
 | XHPElementName
+| XHPClassName
 | XHPStringLiteral
 | XHPBody
 | XHPComment
@@ -176,6 +180,7 @@ let from_string keyword =
   | "arraykey" -> Some Arraykey
   | "as" -> Some As
   | "async" -> Some Async
+  | "attribute" -> Some Attribute
   | "await" -> Some Await
   | "bool" -> Some Bool
   | "break" -> Some Break
@@ -205,6 +210,8 @@ let from_string keyword =
   | "function" -> Some Function
   | "if" -> Some If
   | "implements" -> Some Implements
+  | "include" -> Some Include
+  | "include_once" -> Some Include_once
   | "instanceof" -> Some Instanceof
   | "insteadof" -> Some Insteadof
   | "int" -> Some Int
@@ -254,6 +261,7 @@ let to_string kind =
   | Arraykey -> "arraykey"
   | As -> "as"
   | Async -> "async"
+  | Attribute -> "attribute"
   | Await -> "await"
   | Bool -> "bool"
   | Break -> "break"
@@ -282,6 +290,8 @@ let to_string kind =
   | Function -> "function"
   | If -> "if"
   | Implements -> "implements"
+  | Include -> "include"
+  | Include_once -> "include_once"
   | Instanceof -> "instanceof"
   | Insteadof -> "insteadof"
   | Int -> "int"
@@ -398,6 +408,7 @@ let to_string kind =
   | BooleanLiteral -> "boolean_literal"
   | NullLiteral -> "null_literal"
   | XHPElementName -> "XHP_element_name"
+  | XHPClassName -> "XHP_class_name"
   | XHPStringLiteral -> "XHP_string_literal"
   | XHPBody -> "XHP_body"
   | XHPComment -> "XHP_comment"

@@ -16,7 +16,6 @@
 #include "hphp/runtime/vm/jit/write-lease.h"
 
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/treadmill.h"
 
 #include "hphp/util/atomic-vector.h"
@@ -38,7 +37,11 @@ AtomicVectorInit s_funcOwnersInit{
   s_funcOwners, RuntimeOption::EvalFuncCountHint
 };
 std::atomic<int> s_jittingThreads{0};
+
+Lease s_writeLease;
 }
+
+Lease& GetWriteLease() { return s_writeLease; }
 
 Lease::Lease() {
   pthread_mutex_init(&m_lock, nullptr);

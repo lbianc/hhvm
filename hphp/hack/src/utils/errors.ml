@@ -58,6 +58,22 @@ module Common = struct
   let get_lazy_decl_flag err_flags =
     err_flags.lazy_decl_err
 
+  (* Log important data if lazy_decl triggers a crash *)
+  let lazy_decl_error_logging error error_list to_absolute to_string =
+    (* Print the current error list, which should be empty *)
+    Printf.eprintf "%s" "Error list(should be empty):\n";
+    List.iter !error_list ~f:(fun err ->
+        let msg = err |> to_absolute |> to_string in Printf.eprintf "%s\n" msg);
+    Printf.eprintf "%s" "Offending error:\n";
+    Printf.eprintf "%s" error;
+
+    (* Print out a larger stack trace *)
+    Printf.eprintf "%s" "Callstack:\n";
+    Printf.eprintf "%s" (Printexc.raw_backtrace_to_string
+      (Printexc.get_callstack 500));
+    (* Exit with special error code so we can see the log after *)
+    Exit_status.exit Exit_status.Lazy_decl_bug
+
   (*****************************************************************************)
   (* Error code printing. *)
   (*****************************************************************************)
@@ -183,7 +199,9 @@ module NonTracingErrors: Errors_modes = struct
     else
       (* We have an error, but haven't handled it in any way *)
       let msg = error |> to_absolute |> to_string in
-      assert_false_log_backtrace (Some msg)
+      if !in_lazy_decl then
+        Common.lazy_decl_error_logging msg error_list to_absolute to_string
+      else assert_false_log_backtrace (Some msg)
 
 end
 
@@ -266,7 +284,9 @@ module TracingErrors: Errors_modes = struct
     else
     (* We have an error, but haven't handled it in any way *)
       let msg = error |> to_absolute |> to_string in
-      assert_false_log_backtrace (Some msg)
+      if !in_lazy_decl then
+        Common.lazy_decl_error_logging msg error_list to_absolute to_string
+      else assert_false_log_backtrace (Some msg)
 
   let get_sorted_error_list (err,_) =
     List.sort ~cmp:begin fun x y ->
@@ -434,6 +454,7 @@ module Naming                               = struct
   let invalid_instanceof                    = 2067 (* DONT MODIFY!!!! *)
   let name_is_reserved                      = 2068 (* DONT MODIFY!!!! *)
   let dollardollar_unused                   = 2069 (* DONT MODIFY!!!! *)
+  let illegal_member_variable_class         = 2070 (* DONT MODIFY!!!! *)
 
   (* EXTEND HERE WITH NEW VALUES IF NEEDED *)
 end
@@ -904,6 +925,12 @@ let illegal_fun pos =
   let msg = "The argument to fun() must be a single-quoted, constant "^
     "literal string representing a valid function name." in
   add Naming.illegal_fun pos msg
+
+let illegal_member_variable_class pos =
+  let msg = "Cannot declare a constant named 'class'. \
+             The name 'class' is reserved for the class \
+             constant that represents the name of the class" in
+  add Naming.illegal_member_variable_class pos msg
 
 let illegal_meth_fun pos =
   let msg = "String argument to fun() contains ':';"^
@@ -1966,7 +1993,7 @@ let should_be_override pos class_id id =
 let override_per_trait class_name id m_pos =
     let c_pos, c_name = class_name in
     let err_msg =
-      ("Method "^(Utils.strip_ns c_name)^"::"^id^" is should be an override \
+      ("Method "^(Utils.strip_ns c_name)^"::"^id^" should be an override \
         per the declaring trait; no non-private parent definition found \
         or overridden parent is defined in non-<?hh code")
     in add_list Typing.override_per_trait [
@@ -2104,7 +2131,7 @@ let invalid_classname p =
 
 let illegal_type_structure pos errmsg =
   let msg =
-    "The two arguments to typc_structure() must be:"
+    "The two arguments to type_structure() must be:"
     ^"\n - first: ValidClassname::class or an object of that class"
     ^"\n - second: a single-quoted string literal containing the name"
     ^" of a type constant of that class"

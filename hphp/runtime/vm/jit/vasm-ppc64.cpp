@@ -22,7 +22,6 @@
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/func-guard-ppc64.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
@@ -103,12 +102,6 @@ struct Vgen {
                        vinst_names[Vinstr(i).op], size_t(current));
   }
 
-  void copyCR0toCR1(Assembler a, Reg64 raux) {
-    a.mfcr(raux);
-    a.sradi(raux,raux,4);
-    a.mtocrf(0x40,raux);
-  }
-
   // intrinsics
   void emit(const copy& i) {
     if (i.s == i.d) return;
@@ -154,8 +147,6 @@ struct Vgen {
   }
   void emit(const addl& i) {
     a.addo(Reg64(i.d), Reg64(i.s1), Reg64(i.s0), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   void emit(const ldimmqs& i) {
     emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
@@ -167,56 +158,31 @@ struct Vgen {
   }
 
   // instructions
-  void emit(const addq& i) {
-    a.addo(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const addq& i) { a.addo(i.d, i.s0, i.s1, true); }
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
-  void emit(const andq& i) {
-    a.and(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
+  void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
+  void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
+  void emit(const cmpd& i) { a.cmpd(i.s1, i.s0); }
+  void emit(const cmpdi& i) { a.cmpdi(i.s1, i.s0); }
+  void emit(const cmpw& i) { a.cmpw(Reg64(i.s1), Reg64(i.s0)); }
+  void emit(const cmpld& i) { a.cmpld(i.s1, i.s0, Assembler::CR::CR1); }
+  void emit(const cmpldi& i) { a.cmpldi(i.s1, i.s0, Assembler::CR::CR1); }
+  void emit(const cmplw& i) {
+    a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
-  void emit(const andqi& i) {
-    a.andi(i.d, i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  } // andi changes CR0
-  void emit(const cmpl& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpw(Reg64(i.s1), Reg64(i.s0));
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
+  void emit(const cmplwi& i) {
+    a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
   }
-  void emit(const cmpli& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpwi(Reg64(i.s1), i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmplwi(Reg64(i.s1), i.s0, Assembler::CR::CR1);
+  void emit(const cmpwi& i) {
+    a.cmpwi(i.s1, i.s0);
   }
-  void emit(const cmpq& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpd(i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmpld(i.s1, i.s0, Assembler::CR::CR1);
+  void emit(const copycr& i) {
+    a.mfcr(rAsm);
+    a.sradi(rAsm,rAsm,4);
+    a.mtocrf(0x40,rAsm);
   }
-  void emit(const cmpqi& i) {
-    if (i.signFlags == signedOnly || i.signFlags == both)
-      a.cmpdi(i.s1, i.s0);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      a.cmpldi(i.s1, i.s0, Assembler::CR::CR1);
-  }
-  void emit(const decl& i) {
-    a.subfo(Reg64(i.d), rone(), Reg64(i.s), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const decq& i) {
-    a.subfo(i.d, rone(), i.s, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
+  void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
   void emit(const extrb& i ) {
@@ -230,32 +196,16 @@ struct Vgen {
   void emit(const fallthru& i) {}
   void emit(const fcmpo& i) {
     a.fcmpo(i.sf, i.s0, i.s1);
-    copyCR0toCR1(a, rAsm); //todo: guarding this broke 3 tests
+    emit(copycr{});//todo: guarding this broke 3 tests
   }
   void emit(const fcmpu& i) {
     a.fcmpu(i.sf, i.s0, i.s1);
-    copyCR0toCR1(a, rAsm);
+    emit(copycr{});
   }
-  void emit(const imul& i) {
-    a.mulldo(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incl& i) {
-    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incq& i) {
-    a.addo(i.d, i.s, rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const incw& i) {
-    a.addo(Reg64(i.d), Reg64(i.s), rone(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const imul& i) { a.mulldo(i.d, i.s1, i.s0, true); }
+  void emit(const incl& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
+  void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
+  void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
   void emit(const landingpad&) { }
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
@@ -295,55 +245,21 @@ struct Vgen {
   void emit(const mtlr& i) { a.mtlr(i.s); }
   void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
-  void emit(const neg& i) {
-    a.neg(i.d, i.s, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const neg& i) { a.neg(i.d, i.s, true); }
   void emit(const nop& i) { a.nop(); } // no-op form
   void emit(const not& i) { a.nor(i.d, i.s, i.s, false); }
-  void emit(const orq& i) {
-    a.or(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const orq& i) { a.or(i.d, i.s0, i.s1, true); }
   void emit(const ret& i) { a.blr(); }
   void emit(const roundsd& i) { a.xsrdpi(i.d, i.s); }
-  void emit(const sar& i) {
-    a.srad(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a,rAsm);
-  }
-  void emit(const sarqi& i) {
-    a.sradi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shl& i) {
-    a.sld(i.d, i.s1, i.s0, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const sar& i) { a.srad(i.d, i.s1, i.s0, true); }
+  void emit(const sarqi& i) { a.sradi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shl& i) { a.sld(i.d, i.s1, i.s0, true); }
   void emit(const shlli& i) {
     a.slwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
-  void emit(const shlqi& i) {
-    a.sldi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shrli& i) {
-    a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
-  void emit(const shrqi& i) {
-    a.srdi(i.d, i.s1, i.s0.b(), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const shlqi& i) { a.sldi(i.d, i.s1, i.s0.b(), true); }
+  void emit(const shrli& i) { a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true); }
+  void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
   void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
   void emit(const storeups& i) {
@@ -366,28 +282,16 @@ struct Vgen {
   }
 
   // Subtractions: d = s1 - s0
-  void emit(const subq& i) {
-    a.subfo(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const subq& i) { a.subfo(i.d, i.s0, i.s1, true); }
   void emit(const subsd& i) { a.fsub(i.d, i.s1, i.s0, false); }
   void emit(const ud2& i) { a.trap(); }
   void emit(const xorb& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   void emit(const xorl& i) {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
-  void emit(const xorq& i) {
-    a.xor(i.d, i.s0, i.s1, true);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
-  }
+  void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
   void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
   void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
   void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
@@ -415,8 +319,6 @@ struct Vgen {
   void emit(const orqi& i) {
     a.limmediate(rAsm, i.s0.l());
     a.or(i.d, i.s1, rAsm, true /** or. implies Rc = 1 **/);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
   // macro for commonlizing X-/D-form of load/store instructions
 #define X(instr, dst, ptr)                                \
@@ -457,20 +359,15 @@ struct Vgen {
     // https://goo.gl/F1wrbO
     if (i.s0 != i.s1) {
       a.and(rAsm, i.s0, i.s1, true);   // result is not used, only flags
-      if (i.signFlags == unsignedOnly || i.signFlags == both)
-        copyCR0toCR1(a, rAsm);
+      emit(copycr{});
     } else {
-      if (i.signFlags == signedOnly || i.signFlags == both)
-	a.cmpdi(i.s0, Immed(0));
-      if (i.signFlags == unsignedOnly || i.signFlags == both)
-        a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
+      a.cmpdi(i.s0, Immed(0));
+      a.cmpldi(i.s0, Immed(0), Assembler::CR::CR1);
     }
   }
   void emit(const xorqi& i) {
     a.limmediate(rAsm, i.s0.l());
     a.xor(i.d, i.s1, rAsm, true /** xor. implies Rc = 1 **/);
-    if (i.signFlags == unsignedOnly || i.signFlags == both)
-      copyCR0toCR1(a, rAsm);
   }
 
   void emit(const conjure& i) { always_assert(false); }
@@ -577,7 +474,7 @@ void Vgen::emit(const ucomisd& i) {
     // Set "negative" bit if "Overflow" bit is set. Also, keep overflow bit set
     a.limmediate(rAsm, 0x99000000);
     a.mtcrf(0xC0, rAsm);
-    copyCR0toCR1(a, rAsm);
+    emit(copycr{});
   }
   notNAN.asm_label(a);
 }
@@ -1430,7 +1327,7 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   auto& code = unit.blocks[b].code;
   // vcallarray can only appear at the end of a block.
   auto const inst = code.back().get<vcallarray>();
-  auto const origin = code.back().origin;
+  auto const irctx = code.back().irctx();
 
   auto argRegs = inst.args;
   auto const& srcs = unit.tuples[inst.extraArgs];
@@ -1441,10 +1338,8 @@ void lower_vcallarray(Vunit& unit, Vlabel b) {
   }
 
   code.back() = copyargs{unit.makeTuple(srcs), unit.makeTuple(std::move(dsts))};
-  code.emplace_back(callarray{inst.target, argRegs});
-  code.back().origin = origin;
-  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}});
-  code.back().origin = origin;
+  code.emplace_back(callarray{inst.target, argRegs}, irctx);
+  code.emplace_back(unwind{{inst.targets[0], inst.targets[1]}}, irctx);
 }
 
 /*
@@ -1477,7 +1372,7 @@ void lowerForPPC64(Vunit& unit) {
       auto scratch = unit.makeScratchBlock();
       auto& inst = blocks[ib].code[ii];
       SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-      Vout v(unit, scratch, inst.origin);
+      Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
         /*
@@ -1683,7 +1578,7 @@ void fixVptrsForPPC64(Vunit& unit) {
       auto scratch = unit.makeScratchBlock();
       auto& inst = blocks[ib].code[ii];
       SCOPE_EXIT {unit.freeScratchBlock(scratch);};
-      Vout v(unit, scratch, inst.origin);
+      Vout v(unit, scratch, inst.irctx());
 
       switch (inst.op) {
         /*
@@ -1712,8 +1607,108 @@ void fixVptrsForPPC64(Vunit& unit) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-} // anonymous namespace
 
+// Sign conditions
+enum Signs {
+  signedOnly,
+  unsignedOnly,
+  both,
+  neither
+};
+
+/*
+ * Define condition to testq instruction.
+ */
+void defCond_testq (Vout& v, testq& i, Signs blockSigns) {
+  // More information on:
+  // https://goo.gl/F1wrbO
+  if (i.s0 != i.s1) {
+    v << andq { i.s0, i.s1, rAsm, i.sf };
+
+    if (blockSigns == unsignedOnly || blockSigns == both) {
+      v << copycr{};
+    }
+  } else {
+    if (blockSigns == signedOnly || blockSigns == both) {
+      v << cmpdi{ Immed(0), i.s0, i.sf };
+    }
+    if (blockSigns == unsignedOnly || blockSigns == both) {
+      v << cmpldi{ Immed(0), i.s0, i.sf };
+    }
+  }
+}
+
+/*
+ * If for the current block there is at least one logical comparison,
+ * the flags from cr0 must be copied to cr1 in order to use it on the
+ * next comparison instruction
+ */
+void defCond (Vout& v, Vinstr inst, Signs blockSigns) {
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << inst;
+    v << copycr{};
+  }
+}
+
+/*
+ * If in the current block there are only signed comparisons, use
+ * the cmpw instruction, if has only unsigned, use cmplw, otherwise
+ * use both to cover signed and unsigned instructions.
+ */
+void defCond_cmpl (Vout& v, cmpl& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpw{ i.s0, i.s1, i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmplw{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * If in the current block there are only signed comparisons, use
+ * the cmpwi instruction, if has only unsigned, use cmplwi, otherwise
+ * use both to cover signed and unsigned instructions.
+ */
+void defCond_cmpli (Vout& v, cmpli& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpwi{ i.s0, Reg64(i.s1), i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmplwi{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * If in the current block there are only signed comparisons, use
+ * the cmpd instruction, if has only unsigned, use cmpld, otherwise
+ * use both to cover signed and unsigned instructions.
+ */
+void defCond_cmpq (Vout& v, cmpq& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpd{ i.s0, i.s1, i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmpld{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * If in the current block there are only signed comparisons, use
+ * the cmpdi instruction, if has only unsigned, use cmpldi, otherwise
+ * use both to cover signed and unsigned instructions.
+ */
+void defCond_cmpqi (Vout& v, cmpqi& i, Signs blockSigns) {
+  if (blockSigns == signedOnly || blockSigns == both) {
+    v << cmpdi{ i.s0, i.s1, i.sf };
+  }
+  if (blockSigns == unsignedOnly || blockSigns == both) {
+    v << cmpldi{ i.s0, i.s1, i.sf };
+  }
+}
+
+/*
+ * Check signs for each kind of comparison
+ */
 Signs signNeeds(const ConditionCode cc) {
   Signs ret = neither;
   switch (cc) {
@@ -1746,46 +1741,47 @@ Signs signNeeds(const ConditionCode cc) {
   return ret;
 }
 
-static inline Signs addSigns(Signs a, Signs b) {
-  if (a==both || b==both) {
-    return both;
-  } else if (a == neither) {
-    return b;
-  } else if (b == neither) {
-    return a;
-  } else if (a == signedOnly) { // by now, a, b are either signed or unsigned
-    if (b != signedOnly) {
-      return both;
-    }
+/*
+ * Merge sign flags of current block signs with the current instruction sign.
+ */
+static inline Signs addSigns(Signs blockSigns, Signs currentSigns) {
+  if (blockSigns == both || currentSigns == both) return both;
+  else if (blockSigns == neither) return currentSigns;
+  else if (currentSigns == neither) return blockSigns;
+  else if (blockSigns == signedOnly) {
+    // by now, a, b are either signed or unsigned
+    if (currentSigns != signedOnly) return both;
     return signedOnly;
-  } else if (a == unsignedOnly) {
-    if (b != unsignedOnly)
-      return both;
+  } else if (blockSigns == unsignedOnly) {
+    if (currentSigns != unsignedOnly) return both;
     return unsignedOnly;
   }
   always_assert(false);
   return both;
 }
-    
-#define extractCC(name)					  \
-    case Vinstr::name:					  \
-      blockSigns = addSigns(blockSigns,			  \
-			    signNeeds(inst.name##_.cc));  \
-      break						  \
 
-#define updateSignFlags(name)		   \
-    case Vinstr::name:			   \
-      inst.name##_.signFlags = blockSigns; \
-      break
-    
-void learnConditions(Vunit& unit) {
-  auto blocks = sortBlocks(unit);
+#define extractCC(name)                                   \
+    case Vinstr::name:                                    \
+      blockSigns = addSigns(blockSigns,                   \
+                signNeeds(inst.name##_.cc));              \
+      break                                               \
 
-  for (auto blockIt = blocks.begin(); blockIt != blocks.end(); blockIt++) {
-    auto b = *blockIt;
-    auto& block = unit.blocks[b];
+/*
+ * Check all comparison instructions in order to set the correct flags
+ * according with parameter's signs.
+ */
+void defConditions(Vunit& unit) {
+  // Scratch block can change blocks allocation, hence cannot use regular
+  // iterators.
+  auto& blocks = unit.blocks;
+
+  PostorderWalker{unit}.dfs([&] (Vlabel ib) {
+    assertx(!blocks[ib].code.empty());
+
     Signs blockSigns = neither;
-    for (auto i = block.code.begin(); i != block.code.end(); i++) {
+
+    // Extract signs from comparisons
+    for (auto i = blocks[ib].code.begin(); i != blocks[ib].code.end(); i++) {
       auto& inst = *i;
       switch (inst.op) {
       extractCC(jcc);
@@ -1800,48 +1796,298 @@ void learnConditions(Vunit& unit) {
       extractCC(cmovq);
       extractCC(setcc);
       default:
-	break;
-      }
-    }
-    for (auto i = block.code.begin(); i != block.code.end(); i++) {
-      auto& inst = *i;
-      switch (inst.op) {
-      updateSignFlags(addl);
-      updateSignFlags(addq);
-      updateSignFlags(andq);
-      updateSignFlags(andqi);
-      updateSignFlags(decl);
-      updateSignFlags(decq);
-      updateSignFlags(incw);
-      updateSignFlags(incl);
-      updateSignFlags(incq);
-      updateSignFlags(imul);
-      updateSignFlags(neg);
-      updateSignFlags(orq);
-      updateSignFlags(orqi);
-      updateSignFlags(sar);
-      updateSignFlags(shl);
-      updateSignFlags(sarqi);
-      updateSignFlags(shlli);
-      updateSignFlags(shlqi);
-      updateSignFlags(shrli);
-      updateSignFlags(shrqi);
-      updateSignFlags(subq);
-      updateSignFlags(xorb);
-      updateSignFlags(xorl);
-      updateSignFlags(xorq);
-      updateSignFlags(xorqi);
-      updateSignFlags(testq);
-      updateSignFlags(cmpl);
-      updateSignFlags(cmpli);
-      updateSignFlags(cmpq);
-      updateSignFlags(cmpqi);
-      default:
         break;
       }
     }
-  }
+
+    if (blockSigns == neither) return;
+
+    for (size_t ii = 0; ii < blocks[ib].code.size(); ++ii) {
+
+      auto scratch = unit.makeScratchBlock();
+      auto& inst = blocks[ib].code[ii];
+      SCOPE_EXIT {unit.freeScratchBlock(scratch);};
+      Vout v(unit, scratch, inst.irctx());
+
+      switch (inst.op) {
+      case Vinstr::absdbl:
+      case Vinstr::addli:
+      case Vinstr::addlim:
+      case Vinstr::addlm:
+      case Vinstr::addqi:
+      case Vinstr::addqim:
+      case Vinstr::addsd:
+      case Vinstr::addxi:
+      case Vinstr::andb:
+      case Vinstr::andbi:
+      case Vinstr::andbim:
+      case Vinstr::andl:
+      case Vinstr::andli:
+      case Vinstr::asrxi:
+      case Vinstr::asrxis:
+      case Vinstr::bindaddr:
+      case Vinstr::bindjcc:
+      case Vinstr::bindjmp:
+      case Vinstr::bln:
+      case Vinstr::call:
+      case Vinstr::callarray:
+      case Vinstr::callfaststub:
+      case Vinstr::callm:
+      case Vinstr::callphp:
+      case Vinstr::callr:
+      case Vinstr::calls:
+      case Vinstr::callstub:
+      case Vinstr::calltc:
+      case Vinstr::cloadq:
+      case Vinstr::cmovb:
+      case Vinstr::cmovl:
+      case Vinstr::cmovq:
+      case Vinstr::cmovw:
+      case Vinstr::cmpb:
+      case Vinstr::cmpbi:
+      case Vinstr::cmpbim:
+      case Vinstr::cmpbm:
+      case Vinstr::cmpd:
+      case Vinstr::cmpdi:
+      case Vinstr::cmpld:
+      case Vinstr::cmpldi:
+      case Vinstr::cmplim:
+      case Vinstr::cmplims:
+      case Vinstr::cmplm:
+      case Vinstr::cmplw:
+      case Vinstr::cmplwi:
+      case Vinstr::cmpqim:
+      case Vinstr::cmpqm:
+      case Vinstr::cmpsd:
+      case Vinstr::cmpsds:
+      case Vinstr::cmpw:
+      case Vinstr::cmpwi:
+      case Vinstr::cmpwim:
+      case Vinstr::cmpwm:
+      case Vinstr::conjure:
+      case Vinstr::conjureuse:
+      case Vinstr::contenter:
+      case Vinstr::copy2:
+      case Vinstr::copy:
+      case Vinstr::copyargs:
+      case Vinstr::copycr:
+      case Vinstr::cqo:
+      case Vinstr::cvtsi2sd:
+      case Vinstr::cvtsi2sdm:
+      case Vinstr::cvttsd2siq:
+      case Vinstr::debugtrap:
+      case Vinstr::declm:
+      case Vinstr::decqm:
+      case Vinstr::decqmlock:
+      case Vinstr::defvmret:
+      case Vinstr::defvmsp:
+      case Vinstr::divint:
+      case Vinstr::divsd:
+      case Vinstr::extrb:
+      case Vinstr::extsb:
+      case Vinstr::extsw:
+      case Vinstr::fabs:
+      case Vinstr::fallback:
+      case Vinstr::fallbackcc:
+      case Vinstr::fallthru:
+      case Vinstr::fcmpo:
+      case Vinstr::fcmpu:
+      case Vinstr::fctidz:
+      case Vinstr::fcvtzs:
+      case Vinstr::idiv:
+      case Vinstr::inclm:
+      case Vinstr::incqm:
+      case Vinstr::incqmlock:
+      case Vinstr::incwm:
+      case Vinstr::inittc:
+      case Vinstr::jcc:
+      case Vinstr::jcci:
+      case Vinstr::jmp:
+      case Vinstr::jmpi:
+      case Vinstr::jmpm:
+      case Vinstr::jmpr:
+      case Vinstr::landingpad:
+      case Vinstr::ldarx:
+      case Vinstr::ldimmb:
+      case Vinstr::ldimml:
+      case Vinstr::ldimmq:
+      case Vinstr::ldimmqs:
+      case Vinstr::ldimmw:
+      case Vinstr::lea:
+      case Vinstr::lead:
+      case Vinstr::leap:
+      case Vinstr::leavetc:
+      case Vinstr::load:
+      case Vinstr::loadb:
+      case Vinstr::loadl:
+      case Vinstr::loadqd:
+      case Vinstr::loadqp:
+      case Vinstr::loadsd:
+      case Vinstr::loadstubret:
+      case Vinstr::loadtqb:
+      case Vinstr::loadups:
+      case Vinstr::loadw:
+      case Vinstr::loadzbl:
+      case Vinstr::loadzbq:
+      case Vinstr::loadzlq:
+      case Vinstr::lslwi:
+      case Vinstr::lslwis:
+      case Vinstr::lslxi:
+      case Vinstr::lslxis:
+      case Vinstr::lsrwi:
+      case Vinstr::lsrwis:
+      case Vinstr::lsrxi:
+      case Vinstr::lsrxis:
+      case Vinstr::mcprep:
+      case Vinstr::mfcr:
+      case Vinstr::mflr:
+      case Vinstr::mfvsrd:
+      case Vinstr::movb:
+      case Vinstr::movl:
+      case Vinstr::movtdb:
+      case Vinstr::movtdq:
+      case Vinstr::movtqb:
+      case Vinstr::movtql:
+      case Vinstr::movw:
+      case Vinstr::movzbl:
+      case Vinstr::movzbq:
+      case Vinstr::movzbw:
+      case Vinstr::movzlq:
+      case Vinstr::mrs:
+      case Vinstr::msr:
+      case Vinstr::mtlr:
+      case Vinstr::mtvsrd:
+      case Vinstr::mulsd:
+      case Vinstr::nop:
+      case Vinstr::not:
+      case Vinstr::notb:
+      case Vinstr::nothrow:
+      case Vinstr::orbim:
+      case Vinstr::orqim:
+      case Vinstr::orsw:
+      case Vinstr::orswi:
+      case Vinstr::orwim:
+      case Vinstr::phidef:
+      case Vinstr::phijcc:
+      case Vinstr::phijmp:
+      case Vinstr::phplogue:
+      case Vinstr::phpret:
+      case Vinstr::pop:
+      case Vinstr::popm:
+      case Vinstr::popp:
+      case Vinstr::psllq:
+      case Vinstr::psrlq:
+      case Vinstr::push:
+      case Vinstr::pushm:
+      case Vinstr::pushp:
+      case Vinstr::resumetc:
+      case Vinstr::ret:
+      case Vinstr::retransopt:
+      case Vinstr::roundsd:
+      case Vinstr::sarq:
+      case Vinstr::setcc:
+      case Vinstr::shlq:
+      case Vinstr::sqrtsd:
+      case Vinstr::srem:
+      case Vinstr::stdcx:
+      case Vinstr::store:
+      case Vinstr::storeb:
+      case Vinstr::storebi:
+      case Vinstr::storel:
+      case Vinstr::storeli:
+      case Vinstr::storeqi:
+      case Vinstr::storesd:
+      case Vinstr::storeups:
+      case Vinstr::storew:
+      case Vinstr::storewi:
+      case Vinstr::stublogue:
+      case Vinstr::stubret:
+      case Vinstr::stubtophp:
+      case Vinstr::stubunwind:
+      case Vinstr::subbi:
+      case Vinstr::subl:
+      case Vinstr::subli:
+      case Vinstr::subqi:
+      case Vinstr::subsb:
+      case Vinstr::subsd:
+      case Vinstr::syncpoint:
+      case Vinstr::syncvmret:
+      case Vinstr::syncvmsp:
+      case Vinstr::tailcallphp:
+      case Vinstr::tailcallstub:
+      case Vinstr::testb:
+      case Vinstr::testbi:
+      case Vinstr::testbim:
+      case Vinstr::testl:
+      case Vinstr::testli:
+      case Vinstr::testlim:
+      case Vinstr::testqi:
+      case Vinstr::testqim:
+      case Vinstr::testqm:
+      case Vinstr::testwim:
+      case Vinstr::ucomisd:
+      case Vinstr::ud2:
+      case Vinstr::unpcklpd:
+      case Vinstr::unwind:
+      case Vinstr::uxth:
+      case Vinstr::vcall:
+      case Vinstr::vcallarray:
+      case Vinstr::vinvoke:
+      case Vinstr::xorbi:
+      case Vinstr::xscvdpsxds:
+      case Vinstr::xscvsxddp:
+      case Vinstr::xxlxor:
+      case Vinstr::xxpermdi:
+        break;
+      case Vinstr::addl:
+      case Vinstr::addq:
+      case Vinstr::andq:
+      case Vinstr::andqi:
+      case Vinstr::decl:
+      case Vinstr::decq:
+      case Vinstr::imul:
+      case Vinstr::incl:
+      case Vinstr::incq:
+      case Vinstr::incw:
+      case Vinstr::neg:
+      case Vinstr::orq:
+      case Vinstr::orqi:
+      case Vinstr::sar:
+      case Vinstr::sarqi:
+      case Vinstr::shl:
+      case Vinstr::shlli:
+      case Vinstr::shlqi:
+      case Vinstr::shrli:
+      case Vinstr::shrqi:
+      case Vinstr::subq:
+      case Vinstr::xorb:
+      case Vinstr::xorl:
+      case Vinstr::xorq:
+      case Vinstr::xorqi: defCond(v, inst, blockSigns);
+        break;
+      case Vinstr::testq: defCond_testq(v, inst.testq_, blockSigns);
+        break;
+      case Vinstr::cmpl: defCond_cmpl(v, inst.cmpl_, blockSigns);
+        break;
+      case Vinstr::cmpli: defCond_cmpli(v, inst.cmpli_, blockSigns);
+        break;
+      case Vinstr::cmpq: defCond_cmpq(v, inst.cmpq_, blockSigns);
+        break;
+      case Vinstr::cmpqi: defCond_cmpqi(v, inst.cmpqi_, blockSigns);
+        break;
+      }
+
+      if (!v.empty()) {
+        vector_splice(unit.blocks[ib].code, ii, 1,
+                      unit.blocks[scratch].code);
+      }
+    }
+  });
 }
+
+///////////////////////////////////////////////////////////////////////////////
+} // anonymous namespace
+
 
     
 void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
@@ -1871,7 +2117,7 @@ void optimizePPC64(Vunit& unit, const Abi& abi, bool regalloc) {
     optimizeJmps(unit);
   }
 
-  learnConditions(unit);
+  defConditions(unit);
 }
 
 void emitPPC64(const Vunit& unit, Vtext& text, CGMeta& fixups,

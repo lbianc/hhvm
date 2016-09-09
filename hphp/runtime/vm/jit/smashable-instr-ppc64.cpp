@@ -19,7 +19,9 @@
 #include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/align-ppc64.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
+#include "hphp/runtime/vm/jit/code-cache.h"
+#include "hphp/runtime/vm/jit/tc.h"
+#include "hphp/runtime/vm/jit/tc-internal.h"
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/ppc64-asm/decoded-instr-ppc64.h"
@@ -97,7 +99,7 @@ void smashMovq(TCA inst, uint64_t imm) {
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
-  auto& cb = mcg->code().blockFor(inst);
+  auto& cb = tc::code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
@@ -109,7 +111,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
 }
 
 void smashCall(TCA inst, TCA target) {
-  auto& cb = mcg->code().blockFor(inst);
+  auto& cb = tc::code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
@@ -125,7 +127,7 @@ void smashCall(TCA inst, TCA target) {
 }
 
 void smashJmp(TCA inst, TCA target) {
-  auto& cb = mcg->code().blockFor(inst);
+  auto& cb = tc::code().blockFor(inst);
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
@@ -140,7 +142,7 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
   if (cc == CC_None) {
     Assembler::patchBranch(inst, target);
   } else {
-    auto& cb = mcg->code().blockFor(inst);
+    auto& cb = tc::code().blockFor(inst);
     CodeCursor cursor { cb, inst };
     Assembler a { cb };
     a.branchFar(target, cc);

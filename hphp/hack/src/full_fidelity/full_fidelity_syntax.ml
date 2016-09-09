@@ -365,10 +365,12 @@ module WithToken(Token: TokenType) = struct
     }
     and break_statement = {
       break_keyword: t;
+      break_level: t;
       break_semicolon: t
     }
     and continue_statement = {
       continue_keyword: t;
+      continue_level: t;
       continue_semicolon: t
     }
     and function_static_statement = {
@@ -424,6 +426,16 @@ module WithToken(Token: TokenType) = struct
       cast_type : t;
       cast_right_paren : t;
       cast_operand : t
+    }
+    and scope_resolution_expression = {
+      scope_resolution_qualifier : t;
+      scope_resolution_operator : t;
+      scope_resolution_name : t
+    }
+    and member_selection_expression = {
+      member_object : t;
+      member_operator : t;
+      member_name : t
     }
     and yield_expression = {
       yield_token : t;
@@ -509,6 +521,22 @@ module WithToken(Token: TokenType) = struct
     and awaitable_creation_expression = {
       awaitable_async : t;
       awaitable_compound_statement : t;
+    }
+    and xhp_enum_type = {
+      xhp_enum_token : t;
+      xhp_enum_left_brace : t;
+      xhp_enum_values : t;
+      xhp_enum_right_brace : t
+    }
+    and xhp_class_attribute_declaration = {
+      xhp_attr_token : t;
+      xhp_attr_list : t;
+      xhp_attr_semicolon : t
+    }
+    and xhp_class_attribute = {
+      xhp_attr_decl_type : t;
+      xhp_attr_decl_name : t;
+      xhp_attr_decl_init : t
     }
     and xhp_attribute = {
       xhp_attr_name : t;
@@ -630,6 +658,9 @@ module WithToken(Token: TokenType) = struct
     | MethodishDeclaration of methodish_declaration
     | ClassishDeclaration of classish_declaration
     | ClassishBody of classish_body
+    | XHPEnumType of xhp_enum_type
+    | XHPClassAttributeDeclaration of xhp_class_attribute_declaration
+    | XHPClassAttribute of xhp_class_attribute
     | TraitUse of trait_use
     | RequireClause of require_clause
     | ConstDeclaration of const_declaration
@@ -669,6 +700,9 @@ module WithToken(Token: TokenType) = struct
     | StaticDeclarator of static_declarator
     | EchoStatement of echo_statement
 
+    | MemberSelectionExpression of member_selection_expression
+    | SafeMemberSelectionExpression of member_selection_expression
+    | ScopeResolutionExpression of scope_resolution_expression
     | YieldExpression of yield_expression
     | PrintExpression of print_expression
     | CastExpression of cast_expression
@@ -732,6 +766,10 @@ module WithToken(Token: TokenType) = struct
       match syntax with
       | Missing -> SyntaxKind.Missing
       | Token _  -> SyntaxKind.Token
+      | MemberSelectionExpression _ -> SyntaxKind.MemberSelectionExpression
+      | SafeMemberSelectionExpression _ ->
+        SyntaxKind.SafeMemberSelectionExpression
+      | ScopeResolutionExpression _ -> SyntaxKind.ScopeResolutionExpression
       | YieldExpression _ -> SyntaxKind.YieldExpression
       | PrintExpression _ -> SyntaxKind.PrintExpression
       | CastExpression _ -> SyntaxKind.CastExpression
@@ -762,6 +800,10 @@ module WithToken(Token: TokenType) = struct
       | MethodishDeclaration _ -> SyntaxKind.MethodishDeclaration
       | ClassishDeclaration _ -> SyntaxKind.ClassishDeclaration
       | ClassishBody _ -> SyntaxKind.ClassishBody
+      | XHPEnumType _ -> SyntaxKind.XHPEnumType
+      | XHPClassAttributeDeclaration _ ->
+        SyntaxKind.XHPClassAttributeDeclaration
+      | XHPClassAttribute _ -> SyntaxKind.XHPClassAttribute
       | TraitUse _ -> SyntaxKind.TraitUse
       | RequireClause _ -> SyntaxKind.RequireClause
       | ConstDeclaration _ -> SyntaxKind.ConstDeclaration
@@ -836,6 +878,12 @@ module WithToken(Token: TokenType) = struct
 
     let is_missing node = kind node = SyntaxKind.Missing
     let is_token node = kind node = SyntaxKind.Token
+    let is_scope_resolution_expression node =
+      kind node = SyntaxKind.ScopeResolutionExpression
+    let is_member_selection_expression node =
+      kind node = SyntaxKind.MemberSelectionExpression
+    let is_safe_member_selection_expression node =
+      kind node = SyntaxKind.SafeMemberSelectionExpression
     let is_yield_expression node = kind node = SyntaxKind.YieldExpression
     let is_print_expression node = kind node = SyntaxKind.PrintExpression
     let is_cast_expression node = kind node = SyntaxKind.CastExpression
@@ -929,6 +977,7 @@ module WithToken(Token: TokenType) = struct
     let is_element_initializer node = kind node = SyntaxKind.ElementInitializer
     let is_subscript_expression node =
       kind node = SyntaxKind.SubscriptExpression
+    let is_xhp_enum_type node = kind node = SyntaxKind.XHPEnumType
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -998,6 +1047,17 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression x -> [x]
       | Error x -> x
       | SyntaxList x -> x
+      | ScopeResolutionExpression
+        { scope_resolution_qualifier; scope_resolution_operator;
+          scope_resolution_name } ->
+        [ scope_resolution_qualifier; scope_resolution_operator;
+          scope_resolution_name ]
+      | MemberSelectionExpression
+        { member_object; member_operator; member_name } ->
+        [ member_object; member_operator; member_name ]
+      | SafeMemberSelectionExpression
+        { member_object; member_operator; member_name } ->
+        [ member_object; member_operator; member_name ]
       | YieldExpression
         { yield_token; yield_operand } ->
         [ yield_token; yield_operand ]
@@ -1107,6 +1167,17 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ classish_body_left_brace; classish_body_elements;
           classish_body_right_brace ]
+      | XHPEnumType
+        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+          xhp_enum_right_brace } ->
+        [ xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+          xhp_enum_right_brace ]
+      | XHPClassAttributeDeclaration
+        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
+        [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]
+      | XHPClassAttribute
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init } ->
+        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init ]
       | TraitUse
         { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
         [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]
@@ -1221,11 +1292,11 @@ module WithToken(Token: TokenType) = struct
         { throw_keyword; throw_expr; throw_semicolon } ->
         [ throw_keyword; throw_expr; throw_semicolon ]
       | BreakStatement
-        { break_keyword; break_semicolon } ->
-        [ break_keyword; break_semicolon ]
+        { break_keyword; break_level; break_semicolon } ->
+        [ break_keyword; break_level; break_semicolon ]
       | ContinueStatement
-        { continue_keyword; continue_semicolon } ->
-        [ continue_keyword; continue_semicolon ]
+        { continue_keyword; continue_level; continue_semicolon } ->
+        [ continue_keyword; continue_level; continue_semicolon ]
       | FunctionStaticStatement
         { static_static; static_declarations; static_semicolon } ->
         [ static_static; static_declarations; static_semicolon ]
@@ -1384,6 +1455,17 @@ module WithToken(Token: TokenType) = struct
       | PipeVariableExpression _ -> ["pipe_variable_expression"]
       | Error _ -> []
       | SyntaxList _ -> []
+      | MemberSelectionExpression
+        { member_object; member_operator; member_name } ->
+        [ "member_object"; "member_operator"; "member_name" ]
+      | SafeMemberSelectionExpression
+        { member_object; member_operator; member_name } ->
+        [ "member_object"; "member_operator"; "member_name" ]
+      | ScopeResolutionExpression
+        { scope_resolution_qualifier; scope_resolution_operator;
+          scope_resolution_name } ->
+        [ "scope_resolution_qualifier"; "scope_resolution_operator";
+          "scope_resolution_name" ]
       | YieldExpression
         { yield_token; yield_operand } ->
         [ "yield_token"; "yield_operand" ]
@@ -1494,6 +1576,17 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ "classish_body_left_brace"; "classish_body_elements";
           "classish_body_right_brace" ]
+      | XHPEnumType
+        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+          xhp_enum_right_brace } ->
+        [ "xhp_enum_token"; "xhp_enum_left_brace"; "xhp_enum_values";
+          "xhp_enum_right_brace" ]
+      | XHPClassAttributeDeclaration
+        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
+        [ "xhp_attr_token"; "xhp_attr_list"; "xhp_attr_semicolon" ]
+      | XHPClassAttribute
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init } ->
+        [ "xhp_attr_decl_type"; "xhp_attr_decl_name"; "xhp_attr_decl_init" ]
       | TraitUse
         { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
         [ "trait_use_token"; "trait_use_name_list"; "trait_use_semicolon"; ]
@@ -1612,11 +1705,11 @@ module WithToken(Token: TokenType) = struct
         { throw_keyword; throw_expr; throw_semicolon } ->
         [ "throw_keyword"; "throw_expr"; "throw_semicolon" ]
       | BreakStatement
-        { break_keyword; break_semicolon } ->
-        [ "break_keyword"; "break_semicolon" ]
+        { break_keyword; break_level; break_semicolon } ->
+        [ "break_keyword"; "break_level"; "break_semicolon" ]
       | ContinueStatement
-        { continue_keyword; continue_semicolon } ->
-        [ "continue_keyword"; "continue_semicolon" ]
+        { continue_keyword; continue_level; continue_semicolon } ->
+        [ "continue_keyword"; "continue_level"; "continue_semicolon" ]
       | FunctionStaticStatement
         { static_static; static_declarations; static_semicolon } ->
         [ "static_static"; "static_declarations"; "static_semicolon" ]
@@ -1919,10 +2012,6 @@ module WithToken(Token: TokenType) = struct
     let throw_keyword x = x.throw_keyword
     let throw_expr x = x.throw_expr
     let throw_semicolon x = x.throw_semicolon
-    let break_keyword x = x.break_keyword
-    let break_semicolon x = x.break_semicolon
-    let continue_keyword x = x.continue_keyword
-    let continue_semicolon x = x.continue_semicolon
     let echo_token x = x.echo_token
     let echo_expression_list x = x.echo_expression_list
     let echo_semicolon x = x.echo_semicolon
@@ -2034,6 +2123,20 @@ module WithToken(Token: TokenType) = struct
       match kind, ts with
       | (SyntaxKind.Missing, []) -> Missing
       | (SyntaxKind.SyntaxList, x) -> SyntaxList x
+      | (SyntaxKind.MemberSelectionExpression,
+        [ member_object; member_operator; member_name ]) ->
+        MemberSelectionExpression
+        { member_object; member_operator; member_name }
+      | (SyntaxKind.SafeMemberSelectionExpression,
+        [ member_object; member_operator; member_name ]) ->
+        SafeMemberSelectionExpression
+        { member_object; member_operator; member_name }
+      | (SyntaxKind.ScopeResolutionExpression,
+        [ scope_resolution_qualifier; scope_resolution_operator;
+          scope_resolution_name ]) ->
+        ScopeResolutionExpression
+        { scope_resolution_qualifier; scope_resolution_operator;
+          scope_resolution_name }
       | (SyntaxKind.YieldExpression,
         [ yield_token; yield_operand ]) ->
         YieldExpression
@@ -2166,6 +2269,20 @@ module WithToken(Token: TokenType) = struct
         ClassishBody {
           classish_body_left_brace; classish_body_elements;
           classish_body_right_brace }
+      | (SyntaxKind.XHPEnumType,
+        [ xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+          xhp_enum_right_brace ]) ->
+        XHPEnumType
+        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+          xhp_enum_right_brace }
+      | (SyntaxKind.XHPClassAttributeDeclaration,
+        [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]) ->
+        XHPClassAttributeDeclaration
+        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon }
+      | (SyntaxKind.XHPClassAttribute,
+        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init ]) ->
+        XHPClassAttribute
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init }
       | (SyntaxKind.TraitUse,
         [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]) ->
         TraitUse { trait_use_token; trait_use_name_list; trait_use_semicolon; }
@@ -2284,11 +2401,14 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.ThrowStatement, [ throw_keyword;
         throw_expr; throw_semicolon ]) ->
         ThrowStatement { throw_keyword; throw_expr; throw_semicolon }
-      | (SyntaxKind.BreakStatement, [ break_keyword; break_semicolon ]) ->
-        BreakStatement { break_keyword; break_semicolon }
+      | (SyntaxKind.BreakStatement,
+        [ break_keyword; break_level; break_semicolon ]) ->
+        BreakStatement
+        { break_keyword; break_level; break_semicolon }
       | (SyntaxKind.ContinueStatement,
-          [ continue_keyword; continue_semicolon ]) ->
-        ContinueStatement { continue_keyword; continue_semicolon }
+        [ continue_keyword; continue_level; continue_semicolon ]) ->
+        ContinueStatement
+        { continue_keyword; continue_level; continue_semicolon }
       | (SyntaxKind.FunctionStaticStatement,
         [ static_static; static_declarations; static_semicolon ]) ->
         FunctionStaticStatement
@@ -2516,6 +2636,16 @@ module WithToken(Token: TokenType) = struct
           [ function_call_receiver; function_call_lparen;
             function_call_arguments; function_call_rparen ]
 
+      let make_member_selection_expression ob op name =
+        from_children SyntaxKind.MemberSelectionExpression [ ob; op; name ]
+
+      let make_safe_member_selection_expression ob op name =
+        from_children SyntaxKind.SafeMemberSelectionExpression [ ob; op; name ]
+
+      let make_scope_resolution_expression qualifier op name =
+        from_children SyntaxKind.ScopeResolutionExpression
+          [ qualifier; op; name ]
+
       let make_yield_expression token operand =
         from_children SyntaxKind.YieldExpression [ token; operand ]
 
@@ -2715,6 +2845,18 @@ module WithToken(Token: TokenType) = struct
           classish_body_left_brace; classish_body_elements;
           classish_body_right_brace ]
 
+      let make_xhp_enum_type token left items right =
+        from_children SyntaxKind.XHPEnumType
+        [ token; left; items; right ]
+
+      let make_xhp_class_attribute_declaration attr attrs semi =
+        from_children SyntaxKind.XHPClassAttributeDeclaration
+          [ attr; attrs; semi ]
+
+      let make_xhp_class_attribute attr_type name init =
+        from_children SyntaxKind.XHPClassAttribute
+          [ attr_type; name; init ]
+
       let make_trait_use trait_use_token trait_use_name_list
         trait_use_semicolon =
         from_children SyntaxKind.TraitUse [
@@ -2862,13 +3004,13 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.ThrowStatement
           [ throw_keyword; throw_expr; throw_semicolon ]
 
-      let make_break_statement break_keyword break_semicolon =
+      let make_break_statement keyword level semi =
         from_children SyntaxKind.BreakStatement
-          [ break_keyword; break_semicolon ]
+          [ keyword; level; semi ]
 
-      let make_continue_statement continue_keyword continue_semicolon =
+      let make_continue_statement keyword level semi =
         from_children SyntaxKind.ContinueStatement
-          [ continue_keyword; continue_semicolon ]
+          [ keyword; level; semi ]
 
       let make_function_static_statement static decls semi =
         from_children SyntaxKind.FunctionStaticStatement [ static; decls; semi ]

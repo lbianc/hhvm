@@ -32,8 +32,8 @@
 #include "hphp/runtime/vm/unit.h"
 
 #include "hphp/runtime/vm/jit/func-guard.h"
-#include "hphp/runtime/vm/jit/mc-generator.h"
-#include "hphp/runtime/vm/jit/recycle-tc.h"
+#include "hphp/runtime/vm/jit/mcgen.h"
+#include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/system/systemlib.h"
@@ -52,8 +52,6 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 TRACE_SET_MOD(hhbc);
-
-using jit::mcg;
 
 const StringData*     Func::s___call       = makeStaticString("__call");
 const StringData*     Func::s___callStatic = makeStaticString("__callStatic");
@@ -92,7 +90,7 @@ Func::~Func() {
   if (m_fullName != nullptr && m_maybeIntercepted != -1) {
     unregister_intercept_flag(fullNameStr(), &m_maybeIntercepted);
   }
-  if (mcg != nullptr && !RuntimeOption::EvalEnableReusableTC) {
+  if (jit::mcgen::initialized() && !RuntimeOption::EvalEnableReusableTC) {
     // If Reusable TC is enabled then the prologue may have already been smashed
     // and the memory may now be in use by another function.
     jit::clobberFuncGuards(this);
@@ -115,9 +113,9 @@ void* Func::allocFuncMem(int numParams) {
 
 void Func::destroy(Func* func) {
   if (func->m_funcId != InvalidFuncId) {
-    if (mcg && RuntimeOption::EvalEnableReusableTC) {
+    if (jit::mcgen::initialized() && RuntimeOption::EvalEnableReusableTC) {
       // Free TC-space associated with func
-      jit::reclaimFunction(func);
+      jit::tc::reclaimFunction(func);
     }
 
     DEBUG_ONLY auto oldVal = s_funcVec.exchange(func->m_funcId, nullptr);
@@ -140,9 +138,9 @@ void Func::freeClone() {
   assert(isPreFunc());
   assert(m_cloned.flag.test_and_set());
 
-  if (mcg && RuntimeOption::EvalEnableReusableTC) {
+  if (jit::mcgen::initialized() && RuntimeOption::EvalEnableReusableTC) {
     // Free TC-space associated with func
-    jit::reclaimFunction(this);
+    jit::tc::reclaimFunction(this);
   } else {
     jit::clobberFuncGuards(this);
   }
@@ -233,7 +231,7 @@ void Func::initPrologues(int numParams) {
     maxNumPrologues > kNumFixedPrologues ? maxNumPrologues
                                          : kNumFixedPrologues;
 
-  if (mcg == nullptr) {
+  if (!jit::mcgen::initialized()) {
     m_funcBody = nullptr;
     for (int i = 0; i < numPrologues; i++) {
       m_prologueTable[i] = nullptr;
@@ -241,7 +239,7 @@ void Func::initPrologues(int numParams) {
     return;
   }
 
-  auto const& stubs = mcg->ustubs();
+  auto const& stubs = jit::tc::ustubs();
 
   m_funcBody = stubs.funcBodyHelperThunk;
 
@@ -590,7 +588,7 @@ int Func::numPrologues() const {
 }
 
 void Func::resetPrologue(int numParams) {
-  auto const& stubs = mcg->ustubs();
+  auto const& stubs = jit::tc::ustubs();
   m_prologueTable[numParams] = stubs.fcallHelperThunk;
 }
 

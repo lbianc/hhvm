@@ -260,6 +260,22 @@ let rec get_doc node =
     let right = get_doc (classish_body_right_brace x) in
     let body = get_doc (classish_body_elements x) in
     indent_block_no_space left body right indt
+  | XHPEnumType x ->
+    let e = get_doc x.xhp_enum_token in
+    let l = get_doc x.xhp_enum_left_brace in
+    let v = get_doc x.xhp_enum_values in
+    let r = get_doc x.xhp_enum_right_brace in
+    group_doc (e ^| l ^| v ^| r)
+  | XHPClassAttributeDeclaration x ->
+    let attr = get_doc x.xhp_attr_token in
+    let attrs = get_doc x.xhp_attr_list in
+    let semi = get_doc x.xhp_attr_semicolon in
+    group_doc (attr ^| attrs ^^^ semi)
+  | XHPClassAttribute x ->
+    let t = get_doc x.xhp_attr_decl_type in
+    let n = get_doc x.xhp_attr_decl_name in
+    let i = get_doc x.xhp_attr_decl_init in
+    group_doc (t ^| n ^| i)
   | TraitUse x ->
     let use = get_doc (trait_use_token x) in
     let name_list = get_doc (trait_use_name_list x) in
@@ -565,6 +581,17 @@ let rec get_doc node =
     let start_block = indent_block_no_space left_part expr right indt in
     handle_switch start_block x
     (* group_doc (start_block ^| statement) *)
+  | ScopeResolutionExpression x ->
+    let q = get_doc x.scope_resolution_qualifier in
+    let o = get_doc x.scope_resolution_operator in
+    let n = get_doc x.scope_resolution_name in
+    group_doc (q ^^^ o ^^^ n)
+  | MemberSelectionExpression x
+  | SafeMemberSelectionExpression x ->
+    let ob = get_doc x.member_object in
+    let op = get_doc x.member_operator in
+    let nm = get_doc x.member_name in
+    group_doc (ob ^^^ op ^^^ nm)
   | YieldExpression x ->
     let y = get_doc x.yield_token in
     let o = get_doc x.yield_operand in
@@ -833,13 +860,17 @@ let rec get_doc node =
     let back_part = expr ^^^ semicolon in
     group_doc (indent_doc keyword back_part indt)
   | BreakStatement x ->
-    let keyword = get_doc (break_keyword x) in
-    let semicolon = get_doc (break_semicolon x) in
-    keyword ^^^ semicolon
+    let b = get_doc x.break_keyword in
+    let l = get_doc x.break_level in
+    let s = get_doc x.break_semicolon in
+    if is_missing x.break_level then group_doc (b ^^^ l ^^^ s)
+    else group_doc (b ^| l ^^^ s)
   | ContinueStatement x ->
-    let keyword = get_doc (continue_keyword x) in
-    let semicolon = get_doc (continue_semicolon x) in
-    keyword ^^^ semicolon
+    let c = get_doc x.continue_keyword in
+    let l = get_doc x.continue_level in
+    let s = get_doc x.continue_semicolon in
+    if is_missing x.continue_level then group_doc (c ^^^ l ^^^ s)
+    else group_doc (c ^| l ^^^ s)
   | FunctionStaticStatement x ->
     let st = get_doc x.static_static in
     let ds = get_doc x.static_declarations in

@@ -35,7 +35,10 @@
 #include "hphp/util/data-block.h"
 #include "hphp/util/immed.h"
 
+#include <limits>
+
 namespace HPHP { namespace jit {
+
 ///////////////////////////////////////////////////////////////////////////////
 
 struct IRInstruction;
@@ -191,7 +194,7 @@ struct Vunit;
   O(cmpbim, I(s0), U(s1), D(sf))\
   O(cmpbm, Inone, U(s0) U(s1), D(sf))\
   O(cmpwim, I(s0), U(s1), D(sf))\
-  O(cmpwm, Inone, U(s0) U(s1), D(sf))           \
+  O(cmpwm, Inone, U(s0) U(s1), D(sf))\
   O(cmpl, Inone, U(s0) U(s1), D(sf))\
   O(cmpli, I(s0), U(s1), D(sf))\
   O(cmplm, Inone, U(s0) U(s1), D(sf))\
@@ -310,6 +313,15 @@ struct Vunit;
   O(subsb, Inone, UA(s0) U(s1), D(d) D(sf))\
   O(uxth, Inone, U(s), D(d))\
   /* ppc64 instructions */\
+  O(cmpd, Inone, U(s0) U(s1), D(sf))\
+  O(cmpdi, I(s0), U(s1), D(sf))\
+  O(cmpld, Inone, U(s0) U(s1), D(sf))\
+  O(cmpldi, I(s0), U(s1), D(sf))\
+  O(cmplw, Inone, U(s0) U(s1), D(sf))\
+  O(cmplwi, I(s0), U(s1), D(sf))\
+  O(cmpw, Inone, U(s0) U(s1), D(sf))\
+  O(cmpwi, I(s0), U(s1), D(sf))\
+  O(copycr, Inone, Un, Dn)\
   O(extrb, Inone, UH(s,d), DH(d,s))\
   O(extsb, Inone, UH(s,d), DH(d,s))\
   O(extsw, Inone, UH(s,d), DH(d,s))\
@@ -894,13 +906,6 @@ struct divint { Vreg s0, s1, d; };
  * can do whatever they please with the upper bits.
  */
 
-enum Signs {
-  signedOnly,
-  unsignedOnly,
-  both,
-  neither
-};
- 
 /*
  * Nop and trap.
  */
@@ -911,11 +916,11 @@ struct ud2 {};
  * Arithmetic instructions.
  */
 // add: s0 + {s1|m} => {d|m}, sf
-struct addl   { Vreg32 s0, s1, d; VregSF sf; Signs signFlags; };
+struct addl   { Vreg32 s0, s1, d; VregSF sf; };
 struct addli  { Immed s0; Vreg32 s1, d; VregSF sf; };
 struct addlm  { Vreg32 s0; Vptr m; VregSF sf; };
 struct addlim { Immed s0; Vptr m; VregSF sf; };
-struct addq  { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct addq  { Vreg64 s0, s1, d; VregSF sf; };
 struct addqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct addqim { Immed s0; Vptr m; VregSF sf; };
 struct addsd  { VregDbl s0, s1, d; };
@@ -925,58 +930,58 @@ struct andbi { Immed s0; Vreg8 s1, d; VregSF sf; };
 struct andbim { Immed s; Vptr m; VregSF sf; };
 struct andl  { Vreg32 s0, s1, d; VregSF sf; };
 struct andli { Immed s0; Vreg32 s1, d; VregSF sf; };
-struct andq  { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
-struct andqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct andq  { Vreg64 s0, s1, d; VregSF sf; };
+struct andqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 // dec: {s|m} - 1 => {d|m}, sf
-struct decl { Vreg32 s, d; VregSF sf; Signs signFlags; };
+struct decl { Vreg32 s, d; VregSF sf; };
 struct declm { Vptr m; VregSF sf; };
-struct decq { Vreg64 s, d; VregSF sf; Signs signFlags; };
+struct decq { Vreg64 s, d; VregSF sf; };
 struct decqm { Vptr m; VregSF sf; };
 struct decqmlock { Vptr m; VregSF sf; };
 // inc: {s|m} + 1 => {d|m}, sf
-struct incw { Vreg16 s, d; VregSF sf; Signs signFlags; };
+struct incw { Vreg16 s, d; VregSF sf; };
 struct incwm { Vptr m; VregSF sf; };
-struct incl { Vreg32 s, d; VregSF sf; Signs signFlags; };
+struct incl { Vreg32 s, d; VregSF sf; };
 struct inclm { Vptr m; VregSF sf; };
-struct incq { Vreg64 s, d; VregSF sf; Signs signFlags; };
+struct incq { Vreg64 s, d; VregSF sf; };
 struct incqm { Vptr m; VregSF sf; };
 struct incqmlock { Vptr m; VregSF sf; };
 // mul: s0 * s1 => d, sf
-struct imul { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct imul { Vreg64 s0, s1, d; VregSF sf; };
 // neg: 0 - s => d, sf
-struct neg { Vreg64 s, d; VregSF sf;  Signs signFlags; };
+struct neg { Vreg64 s, d; VregSF sf; };
 // not: ~s => d
 struct notb { Vreg8 s, d; };
 struct not { Vreg64 s, d; };
 // or: s0 | {s1|m} => {d|m}, sf
 struct orbim { Immed s0; Vptr m; VregSF sf; };
 struct orwim { Immed s0; Vptr m; VregSF sf; };
-struct orq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
-struct orqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct orq { Vreg64 s0, s1, d; VregSF sf; };
+struct orqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct orqim { Immed s0; Vptr m; VregSF sf; };
 // shift: s1 << s0 => d, sf
-struct sar { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
-struct shl { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
-struct sarqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
-struct shlli { Immed s0; Vreg32 s1, d; VregSF sf; Signs signFlags; };
-struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
-struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; Signs signFlags; };
-struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct sar { Vreg64 s0, s1, d; VregSF sf; };
+struct shl { Vreg64 s0, s1, d; VregSF sf; };
+struct sarqi { Immed s0; Vreg64 s1, d; VregSF sf; };
+struct shlli { Immed s0; Vreg32 s1, d; VregSF sf; };
+struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; };
+struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; };
+struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct psllq { Immed s0; VregDbl s1, d; };
 struct psrlq { Immed s0; VregDbl s1, d; };
 // sub: s1 - s0 => d, sf
 struct subbi { Immed s0; Vreg8 s1, d; VregSF sf; };
 struct subl { Vreg32 s0, s1, d; VregSF sf; };
 struct subli { Immed s0; Vreg32 s1, d; VregSF sf; };
-struct subq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
+struct subq { Vreg64 s0, s1, d; VregSF sf; };
 struct subqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct subsd { VregDbl s0, s1, d; };
 // xor: s0 ^ s1 => d, sf
-struct xorb { Vreg8 s0, s1, d; VregSF sf; Signs signFlags; };
+struct xorb { Vreg8 s0, s1, d; VregSF sf; };
 struct xorbi { Immed s0; Vreg8 s1, d; VregSF sf; };
-struct xorl { Vreg32 s0, s1, d; VregSF sf; Signs signFlags; };
-struct xorq { Vreg64 s0, s1, d; VregSF sf; Signs signFlags; };
-struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; Signs signFlags; };
+struct xorl { Vreg32 s0, s1, d; VregSF sf; };
+struct xorq { Vreg64 s0, s1, d; VregSF sf; };
+struct xorqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 
 /*
  * Compares and tests.
@@ -988,12 +993,12 @@ struct cmpbim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpbm { Vreg8 s0; Vptr s1; VregSF sf; };
 struct cmpwim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpwm { Vreg16 s0; Vptr s1; VregSF sf; };
-struct cmpl { Vreg32 s0; Vreg32 s1; VregSF sf; Signs signFlags; };
-struct cmpli { Immed s0; Vreg32 s1; VregSF sf; Signs signFlags; };
+struct cmpl { Vreg32 s0; Vreg32 s1; VregSF sf; };
+struct cmpli { Immed s0; Vreg32 s1; VregSF sf; };
 struct cmplm { Vreg32 s0; Vptr s1; VregSF sf; };
 struct cmplim { Immed s0; Vptr s1; VregSF sf; };
-struct cmpq { Vreg64 s0; Vreg64 s1; VregSF sf; Signs signFlags; };
-struct cmpqi { Immed s0; Vreg64 s1; VregSF sf; Signs signFlags; };
+struct cmpq { Vreg64 s0; Vreg64 s1; VregSF sf; };
+struct cmpqi { Immed s0; Vreg64 s1; VregSF sf; };
 struct cmpqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct cmpqim { Immed s0; Vptr s1; VregSF sf; };
 struct cmpsd { ComparisonPred pred; VregDbl s0, s1, d; };
@@ -1006,7 +1011,7 @@ struct testwim { Immed s0; Vptr s1; VregSF sf; };
 struct testl { Vreg32 s0, s1; VregSF sf; };
 struct testli { Immed s0; Vreg32 s1; VregSF sf; };
 struct testlim { Immed s0; Vptr s1; VregSF sf; };
-struct testq { Vreg64 s0, s1; VregSF sf; Signs signFlags; };
+struct testq { Vreg64 s0, s1; VregSF sf; };
 struct testqi { Immed s0; Vreg64 s1; VregSF sf; };
 struct testqm { Vreg64 s0; Vptr s1; VregSF sf; };
 struct testqim { Immed s0; Vptr s1; VregSF sf; };
@@ -1155,6 +1160,15 @@ struct uxth { Vreg16 s; Vreg32 d; };
 /*
  * ppc64 intrinsics.
  */
+struct cmpd { Vreg64 s0; Vreg64 s1; VregSF sf; };
+struct cmpdi { Immed s0; Vreg64 s1; VregSF sf; };
+struct cmpld { Vreg64 s0; Vreg64 s1; VregSF sf; };
+struct cmpldi { Immed s0; Vreg64 s1; VregSF sf; };
+struct cmplw { Vreg32 s0; Vreg32 s1; VregSF sf; };
+struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
+struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
+struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
+struct copycr {};
 struct extrb { Vreg8 s; Vreg8 d; };   // Extract and zeros the upper bits
 struct extsb { Vreg64 s; Vreg64 d; }; // Extend byte sign
 struct extsw { Vreg64 s; Vreg64 d; }; // Extend word sign
@@ -1177,18 +1191,37 @@ struct xxpermdi { Vreg128 s0, s1, d; };
 
 struct Vinstr {
 #define O(name, imms, uses, defs) name,
-  enum Opcode : uint8_t { VASM_OPCODES };
+  enum Opcode : uint16_t { VASM_OPCODES };
 #undef O
+
+  /*
+   * Helper struct for transferring the IR context of a Vinstr during
+   * optimization passes.
+   */
+  struct ir_context {
+    const IRInstruction* origin;
+    uint8_t voff;
+  };
+
+  static constexpr auto kInvalidVoff = std::numeric_limits<uint8_t>::max();
+
+  /////////////////////////////////////////////////////////////////////////////
 
   Vinstr() : op(ud2) {}
 
-#define O(name, imms, uses, defs)               \
-  /* implicit */ Vinstr(jit::name i) : op(name), name##_(i) {}
+#define O(name, imms, uses, defs) \
+  /* implicit */ Vinstr(jit::name i, ir_context ctx = ir_context{}) \
+    : op(name)                    \
+    , voff(ctx.voff)              \
+    , origin(ctx.origin)          \
+    , name##_(i)                  \
+  {}
   VASM_OPCODES
 #undef O
 
   /*
-   * Define an operator= for all instructions to preserve origin and pos.
+   * Define an assignment operator for all instructions that preserves origin,
+   * voff, and pos.
    */
 #define O(name, ...)                            \
   Vinstr& operator=(const jit::name& i) {       \
@@ -1222,10 +1255,28 @@ struct Vinstr {
     return op_matcher<op>::get(*this);
   }
 
+  /*
+   * Get and set the IR "context" members.
+   */
+  ir_context irctx() const {
+    return ir_context { origin, voff };
+  }
+  void set_irctx(ir_context ctx) {
+    origin = ctx.origin;
+    voff = ctx.voff;
+  }
+
   /////////////////////////////////////////////////////////////////////////////
   // Data members.
 
   Opcode op;
+
+  /*
+   * The index of this instruction within the code for `origin'.
+   */
+  uint8_t voff;
+
+  // 2-byte hole here.
 
   /*
    * Instruction position, currently used only in vasm-xls.
@@ -1297,6 +1348,7 @@ bool isBlockEnd(const Vinstr& inst);
 Width width(Vinstr::Opcode op);
 
 ///////////////////////////////////////////////////////////////////////////////
+
 }}
 
 #endif

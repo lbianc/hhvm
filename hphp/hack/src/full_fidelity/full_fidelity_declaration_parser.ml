@@ -100,6 +100,8 @@ module WithExpressionAndStatementParser
     require-once-directive:
       require_once  (  include-filename  )  ;
       require_once  include-filename  ;
+    TODO The php spec says that include and include_once is followed by
+      expression, we need to know what kind of expression is allowed.
     *)
 
     let (parser, require) = next_token parser in
@@ -181,7 +183,6 @@ module WithExpressionAndStatementParser
     match Token.kind token with
     | RightBrace -> parser, make_missing ()
     | _ -> aux [] parser
-
 
   and parse_enum_declaration parser =
     (*
@@ -303,7 +304,7 @@ module WithExpressionAndStatementParser
       parse_classish_modifiers parser in
     let (parser, token) =
       parse_classish_token parser in
-    let (parser, name) = expect_name parser in
+    let (parser, name) = expect_class_name parser in
     let (parser, generic_type_parameter_list) =
       parse_generic_type_parameter_list_opt parser in
     let (parser, classish_extends, classish_extends_list) =
@@ -382,6 +383,7 @@ module WithExpressionAndStatementParser
     (parser, syntax)
 
   and parse_classish_element_list_opt parser =
+    (* TODO: Refactor this method so that it uses list parsing helpers. *)
     (* We need to identify an element of a class, trait, etc. Possibilities
        are:
 
@@ -423,6 +425,9 @@ module WithExpressionAndStatementParser
       require  extends  qualified-name
       require  implements  qualified-name
 
+      // XHP class attribute declaration
+      attribute ... ;
+
     *)
     let rec aux parser acc =
       let token = peek_token parser in
@@ -462,6 +467,9 @@ module WithExpressionAndStatementParser
              in a later pass. *)
          let (parser, require) = parse_require_clause parser in
          aux parser (require :: acc)
+      | TokenKind.Attribute -> let (parser, attr) =
+        parse_xhp_class_attribute_declaration parser in
+        aux parser (attr :: acc)
       | _ ->
           (* TODO *)
         let (parser, token) = next_token parser in
@@ -471,6 +479,70 @@ module WithExpressionAndStatementParser
     let (parser, classish_elements) = aux parser [] in
     let classish_elements = List.rev classish_elements in
     (parser, make_list classish_elements)
+
+  and parse_xhp_type_specifier parser =
+    (* SPEC (Draft)
+      xhp-type-specifier:
+        enum { xhp-attribute-enum-list-opt }
+        type-specifier
+
+      xhp-attribute-enum-value:
+        any integer literal
+        any single-quoted-string literal
+        any double-quoted-string literal
+
+      TODO: What are the semantics of encapsulated expressions in double-quoted
+            string literals here?
+      TODO: Write the grammar for the comma-separated list
+      TODO: Can the list end in a trailing comma?
+      TODO: Can it be empty?
+      ERROR RECOVERY: We parse any expressions here;
+      TODO: give an error in a later pass if the expressions are not literals.
+    *)
+    if peek_token_kind parser = Enum then
+      let (parser, enum_token) = assert_token parser Enum in
+      let (parser, left_brace, values, right_brace) =
+        parse_braced_comma_list_opt_allow_trailing
+        parser parse_expression in
+      let result =
+        make_xhp_enum_type enum_token left_brace values right_brace in
+      (parser, result)
+    else
+      parse_type_specifier parser
+
+  and parse_xhp_class_attribute parser =
+    (* SPEC (Draft)
+    xhp-attribute-declaration:
+      xhp-class-name
+      xhp-type-specifier name initializer-opt @required-opt (TODO)
+    *)
+    if peek_token_kind parser = Colon then
+      (* TODO: This doesn't give quite the right error message if it turns
+      out to be malformed; consider tweaking this. *)
+      (* TODO: What about the case where we have a "type name = value"
+         attribute and the type starts with a colon? Is that ever legal? *)
+      expect_class_name parser
+    else
+      let (parser, ty) = parse_xhp_type_specifier parser in
+      let (parser, name) = expect_name parser in
+      let (parser, init) = parse_simple_initializer_opt parser in
+      (* TODO: Parse @required *)
+      let result = make_xhp_class_attribute ty name init in
+      (parser, result)
+
+  and parse_xhp_class_attribute_declaration parser =
+    (* SPEC: (Draft)
+    xhp-class-attribute-declaration :
+      attribute xhp-attribute-declaration-list ;
+    *)
+    let (parser, attr_token) = assert_token parser TokenKind.Attribute in
+    (* TODO: Can this list be terminated with a trailing comma? *)
+    (* TODO: Better error message. *)
+    let (parser, attrs) = parse_comma_list parser Semicolon
+      SyntaxError.error1004 parse_xhp_class_attribute in
+    let (parser, semi) = expect_semicolon parser in
+    let result = make_xhp_class_attribute_declaration attr_token attrs semi in
+    (parser, result)
 
   and parse_qualified_name_type parser =
     (* Here we're parsing a name followed by an optional generic type
@@ -570,15 +642,9 @@ module WithExpressionAndStatementParser
         =  expression
     *)
     let (parser, name) = expect_variable parser in
-    let (parser, equal) = optional_token parser Equal in
-    if is_missing equal then
-      let result = make_property_declarator name (make_missing()) in
-      (parser, result)
-    else
-      let (parser, initial_value) = parse_expression parser in
-      let simple_init = make_simple_initializer equal initial_value in
-      let result = make_property_declarator name simple_init in
-      (parser, result)
+    let (parser, simple_init) = parse_simple_initializer_opt parser in
+    let result = make_property_declarator name simple_init in
+    (parser, result)
 
   (* SPEC:
     const-declaration:
@@ -611,9 +677,8 @@ module WithExpressionAndStatementParser
 
   and parse_constant_declarator parser =
     let (parser, const_name) = expect_name parser in
-    let (parser, initializer_) = parse_simple_initializer parser in
+    let (parser, initializer_) = parse_simple_initializer_opt parser in
     (parser, make_constant_declarator const_name initializer_)
-
 
   (* SPEC:
     type-constant-declaration:
@@ -800,7 +865,7 @@ module WithExpressionAndStatementParser
         | Variable | DotDotDot | Ampersand -> (parser, make_missing())
         | _ -> parse_type_specifier parser in
     let (parser, name) = parse_decorated_variable_opt parser in
-    let (parser, default) = parse_simple_initializer parser in
+    let (parser, default) = parse_simple_initializer_opt parser in
     let syntax =
       make_parameter_declaration attrs visibility type_specifier name default in
     (parser, syntax)
@@ -830,7 +895,7 @@ module WithExpressionAndStatementParser
     constant-initializer:
       =  const-expression
   *)
-  and parse_simple_initializer parser =
+  and parse_simple_initializer_opt parser =
     let (parser1, token) = next_token parser in
     match (Token.kind token) with
     | Equal ->
@@ -964,6 +1029,8 @@ module WithExpressionAndStatementParser
   and parse_declaration parser =
     let (parser1, token) = next_token parser in
     match (Token.kind token) with
+    | Include
+    | Include_once
     | Require
     | Require_once -> parse_inclusion_directive parser
     | Type
