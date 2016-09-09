@@ -203,7 +203,7 @@ struct Label {
   void branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  ImmType immt = ImmType::AnyFixed);
+                  ImmType immt = ImmType::TocOnly);
   void asm_label(Assembler& a);
 
 private:
@@ -379,13 +379,13 @@ struct Assembler {
   // TOC emit length: (ld/lwz + nop) or (addis + ld/lwz)
   static const uint8_t kTocLen = instr_size_in_bytes * 2;
 
-  // Jcc length: li64 + mtctr + nop + nop + bcctr
-  static const uint8_t kJccLen = kLi64Len + instr_size_in_bytes * 4;
+  // Jcc length: kTocLen + mtctr + nop + nop + bcctr
+  static const uint8_t kJccLen = kTocLen + instr_size_in_bytes * 4;
   // Jcc using TOC length: kTocLen + mtctr + nop + nop + bcctr
   static const uint8_t kJccTocLen = kTocLen + instr_size_in_bytes * 4;
 
-  // Call length: li64 + mtctr + bctr
-  static const uint8_t kCallLen = kLi64Len + instr_size_in_bytes * 2;
+  // Call length: kTocLen + mtctr + bctr
+  static const uint8_t kCallLen = kTocLen + instr_size_in_bytes * 2;
   // Call using TOC length: kTocLen + mtctr + bctr
   static const uint8_t kCallTocLen = kTocLen + instr_size_in_bytes * 2;
 
@@ -1834,14 +1834,14 @@ struct Assembler {
   void branchFar(Label& l,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::AnyFixed) {
+                  ImmType immt = ImmType::TocOnly) {
     l.branchFar(*this, bc, lr, immt);
   }
 
   void branchFar(CodeAddress c,
                   BranchConditions bc = BranchConditions::Always,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::AnyFixed) {
+                  ImmType immt = ImmType::TocOnly) {
     Label l(c);
     l.branchFar(*this, bc, lr, immt);
   }
@@ -1849,12 +1849,12 @@ struct Assembler {
   void branchFar(CodeAddress c,
                   ConditionCode cc,
                   LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::AnyFixed) {
+                  ImmType immt = ImmType::TocOnly) {
     branchFar(c, BranchParams::convertCC(cc), lr, immt);
   }
 
   void branchFar(CodeAddress c, BranchParams bp,
-                  ImmType immt = ImmType::AnyFixed) {
+                  ImmType immt = ImmType::TocOnly) {
     LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
     branchFar(c, static_cast<BranchConditions>(bp), lr, immt);
   }
@@ -1888,9 +1888,7 @@ struct Assembler {
   template <typename T>
   void call(T& target, CallArg ca = CallArg::Internal) {
     if ((CallArg::SmashInt == ca) || (CallArg::SmashExt == ca)) {
-      // Smashable instructions use toc for storing immediates.
-      branchFar(target, BranchConditions::Always, LinkReg::Save,
-          ImmType::TocOnly);
+      branchFar(target, BranchConditions::Always, LinkReg::Save);
     } else {
       // tries best performance possible
       branchAuto(target, BranchConditions::Always, LinkReg::Save);
