@@ -235,7 +235,7 @@ struct Vgen {
     // pointer and it doesn't fit on a single instruction as the TOC is too big
     // now. Therefore, emit this limmediate as fixed_size to avoid overlapping.
     bool toc_may_grow = RuntimeOption::EvalJitRelocationSize != 0;
-    auto imm_type = toc_may_grow ? ImmType::AnyFixed : ImmType::AnyCompact;
+    auto imm_type = toc_may_grow ? ImmType::TocOnly : ImmType::AnyCompact;
     a.limmediate(i.d, i.s.r.disp, imm_type);
   }
   void emit(const lead& i) { a.limmediate(i.d, (int64_t)i.s.get()); }
@@ -504,7 +504,7 @@ void Vgen::emit(const ldimml& i) {
 void Vgen::emit(const ldimmq& i) {
   // See leap to better understand the necessity of toc_may_grow
   bool toc_may_grow = RuntimeOption::EvalJitRelocationSize != 0;
-  auto imm_type = toc_may_grow ? ImmType::AnyFixed : ImmType::AnyCompact;
+  auto imm_type = toc_may_grow ? ImmType::TocOnly : ImmType::AnyCompact;
   auto val = i.s.q();
   if (i.d.isGP()) {
     a.limmediate(i.d, val, imm_type);
