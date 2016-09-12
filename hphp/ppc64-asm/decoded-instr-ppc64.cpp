@@ -122,11 +122,11 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
   if (isNearBranch()) {
     // grab conditional parameters
     BranchParams bp(m_ip);
+    bool uncond = (bp.bo() == uint8_t(BranchParams::BO::Always));
+    auto block_size = uncond ? Assembler::kCallLen : Assembler::kJccLen;
 
     HPHP::CodeBlock cb;
-    assertx(Assembler::kJccLen > Assembler::kCallLen);
-    auto max_branch_size = Assembler::kJccLen;
-    cb.init(m_ip, max_branch_size, "widenBranch relocation");
+    cb.init(m_ip, block_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
     a.branchFar(target, bp, ImmType::TocOnly);
@@ -190,15 +190,14 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool smashable) {
   DecoderInfo di = getFarBranch();
   if (di.isInvalid()) return false;
 
-  ppc64_asm::BranchParams bp(di.ip());
+  BranchParams bp(di.ip());
   bool uncond = (bp.bo() == uint8_t(BranchParams::BO::Always));
   auto block_size = uncond ? Assembler::kCallLen : Assembler::kJccLen;
 
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  ImmType immt = ImmType::TocOnly;
-  a.branchFar(target, bp, immt);
+  a.branchFar(target, bp, ImmType::TocOnly);
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {

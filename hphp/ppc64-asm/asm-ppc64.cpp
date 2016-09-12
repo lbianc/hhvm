@@ -856,8 +856,7 @@ void Assembler::unimplemented(){
 
 //////////////////////////////////////////////////////////////////////
 
-void Assembler::patchAbsolute(CodeAddress jmp,
-                              CodeAddress dest) {
+void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kTocLen, "patched bctr");
@@ -865,8 +864,7 @@ void Assembler::patchAbsolute(CodeAddress jmp,
   a.limmediate(reg::r12, ssize_t(dest), ImmType::TocOnly);
 }
 
-void Assembler::patchBranch(CodeAddress jmp,
-                            CodeAddress dest) {
+void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
   auto di = DecodedInstruction(jmp);
 
   // Detect Far branch
@@ -941,7 +939,7 @@ void Assembler::li64 (const Reg64& rt, int64_t imm64, bool fixedSize) {
   }
 }
 
-void Assembler::li32(const Reg64& rt, int32_t imm32) {
+void Assembler::li32 (const Reg64& rt, int32_t imm32) {
 
   if (HPHP::jit::deltaFits(imm32, HPHP::sz::word)) {
     // immediate has only low 16 bits set, use simple load immediate
