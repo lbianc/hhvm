@@ -49,20 +49,11 @@ PhysRegSaver::PhysRegSaver(Vout& v, RegSet regs)
 
   switch (arch()) {
     case Arch::X64:
+    case Arch::PPC64:
       gpr.forEach([&] (PhysReg r) {
         v << push{r};
       });
       break;
-    case Arch::PPC64:
-      {
-        // allocate stack size
-        v << lea{rsp()[gpr.size() * -8], rsp()};
-        auto index = 0;
-        gpr.forEach([&] (PhysReg r) {
-            v << store{r, rsp()[index++ * 8]};
-            });
-        break;
-      }
     case Arch::ARM:
       gpr.forEachPair([&] (PhysReg r0, PhysReg r1) {
         if (r1 == InvalidReg) {
@@ -92,20 +83,11 @@ PhysRegSaver::~PhysRegSaver() {
 
   switch (arch()) {
     case Arch::X64:
+    case Arch::PPC64:
       gpr.forEachR([&] (PhysReg r) {
         v << pop{r};
       });
       break;
-    case Arch::PPC64:
-      {
-        auto index = 0;
-        gpr.forEach([&] (PhysReg r) {
-            v << load{rsp()[index++ * 8], r};
-            });
-        // deallocate stack size
-        v << lea{rsp()[gpr.size() * 8], rsp()};
-        break;
-      }
     case Arch::ARM:
       gpr.forEachPairR([&] (PhysReg r0, PhysReg r1) {
         if (r1 == InvalidReg) {

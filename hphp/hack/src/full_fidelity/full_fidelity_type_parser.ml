@@ -20,8 +20,20 @@ module SimpleParser =
 open TokenKind
 open Syntax
 
+module WithExpressionParser (ExpressionParser :
+    Full_fidelity_expression_parser_type.ExpressionParserType) :
+  Full_fidelity_type_parser_type.TypeParserType = struct
+
 include SimpleParser
 include Full_fidelity_parser_helpers.WithParser(SimpleParser)
+
+let parse_expression parser =
+  let expr_parser = ExpressionParser.make parser.lexer parser.errors in
+  let (expr_parser, node) = ExpressionParser.parse_expression expr_parser in
+  let lexer = ExpressionParser.lexer expr_parser in
+  let errors = ExpressionParser.errors expr_parser in
+  let parser = { lexer; errors } in
+  (parser, node)
 
 (* TODO: What about something like for::for? Is that a legal
   type constant?  *)
@@ -29,7 +41,7 @@ include Full_fidelity_parser_helpers.WithParser(SimpleParser)
 let rec parse_type_specifier parser =
   (* Strictly speaking, "mixed" is a nullable type specifier. We parse it as
      a simple type specifier here. *)
-  let (parser1, token) = next_token parser in
+  let (parser1, token) = next_xhp_class_name_or_other parser in
   match Token.kind token with
   | Double (* TODO: Specification does not mention double; fix it. *)
   | Bool
@@ -44,6 +56,7 @@ let rec parse_type_specifier parser =
   | This -> parse_simple_type_or_type_constant parser
   | Name -> parse_simple_type_or_type_constant_or_generic parser
   | Self -> parse_remaining_type_constant parser1 (make_token token)
+  | XHPClassName
   | QualifiedName -> parse_possible_generic_specifier parser
   | Array -> parse_array_type_specifier parser
   | LeftParen -> parse_tuple_or_closure_type_specifier parser
@@ -85,16 +98,15 @@ and parse_remaining_type_constant parser left =
     (parser, syntax)
 
 and parse_simple_type_or_type_constant parser =
-  let (parser, name) = next_token parser in
+  let (parser, name) = next_xhp_class_name_or_other parser in
   let token = peek_token parser in
   match Token.kind token with
   | ColonColon -> parse_remaining_type_constant parser (make_token name)
   | _ -> (parser, make_simple_type_specifier (make_token name))
 
 and parse_simple_type_or_type_constant_or_generic parser =
-  let parser0 = skip_token parser in
-  let token = peek_token parser0 in
-  match Token.kind token with
+  let (parser0, _) = next_xhp_class_name_or_other parser in
+  match peek_token_kind parser0 with
   | LessThan -> parse_possible_generic_specifier parser
   | _ -> parse_simple_type_or_type_constant parser
 
@@ -103,7 +115,7 @@ and parse_simple_type_or_type_constant_or_generic parser =
     qualified-name generic-type-argument-listopt
 *)
 and parse_possible_generic_specifier parser =
-  let (parser, name) = next_token parser in
+  let (parser, name) = next_xhp_class_name_or_other parser in
   let (parser, arguments) = parse_generic_type_argument_list_opt parser in
   if (kind arguments) = SyntaxKind.Missing then
     (parser, make_simple_type_specifier (make_token name))
@@ -337,6 +349,8 @@ and parse_tuple_type_specifier parser =
      actually requires a type list with two or more items. Give an error in
      a later pass if there is only one item here. *)
 
+  (* TODO: Should we allow trailing commas? If so, update the spec. *)
+
   let (parser, left_paren) = next_token parser in
   let left_paren = make_token left_paren in
   let (parser, args) = parse_type_list parser RightParen in
@@ -354,8 +368,16 @@ and parse_tuple_type_specifier parser =
     (parser, result)
 
 and parse_nullable_type_specifier parser =
-  let (parser, question) = next_token parser in
-  let question = make_token question in
+  (* SPEC:
+    nullable-type-specifier:
+      ? type-specifier
+      mixed
+
+  * Note that we parse "mixed" as a simple type specifier, even though
+    technically it is classified as a nullable type specifier by the grammar.
+  * Note that it is perfectly legal to have trivia between the ? and the
+    underlying type. *)
+  let (parser, question) = assert_token parser Question in
   let (parser, nullable_type) = parse_type_specifier parser in
   let result = make_nullable_type_specifier question nullable_type in
   (parser, result)
@@ -381,16 +403,16 @@ and parse_field_specifier parser =
     field-specifier:
       single-quoted-string-literal  =>  type-specifier
       qualified-name  =>  type-specifier
+      scope-resolution-expression  =>  type-specifier
   *)
 
-  (* TODO: ERROR RECOVERY is not very sophisticated here. *)
-  let (parser, name) = next_token parser in
-  let parser = match Token.kind name with
-  | SingleQuotedStringLiteral
-  | QualifiedName
-  | Name -> parser
-  | _ -> with_error parser SyntaxError.error1025 in
-  let name = make_token name in
+  (* TODO: We require that it be either all literals or no literals in the
+           set of specifiers; make an error reporting pass that detects this. *)
+
+  (* ERROR RECOVERY: We allow any expression for the left-hand side.
+     TODO: Make an error-detecting pass that gives an error if the left-hand
+     side is not a literal or name. *)
+  let (parser, name) = parse_expression parser in
   let (parser, arrow) = expect_arrow parser in
   let (parser, field_type) = parse_type_specifier parser in
   let result = make_field_specifier name arrow field_type in
@@ -402,6 +424,7 @@ and parse_field_list parser =
       field-specifier
       field-specifier-list  ,  field-specifier
     NOTE: trailing comma is allowed
+    TODO: Update the specification accordingly.
   *)
   parse_comma_list_allow_trailing parser RightParen SyntaxError.error1025
     parse_field_specifier
@@ -447,3 +470,5 @@ and parse_return_type parser =
     (parser1, make_token token)
   else
     parse_type_specifier parser
+
+end

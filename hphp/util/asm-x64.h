@@ -1205,8 +1205,8 @@ public:
     bytes(n, nops[n]);
   }
 
-  void emitExceptions(int n) {
-    while (n >= 2) ud2();
+  void emitTrap(int n) {
+    while (canEmit(2)) ud2();
     if (n > 0) int3();
   }
 
