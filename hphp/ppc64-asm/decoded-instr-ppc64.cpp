@@ -71,11 +71,17 @@ bool DecodedInstruction::setImmediate(int64_t value) {
 
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(m_ip, Assembler::kTocLen, "setImmediate relocation");
+  cb.init(m_ip, Assembler::kLimmLen, "setImmediate relocation");
   HPHP::CodeCursor cursor { cb, m_ip };
   Assembler a{ cb };
 
-  a.limmediate(getLimmediateReg(), ssize_t(value), ImmType::TocOnly);
+  a.limmediate(getLimmediateReg(), ssize_t(value),
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
   // refresh m_imm and other parameters
   decode();
@@ -129,7 +135,13 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
     cb.init(m_ip, block_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp, ImmType::TocOnly);
+    a.branchFar(target, bp,
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
     // refresh m_size and other parameters
     decode();
@@ -197,7 +209,13 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool smashable) {
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  a.branchFar(target, bp, ImmType::TocOnly);
+  a.branchFar(target, bp,
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {

@@ -379,8 +379,6 @@ struct Assembler {
   // TOC emit length: (ld/lwz + nop) or (addis + ld/lwz)
   static const uint8_t kTocLen = instr_size_in_bytes * 2;
 
-#define USE_TOC_ON_BRANCH
-
   // Compile time switch for using TOC or not on branches
   static const uint8_t kLimmLen =
 #ifdef USE_TOC_ON_BRANCH

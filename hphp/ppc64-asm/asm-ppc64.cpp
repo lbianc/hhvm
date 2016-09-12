@@ -859,9 +859,15 @@ void Assembler::unimplemented(){
 void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(jmp, Assembler::kTocLen, "patched bctr");
+  cb.init(jmp, Assembler::kLimmLen, "patched bctr");
   Assembler a{ cb };
-  a.limmediate(reg::r12, ssize_t(dest), ImmType::TocOnly);
+  a.limmediate(reg::r12, ssize_t(dest),
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
