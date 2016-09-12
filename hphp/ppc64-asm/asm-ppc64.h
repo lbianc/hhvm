@@ -379,15 +379,22 @@ struct Assembler {
   // TOC emit length: (ld/lwz + nop) or (addis + ld/lwz)
   static const uint8_t kTocLen = instr_size_in_bytes * 2;
 
-  // Jcc length: kTocLen + mtctr + nop + nop + bcctr
-  static const uint8_t kJccLen = kTocLen + instr_size_in_bytes * 4;
-  // Jcc using TOC length: kTocLen + mtctr + nop + nop + bcctr
-  static const uint8_t kJccTocLen = kTocLen + instr_size_in_bytes * 4;
+#define USE_TOC_ON_BRANCH
 
-  // Call length: kTocLen + mtctr + bctr
-  static const uint8_t kCallLen = kTocLen + instr_size_in_bytes * 2;
-  // Call using TOC length: kTocLen + mtctr + bctr
-  static const uint8_t kCallTocLen = kTocLen + instr_size_in_bytes * 2;
+  // Compile time switch for using TOC or not on branches
+  static const uint8_t kLimmLen =
+#ifdef USE_TOC_ON_BRANCH
+    kTocLen
+#else
+    kLi64Len
+#endif
+    ;
+
+  // Jcc using TOC length: toc/li64 + mtctr + nop + nop + bcctr
+  static const uint8_t kJccLen = kLimmLen + instr_size_in_bytes * 4;
+
+  // Call using TOC length: toc/li64 + mtctr + bctr
+  static const uint8_t kCallLen = kLimmLen + instr_size_in_bytes * 2;
 
   // PPC64 Instructions
   void add(const Reg64& rt, const Reg64& ra, const Reg64& rb, bool rc = 0);

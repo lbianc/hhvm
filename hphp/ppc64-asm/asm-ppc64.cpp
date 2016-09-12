@@ -980,8 +980,12 @@ void Assembler::limmediate (const Reg64& rt, int64_t imm64, ImmType immt) {
      return (static_cast<uint64_t>(imm64) >> shift_n) == 0 ? true : false;
   };
 
-  if (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize) &&
-      (immt != ImmType::TocOnly)) {
+  if (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize)
+      && (immt != ImmType::TocOnly)
+#ifndef USE_TOC_ON_BRANCH
+      || 1
+#endif
+      ) {
     li64(rt, imm64, immt != ImmType::AnyCompact);
     return;
   }

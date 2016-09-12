@@ -40,15 +40,15 @@ using ppc64_asm::Assembler;
 constexpr uint8_t kStdIns = ppc64_asm::instr_size_in_bytes;
 
 // limmediate
-constexpr size_t smashableMovqLen() { return Assembler::kTocLen; }
+constexpr size_t smashableMovqLen() { return Assembler::kLimmLen; }
 
 // limmediate + lwz + extsw + cmpd
 constexpr size_t smashableCmpqLen() { return smashableMovqLen() + 3*kStdIns; }
 
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl
-constexpr size_t smashableCallLen() { return Assembler::kCallTocLen; }
-constexpr size_t smashableJccLen()  { return Assembler::kJccTocLen; }
+constexpr size_t smashableCallLen() { return Assembler::kCallLen; }
+constexpr size_t smashableJccLen()  { return Assembler::kJccLen; }
 
 // Same length as Jcc.
 constexpr size_t smashableJmpLen()  { return smashableJccLen(); }
