@@ -61,6 +61,9 @@ constexpr uint8_t toc_position_on_frame     = 3 * 8;
 // Currently it skips a "nop" or a "ld 2,24(1)"
 constexpr uint8_t call_skip_bytes_for_ret   = 1 * instr_size_in_bytes;
 
+// Force usage of TOC on branches
+//#define USE_TOC_ON_BRANCH
+
 //////////////////////////////////////////////////////////////////////
 
 enum class RegNumber : uint32_t {};
