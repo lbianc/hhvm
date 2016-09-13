@@ -21,6 +21,8 @@
 
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
+#include "hphp/runtime/vm/jit/abi-ppc64.h"
+
 namespace ppc64_asm {
 
 Decoder* Decoder::s_decoder = nullptr;
@@ -359,6 +361,42 @@ bool DecoderInfo::isNop() const {
   return false;
 }
 
+bool DecoderInfo::isLd(bool toc) const {
+  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld)) {
+    if (!toc) return true;
+
+    DS_form_t dsform;
+    dsform.instruction = m_image;
+    if (Reg64(dsform.RA) == reg::r2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Auxiliary for isLwz and isAddis
+ */
+bool DecoderInfo::isDformOp(OpcodeNames opn, bool toc) const {
+  if ((m_form == Form::kD) && (m_opn == opn)) {
+    if (!toc) return true;
+
+    D_form_t dform;
+    dform.instruction = m_image;
+    if (Reg64(dform.RA) == reg::r2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool DecoderInfo::isLwz(bool toc) const {
+  return isDformOp(OpcodeNames::op_lwz, toc);
+}
+
+bool DecoderInfo::isAddis(bool toc) const {
+  return isDformOp(OpcodeNames::op_addis, toc);
+}
 
 bool DecoderInfo::isOffsetBranch(AllowCond ac /* = AllowCond::Any */) const {
   // ac: OnlyUncond
@@ -573,6 +611,28 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
       return 0;
       break;
   }
+}
+/*
+ * Find the offset from instructions like ld, which was created by
+ * limmediate.
+ */
+int16_t DecoderInfo::offsetDS() const {
+  always_assert(m_form == Form::kDS && "Instruction not expected.");
+  DS_form_t instr_d;
+  instr_d.instruction = m_image;
+
+  return static_cast<int16_t>(instr_d.DS << 2);
+}
+
+/*
+ * Find the offset from instructions like lwz.
+ */
+int16_t DecoderInfo::offsetD() const {
+  always_assert(m_form == Form::kD && "Instruction not expected.");
+  D_form_t instr_d;
+  instr_d.instruction = m_image;
+
+  return static_cast<int16_t>(instr_d.D);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

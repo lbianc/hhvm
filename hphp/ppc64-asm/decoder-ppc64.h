@@ -1596,8 +1596,16 @@ struct DecoderInfo {
   void setIp(const PPC64Instr* const ip) {
     setIp(reinterpret_cast<const uint8_t* const>(ip));
   }
+  bool isAddis(bool toc = false) const;
+  bool isLd(bool toc = false) const;
+  bool isLwz(bool toc = false) const;
+  int16_t offsetDS() const;
+  int16_t offsetD() const;
 
 private:
+  // Auxiliary function for isLd and isLwz
+  bool isDformOp(OpcodeNames opn, bool toc) const;
+
   // opcode enumeration identifier
   OpcodeNames m_opn;
   // pointer to the decoded instruction in the memory

@@ -36,11 +36,20 @@ struct DecInfoOffset {
 };
 
 struct DecodedInstruction {
+  explicit DecodedInstruction(PPC64Instr* ip, uint8_t max_size = 0)
+    : m_ip(reinterpret_cast<uint8_t*>(ip))
+    , m_imm(0)
+    , m_dinfo(Decoder::GetDecoder().getInvalid())
+    , m_size(instr_size_in_bytes)
+    , m_max_size(max_size)
+  {
+    decode();
+  }
   // 0 as @max_size means unlimited size
   explicit DecodedInstruction(uint8_t* ip, uint8_t max_size = 0)
     : m_ip(ip)
     , m_imm(0)
-    , m_dinfo(Decoder::GetDecoder().decode(ip))
+    , m_dinfo(Decoder::GetDecoder().getInvalid())
     , m_size(instr_size_in_bytes)
     , m_max_size(max_size)
   {
@@ -70,7 +79,12 @@ struct DecodedInstruction {
   // wide   : branch by absolute address.
   bool shrinkBranch();
   void widenBranch(uint8_t* target);
-
+  int32_t offsetDS() const      { return m_dinfo.offsetDS(); }
+  int16_t offsetD() const       { return m_dinfo.offsetD(); }
+  bool isLd(bool toc) const     { return m_dinfo.isLd(toc); }
+  bool isLwz(bool toc) const    { return m_dinfo.isLwz(toc); }
+  bool isAddis(bool toc) const  { return m_dinfo.isAddis(toc); }
+  // if it's conditional branch, it's not a jmp
   uint8_t* ip() const           { return m_ip; }
   int32_t offset() const        { return m_dinfo.offset(); }
   bool isException() const      { return m_dinfo.isException(); }
@@ -87,12 +101,15 @@ struct DecodedInstruction {
   DecoderInfo getFarBranch(AllowCond ac = AllowCond::Any) const;
   DecInfoOffset getFarBranchLength(AllowCond ac = AllowCond::Any) const;
   uint8_t* farBranchTarget() const { return (uint8_t*)m_imm; }
-  bool setFarBranchTarget(uint8_t* target, bool fixedSize);
+  bool setFarBranchTarget(uint8_t* target, bool smashable);
 
   bool isCall() const;
 
   // Retrieve the register used by li64 instruction
   HPHP::jit::Reg64 getLi64Reg() const;
+
+  // Retrieve the register used by limmediate instruction
+  HPHP::jit::Reg64 getLimmediateReg() const;
 
   // Retrieve the register used by li32 instruction
   HPHP::jit::Reg64 getLi32Reg() const { return getLi64Reg(); }
@@ -108,6 +125,9 @@ private:
   // Check if m_ip points to the beginning of a li64 instruction (relaxed
   // constraint, only checks a part of it)
   bool isLi64Possible() const;
+  // Check if m_ip points to the beginning of a limmediate instruction (relaxed
+  // constraint, only checks a part of it)
+  bool isLimmediatePossible() const;
 
   uint8_t* m_ip;
   int64_t m_imm;

@@ -24,7 +24,11 @@
 #include "hphp/util/data-block.h"
 
 #ifndef MIN
-#define MIN(x,y)        (((x) < (y)) ? (x) : (y))
+#define MIN(a, b)       (((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a, b)       (((a) > (b)) ? (a) : (b))
 #endif
 
 namespace ppc64_asm {
@@ -59,7 +63,7 @@ bool DecodedInstruction::setNearBranchTarget(uint8_t* target) {
 
 bool DecodedInstruction::isImmediate() const {
   // if destination register is r12, then it's preparing to branch
-  return isLi64Possible() && (reg::r12 != getLi64Reg());
+  return isLimmediatePossible() && (reg::r12 != getLimmediateReg());
 }
 
 bool DecodedInstruction::setImmediate(int64_t value) {
@@ -67,11 +71,17 @@ bool DecodedInstruction::setImmediate(int64_t value) {
 
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(m_ip, Assembler::kLi64Len, "setImmediate relocation");
+  cb.init(m_ip, Assembler::kLimmLen, "setImmediate relocation");
   HPHP::CodeCursor cursor { cb, m_ip };
   Assembler a{ cb };
 
-  a.li64(getLi64Reg(), ssize_t(value));
+  a.limmediate(getLimmediateReg(), ssize_t(value),
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
   // refresh m_imm and other parameters
   decode();
@@ -118,14 +128,20 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
   if (isNearBranch()) {
     // grab conditional parameters
     BranchParams bp(m_ip);
+    bool uncond = (bp.bo() == uint8_t(BranchParams::BO::Always));
+    auto block_size = uncond ? Assembler::kCallLen : Assembler::kJccLen;
 
     HPHP::CodeBlock cb;
-    assertx(Assembler::kJccLen > Assembler::kCallLen);
-    auto max_branch_size = Assembler::kJccLen;
-    cb.init(m_ip, max_branch_size, "widenBranch relocation");
+    cb.init(m_ip, block_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp, true);
+    a.branchFar(target, bp,
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
     // refresh m_size and other parameters
     decode();
@@ -152,7 +168,7 @@ DecoderInfo DecodedInstruction::getFarBranch(AllowCond ac /* = Any */) const {
 // branch instruction is found
 DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   DecInfoOffset ret;
-  if (!isLi64Possible() || (reg::r12 != getLi64Reg())) return ret;
+  if (!isLimmediatePossible() || (reg::r12 != getLimmediateReg())) return ret;
 
   // only read bytes up to the smallest of @max_read or @bytes.
   auto canRead = [](uint8_t n, uint8_t max_read, uint8_t bytes) -> bool {
@@ -162,7 +178,6 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
       return n < bytes;
   };
 
-#define MAX(a, b)    (((a) > (b)) ? (a) : (b))
   auto branch_size = ((ac == AllowCond::OnlyCond)
       ? Assembler::kJccLen
       : ((ac == AllowCond::OnlyUncond)
@@ -170,7 +185,6 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
         : MAX(Assembler::kCallLen, Assembler::kJccLen)
         )
       );
-#undef MAX
 
   // Search for a register branch instruction like bctr. Return when found.
   for (ret.m_offset = 0;
@@ -184,18 +198,24 @@ DecInfoOffset DecodedInstruction::getFarBranchLength(AllowCond ac) const {
   return DecInfoOffset();
 }
 
-bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool fixedSize) {
+bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool smashable) {
   DecoderInfo di = getFarBranch();
   if (di.isInvalid()) return false;
 
-  ppc64_asm::BranchParams bp(di.ip());
+  BranchParams bp(di.ip());
   bool uncond = (bp.bo() == uint8_t(BranchParams::BO::Always));
   auto block_size = uncond ? Assembler::kCallLen : Assembler::kJccLen;
 
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  a.branchFar(target, bp, fixedSize);
+  a.branchFar(target, bp,
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {
@@ -220,6 +240,33 @@ bool DecodedInstruction::isCall() const {
   return branch_di.isBranchWithLR();
 }
 
+Reg64 DecodedInstruction::getLimmediateReg() const {
+  auto di = Decoder::GetDecoder().decode(m_ip);
+  if (m_dinfo.isLd(true)) {
+    DS_form_t ds_instr;
+    ds_instr.instruction = m_dinfo.instruction_image();
+    return Reg64(ds_instr.RT);
+  }
+  else if (m_dinfo.isLwz(true)) {
+    D_form_t d_instr;
+    d_instr.instruction = m_dinfo.instruction_image();
+    return Reg64(d_instr.RT);
+  }
+  else if (m_dinfo.isAddis(true)) {
+    auto di = Decoder::GetDecoder().decode(m_ip+4);
+    if (di.isLd()) {
+      DS_form_t ds_instr;
+      ds_instr.instruction = di.instruction_image();
+      return Reg64(ds_instr.RT);
+    } else if (di.isLwz()) {
+      D_form_t d_instr;
+      d_instr.instruction = di.instruction_image();
+      return Reg64(d_instr.RT);
+    }
+  }
+  return getLi64Reg();
+}
+
 Reg64 DecodedInstruction::getLi64Reg() const {
   // First instruction is always either li or lis, both are D-form
   assertx(isLi64Possible());
@@ -235,7 +282,7 @@ Reg64 DecodedInstruction::getLi64Reg() const {
 void DecodedInstruction::decode() {
   m_dinfo = Decoder::GetDecoder().decode(m_ip);
 
-  if (isLi64Possible() && (reg::r12 == getLi64Reg())) {
+  if (isLimmediatePossible() && (reg::r12 == getLimmediateReg())) {
     // Compute the whole branch on the m_size. Used on relocation to skip
     // instructions
     DecInfoOffset dio = getFarBranchLength();
@@ -251,11 +298,40 @@ void DecodedInstruction::decode() {
 
 /*
  * Reads back the immediate when emmited with (without nops) and return the
- * number of bytes reaad for this immediate decoding.
+ * number of bytes read for this immediate decoding.
  */
 uint8_t DecodedInstruction::decodeImm() {
   // Functions that detect if @dinfo is exactly the instructions flavor that
-  // our li64 uses. Also the target register to be modified has to be the same.
+  // our limmediate uses. Also the target register to be modified has to be
+  // the same.
+
+  auto calcIndex = [&](int16_t indexBigTOC, int16_t indexTOC) {
+    return static_cast<int64_t>(static_cast<int64_t>(indexTOC) +
+              static_cast<int64_t>(indexBigTOC << 16));
+  };
+
+  if (m_dinfo.isLd(true)) {
+    m_imm = VMTOC::getInstance().getValue(calcIndex(0, m_dinfo.offsetDS()),
+      true);
+    return instr_size_in_bytes;
+  } else if (m_dinfo.isLwz(true)) {
+    m_imm = VMTOC::getInstance().getValue(calcIndex(0, m_dinfo.offsetD()));
+    return instr_size_in_bytes;
+  } else if (m_dinfo.isAddis(true)) {
+    auto bigIndexTOC = m_dinfo.offsetD();
+    // Get next instruction
+    auto di = Decoder::GetDecoder().decode(m_ip+4);
+    if (di.isLd()) {
+      m_imm = VMTOC::getInstance().getValue(calcIndex(bigIndexTOC,
+          di.offsetDS()), true);
+      return 2*instr_size_in_bytes;
+    } else if (di.isLwz()) {
+      m_imm = VMTOC::getInstance().getValue(calcIndex(bigIndexTOC,
+          di.offsetD()));
+      return 2*instr_size_in_bytes;
+    }
+  }
+
   auto isLi = [](DecoderInfo* dinfo, const Reg64& dest, int16_t* imm) {
     D_form_t dform;
     dform.instruction = dinfo->instruction_image();
@@ -350,6 +426,13 @@ bool DecodedInstruction::fitsOnNearBranch(ptrdiff_t diff, bool uncond) const {
   // is it b or bc? b can use offsets up to 26bits and bc only 16bits
   auto bitsize = uncond ? 26 : 16;
   return HPHP::jit::deltaFitsBits(diff, bitsize);
+}
+
+bool DecodedInstruction::isLimmediatePossible() const {
+  if (m_dinfo.isLd(true) || m_dinfo.isLwz(true) || m_dinfo.isAddis(true)) {
+    return true;
+  }
+  return isLi64Possible();
 }
 
 bool DecodedInstruction::isLi64Possible() const {

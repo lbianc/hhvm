@@ -15,9 +15,83 @@
 */
 
 #include "hphp/ppc64-asm/asm-ppc64.h"
+#include "hphp/ppc64-asm/decoded-instr-ppc64.h"
 #include "hphp/ppc64-asm/decoder-ppc64.h"
+#include "hphp/runtime/base/runtime-option.h"
 
 namespace ppc64_asm {
+int64_t VMTOC::pushElem(int64_t elem) {
+  if (m_map.find(elem) != m_map.end()) {
+    return m_map[elem];
+  }
+  auto offset = allocTOC(static_cast<int32_t>(elem & 0xffffffff), true);
+  m_map.insert( { elem, offset });
+  allocTOC(static_cast<int32_t>((elem & 0xffffffff00000000) >> 32));
+  m_last_elem_pos += 2;
+  return offset;
+}
+
+int64_t VMTOC::pushElem(int32_t elem) {
+  if (m_map.find(elem) != m_map.end()) {
+    return m_map[elem];
+  }
+  auto offset = allocTOC(elem);
+  m_map.insert( { elem, offset });
+  m_last_elem_pos++;
+  return offset;
+}
+
+VMTOC& VMTOC::getInstance() {
+  static VMTOC instance;
+  return instance;
+}
+
+intptr_t VMTOC::getPtrVector() {
+  always_assert(m_tocvector != nullptr);
+  return reinterpret_cast<intptr_t>(m_tocvector->base() + INT16_MAX + 1);
+}
+
+int64_t VMTOC::getValue(int64_t index, bool qword) {
+  HPHP::Address addr = reinterpret_cast<HPHP::Address>(
+      reinterpret_cast<intptr_t>(index) + getPtrVector());
+  int64_t ret_val = 0;
+  int max_elem = qword ? 8 : 4;
+  for (int i = max_elem-1; i >= 0; i--) {
+    ret_val = addr[i] + (ret_val << 8);
+  }
+  return ret_val;
+}
+
+int64_t VMTOC::allocTOC(int32_t target, bool align) {
+  HPHP::Address addr = m_tocvector->frontier();
+  if (align) {
+    forceAlignment(addr);
+    always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
+  }
+
+  m_tocvector->assertCanEmit(sizeof(int32_t));
+  m_tocvector->dword(reinterpret_cast<int32_t>(target));
+  return addr - (m_tocvector->base() + INT16_MAX + 1);
+}
+
+void VMTOC::setTOCDataBlock(HPHP::DataBlock *db) {
+  if(m_tocvector == nullptr) {
+    m_tocvector = db;
+    HPHP::Address addr = m_tocvector->frontier();
+    forceAlignment(addr);
+  }
+  return;
+}
+
+void VMTOC::forceAlignment(HPHP::Address& addr) {
+  // keep 8-byte alignment
+  while (reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
+    uint8_t fill_byte = 0xf0;
+    m_tocvector->assertCanEmit(sizeof(uint8_t));
+    m_tocvector->byte(fill_byte);
+    addr = m_tocvector->frontier();
+  }
+}
 
 void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
   const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
@@ -786,9 +860,15 @@ void Assembler::unimplemented(){
 void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   // Initialize code block cb pointing to li64
   HPHP::CodeBlock cb;
-  cb.init(jmp, Assembler::kLi64Len, "patched bctr");
+  cb.init(jmp, Assembler::kLimmLen, "patched bctr");
   Assembler a{ cb };
-  a.li64(reg::r12, ssize_t(dest), true);
+  a.limmediate(reg::r12, ssize_t(dest),
+#ifdef USE_TOC_ON_BRANCH
+      ImmType::TocOnly
+#else
+      ImmType::AnyFixed
+#endif
+      );
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
@@ -885,14 +965,73 @@ void Assembler::li32 (const Reg64& rt, int32_t imm32) {
   }
 }
 
+void Assembler::loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
+      uint64_t offset, bool fixedSize, bool fits32) {
+  if (fits32) {
+    Assembler::lwz(rt,rttoc[offset]);
+  }
+  else {
+    Assembler::ld(rt, rttoc[offset]);
+  }
+  if (fixedSize) {
+    emitNop(3 * instr_size_in_bytes);
+  }
+  return;
+}
+
+void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
+  always_assert(HPHP::RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
+    HPHP::RuntimeOption::Evalppc64minTOCImmSize <= 64);
+
+  auto fits = [](int64_t imm64, uint16_t shift_n) {
+     return (static_cast<uint64_t>(imm64) >> shift_n) == 0 ? true : false;
+  };
+
+  if (
+#ifndef USE_TOC_ON_BRANCH
+      1 ||
+#endif
+      (fits(imm64, HPHP::RuntimeOption::Evalppc64minTOCImmSize)
+      && (immt != ImmType::TocOnly))) {
+    li64(rt, imm64, immt != ImmType::AnyCompact);
+    return;
+  }
+
+  bool fits32 = HPHP::RuntimeOption::Evalppc64useTOCLwz && fits(imm64, 32);
+  int64_t TOCoffset;
+  if (fits32) {
+    TOCoffset = VMTOC::getInstance().pushElem(
+        static_cast<int32_t>(UINT32_MAX & imm64));
+  }
+  else {
+    TOCoffset = VMTOC::getInstance().pushElem(imm64);
+  }
+
+  if (TOCoffset > INT16_MAX) {
+    int16_t complement = 0;
+    // If last four bytes is still bigger than a signed 16bits, uses as two
+    // complement.
+    if ((TOCoffset & UINT16_MAX) > INT16_MAX) complement = 1;
+    addis(rt, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
+    loadTOC(rt, rt, imm64, TOCoffset & UINT16_MAX,
+        immt == ImmType::AnyFixed, fits32);
+  }
+  else {
+    loadTOC(rt, reg::r2, imm64, TOCoffset, immt == ImmType::AnyFixed, fits32);
+    bool toc_may_grow = HPHP::RuntimeOption::EvalJitRelocationSize != 0;
+    if ((immt != ImmType::AnyCompact) || toc_may_grow) {
+      emitNop(1 * instr_size_in_bytes);
+    }
+  }
+
+  return;
+}
+
 //////////////////////////////////////////////////////////////////////
 // Label
 //////////////////////////////////////////////////////////////////////
 
 Label::~Label() {
-  if (!m_toPatch.empty()) {
-    assert(m_a && m_address && "Label had jumps but was never set");
-  }
   for (auto& ji : m_toPatch) {
     ji.a->patchBranch(ji.addr, m_address);
   }
@@ -940,13 +1079,13 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
 void Label::branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  bool fixedSize /* = true */) {
+                  ImmType immt) {
   // Marking current address for patchAbsolute
   addJump(&a);
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.li64(reg::r12, address, fixedSize);
+  a.limmediate(reg::r12, address, immt);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).
@@ -957,7 +1096,7 @@ void Label::branchFar(Assembler& a,
   if (bc == BranchConditions::Overflow || bc == BranchConditions::NoOverflow) {
     a.xor(reg::r0, reg::r0, reg::r0,false);
     a.mtspr(Assembler::SpecialReg::XER, reg::r0);
-  } else if (cond && fixedSize) {
+  } else if (cond && immt != ImmType::AnyCompact) {
     // Unconditional branch (jmp or call) doesn't need this reserve bytes
     a.emitNop(2 * instr_size_in_bytes);
   }

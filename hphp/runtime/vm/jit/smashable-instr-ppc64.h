@@ -31,22 +31,24 @@ namespace ppc64 {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+using ppc64_asm::Assembler;
+
 /*
  * Mirrors the API of smashable-instr.h.
  */
 
 constexpr uint8_t kStdIns = ppc64_asm::instr_size_in_bytes;
 
-// li64
-constexpr size_t smashableMovqLen() { return ppc64_asm::Assembler::kLi64Len; }
+// limmediate
+constexpr size_t smashableMovqLen() { return Assembler::kLimmLen; }
 
-// li64 + cmpd
-constexpr size_t smashableCmpqLen() { return smashableMovqLen() + kStdIns; }
+// limmediate + lwz + extsw + cmpd
+constexpr size_t smashableCmpqLen() { return smashableMovqLen() + 3*kStdIns; }
 
 // The following instruction size is from the beginning of the smashableCall
 // to the address the LR saves upon branching with bctrl
-constexpr size_t smashableCallLen() { return ppc64_asm::Assembler::kCallLen; }
-constexpr size_t smashableJccLen()  { return ppc64_asm::Assembler::kJccLen; }
+constexpr size_t smashableCallLen() { return Assembler::kCallLen; }
+constexpr size_t smashableJccLen()  { return Assembler::kJccLen; }
 
 // Same length as Jcc.
 constexpr size_t smashableJmpLen()  { return smashableJccLen(); }
@@ -55,7 +57,8 @@ TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d);
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
                       PhysReg r, int8_t disp);
-TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target);
+TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target,
+    Assembler::CallArg ca = Assembler::CallArg::SmashInt);
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target);
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc);

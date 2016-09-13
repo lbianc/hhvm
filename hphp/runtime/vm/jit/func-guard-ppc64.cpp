@@ -34,9 +34,10 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// funcGuard: li64 (5 instr), ld, cmpd, li64 (5 instr), mtctr, nop, nop, bctr
+// funcGuard: kTocLen, ld, cmpd, kJccLen
 // it needs to rewind all of those instructions but pointing to the first.
-constexpr auto kFuncGuardLen = 16 * ppc64_asm::instr_size_in_bytes;
+constexpr auto kFuncGuardLen = smashableMovqLen()
+  + 2 * ppc64_asm::instr_size_in_bytes + ppc64_asm::Assembler::kJccLen;
 
 ALWAYS_INLINE bool isPrologueStub(TCA addr) {
   return addr == tc::ustubs().fcallHelperThunk;
@@ -62,7 +63,8 @@ void emitFuncGuard(const Func* func, CodeBlock& cb, CGMeta& fixups) {
   a.  cmpd   (tmp1, tmp2);
 
   a.  branchFar(tc::ustubs().funcPrologueRedispatch,
-                  ppc64_asm::BranchConditions::NotEqual);
+                  ppc64_asm::BranchConditions::NotEqual,
+                  ppc64_asm::ImmType::TocOnly);
 
   DEBUG_ONLY auto guard = funcGuardFromPrologue(a.frontier(), func);
   assertx(funcGuardMatches(guard, func));
