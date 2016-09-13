@@ -763,7 +763,7 @@ void Vgen::emit(const calls& i) {
   // r1 pointer to a valid frame in order to allow LR save by callee's
   // prologue.
   emitCallPrologue();
-  a.std(ppc64_asm::reg::r2, ppc64_asm::reg::r1[AROFF(SAVED_TOC())]);
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
   emitSmashableCall(a.code(), env.meta, i.target, Assembler::CallArg::SmashExt);
 }
 
@@ -809,7 +809,7 @@ void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
   if (i.saveframe) {
     a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
-    a.mr(ppc64_asm::reg::r1, rvmfp());
+    a.mr(rsfp(), rvmfp());
   }
 
   // restore return address.
