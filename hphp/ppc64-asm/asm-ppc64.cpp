@@ -62,16 +62,12 @@ int64_t VMTOC::getValue(int64_t index, bool qword) {
   return ret_val;
 }
 
-int64_t VMTOC::allocTOC (int32_t target, bool align) {
+int64_t VMTOC::allocTOC(int32_t target, bool align) {
   HPHP::Address addr = m_tocvector->frontier();
-  while (align && reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
-    uint8_t f0 = 0xf0;
-    m_tocvector->assertCanEmit(sizeof(uint8_t));
-    m_tocvector->byte(reinterpret_cast<uint8_t>(f0));
-    addr = m_tocvector->frontier();
+  if (align) {
+    forceAlignment(addr);
+    always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
   }
-
-  if (align) always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
 
   m_tocvector->assertCanEmit(sizeof(int32_t));
   m_tocvector->dword(reinterpret_cast<int32_t>(target));
@@ -80,16 +76,21 @@ int64_t VMTOC::allocTOC (int32_t target, bool align) {
 
 void VMTOC::setTOCDataBlock(HPHP::DataBlock *db) {
   if(m_tocvector == nullptr) {
-     m_tocvector = db;
-
+    m_tocvector = db;
     HPHP::Address addr = m_tocvector->frontier();
-    while (reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
-      uint8_t f0 = 0xf0;
-      m_tocvector->byte(reinterpret_cast<uint8_t>(f0));
-      addr = m_tocvector->frontier();
-    }
+    forceAlignment(addr);
   }
   return;
+}
+
+void VMTOC::forceAlignment(HPHP::Address& addr) {
+  // keep 8-byte alignment
+  while (reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
+    uint8_t fill_byte = 0xf0;
+    m_tocvector->assertCanEmit(sizeof(uint8_t));
+    m_tocvector->byte(fill_byte);
+    addr = m_tocvector->frontier();
+  }
 }
 
 void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
@@ -978,7 +979,7 @@ void Assembler::loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
   return;
 }
 
-void Assembler::limmediate (const Reg64& rt, int64_t imm64, ImmType immt) {
+void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
   always_assert(HPHP::RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
     HPHP::RuntimeOption::Evalppc64minTOCImmSize <= 64);
 

@@ -254,7 +254,7 @@ Reg64 DecodedInstruction::getLimmediateReg() const {
   }
   else if (m_dinfo.isAddis(true)) {
     auto di = Decoder::GetDecoder().decode(m_ip+4);
-    if(di.isLd()) {
+    if (di.isLd()) {
       DS_form_t ds_instr;
       ds_instr.instruction = di.instruction_image();
       return Reg64(ds_instr.RT);

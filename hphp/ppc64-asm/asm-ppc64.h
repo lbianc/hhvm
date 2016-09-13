@@ -222,7 +222,9 @@ private:
   std::vector<JumpInfo> m_toPatch;
 };
 
-/* Class that represents a virtual TOC */
+/*
+ * Class that represents a virtual TOC
+ */
 struct VMTOC {
 
 private:
@@ -254,32 +256,47 @@ public:
 
   void setTOCDataBlock(HPHP::DataBlock *db);
 
-  /* push a 64 bit element into the stack and return its index */
+  /*
+   * Push a 64 bit element into the stack and return its index.
+   */
   int64_t pushElem(int64_t elem);
 
-  /* push a 32 bit element into the stack and return its index */
+  /*
+   * Push a 32 bit element into the stack and return its index.
+   */
   int64_t pushElem(int32_t elem);
 
-  /* get the singleton instance */
+  /*
+   * Get the singleton instance.
+   */
   static VMTOC& getInstance();
 
-  /* return the address of the middle element from the vector
-   * this is done so signed offsets could be used */
+  /*
+   * Return the address of the middle element from the vector.
+   *
+   * This is done so signed offsets can be used.
+   */
   intptr_t getPtrVector();
 
-  /* return a value previously pushed */
+  /*
+   * Return a value previously pushed.
+   */
   int64_t getValue(int64_t index, bool qword = false);
 
 private:
   int64_t allocTOC (int32_t target, bool align = false);
+  void forceAlignment(HPHP::Address& addr);
 
   HPHP::DataBlock *m_tocvector;
 
-  /* vector position of the last element */
+  /*
+   * Vector position of the last element.
+   */
   uint64_t m_last_elem_pos;
 
-
-  /* map used to avoid insertion of duplicates */
+  /*
+   * Map used to avoid insertion of duplicates.
+   */
   std::map<int64_t, uint64_t> m_map;
 };
 
@@ -1921,10 +1938,8 @@ public:
    * It decodes the branch @jmp to decide whether it's an absolute branch or an
    * offset branch and patches it properly.
    */
-  static void patchBranch(CodeAddress jmp,
-                          CodeAddress dest);
-  static void patchAbsolute(CodeAddress jmp,
-                            CodeAddress dest);
+  static void patchBranch(CodeAddress jmp, CodeAddress dest);
+  static void patchAbsolute(CodeAddress jmp, CodeAddress dest);
 
 //////////////////////////////////////////////////////////////////////
 

@@ -362,9 +362,9 @@ bool DecoderInfo::isNop() const {
 }
 
 bool DecoderInfo::isLd(bool toc) const {
-  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld) && !toc) {
-    return true;
-  } else if((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld) && toc) {
+  if ((m_form == Form::kDS) && (m_opn == OpcodeNames::op_ld)) {
+    if (!toc) return true;
+
     DS_form_t dsform;
     dsform.instruction = m_image;
     if (Reg64(dsform.RA) == reg::r2) {
@@ -374,10 +374,13 @@ bool DecoderInfo::isLd(bool toc) const {
   return false;
 }
 
-bool DecoderInfo::isLwz(bool toc) const {
-  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz) && !toc) {
-    return true;
-  } else if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_lwz) && toc) {
+/*
+ * Auxiliary for isLwz and isAddis
+ */
+bool DecoderInfo::isDformOp(OpcodeNames opn, bool toc) const {
+  if ((m_form == Form::kD) && (m_opn == opn)) {
+    if (!toc) return true;
+
     D_form_t dform;
     dform.instruction = m_image;
     if (Reg64(dform.RA) == reg::r2) {
@@ -387,17 +390,12 @@ bool DecoderInfo::isLwz(bool toc) const {
   return false;
 }
 
+bool DecoderInfo::isLwz(bool toc) const {
+  return isDformOp(OpcodeNames::op_lwz, toc);
+}
+
 bool DecoderInfo::isAddis(bool toc) const {
-  if ((m_form == Form::kD) && (m_opn == OpcodeNames::op_addis) && !toc) {
-    return true;
-  } else if((m_form == Form::kD) && (m_opn == OpcodeNames::op_addis) && toc) {
-    D_form_t dform;
-    dform.instruction = m_image;
-    if (Reg64(dform.RA) == reg::r2) {
-      return true;
-    }
-  }
-  return false;
+  return isDformOp(OpcodeNames::op_addis, toc);
 }
 
 bool DecoderInfo::isOffsetBranch(AllowCond ac /* = AllowCond::Any */) const {
@@ -614,7 +612,7 @@ PPC64Instr DecoderInfo::setBranchOffset(int32_t offset) const {
       break;
   }
 }
-/**
+/*
  * Find the offset from instructions like ld, which was created by
  * limmediate.
  */
@@ -626,8 +624,8 @@ int16_t DecoderInfo::offsetDS() const {
   return static_cast<int16_t>(instr_d.DS << 2);
 }
 
-/**
- * Find the offset from instructions like lwz
+/*
+ * Find the offset from instructions like lwz.
  */
 int16_t DecoderInfo::offsetD() const {
   always_assert(m_form == Form::kD && "Instruction not expected.");

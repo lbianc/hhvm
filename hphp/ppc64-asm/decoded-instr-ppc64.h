@@ -80,10 +80,10 @@ struct DecodedInstruction {
   bool shrinkBranch();
   void widenBranch(uint8_t* target);
   int32_t offsetDS() const      { return m_dinfo.offsetDS(); }
-  int16_t offsetD()             { return m_dinfo.offsetD(); }
-  bool isLd(bool toc) const             {return m_dinfo.isLd(toc); }
-  bool isLwz(bool toc) const            {return m_dinfo.isLwz(toc); }
-  bool isAddis(bool toc) const             {return m_dinfo.isAddis(toc); }
+  int16_t offsetD() const       { return m_dinfo.offsetD(); }
+  bool isLd(bool toc) const     { return m_dinfo.isLd(toc); }
+  bool isLwz(bool toc) const    { return m_dinfo.isLwz(toc); }
+  bool isAddis(bool toc) const  { return m_dinfo.isAddis(toc); }
   // if it's conditional branch, it's not a jmp
   uint8_t* ip() const           { return m_ip; }
   int32_t offset() const        { return m_dinfo.offset(); }

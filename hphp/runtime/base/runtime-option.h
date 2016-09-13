@@ -604,13 +604,12 @@ struct RuntimeOption {
   F(int64_t, PerfWarningSampleRate, 1)                                  \
   /* Profiling flags */                                                 \
   F(bool, EnableReverseDataMap, false)                                  \
-  /* PPC64 Option: minimum immediate size to use TOC */                 \
-  F(uint16_t, ppc64minTOCImmSize,      64)                              \
-  /* PPC64 Option: dump the number of elements stored in TOC */         \
-  F(bool, ppc64dumpTOCNelements,      false)                            \
-  /* PPC64 Option: if ppc64useTOCLwz is set, lwz and ld will be used to
-   * load values from TOC. Otherwise, only ld will be used. */          \
-  F(bool, ppc64useTOCLwz,     false)                                    \
+  /* PPC64 Option: Minimum immediate size to use TOC */                 \
+  F(uint16_t, ppc64minTOCImmSize, 64)                                   \
+  /* PPC64 Option: Dump the number of elements stored in TOC */         \
+  F(bool, ppc64dumpTOCNelements, false)                                 \
+  /* PPC64 Option: Allow lwz and not only ld to be used for TOC read */ \
+  F(bool, ppc64useTOCLwz, false)                                        \
   /* */
 
 private:

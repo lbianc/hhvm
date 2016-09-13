@@ -33,6 +33,7 @@ namespace HPHP { namespace jit { namespace ppc64 {
 using ppc64_asm::PPC64Instr;
 using ppc64_asm::Assembler;
 using ppc64_asm::ImmType;
+using ppc64_asm::DecodedInstruction;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -67,7 +68,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target,
-    ppc64_asm::Assembler::CallArg ca) {
+    Assembler::CallArg ca) {
   return EMIT_BODY(cb, fixups, call, target, ca);
 }
 
@@ -92,7 +93,7 @@ void smashMovq(TCA inst, uint64_t imm) {
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
   a.limmediate(reg, imm, ImmType::TocOnly);
@@ -104,7 +105,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
   Assembler a { cb };
 
   // the first instruction is a vasm ldimml, which is a li32
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
   a.limmediate(reg, imm, ImmType::TocOnly);
@@ -115,7 +116,7 @@ void smashCall(TCA inst, TCA target) {
   CodeCursor cursor { cb, inst };
   Assembler a { cb };
 
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   if (!di.isCall()) {
     always_assert(false && "smashCall has unexpected block");
   }
@@ -152,24 +153,24 @@ void smashJcc(TCA inst, TCA target, ConditionCode cc) {
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   return di.immediate();
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   return static_cast<uint32_t>(di.immediate());
 }
 
 TCA smashableCallTarget(TCA inst) {
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   if (!di.isCall()) return nullptr;
 
   return di.farBranchTarget();
 }
 
 static TCA smashableBranchTarget(TCA inst, bool allowCond) {
-  const ppc64_asm::DecodedInstruction di(inst);
+  const DecodedInstruction di(inst);
   auto ac = (allowCond)
     ? ppc64_asm::AllowCond::Any
     : ppc64_asm::AllowCond::OnlyUncond;
