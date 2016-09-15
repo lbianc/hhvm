@@ -91,7 +91,25 @@ module Program =
       (* Because of symlinks, we can have updates from files that aren't in
        * the .hhconfig directory *)
       let updates = SSet.filter updates (fun p -> string_starts_with p root) in
-      Relative_path.(relativize_set Root updates)
+      let updates = Relative_path.(relativize_set Root updates) in
+      let to_recheck =
+        Relative_path.Set.filter updates begin fun update ->
+          ServerEnv.file_filter (Relative_path.suffix update)
+        end in
+      let config_in_updates =
+        Relative_path.Set.mem updates ServerConfig.filename in
+      if config_in_updates then begin
+        let new_config, _ = ServerConfig.(load filename genv.options) in
+        if not (ServerConfig.is_compatible genv.config new_config) then begin
+          Hh_logger.log
+            "%s changed in an incompatible way; please restart %s.\n"
+            (Relative_path.suffix ServerConfig.filename)
+            GlobalConfig.program_name;
+           (** TODO: Notify the server monitor directly about this. *)
+           Exit_status.(exit Hhconfig_changed)
+        end;
+      end;
+      to_recheck
 
     let recheck genv old_env typecheck_updates =
       if Relative_path.Set.is_empty typecheck_updates then
@@ -103,14 +121,6 @@ module Program =
         let new_env, total_rechecked = ServerTypeCheck.check genv check_env in
         ServerStamp.touch_stamp_errors (Errors.get_error_list old_env.errorl)
                                        (Errors.get_error_list new_env.errorl);
-        Option.iter new_env.diag_subscribe ~f:begin fun sub ->
-          let id = Diagnostic_subscription.get_id sub in
-          let errors = Errors.get_error_list new_env.errorl in
-          let errors = List.map ~f:Errors.to_absolute errors in
-          let res = ServerCommandTypes.DIAGNOSTIC (id, errors) in
-          let client = Utils.unsafe_opt new_env.persistent_client in
-          ClientProvider.send_push_message_to_client client res;
-        end;
         new_env, total_rechecked
       end
 
@@ -189,26 +199,8 @@ let handle_connection genv env client is_persistent =
      flush stderr;
      env
 
-let recheck genv old_env updates =
-  let to_recheck =
-    Relative_path.Set.filter updates begin fun update ->
-      ServerEnv.file_filter (Relative_path.suffix update)
-    end in
-  let config_in_updates =
-    Relative_path.Set.mem updates ServerConfig.filename in
-  if config_in_updates then begin
-    let new_config, _ = ServerConfig.(load filename genv.options) in
-    if not (ServerConfig.is_compatible genv.config new_config) then begin
-      Hh_logger.log
-        "%s changed in an incompatible way; please restart %s.\n"
-        (Relative_path.suffix ServerConfig.filename)
-        GlobalConfig.program_name;
-       (** TODO: Notify the server monitor directly about this. *)
-       Exit_status.(exit Hhconfig_changed)
-    end;
-  end;
+let recheck genv old_env to_recheck =
   let env, total_rechecked = Program.recheck genv old_env to_recheck in
-  BuildMain.incremental_update genv old_env env updates;
   env, to_recheck, total_rechecked
 
 (* When a rebase occurs, dfind takes a while to give us the full list of
@@ -274,6 +266,21 @@ let serve_one_iteration genv env client_provider stats_refs =
       stats.total_rechecked_count;
     Hh_logger.log "Recheck id: %s" !recheck_id;
   end;
+
+  Option.iter env.diag_subscribe ~f:begin fun sub ->
+    let id = Diagnostic_subscription.get_id sub in
+    let errors = Diagnostic_subscription.get_absolute_errors sub in
+    if not @@ SMap.is_empty errors then begin
+      let res = ServerCommandTypes.DIAGNOSTIC (id, errors) in
+      let client = Utils.unsafe_opt env.persistent_client in
+      ClientProvider.send_push_message_to_client client res
+    end
+  end;
+
+  let env = { env with diag_subscribe =
+    Option.map env.diag_subscribe ~f:Diagnostic_subscription.clear }
+  in
+
   last_stats := stats;
   let env = if has_client then
     (try

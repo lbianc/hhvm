@@ -108,6 +108,7 @@ module WithToken(Token: TokenType) = struct
       enumerator_semicolon : t
     }
     and alias_declaration = {
+      alias_attribute_spec : t;
       alias_token : t;
       alias_name : t;
       alias_generic_parameter : t;
@@ -538,6 +539,10 @@ module WithToken(Token: TokenType) = struct
       xhp_enum_values : t;
       xhp_enum_right_brace : t
     }
+    and xhp_required = {
+      xhp_required_at : t;
+      xhp_required : t
+    }
     and xhp_class_attribute_declaration = {
       xhp_attr_token : t;
       xhp_attr_list : t;
@@ -546,7 +551,8 @@ module WithToken(Token: TokenType) = struct
     and xhp_class_attribute = {
       xhp_attr_decl_type : t;
       xhp_attr_decl_name : t;
-      xhp_attr_decl_init : t
+      xhp_attr_decl_init : t;
+      xhp_attr_decl_required : t
     }
     and xhp_attribute = {
       xhp_attr_name : t;
@@ -641,6 +647,11 @@ module WithToken(Token: TokenType) = struct
       type_arguments : t;
       type_arguments_right_angle : t
     }
+    and type_parameters = {
+      type_parameters_left_angle : t;
+      type_parameters : t;
+      type_parameters_right_angle : t
+    }
     and tuple_type_specifier = {
       tuple_left_paren : t;
       tuple_types : t;
@@ -670,6 +681,7 @@ module WithToken(Token: TokenType) = struct
     | ClassishDeclaration of classish_declaration
     | ClassishBody of classish_body
     | XHPEnumType of xhp_enum_type
+    | XHPRequired of xhp_required
     | XHPClassAttributeDeclaration of xhp_class_attribute_declaration
     | XHPClassAttribute of xhp_class_attribute
     | TraitUse of trait_use
@@ -754,6 +766,7 @@ module WithToken(Token: TokenType) = struct
     | TypeConstant of type_constant
     | GenericTypeSpecifier of generic_type
     | TypeArguments of type_arguments
+    | TypeParameters of type_parameters
     | TupleTypeSpecifier of tuple_type_specifier
     | VectorTypeSpecifier of vector_type_specifier
     | MapTypeSpecifier of map_type_specifier
@@ -814,6 +827,7 @@ module WithToken(Token: TokenType) = struct
       | ClassishDeclaration _ -> SyntaxKind.ClassishDeclaration
       | ClassishBody _ -> SyntaxKind.ClassishBody
       | XHPEnumType _ -> SyntaxKind.XHPEnumType
+      | XHPRequired _ -> SyntaxKind.XHPRequired
       | XHPClassAttributeDeclaration _ ->
         SyntaxKind.XHPClassAttributeDeclaration
       | XHPClassAttribute _ -> SyntaxKind.XHPClassAttribute
@@ -878,6 +892,7 @@ module WithToken(Token: TokenType) = struct
       | NullableTypeSpecifier _ -> SyntaxKind.NullableTypeSpecifier
       | GenericTypeSpecifier _ -> SyntaxKind.GenericTypeSpecifier
       | TypeArguments _ -> SyntaxKind.TypeArguments
+      | TypeParameters _ -> SyntaxKind.TypeParameters
       | TupleTypeSpecifier _ -> SyntaxKind.TupleTypeSpecifier
       | VectorTypeSpecifier _ -> SyntaxKind.VectorTypeSpecifier
       | MapTypeSpecifier _ -> SyntaxKind.MapTypeSpecifier
@@ -993,6 +1008,7 @@ module WithToken(Token: TokenType) = struct
     let is_subscript_expression node =
       kind node = SyntaxKind.SubscriptExpression
     let is_xhp_enum_type node = kind node = SyntaxKind.XHPEnumType
+    let is_xhp_required node = kind node = SyntaxKind.XHPRequired
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
     let is_xhp_open node = kind node = SyntaxKind.XHPOpen
     let is_xhp_attribute node = kind node = SyntaxKind.XHPAttribute
@@ -1002,6 +1018,7 @@ module WithToken(Token: TokenType) = struct
     let is_nullable_type_specifier node =
       kind node = SyntaxKind.NullableTypeSpecifier
     let is_type_arguments node = kind node = SyntaxKind.TypeArguments
+    let is_type_parameters node = kind node = SyntaxKind.TypeParameters
     let is_tuple_type node = kind node = SyntaxKind.TupleTypeSpecifier
     let is_vector_type_specifier node =
       kind node = SyntaxKind.VectorTypeSpecifier
@@ -1122,10 +1139,12 @@ module WithToken(Token: TokenType) = struct
         [ enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon ]
       | AliasDeclaration
-        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
-          alias_equal; alias_type; alias_semicolon } ->
-        [ alias_token; alias_name; alias_generic_parameter; alias_constraint;
-          alias_equal; alias_type; alias_semicolon ]
+        { alias_attribute_spec; alias_token; alias_name;
+          alias_generic_parameter; alias_constraint; alias_equal; alias_type;
+          alias_semicolon } ->
+        [ alias_attribute_spec; alias_token; alias_name;
+          alias_generic_parameter; alias_constraint; alias_equal; alias_type;
+          alias_semicolon ]
       | PropertyDeclaration
         { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
         [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]
@@ -1194,12 +1213,17 @@ module WithToken(Token: TokenType) = struct
           xhp_enum_right_brace } ->
         [ xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace ]
+      | XHPRequired
+        { xhp_required_at; xhp_required } ->
+        [ xhp_required_at; xhp_required ]
       | XHPClassAttributeDeclaration
         { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
         [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]
       | XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init } ->
-        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init ]
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
+          xhp_attr_decl_required } ->
+        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
+          xhp_attr_decl_required ]
       | TraitUse
         { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
         [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]
@@ -1435,6 +1459,11 @@ module WithToken(Token: TokenType) = struct
           type_arguments_right_angle } ->
         [ type_arguments_left_angle; type_arguments;
           type_arguments_right_angle ]
+      | TypeParameters
+        { type_parameters_left_angle; type_parameters;
+          type_parameters_right_angle } ->
+        [ type_parameters_left_angle; type_parameters;
+          type_parameters_right_angle ]
       | TupleTypeSpecifier
         { tuple_left_paren; tuple_types; tuple_right_paren } ->
         [ tuple_left_paren; tuple_types; tuple_right_paren ]
@@ -1537,10 +1566,12 @@ module WithToken(Token: TokenType) = struct
         [ "enumerator_name"; "enumerator_equal"; "enumerator_value";
           "enumerator_semicolon" ]
       | AliasDeclaration
-        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
-          alias_equal; alias_type; alias_semicolon } ->
-        [ "alias_token"; "alias_name"; "alias_generic_parameter";
-          "alias_constraint"; "alias_equal"; "alias_type"; "alias_semicolon" ]
+        { alias_attribute_spec; alias_token; alias_name;
+          alias_generic_parameter; alias_constraint; alias_equal; alias_type;
+          alias_semicolon } ->
+        [ "alias_attribute_spec"; "alias_token"; "alias_name";
+          "alias_generic_parameter"; "alias_constraint"; "alias_equal";
+          "alias_type"; "alias_semicolon" ]
       | PropertyDeclaration
         { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
         [ "prop_modifiers"; "prop_type"; "prop_declarators"; "prop_semicolon" ]
@@ -1610,12 +1641,17 @@ module WithToken(Token: TokenType) = struct
           xhp_enum_right_brace } ->
         [ "xhp_enum_token"; "xhp_enum_left_brace"; "xhp_enum_values";
           "xhp_enum_right_brace" ]
+      | XHPRequired
+        { xhp_required_at; xhp_required } ->
+        [ "xhp_required_at"; "xhp_required" ]
       | XHPClassAttributeDeclaration
         { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
         [ "xhp_attr_token"; "xhp_attr_list"; "xhp_attr_semicolon" ]
       | XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init } ->
-        [ "xhp_attr_decl_type"; "xhp_attr_decl_name"; "xhp_attr_decl_init" ]
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
+          xhp_attr_decl_required } ->
+        [ "xhp_attr_decl_type"; "xhp_attr_decl_name"; "xhp_attr_decl_init";
+          "xhp_attr_decl_required" ]
       | TraitUse
         { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
         [ "trait_use_token"; "trait_use_name_list"; "trait_use_semicolon"; ]
@@ -1857,6 +1893,11 @@ module WithToken(Token: TokenType) = struct
           type_arguments_right_angle } ->
         [ "type_arguments_left_angle"; "type_arguments";
           "type_arguments_right_angle" ]
+      | TypeParameters
+        { type_parameters_left_angle; type_parameters;
+          type_parameters_right_angle } ->
+        [ "type_parameters_left_angle"; "type_parameters";
+          "type_parameters_right_angle" ]
       | TupleTypeSpecifier
         { tuple_left_paren; tuple_types; tuple_right_paren } ->
         [ "tuple_left_paren"; "tuple_types"; "tuple_right_paren" ]
@@ -2227,11 +2268,13 @@ module WithToken(Token: TokenType) = struct
         { enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon }
       | (SyntaxKind.AliasDeclaration,
-        [ alias_token; alias_name; alias_generic_parameter; alias_constraint;
-          alias_equal; alias_type; alias_semicolon ]) ->
+        [ alias_attribute_spec; alias_token; alias_name;
+          alias_generic_parameter; alias_constraint; alias_equal; alias_type;
+          alias_semicolon ]) ->
         AliasDeclaration
-        { alias_token; alias_name; alias_generic_parameter; alias_constraint;
-          alias_equal; alias_type; alias_semicolon }
+        { alias_attribute_spec; alias_token; alias_name;
+          alias_generic_parameter; alias_constraint; alias_equal; alias_type;
+          alias_semicolon }
       | (SyntaxKind.PropertyDeclaration,
         [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]) ->
         PropertyDeclaration
@@ -2312,14 +2355,20 @@ module WithToken(Token: TokenType) = struct
         XHPEnumType
         { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace }
+      | (SyntaxKind.XHPRequired,
+        [ xhp_required_at; xhp_required ]) ->
+        XHPRequired
+        { xhp_required_at; xhp_required }
       | (SyntaxKind.XHPClassAttributeDeclaration,
         [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]) ->
         XHPClassAttributeDeclaration
         { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon }
       | (SyntaxKind.XHPClassAttribute,
-        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init ]) ->
+        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
+          xhp_attr_decl_required ]) ->
         XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init }
+        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
+          xhp_attr_decl_required }
       | (SyntaxKind.TraitUse,
         [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]) ->
         TraitUse { trait_use_token; trait_use_name_list; trait_use_semicolon; }
@@ -2566,6 +2615,12 @@ module WithToken(Token: TokenType) = struct
           type_arguments; type_arguments_right_angle ]) ->
         TypeArguments { type_arguments_left_angle;
             type_arguments; type_arguments_right_angle }
+      | (SyntaxKind.TypeParameters,
+        [ type_parameters_left_angle; type_parameters;
+          type_parameters_right_angle ]) ->
+        TypeParameters
+        { type_parameters_left_angle; type_parameters;
+          type_parameters_right_angle }
       | (SyntaxKind.TypeParameter, [ type_variance_opt;
           type_name; type_constraint_list_opt  ]) ->
         TypeParameter { type_variance_opt;
@@ -2818,9 +2873,9 @@ module WithToken(Token: TokenType) = struct
       let make_enumerator name equal value semicolon =
         from_children SyntaxKind.Enumerator [ name; equal; value; semicolon ]
 
-      let make_alias token name generic constr equal ty semi =
+      let make_alias attr token name generic constr equal ty semi =
         from_children SyntaxKind.AliasDeclaration
-          [ token; name; generic; constr; equal; ty; semi ]
+          [ attr; token; name; generic; constr; equal; ty; semi ]
 
       let make_property_declaration mods ty decls semi =
         from_children SyntaxKind.PropertyDeclaration
@@ -2891,13 +2946,16 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.XHPEnumType
         [ token; left; items; right ]
 
+      let make_xhp_required at req =
+        from_children SyntaxKind.XHPRequired [ at; req ]
+
       let make_xhp_class_attribute_declaration attr attrs semi =
         from_children SyntaxKind.XHPClassAttributeDeclaration
           [ attr; attrs; semi ]
 
-      let make_xhp_class_attribute attr_type name init =
+      let make_xhp_class_attribute attr_type name init required =
         from_children SyntaxKind.XHPClassAttribute
-          [ attr_type; name; init ]
+          [ attr_type; name; init; required ]
 
       let make_trait_use trait_use_token trait_use_name_list
         trait_use_semicolon =
@@ -3095,6 +3153,9 @@ module WithToken(Token: TokenType) = struct
 
       let make_type_arguments left items right =
         from_children SyntaxKind.TypeArguments [ left; items; right ]
+
+      let make_type_parameters left items right =
+        from_children SyntaxKind.TypeParameters [ left; items; right ]
 
       let make_tuple_type_specifier left types right =
         from_children SyntaxKind.TupleTypeSpecifier [ left; types; right ]

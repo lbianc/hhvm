@@ -108,6 +108,7 @@ type t =
 | XHPClassAttributeDeclaration
 | XHPClassAttribute
 | XHPEnumType
+| XHPRequired
 
 (* Types *)
 | SimpleTypeSpecifier
@@ -117,6 +118,7 @@ type t =
 | TypeConstant
 | GenericTypeSpecifier
 | TypeArguments
+| TypeParameters
 | TupleTypeSpecifier
 | VectorTypeSpecifier
 | MapTypeSpecifier
@@ -220,6 +222,7 @@ let to_string kind =
   | ShapeTypeSpecifier -> "shape_type_specifier"
   | FieldSpecifier -> "field_specifier"
   | TypeArguments -> "type_arguments"
+  | TypeParameters -> "type_parameters"
   | InclusionDirective -> "inclusion_directive"
   | EnumDeclaration -> "enum_declaration"
   | Enumerator -> "enumerator"
@@ -234,3 +237,4 @@ let to_string kind =
   | XHPClassAttributeDeclaration -> "xhp_class_attribute_declaration"
   | XHPClassAttribute -> "xhp_class_attribute"
   | XHPEnumType -> "xhp_enum_type"
+  | XHPRequired -> "xhp_required"

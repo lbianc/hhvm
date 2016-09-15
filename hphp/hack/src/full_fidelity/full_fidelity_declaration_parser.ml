@@ -118,21 +118,19 @@ module WithExpressionAndStatementAndTypeParser
       require left_paren filename right_paren semi in
     (parser, result)
 
-  and parse_alias_declaration parser =
+  and parse_alias_declaration parser attr =
     (* SPEC
       alias-declaration:
-        type  name  =  type-to-be-aliased  ;
-        newtype  name  type-constraintopt  =  type-to-be-aliased  ;
-
-      type-to-be-aliased:
-        type-specifier
-        qualified-name
-        NOTE alias name can contain generics.
-        TODO figure out the grammar for this add add second error pass to
-        report illegal names
+        attribute-spec-opt type  name
+          generic-type-parameter-list-opt  =  type-specifier  ;
+        attribute-spec-opt newtype  name
+          generic-type-parameter-list-opt type-constraint-opt  =type-specifier  ;
     *)
 
-    (* TODO: Produce an error if the "type" version has a constraint. *)
+    (* ERROR RECOVERY: We allow the "type" version to have a constraint in the
+       initial parse.
+       TODO: Produce an error in a later pass if the "type" version has a
+       constraint. *)
 
     let (parser, token) = next_token parser in
     let token = make_token token in
@@ -142,7 +140,7 @@ module WithExpressionAndStatementAndTypeParser
     let (parser, equal) = expect_equal parser in
     let (parser, ty) = parse_type_specifier parser in
     let (parser, semi) = expect_semicolon parser in
-    let result = make_alias token name generic constr equal ty semi in
+    let result = make_alias attr token name generic constr equal ty semi in
     (parser, result)
 
   and parse_enumerator parser =
@@ -559,25 +557,48 @@ module WithExpressionAndStatementAndTypeParser
     else
       parse_type_specifier parser
 
+  and parse_xhp_required_opt parser =
+    (* SPEC (Draft)
+      xhp-required :
+        @  required
+
+      Note that these are two tokens. They can have whitespace between them. *)
+    if peek_token_kind parser = At then
+      let (parser, at) = assert_token parser At in
+      let (parser, req) = expect_required parser in
+      let result = make_xhp_required at req in
+      (parser, result)
+    else
+      (parser, (make_missing()))
+
+  and parse_xhp_class_attribute_typed parser =
+    (* xhp-type-specifier xhp-name initializer-opt xhp-required-opt *)
+    let (parser, ty) = parse_xhp_type_specifier parser in
+    let (parser, name) = expect_xhp_name parser in
+    let (parser, init) = parse_simple_initializer_opt parser in
+    let (parser, req) = parse_xhp_required_opt parser in
+    let result = make_xhp_class_attribute ty name init req in
+    (parser, result)
+
   and parse_xhp_class_attribute parser =
     (* SPEC (Draft)
     xhp-attribute-declaration:
       xhp-class-name
-      xhp-type-specifier name initializer-opt @required-opt (TODO)
+      xhp-type-specifier xhp-name initializer-opt xhp-required-opt
+
+    ERROR RECOVERY:
+    The xhp type specifier could be an xhp class name. To disambiguate we peek
+    ahead a token; if it's a comma or semi, we're done. If not, then we assume
+    that we are in the more complex case.
     *)
-    if peek_token_kind parser = Colon then
-      (* TODO: This doesn't give quite the right error message if it turns
-      out to be malformed; consider tweaking this. *)
-      (* TODO: What about the case where we have a "type name = value"
-         attribute and the type starts with a colon? Is that ever legal? *)
-      expect_class_name parser
+    if is_next_xhp_class_name parser then
+      let (parser1, class_name) = expect_class_name parser in
+      match peek_token_kind parser1 with
+      | Comma
+      | Semicolon -> (parser1, class_name)
+      | _ -> parse_xhp_class_attribute_typed parser
     else
-      let (parser, ty) = parse_xhp_type_specifier parser in
-      let (parser, name) = expect_name parser in
-      let (parser, init) = parse_simple_initializer_opt parser in
-      (* TODO: Parse @required *)
-      let result = make_xhp_class_attribute ty name init in
-      (parser, result)
+      parse_xhp_class_attribute_typed parser
 
   and parse_xhp_class_attribute_declaration parser =
     (* SPEC: (Draft)
@@ -1060,10 +1081,14 @@ module WithExpressionAndStatementAndTypeParser
     aux [] parser
 
   and parse_classish_or_function_declaration parser =
+    (* A type alias, function, interface, trait or class may all begin with
+    an attribute. *)
     let parser, attribute_specification =
       parse_attribute_specification_opt parser in
     let parser1, token = next_token parser in
     match Token.kind token with
+    | Type | Newtype ->
+      parse_alias_declaration parser attribute_specification
     | Async | Function ->
       parse_function_declaration parser attribute_specification
     | Abstract
@@ -1083,7 +1108,7 @@ module WithExpressionAndStatementAndTypeParser
     | Require
     | Require_once -> parse_inclusion_directive parser
     | Type
-    | Newtype -> parse_alias_declaration parser
+    | Newtype -> parse_alias_declaration parser (make_missing())
     | Enum -> parse_enum_declaration parser
     | Namespace -> parse_namespace_declaration parser
     | Use -> parse_namespace_use_declaration parser

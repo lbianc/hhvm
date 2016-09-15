@@ -260,6 +260,10 @@ let rec get_doc node =
     let right = get_doc (classish_body_right_brace x) in
     let body = get_doc (classish_body_elements x) in
     indent_block_no_space left body right indt
+  | XHPRequired x ->
+    let a = get_doc x.xhp_required_at in
+    let r = get_doc x.xhp_required in
+    a ^^^ r
   | XHPEnumType x ->
     let e = get_doc x.xhp_enum_token in
     let l = get_doc x.xhp_enum_left_brace in
@@ -275,7 +279,8 @@ let rec get_doc node =
     let t = get_doc x.xhp_attr_decl_type in
     let n = get_doc x.xhp_attr_decl_name in
     let i = get_doc x.xhp_attr_decl_init in
-    group_doc (t ^| n ^| i)
+    let r = get_doc x.xhp_attr_decl_required in
+    group_doc (t ^| n ^| i ^| r)
   | TraitUse x ->
     let use = get_doc (trait_use_token x) in
     let name_list = get_doc (trait_use_name_list x) in
@@ -331,6 +336,9 @@ let rec get_doc node =
     let semicolon = get_doc x.enumerator_semicolon in
     n ^| e ^| v ^^^ semicolon
   | AliasDeclaration x ->
+    (* TODO: What's the best way to ensure that there's a newline between the
+    attribute and the alias declaration proper? *)
+    let attr = get_doc x.alias_attribute_spec in
     let a = get_doc x.alias_token in
     let n = get_doc x.alias_name in
     let generic = get_doc x.alias_generic_parameter in
@@ -338,7 +346,7 @@ let rec get_doc node =
     let e = get_doc x.alias_equal in
     let t = get_doc x.alias_type in
     let s = get_doc x.alias_semicolon in
-    a ^| n ^| generic ^| c ^| e ^| t ^^^ s
+    attr ^| a ^| n ^| generic ^| c ^| e ^| t ^^^ s
   | PropertyDeclaration x ->
     let m = get_doc x.prop_modifiers in
     let t = get_doc x.prop_type in
@@ -838,6 +846,11 @@ let rec get_doc node =
     let right = get_doc (type_arguments_right_angle x) in
     let args = get_doc (type_arguments x) in
     indent_block_no_space left args right indt
+  | TypeParameters x ->
+    let left = get_doc x.type_parameters_left_angle in
+    let params = get_doc x.type_parameters in
+    let right = get_doc x.type_parameters_right_angle in
+    indent_block_no_space left params right indt
   | TupleTypeSpecifier x ->
     let left = get_doc x.tuple_left_paren in
     let types = get_doc x.tuple_types in

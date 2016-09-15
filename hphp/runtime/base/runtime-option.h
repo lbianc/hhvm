@@ -517,6 +517,7 @@ struct RuntimeOption {
   F(bool, JitDisabledByHphpd,          false)                           \
   F(bool, JitTransCounters,            false)                           \
   F(bool, JitPseudomain,               true)                            \
+  F(uint32_t, JitWarmupStatusBytes,    ((25 << 10) + 1))                \
   F(uint32_t, JitWriteLeaseExpiration, 1500) /* in microseconds */      \
   F(bool, HHIRLICM,                    false)                           \
   F(bool, HHIRSimplification,          true)                            \
@@ -586,6 +587,7 @@ struct RuntimeOption {
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
   F(uint32_t, GCSampleRate,                1)                           \
+  F(uint32_t, SerDesSampleRate,            0)                           \
   F(uint32_t, JitSampleRate,               0)                           \
   F(uint32_t, JitFilterLease,              1)                           \
   F(bool, DisableSomeRepoAuthNotices,  true)                            \
