@@ -236,7 +236,7 @@ private:
   {}
 
   ~VMTOC(){
-    if (HPHP::RuntimeOption::Evalppc64dumpTOCNelements) {
+    if (HPHP::RuntimeOption::EvalPPC64dumpTOCNelements) {
      pid_t pid = getpid();
      std::string dumpedfile = "/tmp/nelements." + std::to_string(pid);
      std::ofstream nelemdumped;
