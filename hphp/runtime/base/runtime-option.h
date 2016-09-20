@@ -607,7 +607,7 @@ struct RuntimeOption {
   /* Profiling flags */                                                 \
   F(bool, EnableReverseDataMap, false)                                  \
   /* PPC64 Option: Minimum immediate size to use TOC */                 \
-  F(uint16_t, PPC64minTOCImmSize, 64)                                   \
+  F(uint16_t, PPC64MinTOCImmSize, 64)                                   \
   /* */
 
 private:
