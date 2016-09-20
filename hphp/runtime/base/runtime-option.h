@@ -608,8 +608,6 @@ struct RuntimeOption {
   F(bool, EnableReverseDataMap, false)                                  \
   /* PPC64 Option: Minimum immediate size to use TOC */                 \
   F(uint16_t, PPC64minTOCImmSize, 64)                                   \
-  /* PPC64 Option: Dump the number of elements stored in TOC */         \
-  F(bool, PPC64dumpTOCNelements, false)                                 \
   /* */
 
 private:
