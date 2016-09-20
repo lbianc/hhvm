@@ -20,8 +20,6 @@
 #include <cstdint>
 #include <cassert>
 #include <vector>
-#include <iostream>
-#include <fstream>
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/immed.h"
@@ -35,6 +33,7 @@
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 #include "hphp/runtime/base/runtime-option.h"
+
 
 namespace ppc64_asm {
 
@@ -235,19 +234,7 @@ private:
 
   {}
 
-  ~VMTOC(){
-    if (HPHP::RuntimeOption::EvalPPC64dumpTOCNelements) {
-     pid_t pid = getpid();
-     std::string dumpedfile = "/tmp/nelements." + std::to_string(pid);
-     std::ofstream nelemdumped;
-     nelemdumped.open(dumpedfile);
-     if (nelemdumped.is_open())
-       nelemdumped << "Number of values stored in TOC: ";
-       nelemdumped << std::to_string(m_last_elem_pos);
-       nelemdumped << "\n";
-       nelemdumped.close();
-    }
-  }
+  ~VMTOC();
 
 public:
   VMTOC(VMTOC const&) = delete;
