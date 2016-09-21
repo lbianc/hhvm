@@ -25,7 +25,9 @@ type test_case = {
 let sanity_test_classic_parser source =
   let errorl, result, _ =
     Errors.do_ begin fun () ->
-      Parser_hack.program (Relative_path.default) source
+      Parser_hack.program_with_default_popt
+        (Relative_path.default)
+        source
     end
   in
   if not (Errors.is_empty errorl) then begin

@@ -339,6 +339,9 @@ let scan_unicode_escape lexer =
     advance lexer 2
   else
     (* TODO: Verify that number is in range. *)
+    (* TODO: Verify that there are any digits at all! *)
+    (* Skip over the slash, u and brace, and start lexing the number. *)
+    let lexer = advance lexer 3 in
     let lexer = scan_hexadecimal_digits lexer in
     let ch = peek_char lexer 0 in
     if ch != '}' then
@@ -903,3 +906,19 @@ let next_xhp_class_name lexer =
 
 let next_xhp_name lexer =
   scan_token_and_trivia scan_xhp_element_name false lexer
+
+let is_next_xhp_category_name lexer =
+  (* An XHP category is an xhp element name preceded by a %. *)
+  let ch0 = peek_char lexer 0 in
+  let ch1 = peek_char lexer 1 in
+  ch0 = '%' && is_name_nondigit ch1
+
+let scan_xhp_category_name lexer =
+  if is_next_xhp_category_name lexer then
+    let (lexer, _) = scan_xhp_element_name (advance lexer 1) in
+    (lexer, TokenKind.XHPCategoryName)
+  else
+    scan_token false lexer
+
+let next_xhp_category_name lexer =
+  scan_token_and_trivia scan_xhp_category_name false lexer

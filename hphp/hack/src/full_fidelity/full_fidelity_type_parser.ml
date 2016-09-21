@@ -62,10 +62,11 @@ let rec parse_type_specifier parser =
   | LeftParen -> parse_tuple_or_closure_type_specifier parser
   | Shape -> parse_shape_specifier parser
   | Question -> parse_nullable_type_specifier parser
+  | At -> parse_soft_type_specifier parser
   | Classname -> parse_classname_type_specifier parser
   | _ ->
     let parser = with_error parser1 SyntaxError.error1007 in
-    (parser, make_error [(make_token token)])
+    (parser, make_error (make_token token))
 
 (* SPEC
   type-constant-type-name:
@@ -216,7 +217,7 @@ and parse_type_list parser close_kind =
     parse_type_specifier
 
 and parse_type_or_ellipsis_list parser close_kind =
-  parse_comma_list parser close_kind SyntaxError.error1007
+  parse_comma_list_allow_trailing parser close_kind SyntaxError.error1007
   parse_type_or_ellipsis
 
 and parse_type_or_ellipsis parser =
@@ -373,17 +374,40 @@ and parse_nullable_type_specifier parser =
   let result = make_nullable_type_specifier question nullable_type in
   (parser, result)
 
+and parse_soft_type_specifier parser =
+  (* SPEC (Draft)
+    soft-type-specifier:
+      @ type-specifier
+
+    TODO: The spec does not mention this type grammar.  Work out where and
+    when it is legal, and what the exact semantics are, and put it in the spec.
+    Add an error pass if necessary to identify illegal usages of this type.
+
+    Note that it is legal for trivia to come between the @ and the type.
+  *)
+  let (parser, soft_at) = assert_token parser At in
+  let (parser, soft_type) = parse_type_specifier parser in
+  let result = make_soft_type_specifier soft_at soft_type in
+  (parser, result)
+
 and parse_classname_type_specifier parser =
   (* SPEC
     classname-type-specifier:
-      classname  <  qualified-name  >
+      classname  <  qualified-name generic-type-argument-list-opt >
+
+      TODO: We parse any type as the class name type; we should write an
+      error detection pass later that determines when this is a bad type.
+
+      TODO: Is this grammar correct?  In particular, can the name have a
+      scope resolution operator (::) in it?  Find out and update the spec if
+      this is permitted.
   *)
 
   (* TODO ERROR RECOVERY is unsophisticated here. *)
   let (parser, classname) = next_token parser in
   let classname = make_token classname in
   let (parser, left_angle) = expect_left_angle parser in
-  let (parser, classname_type) = expect_qualified_name parser in
+  let (parser, classname_type) = parse_type_specifier parser in
   let (parser, right_angle) = expect_right_angle parser in
   let result = make_classname_type_specifier
     classname left_angle classname_type right_angle in

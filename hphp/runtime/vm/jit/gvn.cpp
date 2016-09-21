@@ -331,7 +331,6 @@ bool supportsGVN(const IRInstruction* inst) {
   case LdRDSAddr:
   case LdCtx:
   case LdCctx:
-  case CastCtxThis:
   case LdClsCtx:
   case LdClsCctx:
   case LdClsCtor:
@@ -481,6 +480,10 @@ void tryReplaceInstruction(
     if (valueNumber == s) continue;
     if (!valueNumber) continue;
     if (!is_tmp_usable(idoms, valueNumber, inst->block())) continue;
+
+    // Don't replace a value with one that has a less refined type.
+    if (s->type() < valueNumber->type()) continue;
+
     FTRACE(1,
       "instruction {}\n"
       "replacing src {} with dst of {}\n",

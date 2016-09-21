@@ -24,15 +24,17 @@ type env = {
   lb        : Lexing.lexbuf;
   errors    : (Pos.t * string) list ref;
   in_generator : bool ref;
+  popt      : ParserOptions.t;
 }
 
-let init_env file lb = {
+let init_env file lb popt = {
   file     = file;
   mode     = FileInfo.Mpartial;
   priority = 0;
   lb       = lb;
   errors   = ref [];
   in_generator = ref false;
+  popt     = popt;
 }
 
 type parser_return = {
@@ -426,12 +428,12 @@ let rec program
     ?(elaborate_namespaces = true)
     ?(include_line_comments = false)
     ?(keep_errors = true)
-    file content =
+    popt file content =
   L.include_line_comments := include_line_comments;
   L.comment_list := [];
   L.fixmes := IMap.empty;
   let lb = Lexing.from_string content in
-  let env = init_env file lb in
+  let env = init_env file lb popt in
   let ast, file_mode = header env in
   let comments = !L.comment_list in
   let fixmes = !L.fixmes in
@@ -442,9 +444,22 @@ let rec program
     Option.iter (List.last !(env.errors)) Errors.parsing_error
   end;
   let ast = if elaborate_namespaces
-    then Namespaces.elaborate_defs ast
+    then Namespaces.elaborate_defs env.popt ast
     else ast in
   {file_mode; comments; ast}
+
+and program_with_default_popt
+    ?(elaborate_namespaces = true)
+    ?(include_line_comments = false)
+    ?(keep_errors = true)
+    file content =
+      program
+        ~elaborate_namespaces
+        ~include_line_comments
+        ~keep_errors
+        ParserOptions.default
+        file
+        content
 
 (*****************************************************************************)
 (* Hack headers (strict, decl, partial) *)
@@ -546,7 +561,7 @@ and ignore_toplevel attr_start ~attr acc env terminate =
       | "abstract" | "final"
       | "class"| "trait" | "interface"
       | "namespace"
-      | "async" | "newtype"| "type"| "const" ->
+      | "async" | "newtype"| "type"| "const" | "enum" ->
           (* Parsing toplevel declarations (class, function etc ...) *)
           let def_start = Option.value attr_start
             ~default:(Pos.make env.file env.lb) in
@@ -661,7 +676,7 @@ and toplevel_word def_start ~attr env = function
             cst_name = x;
             cst_type = h;
             cst_value = y;
-            cst_namespace = Namespace_env.empty;
+            cst_namespace = Namespace_env.empty env.popt;
           } end
       | _ -> assert false)
   | r when is_import r ->
@@ -684,7 +699,7 @@ and define_or_stmt env = function
       cst_name = name;
       cst_type = None;
       cst_value = value;
-      cst_namespace = Namespace_env.empty;
+      cst_namespace = Namespace_env.empty env.popt;
     }
   | stmt ->
       Stmt stmt
@@ -753,7 +768,7 @@ and fun_ fun_start ~attr ~(sync:fun_decl_kind) env =
     f_user_attributes = attr;
     f_fun_kind = fun_kind sync is_generator;
     f_mode = env.mode;
-    f_namespace = Namespace_env.empty;
+    f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.btw fun_start fun_end;
   }
 
@@ -783,7 +798,7 @@ and class_ class_start ~attr ~final ~kind env =
       c_name            = cname;
       c_extends         = cextends;
       c_body            = cbody;
-      c_namespace       = Namespace_env.empty;
+      c_namespace       = Namespace_env.empty env.popt;
       c_enum            = None;
       c_span         = span;
     }
@@ -817,7 +832,7 @@ and enum_ class_start ~attr env =
       c_name            = cname;
       c_extends         = [];
       c_body            = cbody;
-      c_namespace       = Namespace_env.empty;
+      c_namespace       = Namespace_env.empty env.popt;
       c_enum            = Some
         { e_base       = basety;
           e_constraint = constraint_;
@@ -1774,6 +1789,7 @@ and method_ env method_start ~modifiers ~attrs ~(sync:fun_decl_kind)
   let tparams = class_params env in
   let params = parameter_list env in
   let ret = hint_return_opt env in
+  let constrs = where_clause env in
   let is_generator, body_stmts = function_body env in
   let method_end = Pos.make env.file env.lb in
   let ret = method_implicit_return env pname ret in
@@ -1783,6 +1799,7 @@ and method_ env method_start ~modifiers ~attrs ~(sync:fun_decl_kind)
     m_tparams = tparams;
     m_params = params;
     m_ret = ret;
+    m_constrs = constrs;
     m_ret_by_ref = is_ref;
     m_body = body_stmts;
     m_kind = modifiers;
@@ -2443,6 +2460,39 @@ and parameter_default env =
   | _ -> L.back env.lb; None
 
 (*****************************************************************************)
+(* Method where-clause (type constraints) *)
+(*****************************************************************************)
+
+and where_clause env =
+  match L.token env.file env.lb with
+  | Tword when Lexing.lexeme env.lb = "where" -> where_clause_constraints env
+  | _ -> L.back env.lb; []
+
+and where_clause_constraints env =
+  if peek env = Tlcb then [] else
+  let error_state = !(env.errors) in
+  let t1 = hint env in
+  match option_constraint_operator env with
+  | None -> []
+  | Some c ->
+    let t2 = hint env in
+    let constr = (t1, c, t2) in
+    match L.token env.file env.lb with
+    | Tcomma ->
+      if !(env.errors) != error_state
+      then [constr]
+      else constr :: where_clause_constraints env
+    | Tlcb -> L.back env.lb; [constr]
+    | _ -> error_expect env ", or {"; [constr]
+
+and option_constraint_operator env =
+  match L.token env.file env.lb with
+  | Tword when Lexing.lexeme env.lb = "as" -> Some Constraint_as
+  | Teq -> Some Constraint_eq
+  | Tword when Lexing.lexeme env.lb = "super" -> Some Constraint_super
+  | _ -> error_expect env "type constraint operator (as, super or =)"; None
+
+(*****************************************************************************)
 (* Expressions *)
 (*****************************************************************************)
 
@@ -2667,7 +2717,7 @@ and lambda_body ~sync env params ret =
     f_user_attributes = [];
     f_fun_kind;
     f_mode = env.mode;
-    f_namespace = Namespace_env.empty;
+    f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.none; (* We only care about span of "real" functions *)
   }
   in Lfun f
@@ -3180,7 +3230,7 @@ and expr_anon_fun env pos ~(sync:fun_decl_kind) =
     f_user_attributes = [];
     f_fun_kind = fun_kind sync is_generator;
     f_mode = env.mode;
-    f_namespace = Namespace_env.empty;
+    f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.none; (* We only care about span of "real" functions *)
   }
   in
@@ -3907,7 +3957,7 @@ and typedef ~attr ~is_abstract env =
     t_constraint = tconstraint;
     t_kind = kind;
     t_user_attributes = attr;
-    t_namespace = Namespace_env.empty;
+    t_namespace = Namespace_env.empty env.popt;
     t_mode = env.mode;
   }
 
@@ -4066,7 +4116,10 @@ and namespace_group_use env kind prefix =
 (* Helper *)
 (*****************************************************************************)
 
-let from_file file =
+let from_file popt file =
   let content =
     try Sys_utils.cat (Relative_path.to_absolute file) with _ -> "" in
-  program file content
+  program popt file content
+
+let from_file_with_default_popt file =
+  from_file ParserOptions.default file

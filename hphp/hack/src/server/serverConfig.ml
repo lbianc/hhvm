@@ -23,6 +23,7 @@ type t = {
   gc_control       : Gc.control;
   sharedmem_config : SharedMem.config;
   tc_options       : TypecheckerOptions.t;
+  parser_options   : ParserOptions.t;
 }
 
 let filename = Relative_path.concat Relative_path.Root ".hhconfig"
@@ -102,6 +103,25 @@ let maybe_relative_path fn =
     else fn
   end
 
+let extract_auto_namespace_element ns_map element =
+  match element with
+    | (source, Hh_json.JSON_String target) ->
+       (source, target)::ns_map
+    | _ -> ns_map (* This means the JSON we received is incorrect *)
+
+let convert_auto_namespace_to_map map =
+  let json = Hh_json.json_of_string ~strict:true map in
+  let pairs = Hh_json.get_object_exn json in
+  (* We do a fold instead of a map to filter
+   * out the incorrect entrie as we look at each item *)
+  List.fold_left ~init:[] ~f:extract_auto_namespace_element pairs
+
+let prepare_auto_namespace_map config =
+  Option.value_map
+    (SMap.get config "auto_namespace_map")
+    ~default:[]
+    ~f:convert_auto_namespace_to_map
+
 let load config_filename options =
   let config = Config_file.parse (Relative_path.to_absolute config_filename) in
   let local_config = ServerLocalConfig.load () in
@@ -134,6 +154,9 @@ let load config_filename options =
         ~default:[]
         config);
   } in
+  let popts = { ParserOptions.
+    po_auto_namespace_map = prepare_auto_namespace_map config;
+  } in
   {
     load_script = load_script;
     load_script_timeout = load_script_timeout;
@@ -141,6 +164,7 @@ let load config_filename options =
     gc_control = make_gc_control config;
     sharedmem_config = make_sharedmem_config config options local_config;
     tc_options = tcopts;
+    parser_options = popts;
   }, local_config
 
 (* useful in testing code *)
@@ -151,6 +175,7 @@ let default_config = {
   gc_control = GlobalConfig.gc_control;
   sharedmem_config = GlobalConfig.default_sharedmem_config;
   tc_options = TypecheckerOptions.default;
+  parser_options = ParserOptions.default;
 }
 
 let load_script config = config.load_script
@@ -159,3 +184,4 @@ let load_mini_script config = config.load_mini_script
 let gc_control config = config.gc_control
 let sharedmem_config config = config.sharedmem_config
 let typechecker_options config = config.tc_options
+let parser_options config = config.parser_options

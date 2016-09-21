@@ -50,6 +50,8 @@ type t =
   | Hash_table_full
   | IDE_persistent_client_already_exists
   | Lazy_decl_bug
+  | Decl_heap_elems_bug
+  | Heap_full
 
 exception Exit_with of t
 
@@ -74,6 +76,7 @@ let exit_code = function
   | Lost_parent_monitor -> 12
   | Out_of_shared_memory -> 15
   | Hash_table_full -> 16
+  | Heap_full -> 17
   | Interrupted -> -6
   | Missing_hhi -> 97
   | Socket_error -> 98
@@ -95,6 +98,7 @@ let exit_code = function
   | IDE_typechecker_died -> 206
   | IDE_persistent_client_already_exists -> 207
   | Lazy_decl_bug -> 208
+  | Decl_heap_elems_bug -> 209
 
 
 let exit t =
@@ -144,6 +148,8 @@ let to_string = function
   | IDE_persistent_client_already_exists ->
     "IDE_persistent_client_already_exists"
   | Lazy_decl_bug -> "Lazy_decl_bug"
+  | Decl_heap_elems_bug -> "Decl_heap_elems_bug"
+  | Heap_full -> "Heap_full"
 
 
 let unpack = function

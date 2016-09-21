@@ -70,6 +70,8 @@ type t =
 | SimpleInitializer
 
 (* Expressions *)
+| InstanceofExpression
+| InclusionExpression
 | MemberSelectionExpression
 | SafeMemberSelectionExpression
 | ScopeResolutionExpression
@@ -101,6 +103,8 @@ type t =
 | ElementInitializer
 | SubscriptExpression
 | AwaitableCreationExpression
+| XHPChildrenDeclaration
+| XHPCategoryDeclaration
 | XHPExpression
 | XHPOpen
 | XHPAttribute
@@ -111,6 +115,7 @@ type t =
 | XHPRequired
 
 (* Types *)
+| SoftTypeSpecifier
 | SimpleTypeSpecifier
 | NullableTypeSpecifier
 | TypeConstraint
@@ -210,6 +215,7 @@ let to_string kind =
   | SubscriptExpression -> "subscript_expression"
   | TypeConstant -> "type_constant"
   | SimpleTypeSpecifier -> "simple_type_specifier"
+  | SoftTypeSpecifier -> "soft_type_specifier"
   | TypeConstraint -> "type_constraint"
   | TypeParameter -> "type_parameter"
   | NullableTypeSpecifier -> "nullable_type_specifier"
@@ -224,12 +230,16 @@ let to_string kind =
   | TypeArguments -> "type_arguments"
   | TypeParameters -> "type_parameters"
   | InclusionDirective -> "inclusion_directive"
+  | InstanceofExpression -> "instanceof_expression"
+  | InclusionExpression -> "inclusion_expression"
   | EnumDeclaration -> "enum_declaration"
   | Enumerator -> "enumerator"
   | AliasDeclaration -> "alias_declaration"
   | PropertyDeclaration -> "property_declaration"
   | PropertyDeclarator -> "property_declarator"
   | AwaitableCreationExpression -> "awaitable_creation_expression"
+  | XHPChildrenDeclaration -> "xhp_children_declaration"
+  | XHPCategoryDeclaration -> "xhp_category_declaration"
   | XHPExpression -> "xhp_expression"
   | XHPOpen -> "xhp_open"
   | XHPAttribute -> "xhp_attribute"

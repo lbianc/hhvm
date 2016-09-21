@@ -34,7 +34,7 @@
                     ((>)))
                   ((>)))
                 ((,)(whitespace)))
-                (simple_type_specifier((string))))
+              (list_item(simple_type_specifier((string)))((,))))
               ((rparen)(whitespace))
               ((:)(whitespace))
               (simple_type_specifier((void)))
@@ -57,13 +57,16 @@
           ((,)(end_of_line)))
         (parameter_declaration
           (missing)(missing)
-          (classname_type_specifier
-            ((whitespace)(classname))
-            ((<))
-            ((name))
-            ((>)(whitespace)))
-          ((variable)(end_of_line))
-          (missing)))
+          (soft_type_specifier((whitespace)(@))
+            (classname_type_specifier
+              ((classname))
+              ((<))
+              (generic_type_specifier
+                ((name))
+                (type_arguments((<))(simple_type_specifier((name)))((>))))
+              ((>)(whitespace))))
+            ((variable)(end_of_line))
+            (missing)))
         ((rparen)(whitespace))
         ((:)(whitespace))
         (simple_type_specifier

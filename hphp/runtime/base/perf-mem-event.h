@@ -14,16 +14,19 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/util/atomic-vector.h"
+#ifndef incl_HPHP_PERF_EVENT_H_
+#define incl_HPHP_PERF_EVENT_H_
+
+#include "hphp/util/perf-event.h"
 
 namespace HPHP {
 
-std::vector<std::function<void()>> AtomicVectorInit::s_funcs;
+///////////////////////////////////////////////////////////////////////////////
 
-void AtomicVectorInit::runAll() {
-  for (auto& func : s_funcs) {
-    func();
-  }
-}
+void record_perf_mem_event(PerfEvent kind, const perf_event_sample* sample);
+
+///////////////////////////////////////////////////////////////////////////////
 
 }
+
+#endif

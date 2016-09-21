@@ -14,6 +14,7 @@ open Core
 type t = {
   use_watchman: bool;
   watchman_init_timeout: int; (* in seconds *)
+  watchman_subscribe: bool;
   use_mini_state: bool;
   load_mini_script_timeout: int; (* in seconds *)
   type_decl_bucket_size: int;
@@ -22,11 +23,13 @@ type t = {
   io_priority: int;
   cpu_priority: int;
   shm_dirs: string list;
+  load_script_config: LoadScriptConfig.t;
 }
 
 let default = {
   use_watchman = false;
   watchman_init_timeout = 10;
+  watchman_subscribe = false;
   use_mini_state = false;
   load_mini_script_timeout = 20;
   type_decl_bucket_size = 1000;
@@ -35,6 +38,7 @@ let default = {
   io_priority = 7;
   cpu_priority = 10;
   shm_dirs = [GlobalConfig.shm_dir; GlobalConfig.tmp_dir;];
+  load_script_config = LoadScriptConfig.default;
 }
 
 let path =
@@ -58,6 +62,7 @@ let load_ fn =
   (* Buck and hgwatchman use a 10 second timeout too *)
   let watchman_init_timeout =
     int_ "watchman_init_timeout" ~default:10 config in
+  let watchman_subscribe = bool_ "watchman_subscribe" ~default:false config in
   let io_priority = int_ "io_priority" ~default:7 config in
   let cpu_priority = int_ "cpu_priority" ~default:10 config in
   let shm_dirs = string_list
@@ -66,9 +71,14 @@ let load_ fn =
     ~default:default.shm_dirs
     config
   |> List.map ~f:(fun(dir) -> Path.(to_string @@ make dir)) in
+  let saved_state_load_type =
+    LoadScriptConfig.saved_state_load_type_ config in
+  let load_script_config =
+    LoadScriptConfig.createLoadScriptConfig saved_state_load_type in
   {
     use_watchman;
     watchman_init_timeout;
+    watchman_subscribe;
     use_mini_state;
     load_mini_script_timeout;
     type_decl_bucket_size;
@@ -77,6 +87,7 @@ let load_ fn =
     io_priority;
     cpu_priority;
     shm_dirs;
+    load_script_config;
   }
 
 let load () =

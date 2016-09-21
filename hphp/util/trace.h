@@ -145,6 +145,7 @@ namespace Trace {
       TM(minstr)        \
       TM(mm)            \
       TM(objprof)       \
+      TM(perf_mem_event) \
       TM(pgo)           \
       TM(printir)       \
       TM(rat)           \

@@ -87,6 +87,12 @@ module WithParser(Parser : ParserType) = struct
          and continue on from the current token. Don't skip it. *)
       (with_error parser SyntaxError.error1004, (Syntax.make_missing()))
 
+  let next_xhp_category_name parser =
+    let lexer = Parser.lexer parser in
+    let (lexer, token) = Parser.Lexer.next_xhp_category_name lexer in
+    let parser = Parser.with_lexer parser lexer in
+    (parser, token)
+
   (* We have a number of issues involving xhp class names, which begin with
      a colon and may contain internal colons and dashes.  These are some
      helper methods to deal with them. *)
@@ -141,6 +147,15 @@ module WithParser(Parser : ParserType) = struct
   let next_xhp_class_name_or_other parser =
     if is_next_xhp_class_name parser then next_xhp_class_name parser
     else next_token parser
+
+  let is_next_xhp_category_name parser =
+    Parser.Lexer.is_next_xhp_category_name (Parser.lexer parser)
+
+  let next_xhp_children_name_or_other parser =
+    if is_next_xhp_category_name parser then
+      next_xhp_category_name parser
+    else
+      next_xhp_class_name_or_other parser
 
   (* We accept either a Name or a QualifiedName token when looking for a
      qualified name. *)
@@ -226,6 +241,21 @@ module WithParser(Parser : ParserType) = struct
       (parser, Syntax.make_token token)
     else
       expect_name_or_variable parser
+
+  let expect_xhp_class_name_or_qualified_name_or_variable parser =
+    if is_next_xhp_class_name parser then
+      let (parser, token) = next_xhp_class_name parser in
+      (parser, Syntax.make_token token)
+    else
+      let (parser1, token) = next_token_as_name parser in
+      match Token.kind token with
+      | TokenKind.Name
+      | TokenKind.QualifiedName
+      | TokenKind.Variable -> (parser1, Syntax.make_token token)
+      | _ ->
+        (* ERROR RECOVERY: Create a missing token for the expected token,
+           and continue on from the current token. Don't skip it. *)
+        (with_error parser SyntaxError.error1050, (Syntax.make_missing()))
 
   let expect_name_variable_or_class parser =
     let (parser1, token) = next_token parser in
@@ -362,6 +392,12 @@ module WithParser(Parser : ParserType) = struct
   let parse_parenthesized_list parser parse_items =
     parse_delimited_list parser TokenKind.LeftParen SyntaxError.error1019
       TokenKind.RightParen SyntaxError.error1011 parse_items
+
+  let parse_parenthesized_comma_list parser parse_item =
+    let parse_items parser =
+      parse_comma_list
+        parser TokenKind.RightParen SyntaxError.error1011 parse_item in
+    parse_parenthesized_list parser parse_items
 
   let parse_parenthesized_comma_list_opt parser parse_item =
     let parse_items parser =

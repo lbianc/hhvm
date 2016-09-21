@@ -27,7 +27,10 @@ let make_genv options config local_config handle =
   let watchman =
     if check_mode || not local_config.SLC.use_watchman
     then None
-    else Watchman.init local_config.SLC.watchman_init_timeout root
+    else Watchman.init
+           local_config.SLC.watchman_init_timeout
+           local_config.SLC.watchman_subscribe
+           root
   in
   if Option.is_some watchman then Hh_logger.log "Using watchman";
   let indexer, notifier, wait_until_ready =
@@ -93,6 +96,7 @@ let default_genv =
 
 let make_env config =
   { tcopt          = ServerConfig.typechecker_options config;
+    popt           = ServerConfig.parser_options config;
     files_info     = Relative_path.Map.empty;
     errorl         = Errors.empty;
     failed_parsing = Relative_path.Set.empty;
@@ -101,7 +105,9 @@ let make_env config =
     persistent_client = None;
     last_command_time = 0.0;
     edited_files   = Relative_path.Map.empty;
-    files_to_check = Relative_path.Set.empty;
+    ide_needs_parsing = Relative_path.Set.empty;
+    disk_needs_parsing = Relative_path.Set.empty;
+    needs_decl = Relative_path.Set.empty;
+    needs_full_check = false;
     diag_subscribe = None;
-    symbols_cache  = SMap.empty;
   }

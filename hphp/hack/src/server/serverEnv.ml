@@ -42,9 +42,9 @@ type genv = {
 type env = {
     files_info     : FileInfo.t Relative_path.Map.t;
     tcopt          : TypecheckerOptions.t;
+    popt           : ParserOptions.t;
     errorl         : Errors.t;
-    (* Keeps list of files containing parsing errors in the last iteration. File
-     * need to be rechecked will also join this list during typecheck *)
+    (* Keeps list of files containing parsing errors in the last iteration. *)
     failed_parsing : Relative_path.Set.t;
     failed_decl    : Relative_path.Set.t;
     failed_check   : Relative_path.Set.t;
@@ -53,12 +53,18 @@ type env = {
     last_command_time : float;
     (* The map from full path to synchronized file contents *)
     edited_files   : File_content.t Relative_path.Map.t;
-    (* The list of full path of synchronized files need to be type checked *)
-    files_to_check : Relative_path.Set.t;
+    (* Files which parse trees were invalidated (because they changed on disk
+     * or in editor) and need to be re-parsed *)
+    ide_needs_parsing : Relative_path.Set.t;
+    disk_needs_parsing : Relative_path.Set.t;
+    (* Definitions that became invalidated and removed from heap. Depending
+     * on lazy decl to update them on as-needed basis. Things that require
+     * entire global state to be up to date (like global list of errors, build,
+     * or find all references) must be preceded by Full_check. *)
+    needs_decl : Relative_path.Set.t;
+    needs_full_check : bool;
     (* The diagnostic subscription information of the current client *)
     diag_subscribe : Diagnostic_subscription.t option;
-    (* Highlight information cached for ide related commands *)
-    symbols_cache  : IdentifySymbolService.cache;
   }
 
 let file_filter f =

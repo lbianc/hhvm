@@ -520,7 +520,9 @@ end
 let parse content =
   Errors.ignore_ begin fun () ->
     let {Parser_hack.ast; comments = _; file_mode = _} =
-      Parser_hack.program Relative_path.default content
+      Parser_hack.program_with_default_popt
+        Relative_path.default
+        content
     in ast
   end
 

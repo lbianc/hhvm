@@ -466,7 +466,7 @@ and stmt env = function
       | _, Tunresolved _ ->
           (* we allow return types to grow for anonymous functions *)
           let env, rty = TUtils.unresolved env rty in
-          let env, _ = Type.unify pos Reason.URreturn env expected_return rty in
+          let env = Type.sub_type pos Reason.URreturn env rty expected_return in
           env
       | _, (Tany | Tmixed | Tarraykind _ | Toption _ | Tprim _
         | Tvar _ | Tfun _ | Tabstract (_, _) | Tclass (_, _) | Ttuple _
@@ -1038,6 +1038,7 @@ and expr_
               ft_abstract = false;
               ft_arity = fun_arity;
               ft_tparams = fty.ft_tparams;
+              ft_locl_cstr = fty.ft_locl_cstr;
               ft_params = fty.ft_params;
               ft_ret = fty.ft_ret;
             } in
@@ -2104,7 +2105,9 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
                 ft_pos = fty.ft_pos;
                 ft_deprecated = None;
                 ft_abstract = false;
-                ft_arity = Fstandard (arity, arity); ft_tparams = [];
+                ft_arity = Fstandard (arity, arity);
+                ft_tparams = [];
+                ft_locl_cstr = [];
                 ft_params = List.map vars (fun x -> (None, x));
                 ft_ret = tr;
               }
@@ -2447,7 +2450,7 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
               any, any
         in
         let env, ty2 = TUtils.unresolved env ty2 in
-        let env, _ = Type.unify p (Reason.index_class cn) env k ty2 in
+        let env = Type.sub_type p (Reason.index_class cn) env ty2 k in
         env, v
   (* Certain container/collection types are intended to be immutable/const,
    * thus they should never appear as a lvalue when indexing i.e.
@@ -2479,7 +2482,7 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
         | [ty] -> ty
         | _ -> arity_error id; Reason.Rwitness p, Tany in
       let ty1 = Reason.Ridx (fst e2, fst ety1), Tprim Tint in
-      let env, _ = Type.unify p (Reason.index_class cn) env ty2 ty1 in
+      let env = Type.sub_type p (Reason.index_class cn) env ty2 ty1 in
       env, ty
   | Tclass ((_, cn), _)
       when is_lvalue &&
@@ -2487,7 +2490,7 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
     error_const_mutation env p ety1
   | Tarraykind (AKmap (k, v)) ->
       let env, ty2 = TUtils.unresolved env ty2 in
-      let env, _ = Type.unify p Reason.index_array env k ty2 in
+      let env = Type.sub_type p Reason.index_array env ty2 k in
       env, v
   | Tarraykind ((AKshape  _ |  AKtuple _) as akind) ->
       let key = Typing_arrays.static_array_access env (Some e2) in
@@ -2504,7 +2507,7 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
             begin match Nast.ShapeMap.get field_name fdm with
               | Some (k, v) ->
                   let env, ty2 = TUtils.unresolved env ty2 in
-                  let env, _ = Type.unify p Reason.index_array env k ty2 in
+                  let env = Type.sub_type p Reason.index_array env ty2 k in
                   env, Some v
               | None -> env, None
             end
@@ -2521,9 +2524,8 @@ and array_get is_lvalue p env ty1 ety1 e2 ty2 =
   | Tany | Tarraykind (AKany | AKempty)-> env, (Reason.Rnone, Tany)
   | Tprim Tstring ->
       let ty = Reason.Rwitness p, Tprim Tstring in
-      let env, ty = Type.unify p Reason.URnone env ty1 ty in
       let int = Reason.Ridx (fst e2, fst ety1), Tprim Tint in
-      let env, _ = Type.unify p Reason.index_array env ty2 int in
+      let env = Type.sub_type p Reason.index_array env ty2 int in
       env, ty
   | Ttuple tyl ->
       (match e2 with
@@ -3348,7 +3350,9 @@ and unop p env uop ty =
       env, (Reason.Rlogic_ret p, Tprim Tbool)
   | Ast.Utild ->
       (* ~$x (bitwise not) only works with int *)
-      Type.unify p Reason.URnone env (Reason.Rarith p, Tprim Tint) ty
+      let env = Type.sub_type p Reason.URnone env ty
+        (Reason.Rarith p, Tprim Tint) in
+      env, (Reason.Rarith p, Tprim Tint)
   | Ast.Uincr
   | Ast.Upincr
   | Ast.Updecr
@@ -3478,9 +3482,9 @@ and binop in_cond p env bop p1 ty1 p2 ty2 =
       let env, ety2 = Env.expand_type env ty2 in
       (match ety1, ety2 with
       | (_, Tprim Tbool), _ | _, (_, Tprim Tbool) ->
-          let env, _ = Type.unify p Reason.URnone env ty1
+          let env = Type.sub_type p Reason.URnone env ty1
             (Reason.Rlogic_ret p1, Tprim Tbool) in
-          let env, _ = Type.unify p Reason.URnone env ty2
+          let env = Type.sub_type p Reason.URnone env ty2
             (Reason.Rlogic_ret p1, Tprim Tbool) in
           env, (Reason.Rlogic_ret p, Tprim Tbool)
       | (_, (Tany | Tmixed | Tarraykind _ | Toption _
@@ -3488,9 +3492,9 @@ and binop in_cond p env bop p1 ty1 p2 ty2 =
         | Ttuple _ | Tanon (_, _) | Tunresolved _ | Tobject | Tshape _
         )
         ), _ ->
-          let env, _ = Type.unify p Reason.URnone env ty1
+          let env = Type.sub_type p Reason.URnone env ty1
             (Reason.Rarith p1, Tprim Tint) in
-          let env, _ = Type.unify p Reason.URnone env ty2
+          let env = Type.sub_type p Reason.URnone env ty2
             (Reason.Rarith p1, Tprim Tint) in
           env, (Reason.Rarith_ret p, Tprim Tint)
       )
@@ -3856,6 +3860,11 @@ and check_implements_tparaml (env: Env.env) ht =
           match ck with
           | Ast.Constraint_as ->
             ignore (Type.sub_type_decl p Reason.URnone env ty cstr)
+          | Ast.Constraint_eq ->
+            (* This code could well be unreachable, because we don't allow
+             * equality constraints on class generics. *)
+            ignore (Type.sub_type_decl p Reason.URnone env ty cstr);
+            ignore (Type.sub_type_decl p Reason.URnone env cstr ty)
           | Ast.Constraint_super ->
             ignore (Type.sub_type_decl p Reason.URnone env cstr ty)
         end
@@ -4118,9 +4127,10 @@ and method_def env m =
   Reason.expr_display_id_map := IMap.empty;
   Typing_hooks.dispatch_enter_method_def_hook m;
   let env = Env.env_with_locals env Local_id.Map.empty in
-  let env = Phase.localize_generic_parameters_with_bounds env m.m_tparams
+  let todo = m.m_tparams @ m.m_locl_cstrs in
+  let env = Phase.localize_generic_parameters_with_bounds env todo
     ~ety_env:({ (Phase.env_with_self env) with from_class = Some CIstatic; }) in
-  TI.check_tparams_instantiable env m.m_tparams;
+  TI.check_tparams_instantiable env todo;
   let env = Env.set_local env this (Env.get_self env) in
   let env, ret = match m.m_ret with
     | None -> env, (Reason.Rwitness (fst m.m_name), Tany)

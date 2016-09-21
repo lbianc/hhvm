@@ -12,13 +12,13 @@ open Reordered_argument_collections
 
 type t
 
-val of_id : id:int -> t
+val of_id : id:int -> init:Errors.t -> t
 
 val get_id : t -> int
 
-val clear : t -> t
+val mark_as_pushed : t -> t
 
-val update : t -> Errors.t -> t
+val update : t -> FileInfo.fast -> Errors.t -> t
 
 (* Errors ready for sending to client *)
 val get_absolute_errors : t -> (Pos.absolute Errors.error_ list) SMap.t

@@ -92,7 +92,7 @@ module WithToken(Token: TokenType) = struct
       script_declarations : t
     }
     and enum_declaration = {
-      enum_enum : t;
+      enum_keyword : t;
       enum_name : t;
       enum_colon : t;
       enum_base : t;
@@ -109,7 +109,7 @@ module WithToken(Token: TokenType) = struct
     }
     and alias_declaration = {
       alias_attribute_spec : t;
-      alias_token : t;
+      alias_keyword : t;
       alias_name : t;
       alias_generic_parameter : t;
       alias_constraint : t;
@@ -118,17 +118,17 @@ module WithToken(Token: TokenType) = struct
       alias_semicolon : t
     }
     and property_declaration = {
-      prop_modifiers : t;
-      prop_type : t;
-      prop_declarators : t;
-      prop_semicolon : t
+      property_modifiers : t;
+      property_type : t;
+      property_declarators : t;
+      property_semicolon : t
     }
     and property_declarator = {
-      prop_name : t;
-      prop_init : t
+      property_name : t;
+      property_initializer : t
     }
     and namespace_declaration = {
-      namespace_token : t;
+      namespace_keyword : t;
       namespace_name : t;
       namespace_body : t
     }
@@ -138,13 +138,13 @@ module WithToken(Token: TokenType) = struct
       namespace_right_brace : t
     }
     and namespace_use_declaration = {
-      namespace_use : t;
+      namespace_use_keyword : t;
       namespace_use_kind : t;
       namespace_use_clauses : t;
       namespace_use_semicolon : t
     }
     and namespace_group_use_declaration = {
-      namespace_group_use : t;
+      namespace_group_use_keyword : t;
       namespace_group_use_kind : t;
       namespace_group_use_prefix : t;
       namespace_group_use_left_brace : t;
@@ -165,29 +165,29 @@ module WithToken(Token: TokenType) = struct
     }
     and function_declaration_header = {
       function_async : t;
-      function_token : t;
+      function_keyword : t;
       function_name : t;
-      function_type_params : t;
+      function_type_parameter_list : t;
       function_left_paren : t;
-      function_params : t;
+      function_parameter_list : t;
       function_right_paren : t;
       function_colon : t;
       function_type : t;
     }
     and methodish_declaration = {
-        methodish_attr : t;
-        methodish_modifiers : t;
-        methodish_function_decl_header : t;
-        (* Only one of function body and semicolon can be used *)
-        methodish_function_body : t;
-        methodish_semicolon : t;
+      methodish_attribute : t;
+      methodish_modifiers : t;
+      methodish_function_decl_header : t;
+      (* Only one of function body and semicolon can be used *)
+      methodish_function_body : t;
+      methodish_semicolon : t;
     }
     and classish_declaration = {
-      classish_attr : t;
+      classish_attribute : t;
       classish_modifiers : t;
-      classish_token : t;
+      classish_keyword : t;
       classish_name : t;
-      classish_type_params : t;
+      classish_type_parameter_list : t;
       classish_extends : t;
       classish_extends_list : t;
       classish_implements : t;
@@ -200,19 +200,19 @@ module WithToken(Token: TokenType) = struct
       classish_body_right_brace : t;
     }
     and trait_use = {
-      trait_use_token : t;
+      trait_use_keyword : t;
       trait_use_name_list : t;
       trait_use_semicolon : t;
     }
     and require_clause = {
-      require_token : t;
+      require_keyword : t;
       require_kind : t;
       require_name : t;
       require_semicolon : t
     }
     and const_declaration = {
       const_abstract : t;
-      const_token : t;
+      const_keyword : t;
       const_type_specifier : t;
       const_declarator_list : t;
       const_semicolon : t;
@@ -223,8 +223,8 @@ module WithToken(Token: TokenType) = struct
     }
     and type_const_declaration = {
       type_const_abstract : t;
-      type_const_const_token : t;
-      type_const_type_token : t;
+      type_const_keyword : t;
+      type_const_type_keyword : t;
       type_const_name : t;
       type_const_type_constraint : t;
       type_const_equal : t;
@@ -236,7 +236,7 @@ module WithToken(Token: TokenType) = struct
       decorated_expression_expression: t;
     }
     and parameter_declaration = {
-      param_attr : t;
+      param_attribute : t;
       param_visibility : t;
       param_type : t;
       param_name : t;
@@ -253,11 +253,12 @@ module WithToken(Token: TokenType) = struct
       attribute_values : t;
       attribute_right_paren : t
     }
-    and inclusion_directive = {
+    and inclusion_expression = {
       inclusion_require : t;
-      inclusion_left_paren : t;
       inclusion_filename : t;
-      inclusion_right_paren : t;
+    }
+    and inclusion_directive = {
+      inclusion_expression : t;
       inclusion_semicolon : t
     }
     and compound_statement = {
@@ -272,14 +273,14 @@ module WithToken(Token: TokenType) = struct
     and while_statement = {
       while_keyword : t;
       while_left_paren : t;
-      while_condition_expr : t;
+      while_condition : t;
       while_right_paren: t;
       while_body: t
     }
     and if_statement = {
       if_keyword: t;
       if_left_paren: t;
-      if_condition_expr: t;
+      if_condition: t;
       if_right_paren: t;
       if_statement: t;
       if_elseif_clauses: t;
@@ -288,7 +289,7 @@ module WithToken(Token: TokenType) = struct
     and elseif_clause ={
       elseif_keyword: t;
       elseif_left_paren: t;
-      elseif_condition_expr: t;
+      elseif_condition: t;
       elseif_right_paren: t;
       elseif_statement: t
     }
@@ -391,30 +392,30 @@ module WithToken(Token: TokenType) = struct
     }
     and static_declarator = {
       static_name : t;
-      static_init : t
+      static_initializer : t
     }
     and echo_statement = {
-      echo_token : t;
+      echo_keyword : t;
       echo_expression_list: t;
       echo_semicolon: t;
     }
     and simple_initializer = {
-      simple_init_equal : t;
-      simple_init_value : t
+      simple_initializer_equal : t;
+      simple_initializer_value : t
     }
     and anonymous_function = {
       anonymous_async : t;
       anonymous_function : t;
       anonymous_left_paren : t;
-      anonymous_params : t;
+      anonymous_parameter_list : t;
       anonymous_right_paren : t;
       anonymous_colon : t;
       anonymous_type : t;
       anonymous_use : t;
       anonymous_body : t
     }
-    and anonymous_use = {
-      anonymous_use_token : t;
+    and anonymous_function_use_clause = {
+      anonymous_use_keyword : t;
       anonymous_use_left_paren : t;
       anonymous_use_variables : t;
       anonymous_use_right_paren : t
@@ -427,7 +428,7 @@ module WithToken(Token: TokenType) = struct
     }
     and lambda_signature = {
       lambda_left_paren : t;
-      lambda_params : t;
+      lambda_parameter_list : t;
       lambda_right_paren : t;
       lambda_colon : t;
       lambda_type : t
@@ -448,12 +449,17 @@ module WithToken(Token: TokenType) = struct
       member_operator : t;
       member_name : t
     }
+    and safe_member_selection_expression = {
+      safe_member_object : t;
+      safe_member_operator : t;
+      safe_member_name : t
+    }
     and yield_expression = {
-      yield_token : t;
+      yield_keyword : t;
       yield_operand : t
     }
     and print_expression = {
-      print_token : t;
+      print_keyword : t;
       print_expr : t;
     }
     and unary_operator = {
@@ -464,6 +470,11 @@ module WithToken(Token: TokenType) = struct
       binary_left_operand : t;
       binary_operator : t;
       binary_right_operand : t
+    }
+    and instanceof_expression = {
+      instanceof_left_operand : t;
+      instanceof_operator : t;
+      instanceof_right_operand : t
     }
     and conditional_expression = {
       conditional_test : t;
@@ -488,11 +499,11 @@ module WithToken(Token: TokenType) = struct
       braced_expr : t;
       braced_expr_right_brace : t
     }
-    and listlike_expression = {
-      listlike_keyword: t;
-      listlike_left_paren: t;
-      listlike_members: t;
-      listlike_right_paren: t;
+    and list_expression = {
+      list_keyword: t;
+      list_left_paren: t;
+      list_members: t;
+      list_right_paren: t;
     }
     and collection_literal_expression = {
       collection_literal_name : t;
@@ -533,8 +544,18 @@ module WithToken(Token: TokenType) = struct
       awaitable_async : t;
       awaitable_compound_statement : t;
     }
+    and xhp_children_declaration = {
+      xhp_children : t;
+      xhp_children_expression : t;
+      xhp_children_semicolon : t
+    }
+    and xhp_category_declaration = {
+      xhp_category : t;
+      xhp_category_list : t;
+      xhp_category_semicolon : t
+    }
     and xhp_enum_type = {
-      xhp_enum_token : t;
+      xhp_enum_keyword : t;
       xhp_enum_left_brace : t;
       xhp_enum_values : t;
       xhp_enum_right_brace : t
@@ -544,24 +565,24 @@ module WithToken(Token: TokenType) = struct
       xhp_required : t
     }
     and xhp_class_attribute_declaration = {
-      xhp_attr_token : t;
-      xhp_attr_list : t;
-      xhp_attr_semicolon : t
+      xhp_attribute_keyword : t;
+      xhp_attribute_list : t;
+      xhp_attribute_semicolon : t
     }
     and xhp_class_attribute = {
-      xhp_attr_decl_type : t;
-      xhp_attr_decl_name : t;
-      xhp_attr_decl_init : t;
-      xhp_attr_decl_required : t
+      xhp_attribute_decl_type : t;
+      xhp_attribute_decl_name : t;
+      xhp_attribute_decl_initializer : t;
+      xhp_attribute_decl_required : t
     }
     and xhp_attribute = {
-      xhp_attr_name : t;
-      xhp_attr_equal : t;
-      xhp_attr_expr : t;
+      xhp_attribute_name : t;
+      xhp_attribute_equal : t;
+      xhp_attribute_expr : t;
     }
     and xhp_open = {
       xhp_open_name : t;
-      xhp_open_attrs : t;
+      xhp_open_attributes : t;
       xhp_open_right_angle : t;
     }
     and xhp_expression = {
@@ -590,9 +611,9 @@ module WithToken(Token: TokenType) = struct
       type_name : t;
       type_constraint_list_opt  : t;
     }
-    and type_constraint_specifier = {
-      constraint_token: t;
-      matched_type: t;
+    and type_constraint = {
+      constraint_keyword: t;
+      constraint_type: t;
     }
     and map_type_specifier = {
       map_array : t;
@@ -624,9 +645,9 @@ module WithToken(Token: TokenType) = struct
       field_type : t
     }
     and field_initializer = {
-      field_init_name : t;
-      field_init_arrow : t;
-      field_init_value : t
+      field_initializer_name : t;
+      field_initializer_arrow : t;
+      field_initializer_value : t
     }
     and shape = {
       shape_shape : t;
@@ -641,6 +662,25 @@ module WithToken(Token: TokenType) = struct
     and nullable_type_specifier = {
       nullable_question : t;
       nullable_type : t
+    }
+    and simple_type_specifier = {
+      simple_type_specifier : t;
+    }
+    and pipe_variable_expression = {
+      pipe_variable_expression : t;
+    }
+    and qualified_name_expression = {
+      qualified_name_expression : t;
+    }
+    and variable_expression = {
+      variable_expression : t;
+    }
+    and literal_expression = {
+      literal_expression : t;
+    }
+    and soft_type_specifier = {
+      soft_at : t;
+      soft_type : t
     }
     and type_arguments = {
       type_arguments_left_angle : t;
@@ -661,15 +701,17 @@ module WithToken(Token: TokenType) = struct
       list_item : t;
       list_separator : t
     }
+    and error = {
+      error : t;
+    }
     and syntax =
     | Token of Token.t
-    | Error of t list
     | Missing
     | SyntaxList of t list
+    | Error of error
     | ListItem of list_item
     | ScriptHeader of script_header
     | Script of script
-
     | NamespaceDeclaration of namespace_declaration
     | NamespaceBody of namespace_body
     | NamespaceGroupUseDeclaration of namespace_group_use_declaration
@@ -680,6 +722,8 @@ module WithToken(Token: TokenType) = struct
     | MethodishDeclaration of methodish_declaration
     | ClassishDeclaration of classish_declaration
     | ClassishBody of classish_body
+    | XHPChildrenDeclaration of xhp_children_declaration
+    | XHPCategoryDeclaration of xhp_category_declaration
     | XHPEnumType of xhp_enum_type
     | XHPRequired of xhp_required
     | XHPClassAttributeDeclaration of xhp_class_attribute_declaration
@@ -698,6 +742,7 @@ module WithToken(Token: TokenType) = struct
     | ParameterDeclaration of parameter_declaration
     | AttributeSpecification of attribute_specification
     | Attribute of attribute
+    | InclusionExpression of inclusion_expression
     | InclusionDirective of inclusion_directive
     | CompoundStatement of compound_statement
     | ExpressionStatement of expression_statement
@@ -724,7 +769,7 @@ module WithToken(Token: TokenType) = struct
     | EchoStatement of echo_statement
 
     | MemberSelectionExpression of member_selection_expression
-    | SafeMemberSelectionExpression of member_selection_expression
+    | SafeMemberSelectionExpression of safe_member_selection_expression
     | ScopeResolutionExpression of scope_resolution_expression
     | YieldExpression of yield_expression
     | PrintExpression of print_expression
@@ -732,19 +777,20 @@ module WithToken(Token: TokenType) = struct
     | LambdaExpression of lambda_expression
     | LambdaSignature of lambda_signature
     | AnonymousFunction of anonymous_function
-    | AnonymousFunctionUseClause of anonymous_use
-    | LiteralExpression of t
-    | VariableExpression of t
-    | QualifiedNameExpression of t
-    | PipeVariableExpression of t
+    | AnonymousFunctionUseClause of anonymous_function_use_clause
+    | LiteralExpression of literal_expression
+    | VariableExpression of variable_expression
+    | QualifiedNameExpression of qualified_name_expression
+    | PipeVariableExpression of pipe_variable_expression
     | PrefixUnaryOperator of unary_operator
     | PostfixUnaryOperator of unary_operator
     | BinaryOperator of binary_operator
+    | InstanceofExpression of instanceof_expression
     | ConditionalExpression of conditional_expression
     | FunctionCallExpression of function_call_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
-    | ListExpression of listlike_expression
+    | ListExpression of list_expression
     | CollectionLiteralExpression of collection_literal_expression
     | ObjectCreationExpression of object_creation_expression
     | ShapeExpression of shape
@@ -759,9 +805,10 @@ module WithToken(Token: TokenType) = struct
     | XHPAttribute of xhp_attribute
     | XHPClose of xhp_close
 
-    | SimpleTypeSpecifier of t
+    | SimpleTypeSpecifier of simple_type_specifier
     | NullableTypeSpecifier of nullable_type_specifier
-    | TypeConstraint of type_constraint_specifier
+    | SoftTypeSpecifier of soft_type_specifier
+    | TypeConstraint of type_constraint
     | TypeParameter of type_parameter
     | TypeConstant of type_constant
     | GenericTypeSpecifier of generic_type
@@ -826,6 +873,8 @@ module WithToken(Token: TokenType) = struct
       | MethodishDeclaration _ -> SyntaxKind.MethodishDeclaration
       | ClassishDeclaration _ -> SyntaxKind.ClassishDeclaration
       | ClassishBody _ -> SyntaxKind.ClassishBody
+      | XHPChildrenDeclaration _ -> SyntaxKind.XHPChildrenDeclaration
+      | XHPCategoryDeclaration _ -> SyntaxKind.XHPCategoryDeclaration
       | XHPEnumType _ -> SyntaxKind.XHPEnumType
       | XHPRequired _ -> SyntaxKind.XHPRequired
       | XHPClassAttributeDeclaration _ ->
@@ -840,6 +889,7 @@ module WithToken(Token: TokenType) = struct
       | ParameterDeclaration _ -> SyntaxKind.ParameterDeclaration
       | AttributeSpecification _ -> SyntaxKind.AttributeSpecification
       | Attribute _ -> SyntaxKind.Attribute
+      | InclusionExpression _ -> SyntaxKind.InclusionExpression
       | InclusionDirective _ -> SyntaxKind.InclusionDirective
       | CompoundStatement _ -> SyntaxKind.CompoundStatement
       | ExpressionStatement _ -> SyntaxKind.ExpressionStatement
@@ -867,6 +917,7 @@ module WithToken(Token: TokenType) = struct
       | PrefixUnaryOperator _ -> SyntaxKind.PrefixUnaryOperator
       | PostfixUnaryOperator _ -> SyntaxKind.PostfixUnaryOperator
       | BinaryOperator _ -> SyntaxKind.BinaryOperator
+      | InstanceofExpression _ -> SyntaxKind.InstanceofExpression
       | ConditionalExpression _ -> SyntaxKind.ConditionalExpression
       | FunctionCallExpression _ -> SyntaxKind.FunctionCallExpression
       | ParenthesizedExpression _ -> SyntaxKind.ParenthesizedExpression
@@ -890,6 +941,7 @@ module WithToken(Token: TokenType) = struct
       | TypeConstraint _ -> SyntaxKind.TypeConstraint
       | TypeParameter _ -> SyntaxKind.TypeParameter
       | NullableTypeSpecifier _ -> SyntaxKind.NullableTypeSpecifier
+      | SoftTypeSpecifier _ -> SyntaxKind.SoftTypeSpecifier
       | GenericTypeSpecifier _ -> SyntaxKind.GenericTypeSpecifier
       | TypeArguments _ -> SyntaxKind.TypeArguments
       | TypeParameters _ -> SyntaxKind.TypeParameters
@@ -944,7 +996,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.NamespaceGroupUseDeclaration
     let is_namespace_use node = kind node = SyntaxKind.NamespaceUseDeclaration
     let is_namespace_use_clause node = kind node = SyntaxKind.NamespaceUseClause
-    let is_function node = kind node = SyntaxKind.FunctionDeclaration
+    let is_function_declaration node =
+      kind node = SyntaxKind.FunctionDeclaration
     let is_method node = kind node = SyntaxKind.MethodishDeclaration
     let is_classish node = kind node = SyntaxKind.ClassishDeclaration
     let is_classish_body node = kind node = SyntaxKind.ClassishBody
@@ -961,6 +1014,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.AttributeSpecification
     let is_attribute node = kind node = SyntaxKind.Attribute
     let is_inclusion_directive node = kind node = SyntaxKind.InclusionDirective
+    let is_inclusion_expression node =
+      kind node = SyntaxKind.InclusionExpression
     let is_compound_statement node = kind node = SyntaxKind.CompoundStatement
     let is_expression_statement node =
       kind node = SyntaxKind.ExpressionStatement
@@ -984,6 +1039,8 @@ module WithToken(Token: TokenType) = struct
     let is_prefix_operator node = kind node = SyntaxKind.PrefixUnaryOperator
     let is_postfix_operator node = kind node = SyntaxKind.PostfixUnaryOperator
     let is_binary_operator node = kind node = SyntaxKind.BinaryOperator
+    let is_instanceof_operator node =
+      kind node = SyntaxKind.InstanceofExpression
     let is_type_constraint node = kind node = SyntaxKind.TypeConstraint
     let is_type_parameter node = kind node = SyntaxKind.TypeParameter
     let is_conditional_expression node =
@@ -993,7 +1050,7 @@ module WithToken(Token: TokenType) = struct
     let is_parenthesized_expression node =
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node = kind node = SyntaxKind.BracedExpression
-    let is_listlike_expression node = kind node = SyntaxKind.ListExpression
+    let is_list_expression node = kind node = SyntaxKind.ListExpression
     let is_collection_literal_expression node =
       kind node = SyntaxKind.CollectionLiteralExpression
     let is_object_creation_expression node =
@@ -1007,6 +1064,10 @@ module WithToken(Token: TokenType) = struct
     let is_element_initializer node = kind node = SyntaxKind.ElementInitializer
     let is_subscript_expression node =
       kind node = SyntaxKind.SubscriptExpression
+    let is_xhp_category_declaration node =
+      kind node = SyntaxKind.XHPCategoryDeclaration
+    let is_xhp_children_declaration node =
+      kind node = SyntaxKind.XHPChildrenDeclaration
     let is_xhp_enum_type node = kind node = SyntaxKind.XHPEnumType
     let is_xhp_required node = kind node = SyntaxKind.XHPRequired
     let is_xhp_expression node = kind node = SyntaxKind.XHPExpression
@@ -1017,6 +1078,8 @@ module WithToken(Token: TokenType) = struct
     let is_generic_type node = kind node = SyntaxKind.GenericTypeSpecifier
     let is_nullable_type_specifier node =
       kind node = SyntaxKind.NullableTypeSpecifier
+    let is_soft_type_specifier node =
+      kind node = SyntaxKind.SoftTypeSpecifier
     let is_type_arguments node = kind node = SyntaxKind.TypeArguments
     let is_type_parameters node = kind node = SyntaxKind.TypeParameters
     let is_tuple_type node = kind node = SyntaxKind.TupleTypeSpecifier
@@ -1073,12 +1136,22 @@ module WithToken(Token: TokenType) = struct
       match node.syntax with
       | Missing -> []
       | Token _ -> []
-      | LiteralExpression x -> [x]
-      | VariableExpression x -> [x]
-      | QualifiedNameExpression x -> [x]
-      | PipeVariableExpression x -> [x]
-      | Error x -> x
       | SyntaxList x -> x
+      | Error
+        { error } ->
+        [ error ]
+      | LiteralExpression
+        { literal_expression } ->
+        [ literal_expression ]
+      | VariableExpression
+        { variable_expression } ->
+        [ variable_expression ]
+      | QualifiedNameExpression
+        { qualified_name_expression } ->
+        [ qualified_name_expression ]
+      | PipeVariableExpression
+        { pipe_variable_expression } ->
+        [ pipe_variable_expression ]
       | ScopeResolutionExpression
         { scope_resolution_qualifier; scope_resolution_operator;
           scope_resolution_name } ->
@@ -1088,14 +1161,14 @@ module WithToken(Token: TokenType) = struct
         { member_object; member_operator; member_name } ->
         [ member_object; member_operator; member_name ]
       | SafeMemberSelectionExpression
-        { member_object; member_operator; member_name } ->
-        [ member_object; member_operator; member_name ]
+        { safe_member_object; safe_member_operator; safe_member_name } ->
+        [ safe_member_object; safe_member_operator; safe_member_name ]
       | YieldExpression
-        { yield_token; yield_operand } ->
-        [ yield_token; yield_operand ]
+        { yield_keyword; yield_operand } ->
+        [ yield_keyword; yield_operand ]
       | PrintExpression
-        { print_token; print_expr; } ->
-        [ print_token; print_expr; ]
+        { print_keyword; print_expr; } ->
+        [ print_keyword; print_expr; ]
       | CastExpression
         { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
         [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]
@@ -1103,21 +1176,21 @@ module WithToken(Token: TokenType) = struct
         { lambda_async; lambda_signature; lambda_arrow; lambda_body } ->
         [ lambda_async; lambda_signature; lambda_arrow; lambda_body ]
       | LambdaSignature
-        { lambda_left_paren; lambda_params; lambda_right_paren;
+        { lambda_left_paren; lambda_parameter_list; lambda_right_paren;
           lambda_colon; lambda_type } ->
-        [ lambda_left_paren; lambda_params; lambda_right_paren;
+        [ lambda_left_paren; lambda_parameter_list; lambda_right_paren;
           lambda_colon; lambda_type ]
       | AnonymousFunction
         { anonymous_async; anonymous_function; anonymous_left_paren;
-          anonymous_params; anonymous_right_paren; anonymous_colon;
+          anonymous_parameter_list; anonymous_right_paren; anonymous_colon;
           anonymous_type; anonymous_use; anonymous_body } ->
         [ anonymous_async; anonymous_function; anonymous_left_paren;
-          anonymous_params; anonymous_right_paren; anonymous_colon;
+          anonymous_parameter_list; anonymous_right_paren; anonymous_colon;
           anonymous_type; anonymous_use; anonymous_body ]
       | AnonymousFunctionUseClause
-        { anonymous_use_token; anonymous_use_left_paren;
+        { anonymous_use_keyword; anonymous_use_left_paren;
           anonymous_use_variables; anonymous_use_right_paren } ->
-        [ anonymous_use_token; anonymous_use_left_paren;
+        [ anonymous_use_keyword; anonymous_use_left_paren;
           anonymous_use_variables; anonymous_use_right_paren ]
       | ListItem
         { list_item; list_separator } ->
@@ -1129,9 +1202,9 @@ module WithToken(Token: TokenType) = struct
         { script_header; script_declarations } ->
         [ script_header; script_declarations ]
       | EnumDeclaration
-        { enum_enum; enum_name; enum_colon; enum_base; enum_type;
+        { enum_keyword; enum_name; enum_colon; enum_base; enum_type;
           enum_left_brace; enum_enumerators; enum_right_brace } ->
-        [ enum_enum; enum_name; enum_colon; enum_base; enum_type;
+        [ enum_keyword; enum_name; enum_colon; enum_base; enum_type;
           enum_left_brace; enum_enumerators; enum_right_brace ]
       | Enumerator
         { enumerator_name; enumerator_equal; enumerator_value;
@@ -1139,39 +1212,41 @@ module WithToken(Token: TokenType) = struct
         [ enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon ]
       | AliasDeclaration
-        { alias_attribute_spec; alias_token; alias_name;
+        { alias_attribute_spec; alias_keyword; alias_name;
           alias_generic_parameter; alias_constraint; alias_equal; alias_type;
           alias_semicolon } ->
-        [ alias_attribute_spec; alias_token; alias_name;
+        [ alias_attribute_spec; alias_keyword; alias_name;
           alias_generic_parameter; alias_constraint; alias_equal; alias_type;
           alias_semicolon ]
       | PropertyDeclaration
-        { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
-        [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]
+        { property_modifiers; property_type;
+          property_declarators; property_semicolon } ->
+        [ property_modifiers; property_type;
+          property_declarators; property_semicolon ]
       | PropertyDeclarator
-        { prop_name; prop_init } ->
-        [ prop_name; prop_init ]
+        { property_name; property_initializer } ->
+        [ property_name; property_initializer ]
       | NamespaceDeclaration
-        { namespace_token; namespace_name; namespace_body } ->
-        [ namespace_token; namespace_name; namespace_body ]
+        { namespace_keyword; namespace_name; namespace_body } ->
+        [ namespace_keyword; namespace_name; namespace_body ]
       | NamespaceBody
         { namespace_left_brace; namespace_declarations;
           namespace_right_brace } ->
         [ namespace_left_brace; namespace_declarations;
           namespace_right_brace ]
       | NamespaceGroupUseDeclaration
-        { namespace_group_use; namespace_group_use_kind;
+        { namespace_group_use_keyword; namespace_group_use_kind;
           namespace_group_use_prefix; namespace_group_use_left_brace;
           namespace_group_use_clauses; namespace_group_use_right_brace;
           namespace_group_use_semicolon } ->
-        [ namespace_group_use; namespace_group_use_kind;
+        [ namespace_group_use_keyword; namespace_group_use_kind;
           namespace_group_use_prefix; namespace_group_use_left_brace;
           namespace_group_use_clauses; namespace_group_use_right_brace;
           namespace_group_use_semicolon ]
       | NamespaceUseDeclaration
-        { namespace_use; namespace_use_kind; namespace_use_clauses;
+        { namespace_use_keyword; namespace_use_kind; namespace_use_clauses;
           namespace_use_semicolon } ->
-        [ namespace_use; namespace_use_kind; namespace_use_clauses;
+        [ namespace_use_keyword; namespace_use_kind; namespace_use_clauses;
           namespace_use_semicolon ]
       | NamespaceUseClause
         { namespace_use_clause_kind; namespace_use_name;
@@ -1183,24 +1258,28 @@ module WithToken(Token: TokenType) = struct
         ->
         [ function_attribute_spec; function_declaration_header; function_body]
       | FunctionDeclarationHeader
-        { function_async; function_token; function_name;
-          function_type_params; function_left_paren; function_params;
+        { function_async; function_keyword; function_name;
+          function_type_parameter_list; function_left_paren;
+          function_parameter_list;
           function_right_paren; function_colon; function_type } ->
-        [ function_async; function_token; function_name;
-          function_type_params; function_left_paren; function_params;
+        [ function_async; function_keyword; function_name;
+          function_type_parameter_list; function_left_paren;
+          function_parameter_list;
           function_right_paren; function_colon; function_type ]
       | MethodishDeclaration
-        { methodish_attr; methodish_modifiers; methodish_function_decl_header;
+        { methodish_attribute; methodish_modifiers;
+          methodish_function_decl_header;
           methodish_function_body; methodish_semicolon } ->
-        [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
+        [ methodish_attribute; methodish_modifiers;
+          methodish_function_decl_header;
           methodish_function_body; methodish_semicolon ]
       | ClassishDeclaration
-        { classish_attr; classish_modifiers; classish_token;
-          classish_name; classish_type_params; classish_extends;
+        { classish_attribute; classish_modifiers; classish_keyword;
+          classish_name; classish_type_parameter_list; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body } ->
-        [ classish_attr; classish_modifiers; classish_token;
-          classish_name; classish_type_params; classish_extends;
+        [ classish_attribute; classish_modifiers; classish_keyword;
+          classish_name; classish_type_parameter_list; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body ]
       | ClassishBody
@@ -1208,50 +1287,60 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ classish_body_left_brace; classish_body_elements;
           classish_body_right_brace ]
+      | XHPChildrenDeclaration
+        { xhp_children; xhp_children_expression; xhp_children_semicolon } ->
+        [ xhp_children; xhp_children_expression; xhp_children_semicolon ]
+      | XHPCategoryDeclaration
+        { xhp_category; xhp_category_list; xhp_category_semicolon } ->
+        [ xhp_category; xhp_category_list; xhp_category_semicolon ]
       | XHPEnumType
-        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+        { xhp_enum_keyword; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace } ->
-        [ xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+        [ xhp_enum_keyword; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace ]
       | XHPRequired
         { xhp_required_at; xhp_required } ->
         [ xhp_required_at; xhp_required ]
       | XHPClassAttributeDeclaration
-        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
-        [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]
+        { xhp_attribute_keyword; xhp_attribute_list;
+          xhp_attribute_semicolon } ->
+        [ xhp_attribute_keyword; xhp_attribute_list;
+          xhp_attribute_semicolon ]
       | XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
-          xhp_attr_decl_required } ->
-        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
-          xhp_attr_decl_required ]
+        { xhp_attribute_decl_type; xhp_attribute_decl_name;
+          xhp_attribute_decl_initializer; xhp_attribute_decl_required } ->
+        [ xhp_attribute_decl_type; xhp_attribute_decl_name;
+          xhp_attribute_decl_initializer; xhp_attribute_decl_required ]
       | TraitUse
-        { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
-        [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]
+        { trait_use_keyword; trait_use_name_list; trait_use_semicolon; } ->
+        [ trait_use_keyword; trait_use_name_list; trait_use_semicolon; ]
       | RequireClause
-        { require_token; require_kind; require_name; require_semicolon } ->
-        [ require_token; require_kind; require_name; require_semicolon ]
+        { require_keyword; require_kind; require_name; require_semicolon } ->
+        [ require_keyword; require_kind; require_name; require_semicolon ]
       | ConstDeclaration
-        { const_abstract; const_token; const_type_specifier;
+        { const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; } ->
-        [ const_abstract; const_token; const_type_specifier;
+        [ const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; ]
       | ConstantDeclarator
         { constant_declarator_name; constant_declarator_initializer; } ->
         [ constant_declarator_name; constant_declarator_initializer; ]
       | TypeConstDeclaration
-        { type_const_abstract; type_const_const_token; type_const_type_token;
+        { type_const_abstract; type_const_keyword; type_const_type_keyword;
           type_const_name; type_const_type_constraint; type_const_equal;
           type_const_type_specifier; type_const_semicolon; } ->
-        [ type_const_abstract; type_const_const_token; type_const_type_token;
+        [ type_const_abstract; type_const_keyword; type_const_type_keyword;
           type_const_name; type_const_type_constraint; type_const_equal;
           type_const_type_specifier; type_const_semicolon; ]
       | DecoratedExpression
         { decorated_expression_decorator; decorated_expression_expression; } ->
         [ decorated_expression_decorator; decorated_expression_expression; ]
       | ParameterDeclaration
-        { param_attr; param_visibility; param_type; param_name; param_default }
+        { param_attribute; param_visibility; param_type;
+          param_name; param_default }
         ->
-        [ param_attr; param_visibility; param_type; param_name; param_default ]
+        [ param_attribute; param_visibility; param_type;
+          param_name; param_default ]
       | AttributeSpecification
         { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
           attribute_spec_right_double_angle } ->
@@ -1262,11 +1351,12 @@ module WithToken(Token: TokenType) = struct
           attribute_right_paren } ->
         [ attribute_name; attribute_left_paren; attribute_values;
           attribute_right_paren ]
+      | InclusionExpression
+        { inclusion_require; inclusion_filename } ->
+        [ inclusion_require; inclusion_filename ]
       | InclusionDirective
-        { inclusion_require; inclusion_left_paren; inclusion_filename;
-          inclusion_right_paren; inclusion_semicolon } ->
-        [ inclusion_require; inclusion_left_paren; inclusion_filename;
-          inclusion_right_paren; inclusion_semicolon ]
+        { inclusion_expression; inclusion_semicolon } ->
+        [ inclusion_expression; inclusion_semicolon ]
       | CompoundStatement
         { compound_left_brace; compound_statements; compound_right_brace } ->
         [ compound_left_brace; compound_statements; compound_right_brace ]
@@ -1274,19 +1364,19 @@ module WithToken(Token: TokenType) = struct
         { expr_statement_expr; expr_statement_semicolon } ->
         [ expr_statement_expr; expr_statement_semicolon ]
       | WhileStatement
-        { while_keyword; while_left_paren; while_condition_expr;
+        { while_keyword; while_left_paren; while_condition;
           while_right_paren; while_body } ->
-        [ while_keyword; while_left_paren; while_condition_expr;
+        [ while_keyword; while_left_paren; while_condition;
           while_right_paren; while_body ]
       | IfStatement
-        { if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+        { if_keyword; if_left_paren; if_condition; if_right_paren;
           if_statement; if_elseif_clauses; if_else_clause } ->
-        [ if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+        [ if_keyword; if_left_paren; if_condition; if_right_paren;
           if_statement; if_elseif_clauses; if_else_clause ]
       | ElseifClause
-        { elseif_keyword; elseif_left_paren; elseif_condition_expr;
+        { elseif_keyword; elseif_left_paren; elseif_condition;
           elseif_right_paren; elseif_statement } ->
-        [ elseif_keyword; elseif_left_paren; elseif_condition_expr;
+        [ elseif_keyword; elseif_left_paren; elseif_condition;
           elseif_right_paren; elseif_statement ]
       | ElseClause
         { else_keyword; else_statement } ->
@@ -1347,14 +1437,14 @@ module WithToken(Token: TokenType) = struct
         { static_static; static_declarations; static_semicolon } ->
         [ static_static; static_declarations; static_semicolon ]
       | SimpleInitializer
-        { simple_init_equal; simple_init_value } ->
-        [ simple_init_equal; simple_init_value ]
+        { simple_initializer_equal; simple_initializer_value } ->
+        [ simple_initializer_equal; simple_initializer_value ]
       | StaticDeclarator
-        { static_name; static_init } ->
-        [ static_name; static_init ]
+        { static_name; static_initializer } ->
+        [ static_name; static_initializer ]
       | EchoStatement
-        { echo_token; echo_expression_list; echo_semicolon; } ->
-        [ echo_token; echo_expression_list; echo_semicolon; ]
+        { echo_keyword; echo_expression_list; echo_semicolon; } ->
+        [ echo_keyword; echo_expression_list; echo_semicolon; ]
       | PrefixUnaryOperator
         { unary_operator; unary_operand } ->
         [ unary_operator; unary_operand ]
@@ -1364,6 +1454,11 @@ module WithToken(Token: TokenType) = struct
       | BinaryOperator
         { binary_left_operand; binary_operator; binary_right_operand } ->
         [ binary_left_operand; binary_operator; binary_right_operand ]
+      | InstanceofExpression
+        { instanceof_left_operand; instanceof_operator;
+          instanceof_right_operand } ->
+        [ instanceof_left_operand; instanceof_operator;
+          instanceof_right_operand ]
       | ConditionalExpression
         { conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative } ->
@@ -1381,10 +1476,10 @@ module WithToken(Token: TokenType) = struct
         { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
         [ braced_expr_left_brace; braced_expr; braced_expr_right_brace ]
       | ListExpression
-        { listlike_keyword; listlike_left_paren; listlike_members;
-          listlike_right_paren } ->
-        [ listlike_keyword; listlike_left_paren; listlike_members;
-          listlike_right_paren ]
+        { list_keyword; list_left_paren; list_members;
+          list_right_paren } ->
+        [ list_keyword; list_left_paren; list_members;
+          list_right_paren ]
       | CollectionLiteralExpression
         { collection_literal_name; collection_literal_left_brace;
           collection_literal_initialization_list;
@@ -1401,8 +1496,10 @@ module WithToken(Token: TokenType) = struct
         { shape_shape; shape_left_paren; shape_fields; shape_right_paren } ->
         [ shape_shape; shape_left_paren; shape_fields; shape_right_paren ]
       | FieldInitializer
-        { field_init_name; field_init_arrow; field_init_value } ->
-        [ field_init_name; field_init_arrow; field_init_value ]
+        { field_initializer_name; field_initializer_arrow;
+          field_initializer_value } ->
+        [ field_initializer_name; field_initializer_arrow;
+          field_initializer_value ]
       | ArrayCreationExpression
         { array_creation_left_bracket; array_creation_members;
           array_creation_right_bracket } ->
@@ -1428,29 +1525,34 @@ module WithToken(Token: TokenType) = struct
         { xhp_open; xhp_body; xhp_close } ->
         [ xhp_open; xhp_body; xhp_close ]
       | XHPOpen
-        { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
-        [ xhp_open_name; xhp_open_attrs; xhp_open_right_angle ]
+        { xhp_open_name; xhp_open_attributes; xhp_open_right_angle } ->
+        [ xhp_open_name; xhp_open_attributes; xhp_open_right_angle ]
       | XHPClose
         { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle } ->
         [ xhp_close_left_angle; xhp_close_name; xhp_close_right_angle ]
       | XHPAttribute
-        { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
-        [ xhp_attr_name; xhp_attr_equal; xhp_attr_expr ]
+        { xhp_attribute_name; xhp_attribute_equal; xhp_attribute_expr } ->
+        [ xhp_attribute_name; xhp_attribute_equal; xhp_attribute_expr ]
       | TypeConstant
         { type_constant_left_type; type_constant_separator;
           type_constant_right_type } ->
         [ type_constant_left_type; type_constant_separator;
         type_constant_right_type ]
-      | SimpleTypeSpecifier x -> [x]
+      | SimpleTypeSpecifier
+        { simple_type_specifier } ->
+        [ simple_type_specifier ]
       | TypeConstraint
-        { constraint_token; matched_type } ->
-        [ constraint_token; matched_type ]
+        { constraint_keyword; constraint_type } ->
+        [ constraint_keyword; constraint_type ]
       | TypeParameter
         { type_variance_opt; type_name; type_constraint_list_opt } ->
         [ type_variance_opt; type_name; type_constraint_list_opt ]
       | NullableTypeSpecifier
         { nullable_question; nullable_type } ->
         [ nullable_question; nullable_type ]
+      | SoftTypeSpecifier
+        { soft_at; soft_type } ->
+        [ soft_at; soft_type ]
       | GenericTypeSpecifier
         { generic_class_type; generic_arguments } ->
         [ generic_class_type; generic_arguments ]
@@ -1500,29 +1602,39 @@ module WithToken(Token: TokenType) = struct
       match node.syntax with
       | Missing -> []
       | Token _ -> []
-      | LiteralExpression _ -> [ "literal_expression" ]
-      | VariableExpression _ -> [ "variable_expression" ]
-      | QualifiedNameExpression _ -> [ "qualified_name_expression" ]
-      | PipeVariableExpression _ -> ["pipe_variable_expression"]
-      | Error _ -> []
+      | LiteralExpression
+        { literal_expression }->
+        [ "literal_expression" ]
+      | VariableExpression
+        { variable_expression }->
+        [ "variable_expression" ]
+      | QualifiedNameExpression
+        { qualified_name_expression } ->
+        [ "qualified_name_expression" ]
+      | PipeVariableExpression
+        { pipe_variable_expression } ->
+        ["pipe_variable_expression"]
+      | Error
+        { error } ->
+        [ "error" ]
       | SyntaxList _ -> []
       | MemberSelectionExpression
         { member_object; member_operator; member_name } ->
         [ "member_object"; "member_operator"; "member_name" ]
       | SafeMemberSelectionExpression
-        { member_object; member_operator; member_name } ->
-        [ "member_object"; "member_operator"; "member_name" ]
+        { safe_member_object; safe_member_operator; safe_member_name } ->
+        [ "safe_member_object"; "safe_member_operator"; "safe_member_name" ]
       | ScopeResolutionExpression
         { scope_resolution_qualifier; scope_resolution_operator;
           scope_resolution_name } ->
         [ "scope_resolution_qualifier"; "scope_resolution_operator";
           "scope_resolution_name" ]
       | YieldExpression
-        { yield_token; yield_operand } ->
-        [ "yield_token"; "yield_operand" ]
+        { yield_keyword; yield_operand } ->
+        [ "yield_keyword"; "yield_operand" ]
       | PrintExpression
-        { print_token; print_expr; } ->
-        [ "print_token"; "print_expr"; ]
+        { print_keyword; print_expr; } ->
+        [ "print_keyword"; "print_expr"; ]
       | CastExpression
         { cast_left_paren; cast_type; cast_right_paren; cast_operand } ->
         [ "cast_left_paren"; "cast_type"; "cast_right_paren"; "cast_operand" ]
@@ -1530,21 +1642,22 @@ module WithToken(Token: TokenType) = struct
         { lambda_async; lambda_signature; lambda_arrow; lambda_body } ->
         [ "lambda_async"; "lambda_signature"; "lambda_arrow"; "lambda_body" ]
       | LambdaSignature
-        { lambda_left_paren; lambda_params; lambda_right_paren;
+        { lambda_left_paren; lambda_parameter_list; lambda_right_paren;
           lambda_colon; lambda_type } ->
-        [ "lambda_left_paren"; "lambda_params"; "lambda_right_paren";
+        [ "lambda_left_paren"; "lambda_parameter_list"; "lambda_right_paren";
           "lambda_colon"; "lambda_type" ]
       | AnonymousFunction
         { anonymous_async; anonymous_function; anonymous_left_paren;
-          anonymous_params; anonymous_right_paren; anonymous_colon;
+          anonymous_parameter_list; anonymous_right_paren; anonymous_colon;
           anonymous_type; anonymous_use; anonymous_body } ->
         [ "anonymous_async"; "anonymous_function"; "anonymous_left_paren";
-          "anonymous_params"; "anonymous_right_paren"; "anonymous_colon";
-          "anonymous_type"; "anonymous_use"; "anonymous_body" ]
+          "anonymous_parameter_list"; "anonymous_right_paren";
+          "anonymous_colon"; "anonymous_type"; "anonymous_use";
+          "anonymous_body" ]
       | AnonymousFunctionUseClause
-        { anonymous_use_token; anonymous_use_left_paren;
+        { anonymous_use_keyword; anonymous_use_left_paren;
           anonymous_use_variables; anonymous_use_right_paren } ->
-        [ "anonymous_use_token"; "anonymous_use_left_paren";
+        [ "anonymous_use_keyword"; "anonymous_use_left_paren";
           "anonymous_use_variables"; "anonymous_use_right_paren" ]
       | ListItem
         { list_item; list_separator } ->
@@ -1556,9 +1669,9 @@ module WithToken(Token: TokenType) = struct
         { script_header; script_declarations } ->
         [ "script_header"; "script_declarations" ]
       | EnumDeclaration
-        { enum_enum; enum_name; enum_colon; enum_base; enum_type;
+        { enum_keyword; enum_name; enum_colon; enum_base; enum_type;
           enum_left_brace; enum_enumerators; enum_right_brace } ->
-        [ "enum_enum"; "enum_name"; "enum_colon"; "enum_base"; "enum_type";
+        [ "enum_keyword"; "enum_name"; "enum_colon"; "enum_base"; "enum_type";
           "enum_left_brace"; "enum_enumerators"; "enum_right_brace" ]
       | Enumerator
         { enumerator_name; enumerator_equal; enumerator_value;
@@ -1566,40 +1679,42 @@ module WithToken(Token: TokenType) = struct
         [ "enumerator_name"; "enumerator_equal"; "enumerator_value";
           "enumerator_semicolon" ]
       | AliasDeclaration
-        { alias_attribute_spec; alias_token; alias_name;
+        { alias_attribute_spec; alias_keyword; alias_name;
           alias_generic_parameter; alias_constraint; alias_equal; alias_type;
           alias_semicolon } ->
-        [ "alias_attribute_spec"; "alias_token"; "alias_name";
+        [ "alias_attribute_spec"; "alias_keyword"; "alias_name";
           "alias_generic_parameter"; "alias_constraint"; "alias_equal";
           "alias_type"; "alias_semicolon" ]
       | PropertyDeclaration
-        { prop_modifiers; prop_type; prop_declarators; prop_semicolon } ->
-        [ "prop_modifiers"; "prop_type"; "prop_declarators"; "prop_semicolon" ]
+        { property_modifiers; property_type;
+          property_declarators; property_semicolon } ->
+        [ "property_modifiers"; "property_type";
+          "property_declarators"; "property_semicolon" ]
       | PropertyDeclarator
-        { prop_name; prop_init } ->
-        [ "prop_name"; "prop_init" ]
+        { property_name; property_initializer } ->
+        [ "property_name"; "property_initializer" ]
       | NamespaceDeclaration
-        { namespace_token; namespace_name; namespace_body } ->
-        [ "namespace_token"; "namespace_name"; "namespace_body" ]
+        { namespace_keyword; namespace_name; namespace_body } ->
+        [ "namespace_keyword"; "namespace_name"; "namespace_body" ]
       | NamespaceBody
         { namespace_left_brace; namespace_declarations;
           namespace_right_brace } ->
         [ "namespace_left_brace"; "namespace_declarations";
           "namespace_right_brace" ]
       | NamespaceGroupUseDeclaration
-        { namespace_group_use; namespace_group_use_kind;
+        { namespace_group_use_keyword; namespace_group_use_kind;
           namespace_group_use_prefix; namespace_group_use_left_brace;
           namespace_group_use_clauses; namespace_group_use_right_brace;
           namespace_group_use_semicolon } ->
-        [ "namespace_group_use"; "namespace_group_use_kind";
+        [ "namespace_group_use_keyword"; "namespace_group_use_kind";
           "namespace_group_use_prefix"; "namespace_group_use_left_brace";
           "namespace_group_use_clauses"; "namespace_group_use_right_brace";
           "namespace_group_use_semicolon" ]
       | NamespaceUseDeclaration
-        { namespace_use; namespace_use_kind; namespace_use_clauses;
+        { namespace_use_keyword; namespace_use_kind; namespace_use_clauses;
           namespace_use_semicolon } ->
         [ "namespace_use"; "namespace_use_kind"; "namespace_use_clauses";
-          "namespace_use_semicolon" ]
+          "namespace_use_keyword_semicolon" ]
       | NamespaceUseClause
         { namespace_use_clause_kind; namespace_use_name;
           namespace_use_as; namespace_use_alias } ->
@@ -1610,25 +1725,28 @@ module WithToken(Token: TokenType) = struct
         -> [ "function_attribute_spec"; "function_declaration_header";
         "function_body" ]
       | FunctionDeclarationHeader
-        { function_async; function_token; function_name;
-          function_type_params; function_left_paren; function_params;
+        { function_async; function_keyword; function_name;
+          function_type_parameter_list; function_left_paren;
+          function_parameter_list;
           function_right_paren; function_colon; function_type; } ->
-        [ "function_async"; "function_token"; "function_name";
-          "function_type_params"; "function_left_paren"; "function_params";
+        [ "function_async"; "function_keyword"; "function_name";
+          "function_type_parameter_list"; "function_left_paren";
+          "function_parameter_list";
           "function_right_paren"; "function_colon"; "function_type"; ]
       | MethodishDeclaration
-        { methodish_attr; methodish_modifiers; methodish_function_decl_header;
+        { methodish_attribute; methodish_modifiers;
+          methodish_function_decl_header;
           methodish_function_body; methodish_semicolon } ->
-        [ "methodish_attr"; "methodish_modifiers";
+        [ "methodish_attribute"; "methodish_modifiers";
           "methodish_function_decl_header"; "methodish_function_body";
           "methodish_semicolon" ]
       | ClassishDeclaration
-        { classish_attr; classish_modifiers; classish_token;
-          classish_name; classish_type_params; classish_extends;
+        { classish_attribute; classish_modifiers; classish_keyword;
+          classish_name; classish_type_parameter_list; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body } ->
-        [ "classish_attr"; "classish_modifiers";
-          "classish_token"; "classish_name"; "classish_type_params";
+        [ "classish_attribute"; "classish_modifiers";
+          "classish_keyword"; "classish_name"; "classish_type_parameter_list";
           "classish_extends"; "classish_extends_list"; "classish_implements";
           "classish_implements_list"; "classish_body" ]
       | ClassishBody
@@ -1636,51 +1754,61 @@ module WithToken(Token: TokenType) = struct
           classish_body_right_brace } ->
         [ "classish_body_left_brace"; "classish_body_elements";
           "classish_body_right_brace" ]
+      | XHPChildrenDeclaration
+        { xhp_children; xhp_children_expression; xhp_children_semicolon } ->
+        [ "xhp_children"; "xhp_children_expression"; "xhp_children_semicolon" ]
+      | XHPCategoryDeclaration
+        { xhp_category; xhp_category_list; xhp_category_semicolon } ->
+        [ "xhp_category"; "xhp_category_list"; "xhp_category_semicolon" ]
       | XHPEnumType
-        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+        { xhp_enum_keyword; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace } ->
-        [ "xhp_enum_token"; "xhp_enum_left_brace"; "xhp_enum_values";
+        [ "xhp_enum_keyword"; "xhp_enum_left_brace"; "xhp_enum_values";
           "xhp_enum_right_brace" ]
       | XHPRequired
         { xhp_required_at; xhp_required } ->
         [ "xhp_required_at"; "xhp_required" ]
       | XHPClassAttributeDeclaration
-        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon } ->
-        [ "xhp_attr_token"; "xhp_attr_list"; "xhp_attr_semicolon" ]
+        { xhp_attribute_keyword; xhp_attribute_list;
+          xhp_attribute_semicolon } ->
+        [ "xhp_attribute_keyword"; "xhp_attribute_list";
+          "xhp_attribute_semicolon" ]
       | XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
-          xhp_attr_decl_required } ->
-        [ "xhp_attr_decl_type"; "xhp_attr_decl_name"; "xhp_attr_decl_init";
-          "xhp_attr_decl_required" ]
+        { xhp_attribute_decl_type; xhp_attribute_decl_name;
+          xhp_attribute_decl_initializer; xhp_attribute_decl_required } ->
+        [ "xhp_attribute_decl_type"; "xhp_attribute_decl_name";
+          "xhp_attribute_decl_initializer"; "xhp_attribute_decl_required" ]
       | TraitUse
-        { trait_use_token; trait_use_name_list; trait_use_semicolon; } ->
-        [ "trait_use_token"; "trait_use_name_list"; "trait_use_semicolon"; ]
+        { trait_use_keyword; trait_use_name_list; trait_use_semicolon; } ->
+        [ "trait_use_keyword"; "trait_use_name_list"; "trait_use_semicolon"; ]
       | RequireClause
-        { require_token; require_kind; require_name; require_semicolon } ->
-        [ "require_token"; "require_kind"; "require_name"; "require_semicolon" ]
+        { require_keyword; require_kind; require_name; require_semicolon } ->
+        [ "require_keyword"; "require_kind"; "require_name";
+          "require_semicolon" ]
       | ConstDeclaration
-        { const_abstract; const_token; const_type_specifier;
+        { const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; } ->
-        [ "const_abstract"; "const_token"; "const_type_specifier";
+        [ "const_abstract"; "const_keyword"; "const_type_specifier";
           "const_declarator_list"; "const_semicolon"; ]
       | ConstantDeclarator
         { constant_declarator_name; constant_declarator_initializer; } ->
         [ "constant_declarator_name"; "constant_declarator_initializer"; ]
       | TypeConstDeclaration
-        { type_const_abstract; type_const_const_token; type_const_type_token;
+        { type_const_abstract; type_const_keyword; type_const_type_keyword;
           type_const_name; type_const_type_constraint; type_const_equal;
           type_const_type_specifier; type_const_semicolon; } ->
-        [ "type_const_abstract"; "type_const_const_token";
-          "type_const_type_token"; "type_const_name";
+        [ "type_const_abstract"; "type_const_keyword";
+          "type_const_type_keyword"; "type_const_name";
           "type_const_type_constraint"; "type_const_equal";
           "type_const_type_specifier"; "type_const_semicolon"; ]
       | DecoratedExpression
         { decorated_expression_decorator; decorated_expression_expression; } ->
         [ "decorated_expression_decorator"; "decorated_expression_expression"; ]
       | ParameterDeclaration
-        { param_attr; param_visibility; param_type; param_name; param_default }
+        { param_attribute; param_visibility; param_type; param_name;
+          param_default }
         ->
-        [ "param_attr"; "param_visibility"; "param_type"; "param_name";
+        [ "param_attribute"; "param_visibility"; "param_type"; "param_name";
           "param_default" ]
       | AttributeSpecification
         { attribute_spec_left_double_angle; attribute_spec_attribute_list ;
@@ -1692,11 +1820,12 @@ module WithToken(Token: TokenType) = struct
           attribute_right_paren } ->
         [ "attribute_name"; "attribute_left_paren"; "attribute_values";
           "attribute_right_paren" ]
+      | InclusionExpression
+        { inclusion_require; inclusion_filename } ->
+        [ "inclusion_require"; "inclusion_filename" ]
       | InclusionDirective
-        { inclusion_require; inclusion_left_paren; inclusion_filename;
-          inclusion_right_paren; inclusion_semicolon } ->
-        [ "inclusion_require"; "inclusion_left_paren"; "inclusion_filename";
-          "inclusion_right_paren"; "inclusion_semicolon" ]
+        { inclusion_expression; inclusion_semicolon } ->
+        [ "inclusion_expression"; "inclusion_semicolon" ]
       | CompoundStatement
         { compound_left_brace; compound_statements; compound_right_brace } ->
         [ "compound_left_brace"; "compound_statements"; "compound_right_brace" ]
@@ -1704,19 +1833,19 @@ module WithToken(Token: TokenType) = struct
         { expr_statement_expr; expr_statement_semicolon } ->
         [ "expr_statement_expr"; "expr_statement_semicolon" ]
       | WhileStatement
-        { while_keyword; while_left_paren; while_condition_expr;
+        { while_keyword; while_left_paren; while_condition;
           while_right_paren; while_body } ->
-        [ "while_keyword"; "while_left_paren"; "while_condition_expr";
+        [ "while_keyword"; "while_left_paren"; "while_condition";
           "while_right_paren"; "while_body" ]
       | IfStatement
-        { if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+        { if_keyword; if_left_paren; if_condition; if_right_paren;
           if_statement; if_elseif_clauses; if_else_clause } ->
-        [ "if_keyword"; "if_left_paren"; "if_condition_expr"; "if_right_paren";
+        [ "if_keyword"; "if_left_paren"; "if_condition"; "if_right_paren";
           "if_statement"; "if_elseif_clauses"; "if_else_clause" ]
       | ElseifClause
-        { elseif_keyword; elseif_left_paren; elseif_condition_expr;
+        { elseif_keyword; elseif_left_paren; elseif_condition;
           elseif_right_paren; elseif_statement } ->
-        [ "elseif_keyword"; "elseif_left_paren"; "elseif_condition_expr";
+        [ "elseif_keyword"; "elseif_left_paren"; "elseif_condition";
           "elseif_right_paren"; "elseif_statement" ]
       | ElseClause
         { else_keyword; else_statement } ->
@@ -1779,14 +1908,14 @@ module WithToken(Token: TokenType) = struct
         { static_static; static_declarations; static_semicolon } ->
         [ "static_static"; "static_declarations"; "static_semicolon" ]
       | SimpleInitializer
-        { simple_init_equal; simple_init_value } ->
-        [ "simple_init_equal"; "simple_init_value" ]
+        { simple_initializer_equal; simple_initializer_value } ->
+        [ "simple_initializer_equal"; "simple_initializer_value" ]
       | StaticDeclarator
-        { static_name; static_init } ->
-        [ "static_name"; "static_init" ]
+        { static_name; static_initializer } ->
+        [ "static_name"; "static_initializer" ]
       | EchoStatement
-        { echo_token; echo_expression_list; echo_semicolon; } ->
-        [ "echo_token"; "echo_expression_list"; "echo_semicolon"; ]
+        { echo_keyword; echo_expression_list; echo_semicolon; } ->
+        [ "echo_keyword"; "echo_expression_list"; "echo_semicolon"; ]
       | PrefixUnaryOperator
         { unary_operator; unary_operand } ->
         [ "unary_operator"; "unary_operand" ]
@@ -1796,6 +1925,11 @@ module WithToken(Token: TokenType) = struct
       | BinaryOperator
         { binary_left_operand; binary_operator; binary_right_operand } ->
         [ "binary_left_operand"; "binary_operator"; "binary_right_operand" ]
+      | InstanceofExpression
+        { instanceof_left_operand; instanceof_operator;
+          instanceof_right_operand } ->
+        [ "instanceof_left_operand"; "instanceof_operator";
+          "instanceof_right_operand" ]
       | ConditionalExpression
         { conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative } ->
@@ -1813,10 +1947,10 @@ module WithToken(Token: TokenType) = struct
         { braced_expr_left_brace; braced_expr; braced_expr_right_brace } ->
         [ "braced_expr_left_brace"; "braced_expr"; "braced_expr_right_brace" ]
       | ListExpression
-        { listlike_keyword; listlike_left_paren; listlike_members;
-          listlike_right_paren } ->
-        [ "listlike_keyword"; "listlike_left_paren"; "listlike_members";
-          "listlike_right_paren" ]
+        { list_keyword; list_left_paren; list_members;
+          list_right_paren } ->
+        [ "list_keyword"; "list_left_paren"; "list_members";
+          "list_right_paren" ]
       | CollectionLiteralExpression
         { collection_literal_name; collection_literal_left_brace;
           collection_literal_initialization_list;
@@ -1836,8 +1970,10 @@ module WithToken(Token: TokenType) = struct
         [ "shape_shape"; "shape_left_paren"; "shape_fields";
           "shape_right_paren" ]
       | FieldInitializer
-        { field_init_name; field_init_arrow; field_init_value } ->
-        [ "field_init_name"; "field_init_arrow"; "field_init_value" ]
+        { field_initializer_name; field_initializer_arrow;
+          field_initializer_value } ->
+        [ "field_initializer_name"; "field_initializer_arrow";
+          "field_initializer_value" ]
       | ArrayCreationExpression
         { array_creation_left_bracket; array_creation_members;
           array_creation_right_bracket } ->
@@ -1863,25 +1999,30 @@ module WithToken(Token: TokenType) = struct
         { xhp_open; xhp_body; xhp_close } ->
         [ "xhp_open"; "xhp_body"; "xhp_close" ]
       | XHPOpen
-        { xhp_open_name; xhp_open_attrs; xhp_open_right_angle } ->
-        [ "xhp_open_name"; "xhp_open_attrs"; "xhp_open_right_angle" ]
+        { xhp_open_name; xhp_open_attributes; xhp_open_right_angle } ->
+        [ "xhp_open_name"; "xhp_open_attributes"; "xhp_open_right_angle" ]
       | XHPClose
         { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle } ->
         [ "xhp_close_left_angle"; "xhp_close_name"; "xhp_close_right_angle" ]
       | XHPAttribute
-        { xhp_attr_name; xhp_attr_equal; xhp_attr_expr } ->
-        [ "xhp_attr_name"; "xhp_attr_equal"; "xhp_attr_expr" ]
+        { xhp_attribute_name; xhp_attribute_equal; xhp_attribute_expr } ->
+        [ "xhp_attribute_name"; "xhp_attribute_equal"; "xhp_attribute_expr" ]
       | TypeConstant
         { type_constant_left_type; type_constant_separator;
           type_constant_right_type } ->
         [ "type_constant_left_type"; "type_constant_separator";
         "type_constant_right_type" ]
-      | SimpleTypeSpecifier _ -> [ "simple_type_specifier" ]
+      | SimpleTypeSpecifier
+        { simple_type_specifier } ->
+        [ "simple_type_specifier" ]
       | TypeParameter
         { type_variance_opt; type_name; type_constraint_list_opt  } ->
         [ "type_variance_opt"; "type_name"; "type_constraint_list_opt " ]
-      | TypeConstraint { constraint_token; matched_type } ->
-        [ "constraint_token"; "matched_type" ]
+      | TypeConstraint { constraint_keyword; constraint_type } ->
+        [ "constraint_keyword"; "constraint_type" ]
+      | SoftTypeSpecifier
+        { soft_at; soft_type } ->
+        [ "soft_at"; "soft_type" ]
       | NullableTypeSpecifier
         { nullable_question; nullable_type } ->
         [ "nullable_question"; "nullable_type" ]
@@ -1937,7 +2078,6 @@ module WithToken(Token: TokenType) = struct
       let open Hh_json in
       let ch = match node.syntax with
       | Token t -> [ "token", Token.to_json t ]
-      | Error x -> [ ("errors", JSON_Array (List.map to_json x)) ]
       | SyntaxList x -> [ ("elements", JSON_Array (List.map to_json x)) ]
       | _ ->
         let rec aux acc c n =
@@ -1950,204 +2090,6 @@ module WithToken(Token: TokenType) = struct
       let k = ("kind", JSON_String (SyntaxKind.to_string (kind node))) in
       JSON_Object (k :: ch)
 
-    let script_header x = x.script_header
-    let script_declarations x = x.script_declarations
-    let header_less_than x = x.header_less_than
-    let header_question x = x.header_question
-    let header_language x = x.header_language
-    let function_async x = x.function_async
-    let function_token x = x.function_token
-    let function_name x = x.function_name
-    let function_type_params x = x.function_type_params
-    let function_left_paren x = x.function_left_paren
-    let function_params x = x.function_params
-    let function_right_paren x = x.function_right_paren
-    let function_colon x = x.function_colon
-    let function_type x = x.function_type
-    let function_attribute_spec x = x.function_attribute_spec
-    let function_declaration_header x = x.function_declaration_header
-    let function_body x = x.function_body
-    let methodish_attr x = x.methodish_attr
-    let methodish_modifiers x = x.methodish_modifiers
-    let methodish_function_decl_header x = x.methodish_function_decl_header
-    let methodish_function_body x =
-      x.methodish_function_body
-    let methodish_semicolon x = x.methodish_semicolon
-    let classish_attr x = x.classish_attr
-    let classish_modifiers x = x.classish_modifiers
-    let classish_token x = x.classish_token
-    let classish_name x = x.classish_name
-    let classish_type_params x = x.classish_type_params
-    let classish_extends x = x.classish_extends
-    let classish_extends_list x = x.classish_extends_list
-    let classish_implements x = x.classish_implements
-    let classish_implements_list x = x.classish_implements_list
-    let classish_body x = x.classish_body
-    let classish_body_left_brace x = x.classish_body_left_brace
-    let classish_body_elements x = x.classish_body_elements
-    let classish_body_right_brace x = x.classish_body_right_brace
-    let trait_use_token x = x.trait_use_token
-    let trait_use_name_list x = x.trait_use_name_list
-    let trait_use_semicolon x = x.trait_use_semicolon
-    let const_abstract x = x.const_abstract
-    let const_token x = x.const_token
-    let const_type_specifier x = x.const_type_specifier
-    let const_declarator_list x = x.const_declarator_list
-    let const_semicolon x = x.const_semicolon
-    let constant_declarator_name x = x.constant_declarator_name
-    let constant_declarator_initializer x = x.constant_declarator_initializer
-    let type_const_abstract x = x.type_const_abstract
-    let type_const_const_token x = x.type_const_const_token
-    let type_const_type_token x = x.type_const_type_token
-    let type_const_name x = x.type_const_name
-    let type_const_type_constraint x = x.type_const_type_constraint
-    let type_const_equal x = x.type_const_equal
-    let type_const_type_specifier x = x.type_const_type_specifier
-    let type_const_semicolon x = x.type_const_semicolon
-    let decorated_expression_decorator x = x.decorated_expression_decorator
-    let decorated_expression_expression x = x.decorated_expression_expression
-    let param_attr x = x.param_attr
-    let param_visibility x = x.param_visibility
-    let param_type x = x.param_type
-    let param_name x = x.param_name
-    let param_default x = x.param_default
-    let attribute_spec_left_double_angle x = x.attribute_spec_left_double_angle
-    let attribute_spec_attribute_list x = x.attribute_spec_attribute_list
-    let attribute_spec_right_double_angle x =
-      x.attribute_spec_right_double_angle
-    let attribute_name x = x.attribute_name
-    let attribute_left_paren x = x.attribute_left_paren
-    let attribute_values x = x.attribute_values
-    let attribute_right_paren x = x.attribute_right_paren
-    let compound_left_brace x = x.compound_left_brace
-    let compound_statements x = x.compound_statements
-    let compound_right_brace x = x.compound_right_brace
-    let while_keyword x = x.while_keyword
-    let while_left_paren x = x.while_left_paren
-    let while_condition_expr x = x.while_condition_expr
-    let while_right_paren x = x.while_right_paren
-    let while_body x = x.while_body
-    let foreach_keyword x = x.foreach_keyword
-    let foreach_left_paren x = x.foreach_left_paren
-    let foreach_collection_name x = x.foreach_collection_name
-    let foreach_await_opt x = x.foreach_await_opt
-    let foreach_as x = x.foreach_as
-    let foreach_key_opt x = x.foreach_key_opt
-    let foreach_key_arrow_opt x = x.foreach_key_arrow_opt
-    let foreach_value x = x.foreach_value
-    let foreach_right_paren x = x.foreach_right_paren
-    let foreach_statement x = x.foreach_statement
-    let if_keyword x = x.if_keyword
-    let if_left_paren x = x.if_left_paren
-    let if_condition_expr x = x.if_condition_expr
-    let if_right_paren x = x.if_right_paren
-    let if_statement x = x.if_statement
-    let if_elseif_clauses x = x.if_elseif_clauses
-    let if_else_clause x = x.if_else_clause
-    let elseif_keyword x = x.elseif_keyword
-    let elseif_left_paren x = x.elseif_left_paren
-    let elseif_condition_expr x = x.elseif_condition_expr
-    let elseif_right_paren x = x.elseif_right_paren
-    let elseif_statement x = x.elseif_statement
-    let else_keyword x = x.else_keyword
-    let else_statement x = x.else_statement
-    let try_keyword x = x.try_keyword
-    let try_compound_statement x = x.try_compound_statement
-    let try_catch_clauses x = x.catch_clauses
-    let try_finally_clause x = x.finally_clause
-    let finally_keyword x = x.finally_keyword
-    let finally_compound_statement x = x.finally_compound_statement
-    let do_keyword x = x.do_keyword
-    let do_statement x = x.do_statement
-    let do_while_keyword x = x.do_while_keyword
-    let do_left_paren x = x.do_left_paren
-    let do_condition_expr x = x.do_condition_expr
-    let do_right_paren x = x.do_right_paren
-    let do_semicolon x = x.do_semicolon
-    let switch_keyword x = x.switch_keyword
-    let switch_left_paren x = x.switch_left_paren
-    let switch_expr x = x.switch_expr
-    let switch_right_paren x = x.switch_right_paren
-    let switch_compound_statement x = x.switch_compound_statement
-    let case_keyword x = x.case_keyword
-    let case_expr x = x.case_expr
-    let case_colon x = x.case_colon
-    let case_stmt x = x.case_stmt
-    let default_keyword x = x.default_keyword
-    let default_colon x = x.default_colon
-    let default_stmt x = x.default_stmt
-    let return_keyword x = x.return_keyword
-    let return_expr x = x.return_expr
-    let return_semicolon x = x.return_semicolon
-    let throw_keyword x = x.throw_keyword
-    let throw_expr x = x.throw_expr
-    let throw_semicolon x = x.throw_semicolon
-    let echo_token x = x.echo_token
-    let echo_expression_list x = x.echo_expression_list
-    let echo_semicolon x = x.echo_semicolon
-    let expr_statement_expr x = x.expr_statement_expr
-    let expr_statement_semicolon x = x.expr_statement_semicolon
-    let unary_operator x = x.unary_operator
-    let unary_operand x = x.unary_operand
-    let binary_left_operand b = b.binary_left_operand
-    let binary_operator b = b.binary_operator
-    let binary_right_operand b = b.binary_right_operand
-    let conditional_test x = x.conditional_test
-    let conditional_question x = x.conditional_question
-    let conditional_consequence x = x.conditional_consequence
-    let conditional_colon x = x.conditional_colon
-    let conditional_alternative x = x.conditional_alternative
-    let paren_expr_left_paren x = x.paren_expr_left_paren
-    let paren_expr x = x.paren_expr
-    let paren_expr_right_paren x = x.paren_expr_right_paren
-    let braced_expr_left_brace x = x.braced_expr_left_brace
-    let braced_expr x = x.braced_expr
-    let braced_expr_right_brace x = x.braced_expr_right_brace
-    let print_token x = x.print_token
-    let print_expr x = x.print_expr
-    let listlike_keyword x = x.listlike_keyword
-    let listlike_left_paren x = x.listlike_left_paren
-    let listlike_members x = x.listlike_members
-    let listlike_right_paren x = x.listlike_right_paren
-    let collection_literal_name x = x.collection_literal_name
-    let collection_literal_left_brace x = x.collection_literal_left_brace
-    let collection_literal_initialization_list x =
-      x.collection_literal_initialization_list
-    let collection_literal_right_brace x = x.collection_literal_right_brace
-    let array_creation_left_bracket x = x.array_creation_left_bracket
-    let array_creation_members x = x.array_creation_members
-    let array_creation_right_bracket x = x.array_creation_right_bracket
-    let array_intrinsic_keyword x = x.array_intrinsic_keyword
-    let array_intrinsic_left_paren x = x.array_intrinsic_left_paren
-    let array_intrinsic_members x = x.array_intrinsic_members
-    let array_intrinsic_right_paren x = x.array_intrinsic_right_paren
-    let awaitable_async x = x.awaitable_async
-    let awaitable_compound_statement x = x.awaitable_compound_statement
-    let xhp_open x = x.xhp_open
-    let xhp_body x = x.xhp_body
-    let xhp_close x = x.xhp_close
-    let xhp_open_name x = x.xhp_open_name
-    let xhp_open_attrs x = x.xhp_open_attrs
-    let xhp_open_right_angle x = x.xhp_open_right_angle
-    let xhp_close_left_angle x = x.xhp_close_left_angle
-    let xhp_close_name x = x.xhp_close_name
-    let xhp_close_right_angle x = x.xhp_close_right_angle
-    let xhp_attr_name x = x.xhp_attr_name
-    let xhp_attr_equal x = x.xhp_attr_equal
-    let xhp_attr_expr x = x.xhp_attr_expr
-    let type_constant_left_type x = x.type_constant_left_type
-    let type_constant_separator x = x.type_constant_separator
-    let type_constant_right_type x = x.type_constant_right_type
-    let generic_class_type x = x.generic_class_type
-    let generic_arguments x = x.generic_arguments
-    let type_arguments_left_angle x = x.type_arguments_left_angle
-    let type_arguments x = x.type_arguments
-    let type_arguments_right_angle x = x.type_arguments_right_angle
-    let type_parameter_variance x = x.type_variance_opt
-    let type_parameter_name x = x.type_name
-    let type_parameter_constraints x = x.type_constraint_list_opt
-    let type_constraint_token x = x.constraint_token
-    let type_constraint_matched_type x = x.matched_type
     let binary_operator_kind b =
       match syntax b.binary_operator with
       | Token token ->
@@ -2198,9 +2140,9 @@ module WithToken(Token: TokenType) = struct
         MemberSelectionExpression
         { member_object; member_operator; member_name }
       | (SyntaxKind.SafeMemberSelectionExpression,
-        [ member_object; member_operator; member_name ]) ->
+        [ safe_member_object; safe_member_operator; safe_member_name ]) ->
         SafeMemberSelectionExpression
-        { member_object; member_operator; member_name }
+        { safe_member_object; safe_member_operator; safe_member_name }
       | (SyntaxKind.ScopeResolutionExpression,
         [ scope_resolution_qualifier; scope_resolution_operator;
           scope_resolution_name ]) ->
@@ -2208,12 +2150,12 @@ module WithToken(Token: TokenType) = struct
         { scope_resolution_qualifier; scope_resolution_operator;
           scope_resolution_name }
       | (SyntaxKind.YieldExpression,
-        [ yield_token; yield_operand ]) ->
+        [ yield_keyword; yield_operand ]) ->
         YieldExpression
-        { yield_token; yield_operand }
+        { yield_keyword; yield_operand }
       | (SyntaxKind.PrintExpression,
-        [ print_token; print_expr; ]) ->
-        PrintExpression { print_token; print_expr; }
+        [ print_keyword; print_expr; ]) ->
+        PrintExpression { print_keyword; print_expr; }
       | (SyntaxKind.CastExpression,
         [ cast_left_paren; cast_type; cast_right_paren; cast_operand ]) ->
         CastExpression
@@ -2223,44 +2165,62 @@ module WithToken(Token: TokenType) = struct
         LambdaExpression
         { lambda_async; lambda_signature; lambda_arrow; lambda_body }
       | (SyntaxKind.LambdaSignature,
-        [ lambda_left_paren; lambda_params; lambda_right_paren;
+        [ lambda_left_paren; lambda_parameter_list; lambda_right_paren;
           lambda_colon; lambda_type ]) ->
         LambdaSignature
-        { lambda_left_paren; lambda_params; lambda_right_paren;
+        { lambda_left_paren; lambda_parameter_list; lambda_right_paren;
           lambda_colon; lambda_type }
       | (SyntaxKind.AnonymousFunction,
         [ anonymous_async; anonymous_function; anonymous_left_paren;
-          anonymous_params; anonymous_right_paren; anonymous_colon;
+          anonymous_parameter_list; anonymous_right_paren; anonymous_colon;
           anonymous_type; anonymous_use; anonymous_body ]) ->
         AnonymousFunction
         { anonymous_async; anonymous_function; anonymous_left_paren;
-          anonymous_params; anonymous_right_paren; anonymous_colon;
+          anonymous_parameter_list; anonymous_right_paren; anonymous_colon;
           anonymous_type; anonymous_use; anonymous_body }
       | (SyntaxKind.AnonymousFunctionUseClause,
-        [ anonymous_use_token; anonymous_use_left_paren;
+        [ anonymous_use_keyword; anonymous_use_left_paren;
           anonymous_use_variables; anonymous_use_right_paren ]) ->
         AnonymousFunctionUseClause
-        { anonymous_use_token; anonymous_use_left_paren;
+        { anonymous_use_keyword; anonymous_use_left_paren;
           anonymous_use_variables; anonymous_use_right_paren }
       | (SyntaxKind.ListItem, [ list_item; list_separator ]) ->
         ListItem { list_item; list_separator }
-      | (SyntaxKind.Error, x) -> Error x
-      | (SyntaxKind.LiteralExpression, [x]) -> LiteralExpression x
-      | (SyntaxKind.VariableExpression, [x]) -> VariableExpression x
-      | (SyntaxKind.QualifiedNameExpression,[x]) -> QualifiedNameExpression x
-      | (SyntaxKind.PipeVariableExpression, [x]) -> PipeVariableExpression x
-      | (SyntaxKind.SimpleTypeSpecifier, [x]) -> SimpleTypeSpecifier x
+      | (SyntaxKind.Error,
+        [ error ]) ->
+        Error
+        { error }
+      | (SyntaxKind.LiteralExpression,
+          [ literal_expression ]) ->
+          LiteralExpression
+          { literal_expression }
+      | (SyntaxKind.VariableExpression,
+        [ variable_expression ]) ->
+        VariableExpression
+        { variable_expression }
+      | (SyntaxKind.QualifiedNameExpression,
+        [ qualified_name_expression ]) ->
+        QualifiedNameExpression
+        { qualified_name_expression }
+      | (SyntaxKind.PipeVariableExpression,
+        [ pipe_variable_expression ]) ->
+        PipeVariableExpression
+        { pipe_variable_expression }
+      | (SyntaxKind.SimpleTypeSpecifier,
+        [ simple_type_specifier ]) ->
+        SimpleTypeSpecifier
+        { simple_type_specifier }
       | (SyntaxKind.ScriptHeader,
         [ header_less_than; header_question; header_language ]) ->
         ScriptHeader { header_less_than; header_question; header_language }
       | (SyntaxKind.Script, [ script_header; script_declarations ]) ->
         Script { script_header; script_declarations }
       | (SyntaxKind.EnumDeclaration,
-          [ enum_enum; enum_name; enum_colon; enum_base; enum_type;
-            enum_left_brace; enum_enumerators; enum_right_brace ]) ->
-          EnumDeclaration
-          { enum_enum; enum_name; enum_colon; enum_base; enum_type;
-            enum_left_brace; enum_enumerators; enum_right_brace }
+        [ enum_keyword; enum_name; enum_colon; enum_base; enum_type;
+          enum_left_brace; enum_enumerators; enum_right_brace ]) ->
+        EnumDeclaration
+        { enum_keyword; enum_name; enum_colon; enum_base; enum_type;
+          enum_left_brace; enum_enumerators; enum_right_brace }
       | (SyntaxKind.Enumerator,
         [ enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon ]) ->
@@ -2268,25 +2228,27 @@ module WithToken(Token: TokenType) = struct
         { enumerator_name; enumerator_equal; enumerator_value;
           enumerator_semicolon }
       | (SyntaxKind.AliasDeclaration,
-        [ alias_attribute_spec; alias_token; alias_name;
+        [ alias_attribute_spec; alias_keyword; alias_name;
           alias_generic_parameter; alias_constraint; alias_equal; alias_type;
           alias_semicolon ]) ->
         AliasDeclaration
-        { alias_attribute_spec; alias_token; alias_name;
+        { alias_attribute_spec; alias_keyword; alias_name;
           alias_generic_parameter; alias_constraint; alias_equal; alias_type;
           alias_semicolon }
       | (SyntaxKind.PropertyDeclaration,
-        [ prop_modifiers; prop_type; prop_declarators; prop_semicolon ]) ->
+        [ property_modifiers; property_type;
+          property_declarators; property_semicolon ]) ->
         PropertyDeclaration
-        { prop_modifiers; prop_type; prop_declarators; prop_semicolon }
+        { property_modifiers; property_type;
+          property_declarators; property_semicolon }
       | (SyntaxKind.PropertyDeclarator,
-        [prop_name; prop_init ]) ->
+        [property_name; property_initializer ]) ->
         PropertyDeclarator
-        { prop_name; prop_init }
+        { property_name; property_initializer }
       | (SyntaxKind.NamespaceDeclaration,
-        [ namespace_token; namespace_name; namespace_body ]) ->
+        [ namespace_keyword; namespace_name; namespace_body ]) ->
         NamespaceDeclaration
-        { namespace_token; namespace_name; namespace_body }
+        { namespace_keyword; namespace_name; namespace_body }
       | (SyntaxKind.NamespaceBody,
         [ namespace_left_brace; namespace_declarations;
           namespace_right_brace ]) ->
@@ -2294,20 +2256,20 @@ module WithToken(Token: TokenType) = struct
         { namespace_left_brace; namespace_declarations;
           namespace_right_brace }
       | (SyntaxKind.NamespaceGroupUseDeclaration,
-        [ namespace_group_use; namespace_group_use_kind;
+        [ namespace_group_use_keyword; namespace_group_use_kind;
           namespace_group_use_prefix; namespace_group_use_left_brace;
           namespace_group_use_clauses; namespace_group_use_right_brace;
           namespace_group_use_semicolon ]) ->
         NamespaceGroupUseDeclaration
-        { namespace_group_use; namespace_group_use_kind;
+        { namespace_group_use_keyword; namespace_group_use_kind;
           namespace_group_use_prefix; namespace_group_use_left_brace;
           namespace_group_use_clauses; namespace_group_use_right_brace;
           namespace_group_use_semicolon }
       | (SyntaxKind.NamespaceUseDeclaration,
-        [ namespace_use; namespace_use_kind; namespace_use_clauses;
+        [ namespace_use_keyword; namespace_use_kind; namespace_use_clauses;
           namespace_use_semicolon ]) ->
         NamespaceUseDeclaration
-        { namespace_use; namespace_use_kind; namespace_use_clauses;
+        { namespace_use_keyword; namespace_use_kind; namespace_use_clauses;
           namespace_use_semicolon }
       | (SyntaxKind.NamespaceUseClause,
         [ namespace_use_clause_kind; namespace_use_name;
@@ -2319,28 +2281,32 @@ module WithToken(Token: TokenType) = struct
         [ function_attribute_spec; function_declaration_header; function_body ])
         -> FunctionDeclaration
         { function_attribute_spec; function_declaration_header; function_body }
-      | (SyntaxKind.FunctionDeclarationHeader, [ function_async;
-        function_token; function_name; function_type_params;
-        function_left_paren; function_params; function_right_paren;
-        function_colon; function_type ]) ->
-            FunctionDeclarationHeader { function_async;
-              function_token; function_name; function_type_params;
-              function_left_paren; function_params; function_right_paren;
-              function_colon; function_type }
+      | (SyntaxKind.FunctionDeclarationHeader,
+        [ function_async;
+          function_keyword; function_name; function_type_parameter_list;
+          function_left_paren; function_parameter_list; function_right_paren;
+          function_colon; function_type ]) ->
+        FunctionDeclarationHeader
+        { function_async;
+          function_keyword; function_name; function_type_parameter_list;
+          function_left_paren; function_parameter_list; function_right_paren;
+          function_colon; function_type }
       | (SyntaxKind.MethodishDeclaration,
-        [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
+        [ methodish_attribute; methodish_modifiers;
+          methodish_function_decl_header;
           methodish_function_body; methodish_semicolon ]) ->
-        MethodishDeclaration { methodish_attr; methodish_modifiers;
+        MethodishDeclaration
+        { methodish_attribute; methodish_modifiers;
           methodish_function_decl_header; methodish_function_body;
           methodish_semicolon }
       | (SyntaxKind.ClassishDeclaration,
-        [ classish_attr; classish_modifiers; classish_token;
-          classish_name; classish_type_params; classish_extends;
+        [ classish_attribute; classish_modifiers; classish_keyword;
+          classish_name; classish_type_parameter_list; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body ]) ->
         ClassishDeclaration {
-          classish_attr; classish_modifiers; classish_token;
-          classish_name; classish_type_params; classish_extends;
+          classish_attribute; classish_modifiers; classish_keyword;
+          classish_name; classish_type_parameter_list; classish_extends;
           classish_extends_list; classish_implements; classish_implements_list;
           classish_body }
       | (SyntaxKind.ClassishBody,
@@ -2349,57 +2315,69 @@ module WithToken(Token: TokenType) = struct
         ClassishBody {
           classish_body_left_brace; classish_body_elements;
           classish_body_right_brace }
+      | (SyntaxKind.XHPChildrenDeclaration,
+        [ xhp_children; xhp_children_expression; xhp_children_semicolon ]) ->
+        XHPChildrenDeclaration
+        { xhp_children; xhp_children_expression; xhp_children_semicolon }
+      | (SyntaxKind.XHPCategoryDeclaration,
+        [ xhp_category; xhp_category_list; xhp_category_semicolon ]) ->
+        XHPCategoryDeclaration
+        { xhp_category; xhp_category_list; xhp_category_semicolon }
       | (SyntaxKind.XHPEnumType,
-        [ xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+        [ xhp_enum_keyword; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace ]) ->
         XHPEnumType
-        { xhp_enum_token; xhp_enum_left_brace; xhp_enum_values;
+        { xhp_enum_keyword; xhp_enum_left_brace; xhp_enum_values;
           xhp_enum_right_brace }
       | (SyntaxKind.XHPRequired,
         [ xhp_required_at; xhp_required ]) ->
         XHPRequired
         { xhp_required_at; xhp_required }
       | (SyntaxKind.XHPClassAttributeDeclaration,
-        [ xhp_attr_token; xhp_attr_list; xhp_attr_semicolon ]) ->
+        [ xhp_attribute_keyword; xhp_attribute_list;
+          xhp_attribute_semicolon ]) ->
         XHPClassAttributeDeclaration
-        { xhp_attr_token; xhp_attr_list; xhp_attr_semicolon }
+        { xhp_attribute_keyword; xhp_attribute_list; xhp_attribute_semicolon }
       | (SyntaxKind.XHPClassAttribute,
-        [ xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
-          xhp_attr_decl_required ]) ->
+        [ xhp_attribute_decl_type; xhp_attribute_decl_name;
+          xhp_attribute_decl_initializer; xhp_attribute_decl_required ]) ->
         XHPClassAttribute
-        { xhp_attr_decl_type; xhp_attr_decl_name; xhp_attr_decl_init;
-          xhp_attr_decl_required }
+        { xhp_attribute_decl_type; xhp_attribute_decl_name;
+          xhp_attribute_decl_initializer; xhp_attribute_decl_required }
       | (SyntaxKind.TraitUse,
-        [ trait_use_token; trait_use_name_list; trait_use_semicolon; ]) ->
-        TraitUse { trait_use_token; trait_use_name_list; trait_use_semicolon; }
+        [ trait_use_keyword; trait_use_name_list; trait_use_semicolon; ]) ->
+        TraitUse
+        { trait_use_keyword; trait_use_name_list; trait_use_semicolon; }
       | (SyntaxKind.ConstDeclaration,
-        [ const_abstract; const_token; const_type_specifier;
+        [ const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; ]) ->
-        ConstDeclaration { const_abstract; const_token; const_type_specifier;
+        ConstDeclaration { const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; }
       | (SyntaxKind.ConstantDeclarator,
         [ constant_declarator_name; constant_declarator_initializer; ]) ->
         ConstantDeclarator { constant_declarator_name;
           constant_declarator_initializer; }
       | (SyntaxKind.TypeConstDeclaration,
-        [ type_const_abstract; type_const_const_token; type_const_type_token;
+        [ type_const_abstract; type_const_keyword; type_const_type_keyword;
           type_const_name; type_const_type_constraint; type_const_equal;
           type_const_type_specifier; type_const_semicolon; ]) ->
-        TypeConstDeclaration { type_const_abstract; type_const_const_token;
-          type_const_type_token; type_const_name; type_const_type_constraint;
+        TypeConstDeclaration { type_const_abstract; type_const_keyword;
+          type_const_type_keyword; type_const_name; type_const_type_constraint;
           type_const_equal; type_const_type_specifier; type_const_semicolon; }
       | (SyntaxKind.DecoratedExpression,
         [ decorated_expression_decorator; decorated_expression_expression; ]) ->
         DecoratedExpression
         { decorated_expression_decorator; decorated_expression_expression; }
-      | (SyntaxKind.ParameterDeclaration, [ param_attr; param_visibility;
-        param_type; param_name; param_default ]) ->
-        ParameterDeclaration { param_attr; param_visibility; param_type;
+      | (SyntaxKind.ParameterDeclaration,
+        [ param_attribute; param_visibility;
+          param_type; param_name; param_default ]) ->
+        ParameterDeclaration
+        { param_attribute; param_visibility; param_type;
           param_name; param_default }
       | (SyntaxKind.RequireClause,
-        [ require_token; require_kind; require_name; require_semicolon ]) ->
+        [ require_keyword; require_kind; require_name; require_semicolon ]) ->
         RequireClause
-        { require_token; require_kind; require_name; require_semicolon }
+        { require_keyword; require_kind; require_name; require_semicolon }
       | SyntaxKind.AttributeSpecification, [ attribute_spec_left_double_angle;
         attribute_spec_attribute_list; attribute_spec_right_double_angle ] ->
         AttributeSpecification { attribute_spec_left_double_angle;
@@ -2408,12 +2386,14 @@ module WithToken(Token: TokenType) = struct
         attribute_values; attribute_right_paren ] ->
         Attribute { attribute_name; attribute_left_paren; attribute_values;
           attribute_right_paren }
-      | (SyntaxKind.InclusionDirective ,
-        [ inclusion_require; inclusion_left_paren; inclusion_filename;
-          inclusion_right_paren; inclusion_semicolon ]) ->
+      | (SyntaxKind.InclusionExpression,
+        [ inclusion_require; inclusion_filename ]) ->
+        InclusionExpression
+        { inclusion_require; inclusion_filename }
+      | (SyntaxKind.InclusionDirective,
+        [ inclusion_expression; inclusion_semicolon ]) ->
         InclusionDirective
-        { inclusion_require; inclusion_left_paren; inclusion_filename;
-          inclusion_right_paren; inclusion_semicolon }
+        { inclusion_expression; inclusion_semicolon }
       | (SyntaxKind.CompoundStatement, [ compound_left_brace;
         compound_statements; compound_right_brace ]) ->
         CompoundStatement { compound_left_brace; compound_statements;
@@ -2422,17 +2402,17 @@ module WithToken(Token: TokenType) = struct
         expr_statement_semicolon ]) ->
         ExpressionStatement { expr_statement_expr; expr_statement_semicolon }
       | (SyntaxKind.WhileStatement, [ while_keyword; while_left_paren;
-        while_condition_expr; while_right_paren; while_body ]) ->
+        while_condition; while_right_paren; while_body ]) ->
         WhileStatement{ while_keyword; while_left_paren;
-          while_condition_expr; while_right_paren; while_body }
-      | (SyntaxKind.IfStatement, [ if_keyword; if_left_paren; if_condition_expr;
+          while_condition; while_right_paren; while_body }
+      | (SyntaxKind.IfStatement, [ if_keyword; if_left_paren; if_condition;
         if_right_paren; if_statement; if_elseif_clauses; if_else_clause ]) ->
-        IfStatement { if_keyword; if_left_paren; if_condition_expr;
+        IfStatement { if_keyword; if_left_paren; if_condition;
           if_right_paren; if_statement; if_elseif_clauses; if_else_clause }
       | (SyntaxKind.ElseifClause, [ elseif_keyword; elseif_left_paren;
-        elseif_condition_expr; elseif_right_paren; elseif_statement ]) ->
+        elseif_condition; elseif_right_paren; elseif_statement ]) ->
         ElseifClause { elseif_keyword; elseif_left_paren;
-          elseif_condition_expr; elseif_right_paren; elseif_statement }
+          elseif_condition; elseif_right_paren; elseif_statement }
       | (SyntaxKind.ElseClause, [ else_keyword; else_statement ]) ->
         ElseClause { else_keyword; else_statement }
 
@@ -2500,17 +2480,17 @@ module WithToken(Token: TokenType) = struct
         FunctionStaticStatement
         { static_static; static_declarations; static_semicolon }
       | (SyntaxKind.SimpleInitializer,
-        [ simple_init_equal; simple_init_value ]) ->
+        [ simple_initializer_equal; simple_initializer_value ]) ->
         SimpleInitializer
-        { simple_init_equal; simple_init_value }
+        { simple_initializer_equal; simple_initializer_value }
       | (SyntaxKind.StaticDeclarator,
-        [ static_name; static_init ]) ->
+        [ static_name; static_initializer ]) ->
         StaticDeclarator
-        { static_name; static_init }
+        { static_name; static_initializer }
       | (SyntaxKind.EchoStatement,
-        [ echo_token; echo_expression_list; echo_semicolon; ]) ->
+        [ echo_keyword; echo_expression_list; echo_semicolon; ]) ->
         EchoStatement
-        { echo_token; echo_expression_list; echo_semicolon; }
+        { echo_keyword; echo_expression_list; echo_semicolon; }
       | (SyntaxKind.PrefixUnaryOperator, [ unary_operator; unary_operand ]) ->
         PrefixUnaryOperator { unary_operator; unary_operand }
       | (SyntaxKind.PostfixUnaryOperator, [ unary_operand; unary_operator ]) ->
@@ -2519,6 +2499,13 @@ module WithToken(Token: TokenType) = struct
         binary_right_operand ]) ->
         BinaryOperator { binary_left_operand; binary_operator;
         binary_right_operand }
+
+      | (SyntaxKind.InstanceofExpression,
+        [ instanceof_left_operand; instanceof_operator;
+          instanceof_right_operand ]) ->
+        InstanceofExpression
+        { instanceof_left_operand; instanceof_operator;
+          instanceof_right_operand }
       | (SyntaxKind.ConditionalExpression,
         [ conditional_test; conditional_question; conditional_consequence;
           conditional_colon; conditional_alternative ]) ->
@@ -2539,10 +2526,10 @@ module WithToken(Token: TokenType) = struct
         braced_expr; braced_expr_right_brace ]) ->
         BracedExpression { braced_expr_left_brace; braced_expr;
           braced_expr_right_brace }
-      | (SyntaxKind.ListExpression, [ listlike_keyword; listlike_left_paren;
-        listlike_members; listlike_right_paren ]) ->
-        ListExpression { listlike_keyword; listlike_left_paren;
-          listlike_members; listlike_right_paren }
+      | (SyntaxKind.ListExpression, [ list_keyword; list_left_paren;
+        list_members; list_right_paren ]) ->
+        ListExpression { list_keyword; list_left_paren;
+          list_members; list_right_paren }
       | (SyntaxKind.CollectionLiteralExpression,
         [ collection_literal_name; collection_literal_left_brace;
           collection_literal_initialization_list;
@@ -2562,9 +2549,11 @@ module WithToken(Token: TokenType) = struct
         ShapeExpression
         { shape_shape; shape_left_paren; shape_fields; shape_right_paren }
       | (SyntaxKind.FieldInitializer,
-        [ field_init_name; field_init_arrow; field_init_value ]) ->
+        [ field_initializer_name; field_initializer_arrow;
+          field_initializer_value ]) ->
         FieldInitializer
-        { field_init_name; field_init_arrow; field_init_value }
+        { field_initializer_name; field_initializer_arrow;
+          field_initializer_value }
       | SyntaxKind.ArrayCreationExpression, [ array_creation_left_bracket;
         array_creation_members; array_creation_right_bracket ] ->
         ArrayCreationExpression { array_creation_left_bracket;
@@ -2591,15 +2580,17 @@ module WithToken(Token: TokenType) = struct
         { awaitable_async; awaitable_compound_statement; }
       | (SyntaxKind.XHPExpression, [ xhp_open; xhp_body; xhp_close ]) ->
         XHPExpression { xhp_open; xhp_body; xhp_close }
-      | (SyntaxKind.XHPOpen, [ xhp_open_name; xhp_open_attrs;
-          xhp_open_right_angle ]) ->
-        XHPOpen { xhp_open_name; xhp_open_attrs; xhp_open_right_angle }
+      | (SyntaxKind.XHPOpen,
+        [ xhp_open_name; xhp_open_attributes; xhp_open_right_angle ]) ->
+        XHPOpen
+        { xhp_open_name; xhp_open_attributes; xhp_open_right_angle }
       | (SyntaxKind.XHPClose, [ xhp_close_left_angle; xhp_close_name;
           xhp_close_right_angle ]) ->
         XHPClose { xhp_close_left_angle; xhp_close_name; xhp_close_right_angle }
-      | (SyntaxKind.XHPAttribute, [ xhp_attr_name; xhp_attr_equal;
-          xhp_attr_expr ]) ->
-        XHPAttribute { xhp_attr_name; xhp_attr_equal; xhp_attr_expr }
+      | (SyntaxKind.XHPAttribute, [ xhp_attribute_name; xhp_attribute_equal;
+          xhp_attribute_expr ]) ->
+        XHPAttribute
+        { xhp_attribute_name; xhp_attribute_equal; xhp_attribute_expr }
       | (SyntaxKind.TypeConstant, [ type_constant_left_type;
           type_constant_separator; type_constant_right_type ]) ->
         TypeConstant { type_constant_left_type; type_constant_separator;
@@ -2609,8 +2600,12 @@ module WithToken(Token: TokenType) = struct
         GenericTypeSpecifier { generic_class_type; generic_arguments }
       | (SyntaxKind.NullableTypeSpecifier,
           [ nullable_question; nullable_type ]) ->
-          NullableTypeSpecifier
+        NullableTypeSpecifier
           { nullable_question; nullable_type }
+      | (SyntaxKind.SoftTypeSpecifier,
+          [ soft_at; soft_type ]) ->
+        SoftTypeSpecifier
+          { soft_at; soft_type }
       | (SyntaxKind.TypeArguments, [ type_arguments_left_angle;
           type_arguments; type_arguments_right_angle ]) ->
         TypeArguments { type_arguments_left_angle;
@@ -2625,9 +2620,9 @@ module WithToken(Token: TokenType) = struct
           type_name; type_constraint_list_opt  ]) ->
         TypeParameter { type_variance_opt;
           type_name; type_constraint_list_opt  }
-      | (SyntaxKind.TypeConstraint, [ constraint_token;
-          matched_type ]) ->
-        TypeConstraint { constraint_token; matched_type }
+      | (SyntaxKind.TypeConstraint, [ constraint_keyword;
+          constraint_type ]) ->
+        TypeConstraint { constraint_keyword; constraint_type }
       | (SyntaxKind.TupleTypeSpecifier,
           [ tuple_left_paren; tuple_types; tuple_right_paren ]) ->
         TupleTypeSpecifier
@@ -2707,12 +2702,15 @@ module WithToken(Token: TokenType) = struct
 
       let make_postfix_unary_operator unary_operator unary_operand =
         from_children SyntaxKind.PostfixUnaryOperator
-          [ unary_operand; unary_operator ]
+          [ unary_operator; unary_operand ]
 
       let make_binary_operator
         binary_left_operand binary_operator binary_right_operand =
           from_children SyntaxKind.BinaryOperator
             [ binary_left_operand; binary_operator; binary_right_operand ]
+
+      let make_instanceof_expression left op right =
+        from_children SyntaxKind.InstanceofExpression [left; op; right ]
 
       let make_conditional_expression
         conditional_test conditional_question conditional_consequence
@@ -2741,9 +2739,9 @@ module WithToken(Token: TokenType) = struct
       let make_yield_expression token operand =
         from_children SyntaxKind.YieldExpression [ token; operand ]
 
-      let make_print_expression print_token print_expr =
+      let make_print_expression print_keyword print_expr =
         from_children SyntaxKind.PrintExpression
-          [ print_token; print_expr; ]
+          [ print_keyword; print_expr; ]
 
       let make_cast_expression left cast_type right operand =
         from_children SyntaxKind.CastExpression
@@ -2776,12 +2774,12 @@ module WithToken(Token: TokenType) = struct
           from_children SyntaxKind.BracedExpression
             [ braced_expr_left_brace; braced_expr; braced_expr_right_brace ]
 
-      let make_listlike_expression
-        listlike_keyword listlike_left_paren listlike_members
-        listlike_right_paren =
+      let make_list_expression
+        list_keyword list_left_paren list_members
+        list_right_paren =
         from_children SyntaxKind.ListExpression
-          [ listlike_keyword; listlike_left_paren; listlike_members;
-          listlike_right_paren ]
+          [ list_keyword; list_left_paren; list_members;
+          list_right_paren ]
 
       let make_collection_literal_expression
         collection_literal_name collection_literal_left_brace
@@ -2830,7 +2828,7 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.AwaitableCreationExpression
           [ async; compound_stmt; ]
 
-      let make_xhp xhp_open xhp_body xhp_close =
+      let make_xhp_expression xhp_open xhp_body xhp_close =
         from_children SyntaxKind.XHPExpression [xhp_open; xhp_body; xhp_close ]
 
       let make_xhp_open xhp_open_name xhp_open_attrs xhp_open_right_angle =
@@ -2842,7 +2840,8 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.XHPClose
           [xhp_close_left_angle; xhp_close_name; xhp_close_right_angle ]
 
-      let make_xhp_attr xhp_attr_name xhp_attr_equal xhp_attr_expr =
+      let make_xhp_attribute
+        xhp_attr_name xhp_attr_equal xhp_attr_expr =
         from_children SyntaxKind.XHPAttribute
           [ xhp_attr_name; xhp_attr_equal; xhp_attr_expr ]
 
@@ -2855,8 +2854,8 @@ module WithToken(Token: TokenType) = struct
       let make_list_item item separator =
         from_children SyntaxKind.ListItem [item; separator]
 
-      let make_error items =
-        from_children SyntaxKind.Error items
+      let make_error item =
+        from_children SyntaxKind.Error [ item ]
 
       let make_script_header header_less_than header_question header_language =
         from_children SyntaxKind.ScriptHeader
@@ -2865,7 +2864,7 @@ module WithToken(Token: TokenType) = struct
       let make_script script_header script_declarations =
         from_children SyntaxKind.Script [ script_header; script_declarations ]
 
-      let make_enum
+      let make_enum_declaration
           enum name colon base enum_type left_brace items right_brace =
         from_children SyntaxKind.EnumDeclaration
           [ enum; name; colon; base; enum_type; left_brace; items; right_brace ]
@@ -2873,7 +2872,7 @@ module WithToken(Token: TokenType) = struct
       let make_enumerator name equal value semicolon =
         from_children SyntaxKind.Enumerator [ name; equal; value; semicolon ]
 
-      let make_alias attr token name generic constr equal ty semi =
+      let make_alias_declaration attr token name generic constr equal ty semi =
         from_children SyntaxKind.AliasDeclaration
           [ attr; token; name; generic; constr; equal; ty; semi ]
 
@@ -2885,7 +2884,7 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.PropertyDeclarator
         [ name; init ]
 
-      let make_namespace token name body =
+      let make_namespace_declaration token name body =
         from_children SyntaxKind.NamespaceDeclaration
           [ token; name; body ]
 
@@ -2893,11 +2892,12 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.NamespaceBody
           [ left; decls; right ]
 
-      let make_namespace_group_use token kind prefix left clauses right semi =
+      let make_namespace_group_use_declaration
+        token kind prefix left clauses right semi =
         from_children SyntaxKind.NamespaceGroupUseDeclaration
         [ token; kind; prefix; left; clauses; right; semi ]
 
-      let make_namespace_use use use_kind clauses semi =
+      let make_namespace_use_declaration use use_kind clauses semi =
         from_children SyntaxKind.NamespaceUseDeclaration
           [ use; use_kind; clauses; semi ]
 
@@ -2905,36 +2905,36 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.NamespaceUseClause
           [ use_kind; name; as_token; alias ]
 
-      let make_function function_attribute_spec function_declaration_header
+      let make_function_declaration function_attribute_spec function_declaration_header
         function_body =
         from_children SyntaxKind.FunctionDeclaration
           [ function_attribute_spec; function_declaration_header;
           function_body ]
 
-      let make_function_header function_async function_token
+      let make_function_declaration_header function_async function_keyword
         function_name function_type_params function_left_paren function_params
         function_right_paren function_colon function_type =
       from_children SyntaxKind.FunctionDeclarationHeader [
-        function_async; function_token; function_name;
+        function_async; function_keyword; function_name;
         function_type_params; function_left_paren; function_params;
         function_right_paren; function_colon; function_type ]
 
-      let make_methodish methodish_attr methodish_modifiers
+      let make_methodish_declaration methodish_attr methodish_modifiers
         methodish_function_decl_header methodish_function_body
         methodish_semicolon =
         from_children SyntaxKind.MethodishDeclaration
           [ methodish_attr; methodish_modifiers; methodish_function_decl_header;
             methodish_function_body; methodish_semicolon ]
 
-    let make_classish classish_attr classish_modifiers
-      classish_token classish_name classish_type_params classish_extends
-      classish_extends_list classish_implements classish_implements_list
-      classish_body =
-      from_children SyntaxKind.ClassishDeclaration [
-        classish_attr; classish_modifiers; classish_token;
-        classish_name; classish_type_params; classish_extends;
-        classish_extends_list; classish_implements; classish_implements_list;
-        classish_body ]
+      let make_classish_declaration classish_attr classish_modifiers
+        classish_keyword classish_name classish_type_params classish_extends
+        classish_extends_list classish_implements classish_implements_list
+        classish_body =
+        from_children SyntaxKind.ClassishDeclaration [
+          classish_attr; classish_modifiers; classish_keyword;
+          classish_name; classish_type_params; classish_extends;
+          classish_extends_list; classish_implements; classish_implements_list;
+          classish_body ]
 
       let make_classish_body classish_body_left_brace classish_body_elements
         classish_body_right_brace =
@@ -2945,6 +2945,14 @@ module WithToken(Token: TokenType) = struct
       let make_xhp_enum_type token left items right =
         from_children SyntaxKind.XHPEnumType
         [ token; left; items; right ]
+
+      let make_xhp_category_declaration category items semi =
+        from_children SyntaxKind.XHPCategoryDeclaration
+        [ category; items; semi ]
+
+      let make_xhp_children_declaration children expr semi =
+        from_children SyntaxKind.XHPChildrenDeclaration
+          [ children; expr; semi ]
 
       let make_xhp_required at req =
         from_children SyntaxKind.XHPRequired [ at; req ]
@@ -2957,18 +2965,18 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.XHPClassAttribute
           [ attr_type; name; init; required ]
 
-      let make_trait_use trait_use_token trait_use_name_list
+      let make_trait_use trait_use_keyword trait_use_name_list
         trait_use_semicolon =
         from_children SyntaxKind.TraitUse [
-          trait_use_token; trait_use_name_list; trait_use_semicolon; ]
+          trait_use_keyword; trait_use_name_list; trait_use_semicolon; ]
 
       let make_require_clause require kind name semi =
         from_children SyntaxKind.RequireClause [ require; kind; name; semi ]
 
-      let make_const_declaration const_abstract const_token const_type_specifier
-        const_declarator_list const_semicolon =
+      let make_const_declaration const_abstract const_keyword
+        const_type_specifier const_declarator_list const_semicolon =
         from_children SyntaxKind.ConstDeclaration [
-          const_abstract; const_token; const_type_specifier;
+          const_abstract; const_keyword; const_type_specifier;
           const_declarator_list; const_semicolon; ]
 
       let make_constant_declarator constant_declarator_name
@@ -2976,11 +2984,11 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.ConstantDeclarator
           [ constant_declarator_name; constant_declarator_initializer; ]
 
-      let make_type_const_declaration type_const_abstract type_const_const_token
-        type_const_type_token type_const_name type_const_type_constraint
+      let make_type_const_declaration type_const_abstract type_const_keyword
+        type_const_type_keyword type_const_name type_const_type_constraint
         type_const_equal type_const_type_specifier type_const_semicolon =
         from_children SyntaxKind.TypeConstDeclaration
-          [ type_const_abstract; type_const_const_token; type_const_type_token;
+          [ type_const_abstract; type_const_keyword; type_const_type_keyword;
             type_const_name; type_const_type_constraint; type_const_equal;
             type_const_type_specifier; type_const_semicolon; ]
 
@@ -3005,10 +3013,11 @@ module WithToken(Token: TokenType) = struct
         [ attribute_name; attribute_left_paren; attribute_values;
           attribute_right_paren ]
 
-      let make_inclusion_directive
-          require left_paren filename right_paren semicolon =
-        from_children SyntaxKind.InclusionDirective
-          [ require; left_paren; filename; right_paren; semicolon ]
+      let make_inclusion_expression require filename =
+        from_children SyntaxKind.InclusionExpression [ require; filename ]
+
+      let make_inclusion_directive expr semicolon =
+        from_children SyntaxKind.InclusionDirective [ expr; semicolon ]
 
       let make_compound_statement
         compound_left_brace compound_statements compound_right_brace =
@@ -3021,24 +3030,24 @@ module WithToken(Token: TokenType) = struct
           [ expr_statement_expr; expr_statement_semicolon ]
 
       let make_while_statement
-        while_keyword while_left_paren while_condition_expr
+        while_keyword while_left_paren while_condition
         while_right_paren while_body =
         from_children SyntaxKind.WhileStatement
-          [ while_keyword; while_left_paren; while_condition_expr;
+          [ while_keyword; while_left_paren; while_condition;
           while_right_paren; while_body ]
 
       let make_if_statement
-        if_keyword if_left_paren if_condition_expr if_right_paren if_statement
+        if_keyword if_left_paren if_condition if_right_paren if_statement
         if_elseif_clauses if_else_clause =
         from_children SyntaxKind.IfStatement
-          [ if_keyword; if_left_paren; if_condition_expr; if_right_paren;
+          [ if_keyword; if_left_paren; if_condition; if_right_paren;
           if_statement; if_elseif_clauses; if_else_clause ]
 
       let make_elseif_clause
-        elseif_keyword elseif_left_paren elseif_condition_expr
+        elseif_keyword elseif_left_paren elseif_condition
         elseif_right_paren elseif_statement =
         from_children SyntaxKind.ElseifClause
-          [ elseif_keyword; elseif_left_paren; elseif_condition_expr;
+          [ elseif_keyword; elseif_left_paren; elseif_condition;
           elseif_right_paren; elseif_statement ]
 
       let make_else_clause else_keyword else_statement =
@@ -3089,7 +3098,7 @@ module WithToken(Token: TokenType) = struct
           switch_right_paren; switch_compound_statement ]
 
       let make_case_statement case_keyword case_expr case_colon case_stmt =
-        from_children SyntaxKind.CaseStatement
+      from_children SyntaxKind.CaseStatement
           [ case_keyword; case_expr; case_colon; case_stmt ]
 
       let make_default_statement default_keyword default_colon default_stmt =
@@ -3122,9 +3131,9 @@ module WithToken(Token: TokenType) = struct
         from_children SyntaxKind.StaticDeclarator [ variable; init ]
 
       let make_echo_statement
-        echo_token echo_expression_list echo_semicolon =
+        echo_keyword echo_expression_list echo_semicolon =
         from_children SyntaxKind.EchoStatement
-        [ echo_token; echo_expression_list; echo_semicolon; ]
+        [ echo_keyword; echo_expression_list; echo_semicolon; ]
 
       let make_type_constant type_constant_left_type type_constant_separator
           type_constant_right_type =
@@ -3132,9 +3141,9 @@ module WithToken(Token: TokenType) = struct
           [ type_constant_left_type; type_constant_separator;
           type_constant_right_type ]
 
-      let make_type_constraint constraint_token matched_type =
+      let make_type_constraint constraint_keyword constraint_type =
         from_children SyntaxKind.TypeConstraint
-          [ constraint_token; matched_type ]
+          [ constraint_keyword; constraint_type ]
 
       let make_type_parameter variance_opt type_name constraint_list_opt =
         from_children SyntaxKind.TypeParameter
@@ -3142,6 +3151,10 @@ module WithToken(Token: TokenType) = struct
 
       let make_simple_type_specifier simple_type =
         from_children SyntaxKind.SimpleTypeSpecifier [ simple_type ]
+
+      let make_soft_type_specifier soft_at soft_type =
+        from_children SyntaxKind.SoftTypeSpecifier
+          [ soft_at; soft_type ]
 
       let make_nullable_type_specifier nullable_question nullable_type =
         from_children SyntaxKind.NullableTypeSpecifier

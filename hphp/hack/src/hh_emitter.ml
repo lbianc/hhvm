@@ -64,7 +64,8 @@ let emit_file { filename; read_stdin; is_test } () =
       Sys_utils.cat (Relative_path.to_absolute filename) in
 
   (* Parse the file and pull out the parts we need *)
-  let parsed_file = Parser_hack.program filename contents  in
+  let parsed_file =
+    Parser_hack.program_with_default_popt filename contents  in
   let {Parser_hack.file_mode; comments; ast} = parsed_file in
   let funs, classes, typedefs, consts = Ast_utils.get_defs ast in
 

@@ -103,7 +103,7 @@ let declare_and_check content ~f =
   let file_info =
     Errors.ignore_ begin fun () ->
       let {Parser_hack.file_mode = _; comments = _; ast} =
-        Parser_hack.program path content
+        Parser_hack.program_with_default_popt path content
       in
       let funs, classes, typedefs, consts =
         List.fold_left ast ~f:begin fun (funs, classes, typedefs, consts) def ->
@@ -134,6 +134,16 @@ let declare_and_check content ~f =
         | Nast.Typedef t -> Decl.typedef_decl t
         | Nast.Constant cst -> Decl.const_decl cst
       end;
+
+      (* If we remove a class member, there may still be child classes that
+       * refer to that member. We can either invalidate all the extends_deps
+       * of the classes we just declared, or revive the types of the class
+       * elements back into the new heap. We choose to revive since it should
+       * be faster, even though it is technically incorrect.
+       *)
+      classes
+      |> List.map ~f:snd
+      |> Decl_class_elements.revive_removed_elems;
       (* We must run all the declaration steps first to ensure that the
        * typechecking below sees all the new declarations. Lazy decl
        * won't work in this case because we haven't put the new ASTs into
@@ -160,7 +170,14 @@ let recheck tcopt filetuple_l =
 let check_file_input tcopt files_info fi =
   match fi with
   | ServerUtils.FileContent content ->
-      declare_and_check content ~f:(fun path _ -> path);
+      begin
+        try
+          declare_and_check content ~f:(fun path _ -> path)
+        with Decl_class.Decl_heap_elems_bug -> begin
+          Hh_logger.log "%s" content;
+          Exit_status.(exit Decl_heap_elems_bug)
+        end
+      end
   | ServerUtils.FileName fn ->
       let path = Relative_path.create Relative_path.Root fn in
       let () = match Relative_path.Map.get files_info path with

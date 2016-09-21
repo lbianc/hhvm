@@ -20,6 +20,7 @@
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/intercept.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/static-string-table.h"
@@ -62,9 +63,10 @@ std::atomic<bool>     Func::s_treadmill;
  */
 static std::atomic<FuncId> s_nextFuncId{0};
 static AtomicVector<const Func*> s_funcVec{0, nullptr};
-static AtomicVectorInit s_funcVecInit{
-  s_funcVec, RuntimeOption::EvalFuncCountHint
-};
+static InitFiniNode s_funcVecReinit([]{
+  UnsafeReinitEmptyAtomicVector(
+    s_funcVec, RuntimeOption::EvalFuncCountHint);
+}, InitFiniNode::When::PostRuntimeOptions, "s_funcVec reinit");
 
 const AtomicVector<const Func*>& Func::getFuncVec() {
   return s_funcVec;
@@ -122,13 +124,16 @@ void Func::destroy(Func* func) {
     assert(oldVal == func);
     func->m_funcId = InvalidFuncId;
 
+    if (RuntimeOption::EvalEnableReverseDataMap) {
+      // We register Funcs to data_map in Func::init() and Func::clone(), both
+      // of which are accompanied by calls to Func::setNewFuncId().
+      data_map::deregister(func);
+    }
+
     if (s_treadmill.load(std::memory_order_acquire)) {
       Treadmill::enqueue([func](){ destroy(func); });
       return;
     }
-  }
-  if (RuntimeOption::EvalEnableReverseDataMap) {
-    data_map::deregister(func);
   }
   func->~Func();
   low_free_data(func);
@@ -175,6 +180,10 @@ Func* Func::clone(Class* cls, const StringData* name) const {
   f->m_cls = cls;
   f->setFullName(numParams);
 
+  if (RuntimeOption::EvalEnableReverseDataMap) {
+    data_map::register_start(f);
+  }
+
   if (f != this) {
     f->m_cachedFunc = rds::Link<LowPtr<Func>>{rds::kInvalidHandle};
     f->m_maybeIntercepted = -1;
@@ -208,6 +217,10 @@ void Func::init(int numParams) {
   if (!preClass()) {
     setNewFuncId();
     setFullName(numParams);
+
+    if (RuntimeOption::EvalEnableReverseDataMap) {
+      data_map::register_start(this);
+    }
   } else {
     m_fullName = nullptr;
   }
@@ -263,10 +276,6 @@ void Func::setFullName(int numParams) {
     if (!isMethod()) {
       setNamedEntity(NamedEntity::get(m_name));
     }
-  }
-
-  if (RuntimeOption::EvalEnableReverseDataMap) {
-    data_map::register_start(this);
   }
 
   if (RuntimeOption::DynamicInvokeFunctions.size()) {

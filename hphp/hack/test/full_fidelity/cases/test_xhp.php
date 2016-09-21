@@ -4,3 +4,7 @@ function foo() {
   comment--><abc/>body{$x}
   body</foo>;
 }
+class :c {
+  category %x, %y, ;
+  children (foo+, %bar*, :blah-blah?)*;
+}

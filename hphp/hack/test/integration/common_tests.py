@@ -140,7 +140,7 @@ class CommonTestDriver(object):
             hh_client,
             'ide',
             self.repo_dir], env={})
-        return IdeConnection(proc)
+        return IdeConnection(proc, self.repo_dir)
 
 
 class DebugSubscription(object):
@@ -171,8 +171,9 @@ class IdeConnection(object):
     """
     Wraps `hh_client ide`.
     """
-    def __init__(self, proc):
+    def __init__(self, proc, root):
         self.proc = proc
+        self.root = root
 
     def close_stdin(self):
         self.proc.stdin.close()
@@ -189,7 +190,11 @@ class IdeConnection(object):
         retcode = self.proc.wait()
         return (stdout_data, stderr_data, retcode)
 
+    def make_absolute(self, file):
+        return self.root + "/" + file
+
     def open(self, file):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 123,"type" : ' +
             '"call","method" : "didOpenFile","args" : {"filename":"' +
@@ -198,6 +203,7 @@ class IdeConnection(object):
         )
 
     def close(self, file):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 123,"type" : ' +
             '"call","method" : "didCloseFile","args" : {"filename":"' +
@@ -206,6 +212,7 @@ class IdeConnection(object):
         )
 
     def edit(self, file, st_line, st_column, ed_line, ed_column, text):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 456,"type" : ' +
             '"call","method" : "didChangeFile","args" : {"filename" : "' +
@@ -224,6 +231,7 @@ class IdeConnection(object):
         )
 
     def auto_complete(self, file, line, column):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 789,"type" : ' +
             '"call","method" : "getCompletions","args" : {"filename" : "' +
@@ -252,6 +260,7 @@ class IdeConnection(object):
                ',"type":"unsubscribe"}\n')
 
     def highlight_ref(self, file, line, column):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 987,"type" : ' +
             '"call","method" : "getSourceHighlights","args" : {"filename" : "' +
@@ -264,6 +273,7 @@ class IdeConnection(object):
         )
 
     def identify_function(self, file, line, column):
+        file = self.make_absolute(file)
         return(
             '{"protocol" : "service_framework3_rpc","id" : 987,"type" : ' +
             '"call","method" : "getDefinition","args" : {"filename" : "' +
@@ -1011,13 +1021,18 @@ function test2(int $x) { $x = $x*x + 3; return f($x); }
         (stdout, _, exit_code) = ide_con.get_return()
         self.assertEqual(
             stdout,
-            '{"protocol":"service_framework3_rpc","type":"response","id":987,' +
-            '"result":[{"name":"\\\\Foo::__construct","result_type":"method",' +
-            '"pos":{"filename":"","line":11,"char_start":18,"char_end":26},"d' +
-            'efinition_pos":null,"definition_span":null,"definition_id":null}' +
-            ',{"name":"\\\\Foo","result_type":"class","pos":{"filename":"","l' +
-            'ine":11,"char_start":22,"char_end":24},"definition_pos":null,"de' +
-            'finition_span":null,"definition_id":null}]}\n',
+            '{"protocol":"service_framework3_rpc","type":"response","id":987,'
+            '"result":[{"name":"\\\\Foo::__construct","result_type":"method",'
+            '"pos":{"filename":"","line":11,"char_start":18,"char_end":26},'
+            '"definition_pos":{"filename":"","line":7,"char_start":15,'
+            '"char_end":17},"definition_span":{"filename":"","line_start":7,'
+            '"char_start":9,"line_end":7,"char_end":20},"definition_id":'
+            '"type_id::Foo"},{"name":"\\\\Foo","result_type":"class",'
+            '"pos":{"filename":"","line":11,"char_start":22,"char_end":24},'
+            '"definition_pos":{"filename":"","line":7,"char_start":15,'
+            '"char_end":17},"definition_span":{"filename":"","line_start":7,'
+            '"char_start":9,"line_end":7,"char_end":20},"definition_id":'
+            '"type_id::Foo"}]}\n',
             msg="Identify function result does not match"
         )
         self.assertEqual(
@@ -1025,3 +1040,22 @@ function test2(int $x) { $x = $x*x + 3; return f($x); }
             0,
             msg="Exit status does not match"
         )
+
+    def test_auto_namespace_alias_addition(self):
+        """
+        Add namespace alias and check if it is still good
+        """
+
+        self.write_load_config()
+        self.check_cmd(['No errors!'])
+
+        with open(os.path.join(self.repo_dir, 'auto_ns_2.php'), 'w') as f:
+            f.write("""
+            <?hh
+            function haha() {
+                Herp\\f();
+                return 1;
+            }
+            """)
+
+        self.check_cmd(['No errors!'])

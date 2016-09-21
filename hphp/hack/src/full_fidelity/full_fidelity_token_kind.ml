@@ -26,6 +26,8 @@ type t =
 | Break
 | Case
 | Catch
+| Category
+| Children
 | Class
 | Classname
 | Clone
@@ -39,6 +41,7 @@ type t =
 | Echo
 | Else
 | Elseif
+| Empty
 | Enum
 | Extends
 | Float
@@ -87,6 +90,7 @@ type t =
 | Type
 | Unset
 | Use
+| Var
 | Void
 | While
 | Yield
@@ -165,6 +169,7 @@ type t =
 | BooleanLiteral
 | NullLiteral
 (* XHP *)
+| XHPCategoryName
 | XHPElementName
 | XHPClassName
 | XHPStringLiteral
@@ -187,6 +192,8 @@ let from_string keyword =
   | "break" -> Some Break
   | "case" -> Some Case
   | "catch" -> Some Catch
+  | "category" -> Some Category
+  | "children" -> Some Children
   | "class" -> Some Class
   | "classname" -> Some Classname
   | "clone" -> Some Clone
@@ -200,6 +207,7 @@ let from_string keyword =
   | "echo" -> Some Echo
   | "else" -> Some Else
   | "elseif" -> Some Elseif
+  | "empty" -> Some Empty
   | "enum" -> Some Enum
   | "extends" -> Some Extends
   | "false" -> Some BooleanLiteral
@@ -251,6 +259,7 @@ let from_string keyword =
   | "type" -> Some Type
   | "unset" -> Some Unset
   | "use" -> Some Use
+  | "var" -> Some Var
   | "void" -> Some Void
   | "while" -> Some While
   | "yield" -> Some Yield
@@ -269,6 +278,8 @@ let to_string kind =
   | Break -> "break"
   | Case -> "case"
   | Catch -> "catch"
+  | Category -> "category"
+  | Children -> "children"
   | Class -> "class"
   | Classname -> "classname"
   | Clone -> "clone"
@@ -282,6 +293,7 @@ let to_string kind =
   | Echo -> "echo"
   | Else -> "else"
   | Elseif -> "elseif"
+  | Empty -> "empty"
   | Enum -> "enum"
   | Extends -> "extends"
   | Float -> "float"
@@ -331,6 +343,7 @@ let to_string kind =
   | Type -> "type"
   | Unset -> "unset"
   | Use -> "use"
+  | Var -> "var"
   | Void -> "void"
   | While -> "while"
   | Yield -> "yield"
@@ -410,6 +423,7 @@ let to_string kind =
   | NowdocStringLiteral -> "nowdoc_string_literal"
   | BooleanLiteral -> "boolean_literal"
   | NullLiteral -> "null_literal"
+  | XHPCategoryName -> "XHP_category_name"
   | XHPElementName -> "XHP_element_name"
   | XHPClassName -> "XHP_class_name"
   | XHPStringLiteral -> "XHP_string_literal"

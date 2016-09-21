@@ -601,15 +601,18 @@ struct Func final {
 
   /*
    * Is this function a method defined on a class?
+   *
+   * Note that trait methods may not satisfy isMethod().
    */
   bool isMethod() const;
 
   /*
-   * Is this function a method defined on a trait?
+   * Was this function imported from a trait?
    *
-   * Note that trait methods may not satisfy isMethod().
+   * Note that this returns false for a trait method in the trait it was
+   * originally declared.
    */
-  bool isTraitMethod() const;
+  bool isFromTrait() const;
 
   /*
    * Is this function declared with `public', `static', or `abstract'?
@@ -1218,8 +1221,8 @@ private:
   AtomicLowPtr<uint8_t> m_funcBody;
   mutable rds::Link<LowPtr<Func>> m_cachedFunc{rds::kInvalidHandle};
   FuncId m_funcId{InvalidFuncId};
-  LowStringPtr m_fullName;
-  LowStringPtr m_name;
+  LowStringPtr m_fullName{nullptr};
+  LowStringPtr m_name{nullptr};
   // The first Class in the inheritance hierarchy that declared this method.
   // Note that this may be an abstract class that did not provide an
   // implementation.
