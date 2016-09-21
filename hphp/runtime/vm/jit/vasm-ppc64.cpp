@@ -679,9 +679,9 @@ void Vgen::emit(const inittc&) {
   VMTOC::getInstance().setTOCDataBlock(&(env.text.data()));
 
   // Save TOC pointer in r2
-  // First, assert the ppc64minTOCImmSize.
-  always_assert(RuntimeOption::Evalppc64minTOCImmSize >= 0 &&
-    RuntimeOption::Evalppc64minTOCImmSize <= 64);
+  // First, assert the PPC64MinTOCImmSize.
+  always_assert(RuntimeOption::EvalPPC64MinTOCImmSize >= 0 &&
+    RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
   a.li64(ppc64::rtoc(), VMTOC::getInstance().getPtrVector(), false);
 }
 
