@@ -829,13 +829,6 @@ public:
     for (; nbytes > 0; nbytes -= 4) nop();
   }
 
-  /*
-   * Emit exception traps until the end of the codeblock.
-   */
-  void emitTrap() {
-    for (size_t nbytes = available(); nbytes > 0; nbytes -= 4) trap();
-  }
-
   // Secure high level instruction emitter
   void Emit(PPC64Instr instruction){
     assert(codeBlock.canEmit(sizeof(instruction)));
