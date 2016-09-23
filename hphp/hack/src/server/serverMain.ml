@@ -361,11 +361,19 @@ let setup_server options handle =
     io_priority;
     enable_on_nfs;
     lazy_decl;
+    load_script_config;
     _
   } as local_config = local_config in
+  let saved_state_load_type =
+    LoadScriptConfig.saved_state_load_type_to_string load_script_config in
   if Sys_utils.is_test_mode ()
   then EventLogger.init (Daemon.devnull ()) 0.0
-  else HackEventLogger.init root init_id (Unix.gettimeofday ()) lazy_decl;
+  else HackEventLogger.init
+    root
+    init_id
+    (Unix.gettimeofday ())
+    lazy_decl
+    saved_state_load_type;
   let root_s = Path.to_string root in
   if Sys_utils.is_nfs root_s && not enable_on_nfs then begin
     Hh_logger.log "Refusing to run on %s: root is on NFS!" root_s;
@@ -415,6 +423,10 @@ let daemon_main_exn options (ic, oc) =
 let daemon_main (state, options) (ic, oc) =
   (* Restore the root directory and other global states from monitor *)
   ServerGlobalState.restore state;
+  (* Restore hhi files every time the server restarts
+    in case the tmp folder changes *)
+  ignore (Hhi.get_hhi_root());
+
   try daemon_main_exn options (ic, oc)
   with
   | SharedMem.Out_of_shared_memory ->

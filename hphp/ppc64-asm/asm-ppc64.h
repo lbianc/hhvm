@@ -60,7 +60,7 @@ constexpr uint8_t toc_position_on_frame     = 3 * 8;
 // Currently it skips a "nop" or a "ld 2,24(1)"
 constexpr uint8_t call_skip_bytes_for_ret   = 1 * instr_size_in_bytes;
 
-// Force usage of TOC on branches
+// Allow TOC usage on branches - disabled at the moment.
 //#define USE_TOC_ON_BRANCH
 
 //////////////////////////////////////////////////////////////////////
@@ -807,10 +807,10 @@ struct Assembler {
   }
 
 //////////////////////////////////////////////////////////////////////
-  // Auxiliary for loading immediates in the best way
+// Auxiliary for loading immediates in the best way
 
 private:
-  void loadTOC(const Reg64& rt, const Reg64& rttoc,  int64_t imm64,
+  void loadTOC(const Reg64& rt, const Reg64& rttoc, int64_t imm64,
       uint64_t offset, bool fixedSize, bool fits32);
 
 public:
