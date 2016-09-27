@@ -605,7 +605,7 @@ struct RuntimeOption {
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \
   /* PPC64 Option: Minimum immediate size to use TOC */                 \
-  F(uint16_t, PPC64MinTOCImmSize, 64)                                   \
+  F(uint16_t, PPC64MinTOCImmSize, 32)                                   \
   /********************                                                 \
    | Profiling flags. |                                                 \
    ********************/                                                \
