@@ -14,11 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/ppc64-asm/branch-ppc64.h"
-#include "hphp/ppc64-asm/decoder-ppc64.h"
-
 #include <cassert>
 
+#include "hphp/ppc64-asm/branch-ppc64.h"
+#include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 
 #include "hphp/runtime/vm/jit/abi-ppc64.h"

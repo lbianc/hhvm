@@ -34,7 +34,7 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// funcGuard: kTocLen, ld, cmpd, kJccLen
+// funcGuard: Immediate, ld, cmpd, kJccLen
 // it needs to rewind all of those instructions but pointing to the first.
 constexpr auto kFuncGuardLen = smashableMovqLen()
   + 2 * ppc64_asm::instr_size_in_bytes + ppc64_asm::Assembler::kJccLen;

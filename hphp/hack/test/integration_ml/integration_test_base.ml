@@ -14,7 +14,6 @@ open Reordered_argument_collections
 open ServerCommandTypes
 
 let root = "/"
-let stats = ServerMain.empty_stats ()
 let genv = ref ServerEnvBuild.default_genv
 
 let setup_server () =
@@ -56,17 +55,19 @@ let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
 
   let genv = { !genv with
     ServerEnv.notifier = begin fun () ->
-      if not !did_read_disk_changes_ref then begin
+      let set = if not !did_read_disk_changes_ref then begin
         did_read_disk_changes_ref := true;
         SSet.of_list (List.map disk_changes fst)
-      end else SSet.empty
+      end else SSet.empty in
+      ServerNotifierTypes.Notifier_synchronous_changes set
     end
   } in
 
-  let env = ServerMain.serve_one_iteration genv env client_provider stats in
+  let env = ServerMain.serve_one_iteration genv env client_provider in
   env, {
     did_read_disk_changes = !did_read_disk_changes_ref;
-    rechecked_count = ServerMain.get_rechecked_count stats;
+    rechecked_count =
+      env.ServerEnv.recent_recheck_loop_stats.ServerEnv.rechecked_count;
     new_client_response =
       TestClientProvider.get_client_response Non_persistent;
     persistent_client_response =

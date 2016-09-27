@@ -13,23 +13,6 @@ open ServerEnv
 open Reordered_argument_collections
 open String_utils
 
-type recheck_loop_stats = {
-  rechecked_batches : int;
-  rechecked_count : int;
-  (* includes dependencies *)
-  total_rechecked_count : int;
-}
-
-type main_loop_stats = recheck_loop_stats ref * string ref
-
-let empty_recheck_loop_stats = {
-  rechecked_batches = 0;
-  rechecked_count = 0;
-  total_rechecked_count = 0;
-}
-
-let get_rechecked_count (stats_ref, _) = !stats_ref.rechecked_count
-
 (*****************************************************************************)
 (* Main initialization *)
 (*****************************************************************************)
@@ -74,6 +57,7 @@ module Program =
 
     let run_once_and_exit genv env =
       ServerError.print_errorl
+        None
         (ServerArgs.json_mode genv.options)
         (List.map (Errors.get_error_list env.errorl) Errors.to_absolute) stdout;
       match ServerArgs.convert genv.options with
@@ -197,8 +181,17 @@ let recheck genv old_env check_kind =
  * rebase, and we don't log the recheck_end event until the update list
  * is no longer getting populated. *)
 let rec recheck_loop acc genv env =
+  let open ServerNotifierTypes in
   let t = Unix.gettimeofday () in
   let raw_updates = genv.notifier () in
+  let acc, raw_updates = match raw_updates with
+  | Notifier_unavailable ->
+    { acc with updates_stale = true; }, SSet.empty
+  | Notifier_async_changes updates ->
+    { acc with updates_stale = false; }, updates
+  | Notifier_synchronous_changes updates ->
+    { acc with updates_stale = false; }, updates
+  in
   let updates = Program.process_updates genv env raw_updates in
 
   let is_idle = t -. env.last_command_time > 0.5 in
@@ -221,6 +214,7 @@ let rec recheck_loop acc genv env =
     let env, rechecked, total_rechecked = recheck genv env check_kind in
 
     let acc = {
+      updates_stale = acc.updates_stale;
       rechecked_batches = acc.rechecked_batches + 1;
       rechecked_count = acc.rechecked_count + rechecked;
       total_rechecked_count = acc.total_rechecked_count + total_rechecked;
@@ -228,37 +222,43 @@ let rec recheck_loop acc genv env =
     recheck_loop acc genv env
   end
 
-let recheck_loop = recheck_loop empty_recheck_loop_stats
+let recheck_loop genv env =
+  let stats, env = recheck_loop empty_recheck_loop_stats genv env in
+  { env with recent_recheck_loop_stats = stats }
 
-let serve_one_iteration genv env client_provider stats_refs =
-  let last_stats, recheck_id = stats_refs in
+let new_serve_iteration_id () =
+  Random_id.short_string ()
+
+let serve_one_iteration genv env client_provider =
+  let recheck_id = new_serve_iteration_id () in
   ServerMonitorUtils.exit_if_parent_dead ();
-  let has_client, has_persistent =
+  let client, has_persistent =
     ClientProvider.sleep_and_check client_provider env.persistent_client in
   let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
-  if not has_persistent && not has_client && not has_parsing_hook
+  if not has_persistent && client = None && not has_parsing_hook
   then begin
+    let last_stats = env.recent_recheck_loop_stats in
     (* Ugly hack: We want GC_SHAREDMEM_RAN to record the last rechecked
      * count so that we can figure out if the largest reclamations
      * correspond to massive rebases. However, the logging call is done in
      * the SharedMem module, which doesn't know anything about Server stuff.
      * So we wrap the call here. *)
     HackEventLogger.with_rechecked_stats
-      !last_stats.rechecked_batches
-      !last_stats.rechecked_count
-      !last_stats.total_rechecked_count
+      last_stats.rechecked_batches
+      last_stats.rechecked_count
+      last_stats.total_rechecked_count
       ServerIdle.go;
-    recheck_id := Random_id.short_string ();
   end;
   let start_t = Unix.gettimeofday () in
-  HackEventLogger.with_id ~stage:`Recheck !recheck_id @@ fun () ->
-  let stats, env = recheck_loop genv env in
+  HackEventLogger.with_id ~stage:`Recheck recheck_id @@ fun () ->
+  let env = recheck_loop genv env in
+  let stats = env.recent_recheck_loop_stats in
   if stats.rechecked_count > 0 then begin
     HackEventLogger.recheck_end start_t has_parsing_hook
       stats.rechecked_batches
       stats.rechecked_count
       stats.total_rechecked_count;
-    Hh_logger.log "Recheck id: %s" !recheck_id;
+    Hh_logger.log "Recheck id: %s" recheck_id;
   end;
 
   Option.iter env.diag_subscribe ~f:begin fun sub ->
@@ -275,27 +275,19 @@ let serve_one_iteration genv env client_provider stats_refs =
     Option.map env.diag_subscribe ~f:Diagnostic_subscription.mark_as_pushed }
   in
 
-  last_stats := stats;
-  let env = if has_client then
-    (try
-      let client = ClientProvider.accept_client client_provider in
-      HackEventLogger.got_client_channels start_t;
-      (try
-        let env = handle_connection genv env client false in
-        HackEventLogger.handled_connection start_t;
-        env
-      with
-      | e ->
-        HackEventLogger.handle_connection_exception e;
-        Hh_logger.log "Handling client failed. Ignoring.";
-        env)
+  let env = match client with
+  | None -> env
+  | Some client -> begin
+    try
+      let env = handle_connection genv env client false in
+      HackEventLogger.handled_connection start_t;
+      env
     with
     | e ->
-      HackEventLogger.get_client_channels_exception e;
-      Hh_logger.log
-        "Getting Client FDs failed. Ignoring.";
-      env)
-  else env in
+      HackEventLogger.handle_connection_exception e;
+      Hh_logger.log "Handling client failed. Ignoring.";
+      env
+  end in
   if has_persistent then
     let client = Utils.unsafe_opt env.persistent_client in
     HackEventLogger.got_persistent_client_channels start_t;
@@ -310,16 +302,11 @@ let serve_one_iteration genv env client_provider stats_refs =
       env)
   else env
 
-let empty_stats () =
-  (ref empty_recheck_loop_stats,
-  ref (Random_id.short_string ()))
-
 let serve genv env in_fd _ =
   let client_provider = ClientProvider.provider_from_file_descriptor in_fd in
   let env = ref env in
-  let stats = empty_stats () in
   while true do
-    env := serve_one_iteration genv !env client_provider stats;
+    env := serve_one_iteration genv !env client_provider;
   done
 
 let program_init genv =
