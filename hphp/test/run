@@ -381,6 +381,7 @@ function get_options($argv) {
     'verbose' => 'v',
     'fbmake' => '',
     'testpilot' => '',
+    'xml' => '',
     'threads:' => '',
     'args:' => 'a:',
     'log' => 'l',
@@ -903,6 +904,7 @@ class Status {
   const MODE_VERBOSE = 1;
   const MODE_FBMAKE = 2;
   const MODE_TESTPILOT = 3;
+  const MODE_XML = 4;
 
   const MSG_STARTED = 7;
   const MSG_FINISHED = 1;
@@ -1830,6 +1832,11 @@ function msg_loop($num_tests, $queue) {
     }
   }
 
+  if (Status::getMode() == Status::MODE_XML) {
+    $fp = fopen('/tmp/hphp-tests.xml', "w");
+    fputs($fp, sprintf("<testsuite tests='%d'>\n", $num_tests));
+  }
+
   while (true) {
     if (!msg_receive($queue, 0, $type, 1024, $message)) {
       error("msg_receive failed");
@@ -1889,6 +1896,14 @@ function msg_loop($num_tests, $queue) {
           case Status::MODE_TESTPILOT:
             Status::sayFBMake($test, 'passed', $stime, $etime);
             break;
+          case Status::MODE_XML:
+            fputs($fp,
+              sprintf(" <testcase classname='%s' name='%s'/>\n",
+                dirname($test),  # directory, specifiying a package of tests
+                basename($test)  # test name inside of that package
+              )
+            );
+            break;
         }
         break;
 
@@ -1947,6 +1962,16 @@ function msg_loop($num_tests, $queue) {
           case Status::MODE_TESTPILOT:
             Status::sayFBMake($test, 'failed', $stime, $etime);
             break;
+          case Status::MODE_XML:
+            fputs($fp,
+              sprintf(" <testcase classname='%s' name='%s'>\n",
+                dirname($test),  # directory, specifiying a package of tests
+                basename($test)  # test name inside of that package
+              )
+            );
+            fputs($fp,"  <failure type='Fail'>fail</failure>\n");
+            fputs($fp," </testcase>\n");
+            break;
         }
         break;
 
@@ -1978,6 +2003,11 @@ function msg_loop($num_tests, $queue) {
         "\033[0m$fill] ($total_run/$num_tests) ".
         "($skipped skipped, $failed failed)";
     }
+  }
+
+  if (Status::getMode() == Status::MODE_XML) {
+    fputs($fp, "</testsuite>\n");
+    $fp = fclose($fp);
   }
 
   if ($do_progress) {
@@ -2443,6 +2473,9 @@ function main($argv) {
   }
   if (isset($options['testpilot'])) {
     Status::setMode(Status::MODE_TESTPILOT);
+  }
+  if (isset($options['xml'])) {
+    Status::setMode(Status::MODE_XML);
   }
   Status::setUseColor(isset($options['color']) ? true : posix_isatty(STDOUT));
 
