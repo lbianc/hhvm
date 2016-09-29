@@ -802,7 +802,7 @@ void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
   if (i.saveframe) {
     a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
-    a.mr(rsfp(), rvmfp());
+    a.mr(rsfp(), ppc64_asm::reg::r31);
   }
 
   // restore return address.
