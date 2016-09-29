@@ -890,6 +890,7 @@ class Status {
   private static $mode = 0;
 
   private static $use_color = false;
+  private static $xml = false;
 
   private static $queue = null;
   private static $killed = false;
@@ -904,7 +905,6 @@ class Status {
   const MODE_VERBOSE = 1;
   const MODE_FBMAKE = 2;
   const MODE_TESTPILOT = 3;
-  const MODE_XML = 4;
 
   const MSG_STARTED = 7;
   const MSG_FINISHED = 1;
@@ -960,8 +960,16 @@ class Status {
     self::$use_color = $use;
   }
 
+  public static function setXml($xml) {
+    self::$xml = $xml;
+  }
+
   public static function getMode() {
     return self::$mode;
+  }
+
+  public static function getXml() {
+    return self::$xml;
   }
 
   public static function getOverallStartTime() {
@@ -1832,7 +1840,7 @@ function msg_loop($num_tests, $queue) {
     }
   }
 
-  if (Status::getMode() == Status::MODE_XML) {
+  if (Status::getXml()) {
     $fp = fopen('/tmp/hphp-tests.xml', "w");
     fputs($fp, sprintf("<testsuite tests='%d'>\n", $num_tests));
   }
@@ -1896,14 +1904,14 @@ function msg_loop($num_tests, $queue) {
           case Status::MODE_TESTPILOT:
             Status::sayFBMake($test, 'passed', $stime, $etime);
             break;
-          case Status::MODE_XML:
-            fputs($fp,
-              sprintf(" <testcase classname='%s' name='%s'/>\n",
-                dirname($test),  # directory, specifiying a package of tests
-                basename($test)  # test name inside of that package
-              )
-            );
-            break;
+        }
+        if (Status::getXml()) {
+          fputs($fp,
+            sprintf(" <testcase classname='%s' name='%s'/>\n",
+              dirname($test),  # directory, specifiying a package of tests
+              basename($test)  # test name inside of that package
+            )
+          );
         }
         break;
 
@@ -1935,6 +1943,16 @@ function msg_loop($num_tests, $queue) {
             Status::sayFBMake($test, 'not_relevant', $stime, $etime);
             break;
         }
+        if (Status::getXml()) {
+          fputs($fp,
+            sprintf(" <testcase classname='%s' name='%s'>\n",
+              dirname($test),  # directory, specifiying a package of tests
+              basename($test)  # test name inside of that package
+            )
+          );
+          fputs($fp,"  <skipped/>\n");
+          fputs($fp," </testcase>\n");
+        }
         break;
 
       case Status::MSG_TEST_FAIL:
@@ -1962,16 +1980,16 @@ function msg_loop($num_tests, $queue) {
           case Status::MODE_TESTPILOT:
             Status::sayFBMake($test, 'failed', $stime, $etime);
             break;
-          case Status::MODE_XML:
-            fputs($fp,
-              sprintf(" <testcase classname='%s' name='%s'>\n",
-                dirname($test),  # directory, specifiying a package of tests
-                basename($test)  # test name inside of that package
-              )
-            );
-            fputs($fp,"  <failure type='Fail'>fail</failure>\n");
-            fputs($fp," </testcase>\n");
-            break;
+        }
+        if (Status::getXml()) {
+          fputs($fp,
+            sprintf(" <testcase classname='%s' name='%s'>\n",
+              dirname($test),  # directory, specifiying a package of tests
+              basename($test)  # test name inside of that package
+            )
+          );
+          fputs($fp,"  <failure/>\n");
+          fputs($fp," </testcase>\n");
         }
         break;
 
@@ -2005,7 +2023,7 @@ function msg_loop($num_tests, $queue) {
     }
   }
 
-  if (Status::getMode() == Status::MODE_XML) {
+  if (Status::getXml()) {
     fputs($fp, "</testsuite>\n");
     $fp = fclose($fp);
   }
@@ -2474,10 +2492,8 @@ function main($argv) {
   if (isset($options['testpilot'])) {
     Status::setMode(Status::MODE_TESTPILOT);
   }
-  if (isset($options['xml'])) {
-    Status::setMode(Status::MODE_XML);
-  }
   Status::setUseColor(isset($options['color']) ? true : posix_isatty(STDOUT));
+  Status::setXml(isset($options['xml']));
 
   Status::$key = rand();
   $queue = Status::getQueue();
