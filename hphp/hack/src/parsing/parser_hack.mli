@@ -12,9 +12,11 @@ type parser_return = {
     file_mode  : FileInfo.mode option; (* None if PHP *)
     comments   : (Pos.t * string) list;
     ast        : Ast.program;
+    content   : string;
   }
 
 val program :
+  ?quick:bool ->
   ?elaborate_namespaces:bool ->
   ?include_line_comments:bool ->
   ?keep_errors:bool ->
@@ -30,8 +32,10 @@ val program_with_default_popt :
   string -> parser_return
 
 (* Parses a file *)
-val from_file : ParserOptions.t -> Relative_path.t -> parser_return
-val from_file_with_default_popt : Relative_path.t -> parser_return
+val from_file_with_default_popt :
+  ?quick:bool -> Relative_path.t -> parser_return
+val from_file :
+  ?quick:bool -> ParserOptions.t -> Relative_path.t -> parser_return
 
 type saved_lb
 type assoc

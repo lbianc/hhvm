@@ -22,7 +22,6 @@
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/fixup.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
-#include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-data.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
@@ -65,7 +64,7 @@ struct Vunit;
   O(bindaddr, I(addr) I(target) I(spOff), Un, Dn)\
   O(fallback, I(target) I(spOff) I(trflags), U(args), Dn)\
   O(fallbackcc, I(cc) I(target) I(spOff) I(trflags), U(sf) U(args), Dn)\
-  O(retransopt, I(transID) I(target) I(spOff), U(args), Dn)\
+  O(retransopt, I(sk) I(spOff), U(args), Dn)\
   /* vasm intrinsics */\
   O(copy, Inone, UH(s,d), DH(d,s))\
   O(copy2, Inone, UH(s0,d0) UH(s1,d1), DH(d0,s0) DH(d1,s1))\
@@ -460,18 +459,15 @@ struct fallbackcc {
 };
 
 struct retransopt {
-  explicit retransopt(TransID transID,
-                      SrcKey target,
+  explicit retransopt(SrcKey sk,
                       FPInvOffset spOff,
                       RegSet args)
-    : transID{transID}
-    , target{target}
+    : sk(sk)
     , spOff(spOff)
     , args{args}
   {}
 
-  TransID transID;
-  SrcKey target;
+  SrcKey sk;
   FPInvOffset spOff;
   RegSet args;
 };
@@ -1090,7 +1086,7 @@ struct storesd { VregDbl s; Vptr m; };
  *
  * In vasm, targets are always ordered {next, taken}.
  */
-struct jcc { ConditionCode cc; VregSF sf; Vlabel targets[2]; };
+struct jcc { ConditionCode cc; VregSF sf; Vlabel targets[2]; StringTag tag; };
 struct jcci { ConditionCode cc; VregSF sf; Vlabel target; TCA taken; };
 struct jmp { Vlabel target; };
 struct jmpr { Vreg64 target; RegSet args; };

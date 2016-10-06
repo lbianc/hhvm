@@ -536,26 +536,6 @@ struct ReqRetranslateData : IRExtraData {
   TransFlags trflags;
 };
 
-struct ReqRetranslateOptData : IRExtraData {
-  explicit ReqRetranslateOptData(TransID transID,
-                                 SrcKey target,
-                                 IRSPRelOffset irSPOff)
-    : transID(transID)
-    , target(target)
-    , irSPOff(irSPOff)
-  {}
-
-  std::string show() const {
-    return folly::to<std::string>(transID, ',',
-                                  target.offset(), ',',
-                                  irSPOff.offset);
-  }
-
-  TransID transID;
-  SrcKey target;
-  IRSPRelOffset irSPOff;
-};
-
 /*
  * Compile-time metadata about an ActRec allocation.
  */
@@ -1210,7 +1190,7 @@ X(SyncReturnBC,                 SyncReturnBCData);
 X(InlineReturnNoFrame,          InlineReturnNoFrameData);
 X(ReqRetranslate,               ReqRetranslateData);
 X(ReqBindJmp,                   ReqBindJmpData);
-X(ReqRetranslateOpt,            ReqRetranslateOptData);
+X(ReqRetranslateOpt,            IRSPRelOffsetData);
 X(CheckCold,                    TransIDData);
 X(IncProfCounter,               TransIDData);
 X(Call,                         CallData);
@@ -1285,6 +1265,7 @@ X(StAsyncArResume,              ResumeOffset);
 X(StContArResume,               ResumeOffset);
 X(StContArState,                GeneratorState);
 X(ContEnter,                    ContEnterData);
+X(DbgAssertARFunc,              IRSPRelOffsetData);
 X(LdARFuncPtr,                  IRSPRelOffsetData);
 X(EndCatch,                     IRSPRelOffsetData);
 X(EagerSyncVMRegs,              IRSPRelOffsetData);

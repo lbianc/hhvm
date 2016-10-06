@@ -78,6 +78,8 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
            (ServerArgs.ai_mode genv.options) env.tcopt
     | AI_QUERY json ->
         env, Ai.QueryService.go json
+    | DUMP_FULL_FIDELITY_PARSE file ->
+        env, FullFidelityParseService.go file
     | ECHO_FOR_TEST msg ->
         env, msg
     | OPEN_FILE path ->
@@ -98,7 +100,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
             |> Option.value ~default:(of_content "")
         in
         let edits = [{range = Some {st = pos; ed = pos}; text = "AUTO332"}] in
-        let edited_fc = edit_file fc edits in
+        let edited_fc = edit_file_unsafe fc edits in
         let content = get_content edited_fc in
         env, ServerAutoComplete.auto_complete env.tcopt content
     | IDE_HIGHLIGHT_REF (path, {line; column}) ->
@@ -173,6 +175,7 @@ let to_string : type a. a t -> _ = function
   | GET_DEFINITION_BY_ID _ -> "GET_DEFINITION_BY_ID"
   | IDE_HIGHLIGHT_REFS _ -> "IDE_HIGHLIGHT_REFS"
   | AI_QUERY _ -> "AI_QUERY"
+  | DUMP_FULL_FIDELITY_PARSE _ -> "DUMP_FULL_FIDELITY_PARSE"
   | ECHO_FOR_TEST _ -> "ECHO_FOR_TEST"
   | OPEN_FILE _ -> "OPEN_FILE"
   | CLOSE_FILE _ -> "CLOSE_FILE"

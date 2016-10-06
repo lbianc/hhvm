@@ -35,6 +35,7 @@
 #include "hphp/runtime/vm/jit/unwind-itanium.h"
 #include "hphp/runtime/vm/jit/write-lease.h"
 
+#include "hphp/util/disasm.h"
 #include "hphp/util/mutex.h"
 #include "hphp/util/process.h"
 #include "hphp/util/trace.h"
@@ -171,11 +172,6 @@ void requestInit() {
 }
 
 void requestExit() {
-  always_assert(!GetWriteLease().amOwner());
-  TRACE_MOD(Trace::txlease, 2, "%" PRIx64 " write lease stats: %15" PRId64
-            " kept, %15" PRId64 " grabbed\n",
-            Process::GetThreadIdForTrace(), GetWriteLease().hintKept(),
-            GetWriteLease().hintGrabbed());
   Stats::dump();
   Stats::clear();
   Timer::RequestExit();
@@ -209,6 +205,7 @@ void processInit() {
 
   // Write an .eh_frame section that covers the whole TC.
   initUnwinder(s_code->base(), s_code->codeSize());
+  Disasm::ExcludedAddressRange(s_code->base(), s_code->codeSize());
 }
 
 CodeCache& code() {

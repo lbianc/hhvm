@@ -432,14 +432,13 @@ CachedUnit checkoutFile(StringData* path, const struct stat& statInfo) {
 const std::string mangleUnitPHP7Options() {
   // As the list of options increases, we may want to do something smarter here?
   std::string s;
-  s +=
-      (RuntimeOption::PHP7_IntSemantics ? '1' : '0')
-    + (RuntimeOption::PHP7_LTR_assign ? '1' : '0')
-    + (RuntimeOption::PHP7_NoHexNumerics ? '1' : '0')
-    + (RuntimeOption::PHP7_ReportVersion ? '1' : '0')
-    + (RuntimeOption::PHP7_ScalarTypes ? '1' : '0')
-    + (RuntimeOption::PHP7_Substr ? '1' : '0')
-    + (RuntimeOption::PHP7_UVS ? '1' : '0');
+  s += (RuntimeOption::PHP7_IntSemantics ? '1' : '0') +
+      (RuntimeOption::PHP7_LTR_assign ? '1' : '0') +
+      (RuntimeOption::PHP7_NoHexNumerics ? '1' : '0') +
+      (RuntimeOption::PHP7_Builtins ? '1' : '0') +
+      (RuntimeOption::PHP7_ScalarTypes ? '1' : '0') +
+      (RuntimeOption::PHP7_Substr ? '1' : '0') +
+      (RuntimeOption::PHP7_UVS ? '1' : '0');
   return s;
 }
 
@@ -512,8 +511,14 @@ Unit* lookupUnit(StringData* path, const char* currentDir, bool* initial_opt) {
   // Check if this file has already been included.
   auto it = eContext->m_evaledFiles.find(spath.get());
   if (it != end(eContext->m_evaledFiles)) {
-    initial = false;
-    return it->second;
+    // In RepoAuthoritative mode we assume that the files are unchanged.
+    if (RuntimeOption::RepoAuthoritative ||
+        (it->second.ts_sec > s.st_mtime) ||
+        ((it->second.ts_sec == s.st_mtime) &&
+         (it->second.ts_nsec >= s.st_mtim.tv_nsec))) {
+      initial = false;
+      return it->second.unit;
+    }
   }
 
   // This file hasn't been included yet, so we need to parse the file
@@ -527,10 +532,12 @@ Unit* lookupUnit(StringData* path, const char* currentDir, bool* initial_opt) {
     // if parsing was successful, update the mappings for spath and
     // rpath (if it exists).
     eContext->m_evaledFilesOrder.push_back(cunit.unit->filepath());
-    eContext->m_evaledFiles[spath.get()] = cunit.unit;
+    eContext->m_evaledFiles[spath.get()] =
+      {cunit.unit, s.st_mtime, static_cast<unsigned long>(s.st_mtim.tv_nsec)};
     spath.get()->incRefCount();
     if (!cunit.unit->filepath()->same(spath.get())) {
-      eContext->m_evaledFiles[cunit.unit->filepath()] = cunit.unit;
+      eContext->m_evaledFiles[cunit.unit->filepath()] =
+        {cunit.unit, s.st_mtime, static_cast<unsigned long>(s.st_mtim.tv_nsec)};
     }
     if (g_system_profiler) {
       g_system_profiler->fileLoadCallBack(path->toCppString());
@@ -563,7 +570,6 @@ void preloadRepo() {
     workers.push_back(std::thread([&] {
       hphp_thread_init();
       hphp_session_init();
-      hphp_context_init();
 
       while (true) {
         auto begin = index.fetch_add(batchSize);

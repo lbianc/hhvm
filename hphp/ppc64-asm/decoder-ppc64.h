@@ -484,18 +484,7 @@ class Decoder : private boost::noncopyable {
     }
   }
 
-#if defined (__powerpc64__)
   Decoder();
-#else
-  /*
-   * Disable optimizations for this construction when compile this in non
-   * PPC64 architectures. When optimizations are enabled for this constructor
-   * it's increase the build time for ARM and X86.
-   * TODO(rcardoso): check build time now that unused instructions was removed
-   * from decoder.
-   */
-  NO_OPT Decoder();
-#endif
 
   ~Decoder() {
     for(int i = 0; i < kDecoderSize; i++)

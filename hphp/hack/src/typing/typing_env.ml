@@ -90,10 +90,6 @@ let fresh () =
 let fresh_type () =
   Reason.none, Tvar (Ident.tmp())
 
-let fresh_abstract_type ?constr r =
-  let name = Printf.sprintf "Tfresh%d" (fresh ()) in
-  r, Tabstract (AKgeneric name, constr)
-
 let add_subst env x x' =
   if x <> x'
   then { env with subst = IMap.add x x' env.subst }
@@ -155,7 +151,7 @@ let make_ft p params ret_ty =
     ft_abstract = false;
     ft_arity    = Fstandard (arity, arity);
     ft_tparams  = [];
-    ft_locl_cstr= [];
+    ft_where_constraints = [];
     ft_params   = params;
     ft_ret      = ret_ty;
   }
@@ -220,6 +216,14 @@ let add_lower_bound env name ty =
     end in
   env_with_tpenv env (add_lower_bound_ tpenv name ty)
 
+let add_constraint env id ck ty =
+  match ck with
+  | Ast.Constraint_super -> add_lower_bound env id ty
+  | Ast.Constraint_eq    ->
+    let env = add_upper_bound env id ty in
+    add_lower_bound env id ty
+  | Ast.Constraint_as    -> add_upper_bound env id ty
+
 (* Add type parameters to environment, initially with no bounds.
  * Existing type parameters with the same name will be overridden. *)
 let add_generic_parameters env tparaml =
@@ -231,6 +235,14 @@ let add_generic_parameters env tparaml =
 
 let is_generic_parameter env name =
   SMap.mem name env.lenv.tpenv
+
+let get_generic_parameters env =
+  SMap.keys env.lenv.tpenv
+
+let get_tpenv_size env =
+  SMap.fold (fun _x { lower_bounds; upper_bounds } count ->
+    count + List.length lower_bounds + List.length upper_bounds)
+    env.lenv.tpenv 0
 
 (* Generate a fresh generic parameter with a specified prefix but distinct
  * from all generic parameters in the environment *)

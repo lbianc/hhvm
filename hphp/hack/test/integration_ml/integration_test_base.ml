@@ -14,15 +14,32 @@ open Reordered_argument_collections
 open ServerCommandTypes
 
 let root = "/"
-let genv = ref ServerEnvBuild.default_genv
+let server_config = ServerEnvBuild.default_genv.ServerEnv.config
+let global_opts = GlobalOptions.make
+  ~tco_assume_php: false
+  ~tco_unsafe_xhp: false
+  ~tco_user_attrs: None
+  ~tco_experimental_features: GlobalOptions.tco_experimental_all
+  ~po_auto_namespace_map: []
 
-let setup_server () =
+let server_config = ServerConfig.set_tc_options server_config global_opts
+let server_config = ServerConfig.set_parser_options
+  server_config global_opts
+
+let genv = ref { ServerEnvBuild.default_genv with
+  ServerEnv.config = server_config
+}
+
+let setup_server ?custom_config ()  =
   Printexc.record_backtrace true;
-  EventLogger.init (Daemon.devnull ()) 0.0;
+  EventLogger.init EventLogger.Event_logger_fake 0.0;
   Relative_path.set_path_prefix Relative_path.Root (Path.make root);
   HackSearchService.attach_hooks ();
   let _ = SharedMem.init GlobalConfig.default_sharedmem_config in
-  ServerEnvBuild.make_env !genv.ServerEnv.config
+  match custom_config with
+  | Some config -> ServerEnvBuild.make_env config
+  | None -> ServerEnvBuild.make_env !genv.ServerEnv.config
+
 
 let default_loop_input = {
   disk_changes = [];
@@ -53,14 +70,18 @@ let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
 
   let did_read_disk_changes_ref = ref false in
 
+  let notifier () =
+    if not !did_read_disk_changes_ref then begin
+      did_read_disk_changes_ref := true;
+      SSet.of_list (List.map disk_changes fst)
+    end else SSet.empty
+  in
+
   let genv = { !genv with
-    ServerEnv.notifier = begin fun () ->
-      let set = if not !did_read_disk_changes_ref then begin
-        did_read_disk_changes_ref := true;
-        SSet.of_list (List.map disk_changes fst)
-      end else SSet.empty in
-      ServerNotifierTypes.Notifier_synchronous_changes set
-    end
+    ServerEnv.notifier_async =
+      (fun () ->
+        ServerNotifierTypes.Notifier_synchronous_changes (notifier ()));
+    ServerEnv.notifier = notifier;
   } in
 
   let env = ServerMain.serve_one_iteration genv env client_provider in
@@ -103,6 +124,11 @@ let connect_persistent_client env =
   match env.ServerEnv.persistent_client with
   | Some _ -> env
   | None -> fail "Expected persistent client to be connected"
+
+let get_errors env = Errors.get_error_list env.ServerEnv.errorl
+
+let assert_no_errors env =
+  if get_errors env <> [] then fail "Expected to have no errors"
 
 let assertSingleError expected err_list =
   match err_list with

@@ -246,10 +246,6 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
   if (isEntry) {
     irgen::gen(irgs, EndGuards);
 
-    if (RuntimeOption::EvalJitTransCounters) {
-      irgen::incTransCounter(irgs);
-    }
-
     if (irgs.context.kind == TransKind::Profile) {
       if (block.func()->isEntry(bcOff)) {
         irgen::checkCold(irgs, irgs.context.transID);
@@ -534,7 +530,7 @@ RegionDescPtr getInlinableCalleeRegion(const ProfSrcKey& psk,
     return nullptr;
   }
 
-  inl.accountForInlining(psk.srcKey, callee, *calleeRegion);
+  inl.accountForInlining(psk.srcKey, info.fpushOpc, callee, *calleeRegion);
   return calleeRegion;
 }
 
@@ -673,10 +669,9 @@ TranslateResult irGenRegionImpl(irgen::IRGS& irgs,
       // HHIR may have figured the topFunc even though the RegionDesc
       // didn't know it.  When that happens, update topFunc.
       if (!topFunc && !irb.fs().fpiStack().empty()) {
-        auto& fpiInfo = irb.fs().fpiStack().back();
-        auto func = fpiInfo.func;
-        if (func && func->isNameBindingImmutable(block.unit())) {
-          topFunc = func;
+        auto const& fpiInfo = irb.fs().fpiStack().back();
+        if (fpiInfo.func) {
+          topFunc = fpiInfo.func;
         }
       }
 

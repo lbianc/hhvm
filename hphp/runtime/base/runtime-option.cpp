@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include <folly/FileUtil.h>
 #include <folly/String.h>
 #include <folly/portability/SysResource.h>
 #include <folly/portability/SysTime.h>
@@ -40,7 +41,6 @@
 #include "hphp/util/process.h"
 #include "hphp/util/file-cache.h"
 #include "hphp/util/log-file-flusher.h"
-#include "hphp/runtime/base/file-util.h"
 
 #include "hphp/parser/scanner.h"
 
@@ -48,23 +48,25 @@
 #include "hphp/runtime/server/virtual-host.h"
 #include "hphp/runtime/server/files-match.h"
 #include "hphp/runtime/server/access-log.h"
-
-#include "hphp/runtime/base/type-conversions.h"
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/apc-file-storage.h"
-#include "hphp/runtime/base/extended-logger.h"
-#include "hphp/runtime/base/init-fini-node.h"
 #ifdef FACEBOOK
 #include "hphp/facebook/runtime/server/thrift-logger.h"
 #endif
-#include "hphp/runtime/base/simple-counter.h"
+
+#include "hphp/runtime/base/apc-file-storage.h"
+#include "hphp/runtime/base/autoload-handler.h"
+#include "hphp/runtime/base/builtin-functions.h"
+#include "hphp/runtime/base/config.h"
+#include "hphp/runtime/base/crash-reporter.h"
+#include "hphp/runtime/base/extended-logger.h"
+#include "hphp/runtime/base/file-util.h"
+#include "hphp/runtime/base/hphp-system.h"
+#include "hphp/runtime/base/ini-setting.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/preg.h"
-#include "hphp/runtime/base/crash-reporter.h"
+#include "hphp/runtime/base/simple-counter.h"
 #include "hphp/runtime/base/static-string-table.h"
-#include "hphp/runtime/base/config.h"
-#include "hphp/runtime/base/ini-setting.h"
-#include "hphp/runtime/base/hphp-system.h"
+#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/zend-url.h"
 #include "hphp/runtime/ext/extension-registry.h"
 
@@ -194,6 +196,7 @@ bool RuntimeOption::StopOldServer = false;
 int RuntimeOption::OldServerWait = 30;
 int RuntimeOption::CacheFreeFactor = 50;
 int64_t RuntimeOption::ServerRSSNeededMb = 4096;
+int64_t RuntimeOption::ServerCriticalFreeMb = 512;
 std::vector<std::string> RuntimeOption::ServerNextProtocols;
 bool RuntimeOption::ServerEnableH2C = false;
 int RuntimeOption::BrotliCompressionEnabled = -1;
@@ -305,6 +308,7 @@ int64_t RuntimeOption::UnserializationBigMapThreshold = 1 << 16;
 std::string RuntimeOption::TakeoverFilename;
 int RuntimeOption::AdminServerPort = 0;
 int RuntimeOption::AdminThreadCount = 1;
+int RuntimeOption::AdminServerQueueToWorkerRatio = 1;
 std::string RuntimeOption::AdminPassword;
 std::set<std::string> RuntimeOption::AdminPasswords;
 
@@ -407,7 +411,7 @@ bool RuntimeOption::PHP7_EngineExceptions = false;
 bool RuntimeOption::PHP7_IntSemantics = false;
 bool RuntimeOption::PHP7_LTR_assign = false;
 bool RuntimeOption::PHP7_NoHexNumerics = false;
-bool RuntimeOption::PHP7_ReportVersion = false;
+bool RuntimeOption::PHP7_Builtins = false;
 bool RuntimeOption::PHP7_ScalarTypes = false;
 bool RuntimeOption::PHP7_Substr = false;
 bool RuntimeOption::PHP7_InfNanFloatParse = false;
@@ -443,6 +447,14 @@ static inline bool pgoDefault() {
   return false;
 #else
   return true;
+#endif
+}
+
+static inline bool eagerGcDefault() {
+#ifdef HHVM_EAGER_GC
+  return true;
+#else
+  return false;
 #endif
 }
 
@@ -637,9 +649,11 @@ static void normalizePath(std::string &path) {
 
 static bool matchHdfPattern(const std::string &value,
                             const IniSetting::Map& ini, Hdf hdfPattern,
-                            const std::string& name) {
+                            const std::string& name,
+                            const std::string& suffix = "") {
   string pattern = Config::GetString(ini, hdfPattern, name, "", false);
   if (!pattern.empty()) {
+    if (!suffix.empty()) pattern += suffix;
     Variant ret = preg_match(String(pattern.c_str(), pattern.size(),
                                     CopyString),
                              String(value.c_str(), value.size(),
@@ -659,7 +673,7 @@ static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
                                                   Hdf& config) {
 
   // Machine metrics
-  string hostname, tier, cpu;
+  string hostname, tier, cpu, tiers;
   {
     hostname = Config::GetString(ini, config, "Machine.name");
     if (hostname.empty()) {
@@ -672,6 +686,13 @@ static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
     if (cpu.empty()) {
       cpu = Process::GetCPUModel();
     }
+
+    tiers = Config::GetString(ini, config, "Machine.tiers");
+    if (!tiers.empty()) {
+      if (!folly::readFile(tiers.c_str(), tiers)) {
+        tiers.clear();
+      }
+    }
   }
 
   std::vector<std::string> messages;
@@ -682,11 +703,13 @@ static std::vector<std::string> getTierOverwrites(IniSetting::Map& ini,
       if (messages.empty()) {
         messages.emplace_back(folly::sformat(
                                 "Matching tiers using: "
-                                "machine='{}', tier='{}', cpu = '{}'",
-                                hostname, tier, cpu));
+                                "machine='{}', tier='{}', "
+                                "cpu = '{}', tiers = '{}'",
+                                hostname, tier, cpu, tiers));
       }
       if (matchHdfPattern(hostname, ini, hdf, "machine") &&
           matchHdfPattern(tier, ini, hdf, "tier") &&
+          matchHdfPattern(tiers, ini, hdf, "tiers", "m") &&
           matchHdfPattern(cpu, ini, hdf, "cpu")) {
         messages.emplace_back(folly::sformat(
                                 "Matched tier: {}", hdf.getName()));
@@ -1107,11 +1130,6 @@ void RuntimeOption::Load(
       throw std::runtime_error("Code coverage is not supported with "
         "Eval.Jit=true");
     }
-    if (EvalJitConcurrently && EvalJitTransCounters) {
-      // TODO(12493872): Make thread-safe or remove counters.
-      throw std::runtime_error("Translation counters are not supported with "
-        "Eval.JitConcurrently != 0");
-    }
     Config::Bind(DisableSmallAllocator, ini, config,
                  "Eval.DisableSmallAllocator", DisableSmallAllocator);
     SetArenaSlabAllocBypass(DisableSmallAllocator);
@@ -1264,8 +1282,7 @@ void RuntimeOption::Load(
                  s_PHP7_master);
     Config::Bind(PHP7_NoHexNumerics, ini, config, "PHP7.NoHexNumerics",
                  s_PHP7_master);
-    Config::Bind(PHP7_ReportVersion, ini, config, "PHP7.ReportVersion",
-                 s_PHP7_master);
+    Config::Bind(PHP7_Builtins, ini, config, "PHP7.Builtins", s_PHP7_master);
     Config::Bind(PHP7_ScalarTypes, ini, config, "PHP7.ScalarTypes",
                  s_PHP7_master);
     Config::Bind(PHP7_Substr, ini, config, "PHP7.Substr",
@@ -1357,6 +1374,8 @@ void RuntimeOption::Load(
     Config::Bind(StopOldServer, ini, config, "Server.StopOld", false);
     Config::Bind(OldServerWait, ini, config, "Server.StopOldWait", 30);
     Config::Bind(ServerRSSNeededMb, ini, config, "Server.RSSNeededMb", 4096);
+    Config::Bind(ServerCriticalFreeMb, ini, config,
+                 "Server.CriticalFreeMb", 512);
     Config::Bind(CacheFreeFactor, ini, config, "Server.CacheFreeFactor", 50);
     if (CacheFreeFactor > 100) CacheFreeFactor = 100;
     if (CacheFreeFactor < 0) CacheFreeFactor = 0;
@@ -1629,7 +1648,12 @@ void RuntimeOption::Load(
   {
     // Admin Server
     Config::Bind(AdminServerPort, ini, config, "AdminServer.Port", 0);
+    // Single-threaded by default. If increasing the max thread count > 1, the
+    // queue-to-worker ratio can be raised for a more conservative growth: e.g.,
+    // a ratio of 3 means a second thread will spwan at 3 queued requests, etc.
     Config::Bind(AdminThreadCount, ini, config, "AdminServer.ThreadCount", 1);
+    Config::Bind(AdminServerQueueToWorkerRatio, ini, config,
+                 "AdminServer.QueueToWorkerRatio", 1);
     Config::Bind(AdminPassword, ini, config, "AdminServer.Password");
     Config::Bind(AdminPasswords, ini, config, "AdminServer.Passwords");
   }
@@ -1784,6 +1808,21 @@ void RuntimeOption::Load(
   }
 
   Config::Bind(AliasedNamespaces, ini, config, "AliasedNamespaces");
+  for (auto it = AliasedNamespaces.begin(); it != AliasedNamespaces.end(); ) {
+    if (!is_valid_class_name(it->second)) {
+      Logger::Warning("Skipping invalid AliasedNamespace %s\n",
+                      it->second.c_str());
+      it = AliasedNamespaces.erase(it);
+      continue;
+    }
+
+    while (it->second.size() && it->second[0] == '\\') {
+      it->second = it->second.substr(1);
+    }
+
+    ++it;
+  }
+
   Config::Bind(CustomSettings, ini, config, "CustomSettings");
 
   // Run initializers depedent on options, e.g., resizing atomic maps/vectors.

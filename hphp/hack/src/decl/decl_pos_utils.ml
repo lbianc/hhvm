@@ -91,7 +91,7 @@ module TraversePos(ImplementPos: sig val pos: Pos.t -> Pos.t end) = struct
     | Tmixed as x          -> x
     | Tarray (ty1, ty2)    -> Tarray (ty_opt ty1, ty_opt ty2)
     | Tprim _ as x         -> x
-    | Tgeneric (s, cstr_opt) -> Tgeneric (s, constraint_ cstr_opt)
+    | Tgeneric _ as x      -> x
     | Ttuple tyl           -> Ttuple (List.map tyl ty)
     | Toption x            -> Toption (ty x)
     | Tfun ft              -> Tfun (fun_type ft)
@@ -118,6 +118,7 @@ module TraversePos(ImplementPos: sig val pos: Pos.t -> Pos.t end) = struct
   and class_const cc =
     { cc_synthesized = cc.cc_synthesized;
       cc_abstract = cc.cc_abstract;
+      cc_pos = cc.cc_pos;
       cc_type = ty cc.cc_type;
       cc_expr = Option.map cc.cc_expr (Nast_pos_mapper.expr pos);
       cc_origin = cc.cc_origin;

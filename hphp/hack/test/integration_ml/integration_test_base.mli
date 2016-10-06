@@ -10,7 +10,7 @@
 
 open Integration_test_base_types
 
-val setup_server: unit -> ServerEnv.env
+val setup_server: ?custom_config:ServerConfig.t -> unit -> ServerEnv.env
 
 val setup_disk: ServerEnv.env -> disk_changes_type -> ServerEnv.env
 
@@ -56,7 +56,11 @@ val prepend_root: string -> string
 (* Helpers for asserting things *)
 
 val fail: string -> unit
+
 val assertEqual: string -> string -> unit
+
+val assert_no_errors: ServerEnv.env -> unit
+
 val assertSingleError: string -> Errors.error list -> unit
 
 val assert_no_diagnostics : ('a, 'b) loop_outputs -> unit

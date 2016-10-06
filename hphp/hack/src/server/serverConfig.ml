@@ -94,6 +94,25 @@ let config_user_attributes config =
       let custom_attrs = Str.split config_list_regexp s in
       Some (List.fold_left custom_attrs ~f:SSet.add ~init:SSet.empty)
 
+let process_experimental sl =
+  match List.map sl String.lowercase with
+    | ["false"] -> SSet.empty
+    | ["true"] -> TypecheckerOptions.experimental_all
+    | features ->
+      begin
+        List.iter features ~f:(fun s ->
+          if not (SSet.mem TypecheckerOptions.experimental_all s)
+          then failwith ("invalid experimental feature " ^ s));
+        List.fold_left features ~f:SSet.add ~init:SSet.empty
+      end
+
+let config_experimental_tc_features config =
+  match SMap.get config "enable_experimental_tc_features" with
+    | None -> SSet.empty
+    | Some s ->
+      let sl = Str.split config_list_regexp s in
+      process_experimental sl
+
 let maybe_relative_path fn =
   (* Note: this is not the same as calling realpath; the cwd is not
    * necessarily the same as hh_server's root!!! *)
@@ -132,39 +151,21 @@ let load config_filename options =
   let load_script_timeout = int_ "load_script_timeout" ~default:0 config in
   let load_mini_script =
     Option.map (SMap.get config "load_mini_script") maybe_relative_path in
-  let process_experimental sl =
-    match List.map sl String.lowercase with
-    | ["false"] -> SSet.empty
-    | ["true"] -> TypecheckerOptions.experimental_all
-    | features ->
-      begin
-        List.iter features ~f:(fun s ->
-          if not (SSet.mem TypecheckerOptions.experimental_all s)
-          then failwith ("invalid experimental feature " ^ s));
-        List.fold_left features ~f:SSet.add ~init:SSet.empty
-      end in
-  let tcopts = { TypecheckerOptions.
-    tco_assume_php = bool_ "assume_php" ~default:true config;
-    tco_unsafe_xhp = bool_ "unsafe_xhp" ~default:false config;
-    tco_user_attrs = config_user_attributes config;
-    tco_experimental_features =
-      process_experimental (string_list
-        ~delim:(Str.regexp ",")
-        "enable_experimental_tc_features"
-        ~default:[]
-        config);
-  } in
-  let popts = { ParserOptions.
-    po_auto_namespace_map = prepare_auto_namespace_map config;
-  } in
+  let global_opts = GlobalOptions.make
+    (bool_ "assume_php" ~default:true config)
+    (bool_ "unsafe_xhp" ~default:false config)
+    (config_user_attributes config)
+    (config_experimental_tc_features config)
+    (prepare_auto_namespace_map config)
+  in
   {
     load_script = load_script;
     load_script_timeout = load_script_timeout;
     load_mini_script = load_mini_script;
     gc_control = make_gc_control config;
     sharedmem_config = make_sharedmem_config config options local_config;
-    tc_options = tcopts;
-    parser_options = popts;
+    tc_options = global_opts;
+    parser_options = global_opts;
   }, local_config
 
 (* useful in testing code *)
@@ -178,6 +179,8 @@ let default_config = {
   parser_options = ParserOptions.default;
 }
 
+let set_parser_options config popt = { config with parser_options = popt }
+let set_tc_options config tcopt = { config with tc_options = tcopt }
 let load_script config = config.load_script
 let load_script_timeout config = config.load_script_timeout
 let load_mini_script config = config.load_mini_script

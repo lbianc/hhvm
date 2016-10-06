@@ -24,7 +24,16 @@ open Utils
 exception Watchman_error of string
 exception Timeout
 
+(** Throw this exception when we know there is something to read from
+ * the watchman channel, but reading took too long. *)
+exception Read_payload_too_long
+
 let debug = false
+
+let sync_file_extension = "tmp_sync"
+
+(** TODO: support git. *)
+let vcs_tmp_dir = ".hg"
 
 let crash_marker_path root =
   let root_name = Path.slash_escaped_string_of_path root in
@@ -76,6 +85,10 @@ type watchman_instance =
    * cases too. *)
   | Watchman_dead of dead_env
   | Watchman_alive of env
+
+let get_root_path instance = match instance with
+  | Watchman_dead dead_env -> dead_env.prior_settings.root
+  | Watchman_alive env -> env.settings.root
 
 (* Some JSON processing helpers *)
 module J = struct
@@ -144,6 +157,7 @@ let request_json
             J.strlist ["suffix"; "phpt"];
             J.strlist ["suffix"; "hh"];
             J.strlist ["suffix"; "hhi"];
+            J.strlist ["suffix"; sync_file_extension];
             J.strlist ["suffix"; "xhp"];
             (* FIXME: This is clearly wrong, but we do it to match the
              * behavior on the server-side. We need to investigate if
@@ -154,7 +168,8 @@ let request_json
         ];
         J.pred "not" @@ [
           J.pred "anyof" @@ [
-            J.strlist ["dirname"; ".hg"];
+            (** We don't exclude the .hg directory, because we touch unique
+             * files there to support synchronous queries. *)
             J.strlist ["dirname"; ".git"];
             J.strlist ["dirname"; ".svn"];
           ]
@@ -199,12 +214,21 @@ let capability_check ?(optional=[]) required =
 (*****************************************************************************)
 
 let read_with_timeout timeout ic =
-   Timeout.with_timeout ~timeout
-     ~do_:(fun t -> Timeout.input_line ~timeout:t ic)
-     ~on_timeout:begin fun _ ->
-                   EventLogger.watchman_timeout ();
-                   raise Timeout
-                 end
+  let fd = Timeout.descr_of_in_channel ic in
+  let deadline = Unix.gettimeofday () +. timeout in
+  match Unix.select [fd] [] [] timeout with
+    | [ready_fd], _, _ when ready_fd = fd -> begin
+     Timeout.with_timeout
+       ~timeout:(max 1 (int_of_float (deadline -. Unix.gettimeofday ())))
+       ~do_:(fun t -> Timeout.input_line ~timeout:t ic)
+       ~on_timeout:begin fun _ ->
+                     EventLogger.watchman_timeout ();
+                     raise Read_payload_too_long
+                   end
+    end
+    | _, _, _ ->
+      EventLogger.watchman_timeout ();
+      raise Timeout
 
 let assert_no_error obj =
   (try
@@ -229,7 +253,7 @@ let sanitize_watchman_response output =
   assert_no_error response;
   response
 
-let exec ?(timeout=120) (ic, oc) json =
+let exec ?(timeout=120.0) (ic, oc) json =
   let json_str = Hh_json.(json_to_string json) in
   if debug then Printf.eprintf "Watchman request: %s\n%!" json_str ;
   output_string oc json_str;
@@ -245,7 +269,7 @@ let get_sockname timeout =
   let ic =
     Timeout.open_process_in "watchman"
     [| "watchman"; "get-sockname"; "--no-pretty" |] in
-  let output = read_with_timeout timeout ic in
+  let output = read_with_timeout (float_of_int timeout) ic in
   assert (Timeout.close_process_in ic = Unix.WEXITED 0);
   let json = Hh_json.json_of_string output in
   J.get_string_val "sockname" json
@@ -286,12 +310,29 @@ let init { init_timeout; subscribe_to_changes; root } =
   if subscribe_to_changes then (ignore @@ exec env.socket (subscribe env)) ;
   env
 
-let poll_for_updates env =
-  (* Use the timeout mechanism to manage our polling frequency. *)
-  let timeout = 0 in
+let has_input timeout (in_channel, _) =
+  let fd = Timeout.descr_of_in_channel in_channel in
+  match Unix.select [fd] [] [] timeout with
+    | [_], _, _ -> true
+    | _ -> false
+
+let no_updates_response clockspec =
+  let timeout_str = "{\"files\":[]," ^ "\"clock\":\"" ^ clockspec ^ "\"}" in
+  Hh_json.json_of_string timeout_str
+
+let poll_for_updates ?timeout env =
+  let timeout = Option.value timeout ~default:0.0 in
+  let ready = has_input timeout env.socket in
+  if not ready then
+    if timeout = 0.0 then no_updates_response env.clockspec
+    else raise Timeout
+  else
+  let timeout = 20 in
   try
     let output = begin
       let in_channel, _  = env.socket in
+      (* Use the timeout mechanism to limit maximum time to read payload (cap
+       * data size). *)
       Timeout.with_timeout
         ~do_: (fun t -> Timeout.input_line ~timeout:t in_channel)
         ~timeout
@@ -300,11 +341,8 @@ let poll_for_updates env =
     sanitize_watchman_response output
   with
   | Timeout.Timeout ->
-    let clockspec = begin
-        exec env.socket (clock env.watch_root) |>
-          J.get_string_val "clock" end in
-    let timeout_str = "{\"files\":[]," ^ "\"clock\":\"" ^ clockspec ^ "\"}" in
-    Hh_json.json_of_string (timeout_str)
+    let () = Hh_logger.log "Watchman.poll_for_updates timed out" in
+    raise Read_payload_too_long
   | _ as e ->
     raise e
 
@@ -342,6 +380,19 @@ let maybe_restart_instance instance = match instance with
     else
       instance
 
+let close_channel_on_instance env =
+  let ic, _ = env.socket in
+  Timeout.close_in ic;
+  EventLogger.watchman_died_caught ();
+  Watchman_dead (dead_env_from_alive env), Watchman_unavailable
+
+(** Calls f on the instance, maybe restarting it if its dead and maybe
+ * reverting it to a dead state if things go south. For example, if watchman
+ * shuts the connection on us, or shuts down, or crashes, we revert to a dead
+ * instance, upon which a restart will be attempted down the road.
+ * Alternatively, we also proactively revert to a dead instance if it appears
+ * to be unresponsive (Timeout), and if reading the payload from it is
+ * taking too long. *)
 let call_on_instance instance source f =
   let instance = maybe_restart_instance instance in
   match instance with
@@ -359,6 +410,15 @@ let call_on_instance instance source f =
         Hh_logger.log "Watchman connection reset by peer.";
         EventLogger.watchman_died_caught ();
         Watchman_dead (dead_env_from_alive env), Watchman_unavailable
+      | End_of_file ->
+        Hh_logger.log "Watchman connection End_of_file. Closing channel";
+        close_channel_on_instance env
+      | Read_payload_too_long ->
+        Hh_logger.log "Watchman reading payload too long. Closing channel";
+        close_channel_on_instance env
+      | Timeout ->
+        Hh_logger.log "Watchman reading Timeout. Closing channel";
+        close_channel_on_instance env
       | e ->
         let msg = Printexc.to_string e in
         EventLogger.watchman_uncaught_failure msg;
@@ -377,12 +437,22 @@ let transform_changes_response env data =
     env.clockspec <- J.get_string_val "clock" data;
     set_of_list @@ extract_file_names env data
 
-let get_changes instance =
+let random_filepath root =
+  let root_name = Path.to_string root in
+  let dir = Filename.concat root_name vcs_tmp_dir in
+  let name = Random_id.(short_string_with_alphabet alphanumeric_alphabet) in
+  Filename.concat dir (spf ".%s.%s" name sync_file_extension)
+
+let get_changes ?deadline instance =
+  let timeout = Option.map deadline ~f:(fun deadline ->
+    let timeout = deadline -. (Unix.time ()) in
+    max timeout 0.0
+  ) in
   call_on_instance instance "get_changes" @@ fun env ->
     let response = begin
         if env.settings.subscribe_to_changes
-        then Watchman_pushed (poll_for_updates env)
-        else Watchman_synchronous (exec env.socket (since_query env))
+        then Watchman_pushed (poll_for_updates ?timeout env)
+        else Watchman_synchronous (exec ?timeout env.socket (since_query env))
     end in
     match response with
     | Watchman_unavailable -> Watchman_unavailable
@@ -390,3 +460,73 @@ let get_changes instance =
       Watchman_pushed (transform_changes_response env data)
     | Watchman_synchronous data ->
       Watchman_synchronous (transform_changes_response env data)
+
+let rec get_changes_until_file_sync deadline syncfile instance acc_changes =
+  if Unix.time () >= deadline then raise Timeout else ();
+  let instance, changes = get_changes ~deadline instance in
+  match changes with
+  | Watchman_unavailable ->
+    (** We don't need to use Retry_with_backoff_exception because there is
+     * exponential backoff built into get_changes to restart the watchman
+     * instance. *)
+    get_changes_until_file_sync
+      deadline syncfile instance acc_changes (** Not in 4.01 yet [@tailcall] *)
+  | Watchman_synchronous changes
+  | Watchman_pushed changes ->
+    let acc_changes = SSet.union acc_changes changes in
+    if SSet.mem syncfile changes then
+      instance, acc_changes
+    else
+      get_changes_until_file_sync deadline syncfile instance acc_changes
+
+(** Raise this exception together with a with_retries_until_deadline call to
+ * make use of its exponential backoff machinery. *)
+exception Retry_with_backoff_exception
+
+(** Call "f instance temp_file_name" with a random temporary file created
+ * before f and deleted after f. *)
+let with_random_temp_file instance f =
+  let root = get_root_path instance in
+  let temp_file = random_filepath root in
+  let ic = try Some ( open_out_gen [Open_creat; Open_excl] 555 temp_file) with
+    | _ -> None
+  in
+  match ic with
+  | None ->
+    (** Failed to create temp file. Retry with exponential backoff. *)
+    raise Retry_with_backoff_exception
+  | Some ic ->
+    let () = close_out ic in
+    let result = f instance temp_file in
+    let () = Sys.remove temp_file in
+    result
+
+(** Call f with retries if it throws Retry_with_backoff_exception,
+ * using exponential backoff between attempts.
+ *
+ * Raise Timeout if deadline arrives. *)
+let rec with_retries_until_deadline ~attempt instance deadline f =
+  if Unix.time () > deadline then raise Timeout else ();
+  let max_wait_time = 10.0 in
+  try f instance with
+    | Retry_with_backoff_exception ->
+      let () = if Unix.time () > deadline then raise Timeout else () in
+      let wait_time = min max_wait_time (2.0 ** (float_of_int attempt)) in
+      let () = ignore @@ Unix.select [] [] [] wait_time in
+      with_retries_until_deadline ~attempt:(attempt + 1) instance deadline f
+
+let get_changes_synchronously ~(timeout:int) instance =
+  (** Reading uses Timeout.with_timeout, which is not re-entrant. So
+   * we can't use that out here. *)
+  let deadline = Unix.time () +. (float_of_int timeout) in
+  with_retries_until_deadline ~attempt:0 instance deadline begin
+    (** Lambda here must take an instance to avoid capturing the one in the
+     * outer scope, which is the wrong one since it doesn't change between
+     * restart attempts. *)
+    fun instance ->
+      with_random_temp_file instance begin fun instance sync_file ->
+        let result =
+          get_changes_until_file_sync deadline sync_file instance SSet.empty in
+        result
+      end
+  end

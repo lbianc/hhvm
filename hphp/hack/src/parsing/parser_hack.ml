@@ -25,9 +25,10 @@ type env = {
   errors    : (Pos.t * string) list ref;
   in_generator : bool ref;
   popt      : ParserOptions.t;
+  quick     : bool;
 }
 
-let init_env file lb popt = {
+let init_env file lb popt quick = {
   file     = file;
   mode     = FileInfo.Mpartial;
   priority = 0;
@@ -35,12 +36,14 @@ let init_env file lb popt = {
   errors   = ref [];
   in_generator = ref false;
   popt     = popt;
+  quick    = quick;
 }
 
 type parser_return = {
   file_mode  : FileInfo.mode option; (* None if PHP *)
   comments   : (Pos.t * string) list;
   ast        : Ast.program;
+  content    : string;
 }
 
 (*****************************************************************************)
@@ -149,6 +152,7 @@ let error_back env msg =
   let pos = Pos.make env.file env.lb in
   L.back env.lb;
   error_at env pos msg
+
 
 let error_expect env expect =
   error_back env ("Expected "^expect)
@@ -425,6 +429,7 @@ let ref_param env =
 (*****************************************************************************)
 
 let rec program
+    ?(quick = false) (* Quick parsing of only declarations *)
     ?(elaborate_namespaces = true)
     ?(include_line_comments = false)
     ?(keep_errors = true)
@@ -433,7 +438,7 @@ let rec program
   L.comment_list := [];
   L.fixmes := IMap.empty;
   let lb = Lexing.from_string content in
-  let env = init_env file lb popt in
+  let env = init_env file lb popt quick in
   let ast, file_mode = header env in
   let comments = !L.comment_list in
   let fixmes = !L.fixmes in
@@ -446,7 +451,7 @@ let rec program
   let ast = if elaborate_namespaces
     then Namespaces.elaborate_defs env.popt ast
     else ast in
-  {file_mode; comments; ast}
+  {file_mode; comments; ast; content}
 
 and program_with_default_popt
     ?(elaborate_namespaces = true)
@@ -558,10 +563,11 @@ and ignore_toplevel attr_start ~attr acc env terminate =
           | _ ->
               ignore_toplevel attr_start ~attr acc env terminate
           )
+
       | "abstract" | "final"
       | "class"| "trait" | "interface"
       | "namespace"
-      | "async" | "newtype"| "type"| "const" | "enum" ->
+      | "async" | "newtype" | "type"| "const" | "enum" ->
           (* Parsing toplevel declarations (class, function etc ...) *)
           let def_start = Option.value attr_start
             ~default:(Pos.make env.file env.lb) in
@@ -583,7 +589,8 @@ and ignore_toplevel attr_start ~attr acc env terminate =
       error env "Hack does not allow the closing ?> tag";
       acc
   | _ ->
-      ignore_toplevel attr_start ~attr (acc) env terminate
+      (* All the other statements. *)
+      ignore_toplevel None ~attr:[] acc env terminate
 
 (*****************************************************************************)
 (* Toplevel statements. *)
@@ -1903,6 +1910,7 @@ and function_body env =
       | _ ->
         (match statement_list env with
           | [] -> [Noop]
+          | _ when env.quick -> [Noop]
           | x -> x)
     ) in
     let in_generator = !(env.in_generator) in
@@ -4139,10 +4147,10 @@ and namespace_group_use env kind prefix =
 (* Helper *)
 (*****************************************************************************)
 
-let from_file popt file =
+let from_file ?(quick = false) popt file =
   let content =
     try Sys_utils.cat (Relative_path.to_absolute file) with _ -> "" in
-  program popt file content
+  program ~quick popt file content
 
-let from_file_with_default_popt file =
-  from_file ParserOptions.default file
+let from_file_with_default_popt ?(quick = false) file =
+  from_file ~quick ParserOptions.default file

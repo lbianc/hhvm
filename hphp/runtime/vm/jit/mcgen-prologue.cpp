@@ -23,8 +23,8 @@
 #include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/tc.h"
+#include "hphp/runtime/vm/jit/vm-protect.h"
 #include "hphp/runtime/vm/jit/write-lease.h"
-#include "hphp/runtime/vm/vm-regs.h"
 
 #include "hphp/util/trace.h"
 
@@ -78,27 +78,26 @@ TCA checkCachedPrologue(const Func* func, int paramIdx) {
 
 /**
  * Given the proflogueTransId for a TransProflogue translation, regenerate the
- * prologue (as a TransPrologue).  Returns the starting address for the
- * translation corresponding to triggerSk, if such translation is generated;
- * otherwise returns nullptr.
+ * prologue (as a TransPrologue).
+ *
+ * Returns true iff the prologue had an associated dvInit funclet that was
+ * successfully retranslated as an Optimize translation.
  */
-TCA regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
-                       bool& emittedDVInit) {
+bool regeneratePrologue(TransID prologueTransId) {
   auto rec = profData()->transRec(prologueTransId);
   auto func = rec->func();
   auto nArgs = rec->prologueArgs();
-  emittedDVInit = false;
 
   func->resetPrologue(nArgs);
 
   // If we're regenerating a prologue, and we want to check shouldTranslate()
   // but ignore the code size limits.  We still want to respect the global
   // translation limit and other restrictions, though.
-  if (!tc::shouldTranslateNoSizeLimit(func)) return nullptr;
+  if (!tc::shouldTranslateNoSizeLimit(func)) return false;
 
   // Double check the prologue array now that we have the write lease
   // in case another thread snuck in and set the prologue already.
-  if (auto const p = checkCachedPrologue(func, nArgs)) return p;
+  if (auto const p = checkCachedPrologue(func, nArgs)) return false;
 
   // If this prologue has a DV funclet, then invalidate it and return its SrcKey
   // and TransID
@@ -114,29 +113,27 @@ TCA regeneratePrologue(TransID prologueTransId, SrcKey triggerSk,
         args.kind = TransKind::Optimize;
         args.region = selectHotRegion(funcletTransId);
         auto const spOff = args.region->entry()->initialSpOffset();
-        auto dvStart = translate(args, spOff, rec);
-        emittedDVInit |= dvStart != nullptr;
+        auto const dvStart = translate(args, spOff, rec);
 
         // Flag that this translation has been retranslated, so that
         // it's not retranslated again along with the function body.
         profData()->setOptimized(funcletSK);
-        return dvStart && funcletSK == triggerSk ? dvStart : nullptr;
+        return dvStart != nullptr;
       }
     }
   }
 
   tc::emitFuncPrologueOpt(rec);
-  return nullptr;
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 }
 
-TCA regeneratePrologues(Func* func, SrcKey triggerSk, bool& includedBody) {
-  TCA triggerStart = nullptr;
+bool regeneratePrologues(Func* func) {
   std::vector<TransID> prologTransIDs;
 
-  AssertVMUnused _;
+  VMProtect _;
 
   for (int nArgs = 0; nArgs < func->numPrologues(); nArgs++) {
     TransID tid = profData()->proflogueTransId(func, nArgs);
@@ -166,7 +163,7 @@ TCA regeneratePrologues(Func* func, SrcKey triggerSk, bool& includedBody) {
   // (The region selectors break a region whenever they hit a SrcKey that has
   // already been optimized.)
   SrcKey funcBodySk(func, func->base(), false);
-  includedBody = prologTransIDs.size() <= 1 &&
+  auto const includedBody = prologTransIDs.size() <= 1 &&
     func->past() - func->base() <= RuntimeOption::EvalJitPGOMaxFuncSizeDupBody;
 
   if (!includedBody) profData()->setOptimized(funcBodySk);
@@ -174,24 +171,18 @@ TCA regeneratePrologues(Func* func, SrcKey triggerSk, bool& includedBody) {
 
   bool emittedAnyDVInit = false;
   for (TransID tid : prologTransIDs) {
-    bool emittedDVInit = false;
-    TCA start = regeneratePrologue(tid, triggerSk, emittedDVInit);
-    if (triggerStart == nullptr && start != nullptr) {
-      triggerStart = start;
-    }
-    emittedAnyDVInit |= emittedDVInit;
+    emittedAnyDVInit |= regeneratePrologue(tid);
   }
 
   // If we tried to include the function body along with a DV init, but didn't
   // end up generating any DV init, then flag that the function body was not
   // included.
-  if (!emittedAnyDVInit) includedBody = false;
-
-  return triggerStart;
+  if (!emittedAnyDVInit) return false;
+  return includedBody;
 }
 
 TCA getFuncPrologue(Func* func, int nPassed) {
-  AssertVMUnused _;
+  VMProtect _;
 
   func->validate();
   TRACE(1, "funcPrologue %s(%d)\n", func->fullName()->data(), nPassed);
@@ -206,7 +197,7 @@ TCA getFuncPrologue(Func* func, int nPassed) {
     return tc::profileSrcKey(funcBody) ? TransKind::ProfPrologue :
                                          TransKind::LivePrologue;
   };
-  LeaseHolder writer(GetWriteLease(), func, computeKind());
+  LeaseHolder writer(func, computeKind());
   if (!writer) return nullptr;
 
   auto const kind = computeKind();

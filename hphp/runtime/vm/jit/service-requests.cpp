@@ -189,14 +189,13 @@ TCA emit_retranslate_stub(CodeBlock& cb, DataBlock& data, FPInvOffset spOff,
 }
 
 TCA emit_retranslate_opt_stub(CodeBlock& cb, DataBlock& data, FPInvOffset spOff,
-                              SrcKey target, TransID transID) {
+                              SrcKey sk) {
   return emit_persistent(
     cb,
     data,
-    target.resumed() ? folly::none : folly::make_optional(spOff),
+    sk.resumed() ? folly::none : folly::make_optional(spOff),
     REQ_RETRANSLATE_OPT,
-    target.toAtomicInt(),
-    transID
+    sk.toAtomicInt()
   );
 }
 
@@ -276,9 +275,9 @@ FPInvOffset extract_spoff(TCA stub) {
             instr->Mask(vixl::AddSubImmediateMask) == vixl::SUB_x_imm) {
           return FPInvOffset{offBytes / int32_t{sizeof(Cell)}};
         } else if (instr->Mask(vixl::AddSubImmediateMask) == vixl::ADD_w_imm ||
-		   instr->Mask(vixl::AddSubImmediateMask) == vixl::ADD_x_imm) {
+                   instr->Mask(vixl::AddSubImmediateMask) == vixl::ADD_x_imm) {
           return FPInvOffset{-(offBytes / int32_t{sizeof(Cell)})};
-	}
+        }
       } else if (instr->IsMovn()) {
         auto next = instr->NextInstruction();
         always_assert(next->Mask(vixl::AddSubShiftedMask) == vixl::ADD_w_shift ||

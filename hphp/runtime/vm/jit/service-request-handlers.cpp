@@ -121,7 +121,7 @@ TCA getTranslation(TransArgs args) {
 
   if (!tc::shouldTranslate(args.sk.func(), args.kind)) return nullptr;
 
-  LeaseHolder writer(GetWriteLease(), sk.func(), args.kind);
+  LeaseHolder writer(sk.func(), args.kind);
   if (!writer || !tc::shouldTranslate(sk.func(), args.kind)) return nullptr;
 
   if (RuntimeOption::EvalFailJitPrologs && sk.op() == Op::FCallAwait) {
@@ -147,7 +147,7 @@ TCA getFuncBody(Func* func) {
   auto tca = func->getFuncBody();
   if (tca != tc::ustubs().funcBodyHelperThunk) return tca;
 
-  LeaseHolder writer(GetWriteLease(), func, TransKind::Profile);
+  LeaseHolder writer(func, TransKind::Profile);
   if (!writer) return nullptr;
 
   tca = func->getFuncBody();
@@ -176,7 +176,7 @@ TCA bindJmp(TCA toSmash, SrcKey destSk, ServiceRequest req, TransFlags trflags,
   auto tDest = getTranslation(args);
   if (!tDest) return nullptr;
 
-  LeaseHolder writer(GetWriteLease(), destSk.func(), TransKind::Profile);
+  LeaseHolder writer(destSk.func(), TransKind::Profile);
   if (!writer) return tDest;
 
   if (req == REQ_BIND_ADDR) {
@@ -269,10 +269,17 @@ TCA handleServiceRequest(ReqInfo& info) noexcept {
 
     case REQ_RETRANSLATE_OPT: {
       sk = SrcKey::fromAtomicInt(info.args[0].sk);
-      auto transID = info.args[1].transID;
-      start = mcgen::retranslateOpt(sk, transID);
-      SKTRACE(2, sk, "retranslated-OPT: transId = %d  start: @%p\n", transID,
-              start);
+      if (mcgen::retranslateOpt(sk.funcID())) {
+        // Retranslation was successful. Resume execution at the new Optimize
+        // translation.
+        vmpc() = sk.unit()->at(sk.offset());
+        start = tc::ustubs().resumeHelper;
+      } else {
+        // Retranslation failed, probably because we couldn't get the write
+        // lease. Interpret a BB before running more Profile translations, to
+        // avoid spinning through this path repeatedly.
+        start = nullptr;
+      }
       break;
     }
 
@@ -369,7 +376,7 @@ TCA handleBindCall(TCA toSmash, ActRec* calleeFrame, bool isImmutable) {
   }
 
   if (start && !RuntimeOption::EvalFailJitPrologs) {
-    LeaseHolder writer(GetWriteLease(), func, TransKind::Profile);
+    LeaseHolder writer(func, TransKind::Profile);
     if (!writer) return start;
 
     // Someone else may have changed the func prologue while we waited for

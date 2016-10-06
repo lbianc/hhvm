@@ -40,6 +40,7 @@
 
 #include "hphp/runtime/base/rds-header.h"
 #include "hphp/runtime/vm/debug/debug.h"
+#include "hphp/runtime/vm/jit/vm-protect.h"
 
 namespace HPHP { namespace rds {
 
@@ -287,7 +288,7 @@ Handle alloc(Mode mode, size_t numBytes,
       addFreeBlock(s_normal_free_lists, oldFrontier,
                   s_normal_frontier - oldFrontier);
       s_normal_frontier += adjustedBytes;
-      if (debug && !AssertVMUnused::is_protected) {
+      if (debug && !jit::VMProtect::is_protected) {
         memset(
           (char*)(tl_base) + oldFrontier,
           kRDSTrashFill,
@@ -591,7 +592,7 @@ static void initPersistentCache() {
   s_local_frontier = s_persistent_frontier = s_persistent_base;
 }
 
-void threadInit() {
+void threadInit(bool shouldRegister) {
   assert(tl_base == nullptr);
 
   if (!s_tc_fd) {
@@ -619,11 +620,14 @@ void threadInit() {
   always_assert(tl_same == tl_base);
 #endif
   numa_bind_to(tl_base, s_persistent_base, s_numaNode);
+#ifdef NDEBUG
+  // A huge-page RDS is incompatible with VMProtect in vm-regs.cpp
   if (RuntimeOption::EvalMapTgtCacheHuge) {
     hintHuge(tl_base, RuntimeOption::EvalJitTargetCacheSize);
   }
+#endif
 
-  {
+  if (shouldRegister) {
     Guard g(s_tlBaseListLock);
     assert(std::find(begin(s_tlBaseList), end(s_tlBaseList), tl_base) ==
              end(s_tlBaseList));
@@ -659,8 +663,8 @@ void threadInit() {
   }
 }
 
-void threadExit() {
-  {
+void threadExit(bool shouldUnregister) {
+  if (shouldUnregister) {
     Guard g(s_tlBaseListLock);
     auto it = std::find(begin(s_tlBaseList), end(s_tlBaseList), tl_base);
     if (it != end(s_tlBaseList)) {

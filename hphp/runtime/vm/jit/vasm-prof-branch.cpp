@@ -79,12 +79,13 @@ void reset_counter() {
  */
 struct VasmID {
   VasmID(Offset bcoff, uint16_t iroff, uint16_t voff,
-         Op bc, Opcode ir, AreaIndex area_idx)
+         Op bc, Opcode ir, AreaIndex area_idx, StringTag tag)
     : bcoff(bcoff)
     , iroff(iroff)
     , voff(voff)
     , bc_op(bc)
     , ir_op(ir)
+    , tag(tag)
     , aidx(static_cast<uint8_t>(area_idx))
     , taken(false)
     , imm(false)
@@ -105,6 +106,7 @@ public:
     struct {
       Op bc_op;
       Opcode ir_op;
+      StringTag tag;
       uint8_t aidx : 2;
       bool taken : 1;
       bool imm : 1;
@@ -183,6 +185,10 @@ void record_branch_hit(const BranchID* branch,
     record.setInt(pref + "_iroff", id.iroff);
     record.setInt(pref + "_voff", id.voff);
     record.setStr(pref + "_area", areaAsString(id.area_idx()));
+
+    if (auto const str = string_from_tag(id.tag)) {
+      record.setStr(pref + "_tag", str);
+    }
   };
 
   record_vasm_id("from", b.from);
@@ -256,7 +262,6 @@ Vout vheader(Vunit& unit, Vlabel s, AreaIndex area_cap = AreaIndex::Main) {
  */
 Vreg check_counter(Vout& v) {
   s_counter.bind(rds::Mode::Local);
-  if (*s_counter == 0) reset_counter();
 
   auto const handle = s_counter.handle();
   auto const sf = v.makeReg();
@@ -295,6 +300,19 @@ struct Env {
 };
 
 /*
+ * Get the StringTag for a Vinstr, if it has one.
+ */
+StringTag string_tag_for(const Vinstr& inst) {
+  switch (inst.op) {
+    case Vinstr::jcc:
+      return inst.jcc_.tag;
+    default:
+      break;
+  }
+  return StringTag{};
+}
+
+/*
  * Pack the VasmID for `inst' in block `b'.
  */
 VasmID vasm_id_for(Env& env, const Vinstr& inst, Vlabel b) {
@@ -307,7 +325,8 @@ VasmID vasm_id_for(Env& env, const Vinstr& inst, Vlabel b) {
     inst.voff,
     origin->marker().sk().op(),
     origin->op(),
-    env.unit.blocks[b].area_idx
+    env.unit.blocks[b].area_idx,
+    string_tag_for(inst)
   };
 };
 
@@ -403,7 +422,7 @@ void create_profiling_header(Env& env, BranchID branch, Vlabel to,
 
   // Check the profiling counter, and log a sample if it overflows.
   auto const sf = check_counter(v);
-  unlikelyIfThen(v, vc, CC_Z, sf, [&] (Vout& v) {
+  unlikelyIfThen(v, vc, CC_LE, sf, [&] (Vout& v) {
     sample_branch(v, env, branch, inst.origin->func(), to);
   });
 
@@ -465,7 +484,7 @@ void profile(Env& env, jcci& inst, Vlabel b) {
   auto const header = Vlabel(v);
 
   auto const sf = check_counter(v);
-  unlikelyIfThen(v, vc, CC_Z, sf, [&] (Vout& v) {
+  unlikelyIfThen(v, vc, CC_LE, sf, [&] (Vout& v) {
     auto const& vinstr = env.unit.blocks[b].code.back();
     sample_branch(v, env, branch.take(true), vinstr.origin->func(), b);
   });

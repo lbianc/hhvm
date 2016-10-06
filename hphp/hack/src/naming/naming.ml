@@ -809,7 +809,7 @@ module Make (GetLocals : GetLocals) = struct
       | _ when SMap.mem x params ->
           if hl <> [] then
           Errors.tparam_with_tparam p x;
-          N.Habstr (x, get_constraint env x)
+          N.Habstr x
       | _ ->
         let name = Env.type_name env id ~allow_typedef in
         (* Note that we are intentionally setting allow_typedef to `true` here.
@@ -854,16 +854,6 @@ module Make (GetLocals : GetLocals) = struct
       | Some _ when canon <> x -> Errors.primitive_invalid_alias p x canon
       | _ -> ()
     in opt_hint
-
-  and get_constraint env tparam =
-    let params = (fst env).type_params in
-    let gen_constraint = SMap.find_unsafe tparam params in
-    let genv, lenv = env in
-    (* this prevents an infinite loop from occurring since hint invokes
-     * get_constraint *)
-    let genv = { genv with type_params = SMap.add tparam [] params } in
-    let env = genv, lenv in
-    List.map gen_constraint (constraint_ env)
 
   and constraint_ ?(forbid_this=false) env (ck, h) = ck, hint ~forbid_this env h
 
@@ -1047,16 +1037,12 @@ module Make (GetLocals : GetLocals) = struct
     param_name,
     List.map cstr_list (constraint_ ~forbid_this env)
 
-  and type_locl_cstrl env locl_cstrl =
-    let cstrg = List.fold_left locl_cstrl ~init:SMap.empty
-      ~f:begin fun acc -> function
-        | (_, Happly ((pos, tn) as _tv, [])), ck, ty ->
-            let _, cstrl = try SMap.find tn acc with Not_found -> Pos.none,[] in
-            let cstr = constraint_ env (ck, ty) in
-            SMap.add tn (pos, cstr :: cstrl) acc
-        | (pos, _), _, _ -> Errors.malformed_locl_cstr pos; SMap.empty
-      end in
-    List.map (SMap.bindings cstrg) ~f:(fun (k,(p, vs)) -> Invariant, (p, k), vs)
+  and type_where_constraints env locl_cstrl =
+    List.map locl_cstrl (fun (h1, ck, h2) ->
+          let ty1 = hint env h1 in
+          let ty2 = hint env h2 in
+          (ty1, ck, ty2))
+
   and class_use env x acc =
     match x with
     | Attributes _ -> acc
@@ -1399,7 +1385,7 @@ module Make (GetLocals : GetLocals) = struct
     let final, abs, vis = List.fold_left ~f:kind ~init:acc m.m_kind in
     List.iter m.m_tparams check_constraint;
     let tparam_l = type_paraml env m.m_tparams in
-    let locl_cstrs = type_locl_cstrl env m.m_constrs in
+    let where_constraints = type_where_constraints env m.m_constrs in
     let ret = Option.map m.m_ret (hint ~allow_retonly:true env) in
     let f_kind = m.m_fun_kind in
     let body = (match genv.in_mode with
@@ -1421,7 +1407,7 @@ module Make (GetLocals : GetLocals) = struct
       N.m_abstract        = abs         ;
       N.m_name            = m.Ast.m_name;
       N.m_tparams         = tparam_l    ;
-      N.m_locl_cstrs      = locl_cstrs  ;
+      N.m_where_constraints = where_constraints ;
       N.m_params          = paraml      ;
       N.m_body            = body        ;
       N.m_fun_kind        = f_kind      ;
@@ -1907,7 +1893,7 @@ module Make (GetLocals : GetLocals) = struct
           | [e] -> N.Special_func (N.Gena (expr env e))
           | _ -> Errors.gena_arity p; N.Any
           )
-        end else if cn = SN.FB.fgenva then begin
+        end else if cn = SN.FB.fgenva || cn = SN.HH.asio_va then begin
           arg_unpack_unexpected uel ;
           if List.length el < 1
           then (Errors.genva_arity p; N.Any)

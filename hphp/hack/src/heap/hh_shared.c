@@ -106,6 +106,8 @@
 #include <unistd.h>
 #endif
 
+#include <lz4.h>
+
 // Ideally these would live in a handle.h file but our internal build system
 // can't support that at the moment. These are shared with handle_stubs.c
 #ifdef _WIN32
@@ -202,10 +204,23 @@ static size_t bindings_size_b;
 static uint64_t hashtbl_size;
 static size_t hashtbl_size_b;
 
+typedef enum {
+  KIND_STRING = 1,
+  KIND_SERIALIZED = !KIND_STRING
+} storage_kind;
+
+typedef struct {
+  // Size of data in the heap
+  uint32_t size : 31;
+  storage_kind kind : 1;
+  // Size of the data stored in the heap after decompression.
+  // If the data was not compressed this will be 0
+  uint32_t uncompressed_size;
+} hh_header_t;
+
 /* Size of where we allocate shared objects. */
-#define Get_size(x)     (((size_t*)(x))[-1])
-#define Get_buf_size(x) (((size_t*)(x))[-1] + sizeof(size_t))
-#define Get_buf(x)      (x - sizeof(size_t))
+#define Get_buf_size(x) (((hh_header_t*)(x))[-1].size + sizeof(hh_header_t))
+#define Get_buf(x)      (x - sizeof(hh_header_t))
 
 /* Too lazy to use getconf */
 #define CACHE_LINE_SIZE (1 << 6)
@@ -1384,7 +1399,7 @@ void hh_collect(value aggressive_val) {
 #endif
       memcpy(dest, addr, bl_size);
       // This is where the data ends up after the copy
-      hashtbl[i].addr = heap_init + mem_size + sizeof(size_t);
+      hashtbl[i].addr = heap_init + mem_size + sizeof(hh_header_t);
       dest     += aligned_size;
       mem_size += aligned_size;
     }
@@ -1413,27 +1428,76 @@ static void raise_heap_full() {
  */
 /*****************************************************************************/
 
-static char* hh_alloc(size_t size) {
-  size_t slot_size  = ALIGNED(size + sizeof(size_t));
+static char* hh_alloc(hh_header_t header) {
+  size_t slot_size  = ALIGNED(header.size + sizeof(hh_header_t));
   char* chunk       = __sync_fetch_and_add(heap, (char*)slot_size);
   if (chunk + slot_size > heap_max) {
     raise_heap_full();
   }
   memfd_reserve(chunk, slot_size);
-  *((size_t*)chunk) = size;
-  return (chunk + sizeof(size_t));
+  *((hh_header_t*)chunk) = header;
+  return (chunk + sizeof(hh_header_t));
 }
 
 /*****************************************************************************/
 /* Allocates an ocaml value in the shared heap.
- * The values can only be ocaml strings. It returns the address of the
- * allocated chunk.
+ * Any ocaml value is valid, except closures. It returns the address of
+ * the allocated chunk.
  */
 /*****************************************************************************/
-static char* hh_store_ocaml(value data) {
-  size_t data_size = caml_string_length(data);
-  char* addr = hh_alloc(data_size);
-  memcpy(addr, String_val(data), data_size);
+static char* hh_store_ocaml(value data, /*out*/size_t *alloc_size) {
+  char* value;
+  size_t size;
+  storage_kind kind;
+
+  // If the data is an Ocaml string it is more efficient to copy its contents
+  // directly in our heap instead of serializing it.
+  if (Is_block(data) && Tag_val(data) == String_tag) {
+    value = String_val(data);
+    size = caml_string_length(data);
+    kind = KIND_STRING;
+  } else {
+    intnat serialized_size;
+    // We are responsible for freeing the memory allocated by this function
+    // After copying value into our object heap we need to make sure to free
+    // value
+    caml_output_value_to_malloc(
+      data, Val_int(0)/*flags*/, &value, &serialized_size);
+
+    assert(serialized_size >= 0);
+    size = (size_t) serialized_size;
+    kind = KIND_SERIALIZED;
+  }
+
+  // We limit the size of elements we will allocate to our heap to ~2GB
+  assert(size < 0x80000000);
+  hh_header_t header = { size, kind, 0 };
+
+  size_t max_compression_size = LZ4_compressBound(header.size);
+  char* compressed_data = malloc(max_compression_size);
+  size_t compressed_size = LZ4_compress_default(
+    value,
+    compressed_data,
+    header.size,
+    max_compression_size);
+
+  if (compressed_size != 0 && compressed_size < header.size) {
+    header.uncompressed_size = header.size;
+    header.size = compressed_size;
+  }
+
+  char* addr = hh_alloc(header);
+  memcpy(addr,
+         header.uncompressed_size ? compressed_data : value,
+         header.size);
+
+  free(compressed_data);
+  // We temporarily allocate memory using malloc to serialize the Ocaml object.
+  // When we have finished copying the serialized data into our heap we need
+  // to free the memory we allocated to avoid a leak.
+  if (header.kind == KIND_SERIALIZED) free(value);
+
+  *alloc_size = header.size;
   return addr;
 }
 
@@ -1450,9 +1514,13 @@ static uint64_t get_hash(value key) {
 /*****************************************************************************/
 /* Writes the data in one of the slots of the hashtable. There might be
  * concurrent writers, when that happens, the first writer wins.
+ *
+ * Returns the number of bytes allocated in the shared heap. If the slot
+ * was already written to, a negative value is returned to indicate no new
+ * memory was allocated.
  */
 /*****************************************************************************/
-static void write_at(unsigned int slot, value data) {
+static value write_at(unsigned int slot, value data) {
   // Try to write in a value to indicate that the data is being written.
   if(hashtbl[slot].addr == NULL &&
      __sync_bool_compare_and_swap(
@@ -1461,8 +1529,11 @@ static void write_at(unsigned int slot, value data) {
        HASHTBL_WRITE_IN_PROGRESS
      )
   ) {
-    hashtbl[slot].addr = hh_store_ocaml(data);
+    size_t alloc_size;
+    hashtbl[slot].addr = hh_store_ocaml(data, &alloc_size);
+    return Val_long(alloc_size);
   }
+  return Min_long;
 }
 
 static void raise_hash_table_full() {
@@ -1474,9 +1545,13 @@ static void raise_hash_table_full() {
 /*****************************************************************************/
 /* Adds a key value to the hashtable. This code is perf sensitive, please
  * check the perf before modifying.
+ *
+ * Returns the number of bytes allocated into the shared heap, or a negative
+ * number if nothing no new memory was allocated.
  */
 /*****************************************************************************/
-void hh_add(value key, value data) {
+value hh_add(value key, value data) {
+  CAMLparam2(key, data);
   uint64_t hash = get_hash(key);
   unsigned int slot = hash & (hashtbl_size - 1);
   unsigned int init_slot = slot;
@@ -1484,8 +1559,7 @@ void hh_add(value key, value data) {
     uint64_t slot_hash = hashtbl[slot].hash;
 
     if(slot_hash == hash) {
-      write_at(slot, data);
-      return;
+      CAMLreturn(write_at(slot, data));
     }
 
     if (*hcounter >= hashtbl_size) {
@@ -1499,8 +1573,7 @@ void hh_add(value key, value data) {
         uint64_t size = __sync_fetch_and_add(hcounter, 1);
         // Sanity check
         assert(size < hashtbl_size);
-        write_at(slot, data);
-        return;
+        CAMLreturn(write_at(slot, data));
       }
 
       // Grabbing it failed -- why? If someone else is trying to insert
@@ -1517,8 +1590,7 @@ void hh_add(value key, value data) {
         // no longer null. To make sure hh_mem will work, we try
         // writing the value ourselves; either we insert it ourselves or
         // we know the address is now non-NULL.
-        write_at(slot, data);
-        return;
+        CAMLreturn(write_at(slot, data));
       }
     }
 
@@ -1590,8 +1662,32 @@ CAMLprim value hh_get_and_deserialize(value key) {
 
   unsigned int slot = find_slot(key);
   assert(hashtbl[slot].hash == get_hash(key));
-  size_t size = *(size_t*)(hashtbl[slot].addr - sizeof(size_t));
-  result = caml_input_value_from_block(hashtbl[slot].addr, size);
+  hh_header_t header =
+    *(hh_header_t*)(hashtbl[slot].addr - sizeof(hh_header_t));
+
+  char* data = hashtbl[slot].addr;
+  size_t size = header.size;
+  if (header.uncompressed_size) {
+    data = malloc(header.uncompressed_size);
+    size_t uncompressed_size = LZ4_decompress_safe(
+      hashtbl[slot].addr,
+      data,
+      header.size,
+      header.uncompressed_size);
+    assert(uncompressed_size == header.uncompressed_size);
+    size = uncompressed_size;
+  }
+
+  if (header.kind == KIND_STRING) {
+    result = caml_alloc_string(size);
+    memcpy(String_val(result), data, size);
+  } else {
+    result = caml_input_value_from_block(data, size);
+  }
+
+  if (header.uncompressed_size) {
+    free(data);
+  }
 
   CAMLreturn(result);
 }
@@ -1605,9 +1701,10 @@ CAMLprim value hh_get_size(value key) {
 
   unsigned int slot = find_slot(key);
   assert(hashtbl[slot].hash == get_hash(key));
-  size_t size = *(size_t*)(hashtbl[slot].addr - sizeof(size_t));
+  hh_header_t header =
+    *(hh_header_t*)(hashtbl[slot].addr - sizeof(hh_header_t));
 
-  CAMLreturn(Long_val(size));
+  CAMLreturn(Long_val(header.size));
 }
 
 /*****************************************************************************/

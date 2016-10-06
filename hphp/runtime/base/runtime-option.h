@@ -182,6 +182,9 @@ struct RuntimeOption {
   // server is made.
   static bool StopOldServer;
   static int64_t ServerRSSNeededMb;
+  // Threshold of free memory below which the old server is shutdown immediately
+  // upon a memory pressure check.
+  static int64_t ServerCriticalFreeMb;
   static int OldServerWait;
   // The percentage of page caches that can be considered as free (0 -
   // 100).  This is experimental.
@@ -300,6 +303,7 @@ struct RuntimeOption {
   static std::string TakeoverFilename;
   static int AdminServerPort;
   static int AdminThreadCount;
+  static int AdminServerQueueToWorkerRatio;
   static std::string AdminPassword;
   static std::set<std::string> AdminPasswords;
 
@@ -402,7 +406,7 @@ struct RuntimeOption {
   static bool PHP7_IntSemantics;
   static bool PHP7_LTR_assign;
   static bool PHP7_NoHexNumerics;
-  static bool PHP7_ReportVersion;
+  static bool PHP7_Builtins;
   static bool PHP7_ScalarTypes;
   static bool PHP7_EngineExceptions;
   static bool PHP7_Substr;
@@ -515,7 +519,6 @@ struct RuntimeOption {
   F(bool, JitUseVtuneAPI,              false)                           \
                                                                         \
   F(bool, JitDisabledByHphpd,          false)                           \
-  F(bool, JitTransCounters,            false)                           \
   F(bool, JitPseudomain,               true)                            \
   F(uint32_t, JitWarmupStatusBytes,    ((25 << 10) + 1))                \
   F(uint32_t, JitWriteLeaseExpiration, 1500) /* in microseconds */      \
@@ -531,7 +534,6 @@ struct RuntimeOption {
   F(bool, HHIRInlineSingletons,        true)                            \
   F(std::string, InlineRegionMode,     "both")                          \
   F(bool, HHIRGenerateAsserts,         debug)                           \
-  F(bool, HHIRDirectExit,              true)                            \
   F(bool, HHIRDeadCodeElim,            true)                            \
   F(bool, HHIRGlobalValueNumbering,    true)                            \
   F(bool, HHIRTypeCheckHoisting,       false) /* Task: 7568599 */       \
@@ -577,16 +579,16 @@ struct RuntimeOption {
   F(uint32_t, MaxHotTextHugePages,     hugePagesSoundNice() ? 1 : 0)    \
   F(int32_t, MaxLowMemHugePages,       hugePagesSoundNice() ? 8 : 0)    \
   F(bool, RandomHotFuncs,              false)                           \
-  F(bool, EnableGC,                    false)                           \
+  F(bool, EnableGC,                    eagerGcDefault())                \
   /* Run GC eagerly at each surprise point. */                          \
-  F(bool, EagerGC,                     false)                           \
+  F(bool, EagerGC,                     eagerGcDefault())                \
   /* only run eager-gc once at each surprise point (much faster) */     \
   F(bool, FilterGCPoints,              true)                            \
-  F(bool, Quarantine,                  false)                           \
-  F(bool, EnableGCTypeScan,            false)                           \
+  F(bool, Quarantine,                  eagerGcDefault())                \
+  F(bool, EnableGCTypeScan,            eagerGcDefault())                \
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
-  F(uint32_t, GCSampleRate,                1)                           \
+  F(uint32_t, GCSampleRate,            (eagerGcDefault() ? 0 : 1))      \
   F(uint32_t, SerDesSampleRate,            0)                           \
   F(uint32_t, JitSampleRate,               0)                           \
   F(uint32_t, JitFilterLease,              1)                           \

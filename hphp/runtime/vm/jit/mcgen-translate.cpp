@@ -28,11 +28,11 @@
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/trans-db.h"
 #include "hphp/runtime/vm/jit/translate-region.h"
+#include "hphp/runtime/vm/jit/vm-protect.h"
 #include "hphp/runtime/vm/jit/vtune-jit.h"
 #include "hphp/runtime/vm/jit/write-lease.h"
 
 #include "hphp/runtime/vm/runtime.h"
-#include "hphp/runtime/vm/vm-regs.h"
 
 #include "hphp/util/trace.h"
 
@@ -122,7 +122,7 @@ TCA translate(TransArgs args, FPInvOffset spOff, ProfTransRec* prologue) {
 }
 
 TCA retranslate(TransArgs args, const RegionContext& ctx) {
-  AssertVMUnused _;
+  VMProtect _;
 
   auto sr = tc::findSrcRec(args.sk);
   always_assert(sr);
@@ -155,7 +155,7 @@ TCA retranslate(TransArgs args, const RegionContext& ctx) {
     return nullptr;
   }
 
-  LeaseHolder writer(GetWriteLease(), args.sk.func(), args.kind);
+  LeaseHolder writer(args.sk.func(), args.kind);
   if (!writer || !tc::shouldTranslate(args.sk.func(), kind())) {
     return nullptr;
   }
@@ -184,30 +184,27 @@ TCA retranslate(TransArgs args, const RegionContext& ctx) {
   return result;
 }
 
-TCA retranslateOpt(SrcKey sk, TransID transId) {
-  AssertVMUnused _;
+bool retranslateOpt(FuncId funcID) {
+  VMProtect _;
 
-  if (isDebuggerAttachedProcess()) return nullptr;
+  if (isDebuggerAttachedProcess()) return false;
 
-  auto const func = const_cast<Func*>(sk.func());
-  auto const funcID = func->getFuncId();
-  if (profData() == nullptr || profData()->optimized(funcID)) return nullptr;
+  auto const func = const_cast<Func*>(Func::fromFuncId(funcID));
+  if (profData() == nullptr || profData()->optimized(funcID)) return false;
 
-  LeaseHolder writer(GetWriteLease(), func, TransKind::Optimize);
-  if (!writer) return nullptr;
+  LeaseHolder writer(func, TransKind::Optimize);
+  if (!writer) return false;
 
-  if (profData()->optimized(funcID)) return nullptr;
+  if (profData()->optimized(funcID)) return false;
   profData()->setOptimized(funcID);
 
-  TRACE(1, "retranslateOpt: transId = %u\n", transId);
   func->setFuncBody(tc::ustubs().funcBodyHelperThunk);
 
   // Invalidate SrcDB's entries for all func's SrcKeys.
   tc::invalidateFuncProfSrcKeys(func);
 
   // Regenerate the prologues and DV funclets before the actual function body.
-  bool includedBody{false};
-  TCA start = regeneratePrologues(func, sk, includedBody);
+  auto const includedBody = regeneratePrologues(func);
 
   // Regionize func and translate all its regions.
   std::string transCFGAnnot;
@@ -225,15 +222,12 @@ TCA retranslateOpt(SrcKey sk, TransID transId) {
     transArgs.kind = TransKind::Optimize;
 
     auto const spOff = region->entry()->initialSpOffset();
-    auto const regionStart = translate(transArgs, spOff);
-    if (start == nullptr && regionSk == sk) {
-      start = regionStart;
-    }
+    translate(transArgs, spOff);
     transCFGAnnot = ""; // so we don't annotate it again
   }
 
   tc::checkFreeProfData();
-  return start;
+  return true;
 }
 
 }}}

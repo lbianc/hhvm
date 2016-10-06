@@ -67,7 +67,7 @@ let start_hh_server options  =
 let monitor_daemon_main (options: ServerArgs.options) =
   let init_id = Random_id.short_string () in
   if Sys_utils.is_test_mode ()
-  then EventLogger.init (Daemon.devnull ()) 0.0
+  then EventLogger.init EventLogger.Event_logger_fake 0.0
   else HackEventLogger.init_monitor (ServerArgs.root options) init_id
       (Unix.gettimeofday ());
   Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
@@ -89,9 +89,9 @@ let monitor_daemon_main (options: ServerArgs.options) =
 
   let config, local_config  =
    ServerConfig.(load filename options) in
-  HackEventLogger.set_lazy_decl
-   local_config.ServerLocalConfig.lazy_decl;
-
+  HackEventLogger.set_lazy_levels
+   (local_config.ServerLocalConfig.lazy_decl)
+   (local_config.ServerLocalConfig.lazy_parse);
   if ServerArgs.check_mode options then
     let shared_config = ServerConfig.(sharedmem_config config) in
     let handle = SharedMem.init shared_config in

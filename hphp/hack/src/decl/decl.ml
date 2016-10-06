@@ -198,7 +198,7 @@ and fun_decl_in_env env f =
     ft_abstract    = false;
     ft_arity       = arity;
     ft_tparams     = tparams;
-    ft_locl_cstr   = [];
+    ft_where_constraints = [];
     ft_params      = params;
     ft_ret         = ret_ty;
   } in
@@ -206,6 +206,9 @@ and fun_decl_in_env env f =
 
 and type_param env (variance, x, cstrl) =
   variance, x, List.map cstrl (fun (ck, h) -> (ck, Decl_hint.hint env h))
+
+and where_constraint env (ty1, ck, ty2) =
+  (Decl_hint.hint env ty1, ck, Decl_hint.hint env ty2)
 
 and check_default pos mandatory e =
   if not mandatory && e = None
@@ -524,6 +527,7 @@ and class_const_decl env c acc (h, id, e) =
     let cc = {
       cc_synthesized = false;
       cc_abstract = abstract;
+      cc_pos = fst id;
       cc_type = ty;
       cc_expr = e;
       cc_origin = c_name;
@@ -540,6 +544,7 @@ and class_class_decl class_id =
     reason, Tapply ((pos, SN.Classes.cClassname), [reason, Tthis]) in
   {
     cc_abstract    = false;
+    cc_pos         = pos;
     cc_synthesized = true;
     cc_type        = classname_ty;
     cc_expr        = None;
@@ -618,6 +623,7 @@ and typeconst_ty_decl pos dc_name ~is_abstract =
   let ts_ty = r, Tapply (tsid, [r, Taccess ((r, Tthis), [pos, dc_name])]) in
   {
     cc_abstract    = is_abstract;
+    cc_pos         = pos;
     cc_synthesized = true;
     cc_type        = ts_ty;
     cc_expr        = None;
@@ -667,7 +673,8 @@ and method_decl env m =
     | FVnonVariadic -> Fstandard (arity_min, List.length m.m_params)
   in
   let tparams = List.map m.m_tparams (type_param env) in
-  let locl_cstrs = List.map m.m_locl_cstrs (type_param env) in
+  let where_constraints =
+    List.map m.m_where_constraints (where_constraint env) in
   {
     ft_pos      = fst m.m_name;
     ft_deprecated =
@@ -675,7 +682,7 @@ and method_decl env m =
     ft_abstract = m.m_abstract;
     ft_arity    = arity;
     ft_tparams  = tparams;
-    ft_locl_cstr= locl_cstrs;
+    ft_where_constraints = where_constraints;
     ft_params   = params;
     ft_ret      = ret;
   }
@@ -858,7 +865,7 @@ let name_and_declare_types_program tcopt prog =
 let make_env tcopt fn =
   match Parser_heap.ParserHeap.get fn with
   | None -> ()
-  | Some prog ->
+  | Some (prog, _) ->
     name_and_declare_types_program tcopt prog
 
 let declare_class_in_file tcopt file name =

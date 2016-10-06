@@ -48,7 +48,6 @@
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
-#include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
@@ -252,8 +251,7 @@ void cgCallBuiltin(IRLS& env, const IRInstruction* inst) {
       // Pass the address of tvBuiltinReturn to the native function as the
       // location where it can construct the return Array, String, Object, or
       // Variant.
-      args.addr(rvmtl(), returnOffset);
-      args.indirect();
+      args.indRet(rvmtl(), returnOffset);
     }
   }
 

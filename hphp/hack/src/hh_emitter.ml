@@ -66,14 +66,14 @@ let emit_file { filename; read_stdin; is_test } () =
   (* Parse the file and pull out the parts we need *)
   let parsed_file =
     Parser_hack.program_with_default_popt filename contents  in
-  let {Parser_hack.file_mode; comments; ast} = parsed_file in
+  let {Parser_hack.file_mode; comments; ast; _} = parsed_file in
   let funs, classes, typedefs, consts = Ast_utils.get_defs ast in
 
   if file_mode <> Some FileInfo.Mstrict &&
      file_mode <> Some FileInfo.Mpartial then
     die "Can only emit files in strict/partial mode\n";
 
-  Parser_heap.ParserHeap.add filename ast;
+  Parser_heap.ParserHeap.add filename (ast, Parser_heap.Full);
 
   (* Build a naming environment and run naming *)
   let tcopt = TypecheckerOptions.default in
@@ -84,7 +84,7 @@ let emit_file { filename; read_stdin; is_test } () =
 
 
 let main_hack options =
-  EventLogger.init (Daemon.devnull ()) 0.0;
+  EventLogger.init EventLogger.Event_logger_fake 0.0;
   let _handle = SharedMem.init GlobalConfig.default_sharedmem_config in
 
   (* The emitter needs to track the names of identifiers in order to

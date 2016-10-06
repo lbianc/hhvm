@@ -123,6 +123,8 @@ HttpServer::HttpServer()
   ServerOptions admin_options
     (RuntimeOption::ServerIP, RuntimeOption::AdminServerPort,
      RuntimeOption::AdminThreadCount);
+  admin_options.m_queueToWorkerRatio =
+    RuntimeOption::AdminServerQueueToWorkerRatio;
   m_adminServer = serverFactory->createServer(admin_options);
   m_adminServer->setRequestHandlerFactory<AdminRequestHandler>(
     RuntimeOption::RequestTimeoutSeconds);
@@ -571,9 +573,7 @@ static inline int64_t availableMemory(const MemInfo& mem, int64_t rss,
 bool HttpServer::CanContinue(const MemInfo& mem, int64_t rssMb,
                              int64_t rssNeeded, int cacheFreeFactor) {
   if (!mem.valid()) return false;
-  // Don't proceed if free memory is too limited, no matter how big
-  // the cache is.
-  if (mem.freeMb < rssNeeded / 16) return false;
+  if (mem.freeMb < RuntimeOption::ServerCriticalFreeMb) return false;
   auto const availableMb = availableMemory(mem, rssMb, cacheFreeFactor);
   auto const result = (rssMb + availableMb >= rssNeeded);
   if (result) assert(CanStep(mem, rssMb, rssNeeded, cacheFreeFactor));
@@ -583,9 +583,8 @@ bool HttpServer::CanContinue(const MemInfo& mem, int64_t rssMb,
 bool HttpServer::CanStep(const MemInfo& mem, int64_t rssMb,
                          int64_t rssNeeded, int cacheFreeFactor) {
   if (!mem.valid()) return false;
-  if (mem.freeMb < rssNeeded / 16) return false;
+  if (mem.freeMb < RuntimeOption::ServerCriticalFreeMb) return false;
   auto const availableMb = availableMemory(mem, rssMb, cacheFreeFactor);
-
   // Estimation of the memory needed till the next check point.  Since
   // the current check point is not the last one, we try to be more
   // optimistic, by assuming that memory requirement won't grow
