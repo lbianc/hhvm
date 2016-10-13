@@ -15,7 +15,9 @@ val redo_type_decl :
   Worker.t list option ->
   bucket_size:int ->
   TypecheckerOptions.t ->
+  FileInfo.names ->
   FileInfo.fast ->
+  FileInfo.names ->
   Errors.t * Relative_path.Set.t * DepSet.t * DepSet.t
 
 (**
@@ -26,12 +28,16 @@ val redo_type_decl :
  * in a very particular use case of invalidate_type_decl.
  *)
 val get_dependent_classes :
+  Worker.t list option ->
+  bucket_size:int ->
   FileInfo.t Relative_path.Map.t ->
   SSet.t ->
   SSet.t
 
-val invalidate_type_decl :
+val oldify_type_decl :
   Worker.t list option ->
+  FileInfo.t Relative_path.Map.t ->
   bucket_size:int ->
-  FileInfo.fast ->
+  FileInfo.names ->
+  FileInfo.names ->
   unit

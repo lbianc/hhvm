@@ -42,6 +42,7 @@
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/member-operations.h"
+#include "hphp/runtime/vm/method-lookup.h"
 #include "hphp/runtime/vm/minstr-state.h"
 #include "hphp/runtime/vm/type-constraint.h"
 #include "hphp/runtime/vm/unit-util.h"
@@ -891,7 +892,7 @@ const Func* loadClassCtor(Class* cls, ActRec* fp) {
   if (UNLIKELY(!(f->attrs() & AttrPublic))) {
     auto const ctx = arGetContextClass(fp);
     UNUSED auto func =
-      g_context->lookupMethodCtx(cls, nullptr, ctx, CallType::CtorMethod, true);
+      lookupMethodCtx(cls, nullptr, ctx, CallType::CtorMethod, true);
     assertx(func == f);
   }
   return f;
@@ -965,35 +966,6 @@ void throwSwitchMode() {
 bool methodExistsHelper(Class* cls, StringData* meth) {
   assertx(isNormalClass(cls) && !isAbstract(cls));
   return cls->lookupMethod(meth) != nullptr;
-}
-
-int64_t decodeCufIterHelper(Iter* it, TypedValue func) {
-  DECLARE_FRAME_POINTER(fp);
-
-  ObjectData* obj = nullptr;
-  Class* cls = nullptr;
-  StringData* invName = nullptr;
-
-  auto ar = fp->m_sfp;
-  if (LIKELY(ar->func()->isBuiltin())) {
-    ar = g_context->getOuterVMFrame(ar);
-  }
-  auto const f = vm_decode_function(tvAsVariant(&func),
-                                    ar, false,
-                                    obj, cls, invName,
-                                    DecodeFlags::NoWarn);
-  if (UNLIKELY(!f)) return false;
-
-  auto& cit = it->cuf();
-  cit.setFunc(f);
-  if (obj) {
-    cit.setCtx(obj);
-    obj->incRefCount();
-  } else {
-    cit.setCtx(cls);
-  }
-  cit.setName(invName);
-  return true;
 }
 
 void throwOOBException(TypedValue base, TypedValue key) {

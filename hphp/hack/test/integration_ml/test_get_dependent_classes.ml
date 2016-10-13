@@ -26,6 +26,9 @@ let files = [
   "K", "interface K extends J {}";
   "L", "trait L { require implements K; }";
 
+  "M", "class :M {}";
+  "N", "class :N { attribute :M; }";
+
   "Unrelated", "class Unrelated {}";
 ] |> List.map ~f:begin fun (name, contents) ->
   (name ^ ".php", "<?hh\n" ^ contents)
@@ -38,12 +41,16 @@ let () =
   Test.assert_no_errors env;
 
   let dependent_classes = Decl_redecl_service.get_dependent_classes
+    None
+    ~bucket_size:1
     env.ServerEnv.files_info
-    (SSet.of_list ["\\C"; "\\H"; "\\J"])
+    (SSet.of_list ["\\C"; "\\H"; "\\J"; "\\:M";])
   in
 
-  let expected_dependent_classes =
-    ["\\C"; "\\D"; "\\E"; "\\F"; "\\G"; "\\H"; "\\I"; "\\J"; "\\K"; "\\L"] in
+  let expected_dependent_classes = List.sort String.compare
+    ["\\C"; "\\D"; "\\E"; "\\F"; "\\G"; "\\H";
+      "\\I"; "\\J"; "\\K"; "\\L"; "\\:M"; "\\:N";]
+  in
 
   List.iter (SSet.elements dependent_classes) ~f:print_endline;
 

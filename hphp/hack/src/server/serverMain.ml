@@ -121,6 +121,18 @@ let handle_connection_ genv env client =
   | ClientProvider.Client_went_away | Read_command_timeout ->
     ClientProvider.shutdown_client client;
     env
+  (** Connection dropped off. Its unforunate that we don't actually know
+   * which connection went bad (could be any write to any connection to
+   * child processes/daemons), we just assume at this top-level that
+   * since its not caught elsewhere, its the connection to the client.
+   *
+   * TODO: Make sure the pipe exception is really about this client.*)
+  | Unix.Unix_error (Unix.EPIPE, _, _)
+  | Sys_error("Broken pipe")
+  | Sys_error("Connection reset by peer") ->
+    Hh_logger.log "Client channel went bad. Shutting down client connection";
+    ClientProvider.shutdown_client client;
+    env
   | e ->
     HackEventLogger.handle_connection_exception e;
     let msg = Printexc.to_string e in
@@ -130,43 +142,32 @@ let handle_connection_ genv env client =
     ClientProvider.shutdown_client client;
     env
 
+let shutdown_persistent_client env client =
+  ClientProvider.shutdown_client client;
+  ServerFileSync.clear_sync_data env
+
 let handle_persistent_connection_ genv env client =
    try
      ServerCommand.handle genv env client
    with
-   | Sys_error("Broken pipe") | ServerCommandTypes.Read_command_timeout ->
-     ClientProvider.shutdown_client client;
-     {env with
-     persistent_client = None;
-     edited_files = Relative_path.Map.empty;
-     diag_subscribe = None;}
+   (** TODO: Make sure the pipe exception is really about this client. *)
+   | Unix.Unix_error (Unix.EPIPE, _, _)
+   | Sys_error("Connection reset by peer")
+   | Sys_error("Broken pipe")
+   | ServerCommandTypes.Read_command_timeout ->
+     shutdown_persistent_client env client
    | e ->
      let msg = Printexc.to_string e in
      EventLogger.master_exception msg;
      Printf.fprintf stderr "Error: %s\n%!" msg;
      Printexc.print_backtrace stderr;
-     ClientProvider.shutdown_client client;
-     {env with
-     persistent_client = None;
-     edited_files = Relative_path.Map.empty;
-     diag_subscribe = None;}
+     shutdown_persistent_client env client
 
 let handle_connection genv env client is_persistent =
   ServerIdle.stamp_connection ();
-  try match is_persistent with
+  match is_persistent with
     | true -> handle_persistent_connection_ genv env client
     | false -> handle_connection_ genv env client
-  with
-  | Unix.Unix_error (e, _, _) ->
-     Printf.fprintf stderr "Unix error: %s\n" (Unix.error_message e);
-     Printexc.print_backtrace stderr;
-     flush stderr;
-     env
-  | e ->
-     Printf.fprintf stderr "Error: %s\n" (Printexc.to_string e);
-     Printexc.print_backtrace stderr;
-     flush stderr;
-     env
 
 let recheck genv old_env check_kind =
   let new_env, to_recheck, total_rechecked =
@@ -275,19 +276,24 @@ let serve_one_iteration genv env client_provider =
     Hh_logger.log "Recheck id: %s" recheck_id;
   end;
 
-  Option.iter env.diag_subscribe ~f:begin fun sub ->
-    let id = Diagnostic_subscription.get_id sub in
-    let errors = Diagnostic_subscription.get_absolute_errors sub in
+  let env = Option.value_map env.diag_subscribe
+      ~default:env
+      ~f:begin fun sub ->
+
+    let sub, errors = Diagnostic_subscription.pop_errors sub env.edited_files in
+
     if not @@ SMap.is_empty errors then begin
+      let id = Diagnostic_subscription.get_id sub in
       let res = ServerCommandTypes.DIAGNOSTIC (id, errors) in
       let client = Utils.unsafe_opt env.persistent_client in
-      ClientProvider.send_push_message_to_client client res
-    end
-  end;
-
-  let env = { env with diag_subscribe =
-    Option.map env.diag_subscribe ~f:Diagnostic_subscription.mark_as_pushed }
-  in
+      try
+        ClientProvider.send_push_message_to_client client res
+      with ClientProvider.Client_went_away ->
+        (* Leaving cleanup of this condition to handled_connection function *)
+        ()
+    end;
+    { env with diag_subscribe = Some sub }
+  end in
 
   let env = match client with
   | None -> env
@@ -410,6 +416,7 @@ let run_once options handle =
  * via ic.
  *)
 let daemon_main_exn options (ic, oc) =
+  Printexc.record_backtrace true;
   let in_fd = Daemon.descr_of_in_channel ic in
   let out_fd = Daemon.descr_of_out_channel oc in
   let config, _ = ServerConfig.(load filename options) in

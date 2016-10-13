@@ -65,7 +65,7 @@ struct RuntimeOption {
   }
 
   static bool GcSamplingEnabled() {
-    return EvalEnableGC && EvalGCSampleRate > 0;
+    return EvalGCSampleRate > 0;
   }
 
   static bool JitSamplingEnabled() {
@@ -515,7 +515,7 @@ struct RuntimeOption {
   /* despite the unfortunate name, this enables function renaming and
    * interception in the interpreter as well as the jit, and also
    * implies all functions may be used with fb_intercept */             \
-  F(bool, JitEnableRenameFunction,     false)                           \
+  F(bool, JitEnableRenameFunction,     EvalJitEnableRenameFunction)     \
   F(bool, JitUseVtuneAPI,              false)                           \
                                                                         \
   F(bool, JitDisabledByHphpd,          false)                           \
@@ -588,7 +588,7 @@ struct RuntimeOption {
   F(bool, EnableGCTypeScan,            eagerGcDefault())                \
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
-  F(uint32_t, GCSampleRate,            (eagerGcDefault() ? 0 : 1))      \
+  F(uint32_t, GCSampleRate,            0)                               \
   F(uint32_t, SerDesSampleRate,            0)                           \
   F(uint32_t, JitSampleRate,               0)                           \
   F(uint32_t, JitFilterLease,              1)                           \
@@ -603,6 +603,7 @@ struct RuntimeOption {
   F(bool, EnableNumaLocal, ServerExecutionMode())                       \
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
+  F(bool, LogServerRestartStats, false)                                 \
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \
@@ -616,6 +617,7 @@ struct RuntimeOption {
   F(bool, PPC64RelocationShrinkFarBranches, false)                      \
   /*  Remove nops from a Far branch. */                                 \
   F(bool, PPC64RelocationRemoveFarBranchesNops, true)                   \
+  F(double, InitialLoadFactor, 1.0)                                     \
   /********************                                                 \
    | Profiling flags. |                                                 \
    ********************/                                                \

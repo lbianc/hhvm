@@ -29,7 +29,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     | IDENTIFY_FUNCTION (content, line, char) ->
         env, ServerIdentifyFunction.go_absolute content line char env.tcopt
     | OUTLINE content ->
-        env, FileOutline.outline content
+        env, FileOutline.outline env.popt content
     | GET_DEFINITION_BY_ID id ->
         env, Option.map (ServerSymbolDefinition.from_symbol_id env.tcopt id)
           SymbolDefinition.to_absolute
@@ -59,7 +59,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         env, Ai.InfoService.go Typing_check_utils.check_defs genv.workers
           file_list (ServerArgs.ai_mode genv.options) env.tcopt
     | ARGUMENT_INFO (contents, line, col) ->
-        env, ServerArgumentInfo.go contents line col
+        env, ServerArgumentInfo.go contents line col env.tcopt
     | SEARCH (query, type_) -> env, ServerSearch.go genv.workers query type_
     | COVERAGE_COUNTS path -> env, ServerCoverageMetric.go path genv env
     | LINT fnl -> env, ServerLint.go genv env fnl
@@ -70,7 +70,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     | STATS -> env, Stats.get_stats ()
     | KILL -> env, ()
     | FIND_LVAR_REFS (content, line, char) ->
-        env, ServerFindLocals.go content line char
+        env, ServerFindLocals.go env.tcopt content line char
     | FORMAT (content, from, to_) ->
         env, ServerFormat.go content from to_
     | TRACE_AI action ->
@@ -82,8 +82,8 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         env, FullFidelityParseService.go file
     | ECHO_FOR_TEST msg ->
         env, msg
-    | OPEN_FILE path ->
-        ServerFileSync.open_file env path, ()
+    | OPEN_FILE (path, contents) ->
+        ServerFileSync.open_file env path contents, ()
     | CLOSE_FILE path ->
         ServerFileSync.close_file env path, ()
     | EDIT_FILE (path, edits) ->
@@ -126,11 +126,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         in
         env, ServerIdentifyFunction.go_absolute content line column env.tcopt
     | DISCONNECT ->
-        let new_env = {env with
-        persistent_client = None;
-        edited_files = Relative_path.Map.empty;
-        diag_subscribe = None;} in
-        new_env, ()
+        ServerFileSync.clear_sync_data env, ()
     | SUBSCRIBE_DIAGNOSTIC id ->
         let new_env = { env with
           diag_subscribe = Some (Diagnostic_subscription.of_id id env.errorl)
