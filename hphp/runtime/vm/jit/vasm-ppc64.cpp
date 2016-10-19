@@ -1154,8 +1154,8 @@ void lowerForPPC64(Vout& v, movtdb& inst) { v << copy{inst.s, inst.d}; }
 void lowerForPPC64(Vout& v, movtdq& inst) { v << copy{inst.s, inst.d}; }
 
 // Lower all movzb* to extrb as ppc64 always sign extend the unused bits of reg.
-void lowerForPPC64(Vout& v, movzbl& i)    { v << extrb{i.s, Reg8(i.d)}; }
-void lowerForPPC64(Vout& v, movzbq& i)    { v << extrb{i.s, Reg8(i.d)}; }
+void lowerForPPC64(Vout& v, movzbl& i)    { v << movb{i.s, Reg8(i.d)}; }
+void lowerForPPC64(Vout& v, movzbq& i)    { v << movb{i.s, Reg8(i.d)}; }
 void lowerForPPC64(Vout& v, movzlq& i)    { v << movl{i.s, Reg32(i.d)}; }
 
 void lowerForPPC64(Vout& v, srem& i) {
