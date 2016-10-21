@@ -69,9 +69,6 @@ struct PtrFilter: F {
   void operator()(const NameValueTable& p) { p.scan(*this); }
   void operator()(const VarEnv& venv) { (*this)(&venv); }
 
-  void operator()(const RequestEventHandler& p) { p.scan(*this); }
-  void operator()(const RequestEventHandler* p) { p->scan(*this); }
-
   // mark a TypedValue or TypedValueAux. taking tv by value would exclude aux.
   void operator()(const TypedValueAux& v) { (*this)(*(const TypedValue*)&v); }
   void operator()(const TypedValue& tv) {
@@ -124,6 +121,10 @@ struct PtrFilter: F {
   void implicit(const ResourceHdr* p) { if (p) F::implicit(p); }
   void implicit(const Array& p) {
     if (!p.isNull() && p.get()->isRefCounted()) F::implicit(p.get());
+  }
+
+  template<class T> void operator()(const req::ptr<T>& p) {
+    (*this)(p.get());
   }
 
   // collections of scannable fields
@@ -296,16 +297,37 @@ HeapGraph makeHeapGraph(bool include_free) {
   blocks.iterate([&](const Header* h, size_t size) {
     g.nodes.push_back(HeapGraph::Node{h, -1, -1});
   });
+  type_scan::Scanner type_scanner;
 
   // find roots
   PtrFilter<RootMarker> rmark(g, blocks);
-  scanRoots(rmark);
+  scanRoots(rmark, type_scanner);
+  type_scanner.finish(
+    [&](const void* p) {
+      // definitely a ptr, but maybe interior, and maybe not counted
+      rmark.ambig(p);
+    },
+    [&](const void* p, std::size_t size) {
+      // scan the range conservatively
+      rmark(p, size);
+    }
+  );
 
   // find heap->heap pointers
   for (size_t i = 0, n = g.nodes.size(); i < n; i++) {
     auto h = g.nodes[i].h;
     PtrFilter<ObjMarker> omark(g, blocks, h);
-    scanHeader(h, omark);
+    scanHeader(h, omark, type_scanner);
+    type_scanner.finish(
+      [&](const void* p) {
+        // definitely a ptr, but maybe interior, and maybe not counted
+        omark.ambig(p);
+      },
+      [&](const void* p, std::size_t size) {
+        // scan the range conservatively
+        omark(p, size);
+      }
+    );
   }
   g.nodes.shrink_to_fit();
   g.ptrs.shrink_to_fit();

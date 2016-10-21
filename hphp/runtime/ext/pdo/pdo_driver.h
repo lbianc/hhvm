@@ -433,7 +433,8 @@ protected:
   int parseDataSource(const char *data_source,
                       int data_source_len,
                       struct pdo_data_src_parser *parsed,
-                      int nparams);
+                      int nparams,
+                      folly::StringPiece separators = ";");
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -454,8 +455,6 @@ struct PDOResource : SweepableResourceData {
   const String& o_getClassNameHook() const override { return classnameof(); }
 
   const sp_PDOConnection& conn() const { return m_conn; }
-
-  virtual void vscan(IMarker&) const override;
 
   /////////////////////////////////////////////////////////////////////////////
   // Data members.

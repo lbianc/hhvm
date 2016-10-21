@@ -84,6 +84,9 @@ let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
     ServerEnv.notifier = notifier;
   } in
 
+  (* Always pick up disk changes in tests immediately *)
+  let env = ServerEnv.({ env with last_notifier_check_time = 0.0 }) in
+
   let env = ServerMain.serve_one_iteration genv env client_provider in
   env, {
     did_read_disk_changes = !did_read_disk_changes_ref;
@@ -219,6 +222,12 @@ let errors_to_string buf x =
   List.iter x ~f: begin fun error ->
     Printf.bprintf buf "%s\n" (Errors.to_string error)
   end
+
+let assert_errors env expected =
+  let buf = Buffer.create 1024 in
+  (Errors.get_error_list env.ServerEnv.errorl)
+    |> List.map ~f:(Errors.to_absolute) |> errors_to_string buf;
+  assertEqual expected (Buffer.contents buf)
 
 let diagnostics_to_string x =
   let buf = Buffer.create 1024 in

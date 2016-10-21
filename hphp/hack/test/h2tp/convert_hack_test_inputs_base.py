@@ -187,6 +187,10 @@ UNSUPPORTED_FILES_CONVERTER = {
         "pipe_operator_with_assignment.php",
         "pipe_operator_containing_assignment.php",
         "pipe_operator_dollardollar_null_check.php",
+        "pipe_operator_dollardollar_static_call.php",
+        "pipe_operator_dollardollar_static_call2.php",
+        "pipe_operator_dollardollar_static_member.php",
+        "pipe_operator_dollardollar_static_member2.php",
     ],
     "async is currently not supported. (Other[0])": [
         'dynamic_yield/DynamicYield1.php',
@@ -286,6 +290,7 @@ UNSUPPORTED_FILES_CONVERTER = {
         'unused_awaitable5.php',
         'unused_awaitable6.php',
         'void_option2.php',
+        'void_usage_2.php',
         'void_usage_placeholder.php',
         'weird.php',
         'yield_blank_result.php',

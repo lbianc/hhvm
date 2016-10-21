@@ -30,6 +30,7 @@ let make_genv options config local_config handle =
     else Watchman.init {
       Watchman.init_timeout = local_config.SLC.watchman_init_timeout;
       subscribe_to_changes = local_config.SLC.watchman_subscribe;
+      sync_directory = local_config.SLC.watchman_sync_directory;
       root = root;
     }
   in
@@ -131,6 +132,8 @@ let make_env config =
     failed_check   = Relative_path.Set.empty;
     persistent_client = None;
     last_command_time = 0.0;
+    last_notifier_check_time = 0.0;
+    last_idle_job_time = 0.0;
     edited_files   = Relative_path.Map.empty;
     ide_needs_parsing = Relative_path.Set.empty;
     disk_needs_parsing = Relative_path.Set.empty;

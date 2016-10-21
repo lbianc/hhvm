@@ -217,7 +217,7 @@ struct Generator {
  public:
   // Parse out all the debug information out of the specified file and do the
   // analysis generating the layouts.
-  explicit Generator(const std::string&);
+  explicit Generator(const std::string&, bool skip);
 
   // Turn the layouts into C++ code, writing to the specified ostream.
   void operator()(std::ostream&) const;
@@ -592,13 +592,13 @@ struct Generator::IndexedType {
   folly::Optional<LayoutError> errors;
 };
 
-Generator::Generator(const std::string& filename) {
+Generator::Generator(const std::string& filename, bool skip) {
   // Either this platform has no support for parsing debug information, or the
   // preprocessor symbol to enable actually building scanner isn't
   // enabled. Either way, just bail out. Everything will get a conservative
   // scanner by default if someone actually tries to use the scanners at
   // runtime.
-  if (!HPHP::type_scan::kBuildScanners) return;
+  if (skip) return;
 
   m_parser = TypeParser::make(filename);
 
@@ -630,14 +630,12 @@ Generator::Generator(const std::string& filename) {
     m_objects_by_name.emplace(type.name, type.key);
   }
 
-  // This isn't strictly necessary (the rest of the logic will work fine without
-  // it), but fail fast if it looks like we don't have any debug info
-  // enabled. This will prevent someone from doing a build without debug info
-  // and silently getting conservative scanning for everything.
+  // Complain if it looks like we don't have any debug info enabled.
+  // (falls back to conservative scanning for everything)
   if (countable_markers.empty() && indexer_types.empty()) {
-    throw Exception{
-      "No countable or indexed types found. Is debug-info enabled?"
-    };
+    std::cerr << "gen-type-scanners: warning: "
+                 "No countable or indexed types found. "
+                 "Is debug-info enabled?" << std::endl;
   }
 
   // Extract all the types that Mark[Scannable]Countable<> was instantiated on
@@ -3172,7 +3170,8 @@ int main(int argc, char** argv) {
      "filename to read debug-info from")
     ("output_file",
      po::value<std::string>()->required(),
-     "filename of generated scanners");
+     "filename of generated scanners")
+    ("skip", "do not scan dwarf, generate conservative scanners");
 
   try {
     po::variables_map vm;
@@ -3183,6 +3182,13 @@ int main(int argc, char** argv) {
                 << desc << std::endl;
       return 1;
     }
+
+#ifdef __clang__
+  /* Doesn't work with Clang at the moment. t10336705 */
+  auto skip = true;
+#else
+  auto skip = vm.count("skip") || getenv("HHVM_DISABLE_TYPE_SCANNERS");
+#endif
 
     po::notify(vm);
 
@@ -3198,7 +3204,7 @@ int main(int argc, char** argv) {
 
     try {
       const auto source_executable = vm["source_file"].as<std::string>();
-      Generator generator{source_executable};
+      Generator generator{source_executable, skip};
       std::ofstream output_file{output_filename};
       generator(output_file);
     } catch (const debug_parser::Exception& exn) {

@@ -1471,7 +1471,7 @@ void ExecutionContext::invokeFuncImpl(TypedValue* retptr, const Func* f,
   // If `f' is a method, either `thiz' or `cls' must be non-null.
   assert(IMPLIES(f->preClass(), thiz || cls));
   // If `f' is a static method, thiz must be null.
-  assert(IMPLIES(f->isStaticInProlog(), !thiz));
+  assert(IMPLIES(f->isStaticInPrologue(), !thiz));
   // invName should only be non-null if we are calling __call or __callStatic.
   assert(IMPLIES(invName, f->name()->isame(s___call.get()) ||
                           f->name()->isame(s___callStatic.get())));
@@ -2187,6 +2187,15 @@ void ExecutionContext::exitDebuggerDummyEnv() {
   assert(vmStack().count() == 0);
   vmfp() = nullptr;
   vmpc() = nullptr;
+}
+
+ThrowAllErrorsSetter::ThrowAllErrorsSetter() {
+  m_throwAllErrors = g_context->getThrowAllErrors();
+  g_context->setThrowAllErrors(true);
+}
+
+ThrowAllErrorsSetter::~ThrowAllErrorsSetter() {
+  g_context->setThrowAllErrors(m_throwAllErrors);
 }
 
 }

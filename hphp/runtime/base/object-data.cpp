@@ -53,7 +53,7 @@ namespace HPHP {
 //////////////////////////////////////////////////////////////////////
 
 // current maximum object identifier
-__thread int ObjectData::os_max_id;
+__thread uint32_t ObjectData::os_max_id;
 
 TRACE_SET_MOD(runtime);
 
@@ -178,6 +178,7 @@ void ObjectData::releaseNoObjDestructCheck() noexcept {
   auto& pmax = os_max_id;
   if (o_id && o_id == pmax) --pmax;
 
+  invalidateWeakRef();
   auto const size =
     reinterpret_cast<char*>(stop) - reinterpret_cast<char*>(this);
   assert(size == sizeForNProps(nProps));
@@ -334,10 +335,9 @@ Variant* ObjectData::realPropImpl(const String& propName, int flags,
   // Property is non-NULL if we reach here.
   if ((lookup.accessible && prop->m_type != KindOfUninit) ||
       (flags & (RealPropUnchecked|RealPropExist))) {
-    return reinterpret_cast<Variant*>(prop);
-  } else {
-    return nullptr;
+    return &tvAsVariant(prop);
   }
+  return nullptr;
 }
 
 Variant* ObjectData::o_realProp(const String& propName, int flags,
@@ -680,7 +680,7 @@ static bool decode_invoke(const String& s, ObjectData* obj, bool fatal,
   ctx.func = ctx.cls->lookupMethod(s.get());
   if (ctx.func) {
     // Null out this_ for statically called methods
-    if (ctx.func->isStaticInProlog()) {
+    if (ctx.func->isStaticInPrologue()) {
       ctx.this_ = nullptr;
     }
   } else {
@@ -930,7 +930,7 @@ ObjectData* ObjectData::newInstanceRawBig(Class* cls, size_t size) {
 // Note: the normal object destruction path does not actually call this
 // destructor.  See ObjectData::release.
 ObjectData::~ObjectData() {
-  int& pmax = os_max_id;
+  auto& pmax = os_max_id;
   if (o_id && o_id == pmax) {
     --pmax;
   }

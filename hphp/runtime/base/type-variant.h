@@ -1407,10 +1407,10 @@ private:
     if (debug) varNrFlag() = NR_FLAG;
   }
   const Variant *asVariant() const {
-    return (const Variant*)this;
+    return &tvAsCVarRef(static_cast<const TypedValue*>(this));
   }
-  Variant *asVariant() {
-    return (Variant*)this;
+  Variant* asVariant() {
+    return &tvAsVariant(static_cast<TypedValue*>(this));
   }
   void checkRefCount() {
     assert(m_type != KindOfRef);

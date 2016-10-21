@@ -115,11 +115,21 @@ struct DebuggerSettings {
   int printLevel = -1;
 };
 
+struct ThrowAllErrorsSetter {
+  ThrowAllErrorsSetter();
+  ~ThrowAllErrorsSetter();
+
+private:
+  bool m_throwAllErrors;
+};
+
 using InvokeArgs = folly::Range<const TypedValue*>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct ExecutionContext {
+  friend ThrowAllErrorsSetter;
+
   enum ShutdownType {
     ShutDown,
     PostSend,
@@ -273,7 +283,6 @@ public:
   void setTimeZone(const String&);
 
   bool getThrowAllErrors() const;
-  void setThrowAllErrors(bool);
 
   Variant getExitCallback();
   void setExitCallback(Variant);
@@ -312,6 +321,7 @@ private:
   // helper functions
   void resetCurrentBuffer();
   void executeFunctions(ShutdownType type);
+  void setThrowAllErrors(bool);
 
 public:
   void requestInit();
@@ -501,7 +511,7 @@ public:
     //mark(m_stdoutData);
     mark(m_stdoutBytesWritten);
     mark(m_rawPostData);
-    mark(m_requestEventHandlers);
+    //mark(m_requestEventHandlers); type_scanned via ThreadLocal<T>
     mark(m_shutdowns);
     mark(m_userErrorHandlers);
     mark(m_userExceptionHandlers);

@@ -187,7 +187,7 @@ Variant HHVM_FUNCTION(var_export, const Variant& expression,
   return res;
 }
 
-static ALWAYS_INLINE void do_var_dump(VariableSerializer vs,
+static ALWAYS_INLINE void do_var_dump(VariableSerializer& vs,
                                       const Variant& expression) {
   // manipulate maxCount to match PHP behavior
   if (!expression.isObject()) {
@@ -247,11 +247,15 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
     case KindOfPersistentString:
     case KindOfString: {
       StringData *str = value.getStringData();
+      auto const size = str->size();
+      if (size >= RuntimeOption::MaxSerializedStringSize) {
+        throw Exception("Size of serialized string (%d) exceeds max", size);
+      }
       StringBuffer sb;
       sb.append("s:");
-      sb.append(str->size());
+      sb.append(size);
       sb.append(":\"");
-      sb.append(str->data(), str->size());
+      sb.append(str->data(), size);
       sb.append("\";");
       return sb.detach();
     }
@@ -263,8 +267,7 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
       ArrayData* arr = value.getArrayData();
       assert(arr->isVecArray());
       if (arr->empty()) return s_EmptyVecArray;
-      VariableSerializer vs(VariableSerializer::Type::Serialize);
-      return vs.serialize(value, true);
+      break;
     }
 
     case KindOfPersistentDict:
@@ -272,8 +275,7 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
       ArrayData* arr = value.getArrayData();
       assert(arr->isDict());
       if (arr->empty()) return s_EmptyDictArray;
-      VariableSerializer vs(VariableSerializer::Type::Serialize);
-      return vs.serialize(value, true);
+      break;
     }
 
     case KindOfPersistentKeyset:
@@ -281,8 +283,7 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
       ArrayData* arr = value.getArrayData();
       assert(arr->isKeyset());
       if (arr->empty()) return s_EmptyKeysetArray;
-      VariableSerializer vs(VariableSerializer::Type::Serialize);
-      return vs.serialize(value, true);
+      break;
     }
 
     case KindOfPersistentArray:
@@ -290,19 +291,20 @@ String HHVM_FUNCTION(serialize, const Variant& value) {
       ArrayData *arr = value.getArrayData();
       assert(arr->isPHPArray());
       if (arr->empty()) return s_EmptyArray;
-      VariableSerializer vs(VariableSerializer::Type::Serialize);
-      return vs.serialize(value, true);
+      break;
     }
     case KindOfDouble:
-    case KindOfObject: {
-      VariableSerializer vs(VariableSerializer::Type::Serialize);
-      return vs.serialize(value, true);
-    }
+    case KindOfObject:
+      break;
+
     case KindOfRef:
     case KindOfClass:
-      break;
+      not_reached();
   }
-  not_reached();
+
+  VariableSerializer vs(VariableSerializer::Type::Serialize);
+  // Keep the count so recursive calls to serialize() embed references properly.
+  return vs.serialize(value, true, true);
 }
 
 Variant HHVM_FUNCTION(unserialize, const String& str,

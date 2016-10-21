@@ -1282,7 +1282,7 @@ static void compact(PointerSet& seen, VarEnv* v, Array &ret,
   } else {
     String varname = var.toString();
     if (!varname.empty() && v->lookup(varname.get()) != NULL) {
-      ret.set(varname, *reinterpret_cast<Variant*>(v->lookup(varname.get())));
+      ret.set(varname, tvAsVariant(v->lookup(varname.get())));
     }
   }
 }
@@ -1661,7 +1661,7 @@ TypedValue HHVM_FUNCTION(range,
 // diff/intersect helpers
 
 static int cmp_func(const Variant& v1, const Variant& v2, const void *data) {
-  Variant *callback = (Variant *)data;
+  auto callback = static_cast<const Variant*>(data);
   return vm_call_user_func(*callback, make_packed_array(v1, v2)).toInt32();
 }
 
@@ -2457,10 +2457,6 @@ struct Collator final : RequestEventHandler {
       ucol_close(m_ucoll);
       m_ucoll = NULL;
     }
-  }
-
-  void vscan(IMarker& mark) const override {
-    mark(m_locale);
   }
 
 private:

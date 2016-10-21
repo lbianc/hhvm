@@ -1476,7 +1476,7 @@ void enterVMAtFunc(ActRec* enterFnAr, StackArgsState stk, VarEnv* varEnv) {
   assert(!enterFnAr->resumed());
   Stats::inc(Stats::VMEnter);
 
-  const bool useJit = RID().getJit();
+  const bool useJit = RID().getJit() && !RID().getJitFolding();
   const bool useJitPrologue = useJit && vmfp()
     && !enterFnAr->magicDispatch()
     && !varEnv
@@ -4133,7 +4133,7 @@ OPTBLD_INLINE void iopFPushFunc(intva_t numArgs) {
 
     vmStack().discard();
     ActRec* ar = fPushFuncImpl(func, numArgs);
-    if (func->isStaticInProlog()) {
+    if (func->isStaticInPrologue()) {
       ar->setClass(origObj->getVMClass());
       decRefObj(origObj);
     } else {
@@ -4331,7 +4331,7 @@ void pushClsMethodImpl(Class* cls, StringData* name, int numArgs) {
   auto const res = lookupClsMethod(f, cls, name, obj, ctx, true);
   if (res == LookupResult::MethodFoundNoThis ||
       res == LookupResult::MagicCallStaticFound) {
-    if (!f->isStaticInProlog()) {
+    if (!f->isStaticInPrologue()) {
       raise_missing_this(f);
     }
     obj = nullptr;
@@ -5843,12 +5843,14 @@ OPTBLD_INLINE TCA iopAwait(PC& pc) {
 
 TCA suspendStack(PC &pc) {
   while (true) {
-    auto const jitReturn = []() {
-      // FixMe: what to do here?
+    auto const jitReturn = [&] {
       try {
         return jitReturnPre(vmfp());
+      } catch (VMSwitchMode&) {
+        vmpc() = pc;
+        throw VMSuspendStack();
       } catch (...) {
-        // We're halfway through a bytecode
+        // We're halfway through a bytecode; we can't recover
         always_assert(false);
       }
     }();
@@ -6590,7 +6592,8 @@ TCA iopWrapper(Op op,
 #define O(opcode, imm, push, pop, flags)                                \
   TCA interpOne##opcode(ActRec* fp, TypedValue* sp, Offset pcOff) {     \
   interp_set_regs(fp, sp, pcOff);                                       \
-  SKTRACE(5, SrcKey(liveFunc(), vmpc(), liveResumed()), "%40s %p %p\n", \
+  SKTRACE(5, liveSK(),                                                  \
+          "%40s %p %p\n",                                               \
           "interpOne" #opcode " before (fp,sp)", vmfp(), vmsp());       \
   if (Stats::enableInstrCount()) {                                      \
     Stats::inc(Stats::Instr_Transl##opcode, -1);                        \
@@ -6602,7 +6605,7 @@ TCA iopWrapper(Op op,
     Stats::incStatGrouped(cat, name, 1);                                \
   }                                                                     \
   if (Trace::moduleEnabled(Trace::ringbuffer)) {                        \
-    auto sk = SrcKey{vmfp()->func(), vmpc(), vmfp()->resumed()}.toAtomicInt(); \
+    auto sk = liveSK().toAtomicInt();                                   \
     Trace::ringbufferEntry(Trace::RBTypeInterpOne, sk, 0);              \
   }                                                                     \
   INC_TPC(interp_one)                                                   \
@@ -6795,15 +6798,18 @@ OPTBLD_INLINE TCA switchModeForDebugger(TCA retAddr) {
 }
 
 TCA dispatchBB() {
+  auto sk = [] {
+    return SrcKey(vmfp()->func(), vmpc(), vmfp()->resumed(),
+                  vmfp()->func()->cls() && vmfp()->hasThis());
+  };
+
   if (Trace::moduleEnabled(Trace::dispatchBB)) {
     auto cat = makeStaticString("dispatchBB");
-    auto name = makeStaticString(show(SrcKey(vmfp()->func(), vmpc(),
-                                             vmfp()->resumed())));
+    auto name = makeStaticString(show(sk()));
     Stats::incStatGrouped(cat, name, 1);
   }
   if (Trace::moduleEnabled(Trace::ringbuffer)) {
-    auto sk = SrcKey{vmfp()->func(), vmpc(), vmfp()->resumed()}.toAtomicInt();
-    Trace::ringbufferEntry(Trace::RBTypeDispatchBB, sk, 0);
+    Trace::ringbufferEntry(Trace::RBTypeDispatchBB, sk().toAtomicInt(), 0);
   }
   auto retAddr = dispatchImpl<true>();
   return switchModeForDebugger(retAddr);

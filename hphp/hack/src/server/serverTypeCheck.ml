@@ -168,14 +168,6 @@ let remove_decls env fast_parsed =
   env
 
 (*****************************************************************************)
-(* Removes the files that failed *)
-(*****************************************************************************)
-
-let remove_failed fast failed =
-  Relative_path.Set.fold failed ~init:fast
-    ~f:(fun x m -> Relative_path.Map.remove m x)
-
-(*****************************************************************************)
 (* Parses the set of modified files *)
 (*****************************************************************************)
 
@@ -238,8 +230,7 @@ let declare_names env fast_parsed =
       let failed = Relative_path.Set.union failed' failed in
       errorl, failed
     end ~init:(Errors.empty, Relative_path.Set.empty) in
-  let fast = remove_failed fast_parsed failed_naming in
-  let fast = FileInfo.simplify_fast fast in
+  let fast = FileInfo.simplify_fast fast_parsed in
   env, errorl, failed_naming, fast
 
 (*****************************************************************************)
@@ -352,6 +343,8 @@ module FullCheckKind : CheckKindType = struct
       failed_check = failed_check;
       persistent_client = old_env.persistent_client;
       last_command_time = old_env.last_command_time;
+      last_notifier_check_time = old_env.last_notifier_check_time;
+      last_idle_job_time = old_env.last_idle_job_time;
       edited_files = old_env.edited_files;
       ide_needs_parsing = Relative_path.Set.empty;
       disk_needs_parsing = Relative_path.Set.empty;
@@ -592,19 +585,25 @@ end = functor(CheckKind:CheckKindType) -> struct
     new_env, reparse_count, total_rechecked_count
 end
 
+let check_kind_to_string = function
+  | Full_check -> "Full_check"
+  | Lazy_check -> "Lazy_check"
+
 module FC = Make(FullCheckKind)
 module LC = Make(LazyCheckKind)
 
 let type_check genv env kind =
-  let check_kind = match kind with
-    | Full_check -> "Full_check"
-    | Lazy_check -> "Lazy_check"
-  in
-  Printf.eprintf "******************************************\n";
-  Hh_logger.log "Check kind: %s" check_kind;
-  match kind with
-  | Full_check -> FC.type_check genv env
-  | Lazy_check -> LC.type_check genv env
+  (match kind with
+  | Lazy_check -> HackEventLogger.set_lazy_incremental ()
+  | Full_check -> ());
+  let check_kind = check_kind_to_string kind in
+  HackEventLogger.with_check_kind check_kind @@ begin fun () ->
+    Printf.eprintf "******************************************\n";
+    Hh_logger.log "Check kind: %s" check_kind;
+    match kind with
+    | Full_check -> FC.type_check genv env
+    | Lazy_check -> LC.type_check genv env
+  end
 
 (*****************************************************************************)
 (* Checks that the working directory is clean *)
