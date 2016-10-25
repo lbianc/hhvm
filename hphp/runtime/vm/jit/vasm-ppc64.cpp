@@ -303,7 +303,6 @@ struct Vgen {
     a.fctidz(i.d, i.s, false);
     a.mcrfs(0,5);
   }
-
   void emit(const movl& i) {
     uint8_t sh = 32;
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lowest 32 bits
@@ -1048,7 +1047,6 @@ X(cmpbm, movb, cmpq, loadb, s1, s0)
 
 #undef X
 
-
 /*
  * For PPC64 there are no instructions to perform operations with only part of
  * a register, differently of x86_64.
@@ -1091,7 +1089,6 @@ X(andl,  movl,  andq,  ONE_R64(d))
 
 #undef X
 
-
 #define X(vasm_src, vasm_mov, vasm_ext, vasm_dst, attr_dest)            \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();                          \
@@ -1126,7 +1123,6 @@ X(andli,  movl,  andqi,  ONE_R64(d))
 
 #undef X
 
-
 #define X(vasm_src, vasm_mov, vasm_ext, vasm_dst, attr_dest)            \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp = v.makeReg(), tmp1 = v.makeReg();                           \
@@ -1139,7 +1135,6 @@ X(testli, movl, extsw, testqi, NONE)
 X(subli,  movl, extsw, subqi,  ONE_R64(d))
 
 #undef X
-
 
 #undef NONE
 #undef ONE
