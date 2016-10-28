@@ -55,7 +55,13 @@ let make_genv options config local_config handle =
         let open ServerNotifierTypes in
         match changes with
         | Watchman.Watchman_unavailable -> Notifier_unavailable
-        | Watchman.Watchman_pushed changes -> Notifier_async_changes changes
+        | Watchman.Watchman_pushed changes -> begin match changes with
+          | Watchman.State_enter _
+          | Watchman.State_leave _ ->
+            Notifier_async_changes SSet.empty
+          | Watchman.Files_changed changes ->
+            Notifier_async_changes changes
+          end
         | Watchman.Watchman_synchronous changes ->
           Notifier_synchronous_changes changes
       in
@@ -128,6 +134,7 @@ let make_env config =
     files_info     = Relative_path.Map.empty;
     errorl         = Errors.empty;
     failed_parsing = Relative_path.Set.empty;
+    failed_naming  = Relative_path.Set.empty;
     failed_decl    = Relative_path.Set.empty;
     failed_check   = Relative_path.Set.empty;
     persistent_client = None;

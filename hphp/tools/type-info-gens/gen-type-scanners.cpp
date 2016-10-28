@@ -2764,6 +2764,17 @@ void Generator::checkForLayoutErrors() const {
       }
       oss << "\t- from type '" << *indexed.type << "'\n\n";
     }
+    // Error if an indexed type had internal linkage.
+    for (const auto& address : indexed.addresses) {
+      HPHP::match<void>(address,
+        [&](const std::string&) { /* ok */ },
+        [&](uintptr_t) {
+          ++error_count;
+          oss << "error: type " << *indexed.type << " has internal linkage.\n"
+                 " Indexed types need external linkage.\n";
+        }
+      );
+    }
   }
   if (error_count > 0) throw Exception{oss.str()};
 }
@@ -2870,7 +2881,17 @@ void Generator::genBuiltinScannerFuncs(std::ostream& os) const {
 
 void Generator::genScannerFuncs(std::ostream& os) const {
   genBuiltinScannerFuncs(os);
+  std::vector<std::vector<std::string>> types(m_layouts.size());
+  for (const auto& indexed : m_indexed_types) {
+    if (indexed.ignore || indexed.conservative) continue;
+    types[indexed.layout_index].push_back(indexed.type->toString());
+  }
   for (size_t i = 0; i < m_layouts.size(); ++i) {
+    auto& type_list = types[i];
+    std::sort(type_list.begin(), type_list.end());
+    for (auto& t : type_list) {
+      os << "// " << t << "\n";
+    }
     os << "void scanner_" << i << "(Scanner& scanner, "
        << "const void* ptr, size_t size) {\n";
     genScannerFunc(os, m_layouts[i]);

@@ -176,7 +176,7 @@ private:
   ssize_t getIterBegin() const;
   ssize_t getIterLast() const;
   ssize_t getIterEnd() const { return m_used; }
-  void getElm(ssize_t ei, TypedValue* out) const;
+  Cell getElm(ssize_t ei) const;
 
   ssize_t nextElm(Elm* elms, ssize_t ei) const;
   ssize_t prevElm(Elm* elms, ssize_t ei) const;
@@ -290,7 +290,7 @@ private:
   /*
    * Comparison helper.
    */
-  static bool EqualHelper(const ArrayData*, const ArrayData*);
+  static bool EqualHelper(const ArrayData*, const ArrayData*, bool);
 
 //////////////////////////////////////////////////////////////////////
 // Elements
@@ -465,7 +465,7 @@ public:
   static const TypedValue* NvGetStr(const ArrayData*, const StringData*);
   static const TypedValue* NvTryGetInt(const ArrayData*, int64_t);
   static const TypedValue* NvTryGetStr(const ArrayData*, const StringData*);
-  static void NvGetKey(const ArrayData*, TypedValue*, ssize_t);
+  static Cell NvGetKey(const ArrayData*, ssize_t);
   static size_t Vsize(const ArrayData*);
   static const Variant& GetValueRef(const ArrayData*, ssize_t);
   static bool IsVectorData(const ArrayData*);
@@ -519,7 +519,8 @@ public:
   static ArrayData* ToKeyset(ArrayData*, bool);
   static bool Equal(const ArrayData*, const ArrayData*);
   static bool NotEqual(const ArrayData*, const ArrayData*);
-  static constexpr auto Same = &Equal;
+  static bool Same(const ArrayData*, const ArrayData*);
+  static bool NotSame(const ArrayData*, const ArrayData*);
 
 //////////////////////////////////////////////////////////////////////
 

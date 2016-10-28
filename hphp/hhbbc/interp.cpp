@@ -315,8 +315,9 @@ void in(ISS& env, const bc::ClsCnsD& op) {
   push(env, TInitCell);
 }
 
-void in(ISS& env, const bc::File&)  { nothrow(env); push(env, TSStr); }
-void in(ISS& env, const bc::Dir&)   { nothrow(env); push(env, TSStr); }
+void in(ISS& env, const bc::File&)   { nothrow(env); push(env, TSStr); }
+void in(ISS& env, const bc::Dir&)    { nothrow(env); push(env, TSStr); }
+void in(ISS& env, const bc::Method&) { nothrow(env); push(env, TSStr); }
 
 void in(ISS& env, const bc::NameA&) {
   nothrow(env);
@@ -419,8 +420,10 @@ void binOpBoolImpl(ISS& env, Fun fun) {
   auto const v1 = tv(t1);
   auto const v2 = tv(t2);
   if (v1 && v2) {
-    constprop(env);
-    return push(env, fun(*v2, *v1) ? TTrue : TFalse);
+    if (auto r = eval_cell_value([&]{ return fun(*v2, *v1); })) {
+      constprop(env);
+      return push(env, *r ? TTrue : TFalse);
+    }
   }
   // TODO_4: evaluate when these can throw, non-constant type stuff.
   push(env, TBool);
@@ -433,8 +436,10 @@ void binOpInt64Impl(ISS& env, Fun fun) {
   auto const v1 = tv(t1);
   auto const v2 = tv(t2);
   if (v1 && v2) {
-    constprop(env);
-    return push(env, ival(fun(*v2, *v1)));
+    if (auto r = eval_cell_value([&]{ return ival(fun(*v2, *v1)); })) {
+      constprop(env);
+      return push(env, *r);
+    }
   }
   // TODO_4: evaluate when these can throw, non-constant type stuff.
   push(env, TInt);
@@ -1428,6 +1433,19 @@ void in(ISS& env, const bc::FPushCtorD& op) {
   fpiPush(env, ActRec { FPIKind::Ctor, rcls, rfunc });
 }
 
+void in(ISS& env, const bc::FPushCtorI& op) {
+  auto const name = env.ctx.unit->classes[op.arg2]->name;
+  auto const rcls = env.index.resolve_class(env.ctx, name);
+  always_assert_flog(
+    rcls.hasValue() && rcls->resolved(),
+    "An anonymous class ({}) failed to resolve",
+    name->data()
+  );
+  push(env, objExact(*rcls));
+  auto const rfunc = env.index.resolve_ctor(env.ctx, *rcls);
+  fpiPush(env, ActRec { FPIKind::Ctor, rcls, rfunc });
+}
+
 void in(ISS& env, const bc::FPushCtor& op) {
   auto const t1 = topA(env);
   if (is_specialized_cls(t1)) {
@@ -2038,7 +2056,7 @@ void in(ISS& env, const bc::Parent&) { push(env, TCls); }
 
 void in(ISS& env, const bc::CreateCl& op) {
   auto const nargs   = op.arg1;
-  auto const clsPair = env.index.resolve_closure_class(env.ctx, op.str2);
+  auto const clsPair = env.index.resolve_closure_class(env.ctx, op.arg2);
 
   /*
    * Every closure should have a unique allocation site, but we may see it

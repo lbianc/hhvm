@@ -617,8 +617,7 @@ Array ObjectData::o_toIterArray(const String& context, IterMode mode) {
     ssize_t iter = ad->iter_begin();
     auto pos_limit = ad->iter_end();
     while (iter != pos_limit) {
-      TypedValue key;
-      dynProps->get()->nvGetKey(&key, iter);
+      auto const key = dynProps->get()->nvGetKey(iter);
       iter = dynProps->get()->iter_advance(iter);
 
       // You can get this if you cast an array to object. These
@@ -708,9 +707,9 @@ Variant ObjectData::o_invoke(const String& s, const Variant& params,
       (!isContainer(params) && !params.isNull())) {
     return Variant(Variant::NullInit());
   }
-  Variant ret;
-  g_context->invokeFunc((TypedValue*)&ret, ctx, params);
-  return ret;
+  return Variant::attach(
+    g_context->invokeFunc(ctx, params)
+  );
 }
 
 #define INVOKE_FEW_ARGS_IMPL3                        \
@@ -751,9 +750,9 @@ Variant ObjectData::o_invoke_few_args(const String& s, int count,
     case  0: break;
   }
 
-  Variant ret;
-  g_context->invokeFuncFew(ret.asTypedValue(), ctx, count, args);
-  return ret;
+  return Variant::attach(
+    g_context->invokeFuncFew(ctx, count, args)
+  );
 }
 
 ObjectData* ObjectData::clone() {
@@ -1587,7 +1586,7 @@ void ObjectData::unsetProp(Class* ctx, const StringData* key) {
   if (prop && lookup.accessible && prop->m_type != KindOfUninit) {
     if (propInd != kInvalidSlot) {
       // Declared property.
-      tvSetIgnoreRef(*null_variant.asTypedValue(), *prop);
+      tvSetIgnoreRef(*uninit_variant.asTypedValue(), *prop);
     } else {
       // Dynamic property.
       dynPropArray().remove(StrNR(key).asString(), true /* isString */);

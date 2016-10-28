@@ -368,6 +368,7 @@ let scan_double_quote_string_literal lexer =
       else
         let lexer = with_error lexer SyntaxError.error0006 in
         aux (advance lexer 1)
+    | ('\\', '\\')
     | ('\\', '"')
     | ('\\', '$')
     | ('\\', 'e')
@@ -391,7 +392,16 @@ let scan_double_quote_string_literal lexer =
       (* Here we need to actually scan them for errors. *)
     | ('\\', 'u') -> aux (scan_unicode_escape lexer)
     | ('\\', _) ->
-      let lexer = with_error lexer SyntaxError.error0005 in
+      (* TODO: A backslash followed by something other than an escape sequence
+         is legal in hack, and treated as though it was just the backslash
+         and the character. However we might consider making this a warning.
+         It is particularly egregious when we have something like:
+         $x = "abcdef \
+               ghi";
+         The author of the code likely means the backslash to mean line
+         continuation but in fact it just means to put a backslash and newline
+         in the string.
+         *)
       aux (advance lexer 1)
     | ('"', _) -> (advance lexer 1, TokenKind.DoubleQuotedStringLiteral)
     | _ -> aux (advance lexer 1) in
@@ -505,9 +515,6 @@ let rec scan_xhp_element_name lexer =
 (* Is the next token we're going to lex a possible xhp class name? *)
 let is_xhp_class_name lexer =
   (peek_char lexer 0 = ':') && (is_name_nondigit (peek_char lexer 1))
-
-let is_next_name lexer =
-  is_name_nondigit (peek_char lexer 0)
 
 let scan_xhp_class_name lexer =
   (* An XHP class name is a colon followed by an xhp name. *)
@@ -803,6 +810,10 @@ let scan_trailing_trivia lexer =
   let (lexer, trivia_list) = aux lexer [] in
   (lexer, List.rev trivia_list)
 
+let is_next_name lexer =
+  let (lexer, _) = scan_leading_trivia lexer in
+  is_name_nondigit (peek_char lexer 0)
+
 let is_next_xhp_class_name lexer =
   let (lexer, _) = scan_leading_trivia lexer in
   is_xhp_class_name lexer
@@ -908,6 +919,7 @@ let next_xhp_name lexer =
   scan_token_and_trivia scan_xhp_element_name false lexer
 
 let is_next_xhp_category_name lexer =
+  let (lexer, _) = scan_leading_trivia lexer in
   (* An XHP category is an xhp element name preceded by a %. *)
   let ch0 = peek_char lexer 0 in
   let ch1 = peek_char lexer 1 in

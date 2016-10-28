@@ -137,6 +137,7 @@ static const struct {
   { OpClsCnsD,     {None,             Stack1,       OutUnknown      }},
   { OpFile,        {None,             Stack1,       OutString       }},
   { OpDir,         {None,             Stack1,       OutString       }},
+  { OpMethod,      {None,             Stack1,       OutString       }},
   { OpNameA,       {Stack1,           Stack1,       OutString       }},
 
   /*** 3. Operator instructions ***/
@@ -296,6 +297,7 @@ static const struct {
                    {None,             FStack,       OutFDesc        }},
   { OpFPushCtor,   {Stack1,           Stack1|FStack,OutObject       }},
   { OpFPushCtorD,  {None,             Stack1|FStack,OutObject       }},
+  { OpFPushCtorI,  {None,             Stack1|FStack,OutObject       }},
   { OpFPushCufIter,{None,             FStack,       OutFDesc        }},
   { OpFPushCuf,    {Stack1,           FStack,       OutFDesc        }},
   { OpFPushCufF,   {Stack1,           FStack,       OutFDesc        }},
@@ -911,6 +913,7 @@ bool dontGuardAnyInputs(Op op) {
   case Op::FPushClsMethodF:
   case Op::FPushCtor:
   case Op::FPushCtorD:
+  case Op::FPushCtorI:
   case Op::FPushCufIter:
   case Op::FPushFunc:
   case Op::FPushFuncD:
@@ -929,6 +932,7 @@ bool dontGuardAnyInputs(Op op) {
   case Op::IssetS:
   case Op::IterFree:
   case Op::LateBoundCls:
+  case Op::Method:
   case Op::MIterFree:
   case Op::Mod:
   case Op::Pow:

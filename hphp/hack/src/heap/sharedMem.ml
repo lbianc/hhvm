@@ -280,27 +280,20 @@ module type Key = sig
   (* The type of old keys that get stored in the C hashtable *)
   type old
 
-  (* The type of temporary keys that get stored in the C hashtable *)
-  type tmp
-
   (* The md5 of an old or a new key *)
   type md5
 
   (* Creation/conversion primitives *)
   val make     : Prefix.t -> userkey -> t
   val make_old : Prefix.t -> userkey -> old
-  val make_tmp : Prefix.t -> userkey -> tmp
 
   val to_old   : t -> old
-  val to_tmp   : t -> tmp
 
   val new_from_old : old -> t
-  val new_from_tmp : tmp -> t
 
   (* Md5 primitives *)
   val md5     : t -> md5
   val md5_old : old -> md5
-  val md5_tmp : tmp -> md5
 
 end
 
@@ -312,7 +305,6 @@ end) : Key with type userkey = UserKeyType.t = struct
   type userkey = UserKeyType.t
   type t       = string
   type old     = string
-  type tmp     = string
   type md5     = string
 
   (* The prefix we use for old keys. The prefix guarantees that we never
@@ -320,29 +312,19 @@ end) : Key with type userkey = UserKeyType.t = struct
    * "old_", it always starts with a number (cf Prefix.make()).
    *)
   let old_prefix = "old_"
-  (* Similar to old_prefix, but used for temporarily shelving data in heap *)
-  let tmp_prefix = "tmp_"
 
   let make prefix x = Prefix.make_key prefix (UserKeyType.to_string x)
   let make_old prefix x =
     old_prefix^Prefix.make_key prefix (UserKeyType.to_string x)
-  let make_tmp prefix x =
-    tmp_prefix^Prefix.make_key prefix (UserKeyType.to_string x)
 
   let to_old x = old_prefix^x
-  let to_tmp x = tmp_prefix^x
 
   let new_from_old x =
     let module S = String in
     S.sub x (S.length old_prefix) (S.length x - S.length old_prefix)
 
-  let new_from_tmp x =
-    let module S = String in
-    S.sub x (S.length tmp_prefix) (S.length x - S.length tmp_prefix)
-
   let md5 = Digest.string
   let md5_old = Digest.string
-  let md5_tmp = Digest.string
 
 end
 
@@ -357,16 +339,25 @@ module Raw (Key: Key) (Value:Value.Type): sig
   val get    : Key.md5 -> Value.t
   val remove : Key.md5 -> unit
   val move   : Key.md5 -> Key.md5 -> unit
+
+  module LocalChanges : sig
+    val push_stack : unit -> unit
+    val pop_stack : unit -> unit
+    val revert : Key.md5 -> unit
+    val commit : Key.md5 -> unit
+    val revert_all : unit -> unit
+    val commit_all : unit -> unit
+  end
 end = struct
 
   (* Returns the number of bytes allocated in the heap, or a negative number
    * if no new memory was allocated *)
   external hh_add    : Key.md5 -> Value.t -> int = "hh_add"
-  external mem         : Key.md5 -> bool            = "hh_mem"
+  external hh_mem         : Key.md5 -> bool            = "hh_mem"
   external hh_get_size    : Key.md5 -> int             = "hh_get_size"
   external hh_get_and_deserialize: Key.md5 -> Value.t = "hh_get_and_deserialize"
-  external remove      : Key.md5 -> unit            = "hh_remove"
-  external move        : Key.md5 -> Key.md5 -> unit = "hh_move"
+  external hh_remove      : Key.md5 -> unit            = "hh_remove"
+  external hh_move        : Key.md5 -> Key.md5 -> unit = "hh_move"
 
   let log_serialize n =
     let sharedheap = float n in
@@ -386,16 +377,191 @@ end = struct
       Measure.sample ("ALL bytes allocated for deserialized value") localheap
     end
 
-  let add key v =
-    let size = hh_add key v in
-    if hh_log_level() > 0 && size > 0
-    then log_serialize size
+  (**
+   * Represents a set of local changes to the view of the shared memory heap
+   * WITHOUT materializing to the changes in the actual heap. This allows us to
+   * make speculative changes to the view of the world that can be reverted
+   * quickly and correctly.
+   *
+   * A LocalChanges maintains the same invariants as the shared heap. Except
+   * add are allowed to overwrite filled keys. This is for convenience so we
+   * do not need to remove filled keys upfront.
+   *
+   * LocalChanges can be committed. This will apply the changes to the previous
+   * stack, or directly to shared memory if there are no other active stacks.
+   * Since changes are kept local to the process, this is NOT compatible with
+   * the parallelism provided by MultiWorker.ml
+   *)
+  module LocalChanges = struct
 
-  let get key =
-    let v = hh_get_and_deserialize key in
-    if hh_log_level() > 0
-    then (log_deserialize (hh_get_size key) (Obj.repr v));
-    v
+    type action =
+      (* The value does not exist in the current stack. When committed this
+       * action will invoke remove on the previous stack.
+       *)
+      | Remove
+      (* The value is added to a previously empty slot. When committed this
+       * action will invoke add on the previous stack.
+       *)
+      | Add of Value.t
+      (* The value is replacing a value already associated with a key in the
+       * previous stack. When committed this action will invoke remove then
+       * add on the previous stack.
+       *)
+      | Replace of Value.t
+
+    type t = {
+      current : (Key.md5, action) Hashtbl.t;
+      prev    : t option;
+    }
+
+    let stack: t option ref = ref None
+
+    let rec mem stack_opt key =
+      match stack_opt with
+      | None -> hh_mem key
+      | Some stack ->
+        try Hashtbl.find stack.current key <> Remove
+        with Not_found -> mem stack.prev key
+
+    let rec get stack_opt key =
+      match stack_opt with
+      | None ->
+        let v = hh_get_and_deserialize key in
+        if hh_log_level() > 0
+        then (log_deserialize (hh_get_size key) (Obj.repr v));
+        v
+      | Some stack ->
+        try match Hashtbl.find stack.current key with
+          | Remove -> failwith "Trying to get a non-existent value"
+          | Replace value
+          | Add value -> value
+        with Not_found ->
+          get stack.prev key
+
+    (**
+     * For remove/add it is best to think of them in terms of a state machine.
+     * A key can be in the following states:
+     *
+     *  Remove:
+     *    Local changeset removes a key from the previous stack
+     *  Replace:
+     *    Local changeset replaces value of a key in previous stack
+     *  Add:
+     *    Local changeset associates a value with a key. The key is not
+     *    present in the previous stacks
+     *  Empty:
+     *    No local changes and key is not present in previous stack
+     *  Filled:
+     *    No local changes and key has an associated value in previous stack
+     *  *Error*:
+     *    This means an exception will occur
+     **)
+    (**
+     * Transitions table:
+     *   Remove  -> *Error*
+     *   Replace -> Remove
+     *   Add     -> Empty
+     *   Empty   -> *Error*
+     *   Filled  -> Remove
+     *)
+    let remove stack_opt key =
+      match stack_opt with
+      | None -> hh_remove key
+      | Some stack ->
+        try match Hashtbl.find stack.current key with
+          | Remove -> failwith "Trying to remove a non-existent value"
+          | Replace _ -> Hashtbl.replace stack.current key Remove
+          | Add _ -> Hashtbl.remove stack.current key
+        with Not_found ->
+          if mem stack.prev key then
+            Hashtbl.replace stack.current key Remove
+          else
+            failwith "Trying to remove a non-existent value"
+
+    (**
+     * Transitions table:
+     *   Remove  -> Replace
+     *   Replace -> Replace
+     *   Add     -> Add
+     *   Empty   -> Add
+     *   Filled  -> Replace
+     *)
+    let add stack_opt key value =
+      match stack_opt with
+      | None ->
+        let size = hh_add key value in
+        if hh_log_level() > 0 && size > 0
+        then log_serialize size
+      | Some stack ->
+        try match Hashtbl.find stack.current key with
+          | Remove
+          | Replace _ -> Hashtbl.replace stack.current key (Replace value)
+          | Add _ -> Hashtbl.replace stack.current key (Add value)
+        with Not_found ->
+          if mem stack.prev key then
+            Hashtbl.replace stack.current key (Replace value)
+          else
+            Hashtbl.replace stack.current key (Add value)
+
+    let move stack_opt from_key to_key =
+      match stack_opt with
+      | None -> hh_move from_key to_key
+      | Some stack ->
+        assert (mem stack_opt from_key);
+        assert (not @@ mem stack_opt to_key);
+        let value = get stack_opt from_key in
+        remove stack_opt from_key;
+        add stack_opt to_key value
+
+    let commit_action changeset key elem =
+      match elem with
+      | Remove -> remove changeset key
+      | Add value -> add changeset key value
+      | Replace value ->
+        remove changeset key;
+        add changeset key value
+
+    (** Public API **)
+    let push_stack () =
+      stack := Some ({ current = Hashtbl.create 128; prev = !stack; })
+
+    let pop_stack () =
+      match !stack with
+      | None ->
+        failwith "There are no active local change stacks. Nothing to pop!"
+      | Some { prev; _ } -> stack := prev
+
+    let revert key =
+      match !stack with
+      | None -> ()
+      | Some changeset -> Hashtbl.remove changeset.current key
+
+    let commit key =
+      match !stack with
+      | None -> ()
+      | Some changeset ->
+        try
+          commit_action
+            changeset.prev key @@ Hashtbl.find changeset.current key
+        with Not_found -> ()
+
+    let revert_all () =
+      match !stack with
+      | None -> ()
+      | Some changeset -> Hashtbl.clear changeset.current
+
+    let commit_all () =
+      match !stack with
+      | None -> ()
+      | Some changeset ->
+        Hashtbl.iter (commit_action changeset.prev) changeset.current
+  end
+
+  let add key value = LocalChanges.(add !stack key value)
+  let mem key = LocalChanges.(mem !stack key)
+  let get key = LocalChanges.(get !stack key)
+  let remove key = LocalChanges.(remove !stack key)
+  let move from_key to_key = LocalChanges.(move !stack from_key to_key)
 end
 
 (*****************************************************************************)
@@ -429,8 +595,6 @@ module New : functor (Key : Key) -> functor(Value: Value.Type) -> sig
    *)
   val oldify      : Key.t -> unit
 
-  (* Same as oldify, but uses a different (logical) area of the heap *)
-  val shelve      : Key.t -> unit
   module Raw: module type of Raw (Key) (Value)
 
 end = functor (Key : Key) -> functor (Value : Value.Type) -> struct
@@ -465,13 +629,6 @@ end = functor (Key : Key) -> functor (Value : Value.Type) -> struct
     then
       let old_key = Key.to_old key in
       Raw.move (Key.md5 key) (Key.md5_old old_key)
-    else ()
-
-  let shelve key =
-    if mem key
-    then
-      let tmp_key = Key.to_tmp key in
-      Raw.move (Key.md5 key) (Key.md5_tmp tmp_key)
     else ()
 end
 
@@ -511,43 +668,6 @@ end = functor (Key : Key) -> functor (Value: Value.Type) ->
     Raw.move old_key new_key
 end
 
-(* Same as new, but for temporary values *)
-module Tmp : functor (Key : Key) -> functor (Value : Value.Type) ->
-  functor (Raw : module type of Raw (Key) (Value)) -> sig
-
-  val get         : Key.tmp -> Value.t option
-  val remove      : Key.tmp -> unit
-  val mem         : Key.tmp -> bool
-
-  (* Takes a temporary value and moves it back to a "new" one *)
-  val unshelve      : Key.tmp -> unit
-
-end = functor (Key : Key) -> functor (Value: Value.Type) ->
-  functor (Raw : module type of Raw (Key) (Value)) -> struct
-
-  let get key =
-    let key = Key.md5_tmp key in
-    if Raw.mem key
-    then Some (Raw.get key)
-    else None
-
-  let mem key = Raw.mem (Key.md5_tmp key)
-
-  let remove key =
-    if mem key
-    then Raw.remove (Key.md5_tmp key)
-
-  let unshelve key =
-    if mem key
-    then
-      let new_key = Key.new_from_tmp key in
-      let new_key = Key.md5 new_key in
-      let tmp_key = Key.md5_tmp key in
-      if Raw.mem new_key
-      then Raw.remove new_key;
-      Raw.move tmp_key new_key
-end
-
 (*****************************************************************************)
 (* The signatures of what we are actually going to expose to the user *)
 (*****************************************************************************)
@@ -569,10 +689,15 @@ module type NoCache = sig
   val mem              : key -> bool
   val oldify_batch     : KeySet.t -> unit
   val revive_batch     : KeySet.t -> unit
-  val shelve_batch     : KeySet.t -> unit
-  val get_shelved      : key -> t option
-  val unshelve_batch   : KeySet.t -> unit
-  val remove_shelved_batch : KeySet.t -> unit
+
+  module LocalChanges : sig
+    val push_stack : unit -> unit
+    val pop_stack : unit -> unit
+    val revert_batch : KeySet.t -> unit
+    val commit_batch : KeySet.t -> unit
+    val revert_all : unit -> unit
+    val commit_all : unit -> unit
+  end
 end
 
 module type WithCache = sig
@@ -598,7 +723,6 @@ module NoCache (UserKeyType : UserKeyType) (Value : Value.Type) = struct
 
   module Key = KeyFunctor (UserKeyType)
   module New = New (Key) (Value)
-  module Tmp = Tmp (Key) (Value) (New.Raw)
   module Old = Old (Key) (Value) (New.Raw)
   module KeySet = Set.Make (UserKeyType)
   module KeyMap = MyMap.Make (UserKeyType)
@@ -666,37 +790,20 @@ module NoCache (UserKeyType : UserKeyType) (Value : Value.Type) = struct
       Old.remove key
     end xs
 
-  let shelve_batch xs =
-    KeySet.iter begin fun str_key ->
-      let key = Key.make Value.prefix str_key in
-      if New.mem key
-      then
-        New.shelve key
-      else
-        let key = Key.make_tmp Value.prefix str_key in
-        Tmp.remove key
-    end xs
-
-  let get_shelved x =
-    let key = Key.make_tmp Value.prefix x in
-    Tmp.get key
-
-  let unshelve_batch xs =
-    KeySet.iter begin fun str_key ->
-      let tmp_key = Key.make_tmp Value.prefix str_key in
-      if Tmp.mem tmp_key
-      then
-        Tmp.unshelve tmp_key
-      else
+  module LocalChanges = struct
+    include New.Raw.LocalChanges
+    let revert_batch keys =
+      KeySet.iter begin fun str_key ->
         let key = Key.make Value.prefix str_key in
-        New.remove key
-    end xs
+        revert (Key.md5 key)
+      end keys
 
-  let remove_shelved_batch xs =
-    KeySet.iter begin fun str_key ->
-      let key = Key.make_tmp Value.prefix str_key in
-      Tmp.remove key
-    end xs
+    let commit_batch keys =
+      KeySet.iter begin fun str_key ->
+        let key = Key.make Value.prefix str_key in
+        commit (Key.md5 key)
+      end keys
+  end
 end
 
 (*****************************************************************************)
@@ -945,7 +1052,6 @@ module WithCache (UserKeyType : UserKeyType) (Value:Value.Type) = struct
   (* We don't cache old objects, they are not accessed often enough. *)
   let get_old = Direct.get_old
   let get_old_batch = Direct.get_old_batch
-  let get_shelved = Direct.get_shelved
 
   let find_unsafe x =
     match get x with
@@ -981,17 +1087,30 @@ module WithCache (UserKeyType : UserKeyType) (Value:Value.Type) = struct
 
   let remove_old_batch = Direct.remove_old_batch
 
-  let shelve_batch keys =
-    Direct.shelve_batch keys;
-    KeySet.iter begin fun key ->
-      Cache.remove key
-    end keys
+  module LocalChanges = struct
 
-  let unshelve_batch keys =
-    Direct.unshelve_batch keys;
-    KeySet.iter begin fun x ->
-      Cache.remove x
-    end keys
+    let push_stack () =
+      Direct.LocalChanges.push_stack ();
+      Cache.clear ()
 
-  let remove_shelved_batch = Direct.remove_shelved_batch
+    let pop_stack () =
+      Direct.LocalChanges.pop_stack ();
+      Cache.clear ()
+
+    let revert_batch keys =
+      Direct.LocalChanges.revert_batch keys;
+      KeySet.iter Cache.remove keys
+
+    let commit_batch keys =
+      Direct.LocalChanges.commit_batch keys;
+      KeySet.iter Cache.remove keys
+
+    let revert_all () =
+      Direct.LocalChanges.revert_all ();
+      Cache.clear ()
+
+    let commit_all () =
+      Direct.LocalChanges.commit_all ();
+      Cache.clear ()
+  end
 end

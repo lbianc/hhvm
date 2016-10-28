@@ -27,7 +27,6 @@
 #include <boost/filesystem.hpp>
 
 #include <folly/String.h>
-#include <folly/portability/Libgen.h>
 #include <folly/portability/SysMman.h>
 
 #include "hphp/util/debug.h"
@@ -78,7 +77,6 @@
 #include "hphp/runtime/ext/hh/ext_hh.h"
 #include "hphp/runtime/ext/reflection/ext_reflection.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/std/ext_std_math.h"
 #include "hphp/runtime/ext/std/ext_std_variable.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/runtime/ext/hash/hash_murmur.h"
@@ -565,7 +563,6 @@ TypedValue* ExtraArgs::getExtraArg(unsigned argInd) const {
 
 // Store actual stack elements array in a thread-local in order to amortize the
 // cost of allocation.
-namespace {
 struct StackElms {
   ~StackElms() { flush(); }
   TypedValue* elms() {
@@ -593,7 +590,6 @@ private:
   TypedValue* m_elms{nullptr};
 };
 IMPLEMENT_THREAD_LOCAL(StackElms, t_se);
-}
 
 const int Stack::sSurprisePageSize = sysconf(_SC_PAGESIZE);
 // We reserve the bottom page of each stack for use as the surprise
@@ -1862,6 +1858,11 @@ OPTBLD_INLINE void iopFile() {
 
 OPTBLD_INLINE void iopDir() {
   auto s = vmfp()->m_func->unit()->dirpath();
+  vmStack().pushStaticString(s);
+}
+
+OPTBLD_INLINE void iopMethod() {
+  auto s = vmfp()->m_func->fullName();
   vmStack().pushStaticString(s);
 }
 
@@ -3816,9 +3817,7 @@ TypedValue genericIdx(TypedValue obj, TypedValue key, TypedValue def) {
     key,
     def
   };
-  TypedValue ret;
-  g_context->invokeFuncFew(&ret, func, nullptr, nullptr, 3, &args[0]);
-  return ret;
+  return g_context->invokeFuncFew(func, nullptr, nullptr, 3, &args[0]);
 }
 }
 
@@ -4450,6 +4449,29 @@ OPTBLD_INLINE void iopFPushCtorD(intva_t numArgs, Id id) {
   // Push uninitialized instance.
   ObjectData* this_ = newInstance(cls);
   TRACE(2, "FPushCtorD: new'ed an instance of class %s: %p\n",
+        cls->name()->data(), this_);
+  vmStack().pushObject(this_);
+  // Push new activation record.
+  ActRec* ar = vmStack().allocA();
+  ar->m_func = f;
+  ar->setThis(this_);
+  ar->initNumArgs(numArgs);
+  ar->trashVarEnv();
+  setTypesFlag(vmfp(), ar);
+}
+
+OPTBLD_INLINE void iopFPushCtorI(intva_t numArgs, intva_t clsIx) {
+  auto const func = vmfp()->m_func;
+  auto const preCls = func->unit()->lookupPreClassId(clsIx);
+  auto const cls = Unit::defClass(preCls, true);
+
+  // Lookup the ctor
+  const Func* f;
+  auto res UNUSED = lookupCtorMethod(f, cls, arGetContextClass(vmfp()), true);
+  assert(res == LookupResult::MethodFoundWithThis);
+  // Push uninitialized instance.
+  ObjectData* this_ = newInstance(cls);
+  TRACE(2, "FPushCtorI: new'ed an instance of class %s: %p\n",
         cls->name()->data(), this_);
   vmStack().pushObject(this_);
   // Push new activation record.
@@ -5314,10 +5336,12 @@ OPTBLD_INLINE void iopParent() {
   vmStack().pushClass(parent);
 }
 
-OPTBLD_INLINE void iopCreateCl(intva_t numArgs, const StringData* clsName) {
-  auto const cls = Unit::loadClass(clsName)->rescope(
-    const_cast<Class*>(vmfp()->m_func->cls())
-  );
+OPTBLD_INLINE void iopCreateCl(intva_t numArgs, intva_t clsIx) {
+  auto const func = vmfp()->m_func;
+  auto const preCls = func->unit()->lookupPreClassId(clsIx);
+  auto const c = Unit::defClosure(preCls);
+
+  auto const cls = c->rescope(const_cast<Class*>(func->cls()));
   auto obj = newInstance(cls);
   c_Closure::fromObject(obj)->init(numArgs, vmfp(), vmStack().top());
   vmStack().ndiscard(numArgs);
@@ -5819,10 +5843,10 @@ OPTBLD_INLINE TCA iopAwait(PC& pc) {
       auto const cls = obj->getVMClass();
       auto const func = cls->lookupMethod(s_getWaitHandle.get());
       if (func && !(func->attrs() & AttrStatic)) {
-        TypedValue ret;
-        g_context->invokeFuncFew(&ret, func, obj, nullptr, 0, nullptr);
-        cellSet(*tvToCell(&ret), *vmStack().topC());
-        tvRefcountedDecRef(ret);
+        auto ret = Variant::attach(
+            g_context->invokeFuncFew(func, obj, nullptr, 0, nullptr)
+        );
+        cellSet(*tvToCell(ret.asTypedValue()), *vmStack().topC());
         wh = c_WaitHandle::fromCell(vmStack().topC());
       }
     }

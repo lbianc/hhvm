@@ -779,7 +779,7 @@ int fb_compact_unserialize_from_buffer(
 
 Variant fb_compact_unserialize(const char* str, int len,
                                VRefParam success,
-                               VRefParam errcode /* = null_variant */) {
+                               VRefParam errcode /* = uninit_variant */) {
 
   Variant ret;
   int p = 0;
@@ -796,7 +796,7 @@ Variant fb_compact_unserialize(const char* str, int len,
 
 Variant HHVM_FUNCTION(fb_compact_unserialize,
                       const Variant& thing, VRefParam success,
-                      VRefParam errcode /* = null_variant */) {
+                      VRefParam errcode /* = uninit_variant */) {
   if (!thing.isString()) {
     success.assignIfRef(false);
     errcode.assignIfRef(FB_UNSERIALIZE_NONSTRING_VALUE);
@@ -1024,7 +1024,7 @@ String HHVM_FUNCTION(fb_utf8_substr, const String& str, int64_t start,
 ///////////////////////////////////////////////////////////////////////////////
 
 bool HHVM_FUNCTION(fb_intercept, const String& name, const Variant& handler,
-                                 const Variant& data /* = null_variant */) {
+                                 const Variant& data /* = uninit_variant */) {
   return register_intercept(name, handler, data);
 }
 
@@ -1116,7 +1116,7 @@ Array HHVM_FUNCTION(fb_call_user_func_array_safe,
   if (is_callable(function)) {
     return make_packed_array(true, vm_call_user_func(function, params));
   }
-  return make_packed_array(false, null_variant);
+  return make_packed_array(false, uninit_variant);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1225,8 +1225,7 @@ struct FBExtension : Extension {
   FBExtension(): Extension("fb", "1.0.0") {}
 
   void moduleInit() override {
-    Native::registerConstant<KindOfBoolean>
-      (makeStaticString("HHVM_FACEBOOK"), HHVM_FACEBOOK);
+    HHVM_RC_BOOL_SAME(HHVM_FACEBOOK);
     HHVM_RC_INT_SAME(FB_UNSERIALIZE_NONSTRING_VALUE);
     HHVM_RC_INT_SAME(FB_UNSERIALIZE_UNEXPECTED_END);
     HHVM_RC_INT_SAME(FB_UNSERIALIZE_UNRECOGNIZED_OBJECT_TYPE);

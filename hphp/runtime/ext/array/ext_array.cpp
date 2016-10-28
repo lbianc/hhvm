@@ -126,7 +126,7 @@ static inline bool array_column_coerce_key(Variant &key, const char *name) {
 TypedValue HHVM_FUNCTION(array_column,
                          const Variant& input,
                          const Variant& val_key,
-                         const Variant& idx_key /* = null_variant */) {
+                         const Variant& idx_key /* = uninit_variant */) {
 
   getCheckedContainer(input);
   Variant val = val_key, idx = idx_key;
@@ -381,7 +381,7 @@ Variant HHVM_FUNCTION(array_keys, int64_t argc,
                                   bool strict /*=false*/) {
   return array_keys_helper(
     input,
-    argc < 2 ? null_variant : search_value,
+    argc < 2 ? uninit_variant : search_value,
     strict
   );
 }
@@ -460,9 +460,9 @@ TypedValue HHVM_FUNCTION(array_map,
       keyConverted = !collectionAllowsIntStringKeys(col_type);
     }
     for (ArrayIter iter(arr1); iter; ++iter) {
-      Variant result;
-      g_context->invokeFuncFew((TypedValue*)&result, ctx, 1,
-                               iter.secondRefPlus().asCell());
+      auto result = Variant::attach(
+        g_context->invokeFuncFew(ctx, 1, iter.secondRefPlus().asCell())
+      );
       // if keyConverted is false, it's possible that ret will have fewer
       // elements than cell_arr1; keys int(1) and string('1') may both be
       // present
@@ -502,10 +502,10 @@ TypedValue HHVM_FUNCTION(array_map,
     }
     Array params = params_ai.toArray();
     if (ctx.func) {
-      Variant result;
-      g_context->invokeFunc((TypedValue*)&result,
-                              ctx.func, params, ctx.this_,
-                              ctx.cls, nullptr, ctx.invName);
+      auto result = Variant::attach(
+        g_context->invokeFunc(ctx.func, params, ctx.this_,
+                              ctx.cls, nullptr, ctx.invName)
+      );
       ret_ai.append(result);
     } else {
       ret_ai.append(params);
@@ -517,7 +517,7 @@ TypedValue HHVM_FUNCTION(array_map,
 TypedValue HHVM_FUNCTION(array_merge,
                          int64_t numArgs,
                          const Variant& array1,
-                         const Variant& array2 /* = null_variant */,
+                         const Variant& array2 /* = uninit_variant */,
                          const Array& args /* = null array */) {
   getCheckedContainer(array1);
   Array ret = Array::Create();
@@ -543,7 +543,7 @@ TypedValue HHVM_FUNCTION(array_merge,
 TypedValue HHVM_FUNCTION(array_merge_recursive,
                          int64_t numArgs,
                          const Variant& array1,
-                         const Variant& array2 /* = null_variant */,
+                         const Variant& array2 /* = uninit_variant */,
                          const Array& args /* = null array */) {
   getCheckedArray(array1);
   auto in1 = array1.asCArrRef();
@@ -625,7 +625,7 @@ static void php_array_replace_recursive(PointerSet &seen, bool check,
 
 TypedValue HHVM_FUNCTION(array_replace,
                          const Variant& array1,
-                         const Variant& array2 /* = null_variant */,
+                         const Variant& array2 /* = uninit_variant */,
                          const Array& args /* = null array */) {
   getCheckedArray(array1);
   Array ret = Array::Create();
@@ -648,7 +648,7 @@ TypedValue HHVM_FUNCTION(array_replace,
 
 TypedValue HHVM_FUNCTION(array_replace_recursive,
                          const Variant& array1,
-                         const Variant& array2 /* = null_variant */,
+                         const Variant& array2 /* = uninit_variant */,
                          const Array& args /* = null array */) {
   getCheckedArray(array1);
   Array ret = Array::Create();
@@ -904,7 +904,7 @@ TypedValue HHVM_FUNCTION(array_shift,
 TypedValue HHVM_FUNCTION(array_slice,
                          TypedValue cell_input,
                          int64_t offset,
-                         const Variant& length /* = null_variant */,
+                         const Variant& length /* = uninit_variant */,
                          bool preserve_keys /* = false */) {
   if (UNLIKELY(!isContainer(cell_input))) {
     raise_warning("Invalid operand type was used: %s expects "
@@ -1218,16 +1218,17 @@ static void walk_func(Variant& value,
                       const Variant& userdata,
                       const void *data) {
   CallCtx* ctx = (CallCtx*)data;
-  Variant sink;
   int nargs = userdata.isInitialized() ? 3 : 2;
   TypedValue args[3] = { *value.asRef(), *key.asCell(), *userdata.asCell() };
-  g_context->invokeFuncFew(sink.asTypedValue(), *ctx, nargs, args);
+  tvRefcountedDecRef(
+    g_context->invokeFuncFew(*ctx, nargs, args)
+  );
 }
 
 bool HHVM_FUNCTION(array_walk_recursive,
                    VRefParam input,
                    const Variant& funcname,
-                   const Variant& userdata /* = null_variant */) {
+                   const Variant& userdata /* = uninit_variant */) {
   if (!input.isPHPArray()) {
     throw_expected_array_exception("array_walk_recursive");
     return false;
@@ -1247,7 +1248,7 @@ bool HHVM_FUNCTION(array_walk_recursive,
 bool HHVM_FUNCTION(array_walk,
                    VRefParam input,
                    const Variant& funcname,
-                   const Variant& userdata /* = null_variant */) {
+                   const Variant& userdata /* = uninit_variant */) {
   if (!input.isPHPArray()) {
     throw_expected_array_exception("array_walk");
     return false;
@@ -2812,7 +2813,7 @@ TypedValue HHVM_FUNCTION(hphp_array_idx,
       VarNR index = key.toKey(arr);
       if (!index.isNull()) {
         const Variant& ret = arr->get(index, false);
-        return tvReturn((&ret != &null_variant) ? ret : def);
+        return tvReturn((&ret != &uninit_variant) ? ret : def);
       }
     } else {
       raise_error("hphp_array_idx: search must be an array");
@@ -2904,9 +2905,16 @@ Array HHVM_FUNCTION(HH_dict, const Variant& input) {
   } else if (inputCell->m_type == KindOfObject &&
              inputCell->m_data.pobj->isCollection()) {
     return HHVM_FN(HH_dict)(toArray(inputCell->m_data.pobj));
+  } else if (inputCell->m_type == KindOfObject &&
+             inputCell->m_data.pobj->instanceof(SystemLib::s_IteratorClass)) {
+    auto arr = Array::CreateDict();
+    for (ArrayIter iter(input.toObject()); iter; ++iter) {
+      arr.set(iter.first(), iter.second());
+    }
+    return arr;
   } else {
     raise_warning(
-      "Only arrays, vecs, keysets, and collections can be converted into dicts"
+      "Only arrays, vecs, keysets, and iterables can be converted into dicts"
     );
     return Array::CreateDict();
   }
@@ -2920,9 +2928,16 @@ Array HHVM_FUNCTION(HH_keyset, const Variant& input) {
   } else if (inputCell->m_type == KindOfObject &&
              inputCell->m_data.pobj->isCollection()) {
     return HHVM_FN(HH_keyset)(toArray(inputCell->m_data.pobj));
+  } else if (inputCell->m_type == KindOfObject &&
+             inputCell->m_data.pobj->instanceof(SystemLib::s_IteratorClass)) {
+    auto arr = Array::CreateKeyset();
+    for (ArrayIter iter(input.toObject()); iter; ++iter) {
+      arr.append(iter.first());
+    }
+    return arr;
   } else {
     raise_warning(
-      "Only arrays, vecs, dicts, and collections can be converted into keysets"
+      "Only arrays, vecs, dicts, and iterables can be converted into keysets"
     );
     return Array::CreateKeyset();
   }
@@ -2936,9 +2951,16 @@ Array HHVM_FUNCTION(HH_vec, const Variant& input) {
   } else if (inputCell->m_type == KindOfObject &&
              inputCell->m_data.pobj->isCollection()) {
     return HHVM_FN(HH_vec)(toArray(inputCell->m_data.pobj));
+  } else if (inputCell->m_type == KindOfObject &&
+             inputCell->m_data.pobj->instanceof(SystemLib::s_IteratorClass)) {
+    auto arr = Array::CreateVec();
+    for (ArrayIter iter(input.toObject()); iter; ++iter) {
+      arr.append(iter.second());
+    }
+    return arr;
   } else {
     raise_warning(
-      "Only arrays, dicts, keysets, and collections can be converted into vecs"
+      "Only arrays, dicts, keysets, and iterables can be converted into vecs"
     );
     return Array::CreateVec();
   }

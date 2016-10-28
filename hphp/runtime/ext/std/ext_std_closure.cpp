@@ -256,17 +256,16 @@ static Variant HHVM_METHOD(Closure, call,
     return init_null_variant;
   }
 
-  Variant ret;
   // Could call vm_user_func(bound, params) here which goes through a
   // whole decode function process to get a Func*. But we know this
   // is a closure, and we can get a Func* via getInvokeFunc(), so just
   // bypass all that decode process to save time.
-  g_context->invokeFunc((TypedValue*)&ret,
-                        c_Closure::fromObject(this_)->getInvokeFunc(),
-                        params, bound.toObject().get(),
-                        nullptr, nullptr, nullptr,
-                        ExecutionContext::InvokeCuf);
-  return ret;
+  return Variant::attach(
+    g_context->invokeFunc(c_Closure::fromObject(this_)->getInvokeFunc(),
+                          params, bound.toObject().get(),
+                          nullptr, nullptr, nullptr,
+                          ExecutionContext::InvokeCuf)
+  );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -277,6 +276,10 @@ static ObjectData* closureInstanceCtor(Class* cls) {
   assertx(!(cls->attrs() & (AttrAbstract|AttrInterface|AttrTrait|AttrEnum)));
   assertx(!cls->needInitialization());
   assertx(cls->parent() == c_Closure::classof());
+  if (cls->classHandle() != rds::kInvalidHandle &&
+      !rds::isPersistentHandle(cls->classHandle())) {
+    cls->setCached();
+  }
   auto const nProps = cls->numDeclProperties();
   auto const size = sizeof(ClosureHdr) + ObjectData::sizeForNProps(nProps);
   auto hdr = static_cast<ClosureHdr*>(MM().objMalloc(size));
