@@ -193,7 +193,7 @@ struct Vgen {
   void emit(const extrw& i ) {
     uint8_t sh = 16;
     a.rlwinm(i.d, Reg64(i.s), 0, 32-sh, 31); // extract lower 16 bits
-    a.extsh(i.d, i.d);                       // extend sign
+    a.extsh(i.d, i.d);                      // extend sign
   }
   void emit(const extsb& i) { a.extsb(i.d, i.s); }
   void emit(const extsw& i) { a.extsw(i.d, i.s); }
@@ -308,11 +308,11 @@ struct Vgen {
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lowest 32 bits
   }
   void emit(const movw& i) {
-    uint8_t sh = 16;
+    int8_t sh = 16;
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lowest 16 bits
   }
   void emit(const movb& i) {
-    uint8_t sh = 8;
+    int8_t sh = 8;
     a.rlwinm(Reg64(i.d), Reg64(i.s), 0, 32-sh, 31); // extract lower byte
   }
   void emit(const orqi& i) {
@@ -1076,10 +1076,10 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 
 X(cmpb,  extrb, cmpq,  NONE)
 X(testb, extrb, testq, NONE)
-X(xorb,  movb,  xorq,  ONE_R64(d))
-X(andb,  movb,  andq,  ONE_R64(d))
-X(xorl,  movl,  xorq,  ONE_R64(d))
-X(andl,  movl,  andq,  ONE_R64(d))
+X(xorb,  movb, xorq,  ONE_R64(d))
+X(andb,  movb, andq,  ONE_R64(d))
+X(xorl,  movl, xorq,  ONE_R64(d))
+X(andl,  movl, andq,  ONE_R64(d))
 
 #undef X
 
@@ -1111,9 +1111,9 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 X(cmpbi,  extrb, cmpqi,  NONE)
 X(testbi, extrb, testqi, NONE)
 X(subbi,  extrb, subqi,  ONE_R64(d))
-X(xorbi,  movb,  xorqi,  ONE_R64(d))
-X(andbi,  movb,  andqi,  ONE_R64(d))
-X(andli,  movl,  andqi,  ONE_R64(d))
+X(xorbi,  extrb, xorqi,  ONE_R64(d))
+X(andbi,  extrb, andqi,  ONE_R64(d))
+X(andli,  movl, andqi,  ONE_R64(d))
 
 #undef X
 
