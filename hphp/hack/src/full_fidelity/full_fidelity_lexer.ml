@@ -324,10 +324,11 @@ let scan_hexadecimal_escape lexer =
   let ch2 = peek_char lexer 2 in
   let ch3 = peek_char lexer 3 in
   if not (is_hexadecimal_digit ch2) then
-    let lexer = with_error lexer SyntaxError.error0005 in
+    (* TODO: Consider producing an error for a malformed hex escape *)
+    (* let lexer = with_error lexer SyntaxError.error0005 in *)
     advance lexer 2
   else if not (is_hexadecimal_digit ch3) then
-    let lexer = with_error lexer SyntaxError.error0005 in
+    (* let lexer = with_error lexer SyntaxError.error0005 in *)
     advance lexer 3
   else
     advance lexer 4
@@ -335,7 +336,8 @@ let scan_hexadecimal_escape lexer =
 let scan_unicode_escape lexer =
   let ch2 = peek_char lexer 2 in
   if ch2 != '{' then
-    let lexer = with_error lexer SyntaxError.error0005 in
+    (* TODO: Consider producing a warning for a malformed unicode escape *)
+    (* let lexer = with_error lexer SyntaxError.error0005 in *)
     advance lexer 2
   else
     (* TODO: Verify that number is in range. *)
@@ -345,7 +347,8 @@ let scan_unicode_escape lexer =
     let lexer = scan_hexadecimal_digits lexer in
     let ch = peek_char lexer 0 in
     if ch != '}' then
-      let lexer = with_error lexer SyntaxError.error0005 in
+      (* TODO: Consider producing a warning for a malformed unicode escape *)
+      (* let lexer = with_error lexer SyntaxError.error0005 in *)
       lexer
     else
       advance lexer 1
@@ -410,12 +413,30 @@ let scan_double_quote_string_literal lexer =
 
 (*  A heredoc string literal has the form
 
+header
+optional body
+trailer
+
+The header is:
+
 <<< (optional whitespace) name (no whitespace) (newline)
+
+The optional body is:
+
 any characters whatsoever including newlines (newline)
+
+The trailer is:
+
 (no whitespace) name (no whitespace) (optional semi) (no whitespace) (newline)
 
-The names must be identical.  The trailing semi and newline are NOT part of
-the literal, but they must be present.
+The names must be identical.  The trailing semi and newline must be present.
+
+The body is any and all characters, up to the first line that exactly matches
+the trailer.
+
+The body may contain embedded expressions.
+
+TODO: parse the embedded expressions
 
 A nowdoc string literal has the same form except that the first name is
 enclosed in single quotes.
@@ -482,16 +503,7 @@ let scan_docstring_remainder name lexer =
 
 let scan_docstring_literal lexer =
   let (lexer, name, kind) = scan_docstring_header lexer in
-  (* We need at least one line *)
-  let lexer = skip_to_end_of_line lexer in
-  let ch = peek_char lexer 0 in
-  let lexer =
-    if is_newline ch then
-      scan_docstring_remainder name (skip_end_of_line lexer)
-    else
-      (* If we got here then we ran off the end of the file without
-      finding a newline. Just bail. *)
-      with_error lexer SyntaxError.error0011 in
+  let lexer = scan_docstring_remainder name lexer in
   (lexer, kind)
 
 let scan_xhp_label lexer =
@@ -523,7 +535,7 @@ let scan_xhp_class_name lexer =
     (lexer, TokenKind.XHPClassName)
   else
     let lexer = with_error lexer SyntaxError.error0008 in
-    (advance lexer 1, TokenKind.Error)
+    (advance lexer 1, TokenKind.ErrorToken)
 
 let scan_xhp_string_literal lexer =
   (* XHP string literals are just straight up "find the closing quote"
@@ -569,7 +581,7 @@ let scan_xhp_token lexer =
       scan_xhp_element_name lexer
     else
       let lexer = with_error lexer SyntaxError.error0006 in
-      (advance lexer 1, TokenKind.Error)
+      (advance lexer 1, TokenKind.ErrorToken)
 
 let scan_xhp_comment lexer =
   let rec aux lexer =
@@ -659,6 +671,10 @@ let scan_token in_type lexer =
   | ('%', _, _) -> (advance lexer 1, TokenKind.Percent)
   | ('<', '<', '<') -> scan_docstring_literal lexer
   | ('<', '<', '=') -> (advance lexer 3, TokenKind.LessThanLessThanEqual)
+  (* TODO: We lex and parse the spaceship operator.
+     TODO: This is not in the spec at present.  We should either make it an
+     TODO: error, or add it to the specification. *)
+  | ('<', '=', '>') -> (advance lexer 3, TokenKind.LessThanEqualGreaterThan)
   | ('<', '=', _) -> (advance lexer 2, TokenKind.LessThanEqual)
   | ('<', '<', _) -> (advance lexer 2, TokenKind.LessThanLessThan)
   | ('<', _, _) -> (advance lexer 1, TokenKind.LessThan)
@@ -689,6 +705,7 @@ let scan_token in_type lexer =
   | ('&', _, _) -> (advance lexer 1, TokenKind.Ampersand)
   | ('?', '-', '>') -> (advance lexer 3, TokenKind.QuestionMinusGreaterThan)
   | ('?', '?', _) -> (advance lexer 2, TokenKind.QuestionQuestion)
+  | ('?', '>', _) -> (advance lexer 2, TokenKind.QuestionGreaterThan)
   | ('?', _, _) -> (advance lexer 1, TokenKind.Question)
   | (':', ':', _) -> (advance lexer 2, TokenKind.ColonColon)
   | (':', _, _) -> (advance lexer 1, TokenKind.Colon)
@@ -720,7 +737,7 @@ let scan_token in_type lexer =
       scan_name_or_qualified_name lexer
     else
       let lexer = with_error lexer SyntaxError.error0006 in
-      (advance lexer 1, TokenKind.Error)
+      (advance lexer 1, TokenKind.ErrorToken)
 
 (* Lexing trivia *)
 
@@ -818,9 +835,20 @@ let is_next_xhp_class_name lexer =
   let (lexer, _) = scan_leading_trivia lexer in
   is_xhp_class_name lexer
 
+let as_case_insensitive_keyword text =
+  (* Keywords true, false, null and array are case-insensitive in Hack. *)
+  (* TODO: Consider making non-lowercase versions of these keywords errors
+     in strict mode. *)
+  (* TODO: Should these be case-insensitive only when we are parsing the
+     interior of an expression? *)
+  let lower = String.lowercase text in
+  match lower with
+  | "true" | "false" | "null" | "array" -> lower
+  | _ -> text
+
 let as_keyword kind lexer =
   if kind = TokenKind.Name then
-    let text = current_text lexer in
+    let text = as_case_insensitive_keyword (current_text lexer) in
     match TokenKind.from_string text with
     | Some keyword -> keyword
     | _ -> TokenKind.Name

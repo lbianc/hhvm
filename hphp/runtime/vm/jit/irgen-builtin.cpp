@@ -19,6 +19,8 @@
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/externals.h"
 #include "hphp/runtime/base/file-util.h"
+#include "hphp/runtime/vm/repo.h"
+#include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/vm-regs.h"
 #include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/func-effects.h"
@@ -36,6 +38,8 @@
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 
 #include "hphp/runtime/ext_zend_compat/hhvm/zend-wrap-func.h"
+
+#include "hphp/util/text-util.h"
 
 namespace HPHP { namespace jit { namespace irgen {
 
@@ -91,7 +95,7 @@ const StaticString
   s_abs("abs"),
   s_ord("ord"),
   s_chr("chr"),
-  s_func_num_args("__SystemLib\\func_num_arg_"),
+  s_func_num_args("func_num_args"),
   s_one("1"),
   s_empty("");
 
@@ -532,44 +536,6 @@ SSATmp* opt_foldable(IRGS& env,
                      const Func* func,
                      const ParamPrep& params,
                      uint32_t numNonDefaultArgs) {
-  auto const constAsCell = [] (const SSATmp* tmp) {
-    switch (tmp->type().toDataType()) {
-      case KindOfUninit:
-        return make_tv<KindOfUninit>();
-      case KindOfNull:
-        return make_tv<KindOfNull>();
-      case KindOfBoolean:
-        return make_tv<KindOfBoolean>(tmp->boolVal());
-      case KindOfInt64:
-        return make_tv<KindOfInt64>(tmp->intVal());
-      case KindOfDouble:
-        return make_tv<KindOfDouble>(tmp->dblVal());
-      case KindOfPersistentString:
-        return make_tv<KindOfPersistentString>(tmp->strVal());
-      case KindOfPersistentArray:
-        return make_tv<KindOfPersistentArray>(tmp->arrVal());
-      case KindOfPersistentVec:
-        return make_tv<KindOfPersistentVec>(tmp->vecVal());
-      case KindOfPersistentDict:
-        return make_tv<KindOfPersistentDict>(tmp->dictVal());
-      case KindOfPersistentKeyset:
-        return make_tv<KindOfPersistentKeyset>(tmp->keysetVal());
-
-      case KindOfVec:
-      case KindOfDict:
-      case KindOfKeyset:
-      case KindOfClass:
-      case KindOfString:
-      case KindOfArray:
-      case KindOfObject:
-      case KindOfResource:
-      case KindOfRef:
-        break;
-    }
-    // Other Kinds are not expected to be ConstVal
-    not_reached();
-  };
-
   if (!func->isFoldable()) return nullptr;
 
   // Don't pop the args yet---if the builtin throws at compile time (because
@@ -581,14 +547,14 @@ SSATmp* opt_foldable(IRGS& env,
     if (!t.hasConstVal() && !t.subtypeOfAny(TUninit, TInitNull, TNullptr)) {
       return nullptr;
     } else {
-      args.append(cellAsCVarRef(constAsCell(params[i].value)));
+      args.append(params[i].value->variantVal());
     }
   }
   if (params.size() != func->numNonVariadicParams()) {
     auto const variadic = params.info.back().value;
     if (!variadic->type().hasConstVal()) return nullptr;
 
-    auto const variadicArgs = constAsCell(variadic).m_data.parr;
+    auto const variadicArgs = variadic->variantVal().asCArrRef().get();
     auto const numVariadicArgs = variadicArgs->size();
     for (auto i = 0; i < numVariadicArgs; i++) {
       args.append(variadicArgs->get(i));
@@ -601,15 +567,15 @@ SSATmp* opt_foldable(IRGS& env,
     // COULD generate notices.
     ThrowAllErrorsSetter taes;
 
-#ifdef DEBUG
     VMProtect::Pause deprot;
-    VMRegAnchor _;
+    always_assert(tl_regState == VMRegState::CLEAN);
 
+    // Even though tl_regState is marked clean, vmpc() has not necessarily been
+    // set to anything valid, so we need to do so here (for assertions and
+    // backtraces in the invocation, among other things).
     auto const savedPC = vmpc();
-    // Ensure that vmpc is valid for later asserts within the invoke.
-    vmpc() = vmfp()->m_func->getEntry();
+    vmpc() = vmfp() ? vmfp()->m_func->getEntry() : nullptr;
     SCOPE_EXIT{ vmpc() = savedPC; };
-#endif
 
     RID().setJitFolding(true);
     SCOPE_EXIT{ RID().setJitFolding(false); };
@@ -1350,7 +1316,7 @@ SSATmp* builtinCall(IRGS& env,
       bcSPOffset(env),
       callee,
       params.count ? -1 : numNonDefault,
-      builtinFuncDestroysLocals(callee),
+      funcDestroysLocals(callee),
       builtinFuncNeedsCallerFrame(callee)
     },
     catchMaker.makeUnusualCatch(),
@@ -1979,4 +1945,23 @@ void emitSilence(IRGS& env, Id localId, SilenceOp subop) {
 
 //////////////////////////////////////////////////////////////////////
 
+void emitVarEnvDynCall(IRGS& env) {
+  auto const func = curFunc(env);
+  assertx(func->dynCallTarget());
+
+  if (RuntimeOption::RepoAuthoritative &&
+      Repo::global().DisallowDynamicVarEnvFuncs) {
+    std::string msg;
+    string_printf(
+      msg,
+      Strings::DISALLOWED_DYNCALL,
+      func->fullDisplayName()->data()
+    );
+    gen(env, RaiseError, cns(env, makeStaticString(msg)));
+  } else {
+    gen(env, RaiseVarEnvDynCall, cns(env, func->dynCallTarget()));
+  }
+}
+
+//////////////////////////////////////////////////////////////////////
 }}}

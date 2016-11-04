@@ -99,24 +99,15 @@ module WithStatementAndDeclAndTypeParser
     | BinaryLiteral
     | FloatingLiteral
     | SingleQuotedStringLiteral
-    | HeredocStringLiteral (*TODO: Special? *)
-    | NowdocStringLiteral (* TODO: Special? *)
-    | BooleanLiteral -> (parser1, make_literal_expression (make_token token))
-    | NullLiteral ->
-      (* TODO: Something special about null *)
-      (parser1, make_literal_expression (make_token token))
-
-    | DoubleQuotedStringLiteral
-      (* TODO: Parse interior *)
-      -> (parser1, make_literal_expression (make_token token))
-
+    | HeredocStringLiteral (* TODO: Parse interior *)
+    | NowdocStringLiteral (* TODO: Parse interior *)
+    | DoubleQuotedStringLiteral (* TODO: Parse interior *)
+    | BooleanLiteral
+    | NullLiteral -> (parser1, make_literal_expression (make_token token))
     | Variable -> parse_variable_or_lambda parser
-
     | XHPClassName
     | Name
-    | QualifiedName ->
-        parse_name_or_collection_literal_expression parser1 token
-
+    | QualifiedName -> parse_name_or_collection_literal_expression parser1 token
     | Self
     | Parent
     | Static -> parse_scope_resolution_expression parser1 (make_token token)
@@ -131,46 +122,39 @@ module WithStatementAndDeclAndTypeParser
     | Ampersand
     | Await
     | Clone
-    | At ->
-      parse_prefix_unary_expression parser
-
-    | LeftParen ->
-      parse_cast_or_parenthesized_or_lambda_expression parser
-
-    | LessThan ->
-        parse_possible_xhp_expression parser
-
-    | Class -> (* TODO When is this legal? *)
-      (parser1, make_token token)
-
+    | At -> parse_prefix_unary_expression parser
+    | LeftParen -> parse_cast_or_parenthesized_or_lambda_expression parser
+    | LessThan -> parse_possible_xhp_expression parser
     | List  -> parse_list_expression parser
     | New -> parse_object_creation_expression parser
     | Array -> parse_array_intrinsic_expression parser
     | LeftBracket -> parse_array_creation_expression parser
+    | Tuple -> parse_tuple_expression parser
     | Shape -> parse_shape_expression parser
     | Function -> parse_anon parser
     | DollarDollar ->
       (parser1, make_pipe_variable_expression (make_token token))
-    | Async ->
-      parse_anon_or_lambda_or_awaitable parser
+    | Async -> parse_anon_or_lambda_or_awaitable parser
     | Include
     | Include_once
     | Require
     | Require_once -> parse_inclusion_expression parser
-
-    | Dollar (* TODO: ? *)
-
-    (* TODO: non-lowercased true false null array *)
-    (* TODO: Unsafe *)
-    (* TODO: What keywords are legal as names? *)
-
-    | Final | Abstract | Interface | Trait ->
-      (* TODO: Error *)
-     (parser1, make_token token)
     | EndOfFile
     | _ ->
-      (* TODO: Error, expected expression *)
-      (parser1, make_token token)
+      begin
+        (* TODO: Are there "reserved" keywords that absolutely cannot start
+           an expression? If so, list them above and make them produce an
+           error. *)
+        let (parser1, token) = next_token_as_name parser in
+        match (Token.kind token) with
+        | Name -> parse_name_or_collection_literal_expression parser1 token
+        | _ ->
+          (* ERROR RECOVERY: Eat the offending token.
+          TODO: Create a better error recovery system that does not eat tokens
+          that might be eaten by the outer statement / declaration parser. *)
+          let parser = with_error parser1 SyntaxError.error1015 in
+          (parser, make_token token)
+      end
 
   and parse_inclusion_expression parser =
   (* SPEC:
@@ -225,6 +209,10 @@ module WithStatementAndDeclAndTypeParser
     if next_is_lower_precedence parser then (parser, term)
     else match peek_token_kind parser with
     (* Binary operators *)
+    (* TODO Add an error if PHP and / or / xor are used in Hack.  *)
+    | And
+    | Or
+    | Xor
     | Plus
     | Minus
     | Star
@@ -254,6 +242,7 @@ module WithStatementAndDeclAndTypeParser
     | LessThan
     | ExclamationEqualEqual
     | LessThanEqual
+    | LessThanEqualGreaterThan
     | GreaterThanEqual
     | Ampersand
     | Bar
@@ -262,7 +251,6 @@ module WithStatementAndDeclAndTypeParser
     | Carat
     | BarGreaterThan
     | QuestionQuestion ->
-    (* TODO: "and" "or" "xor" *)
       parse_remaining_binary_expression parser term
     | Instanceof ->
       parse_instanceof_expression parser term
@@ -385,9 +373,15 @@ module WithStatementAndDeclAndTypeParser
       object-creation-expression:
         new  class-type-designator  (  argument-expression-list-opt  )
     *)
+    (* PHP allows the entire expression list to be omitted. *)
+    (* TODO: Give an error in a later pass if it is omitted in Hack. *)
     let (parser, new_token) = assert_token parser New in
     let (parser, designator) = parse_designator parser in
-    let (parser, left, args, right) = parse_expression_list_opt parser in
+    let (parser, left, args, right) =
+    if peek_token_kind parser = LeftParen then
+      parse_expression_list_opt parser
+    else
+      (parser, make_missing(), make_missing(), make_missing()) in
     let result =
       make_object_creation_expression new_token designator left args right in
     (parser, result)
@@ -411,9 +405,16 @@ module WithStatementAndDeclAndTypeParser
   and parse_yield_expression parser =
     (* SPEC:
       yield  array-element-initializer
+      TODO: Hack allows "yield break".
+      TODO: Should this be its own production, or can it be a yield expression?
+      TODO: Is this an expression or a statement?
+      TODO: Add it to the specification.
     *)
     let (parser, token) = assert_token parser Yield in
-    let (parser, operand) = parse_array_element_init parser in
+    let (parser, operand) = if peek_token_kind parser = Break then
+      assert_token parser Break
+    else
+      parse_array_element_init parser in
     let result = make_yield_expression token operand in
     (parser, result)
 
@@ -439,41 +440,246 @@ module WithStatementAndDeclAndTypeParser
     else
       parse_parenthesized_expression parser
 
-  and is_cast_expression parser =
-    (* We have a left paren in hand and wish to know whether we are parsing a
-       cast, lambda or parenthesized expression. There are only eight possible
-       cast prefixes so those are the easiest to detect. *)
-    let (parser, left_paren) = assert_token parser LeftParen in
-    let (parser, type_token) = next_token parser in
-    match Token.kind type_token with
-    | Array
-    | Object
-    | Unset
-    | Double
-    | Bool
-    | Int
-    | Float
-    | String ->
-      peek_token_kind parser = RightParen
+  and is_easy_cast_type kind =
+    (* See comments below. *)
+    match kind with
+    | Array | Bool | Double | Float | Int | Object | String -> true
     | _ -> false
 
-  and parse_cast_expression parser =
-    (* SPEC:
-      cast-expression:
-        (  cast-type  ) unary-expression
-      cast-type: one of
-        bool  int  float  string
+  and token_implies_cast kind =
+    (* See comments below. *)
+    match kind with
+    (* Keywords that imply cast *)
+    | Abstract
+    | Array
+    | Arraykey
+    | Async
+    | TokenKind.Attribute
+    | Await
+    | Bool
+    | Break
+    | Case
+    | Catch
+    | Category
+    | Children
+    | Class
+    | Classname
+    | Clone
+    | Const
+    | Construct
+    | Continue
+    | Default
+    | Destruct
+    | Do
+    | Double
+    | Echo
+    | Else
+    | Elseif
+    | Empty
+    | Enum
+    | Extends
+    | Float
+    | Final
+    | Finally
+    | For
+    | Foreach
+    | Function
+    | Global
+    | If
+    | Implements
+    | Include
+    | Include_once
+    | Insteadof
+    | Int
+    | Interface
+    | List
+    | Mixed
+    | Namespace
+    | New
+    | Newtype
+    | Noreturn
+    | Num
+    | Object
+    | Parent
+    | Print
+    | Private
+    | Protected
+    | Public
+    | Require
+    | Require_once
+    | Required
+    | Resource
+    | Return
+    | Self
+    | Shape
+    | Static
+    | String
+    | Super
+    | Switch
+    | This
+    | Throw
+    | Trait
+    | Try
+    | Tuple
+    | Type
+    | Unset
+    | Use
+    | Var
+    | Void
+    | While
+    | Yield -> true
+    (* Names that imply cast *)
+    | Name
+    | NamespacePrefix
+    | QualifiedName
+    | Variable -> true
+    (* Symbols that imply cast *)
+    | At
+    | DollarDollar
+    | Exclamation
+    | LeftParen
+    | Minus
+    | MinusMinus
+    | Plus
+    | PlusPlus
+    | Tilde -> true
+    (* Literals that imply cast *)
+    | BinaryLiteral
+    | BooleanLiteral
+    | DecimalLiteral
+    | DoubleQuotedStringLiteral
+    | FloatingLiteral
+    | HeredocStringLiteral
+    | HexadecimalLiteral
+    | NowdocStringLiteral
+    | NullLiteral
+    | OctalLiteral
+    | SingleQuotedStringLiteral -> true
+    (* Keywords that imply parenthesized expression *)
+    | And
+    | As
+    | Instanceof
+    | Or
+    | Xor -> false
+    (* Symbols that imply parenthesized expression *)
+    | Ampersand
+    | AmpersandAmpersand
+    | AmpersandEqual
+    | Bar
+    | BarBar
+    | BarEqual
+    | BarGreaterThan
+    | Carat
+    | CaratEqual
+    | Colon
+    | ColonColon
+    | Comma
+    | Dollar
+    | Dot
+    | DotEqual
+    | DotDotDot
+    | Equal
+    | EqualEqual
+    | EqualEqualEqual
+    | EqualEqualGreaterThan
+    | EqualGreaterThan
+    | ExclamationEqual
+    | ExclamationEqualEqual
+    | GreaterThan
+    | GreaterThanEqual
+    | GreaterThanGreaterThan
+    | GreaterThanGreaterThanEqual
+    | LessThanLessThanEqual
+    | MinusEqual
+    | MinusGreaterThan
+    | Question
+    | QuestionGreaterThan
+    | QuestionMinusGreaterThan
+    | QuestionQuestion
+    | RightBrace
+    | RightBracket
+    | RightParen
+    | LeftBrace
+    | LeftBracket
+    | LessThan
+    | LessThanEqual
+    | LessThanEqualGreaterThan
+    | LessThanLessThan
+    | Percent
+    | PercentEqual
+    | PlusEqual
+    | Semicolon
+    | Slash
+    | SlashEqual
+    | SlashGreaterThan
+    | Star
+    | StarEqual
+    | StarStar
+    | StarStarEqual -> false
+    (* Misc *)
+    | ErrorToken
+    | EndOfFile -> false
+    (* TODO: Sort out rules for interactions between casts and XHP. *)
+    | LessThanSlash
+    | XHPCategoryName
+    | XHPElementName
+    | XHPClassName
+    | XHPStringLiteral
+    | XHPBody
+    | XHPComment -> false
 
-      TODO: The specification needs to be updated; double, object, array
-      and unset are also legal cast types.  Note also that the spec does not
-      define "double", "unset" or "object" as keywords.
-    *)
+  and is_cast_expression parser =
+    (* SPEC:
+    cast-expression:
+      (  cast-type  ) unary-expression
+    cast-type:
+      array, bool, double, float, int, object, string, or a name
+
+    TODO: This implies that a cast "(name)" can only be a simple name, but
+    I would expect that (\Foo\Bar), (:foo), (array<int>), and the like
+    should also be legal casts. If we implement that then we will need
+    a sophisticated heuristic to determine whether this is a cast or a
+    parenthesized expression.
+
+    The cast expression introduces an ambiguity: (x)-y could be a
+    subtraction or a cast on top of a unary minus. We resolve this
+    ambiguity as follows:
+
+    * If the thing in parens is one of the keywords mentioned above, then
+      it's a cast.
+    * If the token which follows (x) is as or instanceof then
+      it's a parenthesized expression.
+    * PHP-ism extension: if the token is and, or or xor, then it's a
+      parenthesized expression.
+    * Otherwise, if the token which follows (x) is $$, @, ~, !, (, +, -,
+      any name, qualified name, variable name, literal, or keyword then
+      it's a cast.
+    * Otherwise, it's a parenthesized expression. *)
+
+    let (parser, _) = assert_token parser LeftParen in
+    let (parser, type_token) = next_token parser in
+    let type_token = Token.kind type_token in
+    let (parser, right_paren) = next_token parser in
+    let right_paren = Token.kind right_paren in
+    let following_token = peek_token_kind parser in
+    if right_paren != RightParen then
+      false
+    else if is_easy_cast_type type_token then
+      true
+    else if type_token != Name then
+      false
+    else
+      token_implies_cast following_token
+
+  and parse_cast_expression parser =
     (* We don't get here unless we have a legal cast, thanks to the
-       previous call to is_cast_expression. *)
+       previous call to is_cast_expression. See notes above. *)
     let (parser, left) = assert_token parser LeftParen in
     let (parser, cast_type) = next_token parser in
     let cast_type = make_token cast_type in
     let (parser, right) = assert_token parser RightParen in
+    (* TODO: Do we need to set the precedence of the expression
+    parser here? *)
     let (parser, operand) = parse_expression parser in
     let result = make_cast_expression left cast_type right operand in
     (parser, result)
@@ -498,7 +704,9 @@ module WithStatementAndDeclAndTypeParser
 
        TODO: There could be situations where we have good evidence that a
        lambda is intended but these conditions are not met. Consider
-       a more sophisticated recovery strategy.
+       a more sophisticated recovery strategy.  For example, if we have
+       (x)==> then odds are pretty good that a lambda was intended and the
+       error should say that ($x)==> was expected.
     *)
     let sig_and_arrow parser =
       let (parser, signature) = parse_lambda_signature parser in
@@ -753,9 +961,22 @@ module WithStatementAndDeclAndTypeParser
        Interestingly, this is illegal in C and Java, which require parens,
        but legal in C#.
     *)
-    let token = peek_token parser in
-    (* e1 ?: e2 -- where there is no consequence -- is legal *)
-    let (parser, consequence) = if (Token.kind token) = Colon then
+    let kind = peek_token_kind parser in
+    (* e1 ?: e2 -- where there is no consequence -- is legal.
+       However this introduces an ambiguity:
+       x ? :y::m : z
+       is that
+       x   ?:   y::m   :   z
+       or
+       x   ?   :y::m   :   z
+
+       We assume the latter.
+       TODO: Review this decision.
+       TODO: Add this to the XHP draft specification.
+       *)
+    let missing_consequence =
+      kind = Colon && not (is_next_xhp_class_name parser) in
+    let (parser, consequence) = if missing_consequence then
       (parser, make_missing())
     else
       with_reset_precedence parser parse_expression in
@@ -960,6 +1181,25 @@ module WithStatementAndDeclAndTypeParser
       parse_parenthesized_comma_list_opt_allow_trailing
         parser parse_field_initializer in
     let result = make_shape_expression shape left_paren fields right_paren in
+    (parser, result)
+
+  and parse_tuple_expression parser =
+    (* SPEC
+    tuple-literal:
+      tuple  (  expression-list-one-or-more  )
+
+    expression-list-one-or-more:
+      expression
+      expression-list-one-or-more  ,  expression
+
+    TODO: Can the list be comma-terminated? If so, update the spec.
+    TODO: We need to produce an error in a later pass if the list is empty.
+    *)
+    let (parser, keyword) = assert_token parser Tuple in
+    let (parser, left_paren, items, right_paren) =
+      parse_parenthesized_comma_list_opt_allow_trailing
+        parser parse_expression_with_reset_precedence in
+    let result = make_tuple_expression keyword left_paren items right_paren in
     (parser, result)
 
   and parse_use_variable parser =

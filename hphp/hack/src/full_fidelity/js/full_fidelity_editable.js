@@ -72,6 +72,8 @@ class EditableSyntax
       return ScriptHeader.from_json(json, position, source);
     case 'script':
       return Script.from_json(json, position, source);
+    case 'footer':
+      return ScriptFooter.from_json(json, position, source);
     case 'simple_type_specifier':
       return SimpleTypeSpecifier.from_json(json, position, source);
     case 'literal':
@@ -138,6 +140,8 @@ class EditableSyntax
       return CompoundStatement.from_json(json, position, source);
     case 'expression_statement':
       return ExpressionStatement.from_json(json, position, source);
+    case 'unset_statement':
+      return UnsetStatement.from_json(json, position, source);
     case 'while_statement':
       return WhileStatement.from_json(json, position, source);
     case 'if_statement':
@@ -178,6 +182,8 @@ class EditableSyntax
       return StaticDeclarator.from_json(json, position, source);
     case 'echo_statement':
       return EchoStatement.from_json(json, position, source);
+    case 'global_statement':
+      return GlobalStatement.from_json(json, position, source);
     case 'simple_initializer':
       return SimpleInitializer.from_json(json, position, source);
     case 'anonymous_function':
@@ -274,6 +280,8 @@ class EditableSyntax
       return ShapeTypeSpecifier.from_json(json, position, source);
     case 'shape_expression':
       return ShapeExpression.from_json(json, position, source);
+    case 'tuple_expression':
+      return TupleExpression.from_json(json, position, source);
     case 'generic_type_specifier':
       return GenericTypeSpecifier.from_json(json, position, source);
     case 'nullable_type_specifier':
@@ -583,6 +591,8 @@ class EditableToken extends EditableSyntax
 
     case 'abstract':
        return new AbstractToken(leading, trailing);
+    case 'and':
+       return new AndToken(leading, trailing);
     case 'array':
        return new ArrayToken(leading, trailing);
     case 'arraykey':
@@ -651,6 +661,8 @@ class EditableToken extends EditableSyntax
        return new ForeachToken(leading, trailing);
     case 'function':
        return new FunctionToken(leading, trailing);
+    case 'global':
+       return new GlobalToken(leading, trailing);
     case 'if':
        return new IfToken(leading, trailing);
     case 'implements':
@@ -683,6 +695,8 @@ class EditableToken extends EditableSyntax
        return new NumToken(leading, trailing);
     case 'object':
        return new ObjectToken(leading, trailing);
+    case 'or':
+       return new OrToken(leading, trailing);
     case 'parent':
        return new ParentToken(leading, trailing);
     case 'print':
@@ -737,6 +751,8 @@ class EditableToken extends EditableSyntax
        return new VoidToken(leading, trailing);
     case 'while':
        return new WhileToken(leading, trailing);
+    case 'xor':
+       return new XorToken(leading, trailing);
     case 'yield':
        return new YieldToken(leading, trailing);
     case '[':
@@ -753,6 +769,8 @@ class EditableToken extends EditableSyntax
        return new RightBraceToken(leading, trailing);
     case '.':
        return new DotToken(leading, trailing);
+    case '?>':
+       return new QuestionGreaterThanToken(leading, trailing);
     case '->':
        return new MinusGreaterThanToken(leading, trailing);
     case '++':
@@ -777,6 +795,8 @@ class EditableToken extends EditableSyntax
        return new SlashToken(leading, trailing);
     case '%':
        return new PercentToken(leading, trailing);
+    case '<=>':
+       return new LessThanEqualGreaterThanToken(leading, trailing);
     case '<<':
        return new LessThanLessThanToken(leading, trailing);
     case '>>':
@@ -977,6 +997,13 @@ class AbstractToken extends EditableToken
   constructor(leading, trailing)
   {
     super('abstract', leading, trailing, 'abstract');
+  }
+}
+class AndToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('and', leading, trailing, 'and');
   }
 }
 class ArrayToken extends EditableToken
@@ -1217,6 +1244,13 @@ class FunctionToken extends EditableToken
     super('function', leading, trailing, 'function');
   }
 }
+class GlobalToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('global', leading, trailing, 'global');
+  }
+}
 class IfToken extends EditableToken
 {
   constructor(leading, trailing)
@@ -1327,6 +1361,13 @@ class ObjectToken extends EditableToken
   constructor(leading, trailing)
   {
     super('object', leading, trailing, 'object');
+  }
+}
+class OrToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('or', leading, trailing, 'or');
   }
 }
 class ParentToken extends EditableToken
@@ -1518,6 +1559,13 @@ class WhileToken extends EditableToken
     super('while', leading, trailing, 'while');
   }
 }
+class XorToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('xor', leading, trailing, 'xor');
+  }
+}
 class YieldToken extends EditableToken
 {
   constructor(leading, trailing)
@@ -1572,6 +1620,13 @@ class DotToken extends EditableToken
   constructor(leading, trailing)
   {
     super('.', leading, trailing, '.');
+  }
+}
+class QuestionGreaterThanToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('?>', leading, trailing, '?>');
   }
 }
 class MinusGreaterThanToken extends EditableToken
@@ -1656,6 +1711,13 @@ class PercentToken extends EditableToken
   constructor(leading, trailing)
   {
     super('%', leading, trailing, '%');
+  }
+}
+class LessThanEqualGreaterThanToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('<=>', leading, trailing, '<=>');
   }
 }
 class LessThanLessThanToken extends EditableToken
@@ -2462,6 +2524,53 @@ class Script extends EditableSyntax
     return Script._children_keys;
   }
 }
+class ScriptFooter extends EditableSyntax
+{
+  constructor(
+    question_greater_than)
+  {
+    super('footer', {
+      question_greater_than: question_greater_than });
+  }
+  get question_greater_than() { return this.children.question_greater_than; }
+  with_question_greater_than(question_greater_than){
+    return new ScriptFooter(
+      question_greater_than);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var question_greater_than = this.question_greater_than.rewrite(rewriter, new_parents);
+    if (
+      question_greater_than === this.question_greater_than)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new ScriptFooter(
+        question_greater_than), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let question_greater_than = EditableSyntax.from_json(
+      json.footer_question_greater_than, position, source);
+    position += question_greater_than.width;
+    return new ScriptFooter(
+        question_greater_than);
+  }
+  get children_keys()
+  {
+    if (ScriptFooter._children_keys == null)
+      ScriptFooter._children_keys = [
+        'question_greater_than'];
+    return ScriptFooter._children_keys;
+  }
+}
 class SimpleTypeSpecifier extends EditableSyntax
 {
   constructor(
@@ -2700,6 +2809,7 @@ class PipeVariableExpression extends EditableSyntax
 class EnumDeclaration extends EditableSyntax
 {
   constructor(
+    attribute_spec,
     keyword,
     name,
     colon,
@@ -2710,6 +2820,7 @@ class EnumDeclaration extends EditableSyntax
     right_brace)
   {
     super('enum_declaration', {
+      attribute_spec: attribute_spec,
       keyword: keyword,
       name: name,
       colon: colon,
@@ -2719,6 +2830,7 @@ class EnumDeclaration extends EditableSyntax
       enumerators: enumerators,
       right_brace: right_brace });
   }
+  get attribute_spec() { return this.children.attribute_spec; }
   get keyword() { return this.children.keyword; }
   get name() { return this.children.name; }
   get colon() { return this.children.colon; }
@@ -2727,8 +2839,21 @@ class EnumDeclaration extends EditableSyntax
   get left_brace() { return this.children.left_brace; }
   get enumerators() { return this.children.enumerators; }
   get right_brace() { return this.children.right_brace; }
+  with_attribute_spec(attribute_spec){
+    return new EnumDeclaration(
+      attribute_spec,
+      this.keyword,
+      this.name,
+      this.colon,
+      this.base,
+      this.type,
+      this.left_brace,
+      this.enumerators,
+      this.right_brace);
+  }
   with_keyword(keyword){
     return new EnumDeclaration(
+      this.attribute_spec,
       keyword,
       this.name,
       this.colon,
@@ -2740,6 +2865,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_name(name){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       name,
       this.colon,
@@ -2751,6 +2877,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_colon(colon){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       colon,
@@ -2762,6 +2889,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_base(base){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       this.colon,
@@ -2773,6 +2901,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_type(type){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       this.colon,
@@ -2784,6 +2913,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_left_brace(left_brace){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       this.colon,
@@ -2795,6 +2925,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_enumerators(enumerators){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       this.colon,
@@ -2806,6 +2937,7 @@ class EnumDeclaration extends EditableSyntax
   }
   with_right_brace(right_brace){
     return new EnumDeclaration(
+      this.attribute_spec,
       this.keyword,
       this.name,
       this.colon,
@@ -2821,6 +2953,7 @@ class EnumDeclaration extends EditableSyntax
       parents = [];
     let new_parents = parents.slice();
     new_parents.push(this);
+    var attribute_spec = this.attribute_spec.rewrite(rewriter, new_parents);
     var keyword = this.keyword.rewrite(rewriter, new_parents);
     var name = this.name.rewrite(rewriter, new_parents);
     var colon = this.colon.rewrite(rewriter, new_parents);
@@ -2830,6 +2963,7 @@ class EnumDeclaration extends EditableSyntax
     var enumerators = this.enumerators.rewrite(rewriter, new_parents);
     var right_brace = this.right_brace.rewrite(rewriter, new_parents);
     if (
+      attribute_spec === this.attribute_spec &&
       keyword === this.keyword &&
       name === this.name &&
       colon === this.colon &&
@@ -2844,6 +2978,7 @@ class EnumDeclaration extends EditableSyntax
     else
     {
       return rewriter(new EnumDeclaration(
+        attribute_spec,
         keyword,
         name,
         colon,
@@ -2856,6 +2991,9 @@ class EnumDeclaration extends EditableSyntax
   }
   static from_json(json, position, source)
   {
+    let attribute_spec = EditableSyntax.from_json(
+      json.enum_attribute_spec, position, source);
+    position += attribute_spec.width;
     let keyword = EditableSyntax.from_json(
       json.enum_keyword, position, source);
     position += keyword.width;
@@ -2881,6 +3019,7 @@ class EnumDeclaration extends EditableSyntax
       json.enum_right_brace, position, source);
     position += right_brace.width;
     return new EnumDeclaration(
+        attribute_spec,
         keyword,
         name,
         colon,
@@ -2894,6 +3033,7 @@ class EnumDeclaration extends EditableSyntax
   {
     if (EnumDeclaration._children_keys == null)
       EnumDeclaration._children_keys = [
+        'attribute_spec',
         'keyword',
         'name',
         'colon',
@@ -6014,6 +6154,133 @@ class ExpressionStatement extends EditableSyntax
     return ExpressionStatement._children_keys;
   }
 }
+class UnsetStatement extends EditableSyntax
+{
+  constructor(
+    keyword,
+    left_paren,
+    variables,
+    right_paren,
+    semicolon)
+  {
+    super('unset_statement', {
+      keyword: keyword,
+      left_paren: left_paren,
+      variables: variables,
+      right_paren: right_paren,
+      semicolon: semicolon });
+  }
+  get keyword() { return this.children.keyword; }
+  get left_paren() { return this.children.left_paren; }
+  get variables() { return this.children.variables; }
+  get right_paren() { return this.children.right_paren; }
+  get semicolon() { return this.children.semicolon; }
+  with_keyword(keyword){
+    return new UnsetStatement(
+      keyword,
+      this.left_paren,
+      this.variables,
+      this.right_paren,
+      this.semicolon);
+  }
+  with_left_paren(left_paren){
+    return new UnsetStatement(
+      this.keyword,
+      left_paren,
+      this.variables,
+      this.right_paren,
+      this.semicolon);
+  }
+  with_variables(variables){
+    return new UnsetStatement(
+      this.keyword,
+      this.left_paren,
+      variables,
+      this.right_paren,
+      this.semicolon);
+  }
+  with_right_paren(right_paren){
+    return new UnsetStatement(
+      this.keyword,
+      this.left_paren,
+      this.variables,
+      right_paren,
+      this.semicolon);
+  }
+  with_semicolon(semicolon){
+    return new UnsetStatement(
+      this.keyword,
+      this.left_paren,
+      this.variables,
+      this.right_paren,
+      semicolon);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var left_paren = this.left_paren.rewrite(rewriter, new_parents);
+    var variables = this.variables.rewrite(rewriter, new_parents);
+    var right_paren = this.right_paren.rewrite(rewriter, new_parents);
+    var semicolon = this.semicolon.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      left_paren === this.left_paren &&
+      variables === this.variables &&
+      right_paren === this.right_paren &&
+      semicolon === this.semicolon)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new UnsetStatement(
+        keyword,
+        left_paren,
+        variables,
+        right_paren,
+        semicolon), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.unset_keyword, position, source);
+    position += keyword.width;
+    let left_paren = EditableSyntax.from_json(
+      json.unset_left_paren, position, source);
+    position += left_paren.width;
+    let variables = EditableSyntax.from_json(
+      json.unset_variables, position, source);
+    position += variables.width;
+    let right_paren = EditableSyntax.from_json(
+      json.unset_right_paren, position, source);
+    position += right_paren.width;
+    let semicolon = EditableSyntax.from_json(
+      json.unset_semicolon, position, source);
+    position += semicolon.width;
+    return new UnsetStatement(
+        keyword,
+        left_paren,
+        variables,
+        right_paren,
+        semicolon);
+  }
+  get children_keys()
+  {
+    if (UnsetStatement._children_keys == null)
+      UnsetStatement._children_keys = [
+        'keyword',
+        'left_paren',
+        'variables',
+        'right_paren',
+        'semicolon'];
+    return UnsetStatement._children_keys;
+  }
+}
 class WhileStatement extends EditableSyntax
 {
   constructor(
@@ -8395,6 +8662,89 @@ class EchoStatement extends EditableSyntax
         'expressions',
         'semicolon'];
     return EchoStatement._children_keys;
+  }
+}
+class GlobalStatement extends EditableSyntax
+{
+  constructor(
+    keyword,
+    variables,
+    semicolon)
+  {
+    super('global_statement', {
+      keyword: keyword,
+      variables: variables,
+      semicolon: semicolon });
+  }
+  get keyword() { return this.children.keyword; }
+  get variables() { return this.children.variables; }
+  get semicolon() { return this.children.semicolon; }
+  with_keyword(keyword){
+    return new GlobalStatement(
+      keyword,
+      this.variables,
+      this.semicolon);
+  }
+  with_variables(variables){
+    return new GlobalStatement(
+      this.keyword,
+      variables,
+      this.semicolon);
+  }
+  with_semicolon(semicolon){
+    return new GlobalStatement(
+      this.keyword,
+      this.variables,
+      semicolon);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var variables = this.variables.rewrite(rewriter, new_parents);
+    var semicolon = this.semicolon.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      variables === this.variables &&
+      semicolon === this.semicolon)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new GlobalStatement(
+        keyword,
+        variables,
+        semicolon), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.global_keyword, position, source);
+    position += keyword.width;
+    let variables = EditableSyntax.from_json(
+      json.global_variables, position, source);
+    position += variables.width;
+    let semicolon = EditableSyntax.from_json(
+      json.global_semicolon, position, source);
+    position += semicolon.width;
+    return new GlobalStatement(
+        keyword,
+        variables,
+        semicolon);
+  }
+  get children_keys()
+  {
+    if (GlobalStatement._children_keys == null)
+      GlobalStatement._children_keys = [
+        'keyword',
+        'variables',
+        'semicolon'];
+    return GlobalStatement._children_keys;
   }
 }
 class SimpleInitializer extends EditableSyntax
@@ -13005,6 +13355,110 @@ class ShapeExpression extends EditableSyntax
     return ShapeExpression._children_keys;
   }
 }
+class TupleExpression extends EditableSyntax
+{
+  constructor(
+    keyword,
+    left_paren,
+    items,
+    right_paren)
+  {
+    super('tuple_expression', {
+      keyword: keyword,
+      left_paren: left_paren,
+      items: items,
+      right_paren: right_paren });
+  }
+  get keyword() { return this.children.keyword; }
+  get left_paren() { return this.children.left_paren; }
+  get items() { return this.children.items; }
+  get right_paren() { return this.children.right_paren; }
+  with_keyword(keyword){
+    return new TupleExpression(
+      keyword,
+      this.left_paren,
+      this.items,
+      this.right_paren);
+  }
+  with_left_paren(left_paren){
+    return new TupleExpression(
+      this.keyword,
+      left_paren,
+      this.items,
+      this.right_paren);
+  }
+  with_items(items){
+    return new TupleExpression(
+      this.keyword,
+      this.left_paren,
+      items,
+      this.right_paren);
+  }
+  with_right_paren(right_paren){
+    return new TupleExpression(
+      this.keyword,
+      this.left_paren,
+      this.items,
+      right_paren);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var left_paren = this.left_paren.rewrite(rewriter, new_parents);
+    var items = this.items.rewrite(rewriter, new_parents);
+    var right_paren = this.right_paren.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      left_paren === this.left_paren &&
+      items === this.items &&
+      right_paren === this.right_paren)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new TupleExpression(
+        keyword,
+        left_paren,
+        items,
+        right_paren), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.tuple_expression_keyword, position, source);
+    position += keyword.width;
+    let left_paren = EditableSyntax.from_json(
+      json.tuple_expression_left_paren, position, source);
+    position += left_paren.width;
+    let items = EditableSyntax.from_json(
+      json.tuple_expression_items, position, source);
+    position += items.width;
+    let right_paren = EditableSyntax.from_json(
+      json.tuple_expression_right_paren, position, source);
+    position += right_paren.width;
+    return new TupleExpression(
+        keyword,
+        left_paren,
+        items,
+        right_paren);
+  }
+  get children_keys()
+  {
+    if (TupleExpression._children_keys == null)
+      TupleExpression._children_keys = [
+        'keyword',
+        'left_paren',
+        'items',
+        'right_paren'];
+    return TupleExpression._children_keys;
+  }
+}
 class GenericTypeSpecifier extends EditableSyntax
 {
   constructor(
@@ -13571,6 +14025,7 @@ exports.EditableToken = EditableToken;
 exports.EndOfFileToken = EndOfFileToken;
 
 exports.AbstractToken = AbstractToken;
+exports.AndToken = AndToken;
 exports.ArrayToken = ArrayToken;
 exports.ArraykeyToken = ArraykeyToken;
 exports.AsToken = AsToken;
@@ -13605,6 +14060,7 @@ exports.FinallyToken = FinallyToken;
 exports.ForToken = ForToken;
 exports.ForeachToken = ForeachToken;
 exports.FunctionToken = FunctionToken;
+exports.GlobalToken = GlobalToken;
 exports.IfToken = IfToken;
 exports.ImplementsToken = ImplementsToken;
 exports.IncludeToken = IncludeToken;
@@ -13621,6 +14077,7 @@ exports.NewtypeToken = NewtypeToken;
 exports.NoreturnToken = NoreturnToken;
 exports.NumToken = NumToken;
 exports.ObjectToken = ObjectToken;
+exports.OrToken = OrToken;
 exports.ParentToken = ParentToken;
 exports.PrintToken = PrintToken;
 exports.PrivateToken = PrivateToken;
@@ -13648,6 +14105,7 @@ exports.UseToken = UseToken;
 exports.VarToken = VarToken;
 exports.VoidToken = VoidToken;
 exports.WhileToken = WhileToken;
+exports.XorToken = XorToken;
 exports.YieldToken = YieldToken;
 exports.LeftBracketToken = LeftBracketToken;
 exports.RightBracketToken = RightBracketToken;
@@ -13656,6 +14114,7 @@ exports.RightParenToken = RightParenToken;
 exports.LeftBraceToken = LeftBraceToken;
 exports.RightBraceToken = RightBraceToken;
 exports.DotToken = DotToken;
+exports.QuestionGreaterThanToken = QuestionGreaterThanToken;
 exports.MinusGreaterThanToken = MinusGreaterThanToken;
 exports.PlusPlusToken = PlusPlusToken;
 exports.MinusMinusToken = MinusMinusToken;
@@ -13668,6 +14127,7 @@ exports.ExclamationToken = ExclamationToken;
 exports.DollarToken = DollarToken;
 exports.SlashToken = SlashToken;
 exports.PercentToken = PercentToken;
+exports.LessThanEqualGreaterThanToken = LessThanEqualGreaterThanToken;
 exports.LessThanLessThanToken = LessThanLessThanToken;
 exports.GreaterThanGreaterThanToken = GreaterThanGreaterThanToken;
 exports.LessThanToken = LessThanToken;
@@ -13742,6 +14202,7 @@ exports.DelimitedComment = DelimitedComment;
 exports.SingleLineComment = SingleLineComment;
 exports.ScriptHeader = ScriptHeader;
 exports.Script = Script;
+exports.ScriptFooter = ScriptFooter;
 exports.SimpleTypeSpecifier = SimpleTypeSpecifier;
 exports.LiteralExpression = LiteralExpression;
 exports.VariableExpression = VariableExpression;
@@ -13775,6 +14236,7 @@ exports.InclusionExpression = InclusionExpression;
 exports.InclusionDirective = InclusionDirective;
 exports.CompoundStatement = CompoundStatement;
 exports.ExpressionStatement = ExpressionStatement;
+exports.UnsetStatement = UnsetStatement;
 exports.WhileStatement = WhileStatement;
 exports.IfStatement = IfStatement;
 exports.ElseifClause = ElseifClause;
@@ -13795,6 +14257,7 @@ exports.ContinueStatement = ContinueStatement;
 exports.FunctionStaticStatement = FunctionStaticStatement;
 exports.StaticDeclarator = StaticDeclarator;
 exports.EchoStatement = EchoStatement;
+exports.GlobalStatement = GlobalStatement;
 exports.SimpleInitializer = SimpleInitializer;
 exports.AnonymousFunction = AnonymousFunction;
 exports.AnonymousFunctionUseClause = AnonymousFunctionUseClause;
@@ -13843,6 +14306,7 @@ exports.FieldSpecifier = FieldSpecifier;
 exports.FieldInitializer = FieldInitializer;
 exports.ShapeTypeSpecifier = ShapeTypeSpecifier;
 exports.ShapeExpression = ShapeExpression;
+exports.TupleExpression = TupleExpression;
 exports.GenericTypeSpecifier = GenericTypeSpecifier;
 exports.NullableTypeSpecifier = NullableTypeSpecifier;
 exports.SoftTypeSpecifier = SoftTypeSpecifier;
