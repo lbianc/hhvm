@@ -83,10 +83,7 @@ let save_state env fn =
   let names = FileInfo.simplify_fast env.files_info in
   Marshal.to_channel chan names [];
   Sys_utils.close_out_no_fail fn chan;
-  let sqlite_save_t = SharedMem.save_dep_table_sqlite (fn^".sql") in
-  let save_t = SharedMem.save_dep_table (fn^".deptable") in
-  Hh_logger.log "Saving deptable using sqlite took(seconds): %d" sqlite_save_t;
-  Hh_logger.log "Saving deptable without sqlite took(seconds): %d" save_t;
+  SharedMem.save_dep_table (fn^".deptable");
   ignore @@ Hh_logger.log_duration "Saving" t
 
 let read_json_line ic =
@@ -107,16 +104,17 @@ let check_json_obj_error kv =
  * The second line is a list of the files that have changed since the state
  * was built
  *)
-let load_state root use_sql cmd (_ic, oc) =
+let load_state root saved_state_load_type use_sql cmd (_ic, oc) =
   try
     let load_script_log_file = ServerFiles.load_log root in
     let cmd =
       Printf.sprintf
-        "%s %s %s %s %s"
+        "%s %s %s %s %s %s"
         (Filename.quote (Path.to_string cmd))
         (Filename.quote (Path.to_string root))
         (Filename.quote Build_id.build_revision)
         (Filename.quote load_script_log_file)
+        (Filename.quote saved_state_load_type)
         (Filename.quote (string_of_bool use_sql)) in
     Hh_logger.log "Running load_mini script: %s\n%!" cmd;
     let ic = Unix.open_process_in cmd in
@@ -128,11 +126,7 @@ let load_state root use_sql cmd (_ic, oc) =
       Hh_json.get_bool_exn @@ List.Assoc.find_exn kv "is_cached" in
     let deptable_fn =
       Hh_json.get_string_exn @@ List.Assoc.find_exn kv "deptable" in
-    let read_deptable_time =
-      if use_sql
-      then SharedMem.load_dep_table_sqlite deptable_fn
-      else SharedMem.load_dep_table deptable_fn
-    in
+    let read_deptable_time = SharedMem.load_dep_table deptable_fn in
     let end_time = Unix.gettimeofday () in
     Daemon.to_channel oc
       @@ Ok (`Fst (state_fn, is_cached, end_time, read_deptable_time));
@@ -160,7 +154,7 @@ let with_loader_timeout timeout stage f =
  *
  * The loading of the dependency table must not run concurrently with any
  * operations that might write to the deptable. *)
-let mk_state_future root use_sql cmd =
+let mk_state_future root saved_state_load_type use_sql cmd =
   let start_time = Unix.gettimeofday () in
   Result.try_with @@ fun () ->
   let log_file =
@@ -168,7 +162,7 @@ let mk_state_future root use_sql cmd =
   let log_fd = Daemon.fd_of_path log_file in
   let {Daemon.channels = (ic, _oc); pid} as daemon =
     Daemon.fork (log_fd, log_fd)
-                (load_state root use_sql)
+                (load_state root saved_state_load_type use_sql)
                 cmd
   in fun () ->
   let fn =
@@ -324,15 +318,6 @@ let get_all_deps {FileInfo.n_funs; n_classes; n_types; n_consts} =
   let deps = add_deps_of_sset (fun n -> Dep.Class n) n_types deps in
   let deps = add_deps_of_sset (fun n -> Dep.GConst n) n_consts deps in
   let deps = add_deps_of_sset (fun n -> Dep.GConstName n) n_consts deps in
-  (* We need to type check all classes that have extend dependencies on the
-   * classes that have changed
-   *)
-  let deps =
-    SSet.fold ~f:begin fun class_name acc ->
-      let hash = Typing_deps.Dep.make (Dep.Class class_name) in
-      Decl_compare.get_extend_deps hash acc
-    end n_classes ~init:deps
-  in
   deps
 
 (* We start of with a list of files that have changed since the state was saved
@@ -398,6 +383,9 @@ let init ?load_mini_script genv =
   let lazy_parse = lazy_decl && genv.local_config.SLC.lazy_parse in
   let env = ServerEnvBuild.make_env genv.config in
   let root = ServerArgs.root genv.options in
+  let saved_state_load_type =
+    LSC.saved_state_load_type_to_string
+    genv.local_config.SLC.load_script_config in
   let use_sql = LSC.use_sql genv.local_config.SLC.load_script_config in
 
   (* Spawn this first so that it can run in the background while parsing is
@@ -407,7 +395,7 @@ let init ?load_mini_script genv =
    * handling code in one place. *)
   let load_mini_script = Result.of_option load_mini_script ~error:No_loader in
   let state_future =
-    load_mini_script >>= mk_state_future root use_sql in
+    load_mini_script >>= mk_state_future root saved_state_load_type use_sql in
 
   let get_next, t = indexing genv in
   let env, t = parsing ~lazy_parse genv env ~get_next t in

@@ -17,8 +17,6 @@
 #include "hphp/runtime/vm/jit/func-effects.h"
 
 #include "hphp/runtime/vm/func.h"
-#include "hphp/runtime/vm/repo.h"
-#include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/unit.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 
@@ -27,7 +25,25 @@ namespace HPHP { namespace jit {
 namespace {
 const StaticString
   s_http_response_header("http_response_header"),
-  s_php_errormsg("php_errormsg");
+  s_php_errormsg("php_errormsg"),
+  s_extract("extract"),
+  s_extractNative("__SystemLib\\extract"),
+  s_parse_str("parse_str"),
+  s_parse_strNative("__SystemLib\\parse_str"),
+  s_assert("assert"),
+  s_assertNative("__SystemLib\\assert"),
+  s_set_frame_metadata("HH\\set_frame_metadata");
+
+bool funcByNameDestroysLocals(const StringData* fname) {
+  if (!fname) return false;
+  return fname->isame(s_extract.get()) ||
+         fname->isame(s_extractNative.get()) ||
+         fname->isame(s_parse_str.get()) ||
+         fname->isame(s_parse_strNative.get()) ||
+         fname->isame(s_assert.get()) ||
+         fname->isame(s_assertNative.get()) ||
+         fname->isame(s_set_frame_metadata.get());
+}
 
 using FuncSet = std::unordered_set<std::string, string_hashi, string_eqstri>;
 /*
@@ -196,8 +212,6 @@ FuncSet ignoresCallerFrame = {
   "is_scalar",
   "is_array",
   "HH\\is_vec",
-  "HH\\is_dict",
-  "HH\\is_keyset",
   "is_object",
   "is_resource",
   "boolval",
@@ -307,35 +321,15 @@ FuncSet ignoresCallerFrame = {
   "urlencode",
 };
 
-const StaticString s_assert("assert");
-
 bool funcByNameNeedsCallerFrame(const StringData* fname) {
   return ignoresCallerFrame.find(fname->data()) == ignoresCallerFrame.end();
 }
-
-bool disallowDynamicVarEnvFuncs() {
-  return (RuntimeOption::RepoAuthoritative &&
-          Repo::global().DisallowDynamicVarEnvFuncs) ||
-    RuntimeOption::DisallowDynamicVarEnvFuncs == HackStrictOption::ON;
 }
 
-}
-
-bool funcDestroysLocals(const Func* callee) {
-  if (!callee->writesCallerFrame()) return false;
-
-  if (callee->fullName()->isame(s_assert.get())) {
-    /*
-     * Assert is somewhat special. If RepoAuthoritative isn't set and the first
-     * parameter is a string, it will be evaled and can have arbitrary effects.
-     * If the assert fails, it may execute an arbitrary pre-registered callback
-     * which still might try to write to the assert caller's frame. This can't
-     * happen if calling such frame accessing functions dynamically is
-     * forbidden.
-     */
-    return !RuntimeOption::RepoAuthoritative || !disallowDynamicVarEnvFuncs();
-  }
-  return true;
+bool builtinFuncDestroysLocals(const Func* callee) {
+  assertx(callee && callee->isCPPBuiltin());
+  auto const fname = callee->name();
+  return funcByNameDestroysLocals(fname);
 }
 
 bool callDestroysLocals(const NormalizedInstruction& inst,
@@ -348,10 +342,7 @@ bool callDestroysLocals(const NormalizedInstruction& inst,
   auto* unit = caller->unit();
   auto checkTaintId = [&](Id id) {
     auto const str = unit->lookupLitstrId(id);
-    // Only builtins can destroy a caller's locals and if we can't lookup the
-    // function, we know its not a builtin.
-    auto const callee = Unit::lookupFunc(str);
-    return callee && funcDestroysLocals(callee);
+    return funcByNameDestroysLocals(str);
   };
 
   if (inst.op() == OpFCallBuiltin) return checkTaintId(inst.imm[2].u_SA);
@@ -362,36 +353,23 @@ bool callDestroysLocals(const NormalizedInstruction& inst,
   auto const fpushPc = unit->at(fpi->m_fpushOff);
   auto const op = peek_op(fpushPc);
 
-  switch (op) {
-    case OpFPushFunc:
-    case OpFPushCufIter:
-    case OpFPushCuf:
-    case OpFPushCufF:
-    case OpFPushCufSafe: {
-      // Dynamic calls. If we've forbidden dynamic calls to functions which
-      // touch the caller's frame, we know this can't be one.
-      return !disallowDynamicVarEnvFuncs();
-    }
-    case OpFPushFuncD:
-      return checkTaintId(getImm(fpushPc, 1).u_SA);
-    case OpFPushFuncU:
-      return checkTaintId(getImm(fpushPc, 1).u_SA) ||
-        checkTaintId(getImm(fpushPc, 2).u_SA);
-
-    case OpFPushObjMethod:
-    case OpFPushObjMethodD:
-    case OpFPushClsMethod:
-    case OpFPushClsMethodF:
-    case OpFPushClsMethodD:
-    case OpFPushCtor:
-    case OpFPushCtorD:
-      // None of these touch the caller's frame because they all call methods,
-      // not top-level functions.
-      return false;
-
-    default:
-      return true;
+  if (op == OpFPushFunc) {
+    // If the call has any arguments, the FPushFunc will be in a different
+    // tracelet -- the tracelet will break on every FPass* because the reffiness
+    // of the callee isn't knowable. So we have to say the call destroys locals,
+    // to be conservative. If there aren't any arguments, then it can't destroy
+    // locals -- even if the call is to extract(), there's no argument, so it
+    // won't do anything.
+    auto const numArgs = inst.imm[0].u_IVA;
+    return (numArgs != 0);
   }
+  if (op == OpFPushFuncD) return checkTaintId(getImm(fpushPc, 1).u_SA);
+  if (op == OpFPushFuncU) {
+    return checkTaintId(getImm(fpushPc, 1).u_SA) ||
+           checkTaintId(getImm(fpushPc, 2).u_SA);
+  }
+
+  return false;
 }
 
 bool builtinFuncNeedsCallerFrame(const Func* callee) {

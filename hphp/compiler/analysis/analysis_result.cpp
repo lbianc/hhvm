@@ -287,14 +287,6 @@ bool AnalysisResult::declareFunction(FunctionScopePtr funcScope) const {
     // we need someone to hold on to a reference to it
     // even though we're not going to do anything with it
     this->lock()->m_ignoredScopes.push_back(funcScope);
-
-    std::string msg;
-    string_printf(
-      msg,
-      Strings::REDECLARE_BUILTIN,
-      funcScope->getScopeName().c_str()
-    );
-    funcScope->setFatal(msg);
     return false;
   }
 
@@ -536,6 +528,7 @@ void AnalysisResult::analyzeProgram(bool system /* = false */) {
   AnalysisResultPtr ar = shared_from_this();
 
   getVariables()->setAttribute(VariableTable::ContainsLDynamicVariable);
+  getVariables()->setAttribute(VariableTable::ContainsExtract);
   getVariables()->setAttribute(VariableTable::ForceGlobal);
 
   // Analyze Includes

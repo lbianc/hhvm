@@ -37,7 +37,7 @@ namespace {
 //////////////////////////////////////////////////////////////////////
 
 struct State {
-  bool initialized{false};
+  bool initialized = false;
   std::vector<Type> locals;
 };
 
@@ -52,7 +52,6 @@ struct BlockInfo {
 std::string DEBUG_ONLY show(const State& state) {
   if (!state.initialized) return "<uninit>\n";
   auto ret = std::string{};
-
   for (auto locID = uint32_t{0}; locID < state.locals.size(); ++locID) {
     auto const ty = state.locals[locID];
     if (ty < TGen) folly::format(&ret, "  L{}: {}\n", locID, ty.toString());
@@ -61,20 +60,12 @@ std::string DEBUG_ONLY show(const State& state) {
 }
 
 State entry_state(const RegionDesc& region, std::vector<Type>* input) {
+  auto const numLocals = region.start().func()->numLocals();
   auto ret = State{};
   ret.initialized = true;
-
   if (input) ret.locals = *input;
-  auto const func = region.start().func();
-  ret.locals.resize(func->numLocals(), TGen);
-
+  ret.locals.resize(numLocals, TGen);
   return ret;
-}
-
-bool merge_type(Type& lhs, const Type& rhs) {
-  auto const old = lhs;
-  lhs |= rhs;
-  return lhs != old;
 }
 
 bool merge_into(State& dst, const State& src) {
@@ -82,11 +73,14 @@ bool merge_into(State& dst, const State& src) {
     dst = src;
     return true;
   }
-  auto changed = false;
 
   always_assert(dst.locals.size() == src.locals.size());
-  for (auto i = uint32_t{0}; i < src.locals.size(); ++i) {
-    changed |= merge_type(dst.locals[i], src.locals[i]);
+
+  auto changed = false;
+  for (auto loc = uint32_t{0}; loc < src.locals.size(); ++loc) {
+    auto const old_ty = dst.locals[loc];
+    dst.locals[loc] |= src.locals[loc];
+    if (old_ty != dst.locals[loc]) changed = true;
   }
 
   return changed;
@@ -94,60 +88,62 @@ bool merge_into(State& dst, const State& src) {
 
 //////////////////////////////////////////////////////////////////////
 
-Type& type_of(State& state, Location l) {
-  switch (l.tag()) {
-    case LTag::Local: {
-      auto const locID = l.localId();
-      assertx(locID < state.locals.size());
-      return state.locals[locID];
-    }
-    case LTag::Stack:
-      always_assert(false);
-  }
-  not_reached();
-}
-
-Type type_of(const State& state, Location l) {
-  return type_of(const_cast<State&>(state), l);
-}
-
 bool preconds_may_pass(const RegionDesc::Block& block,
                        const State& state) {
-  // Bail if any type is Bottom, which can only happen in unreachable paths.
-  for (auto const& ty : state.locals) {
-    if (ty == TBottom) return false;
+  // Return false if the type of any local is bottom, which can only
+  // happen in unreachable paths.
+  for (auto& locType : state.locals) {
+    if (locType == TBottom) return false;
   }
 
   auto const& preConds = block.typePreConditions();
-
-  for (auto const& p : preConds) {
-    if (p.location.tag() != LTag::Local) continue;
-    auto const ty = type_of(state, p.location);
-    if (!ty.maybe(p.type)) {
-      FTRACE(6, "  x B{}'s precond {} fails ({} is {})\n",
-             block.id(), show(p), show(p.location), ty);
-      return false;
+  for (auto const& preCond : preConds) {
+    switch (preCond.location.tag()) {
+      case LTag::Local: {
+        auto const loc = preCond.location.localId();
+        assertx(loc < state.locals.size());
+        if (!state.locals[loc].maybe(preCond.type)) {
+          FTRACE(6, "  x B{}'s precond {} fails (Local{} is {})\n",
+                 block.id(), show(preCond), loc, state.locals[loc]);
+          return false;
+        }
+        break;
+      }
+      case LTag::Stack:
+        break;
     }
   }
   return true;
 }
 
-/*
- * PostConditions of a block are our local transfer functions.
- *
- * Changed types are overwritten, while refined types are intersected
- * with the current type.
- */
+// PostConditions of a block are our local transfer functions.
+// Changed types are overwritten, while refined types are intersected
+// with the current type.
 void apply_transfer_function(State& dst, const PostConditions& postConds) {
   for (auto& p : postConds.refined) {
-    if (p.location.tag() != LTag::Local) continue;
-    auto& ty = type_of(dst, p.location);
-    ty &= p.type;
+    switch (p.location.tag()) {
+      case LTag::Local: {
+        const auto locId = p.location.localId();
+        assert(locId < dst.locals.size());
+        dst.locals[locId] = dst.locals[locId] & p.type;
+        break;
+      }
+      case LTag::Stack:
+        break;
+    }
   }
+
   for (auto& p : postConds.changed) {
-    if (p.location.tag() != LTag::Local) continue;
-    auto& ty = type_of(dst, p.location);
-    ty = p.type;
+    switch (p.location.tag()) {
+      case LTag::Local: {
+        const auto locId = p.location.localId();
+        assert(locId < dst.locals.size());
+        dst.locals[locId] = p.type;
+        break;
+      }
+      case LTag::Stack:
+        break;
+    }
   }
 }
 

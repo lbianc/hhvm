@@ -524,10 +524,7 @@ Array resolveTS(const Array& arr,
       newarr.add(s_param_types, Variant(paramTypes));
       break;
     }
-    case TypeStructure::Kind::T_array:
-    case TypeStructure::Kind::T_dict:
-    case TypeStructure::Kind::T_vec:
-    case TypeStructure::Kind::T_keyset: {
+    case TypeStructure::Kind::T_array: {
       if (arr.exists(s_generic_types)) {
         newarr.add(s_generic_types,
                    Variant(resolveGenerics(arr, typeCns, typeCnsCls,

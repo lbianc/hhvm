@@ -20,8 +20,6 @@
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/types.h"
 
-#include "hphp/runtime/base/type-variant.h"
-
 namespace HPHP { namespace jit {
 
 struct IRInstruction;

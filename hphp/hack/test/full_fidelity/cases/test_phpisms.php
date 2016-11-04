@@ -4,14 +4,5 @@
 // TODO: Add those errors, and test them.
 class foo {
   var $x; // PHP allows "var" as a synonym for "public" on a property.
-  function bar() { // PHP allows functions with no modifiers.
-    global $a; // Only allowed in PHP, not in Hack.
-    global(123); // A statement beginning with global should still parse.
-    $f = new foo; // PHP allows argument list to be omitted
-    switch($a) { case 1; default; } // PHP allows semis as well as colons
-    return $x or $x and $x xor $x <=> $x; // PHP operators.
-
-  }
+  function bar() {} // PHP allows functions with no modifiers.
 }
-// The closing tag is not supported in Hack but we parse it anyways.
-?>

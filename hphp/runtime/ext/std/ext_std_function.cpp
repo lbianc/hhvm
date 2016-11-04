@@ -98,7 +98,8 @@ String HHVM_FUNCTION(create_function, const String& args, const String& code) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(func_get_arg, int arg_num) {
+ALWAYS_INLINE
+static Variant func_get_arg_impl(int arg_num) {
   auto const ar = GetCallerFrameForArgs();
 
   if (ar == nullptr) {
@@ -143,6 +144,15 @@ Variant HHVM_FUNCTION(func_get_arg, int arg_num) {
   }
 
   return false;
+}
+
+Variant HHVM_FUNCTION(func_get_arg, int arg_num) {
+  raise_disallowed_dynamic_call(
+    "func_get_arg should not be called dynamically");
+  return func_get_arg_impl(arg_num);
+}
+Variant HHVM_FUNCTION(SystemLib_func_get_arg_sl, int arg_num) {
+  return func_get_arg_impl(arg_num);
 }
 
 Array hhvm_get_frame_args(const ActRec* ar, int offset) {
@@ -196,6 +206,12 @@ Array hhvm_get_frame_args(const ActRec* ar, int offset) {
 } while(0)
 
 Variant HHVM_FUNCTION(func_get_args) {
+  raise_disallowed_dynamic_call(
+    "func_get_args should not be called dynamically");
+  FUNC_GET_ARGS_IMPL(0);
+}
+// __SystemLib\func_get_args_sl
+Variant HHVM_FUNCTION(SystemLib_func_get_args_sl) {
   FUNC_GET_ARGS_IMPL(0);
 }
 
@@ -207,7 +223,8 @@ Variant HHVM_FUNCTION(SystemLib_func_slice_args, int offset) {
   FUNC_GET_ARGS_IMPL(offset);
 }
 
-int64_t HHVM_FUNCTION(func_num_args) {
+ALWAYS_INLINE
+static int64_t func_num_args_impl() {
   EagerCallerFrame cf;
   ActRec* ar = cf.actRecForArgs();
   if (ar == nullptr) {
@@ -220,6 +237,15 @@ int64_t HHVM_FUNCTION(func_num_args) {
     return -1;
   }
   return ar->numArgs();
+}
+
+int64_t HHVM_FUNCTION(func_num_args) {
+  raise_disallowed_dynamic_call(
+    "func_num_args should not be called dynamically");
+  return func_num_args_impl();
+}
+int64_t HHVM_FUNCTION(SystemLib_func_num_arg_) {
+  return func_num_args_impl();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -248,9 +274,12 @@ void StandardExtension::initFunction() {
   HHVM_FE(forward_static_call);
   HHVM_FE(create_function);
   HHVM_FE(func_get_arg);
+  HHVM_FALIAS(__SystemLib\\func_get_arg_sl, SystemLib_func_get_arg_sl);
   HHVM_FE(func_get_args);
+  HHVM_FALIAS(__SystemLib\\func_get_args_sl, SystemLib_func_get_args_sl);
   HHVM_FALIAS(__SystemLib\\func_slice_args, SystemLib_func_slice_args);
   HHVM_FE(func_num_args);
+  HHVM_FALIAS(__SystemLib\\func_num_arg_, SystemLib_func_num_arg_);
   HHVM_FE(register_postsend_function);
   HHVM_FE(register_shutdown_function);
 

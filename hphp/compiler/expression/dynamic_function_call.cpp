@@ -57,6 +57,12 @@ void DynamicFunctionCall::analyzeProgram(AnalysisResultPtr ar) {
     if (m_params) {
       m_params->markParams();
     }
+
+    if (!m_class && !hasStaticClass()) {
+      FunctionScopePtr fs = getFunctionScope();
+      VariableTablePtr vt = fs->getVariables();
+      vt->setAttribute(VariableTable::ContainsDynamicFunctionCall);
+    }
   }
 }
 

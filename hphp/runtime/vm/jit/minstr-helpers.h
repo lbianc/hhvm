@@ -321,14 +321,16 @@ inline TypedValue setOpPropCO(Class* ctx, ObjectData* base, TypedValue key,
 
 inline TypedValue incDecPropC(Class* ctx, TypedValue* base, TypedValue key,
                               IncDecOp op) {
-  auto const result = HPHP::IncDecProp(ctx, op, base, key);
+  auto result = make_tv<KindOfUninit>();
+  HPHP::IncDecProp(ctx, op, base, key, result);
   assertx(result.m_type != KindOfRef);
   return result;
 }
 
 inline TypedValue incDecPropCO(Class* ctx, ObjectData* base, TypedValue key,
                                IncDecOp op) {
-  auto const result = HPHP::IncDecPropObj(ctx, op, base, key);
+  auto result = make_tv<KindOfUninit>();
+  HPHP::IncDecPropObj(ctx, op, base, key, result);
   assertx(result.m_type != KindOfRef);
   return result;
 }

@@ -315,9 +315,21 @@ Variant HHVM_FUNCTION(unserialize, const String& str,
 ///////////////////////////////////////////////////////////////////////////////
 // variable table
 
-Array HHVM_FUNCTION(get_defined_vars) {
+ALWAYS_INLINE
+static Array get_defined_vars() {
   VarEnv* v = g_context->getOrCreateVarEnv();
   return v ? v->getDefinedVariables() : empty_array();
+}
+
+Array HHVM_FUNCTION(get_defined_vars) {
+  raise_disallowed_dynamic_call("get_defined_vars should not be "
+    "called dynamically");
+  return get_defined_vars();
+}
+
+// accessible as __SystemLib\\get_defined_vars
+Array HHVM_FUNCTION(SystemLib_get_defined_vars) {
+  return get_defined_vars();
 }
 
 const StaticString
@@ -405,10 +417,10 @@ static bool modify_extract_name(VarEnv* v,
   return is_valid_var_name(name.get()->data(), name.size());
 }
 
-int64_t HHVM_FUNCTION(extract,
-                      VRefParam vref_array,
-                      int64_t extract_type = EXTR_OVERWRITE,
-                      const String& prefix = "") {
+ALWAYS_INLINE static
+int64_t extract_impl(VRefParam vref_array,
+                     int extract_type /* = EXTR_OVERWRITE */,
+                     const String& prefix /* = "" */) {
   auto arrByRef = false;
   auto arr_tv = vref_array.wrapped().asTypedValue();
   if (arr_tv->m_type == KindOfRef) {
@@ -468,16 +480,41 @@ int64_t HHVM_FUNCTION(extract,
   return count;
 }
 
-void HHVM_FUNCTION(parse_str,
-                   const String& str,
-                   VRefParam arr /* = null */) {
+int64_t HHVM_FUNCTION(extract, VRefParam vref_array,
+                      int64_t extract_type /* = EXTR_OVERWRITE */,
+                      const String& prefix /* = "" */) {
+  raise_disallowed_dynamic_call("extract should not be called dynamically");
+  return extract_impl(vref_array, extract_type, prefix);
+}
+
+int64_t HHVM_FUNCTION(SystemLib_extract,
+                      VRefParam vref_array,
+                      int64_t extract_type = EXTR_OVERWRITE,
+                      const String& prefix = "") {
+  return extract_impl(vref_array, extract_type, prefix);
+}
+
+static void parse_str_impl(const String& str, VRefParam arr) {
   Array result = Array::Create();
   HttpProtocol::DecodeParameters(result, str.data(), str.size());
   if (!arr.isReferenced()) {
-    HHVM_FN(extract)(result);
+    HHVM_FN(SystemLib_extract)(result);
     return;
   }
   arr.assignIfRef(result);
+}
+
+void HHVM_FUNCTION(parse_str,
+                   const String& str,
+                   VRefParam arr /* = null */) {
+  raise_disallowed_dynamic_call("parse_str should not be called dynamically");
+  parse_str_impl(str, arr);
+}
+
+void HHVM_FUNCTION(SystemLib_parse_str,
+                   const String& str,
+                   VRefParam arr /* = null */) {
+  parse_str_impl(str, arr);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -524,8 +561,11 @@ void StandardExtension::initVariable() {
   HHVM_FE(serialize);
   HHVM_FE(unserialize);
   HHVM_FE(get_defined_vars);
+  HHVM_FALIAS(__SystemLib\\get_defined_vars, SystemLib_get_defined_vars);
   HHVM_FE(extract);
   HHVM_FE(parse_str);
+  HHVM_FALIAS(__SystemLib\\extract, SystemLib_extract);
+  HHVM_FALIAS(__SystemLib\\parse_str, SystemLib_parse_str);
 
   loadSystemlib("std_variable");
 }

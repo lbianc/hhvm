@@ -104,7 +104,7 @@ void FuncCache::lookup(rds::Handle handle,
   const StringData* pairSd = pair->m_key;
   if (!stringMatches(pairSd, sd)) {
     // Miss. Does it actually exist?
-    auto const* func = Unit::lookupDynCallFunc(sd);
+    auto const* func = Unit::lookupFunc(sd);
     if (UNLIKELY(!func)) {
       ObjectData *this_ = nullptr;
       Class* self_ = nullptr;
@@ -140,13 +140,12 @@ void FuncCache::lookup(rds::Handle handle,
     }
     assertx(!func->implCls());
     func->validate();
-    pair->m_key =
-      const_cast<StringData*>(func->displayName()); // use a static name
+    pair->m_key = const_cast<StringData*>(func->name()); // use a static name
     pair->m_value = func;
   }
   ar->m_func = pair->m_value;
   ar->trashThis();
-  assertx(stringMatches(pair->m_key, pair->m_value->displayName()));
+  assertx(stringMatches(pair->m_key, pair->m_value->name()));
   pair->m_value->validate();
 }
 

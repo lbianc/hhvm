@@ -86,8 +86,6 @@ Func::Func(Unit& unit, const StringData* name, Attr attrs)
   m_shouldSampleJit = StructuredLog::coinflip(
       RuntimeOption::EvalJitSampleRate
   );
-
- assertx(IMPLIES(accessesCallerFrame(), isBuiltin() && !isMethod()));
 }
 
 Func::~Func() {
@@ -197,10 +195,8 @@ Func* Func::clone(Class* cls, const StringData* name) const {
 
 void Func::rescope(Class* ctx, Attr attrs) {
   m_cls = ctx;
-  if (attrs != AttrNone) {
-    m_attrs = attrs;
-    assertx(IMPLIES(accessesCallerFrame(), isBuiltin() && !isMethod()));
-  }
+  if (attrs != AttrNone) m_attrs = attrs;
+
   setFullName(numParams());
 }
 
@@ -460,6 +456,7 @@ bool Func::byRef(int32_t arg) const {
 }
 
 const StaticString s_extract("extract");
+const StaticString s_extractNative("__SystemLib\\extract");
 const StaticString s_current("current");
 const StaticString s_key("key");
 const StaticString s_array_multisort("array_multisort");
@@ -473,12 +470,11 @@ bool Func::mustBeRef(int32_t arg) const {
       // try to take their first parameter by reference but they also allow
       // expressions that cannot be taken by reference (ex. an array literal).
       // TODO Task #4442937: Come up with a cleaner way to do this.
-      if (cls()) return true;
-      auto const name = displayName();
-      if (name == s_extract.get()) return false;
-      if (name == s_current.get()) return false;
-      if (name == s_key.get()) return false;
-      if (name == s_array_multisort.get()) return false;
+      if (name() == s_extract.get() && !cls()) return false;
+      if (name() == s_extractNative.get() && !cls()) return false;
+      if (name() == s_current.get() && !cls()) return false;
+      if (name() == s_key.get() && !cls()) return false;
+      if (name() == s_array_multisort.get() && !cls()) return false;
     }
   }
 
@@ -620,9 +616,6 @@ static void print_attrs(std::ostream& out, Attr attrs) {
   if (attrs & AttrPersistent) { out << " (persistent)"; }
   if (attrs & AttrMayUseVV) { out << " (mayusevv)"; }
   if (attrs & AttrRequiresThis) { out << " (requiresthis)"; }
-  if (attrs & AttrBuiltin) { out << " (builtin)"; }
-  if (attrs & AttrReadsCallerFrame) { out << " (reads_caller_frame)"; }
-  if (attrs & AttrWritesCallerFrame) { out << " (writes_caller_frame)"; }
 }
 
 void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {

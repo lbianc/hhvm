@@ -214,14 +214,13 @@ end
 (*****************************************************************************)
 (* Pretty-printer of the "full" type.                                        *)
 (* This is used in server/symbolTypeService and elsewhere                    *)
-(* With debug_mode set it is used for hh_show and hh_show_env                *)
+(* With debug_mode set it is used for hh_show                                *)
 (*****************************************************************************)
 
 module Full = struct
   module Env = Typing_env
 
   let debug_mode = ref false
-  let show_tvars = ref false
 
   let rec list_sep o s f l =
     match l with
@@ -280,13 +279,11 @@ module Full = struct
       let _, n' = Env.get_var env n in
       if ISet.mem n' st then o "[rec]"
       else
-      (* In debug mode we show where type variables appear *)
-      if !debug_mode then o "^";
-      (* For hh_show_env we further show the type variable number *)
-      if !show_tvars then o (string_of_int n');
-      let _, ety = Env.expand_type env (Reason.Rnone, x) in
-      let st = ISet.add n' st in
-      ty tcopt st env o ety
+        (* In debug mode we show where type variables appear *)
+        if !debug_mode then o "^";
+        let _, ety = Env.expand_type env (Reason.Rnone, x) in
+        let st = ISet.add n' st in
+        ty tcopt st env o ety
     | Tfun ft ->
       if ft.ft_abstract then o "abs " else ();
       o "(function"; fun_type tcopt st env o ft; o ")";
@@ -399,7 +396,6 @@ module Full = struct
       Typing_env.empty tcopt Relative_path.default
         ~droot:None in
     to_string env x
-
 end
 
 (*****************************************************************************)
@@ -635,13 +631,6 @@ let debug env ty =
   let f_str = full_strip_ns env ty in
   Full.debug_mode := false;
   f_str
-
-let debug_with_tvars env ty =
-  Full.show_tvars := true;
-  let f_str = debug env ty in
-  Full.show_tvars := false;
-  f_str
-
 let class_ tcopt c = PrintClass.class_type tcopt c
 let gconst tcopt gc = Full.to_string_decl tcopt gc
 let fun_ tcopt f = PrintFun.fun_type tcopt f

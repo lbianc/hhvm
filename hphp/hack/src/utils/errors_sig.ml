@@ -205,7 +205,6 @@ module type S = sig
   val static_dynamic : Pos.t -> Pos.t -> string -> unit
   val null_member : string -> Pos.t -> (Pos.t * string) list -> unit
   val non_object_member : string -> Pos.t -> string -> Pos.t -> unit
-  val ambiguous_member : string -> Pos.t -> string -> Pos.t -> unit
   val null_container : Pos.t -> (Pos.t * string) list -> unit
   val option_mixed : Pos.t -> unit
   val declared_covariant : Pos.t -> Pos.t -> (Pos.t * string) list -> unit

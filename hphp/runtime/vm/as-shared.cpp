@@ -58,6 +58,7 @@ constexpr bool supported(ContextMask mask, AttrContext a) {
   X(AttrNoOverrideMagicSet,   C,       "nov_set");          \
   X(AttrNoOverrideMagicIsset, C,       "nov_isset");        \
   X(AttrNoOverrideMagicUnset, C,       "nov_unset");        \
+  X(AttrMayUseVV,             F,       "mayusevv");         \
   /* */
 
 #define HHAS_TYPE_FLAGS                                     \

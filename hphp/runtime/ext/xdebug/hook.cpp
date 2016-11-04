@@ -404,9 +404,11 @@ static bool is_breakpoint_hit(XDebugBreakpoint& bp) {
     auto const prev_disabled = g_context->m_dbgNoBreak;
     g_context->m_dbgNoBreak = true;
 
-    auto const result = g_context->evalPHPDebugger(bp.conditionUnit, 0);
+    Variant result;
+    auto const failure = g_context->evalPHPDebugger((TypedValue*) &result,
+                                                     bp.conditionUnit, 0);
     g_context->m_dbgNoBreak = prev_disabled;
-    if (result.first || !result.second.toBoolean()) {
+    if (failure || !result.toBoolean()) {
       return false;
     }
   }

@@ -979,9 +979,7 @@ public:
   void emitPostponedMeths();
   void bindUserAttributes(MethodStatementPtr meth,
                           FuncEmitter *fe);
-  Attr bindNativeFunc(MethodStatementPtr meth,
-                      FuncEmitter *fe,
-                      bool dynCallWrapper);
+  void bindNativeFunc(MethodStatementPtr meth, FuncEmitter *fe);
   int32_t emitNativeOpCodeImpl(MethodStatementPtr meth,
                                const char* funcName,
                                const char* className,
@@ -1026,6 +1024,7 @@ public:
     CallUserFuncForwardArray = CallUserFuncForward | CallUserFuncArray
   };
 
+  bool emitSystemLibVarEnvFunc(Emitter& e, SimpleFunctionCallPtr node);
   bool emitCallUserFunc(Emitter& e, SimpleFunctionCallPtr node);
   Func* canEmitBuiltinCall(const std::string& name, int numParams);
   void emitFuncCall(Emitter& e, FunctionCallPtr node,
@@ -3442,9 +3441,6 @@ void EmitterVisitor::visit(FileScopePtr file) {
   for (i = 0; i < nk; i++) {
     StatementPtr s = (*stmts)[i];
     if (auto meth = dynamic_pointer_cast<MethodStatement>(s)) {
-      if (auto msg = s->getFunctionScope()->getFatalMessage()) {
-        throw IncludeTimeFatalException(s, msg->data());
-      }
       // Emit afterwards
       postponeMeth(meth, nullptr, true);
     }
@@ -4422,10 +4418,6 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     auto m = static_pointer_cast<MethodStatement>(node);
     // Only called for fn defs not on the top level
     assert(!node->getClassScope()); // Handled directly by emitClass().
-    if (auto msg = node->getFunctionScope()->getFatalMessage()) {
-      emitMakeUnitFatal(e, msg->data());
-      return false;
-    }
     StringData* nName = makeStaticString(m->getOriginalName());
     FuncEmitter* fe = m_ue.newFuncEmitter(nName);
     e.DefFunc(fe->id());
@@ -5102,7 +5094,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       e.Gt();
       e.JmpZ(disabled);
 
-      emitFuncCall(e, call, "assert", call->getParams());
+      emitFuncCall(e, call, "__SystemLib\\assert", call->getParams());
       emitConvertToCell(e);
       e.Jmp(after);
 
@@ -5110,6 +5102,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       e.True();
 
       after.set(e);
+      return true;
+    } else if (emitSystemLibVarEnvFunc(e, call)) {
       return true;
     } else if (call->isCallToFunction("array_slice") &&
                params && params->getCount() == 2 &&
@@ -7797,11 +7791,9 @@ static Attr buildMethodAttrs(MethodStatementPtr meth, FuncEmitter* fe,
   ModifierExpressionPtr mod(meth->getModifiers());
   Attr attrs = buildAttrs(mod, meth->isRef());
 
-  // Be conservative by default. HHBBC can clear it where appropriate.
-  attrs |= AttrMayUseVV;
-
-  if (funcScope->hasRefVariadicParam()) {
-    attrs |= AttrVariadicByRef;
+  // if hasCallToGetArgs() or if mayUseVV
+  if (meth->hasCallToGetArgs() || funcScope->mayUseVV()) {
+    attrs = attrs | AttrMayUseVV;
   }
 
   auto fullName = meth->getOriginalFullName();
@@ -8025,29 +8017,7 @@ void EmitterVisitor::emitPostponedMeths() {
     }
 
     if (funcScope->isNative()) {
-      auto const attr = bindNativeFunc(meth, fe, false);
-      if (attr & (AttrReadsCallerFrame | AttrWritesCallerFrame)) {
-        // If this is a builtin which may access the caller's frame, generate a
-        // dynamic call wrapper function. Dynamic calls to the builtin will be
-        // routed to this wrapper instead.  This function is identical to the
-        // normal builtin function, except it includes the VarEnvDynCall opcode.
-        if (!meth->is(Statement::KindOfFunctionStatement) ||
-            !p.m_top || fe->pce()) {
-          throw IncludeTimeFatalException(
-            meth,
-            "ReadsCallerFrame or WritesCallerFrame can only "
-            "be applied to top-level functions"
-          );
-        }
-        auto const rewrittenName = makeStaticString(
-          folly::sformat("{}$dyncall_wrapper", fe->name->data()));
-        auto stub = m_ue.newFuncEmitter(rewrittenName);
-        m_curFunc = stub;
-        SCOPE_EXIT { m_curFunc = fe; };
-        bindNativeFunc(meth, stub, true);
-        assert(stub->id() != kInvalidId);
-        fe->dynCallWrapperId = stub->id();
-      }
+      bindNativeFunc(meth, fe);
     } else {
       emitMethodMetadata(meth, p.m_closureUseVars, p.m_top);
       emitMethod(meth);
@@ -8091,9 +8061,8 @@ const StaticString s_Void("HH\\void");
 const char* attr_Deprecated = "__Deprecated";
 const StaticString s_attr_Deprecated(attr_Deprecated);
 
-Attr EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
-                                    FuncEmitter *fe,
-                                    bool dynCallWrapper) {
+void EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
+                                    FuncEmitter *fe) {
   if (SystemLib::s_inited &&
       !(Option::WholeProgram && meth->isSystem())) {
     throw IncludeTimeFatalException(meth,
@@ -8182,16 +8151,12 @@ Attr EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
 
   fe->setBuiltinFunc(attributes, base);
   fillFuncEmitterParams(fe, meth->getParams(), true);
-
-  if (dynCallWrapper) e.VarEnvDynCall();
-
   if (nativeAttrs & Native::AttrOpCodeImpl) {
     ff.setStackPad(emitNativeOpCodeImpl(meth, funcname, classname, fe));
   } else {
     e.NativeImpl();
   }
   emitMethodDVInitializers(e, meth, topOfBody);
-  return attributes;
 }
 
 void EmitterVisitor::emitMethodMetadata(MethodStatementPtr meth,
@@ -8943,6 +8908,39 @@ void EmitterVisitor::emitVirtualClassBase(Emitter& e, Expr* node) {
     m_evalStack.setString(
       makeStaticString(node->getOriginalClassName()));
   }
+}
+
+bool EmitterVisitor::emitSystemLibVarEnvFunc(Emitter& e,
+                                             SimpleFunctionCallPtr call) {
+  if (call->isCallToFunction("extract")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\extract", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("parse_str")) {
+    emitFuncCall(e, call, "__SystemLib\\parse_str", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("compact")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\compact_sl", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("get_defined_vars")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\get_defined_vars", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("func_get_args")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\func_get_args_sl", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("func_get_arg")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\func_get_arg_sl", call->getParams());
+    return true;
+  } else if (call->isCallToFunction("func_num_args")) {
+    emitFuncCall(e, call,
+                 "__SystemLib\\func_num_arg_", call->getParams());
+    return true;
+  }
+  return false;
 }
 
 bool EmitterVisitor::emitCallUserFunc(Emitter& e, SimpleFunctionCallPtr func) {
@@ -10962,7 +10960,6 @@ commitGlobalData(std::unique_ptr<ArrayTypeTable::Builder> arrTable) {
   auto gd                     = Repo::GlobalData{};
   gd.HardTypeHints            = HHBBC::options.HardTypeHints;
   gd.HardReturnTypeHints      = HHBBC::options.HardReturnTypeHints;
-  gd.ElideAutoloadInvokes     = HHBBC::options.ElideAutoloadInvokes;
   gd.UsedHHBBC                = Option::UseHHBBC;
   gd.PHP7_IntSemantics        = RuntimeOption::PHP7_IntSemantics;
   gd.PHP7_ScalarTypes         = RuntimeOption::PHP7_ScalarTypes;

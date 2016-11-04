@@ -582,18 +582,6 @@ and p_expression = "Expression", fun () -> [
   (* [yield; array_element_initializer] *)
   ]
 
-and p_expression_no_name = "ExpressionNoName", fun () -> [
-  (* DEVIATION non-assignment options are pre-expanded to increase their
-   * likelihood *)
-  [NonTerm p_assignment_expression];
-  [NonTerm p_primary_expression_no_name];
-  [NonTerm p_unary_expression];
-  (* DEVIATION: complex hierarchy is flattened here *)
-  [NonTerm p_binary_expression];
-  [NonTerm p_xhp_expression]
-  (* [yield; array_element_initializer] *)
-  ]
-
 and p_xhp_expression = "XHPExpression", fun () -> [
   (* Note: 1. opening and closing names are not made the same
    *       2. opening is used as xhp_element_name which comes with a < token
@@ -658,19 +646,6 @@ and p_instanceof_expression = "InstanceofExpression", fun () -> [
 and p_instance_designator = "InstanceTypeDesignator", fun () -> [
   [qualified_name]; [NonTerm p_variable_name]]
 
-and p_primary_expression_no_name = "PrimaryExpressionNoName", fun () -> [
-  (* TODO *)
-  [NonTerm p_variable_name];
-  [NonTerm p_literal];
-  [NonTerm p_intrinsic];
-  (* [NonTerm p_collection_literal]; *)
-  (* [NonTerm p_tuple_literal]; *)
-  [NonTerm p_shape_literal];
-  [NonTerm p_anonymous_fun_creation];
-  (* [NonTerm p_awaitable_creation]; *)
-  [left_paren; NonTerm p_expression_no_name; right_paren];
-  [dollar_dollar]]
-
 and p_primary_expression = "PrimaryExpression", fun () -> [
   (* TODO *)
   [NonTerm p_variable_name];
@@ -682,7 +657,7 @@ and p_primary_expression = "PrimaryExpression", fun () -> [
   [NonTerm p_shape_literal];
   [NonTerm p_anonymous_fun_creation];
   (* [NonTerm p_awaitable_creation]; *)
-  [left_paren; NonTerm p_expression_no_name; right_paren];
+  [left_paren; NonTerm p_expression; right_paren];
   [dollar_dollar]]
 
 and p_list_intrinsic = "ListIntrinsic", fun () -> [

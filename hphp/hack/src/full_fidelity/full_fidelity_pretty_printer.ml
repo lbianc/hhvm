@@ -215,8 +215,6 @@ let rec get_doc node =
                       (x.header_language |> get_doc |> add_break)
   | Script x -> group_doc ( get_doc x.script_header
                      ^| get_doc x.script_declarations )
-  | ScriptFooter { footer_question_greater_than } ->
-    get_doc footer_question_greater_than
   | ClassishDeclaration
     { classish_attribute; classish_modifiers; classish_keyword;
       classish_name; classish_type_parameters; classish_extends_keyword;
@@ -353,27 +351,17 @@ let rec get_doc node =
       equal ^|
       group_doc (type_spec ^^^ semicolon)
     )
-  | EnumDeclaration {
-    enum_attribute_spec;
-    enum_keyword;
-    enum_name;
-    enum_colon;
-    enum_base;
-    enum_type;
-    enum_left_brace;
-    enum_enumerators;
-    enum_right_brace } ->
-    let attrs = get_doc enum_attribute_spec in
-    let en = get_doc enum_keyword in
-    let na = get_doc enum_name in
-    let co = get_doc enum_colon in
-    let ba = get_doc enum_base in
-    let ty = get_doc enum_type in
-    let lb = get_doc enum_left_brace in
-    let es = get_doc enum_enumerators in
-    let rb = get_doc enum_right_brace in
+  | EnumDeclaration x ->
+    let en = get_doc x.enum_keyword in
+    let na = get_doc x.enum_name in
+    let co = get_doc x.enum_colon in
+    let ba = get_doc x.enum_base in
+    let ty = get_doc x.enum_type in
+    let lb = get_doc x.enum_left_brace in
+    let es = get_doc x.enum_enumerators in
+    let rb = get_doc x.enum_right_brace in
     (* TODO: This could be a lot better. Add indentation, etc. *)
-    attrs ^| en ^| na ^| co ^| ba ^| ty ^| lb ^| es ^| rb
+    en ^| na ^| co ^| ba ^| ty ^| lb ^| es ^| rb
   | Enumerator x ->
     let n = get_doc x.enumerator_name in
     let e = get_doc x.enumerator_equal in
@@ -536,18 +524,6 @@ let rec get_doc node =
     let semicolon = get_doc expression_statement_semicolon in
     (* semicolon always follows the last line *)
     body ^^^ semicolon |> group_doc |> add_break
-  | UnsetStatement {
-    unset_keyword;
-    unset_left_paren;
-    unset_variables;
-    unset_right_paren;
-    unset_semicolon} ->
-    let u = get_doc unset_keyword in
-    let l = get_doc unset_left_paren in
-    let v = get_doc unset_variables in
-    let r = get_doc unset_right_paren in
-    let s = get_doc unset_semicolon in
-    group_doc (u ^^^ l ^^^ v ^^^ r ^^^ s)
   | WhileStatement
     { while_keyword; while_left_paren; while_condition; while_right_paren;
       while_body } ->
@@ -891,14 +867,6 @@ let rec get_doc node =
     let fs = get_doc shape_expression_fields in
     let rp = get_doc shape_expression_right_paren in
     sh ^| lp ^^^ fs ^^^ rp
-  | TupleExpression
-    { tuple_expression_keyword; tuple_expression_left_paren;
-       tuple_expression_items; tuple_expression_right_paren } ->
-    let tu = get_doc tuple_expression_keyword in
-    let lp = get_doc tuple_expression_left_paren in
-    let xs = get_doc tuple_expression_items in
-    let rp = get_doc tuple_expression_right_paren in
-    tu ^| lp ^^^ xs ^^^ rp
   | ArrayCreationExpression x ->
     let left_bracket = get_doc x.array_creation_left_bracket in
     let right_bracket = get_doc x.array_creation_right_bracket in
@@ -1105,14 +1073,6 @@ let rec get_doc node =
     let expr_list = get_doc x.echo_expressions in
     let semicolon = get_doc x.echo_semicolon in
     echo ^| expr_list ^^^ semicolon
-  | GlobalStatement {
-    global_keyword;
-    global_variables;
-    global_semicolon } ->
-    let g = get_doc global_keyword in
-    let v = get_doc global_variables in
-    let s = get_doc global_semicolon in
-    g ^| v ^^^ s
   | SimpleInitializer
     { simple_initializer_equal; simple_initializer_value } ->
     let e = get_doc simple_initializer_equal in

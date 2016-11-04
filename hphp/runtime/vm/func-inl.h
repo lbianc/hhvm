@@ -137,16 +137,6 @@ inline StrNR Func::fullNameStr() const {
   return StrNR(m_fullName);
 }
 
-inline const StringData* Func::displayName() const {
-  auto const target = dynCallTarget();
-  return LIKELY(!target) ? name() : target->name();
-}
-
-inline const StringData* Func::fullDisplayName() const {
-  auto const target = dynCallTarget();
-  return LIKELY(!target) ? fullName() : target->fullName();
-}
-
 inline const NamedEntity* Func::getNamedEntity() const {
   assert(!shared()->m_preClass);
   return *reinterpret_cast<const LowPtr<const NamedEntity>*>(&m_namedEntity);
@@ -387,23 +377,8 @@ inline bool Func::isCPPBuiltin() const {
   return UNLIKELY(!!ex) && ex->m_builtinFuncPtr;
 }
 
-inline bool Func::readsCallerFrame() const {
-  return m_attrs & AttrReadsCallerFrame;
-}
-
-inline bool Func::writesCallerFrame() const {
-  return m_attrs & AttrWritesCallerFrame;
-}
-
-inline bool Func::accessesCallerFrame() const {
-  return m_attrs & (AttrReadsCallerFrame | AttrWritesCallerFrame);
-}
-
 inline BuiltinFunction Func::builtinFuncPtr() const {
   if (auto const ex = extShared()) {
-    if (UNLIKELY(ex->m_dynCallTarget != nullptr)) {
-      return ex->m_dynCallTarget->builtinFuncPtr();
-    }
     return ex->m_builtinFuncPtr;
   }
   return nullptr;
@@ -411,24 +386,7 @@ inline BuiltinFunction Func::builtinFuncPtr() const {
 
 inline BuiltinFunction Func::nativeFuncPtr() const {
   if (auto const ex = extShared()) {
-    if (UNLIKELY(ex->m_dynCallTarget != nullptr)) {
-      return ex->m_dynCallTarget->nativeFuncPtr();
-    }
     return ex->m_nativeFuncPtr;
-  }
-  return nullptr;
-}
-
-inline Func* Func::dynCallWrapper() const {
-  if (auto const ex = extShared()) {
-    return ex->m_dynCallWrapper;
-  }
-  return nullptr;
-}
-
-inline Func* Func::dynCallTarget() const {
-  if (auto const ex = extShared()) {
-    return ex->m_dynCallTarget;
   }
   return nullptr;
 }
@@ -598,7 +556,6 @@ inline int8_t& Func::maybeIntercepted() const {
 
 inline void Func::setAttrs(Attr attrs) {
   m_attrs = attrs;
-  assertx(IMPLIES(accessesCallerFrame(), isBuiltin() && !isMethod()));
 }
 
 inline void Func::setBaseCls(Class* baseCls) {
@@ -619,28 +576,6 @@ inline void Func::setHasPrivateAncestor(bool b) {
 inline void Func::setMethodSlot(Slot s) {
   assert(isMethod());
   m_methodSlot = s;
-}
-
-inline void Func::setDynCallWrapper(Func* f) {
-  assert(accessesCallerFrame());
-  assert(f->accessesCallerFrame());
-  assert(!f->dynCallWrapper());
-  assert(extShared());
-  assert(!dynCallWrapper() || dynCallWrapper() == f);
-  assert(!dynCallTarget());
-  assert(!f->dynCallTarget() || f->dynCallTarget() == this);
-  extShared()->m_dynCallWrapper = f;
-}
-
-inline void Func::setDynCallTarget(Func* f) {
-  assert(accessesCallerFrame());
-  assert(f->accessesCallerFrame());
-  assert(!f->dynCallTarget());
-  assert(extShared());
-  assert(!dynCallTarget() || dynCallTarget() == f);
-  assert(!dynCallWrapper());
-  assert(!f->dynCallWrapper() || f->dynCallWrapper() == this);
-  extShared()->m_dynCallTarget = f;
 }
 
 //////////////////////////////////////////////////////////////////////

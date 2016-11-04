@@ -40,7 +40,7 @@ FunctionStatement::FunctionStatement
  ExpressionListPtr attrList)
   : MethodStatement(STATEMENT_CONSTRUCTOR_PARAMETER_VALUES(FunctionStatement),
                     modifiers, ref, name, params, retTypeAnnotation, stmt,
-                    attr, docComment, attrList, false) {
+                    attr, docComment, attrList, false), m_ignored(false) {
 }
 
 StatementPtr FunctionStatement::clone() {
@@ -71,7 +71,10 @@ void FunctionStatement::onParse(AnalysisResultConstPtr ar, FileScopePtr scope) {
   // is a global function, not a class method.
   FunctionScopePtr fs = onInitialParse(ar, scope);
   FunctionScope::RecordFunctionInfo(m_originalName, fs);
-  scope->addFunction(ar, fs);
+  if (!scope->addFunction(ar, fs)) {
+    m_ignored = true;
+    return;
+  }
 
   fs->setPersistent(false);
 

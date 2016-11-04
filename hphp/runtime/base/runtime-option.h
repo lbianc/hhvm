@@ -454,7 +454,6 @@ struct RuntimeOption {
   F(bool, JitTimer,                    kJitTimerDefault)                \
   F(int, JitConcurrently,              1)                               \
   F(int, JitThreads,                   4)                               \
-  F(int, JitWorkerThreads,             0)                               \
   F(bool, RecordSubprocessTimes,       false)                           \
   F(bool, AllowHhas,                   false)                           \
   F(string, UseExternalEmitter,        "")                              \
@@ -502,8 +501,7 @@ struct RuntimeOption {
   F(string, ProfileHWEvents,           std::string(""))                 \
   F(bool, JitAlwaysInterpOne,          false)                           \
   F(int32_t, JitNopInterval,           0)                               \
-  F(uint32_t, JitMaxTranslations,      10)                              \
-  F(uint32_t, JitMaxProfileTranslations, 30)                            \
+  F(uint32_t, JitMaxTranslations,      17)                              \
   F(uint64_t, JitGlobalTranslationLimit, -1)                            \
   F(uint32_t, JitMaxRegionInstrs,      1347)                            \
   F(uint32_t, JitProfileInterpRequests, kDefaultProfileInterpRequests)  \
@@ -537,7 +535,7 @@ struct RuntimeOption {
   F(bool, HHIRPartialInlineFrameOpts,  true)                            \
   F(bool, HHIRInlineSingletons,        true)                            \
   F(std::string, InlineRegionMode,     "both")                          \
-  F(bool, HHIRGenerateAsserts,         false)                           \
+  F(bool, HHIRGenerateAsserts,         debug)                           \
   F(bool, HHIRDeadCodeElim,            true)                            \
   F(bool, HHIRGlobalValueNumbering,    true)                            \
   F(bool, HHIRTypeCheckHoisting,       false) /* Task: 7568599 */       \

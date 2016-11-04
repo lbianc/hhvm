@@ -564,6 +564,9 @@ void Parser::onCall(Token &out, bool dynamic, Token &name, Token &params,
           stripped == "func_get_args" ||
           stripped == "func_get_arg") {
         funcName = stripped;
+        if (m_funcContexts.size() > 0) {
+          m_funcContexts.back().hasCallToGetArgs = true;
+        }
       }
       // Auto import a few functions from the HH namespace
       // TODO(#4245628): merge those into m_fnAliasTable
@@ -1303,12 +1306,16 @@ StatementPtr Parser::onFunctionHelper(FunctionType type,
 
     func->onParse(m_ar, m_file);
     completeScope(func->getFunctionScope());
+    if (func->ignored()) {
+      return NEW_STMT0(StatementList);
+    }
     mth = func;
   }
 
   // check and set generator/async flags
   FunctionContext funcContext = m_funcContexts.back();
   checkFunctionContext(funcName, funcContext, modifiersExp, ref->num());
+  mth->setHasCallToGetArgs(funcContext.hasCallToGetArgs);
   mth->setMayCallSetFrameMetadata(funcContext.mayCallSetFrameMetadata);
   mth->getFunctionScope()->setGenerator(funcContext.isGenerator);
   mth->getFunctionScope()->setAsync(modifiersExp->isAsync());
@@ -1343,6 +1350,11 @@ void Parser::onVariadicParam(Token &out, Token *params,
                 "; variadic params with type constraints are not supported"
                 " in non-Hack files",
                 var.text().c_str(), type.text().c_str());
+  }
+  if (ref) {
+    PARSE_ERROR("Parameter $%s is both variadic and by reference"
+                "; this is unsupported",
+                var.text().c_str());
   }
 
   ExpressionPtr expList;

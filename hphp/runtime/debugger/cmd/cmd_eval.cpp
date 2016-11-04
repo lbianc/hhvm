@@ -76,13 +76,10 @@ bool CmdEval::onServer(DebuggerProxy &proxy) {
   RequestInjectionData &rid = ThreadInfo::s_threadInfo->m_reqInjectionData;
   locSave.swap(rid.m_flowFilter);
   g_context->debuggerSettings.bypassCheck = m_bypassAccessCheck;
-  auto const result = proxy.ExecutePHP(
-    m_body, m_output, m_frame,
-    DebuggerProxy::ExecutePHPFlagsAtInterrupt |
-      (!proxy.isLocal() ? DebuggerProxy::ExecutePHPFlagsLog :
-       DebuggerProxy::ExecutePHPFlagsNone)
-  );
-  m_failed = result.first;
+  proxy.ExecutePHP(m_body, m_output, m_frame, m_failed,
+                   DebuggerProxy::ExecutePHPFlagsAtInterrupt |
+                   (!proxy.isLocal() ? DebuggerProxy::ExecutePHPFlagsLog :
+                    DebuggerProxy::ExecutePHPFlagsNone));
   g_context->debuggerSettings.bypassCheck = false;
   locSave.swap(rid.m_flowFilter);
   return proxy.sendToClient(this);

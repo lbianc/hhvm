@@ -202,7 +202,6 @@ bool removeUnreachable(IRUnit& unit) {
   for (auto* block : blocks) {
     for (auto &edge : block->preds()) {
       auto* inst = edge.inst();
-      always_assert(!inst->isTransient());
       if (!visited.test(inst->block()->id())) {
         deadInsts.push_back(inst);
       }

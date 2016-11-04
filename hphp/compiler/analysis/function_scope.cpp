@@ -143,8 +143,20 @@ void FunctionScope::init(AnalysisResultConstPtr ar) {
   if (m_attribute & FileScope::ContainsLDynamicVariable) {
     m_variables->setAttribute(VariableTable::ContainsLDynamicVariable);
   }
+  if (m_attribute & FileScope::ContainsExtract) {
+    m_variables->setAttribute(VariableTable::ContainsExtract);
+  }
+  if (m_attribute & FileScope::ContainsAssert) {
+    m_variables->setAttribute(VariableTable::ContainsAssert);
+  }
+  if (m_attribute & FileScope::ContainsCompact) {
+    m_variables->setAttribute(VariableTable::ContainsCompact);
+  }
   if (m_attribute & FileScope::ContainsUnset) {
     m_variables->setAttribute(VariableTable::ContainsUnset);
+  }
+  if (m_attribute & FileScope::ContainsGetDefinedVars) {
+    m_variables->setAttribute(VariableTable::ContainsGetDefinedVars);
   }
 
   if (m_stmt && Option::AllVolatile && !m_pseudoMain && !m_method) {
@@ -275,10 +287,6 @@ bool FunctionScope::allowsVariableArguments() const {
 
 bool FunctionScope::usesVariableArgumentFunc() const {
   return m_attribute & FileScope::VariableArgument;
-}
-
-bool FunctionScope::hasRefVariadicParam() const {
-  return m_attribute & FileScope::RefVariadicArgumentParam;
 }
 
 bool FunctionScope::isReferenceVariableArgument() const {
@@ -412,6 +420,20 @@ void FunctionScope::addCaller(BlockScopePtr caller,
 
 void FunctionScope::addNewObjCaller(BlockScopePtr caller) {
   addUse(caller, UseKindCaller & ~UseKindCallerReturn);
+}
+
+bool FunctionScope::mayUseVV() const {
+  VariableTableConstPtr variables = getVariables();
+  return
+    (inPseudoMain() ||
+     usesVariableArgumentFunc() ||
+     variables->getAttribute(VariableTable::ContainsDynamicVariable) ||
+     variables->getAttribute(VariableTable::ContainsExtract) ||
+     variables->getAttribute(VariableTable::ContainsAssert) ||
+     variables->getAttribute(VariableTable::ContainsCompact) ||
+     variables->getAttribute(VariableTable::ContainsGetDefinedVars) ||
+     (!RuntimeOption::EnableHipHopSyntax &&
+      variables->getAttribute(VariableTable::ContainsDynamicFunctionCall)));
 }
 
 bool FunctionScope::isRefParam(int index) const {

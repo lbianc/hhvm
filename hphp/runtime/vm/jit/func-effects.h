@@ -24,12 +24,12 @@ namespace jit {
 struct NormalizedInstruction;
 
 /*
- * Could the function destroy the locals in the environment of its caller?
+ * Could the CPP builtin function `callee` destroy the locals
+ * in the environment of its caller?
  *
  * This occurs, e.g., if `func' is extract().
  */
-bool funcDestroysLocals(const Func*);
-
+bool builtinFuncDestroysLocals(const Func*);
 /*
  * Could `inst' clobber the locals in the environment of `caller'?
  *

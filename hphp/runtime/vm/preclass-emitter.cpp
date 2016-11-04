@@ -382,8 +382,7 @@ void PreClassRepoProxy::InsertPreClassStmt
   }
 
   auto n = name->slice();
-  auto const pos = RuntimeOption::RepoAuthoritative ?
-    std::string::npos : qfind(n, ';');
+  auto const pos = qfind(n, ';');
   auto const nm = pos == std::string::npos ?
     n : folly::StringPiece{n.data(), pos};
   BlobEncoder extraBlob;

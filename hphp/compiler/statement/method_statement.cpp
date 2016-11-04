@@ -64,6 +64,7 @@ MethodStatement::MethodStatement
   : Statement(STATEMENT_CONSTRUCTOR_BASE_PARAMETER_VALUES)
   , m_method(method)
   , m_ref(ref)
+  , m_hasCallToGetArgs(false)
   , m_mayCallSetFrameMetadata(false)
   , m_attribute(attr)
   , m_cppLength(-1)
@@ -120,7 +121,6 @@ FunctionScopePtr MethodStatement::onInitialParse(AnalysisResultConstPtr ar,
   int minParam = 0, numDeclParam = 0;
   bool hasRef = false;
   bool hasVariadicParam = false;
-  bool hasVariadicRefParam = false;
   if (m_params) {
     std::set<std::string> names, allDeclNames;
     int i = 0;
@@ -129,7 +129,6 @@ FunctionScopePtr MethodStatement::onInitialParse(AnalysisResultConstPtr ar,
       dynamic_pointer_cast<ParameterExpression>(
         (*m_params)[numDeclParam - 1]);
     hasVariadicParam = lastParam->isVariadic();
-    hasVariadicRefParam = lastParam->isVariadic() && lastParam->isRef();
     if (hasVariadicParam) {
       allDeclNames.insert(lastParam->getName());
       // prevent the next loop from visiting the variadic param and testing
@@ -175,9 +174,6 @@ FunctionScopePtr MethodStatement::onInitialParse(AnalysisResultConstPtr ar,
   }
   if (hasVariadicParam) {
     m_attribute |= FileScope::VariadicArgumentParam;
-  }
-  if (hasVariadicRefParam) {
-    m_attribute |= FileScope::RefVariadicArgumentParam;
   }
 
   std::vector<UserAttributePtr> attrs;

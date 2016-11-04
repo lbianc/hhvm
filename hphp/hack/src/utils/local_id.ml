@@ -24,18 +24,13 @@ let next () =
 let track_names = ref false
 let trace = ref IMap.empty
 
-let to_string x =
-  match IMap.get x !trace with
-  | Some s -> s
-  | None -> string_of_int x
+let to_string x = string_of_int x
 
 let to_int x = x
 
 let get_name x =
   assert (!track_names);
-  match IMap.get x !trace with
-  | Some s -> s
-  | None -> to_string x
+  IMap.find_unsafe x !trace
 
 let make x =
   let res = next () in
@@ -45,10 +40,7 @@ let make x =
 (* `make` always returns a positive value. By multiplying the hash by -1 we
  * ensure that the value returned by `get` never overlaps with those returned
  * by `make` *)
-let get x =
-  let res = -(Hashtbl.hash x) in
-  if !track_names then trace := IMap.add res x !trace;
-  res
+let get x = -(Hashtbl.hash x)
 
 let tmp () =
   let res = next () in

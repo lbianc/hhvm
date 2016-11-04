@@ -241,15 +241,9 @@ struct Options {
   /*
    * If true, we'll assume that dynamic function calls (like '$f()') do not
    * have effects on unknown locals (i.e. are not extract / compact /...).
+   * See, e.g. __SystemLib\\extract vs extract.
    */
   bool DisallowDynamicVarEnvFuncs = true;
-
-  /*
-   * If true, we'll perform optimizations which can remove invocations of the
-   * autoloader, if it can be proven the invocation would not find a viable
-   * function.
-   */
-  bool ElideAutoloadInvokes = true;
 
   /*
    * The filepath where to save the stats file.  If the path is empty, then we

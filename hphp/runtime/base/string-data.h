@@ -451,8 +451,6 @@ struct StringData final: type_scan::MarkCountable<StringData> {
   bool isProxy() const;
 #endif
 
-  bool isImmutable() const;
-
 private:
   struct Proxy {
     StringDataNode node;
@@ -478,6 +476,7 @@ private:
 #else
   bool isFlat() const;
 #endif
+  bool isImmutable() const;
 
   void releaseDataSlowPath();
   int numericCompare(const StringData *v2) const;

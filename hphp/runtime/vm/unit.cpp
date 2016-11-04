@@ -619,21 +619,6 @@ void Unit::loadFunc(const Func *func) {
   }
 }
 
-Func* Unit::loadDynCallFunc(const StringData* name) {
-  if (auto f = loadFunc(name)) {
-    auto wrapper = f->dynCallWrapper();
-    return LIKELY(!wrapper) ? f : wrapper;
-  }
-  return nullptr;
-}
-
-Func* Unit::lookupDynCallFunc(const StringData* name) {
-  if (auto f = lookupFunc(name)) {
-    auto wrapper = f->dynCallWrapper();
-    return LIKELY(!wrapper) ? f : wrapper;
-  }
-  return nullptr;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1870,7 +1855,6 @@ void Unit::prettyPrint(std::ostream& out, PrintOpts opts) const {
         out.put('\n');
         funcIt->second->prettyPrint(out);
         ++funcIt;
-        prevLineNum = -1;
       }
     }
 

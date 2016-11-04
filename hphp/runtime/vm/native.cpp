@@ -270,7 +270,7 @@ void callFunc(const Func* func, void *ctx,
   if (paramCoerceMode) {                                \
     if (!tvCoerceParamTo##kind##InPlace(&args[-i])) {   \
       raise_param_type_warning(                         \
-        func->displayName()->data(),                    \
+        func->name()->data(),                           \
         i+1,                                            \
         KindOf##warn_kind,                              \
         args[-i].m_type                                 \
@@ -372,7 +372,7 @@ const StringData* getInvokeName(ActRec* ar) {
   if (ar->magicDispatch()) {
     return ar->getInvName();
   }
-  return ar->func()->fullDisplayName();
+  return ar->func()->fullName();
 }
 
 bool nativeWrapperCheckArgs(ActRec* ar) {
@@ -487,7 +487,7 @@ TypedValue* unimplementedWrapper(ActRec* ar) {
     }
   } else {
     raise_error("Call to unimplemented native function %s()",
-                func->displayName()->data());
+                func->name()->data());
     ar->m_r.m_type = KindOfNull;
     frame_free_locals_no_this_inl(ar, func->numParams(), &ar->m_r);
   }

@@ -383,18 +383,6 @@ struct ProfData {
   }
 
   /*
-   * Returns true on the first call for the given `funcId', false for all
-   * subsequent calls.
-   *
-   * Used to ensure that each FuncId is only put in the retranslation queue
-   * once.
-   */
-  bool shouldQueue(FuncId funcId) {
-    m_queuedFuncs.ensureSize(funcId + 1);
-    return !m_queuedFuncs[funcId].exchange(true, std::memory_order_relaxed);
-  }
-
-  /*
    * Forget that a SrcKey is optimized.
    */
   void clearOptimized(SrcKey sk) {
@@ -543,11 +531,6 @@ private:
   std::atomic<int64_t> m_profilingFuncCount{0};
   std::atomic<int64_t> m_profilingBCSize{0};
   std::atomic<int64_t> m_optimizedFuncCount{0};
-
-  /*
-   * Funcs that have been queued for asynchronous retranslation.
-   */
-  AtomicVector<bool> m_queuedFuncs;
 
   /*
    * SrcKeys that have already been optimized. SrcKeys are marked as not

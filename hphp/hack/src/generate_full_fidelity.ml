@@ -69,11 +69,6 @@ let schema = List.map from_list [
     "script";
     "header";
     "declarations" ];
-  [ "ScriptFooter";
-    "script_footer";
-    "footer";
-    "footer";
-    "question_greater_than" ];
   [ "SimpleTypeSpecifier";
     "simple_type_specifier";
     "simple_type_specifier";
@@ -103,8 +98,6 @@ let schema = List.map from_list [
     "enum_declaration";
     "enum_declaration";
     "enum";
-    "attribute_spec";
-    (* TODO: Make all uses of attribute_spec consistent in the API. *)
     "keyword";
     "name";
     "colon";
@@ -336,15 +329,6 @@ let schema = List.map from_list [
     "expression_statement";
     "expression";
     "semicolon" ];
-  [ "UnsetStatement";
-    "unset_statement";
-    "unset_statement";
-    "unset";
-    "keyword";
-    "left_paren";
-    "variables";
-    "right_paren";
-    "semicolon" ];
   [ "WhileStatement";
     "while_statement";
     "while_statement";
@@ -513,13 +497,6 @@ let schema = List.map from_list [
     "echo";
     "keyword";
     "expressions";
-    "semicolon" ];
-  [ "GlobalStatement";
-    "global_statement";
-    "global_statement";
-    "global";
-    "keyword";
-    "variables";
     "semicolon" ];
   [ "SimpleInitializer";
     "simple_initializer";
@@ -883,14 +860,6 @@ let schema = List.map from_list [
     "left_paren";
     "fields";
     "right_paren" ];
-  [ "TupleExpression";
-    "tuple_expression";
-    "tuple_expression";
-    "tuple_expression";
-    "keyword";
-    "left_paren";
-    "items";
-    "right_paren" ];
   [ "GenericTypeSpecifier";
     "generic_type_specifier";
     "generic_type_specifier";
@@ -970,7 +939,6 @@ let no_text_tokens = List.map token_node_from_list [
 
 let given_text_tokens = List.map token_node_from_list [
   [ "Abstract"; "abstract" ];
-  [ "And"; "and" ];
   [ "Array"; "array" ];
   [ "Arraykey"; "arraykey" ];
   [ "As"; "as" ];
@@ -1005,7 +973,6 @@ let given_text_tokens = List.map token_node_from_list [
   [ "For"; "for" ];
   [ "Foreach"; "foreach" ];
   [ "Function"; "function" ];
-  [ "Global"; "global" ];
   [ "If"; "if" ];
   [ "Implements"; "implements" ];
   [ "Include"; "include" ];
@@ -1022,7 +989,6 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Noreturn"; "noreturn" ];
   [ "Num"; "num" ];
   [ "Object"; "object" ];
-  [ "Or"; "or" ];
   [ "Parent"; "parent" ];
   [ "Print"; "print" ];
   [ "Private"; "private" ];
@@ -1050,7 +1016,6 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Var"; "var" ];
   [ "Void"; "void" ];
   [ "While"; "while" ];
-  [ "Xor"; "xor" ];
   [ "Yield"; "yield" ];
   [ "LeftBracket"; "[" ];
   [ "RightBracket"; "]" ];
@@ -1059,7 +1024,6 @@ let given_text_tokens = List.map token_node_from_list [
   [ "LeftBrace"; "{" ];
   [ "RightBrace"; "}" ];
   [ "Dot"; "." ];
-  [ "QuestionGreaterThan"; "?>" ];
   [ "MinusGreaterThan"; "->" ];
   [ "PlusPlus"; "++" ];
   [ "MinusMinus"; "--" ];
@@ -1072,7 +1036,6 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Dollar"; "$" ];
   [ "Slash"; "/" ];
   [ "Percent"; "%" ];
-  [ "LessThanEqualGreaterThan"; "<=>"];
   [ "LessThanLessThan"; "<<" ];
   [ "GreaterThanGreaterThan"; ">>" ];
   [ "LessThan"; "<" ];
@@ -2263,7 +2226,8 @@ exports.Whitespace = Whitespace;
 exports.EndOfLine = EndOfLine;
 exports.DelimitedComment = DelimitedComment;
 exports.SingleLineComment = SingleLineComment;
-EXPORTS_SYNTAX"
+EXPORTS_SYNTAX
+"
 
   let full_fidelity_javascript =
   {
@@ -2299,80 +2263,7 @@ EXPORTS_SYNTAX"
 
 end (* GenerateFFJavaScript *)
 
-
-module GenerateFFTokenKind = struct
-
-  let to_kind_declaration x =
-    Printf.sprintf "  | %s\n" x.token_kind
-
-  let to_from_string x =
-    Printf.sprintf "  | \"%s\" -> Some %s\n" x.token_text x.token_kind
-
-  let to_to_string x =
-    Printf.sprintf "  | %s -> \"%s\"\n" x.token_kind x.token_text
-
-  let full_fidelity_token_kind_template = "(**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the \"hack\" directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
-
-type t =
-KIND_DECLARATIONS_NO_TEXT
-KIND_DECLARATIONS_GIVEN_TEXT
-KIND_DECLARATIONS_VARIABLE_TEXT
-
-let from_string keyword =
-  match keyword with
-  | \"true\" -> Some BooleanLiteral
-  | \"false\" -> Some BooleanLiteral
-FROM_STRING_GIVEN_TEXT
-  | _ -> None
-
-let to_string kind =
-match kind with
-| EndOfFile -> \"end of file\"
-TO_STRING_GIVEN_TEXT
-TO_STRING_VARIABLE_TEXT
-"
-  let full_fidelity_token_kind =
-  {
-    filename = "hphp/hack/src/full_fidelity/full_fidelity_token_kind.ml";
-    template = full_fidelity_token_kind_template;
-    transformations = [];
-    token_no_text_transformations = [
-      { token_pattern = "KIND_DECLARATIONS_NO_TEXT";
-        token_func = to_kind_declaration }];
-    token_given_text_transformations = [
-      { token_pattern = "KIND_DECLARATIONS_GIVEN_TEXT";
-        token_func = to_kind_declaration };
-      { token_pattern = "FROM_STRING_GIVEN_TEXT";
-        token_func = to_from_string };
-      { token_pattern = "TO_STRING_GIVEN_TEXT";
-        token_func = to_to_string }];
-    token_variable_text_transformations = [
-      { token_pattern = "KIND_DECLARATIONS_VARIABLE_TEXT";
-        token_func = to_kind_declaration };
-      { token_pattern = "TO_STRING_VARIABLE_TEXT";
-        token_func = to_to_string }]
-  }
-
-end (* GenerateFFTokenKind *)
-
 let () =
   generate_file GenerateFFSyntax.full_fidelity_syntax;
   generate_file GenerateFFSyntaxKind.full_fidelity_syntax_kind;
   generate_file GenerateFFJavaScript.full_fidelity_javascript;
-  generate_file GenerateFFTokenKind.full_fidelity_token_kind

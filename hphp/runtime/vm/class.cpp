@@ -297,15 +297,12 @@ Class* Class::rescope(Class* ctx, Attr attrs /* = AttrNone */) {
     if (auto cls = try_cache()) return cls;
   }
 
-  auto cloneClass = [&] {
-    auto const cls = newClass(m_preClass.get(), m_parent.get());
-    return cls;
-  };
-
   // We use the French for closure because using the English crashes gcc in the
   // implicit lambda capture below.  (This is fixed in gcc 4.8.5.)
   auto fermeture = ClassPtr {
-    template_cls->m_scoped ? cloneClass() : template_cls
+    template_cls->m_scoped
+      ? newClass(m_preClass.get(), m_parent.get())
+      : template_cls
   };
 
   WriteLock l(s_scope_cache_mutex);
@@ -320,7 +317,7 @@ Class* Class::rescope(Class* ctx, Attr attrs /* = AttrNone */) {
     // set when we first check `m_scoped' before acquiring the lock.
     s_scope_cache_mutex.release();
     SCOPE_EXIT { s_scope_cache_mutex.acquireWrite(); };
-    fermeture = ClassPtr { cloneClass() };
+    fermeture = ClassPtr { newClass(m_preClass.get(), m_parent.get()) };
   }
 
   // Check the caches again.
@@ -340,21 +337,10 @@ Class* Class::rescope(Class* ctx, Attr attrs /* = AttrNone */) {
       ScopedCloneBackref { ClassPtr(template_cls), attrs });
   }
 
-  auto updateClones = [&] {
-    if (template_cls != fermeture.get()) {
-      scopedClones[key] = fermeture;
-      fermeture.get()->setClassHandle(template_cls->m_cachedClass);
-    }
-  };
-
   InstanceBits::ifInitElse(
-    [&] {
-      fermeture->setInstanceBits();
-      updateClones();
-    },
-    [&] {
-      updateClones();
-    }
+    [&] { fermeture->setInstanceBits();
+          if (this != fermeture.get()) scopedClones[key] = fermeture; },
+    [&] { if (this != fermeture.get()) scopedClones[key] = fermeture; }
   );
 
   return fermeture.get();
@@ -504,11 +490,9 @@ void Class::releaseRefs() {
           assertx(template_cls->m_extra);
           auto& scopedClones = template_cls->m_extra.raw()->m_scopedClones;
 
-          auto const it = scopedClones.find(CloneScope { this, attrs });
-          assertx(it != scopedClones.end());
-          it->second->m_cachedClass =
-            rds::Link<LowPtr<Class>>(rds::kInvalidHandle);
-          scopedClones.erase(it);
+          auto const key = CloneScope { this, attrs };
+          assertx(scopedClones.count(key));
+          scopedClones.erase(key);
         }
       }
     }
@@ -846,7 +830,7 @@ Class::PropLookup<Slot> Class::getDeclPropIndex(
   if (propInd != kInvalidSlot) {
     auto const attrs = m_declProperties[propInd].attrs;
     if ((attrs & (AttrProtected|AttrPrivate)) &&
-        (g_context.isNull() || !g_context->debuggerSettings.bypassCheck)) {
+        !g_context->debuggerSettings.bypassCheck) {
       // Fetch the class in the inheritance tree which first declared the
       // property
       auto const baseClass = m_declProperties[propInd].cls;

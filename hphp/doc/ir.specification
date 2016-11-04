@@ -1495,10 +1495,9 @@ To string conversions:
   The caller frame pointer is passed as S1. This is used to keep track of the
   call chain of inlined functions for simplification and dead code elimination.
 
-| InlineReturn<callerFPOff>, ND, S(FramePtr), NF
+| InlineReturn, ND, S(FramePtr), NF
 
-  Unlinks a frame constructed by DefInlineFP.  `callerFPOff' is the offset of
-  the caller's frame pointer relative to S0.
+  Unlinks a frame constructed by DefInlineFP.
 
 | InlineReturnNoFrame<InlineFrameStart>, ND, NA, NF
 
@@ -1864,16 +1863,6 @@ To string conversions:
 | FatalMissingThis, ND, S(Func), T|Er
 
   Similar to RaiseMissingThis, but for cases where we know it will fatal.
-
-| RaiseVarEnvDynCall, ND, S(Func), Er
-
-  Indicates that Func, which can access the caller's environment, was called
-  dynamically. Depending on the setting of the `DisallowDynamicVarEnvFuncs`
-  runtime option, this opcode might fatal, raise a warning, or do nothing. Used
-  inside generated wrapper functions for builtins which can modify the caller's
-  frame. These wrapper functions are called instead of the builtin when the
-  builtin is called dynamically. Func should refer to the builtin, not the
-  wrapper itself.
 
 | InitClosureStaticLoc, ND, S(BoxedCell) S(Cell), NF
 

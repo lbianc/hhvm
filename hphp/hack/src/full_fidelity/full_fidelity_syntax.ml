@@ -102,9 +102,6 @@ module WithToken(Token: TokenType) = struct
       script_header: t;
       script_declarations: t;
     }
-    and script_footer = {
-      footer_question_greater_than: t;
-    }
     and simple_type_specifier = {
       simple_type_specifier: t;
     }
@@ -121,7 +118,6 @@ module WithToken(Token: TokenType) = struct
       pipe_variable_expression: t;
     }
     and enum_declaration = {
-      enum_attribute_spec: t;
       enum_keyword: t;
       enum_name: t;
       enum_colon: t;
@@ -300,13 +296,6 @@ module WithToken(Token: TokenType) = struct
       expression_statement_expression: t;
       expression_statement_semicolon: t;
     }
-    and unset_statement = {
-      unset_keyword: t;
-      unset_left_paren: t;
-      unset_variables: t;
-      unset_right_paren: t;
-      unset_semicolon: t;
-    }
     and while_statement = {
       while_keyword: t;
       while_left_paren: t;
@@ -435,11 +424,6 @@ module WithToken(Token: TokenType) = struct
       echo_keyword: t;
       echo_expressions: t;
       echo_semicolon: t;
-    }
-    and global_statement = {
-      global_keyword: t;
-      global_variables: t;
-      global_semicolon: t;
     }
     and simple_initializer = {
       simple_initializer_equal: t;
@@ -707,12 +691,6 @@ module WithToken(Token: TokenType) = struct
       shape_expression_fields: t;
       shape_expression_right_paren: t;
     }
-    and tuple_expression = {
-      tuple_expression_keyword: t;
-      tuple_expression_left_paren: t;
-      tuple_expression_items: t;
-      tuple_expression_right_paren: t;
-    }
     and generic_type_specifier = {
       generic_class_type: t;
       generic_argument_list: t;
@@ -754,7 +732,6 @@ module WithToken(Token: TokenType) = struct
     | SyntaxList of t list
     | ScriptHeader of script_header
     | Script of script
-    | ScriptFooter of script_footer
     | SimpleTypeSpecifier of simple_type_specifier
     | LiteralExpression of literal_expression
     | VariableExpression of variable_expression
@@ -788,7 +765,6 @@ module WithToken(Token: TokenType) = struct
     | InclusionDirective of inclusion_directive
     | CompoundStatement of compound_statement
     | ExpressionStatement of expression_statement
-    | UnsetStatement of unset_statement
     | WhileStatement of while_statement
     | IfStatement of if_statement
     | ElseifClause of elseif_clause
@@ -809,7 +785,6 @@ module WithToken(Token: TokenType) = struct
     | FunctionStaticStatement of function_static_statement
     | StaticDeclarator of static_declarator
     | EchoStatement of echo_statement
-    | GlobalStatement of global_statement
     | SimpleInitializer of simple_initializer
     | AnonymousFunction of anonymous_function
     | AnonymousFunctionUseClause of anonymous_function_use_clause
@@ -858,7 +833,6 @@ module WithToken(Token: TokenType) = struct
     | FieldInitializer of field_initializer
     | ShapeTypeSpecifier of shape_type_specifier
     | ShapeExpression of shape_expression
-    | TupleExpression of tuple_expression
     | GenericTypeSpecifier of generic_type_specifier
     | NullableTypeSpecifier of nullable_type_specifier
     | SoftTypeSpecifier of soft_type_specifier
@@ -887,8 +861,6 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.ScriptHeader
       | Script _ ->
         SyntaxKind.Script
-      | ScriptFooter _ ->
-        SyntaxKind.ScriptFooter
       | SimpleTypeSpecifier _ ->
         SyntaxKind.SimpleTypeSpecifier
       | LiteralExpression _ ->
@@ -955,8 +927,6 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.CompoundStatement
       | ExpressionStatement _ ->
         SyntaxKind.ExpressionStatement
-      | UnsetStatement _ ->
-        SyntaxKind.UnsetStatement
       | WhileStatement _ ->
         SyntaxKind.WhileStatement
       | IfStatement _ ->
@@ -997,8 +967,6 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.StaticDeclarator
       | EchoStatement _ ->
         SyntaxKind.EchoStatement
-      | GlobalStatement _ ->
-        SyntaxKind.GlobalStatement
       | SimpleInitializer _ ->
         SyntaxKind.SimpleInitializer
       | AnonymousFunction _ ->
@@ -1095,8 +1063,6 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.ShapeTypeSpecifier
       | ShapeExpression _ ->
         SyntaxKind.ShapeExpression
-      | TupleExpression _ ->
-        SyntaxKind.TupleExpression
       | GenericTypeSpecifier _ ->
         SyntaxKind.GenericTypeSpecifier
       | NullableTypeSpecifier _ ->
@@ -1128,8 +1094,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ScriptHeader
     let is_script node =
       kind node = SyntaxKind.Script
-    let is_script_footer node =
-      kind node = SyntaxKind.ScriptFooter
     let is_simple_type_specifier node =
       kind node = SyntaxKind.SimpleTypeSpecifier
     let is_literal_expression node =
@@ -1196,8 +1160,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.CompoundStatement
     let is_expression_statement node =
       kind node = SyntaxKind.ExpressionStatement
-    let is_unset_statement node =
-      kind node = SyntaxKind.UnsetStatement
     let is_while_statement node =
       kind node = SyntaxKind.WhileStatement
     let is_if_statement node =
@@ -1238,8 +1200,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.StaticDeclarator
     let is_echo_statement node =
       kind node = SyntaxKind.EchoStatement
-    let is_global_statement node =
-      kind node = SyntaxKind.GlobalStatement
     let is_simple_initializer node =
       kind node = SyntaxKind.SimpleInitializer
     let is_anonymous_function node =
@@ -1336,8 +1296,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ShapeTypeSpecifier
     let is_shape_expression node =
       kind node = SyntaxKind.ShapeExpression
-    let is_tuple_expression node =
-      kind node = SyntaxKind.TupleExpression
     let is_generic_type_specifier node =
       kind node = SyntaxKind.GenericTypeSpecifier
     let is_nullable_type_specifier node =
@@ -1410,12 +1368,6 @@ module WithToken(Token: TokenType) = struct
       script_declarations
     )
 
-    let get_script_footer_children {
-      footer_question_greater_than;
-    } = (
-      footer_question_greater_than
-    )
-
     let get_simple_type_specifier_children {
       simple_type_specifier;
     } = (
@@ -1447,7 +1399,6 @@ module WithToken(Token: TokenType) = struct
     )
 
     let get_enum_declaration_children {
-      enum_attribute_spec;
       enum_keyword;
       enum_name;
       enum_colon;
@@ -1457,7 +1408,6 @@ module WithToken(Token: TokenType) = struct
       enum_enumerators;
       enum_right_brace;
     } = (
-      enum_attribute_spec,
       enum_keyword,
       enum_name,
       enum_colon,
@@ -1806,20 +1756,6 @@ module WithToken(Token: TokenType) = struct
       expression_statement_semicolon
     )
 
-    let get_unset_statement_children {
-      unset_keyword;
-      unset_left_paren;
-      unset_variables;
-      unset_right_paren;
-      unset_semicolon;
-    } = (
-      unset_keyword,
-      unset_left_paren,
-      unset_variables,
-      unset_right_paren,
-      unset_semicolon
-    )
-
     let get_while_statement_children {
       while_keyword;
       while_left_paren;
@@ -2076,16 +2012,6 @@ module WithToken(Token: TokenType) = struct
       echo_keyword,
       echo_expressions,
       echo_semicolon
-    )
-
-    let get_global_statement_children {
-      global_keyword;
-      global_variables;
-      global_semicolon;
-    } = (
-      global_keyword,
-      global_variables,
-      global_semicolon
     )
 
     let get_simple_initializer_children {
@@ -2620,18 +2546,6 @@ module WithToken(Token: TokenType) = struct
       shape_expression_right_paren
     )
 
-    let get_tuple_expression_children {
-      tuple_expression_keyword;
-      tuple_expression_left_paren;
-      tuple_expression_items;
-      tuple_expression_right_paren;
-    } = (
-      tuple_expression_keyword,
-      tuple_expression_left_paren,
-      tuple_expression_items,
-      tuple_expression_right_paren
-    )
-
     let get_generic_type_specifier_children {
       generic_class_type;
       generic_argument_list;
@@ -2723,11 +2637,6 @@ module WithToken(Token: TokenType) = struct
         script_header;
         script_declarations;
       ]
-      | ScriptFooter {
-        footer_question_greater_than;
-      } -> [
-        footer_question_greater_than;
-      ]
       | SimpleTypeSpecifier {
         simple_type_specifier;
       } -> [
@@ -2754,7 +2663,6 @@ module WithToken(Token: TokenType) = struct
         pipe_variable_expression;
       ]
       | EnumDeclaration {
-        enum_attribute_spec;
         enum_keyword;
         enum_name;
         enum_colon;
@@ -2764,7 +2672,6 @@ module WithToken(Token: TokenType) = struct
         enum_enumerators;
         enum_right_brace;
       } -> [
-        enum_attribute_spec;
         enum_keyword;
         enum_name;
         enum_colon;
@@ -3085,19 +2992,6 @@ module WithToken(Token: TokenType) = struct
         expression_statement_expression;
         expression_statement_semicolon;
       ]
-      | UnsetStatement {
-        unset_keyword;
-        unset_left_paren;
-        unset_variables;
-        unset_right_paren;
-        unset_semicolon;
-      } -> [
-        unset_keyword;
-        unset_left_paren;
-        unset_variables;
-        unset_right_paren;
-        unset_semicolon;
-      ]
       | WhileStatement {
         while_keyword;
         while_left_paren;
@@ -3335,15 +3229,6 @@ module WithToken(Token: TokenType) = struct
         echo_keyword;
         echo_expressions;
         echo_semicolon;
-      ]
-      | GlobalStatement {
-        global_keyword;
-        global_variables;
-        global_semicolon;
-      } -> [
-        global_keyword;
-        global_variables;
-        global_semicolon;
       ]
       | SimpleInitializer {
         simple_initializer_equal;
@@ -3829,17 +3714,6 @@ module WithToken(Token: TokenType) = struct
         shape_expression_fields;
         shape_expression_right_paren;
       ]
-      | TupleExpression {
-        tuple_expression_keyword;
-        tuple_expression_left_paren;
-        tuple_expression_items;
-        tuple_expression_right_paren;
-      } -> [
-        tuple_expression_keyword;
-        tuple_expression_left_paren;
-        tuple_expression_items;
-        tuple_expression_right_paren;
-      ]
       | GenericTypeSpecifier {
         generic_class_type;
         generic_argument_list;
@@ -3923,11 +3797,6 @@ module WithToken(Token: TokenType) = struct
         "script_header";
         "script_declarations";
       ]
-      | ScriptFooter {
-        footer_question_greater_than;
-      } -> [
-        "footer_question_greater_than";
-      ]
       | SimpleTypeSpecifier {
         simple_type_specifier;
       } -> [
@@ -3954,7 +3823,6 @@ module WithToken(Token: TokenType) = struct
         "pipe_variable_expression";
       ]
       | EnumDeclaration {
-        enum_attribute_spec;
         enum_keyword;
         enum_name;
         enum_colon;
@@ -3964,7 +3832,6 @@ module WithToken(Token: TokenType) = struct
         enum_enumerators;
         enum_right_brace;
       } -> [
-        "enum_attribute_spec";
         "enum_keyword";
         "enum_name";
         "enum_colon";
@@ -4285,19 +4152,6 @@ module WithToken(Token: TokenType) = struct
         "expression_statement_expression";
         "expression_statement_semicolon";
       ]
-      | UnsetStatement {
-        unset_keyword;
-        unset_left_paren;
-        unset_variables;
-        unset_right_paren;
-        unset_semicolon;
-      } -> [
-        "unset_keyword";
-        "unset_left_paren";
-        "unset_variables";
-        "unset_right_paren";
-        "unset_semicolon";
-      ]
       | WhileStatement {
         while_keyword;
         while_left_paren;
@@ -4535,15 +4389,6 @@ module WithToken(Token: TokenType) = struct
         "echo_keyword";
         "echo_expressions";
         "echo_semicolon";
-      ]
-      | GlobalStatement {
-        global_keyword;
-        global_variables;
-        global_semicolon;
-      } -> [
-        "global_keyword";
-        "global_variables";
-        "global_semicolon";
       ]
       | SimpleInitializer {
         simple_initializer_equal;
@@ -5029,17 +4874,6 @@ module WithToken(Token: TokenType) = struct
         "shape_expression_fields";
         "shape_expression_right_paren";
       ]
-      | TupleExpression {
-        tuple_expression_keyword;
-        tuple_expression_left_paren;
-        tuple_expression_items;
-        tuple_expression_right_paren;
-      } -> [
-        "tuple_expression_keyword";
-        "tuple_expression_left_paren";
-        "tuple_expression_items";
-        "tuple_expression_right_paren";
-      ]
       | GenericTypeSpecifier {
         generic_class_type;
         generic_argument_list;
@@ -5179,12 +5013,6 @@ module WithToken(Token: TokenType) = struct
           script_header;
           script_declarations;
         }
-      | (SyntaxKind.ScriptFooter, [
-          footer_question_greater_than;
-        ]) ->
-        ScriptFooter {
-          footer_question_greater_than;
-        }
       | (SyntaxKind.SimpleTypeSpecifier, [
           simple_type_specifier;
         ]) ->
@@ -5216,7 +5044,6 @@ module WithToken(Token: TokenType) = struct
           pipe_variable_expression;
         }
       | (SyntaxKind.EnumDeclaration, [
-          enum_attribute_spec;
           enum_keyword;
           enum_name;
           enum_colon;
@@ -5227,7 +5054,6 @@ module WithToken(Token: TokenType) = struct
           enum_right_brace;
         ]) ->
         EnumDeclaration {
-          enum_attribute_spec;
           enum_keyword;
           enum_name;
           enum_colon;
@@ -5575,20 +5401,6 @@ module WithToken(Token: TokenType) = struct
           expression_statement_expression;
           expression_statement_semicolon;
         }
-      | (SyntaxKind.UnsetStatement, [
-          unset_keyword;
-          unset_left_paren;
-          unset_variables;
-          unset_right_paren;
-          unset_semicolon;
-        ]) ->
-        UnsetStatement {
-          unset_keyword;
-          unset_left_paren;
-          unset_variables;
-          unset_right_paren;
-          unset_semicolon;
-        }
       | (SyntaxKind.WhileStatement, [
           while_keyword;
           while_left_paren;
@@ -5846,16 +5658,6 @@ module WithToken(Token: TokenType) = struct
           echo_keyword;
           echo_expressions;
           echo_semicolon;
-        }
-      | (SyntaxKind.GlobalStatement, [
-          global_keyword;
-          global_variables;
-          global_semicolon;
-        ]) ->
-        GlobalStatement {
-          global_keyword;
-          global_variables;
-          global_semicolon;
         }
       | (SyntaxKind.SimpleInitializer, [
           simple_initializer_equal;
@@ -6389,18 +6191,6 @@ module WithToken(Token: TokenType) = struct
           shape_expression_fields;
           shape_expression_right_paren;
         }
-      | (SyntaxKind.TupleExpression, [
-          tuple_expression_keyword;
-          tuple_expression_left_paren;
-          tuple_expression_items;
-          tuple_expression_right_paren;
-        ]) ->
-        TupleExpression {
-          tuple_expression_keyword;
-          tuple_expression_left_paren;
-          tuple_expression_items;
-          tuple_expression_right_paren;
-        }
       | (SyntaxKind.GenericTypeSpecifier, [
           generic_class_type;
           generic_argument_list;
@@ -6532,13 +6322,6 @@ module WithToken(Token: TokenType) = struct
         script_declarations;
       ]
 
-    let make_script_footer
-      footer_question_greater_than
-    =
-      from_children SyntaxKind.ScriptFooter [
-        footer_question_greater_than;
-      ]
-
     let make_simple_type_specifier
       simple_type_specifier
     =
@@ -6575,7 +6358,6 @@ module WithToken(Token: TokenType) = struct
       ]
 
     let make_enum_declaration
-      enum_attribute_spec
       enum_keyword
       enum_name
       enum_colon
@@ -6586,7 +6368,6 @@ module WithToken(Token: TokenType) = struct
       enum_right_brace
     =
       from_children SyntaxKind.EnumDeclaration [
-        enum_attribute_spec;
         enum_keyword;
         enum_name;
         enum_colon;
@@ -6962,21 +6743,6 @@ module WithToken(Token: TokenType) = struct
         expression_statement_semicolon;
       ]
 
-    let make_unset_statement
-      unset_keyword
-      unset_left_paren
-      unset_variables
-      unset_right_paren
-      unset_semicolon
-    =
-      from_children SyntaxKind.UnsetStatement [
-        unset_keyword;
-        unset_left_paren;
-        unset_variables;
-        unset_right_paren;
-        unset_semicolon;
-      ]
-
     let make_while_statement
       while_keyword
       while_left_paren
@@ -7253,17 +7019,6 @@ module WithToken(Token: TokenType) = struct
         echo_keyword;
         echo_expressions;
         echo_semicolon;
-      ]
-
-    let make_global_statement
-      global_keyword
-      global_variables
-      global_semicolon
-    =
-      from_children SyntaxKind.GlobalStatement [
-        global_keyword;
-        global_variables;
-        global_semicolon;
       ]
 
     let make_simple_initializer
@@ -7844,19 +7599,6 @@ module WithToken(Token: TokenType) = struct
         shape_expression_left_paren;
         shape_expression_fields;
         shape_expression_right_paren;
-      ]
-
-    let make_tuple_expression
-      tuple_expression_keyword
-      tuple_expression_left_paren
-      tuple_expression_items
-      tuple_expression_right_paren
-    =
-      from_children SyntaxKind.TupleExpression [
-        tuple_expression_keyword;
-        tuple_expression_left_paren;
-        tuple_expression_items;
-        tuple_expression_right_paren;
       ]
 
     let make_generic_type_specifier

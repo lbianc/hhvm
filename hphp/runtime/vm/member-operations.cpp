@@ -204,49 +204,49 @@ void throw_cannot_use_newelem_for_lval_read_keyset() {
   );
 }
 
-Cell incDecBodySlow(IncDecOp op, Cell* fr) {
+void incDecBodySlow(IncDecOp op, Cell* fr, TypedValue* to) {
   assert(cellIsPlausible(*fr));
   assert(fr->m_type != KindOfUninit);
 
-  auto dup = [&]() { tvRefcountedIncRef(fr); return *fr; };
+  auto dup = [&]() { cellDup(*fr, *to); };
 
   switch (op) {
   case IncDecOp::PreInc:
     cellInc(*fr);
-    return dup();
-  case IncDecOp::PostInc: {
-    auto const tmp = dup();
+    dup();
+    return;
+  case IncDecOp::PostInc:
+    dup();
     cellInc(*fr);
-    return tmp;
-  }
+    return;
   case IncDecOp::PreDec:
     cellDec(*fr);
-    return dup();
-  case IncDecOp::PostDec: {
-    auto const tmp = dup();
+    dup();
+    return;
+  case IncDecOp::PostDec:
+    dup();
     cellDec(*fr);
-    return tmp;
-  }
+    return;
   default: break;
   }
 
   switch (op) {
   case IncDecOp::PreIncO:
     cellIncO(*fr);
-    return dup();
-  case IncDecOp::PostIncO: {
-    auto const tmp = dup();
+    dup();
+    return;
+  case IncDecOp::PostIncO:
+    dup();
     cellIncO(*fr);
-    return tmp;
-  }
+    return;
   case IncDecOp::PreDecO:
     cellDecO(*fr);
-    return dup();
-  case IncDecOp::PostDecO: {
-    auto const tmp = dup();
+    dup();
+    return;
+  case IncDecOp::PostDecO:
+    dup();
     cellDecO(*fr);
-    return tmp;
-  }
+    return;
   default: break;
   }
   not_reached();

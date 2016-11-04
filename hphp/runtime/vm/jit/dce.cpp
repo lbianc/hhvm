@@ -450,7 +450,6 @@ bool canDCE(IRInstruction* inst) {
   case RaiseNotice:
   case RaiseArrayIndexNotice:
   case RaiseArrayKeyNotice:
-  case RaiseVarEnvDynCall:
   case InitClosureStaticLoc:
   case InitStaticLoc:
   case PrintStr:
@@ -1010,7 +1009,7 @@ void convertToInlineReturnNoFrame(IRUnit& unit, IRInstruction& inst) {
   auto const calleeAROff = frameInst->extra<DefInlineFP>()->spOffset;
   auto const spOff = spInst->extra<DefSP>()->offset;
 
-  auto const data = FPRelOffsetData {
+  InlineReturnNoFrameData data {
     // Offset of the callee's return value relative to the frame pointer.
     calleeAROff.to<FPRelOffset>(spOff) + (AROFF(m_r) / sizeof(TypedValue))
   };

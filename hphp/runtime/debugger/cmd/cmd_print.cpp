@@ -349,13 +349,13 @@ bool CmdPrint::onServer(DebuggerProxy &proxy) {
   g_context->debuggerSettings.bypassCheck = m_bypassAccessCheck;
   {
     EvalBreakControl eval(m_noBreak);
-    auto const ret = proxy.ExecutePHP(
-      DebuggerProxy::MakePHPReturn(m_body), m_output, m_frame,
-      DebuggerProxy::ExecutePHPFlagsAtInterrupt |
-        (!proxy.isLocal() ? DebuggerProxy::ExecutePHPFlagsLog :
-         DebuggerProxy::ExecutePHPFlagsNone)
-    );
-    m_ret = ret.second;
+    bool failed;
+    m_ret =
+      proxy.ExecutePHP(DebuggerProxy::MakePHPReturn(m_body),
+                       m_output, m_frame, failed,
+                       DebuggerProxy::ExecutePHPFlagsAtInterrupt |
+                       (!proxy.isLocal() ? DebuggerProxy::ExecutePHPFlagsLog :
+                        DebuggerProxy::ExecutePHPFlagsNone));
   }
   g_context->debuggerSettings.bypassCheck = false;
   locSave.swap(rid.m_flowFilter);

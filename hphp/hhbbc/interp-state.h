@@ -58,19 +58,15 @@ enum class FPIKind {
 struct ActRec {
   explicit ActRec(FPIKind kind,
                   folly::Optional<res::Class> c = folly::none,
-                  folly::Optional<res::Func> f = folly::none,
-                  folly::Optional<res::Func> f2 = folly::none)
+                  folly::Optional<res::Func> f = folly::none)
     : kind(kind)
     , cls(std::move(c))
     , func(std::move(f))
-    , fallbackFunc(std::move(f2))
   {}
 
   FPIKind kind;
   folly::Optional<res::Class> cls;
   folly::Optional<res::Func> func;
-  // Possible fallback func if we cannot determine which will be called.
-  folly::Optional<res::Func> fallbackFunc;
 };
 
 /*
@@ -300,13 +296,11 @@ struct CollectedInfo {
                          PublicSPropIndexer* publicStatics)
     : props{index, ctx, cls}
     , publicStatics{publicStatics}
-    , mayUseVV{false}
   {}
 
   ClosureUseVarMap closureUseTypes;
   PropertiesInfo props;
   PublicSPropIndexer* const publicStatics;
-  bool mayUseVV;
 };
 
 //////////////////////////////////////////////////////////////////////

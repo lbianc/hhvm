@@ -626,7 +626,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   case InlineReturnNoFrame: {
     auto const callee = AliasClass(AStack {
-      inst.extra<InlineReturnNoFrame>()->offset,
+      inst.extra<InlineReturnNoFrame>()->frameOffset,
       std::numeric_limits<int32_t>::max()
     }) | AMIStateAny;
     return may_load_store_kill(AEmpty, callee, callee);
@@ -1572,7 +1572,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case RaiseWarning:
   case RaiseMissingThis:
   case FatalMissingThis:
-  case RaiseVarEnvDynCall:
   case ConvCellToStr:
   case ConvObjToStr:
   case Count:      // re-enters on CountableClass

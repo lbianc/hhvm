@@ -1,3 +1,2 @@
-File "instanceof_unresolved.php", line 10, characters 5-15:
-  (Bar | Baz)
+(Bar | Baz)
 No errors

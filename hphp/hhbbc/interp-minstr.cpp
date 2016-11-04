@@ -1442,7 +1442,6 @@ void in(ISS& env, const bc::BaseNC& op) {
   assert(env.state.arrayChain.empty());
   topC(env, op.arg1);
   readUnknownLocals(env);
-  mayUseVV(env);
   env.state.base = Base{TInitCell, BaseLoc::Frame};
 }
 
@@ -1450,7 +1449,6 @@ void in(ISS& env, const bc::BaseNL& op) {
   assert(env.state.arrayChain.empty());
   locAsCell(env, op.loc1);
   readUnknownLocals(env);
-  mayUseVV(env);
   env.state.base = Base{TInitCell, BaseLoc::Frame};
 }
 

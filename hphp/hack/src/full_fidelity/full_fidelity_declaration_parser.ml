@@ -149,10 +149,7 @@ module WithExpressionAndStatementAndTypeParser
       *)
     (* TODO: Add an error to a later pass that determines the value is
              a constant. *)
-
-    (* TODO: We must allow TRUE to be a legal enum member name; here we allow
-      any keyword.  Consider making this more strict. *)
-    let (parser, name) = expect_name_allow_keywords parser in
+    let (parser, name) = expect_name parser in
     let (parser, equal) = expect_equal parser in
     let (parser, value) = parse_expression parser in
     let (parser, semicolon) = expect_semicolon parser  in
@@ -182,11 +179,10 @@ module WithExpressionAndStatementAndTypeParser
     | RightBrace -> parser, make_missing ()
     | _ -> aux [] parser
 
-  and parse_enum_declaration parser attrs =
+  and parse_enum_declaration parser =
     (*
     enum-declaration:
-      attribute-specification-opt enum  name  enum-base  type-constraint-opt /
-        {  enumerator-list-opt  }
+      enum  name  enum-base  type-constraint-opt  {  enumerator-list-opt  }
     enum-base:
       :  int
       :  string
@@ -205,7 +201,7 @@ module WithExpressionAndStatementAndTypeParser
       parser LeftBrace SyntaxError.error1037 RightBrace SyntaxError.error1006
       parse_enumerator_list_opt in
     let result = make_enum_declaration
-      attrs enum name colon base enum_type left_brace enumerators right_brace in
+      enum name colon base enum_type left_brace enumerators right_brace in
     (parser, result)
 
   and parse_namespace_declaration parser =
@@ -657,7 +653,7 @@ module WithExpressionAndStatementAndTypeParser
     | Plus
     | Question ->
       let result = make_postfix_unary_expression term (make_token token) in
-      parse_xhp_children_trailing parser1 result
+      (parser1, result)
     | Bar ->
       let (parser, right) = parse_xhp_children_expression parser1 in
       let result = make_binary_expression term (make_token token) right in
@@ -938,18 +934,11 @@ module WithExpressionAndStatementAndTypeParser
     (* TODO Use Eric's helper here to assert length of errors *)
     let before = List.length (errors parser) in
     let (parser1, _) = parse_type_specifier parser in
-    let (parser1, _) = expect_name_allow_keywords parser1 in
+    let (parser1, _) = expect_name parser1 in
     List.length (errors parser1) = before
 
   and parse_constant_declarator parser =
-    (* TODO: We allow const names to be keywords here; in particular we
-       require that const string TRUE = "true"; be legal.  Likely this
-       should be more strict. What are the rules for which keywords are
-       legal constant names and which are not?
-       Note that if this logic is changed, it should be changed in
-       is_type_in_const above as well.
-    *)
-    let (parser, const_name) = expect_name_allow_keywords parser in
+    let (parser, const_name) = expect_name parser in
     let (parser, initializer_) = parse_simple_initializer_opt parser in
     (parser, make_constant_declarator const_name initializer_)
 
@@ -1307,14 +1296,13 @@ module WithExpressionAndStatementAndTypeParser
     in
     aux [] parser
 
-  and parse_enum_or_classish_or_function_declaration parser =
-    (* An enum, type alias, function, interface, trait or class may all
-      begin with an attribute. *)
+  and parse_classish_or_function_declaration parser =
+    (* A type alias, function, interface, trait or class may all begin with
+    an attribute. *)
     let parser, attribute_specification =
       parse_attribute_specification_opt parser in
     let parser1, token = next_token parser in
     match Token.kind token with
-    | Enum -> parse_enum_declaration parser attribute_specification
     | Type | Newtype ->
       parse_alias_declaration parser attribute_specification
     | Async | Function ->
@@ -1337,7 +1325,7 @@ module WithExpressionAndStatementAndTypeParser
     | Require_once -> parse_inclusion_directive parser
     | Type
     | Newtype -> parse_alias_declaration parser (make_missing())
-    | Enum -> parse_enum_declaration parser (make_missing())
+    | Enum -> parse_enum_declaration parser
     | Namespace -> parse_namespace_declaration parser
     | Use -> parse_namespace_use_declaration parser
     | Trait
@@ -1348,15 +1336,10 @@ module WithExpressionAndStatementAndTypeParser
     | Async
     | Function -> parse_function_declaration parser (make_missing())
     | LessThanLessThan ->
-      parse_enum_or_classish_or_function_declaration parser
+      parse_classish_or_function_declaration parser
       (* TODO figure out what global const differs from class const *)
     | Const -> parse_const_declaration parser1 (make_missing ())
               (make_token token)
-    | QuestionGreaterThan ->
-      (* We do not support this tag in Hack.
-       TODO: Give an error in a later pass if this is found in a Hack file.
-       TODO: Give an error in a later pass if this is not at the end. *)
-       (parser1, make_script_footer (make_token token))
     | _ ->
       parse_statement parser
 

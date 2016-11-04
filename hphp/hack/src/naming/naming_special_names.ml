@@ -153,7 +153,6 @@ module PseudoFunctions = struct
   let exit_ = "\\exit"
   let die = "\\die"
   let hh_show = "\\hh_show"
-  let hh_show_env = "\\hh_show_env"
 
 end
 

@@ -333,9 +333,8 @@ vm_decode_function(const Variant& function,
         cls = cc;
       }
     }
-
     if (!cls) {
-      HPHP::Func* f = HPHP::Unit::loadDynCallFunc(name.get());
+      HPHP::Func* f = HPHP::Unit::loadFunc(name.get());
       if (!f) {
         if (flags == DecodeFlags::Warn) {
           throw_invalid_argument("function: method '%s' not found",
@@ -413,8 +412,6 @@ vm_decode_function(const Variant& function,
         cls = fwdCls;
       }
     }
-
-    assertx(!f->dynCallWrapper());
     return f;
   }
   if (function.isObject()) {

@@ -330,7 +330,7 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
   // Properties.
  private:
   void initDynProps(int numDynamic = 0);
-  Slot declPropInd(const TypedValue* prop) const;
+  Slot declPropInd(TypedValue* prop) const;
 
   inline Variant o_getImpl(const String& propName, int flags, bool error = true,
                            const String& context = null_string);
@@ -421,7 +421,8 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
   TypedValue* setOpProp(TypedValue& tvRef, Class* ctx, SetOpOp op,
                         const StringData* key, Cell* val);
 
-  Cell incDecProp(Class* ctx, IncDecOp op, const StringData* key);
+  void incDecProp(Class* ctx, IncDecOp op, const StringData* key,
+                  TypedValue& dest);
 
   void unsetProp(Class* ctx, const StringData* key);
 
