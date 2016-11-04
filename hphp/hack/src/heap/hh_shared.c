@@ -108,6 +108,10 @@
 
 #include <lz4.h>
 
+#ifndef NO_SQLITE3
+#include <sqlite3.h>
+#endif
+
 // Ideally these would live in a handle.h file but our internal build system
 // can't support that at the moment. These are shared with handle_stubs.c
 #ifdef _WIN32
@@ -401,6 +405,11 @@ static char** heap;
 /* Useful to add assertions */
 static pid_t* master_pid;
 static pid_t my_pid;
+
+#ifndef NO_SQLITE3
+// SQLite DB pointer
+static sqlite3 *db = NULL;
+#endif
 
 /* Where the heap started (bottom) */
 static char* heap_init;
@@ -1802,11 +1811,10 @@ static void fread_header(FILE* fp) {
  *   - Each key is 4 bytes, with tag bit set to TAG_KEY.
  *   - Each val is 4 bytes, with tag bit set to TAG_VAL.
  */
-void hh_save_dep_table(value out_filename) {
+CAMLprim value hh_save_dep_table(value out_filename) {
   CAMLparam1(out_filename);
-
-  // Measure write time.
   struct timeval tv;
+  struct timeval tv2;
   gettimeofday(&tv, NULL);
 
   FILE* fp = fopen(String_val(out_filename), "wb");
@@ -1840,9 +1848,10 @@ void hh_save_dep_table(value out_filename) {
 
   fclose_no_fail(fp);
 
-  log_duration("Writing dependency file", tv);
-
-  CAMLreturn0;
+  tv2 = log_duration("Writing dependency file without sqlite", tv);
+  int secs = tv2.tv_sec - tv.tv_sec;
+  // Reporting only seconds, ignore milli seconds
+  CAMLreturn(Val_long(secs));
 }
 
 /* Reads a dependency graph from a file. See hh_save_dep_table for a
@@ -1887,3 +1896,247 @@ CAMLprim value hh_load_dep_table(value in_filename) {
   // Reporting only seconds, ignore milli seconds
   CAMLreturn(Val_long(secs));
 }
+
+/*****************************************************************************/
+/* Saved State with SQLite */
+/*****************************************************************************/
+
+#ifndef NO_SQLITE3
+
+// Expects the database to be open
+static void create_sqlite_header(sqlite3 *db) {
+  // Create Header
+  const char *sql = "CREATE TABLE HEADER(" \
+               "MAGIC_CONSTANT INTEGER PRIMARY KEY NOT NULL," \
+               "BUILDINFO TEXT NOT NULL);";
+
+  assert(sqlite3_exec(db, sql, NULL, 0, NULL) == SQLITE_OK);
+
+  // Insert magic constant and build info
+  sqlite3_stmt *insert_stmt = NULL;
+  sql = "INSERT INTO HEADER (MAGIC_CONSTANT, BUILDINFO) VALUES (?,?)";
+  assert(sqlite3_prepare_v2(db, sql, -1, &insert_stmt, NULL) == SQLITE_OK);
+  assert(sqlite3_bind_int64(insert_stmt, 1, MAGIC_CONSTANT) == SQLITE_OK);
+  assert(sqlite3_bind_text(insert_stmt, 2,
+        BuildInfo_kRevision, -1,
+        SQLITE_TRANSIENT)
+      == SQLITE_OK);
+  assert(sqlite3_step(insert_stmt) == SQLITE_DONE);
+  assert(sqlite3_finalize(insert_stmt) == SQLITE_OK);
+}
+
+// Expects the database to be open
+static void verify_sqlite_header(sqlite3 *db) {
+  sqlite3_stmt *select_stmt = NULL;
+  const char *sql = "SELECT * FROM HEADER;";
+  assert(sqlite3_prepare_v2(db, sql, -1, &select_stmt, NULL) == SQLITE_OK);
+
+  if (sqlite3_step(select_stmt) == SQLITE_ROW) {
+      // Columns are 0 indexed
+      assert(sqlite3_column_int64(select_stmt, 0) == MAGIC_CONSTANT);
+      assert(strcmp((char *)sqlite3_column_text(select_stmt, 1),
+                    BuildInfo_kRevision) == 0);
+  }
+  assert(sqlite3_finalize(select_stmt) == SQLITE_OK);
+}
+
+size_t deptbl_entry_count_for_slot(size_t slot) {
+  assert(slot < dep_size);
+
+  size_t count = 0;
+  deptbl_entry_t slotval = deptbl[slot];
+
+  if (slotval.raw != 0 && slotval.s.key.tag == TAG_KEY) {
+    while (slotval.s.next.tag == TAG_NEXT) {
+      assert(slotval.s.next.num < dep_size);
+      slotval = deptbl[slotval.s.next.num];
+      count++;
+    }
+
+    // The final "next" in the list is always a value, not a next pointer.
+    count++;
+  }
+
+  return count;
+}
+
+/*
+ * Assumption: When we save the dependency table, we do a fresh load
+ * aka there is saved state
+ */
+CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
+  CAMLparam1(out_filename);
+
+  // This can only happen in the master
+  assert_master();
+
+  struct timeval tv;
+  struct timeval tv2;
+  gettimeofday(&tv, NULL);
+
+  sqlite3 *db_out;
+  assert(sqlite3_open(String_val(out_filename), &db_out) == SQLITE_OK);
+
+  // Create header for verification while we read from the db
+  create_sqlite_header(db_out);
+
+  // Create Dep able
+  const char *sql = "CREATE TABLE DEPTABLE(" \
+               "KEY_VERTEX INT PRIMARY KEY NOT NULL," \
+               "VALUE_VERTEX BLOB NOT NULL);";
+
+  assert(sqlite3_exec(db_out, sql, NULL, 0, NULL)
+      == SQLITE_OK);
+  // Hand-off the data to the OS for writing and continue,
+  // don't wait for it to complete
+  assert(sqlite3_exec(db_out, "PRAGMA synchronous = OFF", NULL, 0, NULL)
+      == SQLITE_OK);
+  // Store the rollback journal in memory
+  assert(sqlite3_exec(db_out, "PRAGMA journal_mode = MEMORY", NULL, 0, NULL)
+      == SQLITE_OK);
+  // Use one transaction for all the insertions
+  assert(sqlite3_exec(db_out, "BEGIN TRANSACTION", NULL, 0, NULL)
+      == SQLITE_OK);
+
+  // Create entries on the table
+  size_t slot;
+  size_t count;
+  size_t prev_count = 0;
+  uint32_t *values = NULL;
+  size_t iter;
+  sqlite3_stmt *insert_stmt = NULL;
+  sql = "INSERT INTO DEPTABLE (KEY_VERTEX, VALUE_VERTEX) VALUES (?,?)";
+  assert(sqlite3_prepare_v2(db_out, sql, -1, &insert_stmt, NULL) == SQLITE_OK);
+  for (slot = 0; slot < dep_size; ++slot) {
+    count = deptbl_entry_count_for_slot(slot);
+    if (count == 0) {
+      continue;
+    }
+    if (count > prev_count) {
+      // No need to allocate new space if can just re use the old one
+      values = realloc(values, count * sizeof(uint32_t));
+      prev_count = count;
+    }
+    assert(values != NULL);
+    iter = 0;
+
+    deptbl_entry_t slotval = deptbl[slot];
+
+    if (slotval.raw != 0 && slotval.s.key.tag == TAG_KEY) {
+      // This is the head of a linked list aka KEY VERTEX
+      assert(sqlite3_bind_int(insert_stmt, 1, slotval.s.key.num) == SQLITE_OK);
+
+      // Then combine each value to VALUE VERTEX
+      while (slotval.s.next.tag == TAG_NEXT) {
+        assert(slotval.s.next.num < dep_size);
+        slotval = deptbl[slotval.s.next.num];
+        values[iter] = slotval.s.key.num;
+        iter++;
+      }
+
+      // The final "next" in the list is always a value, not a next pointer.
+      values[iter] = slotval.s.next.num;
+      iter++;
+      assert(sqlite3_bind_blob(insert_stmt, 2, values,
+                               iter * sizeof(uint32_t), SQLITE_TRANSIENT)
+          == SQLITE_OK);
+      assert(sqlite3_step(insert_stmt) == SQLITE_DONE);
+      assert(sqlite3_clear_bindings(insert_stmt) == SQLITE_OK);
+      assert(sqlite3_reset(insert_stmt) == SQLITE_OK);
+    }
+  }
+
+  if (values != NULL) {
+    free(values);
+  }
+
+  assert(sqlite3_finalize(insert_stmt) == SQLITE_OK);
+  assert(sqlite3_exec(db_out, "END TRANSACTION", NULL, 0, NULL) == SQLITE_OK);
+
+  assert(sqlite3_close(db_out) == SQLITE_OK);
+  tv2 = log_duration("Writing dependency file with sqlite", tv);
+  int secs = tv2.tv_sec - tv.tv_sec;
+  // Reporting only seconds, ignore milli seconds
+  CAMLreturn(Val_long(secs));
+}
+
+CAMLprim value hh_load_dep_table_sqlite(value in_filename) {
+  CAMLparam1(in_filename);
+  struct timeval tv;
+  struct timeval tv2;
+  gettimeofday(&tv, NULL);
+
+  assert(sqlite3_open(String_val(in_filename), &db) == SQLITE_OK);
+
+  // Verify the header
+  verify_sqlite_header(db);
+
+  tv2 = log_duration("Reading the dependency file with sqlite", tv);
+  int secs = tv2.tv_sec - tv.tv_sec;
+  // Reporting only seconds, ignore milli seconds
+  CAMLreturn(Val_long(secs));
+}
+
+/* Given a key, returns the list of values bound to it from the sql db. */
+CAMLprim value hh_get_dep_sqlite(value ocaml_key) {
+  CAMLparam1(ocaml_key);
+  CAMLlocal2(result, cell);
+
+  // The caller is required to pass a 32-bit node ID.
+  const uint64_t key64 = Long_val(ocaml_key);
+  const uint32_t key = (uint32_t)key64;
+  assert((key & 0x7FFFFFFF) == key64);
+
+  result = Val_int(0); // The empty list
+
+  // Make sure db connection is made
+  // If not then return empty list
+  if(db == NULL) {
+    CAMLreturn(result);
+  }
+
+  uint32_t *values;
+  size_t size, count, i;
+
+  sqlite3_stmt *select_stmt = NULL;
+  const char *sql = "SELECT VALUE_VERTEX FROM DEPTABLE WHERE KEY_VERTEX=?;";
+  assert(sqlite3_prepare_v2(db, sql, -1, &select_stmt, NULL) == SQLITE_OK);
+  assert(sqlite3_bind_int(select_stmt, 1, key) == SQLITE_OK);
+
+  if (sqlite3_step(select_stmt) == SQLITE_ROW) {
+    // Means we found it in the table
+    // Columns are 0 indexed
+    values = (uint32_t *) sqlite3_column_blob(select_stmt, 0);
+    size = (size_t) sqlite3_column_bytes(select_stmt, 0);
+    // Make sure we don't have malformed output
+    assert(size % sizeof(uint32_t) == 0);
+    count = size / sizeof(uint32_t);
+
+    for (i = 0; i < count; i++) {
+      cell = caml_alloc_tuple(2);
+      Field(cell, 0) = Val_long(values[i]);
+      Field(cell, 1) = result;
+      result = cell;
+    }
+  }
+  assert(sqlite3_finalize(select_stmt) == SQLITE_OK);
+  CAMLreturn(result);
+}
+
+#else
+CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
+  CAMLparam0();
+  CAMLreturn(Val_long(0));
+}
+
+CAMLprim value hh_load_dep_table_sqlite(value in_filename) {
+  CAMLparam0();
+  CAMLreturn(Val_long(0));
+}
+
+CAMLprim value hh_get_dep_sqlite(value ocaml_key) {
+  // Empty list
+  CAMLparam0();
+  CAMLreturn(Val_int(0));
+}
+#endif

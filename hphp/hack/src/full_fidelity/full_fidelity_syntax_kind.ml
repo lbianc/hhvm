@@ -21,6 +21,7 @@ type t =
 | SyntaxList
 | ScriptHeader
 | Script
+| ScriptFooter
 | SimpleTypeSpecifier
 | LiteralExpression
 | VariableExpression
@@ -54,6 +55,7 @@ type t =
 | InclusionDirective
 | CompoundStatement
 | ExpressionStatement
+| UnsetStatement
 | WhileStatement
 | IfStatement
 | ElseifClause
@@ -74,6 +76,7 @@ type t =
 | FunctionStaticStatement
 | StaticDeclarator
 | EchoStatement
+| GlobalStatement
 | SimpleInitializer
 | AnonymousFunction
 | AnonymousFunctionUseClause
@@ -122,6 +125,7 @@ type t =
 | FieldInitializer
 | ShapeTypeSpecifier
 | ShapeExpression
+| TupleExpression
 | GenericTypeSpecifier
 | NullableTypeSpecifier
 | SoftTypeSpecifier
@@ -139,6 +143,7 @@ let to_string kind =
   | SyntaxList -> "list"
   | ScriptHeader -> "header"
   | Script -> "script"
+  | ScriptFooter -> "footer"
   | SimpleTypeSpecifier -> "simple_type_specifier"
   | LiteralExpression -> "literal"
   | VariableExpression -> "variable"
@@ -172,6 +177,7 @@ let to_string kind =
   | InclusionDirective -> "inclusion_directive"
   | CompoundStatement -> "compound_statement"
   | ExpressionStatement -> "expression_statement"
+  | UnsetStatement -> "unset_statement"
   | WhileStatement -> "while_statement"
   | IfStatement -> "if_statement"
   | ElseifClause -> "elseif_clause"
@@ -192,6 +198,7 @@ let to_string kind =
   | FunctionStaticStatement -> "function_static_statement"
   | StaticDeclarator -> "static_declarator"
   | EchoStatement -> "echo_statement"
+  | GlobalStatement -> "global_statement"
   | SimpleInitializer -> "simple_initializer"
   | AnonymousFunction -> "anonymous_function"
   | AnonymousFunctionUseClause -> "anonymous_function_use_clause"
@@ -240,6 +247,7 @@ let to_string kind =
   | FieldInitializer -> "field_initializer"
   | ShapeTypeSpecifier -> "shape_type_specifier"
   | ShapeExpression -> "shape_expression"
+  | TupleExpression -> "tuple_expression"
   | GenericTypeSpecifier -> "generic_type_specifier"
   | NullableTypeSpecifier -> "nullable_type_specifier"
   | SoftTypeSpecifier -> "soft_type_specifier"

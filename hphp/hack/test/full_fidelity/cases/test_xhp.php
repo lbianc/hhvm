@@ -6,5 +6,8 @@ function foo() {
 }
 class :c {
   category %x, %y, ;
-  children (foo+, %bar*, :blah-blah?)*;
+  children (foo+ | def, %bar*, :blah-blah?)*;
+}
+function bar() {
+  return $a ? :x:y::Z : $b;
 }

@@ -705,6 +705,7 @@ void in(ISS& env, const bc::Catch&) {
 
 void in(ISS& env, const bc::NativeImpl&) {
   killLocals(env);
+  mayUseVV(env);
 
   if (is_collection_method_returning_this(env.ctx.cls, env.ctx.func)) {
     auto const resCls = env.index.builtin_class(env.ctx.cls->name);
@@ -774,6 +775,7 @@ template <typename Op> void common_cgetn(ISS& env) {
     }
   }
   readUnknownLocals(env);
+  mayUseVV(env);
   popC(env); // conversion to string can throw
   push(env, TInitCell);
 }
@@ -847,6 +849,7 @@ void in(ISS& env, const bc::VGetN&) {
   }
   popC(env);
   boxUnknownLocal(env);
+  mayUseVV(env);
   push(env, TRef);
 }
 
@@ -991,6 +994,7 @@ void issetEmptyNImpl(ISS& env) {
     // whether this function can have a VarEnv.
   }
   readUnknownLocals(env);
+  mayUseVV(env);
   popC(env);
   push(env, TBool);
 }
@@ -1106,6 +1110,7 @@ void in(ISS& env, const bc::SetN&) {
     // change whether or not they are boxed or initialized.
     loseNonRefLocalTypes(env);
   }
+  mayUseVV(env);
   push(env, t1);
 }
 
@@ -1174,6 +1179,7 @@ void in(ISS& env, const bc::SetOpN&) {
   popC(env);
   popC(env);
   loseNonRefLocalTypes(env);
+  mayUseVV(env);
   push(env, TInitCell);
 }
 
@@ -1232,6 +1238,7 @@ void in(ISS& env, const bc::IncDecN& op) {
   }
   popC(env);
   loseNonRefLocalTypes(env);
+  mayUseVV(env);
   push(env, TInitCell);
 }
 
@@ -1278,6 +1285,7 @@ void in(ISS& env, const bc::BindN&) {
   } else {
     boxUnknownLocal(env);
   }
+  mayUseVV(env);
   push(env, t1);
 }
 
@@ -1326,6 +1334,7 @@ void in(ISS& env, const bc::UnsetN& op) {
   popC(env);
   if (!t1.couldBe(TObj) && !t1.couldBe(TRes)) nothrow(env);
   unsetUnknownLocal(env);
+  mayUseVV(env);
 }
 
 void in(ISS& env, const bc::UnsetG& op) {
@@ -1345,8 +1354,13 @@ void in(ISS& env, const bc::FPushFunc& op) {
     auto const name = normalizeNS(v1->m_data.pstr);
     // FPushFuncD doesn't support class-method pair strings yet.
     if (isNSNormalized(name) && notClassMethodPair(name)) {
-      return reduce(env, bc::PopC {},
-                         bc::FPushFuncD { op.arg1, name });
+      auto const rfunc = env.index.resolve_func(env.ctx, name);
+      // Don't turn dynamic calls to caller frame affecting functions into
+      // static calls, because they might fatal (whereas the static one won't).
+      if (!rfunc.mightAccessCallerFrame()) {
+        return reduce(env, bc::PopC {},
+                           bc::FPushFuncD { op.arg1, name });
+      }
     }
   }
   popC(env);
@@ -1357,9 +1371,18 @@ void in(ISS& env, const bc::FPushFunc& op) {
 }
 
 void in(ISS& env, const bc::FPushFuncU& op) {
-  auto const rfunc =
+  auto const rfuncPair =
     env.index.resolve_func_fallback(env.ctx, op.str2, op.str3);
-  fpiPush(env, ActRec { FPIKind::Func, folly::none, rfunc });
+  if (options.ElideAutoloadInvokes && !rfuncPair.second) {
+    return reduce(
+      env,
+      bc::FPushFuncD { op.arg1, rfuncPair.first.name() }
+    );
+  }
+  fpiPush(
+    env,
+    ActRec { FPIKind::Func, folly::none, rfuncPair.first, rfuncPair.second }
+  );
 }
 
 void in(ISS& env, const bc::FPushObjMethodD& op) {
@@ -1425,25 +1448,21 @@ void in(ISS& env, const bc::FPushClsMethodF& op) {
   impl(env, bc::FPushClsMethod { op.arg1 });
 }
 
-void in(ISS& env, const bc::FPushCtorD& op) {
-  auto const rcls = env.index.resolve_class(env.ctx, op.str2);
+void ctorHelper(ISS& env, SString name) {
+  auto const rcls = env.index.resolve_class(env.ctx, name);
   push(env, rcls ? objExact(*rcls) : TObj);
   auto const rfunc =
     rcls ? env.index.resolve_ctor(env.ctx, *rcls) : folly::none;
   fpiPush(env, ActRec { FPIKind::Ctor, rcls, rfunc });
 }
 
+void in(ISS& env, const bc::FPushCtorD& op) {
+  ctorHelper(env, op.str2);
+}
+
 void in(ISS& env, const bc::FPushCtorI& op) {
   auto const name = env.ctx.unit->classes[op.arg2]->name;
-  auto const rcls = env.index.resolve_class(env.ctx, name);
-  always_assert_flog(
-    rcls.hasValue() && rcls->resolved(),
-    "An anonymous class ({}) failed to resolve",
-    name->data()
-  );
-  push(env, objExact(*rcls));
-  auto const rfunc = env.index.resolve_ctor(env.ctx, *rcls);
-  fpiPush(env, ActRec { FPIKind::Ctor, rcls, rfunc });
+  ctorHelper(env, name);
 }
 
 void in(ISS& env, const bc::FPushCtor& op) {
@@ -1504,6 +1523,7 @@ void in(ISS& env, const bc::FPassN& op) {
     // This could change the type of any local.
     popC(env);
     killLocals(env);
+    mayUseVV(env);
     return push(env, TInitGen);
   case PrepKind::Val: return reduce(env, bc::CGetN {},
                                          bc::FPassC { op.arg1 });
@@ -1630,22 +1650,36 @@ void fcallKnownImpl(ISS& env, uint32_t numArgs) {
     CallContext { env.ctx, args },
     *ar.func
   );
-  pushCallReturnType(env, ty);
+  if (!ar.fallbackFunc) {
+    pushCallReturnType(env, ty);
+    return;
+  }
+  auto const ty2 = env.index.lookup_return_type(
+    CallContext { env.ctx, args },
+    *ar.fallbackFunc
+  );
+  pushCallReturnType(env, union_of(ty, ty2));
 }
 
 void in(ISS& env, const bc::FCall& op) {
   auto const ar = fpiTop(env);
-  if (ar.func) {
+  if (ar.func && !ar.fallbackFunc) {
     switch (ar.kind) {
     case FPIKind::Unknown:
     case FPIKind::CallableArr:
     case FPIKind::ObjInvoke:
       not_reached();
     case FPIKind::Func:
-      return reduce(
-        env,
-        bc::FCallD { op.arg1, s_empty.get(), ar.func->name() }
-      );
+      // Don't turn dynamic calls into static calls with functions that can
+      // potentially touch the caller's frame. Such functions will fatal if
+      // called dynamically and we want to preserve that behavior.
+      if (!ar.func->mightAccessCallerFrame()) {
+        return reduce(
+          env,
+          bc::FCallD { op.arg1, s_empty.get(), ar.func->name() }
+        );
+      }
+      break;
     case FPIKind::Ctor:
       /*
        * Need to be wary of old-style ctors. We could get into the situation
@@ -1689,6 +1723,7 @@ void in(ISS& env, const bc::FCallD& op) {
 
 void in(ISS& env, const bc::FCallAwait& op) {
   in(env, bc::FCallD { op.arg1, op.str2, op.str3 });
+  in(env, bc::UnboxRNop { });
   in(env, bc::Await { });
 }
 
@@ -1697,7 +1732,12 @@ void fcallArrayImpl(ISS& env) {
   specialFunctionEffects(env, ar);
   if (ar.func) {
     auto const ty = env.index.lookup_return_type(env.ctx, *ar.func);
-    pushCallReturnType(env, ty);
+    if (!ar.fallbackFunc) {
+      pushCallReturnType(env, ty);
+      return;
+    }
+    auto const ty2 = env.index.lookup_return_type(env.ctx, *ar.fallbackFunc);
+    pushCallReturnType(env, union_of(ty, ty2));
     return;
   }
   return push(env, TInitGen);
@@ -1877,6 +1917,7 @@ void inclOpImpl(ISS& env) {
   killLocals(env);
   killThisProps(env);
   killSelfProps(env);
+  mayUseVV(env);
   push(env, TInitCell);
 }
 
@@ -2202,6 +2243,8 @@ void in(ISS& env, const bc::Silence& op) {
       break;
   }
 }
+
+void in(ISS& emv, const bc::VarEnvDynCall&) {}
 
 void in(ISS& env, const bc::LowInvalid&)  { always_assert(!"LowInvalid"); }
 void in(ISS& env, const bc::HighInvalid&) { always_assert(!"HighInvalid"); }
