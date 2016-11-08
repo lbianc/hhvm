@@ -77,7 +77,7 @@ struct Repo::GlobalData {
    * potential invocations of the autoloader may have been optimized away if it
    * could be proven the invocation would not find a viable function.
    */
-  bool ElideAutoloadInvokes = true;
+  bool ElideAutoloadInvokes = false;
 
   /*
    * Indicates whether the repo was compiled with PHP7 integer semantics. This
