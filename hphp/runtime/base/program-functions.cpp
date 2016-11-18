@@ -729,42 +729,6 @@ const void* __hot_start = nullptr;
 const void* __hot_end = nullptr;
 #endif
 
-#if FACEBOOK && defined USE_SSECRC
-// Overwrite the functiosn
-NEVER_INLINE void copyFunc(void* dst, void* src, uint32_t sz = 64) {
-  if (dst >= reinterpret_cast<void*>(__hot_start) &&
-      dst < reinterpret_cast<void*>(__hot_end)) {
-    memcpy(dst, src, sz);
-    Logger::Info("Successfully overwrite function at %p.", dst);
-  } else {
-    Logger::Info("Failed to patch code at %p.", dst);
-  }
-}
-
-NEVER_INLINE void copyHashFuncs() {
-#ifdef __OPTIMIZE__
-  if (IsSSEHashSupported()) {
-#ifdef NO_M_DATA
-    copyFunc(getMethodPtr(&HPHP::StringData::hashHelper),
-             reinterpret_cast<void*>(g_hashHelper_crc), 64);
-#endif // NO_M_DATA
-    typedef strhash_t (*HashFunc) (const char*, uint32_t);
-    auto hash_func = [](HashFunc x) {
-      return reinterpret_cast<void*>(x);
-    };
-    copyFunc(hash_func(hash_string_cs_unsafe),
-             hash_func(hash_string_cs_crc), 48);
-    copyFunc(hash_func(hash_string_cs),
-             hash_func(hash_string_cs_unaligned_crc), 64);
-    copyFunc(hash_func(hash_string_i_unsafe),
-             hash_func(hash_string_i_crc), 64);
-    copyFunc(hash_func(hash_string_i),
-             hash_func(hash_string_i_unaligned_crc), 128);
-  }
-#endif
-}
-#endif
-
 #if FACEBOOK
 # define AT_END_OF_TEXT       __attribute__((__section__(".stub")))
 #else
@@ -801,11 +765,6 @@ hugifyText(char* from, char* to) {
   // Needs the attribute((optimize("2")) to prevent
   // g++ from turning this back into memcpy(!)
   wordcpy((uint64_t*)from, (uint64_t*)mem, sz / sizeof(uint64_t));
-  // When supported, string hash functions using SSE 4.2 CRC32 instruction will
-  // be used, so we don't have to check every time.
-#ifdef USE_SSECRC
-  copyHashFuncs();
-#endif
   mprotect(from, sz, PROT_READ | PROT_EXEC);
   free(mem);
   mlock(from, to - from);
@@ -882,23 +841,22 @@ static void pagein_self(void) {
   free(buf);
 }
 
-/* Sets RuntimeOption::ExecutionMode according
- * to commandline options prior to config load
+/* Sets RuntimeOption::ExecutionMode according to commandline options prior to
+ * config load.  Returns false upon unrecognized mode.
  */
-static void set_execution_mode(folly::StringPiece mode) {
+static bool set_execution_mode(folly::StringPiece mode) {
   if (mode == "daemon" || mode == "server" || mode == "replay") {
-    RuntimeOption::ExecutionMode = "srv";
+    RuntimeOption::ServerMode = true;
     Logger::Escape = true;
-  } else if (mode == "run" || mode == "debug") {
-    RuntimeOption::ExecutionMode = "cli";
+    return true;
+  } else if (mode == "run" || mode == "debug" || mode == "translate") {
+    // We don't run PHP in "translate" mode, so just treat it like cli mode.
+    RuntimeOption::ServerMode = false;
     Logger::Escape = false;
-  } else if (mode == "translate") {
-    RuntimeOption::ExecutionMode = "";
-    Logger::Escape = false;
-  } else {
-    // Undefined mode
-    always_assert(false);
+    return true;
   }
+  // Invalid mode.
+  return false;
 }
 
 /* Reads a file into the OS page cache, with rate limiting. */
@@ -1498,17 +1456,13 @@ static int execute_program_impl(int argc, char** argv) {
       // Process the options
       store(opts, vm);
       notify(vm);
-      if (vm.count("interactive") /* or -a */) {
-        po.mode = "debug";
-      }
-      if (po.mode == "d") po.mode = "debug";
-      if (po.mode == "s") po.mode = "server";
-      if (po.mode == "t") po.mode = "translate";
-      if (po.mode == "")  po.mode = "run";
-      if (po.mode == "daemon" || po.mode == "server" || po.mode == "replay" ||
-          po.mode == "run" || po.mode == "debug"|| po.mode == "translate") {
-        set_execution_mode(po.mode);
-      } else {
+      if (vm.count("interactive") /* or -a */) po.mode = "debug";
+      else if (po.mode.empty()) po.mode = "run";
+      else if (po.mode == "d") po.mode = "debug";
+      else if (po.mode == "s") po.mode = "server";
+      else if (po.mode == "t") po.mode = "translate";
+
+      if (!set_execution_mode(po.mode)) {
         Logger::Error("Error in command line: invalid mode: %s",
                       po.mode.c_str());
         cout << desc << "\n";

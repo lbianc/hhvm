@@ -107,7 +107,7 @@ struct CGMeta {
    * Smashable locations. Used on relocation to be sure a smashable instruction
    * is not optimized in size.
    */
-  hphp_hash_set<TCA> smashableLocations;
+  std::set<TCA> smashableLocations;
 
   /*
    * Debug-only map from bytecode to machine code address.

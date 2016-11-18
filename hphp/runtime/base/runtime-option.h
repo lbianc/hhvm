@@ -57,11 +57,11 @@ struct RuntimeOption {
     std::vector<std::string>* messages = nullptr);
 
   static bool ServerExecutionMode() {
-    return strcmp(ExecutionMode, "srv") == 0;
+    return ServerMode;
   }
 
   static bool ClientExecutionMode() {
-    return strcmp(ExecutionMode, "cli") == 0;
+    return !ServerMode;
   }
 
   static bool GcSamplingEnabled() {
@@ -80,7 +80,7 @@ struct RuntimeOption {
     std::set<std::string>& xboxPasswords
   );
 
-  static const char *ExecutionMode;
+  static bool ServerMode;
   static std::string BuildId;
   static std::string InstanceId;
   static std::string DeploymentId; // ID for set of instances deployed at once
@@ -526,6 +526,7 @@ struct RuntimeOption {
   F(bool, JitPseudomain,               true)                            \
   F(uint32_t, JitWarmupStatusBytes,    ((25 << 10) + 1))                \
   F(uint32_t, JitWriteLeaseExpiration, 1500) /* in microseconds */      \
+  F(int, JitRetargetJumps,             1)                               \
   F(bool, HHIRLICM,                    false)                           \
   F(bool, HHIRSimplification,          true)                            \
   F(bool, HHIRGenOpts,                 true)                            \
@@ -565,6 +566,8 @@ struct RuntimeOption {
   F(double,   JitPGOMinArcProbability, 0.0)                             \
   F(uint32_t, JitPGOMaxFuncSizeDupBody, 80)                             \
   F(uint32_t, JitPGORelaxPercent,      100)                             \
+  F(uint32_t, JitPGORelaxUncountedToGenPercent, 20)                     \
+  F(uint32_t, JitPGORelaxCountedToGenPercent, 75)                       \
   F(bool,     JitPGODumpCallGraph,     false)                           \
   F(uint64_t, FuncCountHint,           10000)                           \
   F(uint64_t, PGOFuncCountHint,        1000)                            \
@@ -594,6 +597,7 @@ struct RuntimeOption {
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
   F(uint32_t, GCSampleRate,            0)                               \
   F(uint32_t, SerDesSampleRate,            0)                           \
+  F(int, SimpleJsonMaxLength,        2 << 20)                           \
   F(uint32_t, JitSampleRate,               0)                           \
   F(uint32_t, JitFilterLease,              1)                           \
   F(bool, DisableSomeRepoAuthNotices,  true)                            \
@@ -611,17 +615,17 @@ struct RuntimeOption {
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \
+  F(double, InitialLoadFactor, 1.0)                                     \
   /******************                                                   \
    | PPC64 Options. |                                                   \
    *****************/                                                   \
   /* Minimum immediate size to use TOC */                               \
-  F(uint16_t, PPC64MinTOCImmSize, 32)                                   \
+  F(uint16_t, PPC64MinTOCImmSize, 64)                                   \
   /* Relocation features. Use with care on production */                \
   /*  Allow a Far branch be converted to a Near branch. */              \
   F(bool, PPC64RelocationShrinkFarBranches, false)                      \
   /*  Remove nops from a Far branch. */                                 \
   F(bool, PPC64RelocationRemoveFarBranchesNops, true)                   \
-  F(double, InitialLoadFactor, 1.0)                                     \
   /********************                                                 \
    | Profiling flags. |                                                 \
    ********************/                                                \

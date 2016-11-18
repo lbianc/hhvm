@@ -31,6 +31,7 @@ type t =
   | Worker_busy
   (** An uncaught Not_found exception in the worker. *)
   | Worker_not_found_exception
+  | Worker_failed_to_send_job
   | Socket_error
   | Missing_hhi
   | Dfind_died
@@ -40,6 +41,11 @@ type t =
   | EventLogger_broken_pipe
   | CantRunAI
   | Watchman_failed
+  (** It is faster to exit the server (and have the Monitor restart the server)
+   * on a Watchman fresh instance than to compute the files that have been
+   * deleted and do an incremental check.
+   *)
+  | Watchman_fresh_instance
   | Hhconfig_deleted
   | Hhconfig_changed
   | Server_shutting_down
@@ -89,6 +95,7 @@ let exit_code = function
   | Worker_oomed -> 30
   | Worker_busy -> 31
   | Worker_not_found_exception -> 32
+  | Worker_failed_to_send_job -> 33
   | Missing_hhi -> 97
   | Socket_error -> 98
   | Dfind_died -> 99
@@ -97,6 +104,7 @@ let exit_code = function
   | EventLogger_restart_out_of_retries -> 108
   | CantRunAI -> 102
   | Watchman_failed -> 103
+  | Watchman_fresh_instance -> 109
   | Hhconfig_deleted -> 104
   | Hhconfig_changed -> 4
   | Server_name_not_found -> 105
@@ -141,6 +149,7 @@ let to_string = function
   | Worker_oomed -> "Worker_oomed"
   | Worker_busy -> "Worker_busy"
   | Worker_not_found_exception -> "Worker_not_found_exception"
+  | Worker_failed_to_send_job -> "Worker_failed_to_send_job"
   | Socket_error -> "Socket_error"
   | Missing_hhi -> "Missing_hhi"
   | Dfind_died -> "Dfind_died"
@@ -150,6 +159,7 @@ let to_string = function
   | EventLogger_broken_pipe -> "EventLogger_broken_pipe"
   | CantRunAI -> "CantRunAI"
   | Watchman_failed -> "Watchman_failed"
+  | Watchman_fresh_instance -> "Watchman_fresh_instance"
   | Hhconfig_deleted -> "Hhconfig_deleted"
   | Hhconfig_changed -> "Hhconfig_changed"
   | Server_name_not_found -> "Server_name_not_found"

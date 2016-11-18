@@ -118,7 +118,7 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
   IMPLEMENT_COUNTABLE_METHODS
   bool kindIsValid() const { return isObjectKind(headerKind()); }
 
-  template<class F> void scan(F&) const;
+  void scan(type_scan::Scanner&) const;
 
   size_t heapSize() const;
 
@@ -131,6 +131,10 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
 
   inline void setWeakRefed(bool weak_refed) const {
     m_hdr.weak_refed = weak_refed;
+  }
+
+  inline void setPartiallyInited(bool f) const {
+    m_hdr.partially_inited = f;
   }
 
  public:
@@ -369,12 +373,9 @@ struct ObjectData: type_scan::MarkCountable<ObjectData> {
   };
 
  private:
-  template <MOpFlags flags>
-  TypedValue* propImpl(
-    TypedValue* tvRef,
-    const Class* ctx,
-    const StringData* key
-  );
+  template<MOpMode mode>
+  TypedValue* propImpl(TypedValue* tvRef, const Class* ctx,
+                       const StringData* key);
 
   bool propEmptyImpl(const Class* ctx, const StringData* key);
 
@@ -448,22 +449,14 @@ private:
   int64_t toInt64Impl() const noexcept;
   double toDoubleImpl() const noexcept;
 
-// offset:  0    4   8       12     16   20          32
-// 64bit:   cls      header  count  id   [subclass]  [props...]
-// lowptr:  cls  id  header  count  [subclass][props...]
+// offset:  0        8       12   16   20          32
+// 64bit:   header   cls          id   [subclass]  [props...]
+// lowptr:  header   cls     id   [subclass][props...]
 
 private:
-#ifdef USE_LOWPTR
-  LowPtr<Class> m_cls;
-  // Numeric identifier of this object (used for var_dump(), and WeakRefs)
-  uint32_t o_id;
   HeaderWord<uint16_t> m_hdr; // m_hdr.aux stores Attributes
-#else
   LowPtr<Class> m_cls;
-  HeaderWord<uint16_t> m_hdr; // m_hdr.aux stores Attributes
-  // Numeric identifier of this object (used for var_dump(), and WeakRefs)
-  uint32_t o_id;
-#endif
+  uint32_t o_id; // id of this object (used for var_dump(), and WeakRefs)
 };
 #ifdef _MSC_VER
 #pragma pack(pop)
@@ -519,6 +512,7 @@ typename std::enable_if<
   req::ptr<T>
 >::type make(Args&&... args) {
   auto const mem = MM().mallocSmallSize(sizeof(T));
+  (void)type_scan::getIndexForMalloc<T>(); // ensure T* ptrs are interesting
   try {
     auto t = new (mem) T(std::forward<Args>(args)...);
     assert(t->hasExactlyOneRef());

@@ -470,6 +470,9 @@ NEVER_INLINE void Marker::init() {
         // Pointers to either the native data or the object will be mapped to
         // the native data.
         ptrs_.insert(h);
+        if (typeIndexIsUnknown(h->native_.typeIndex())) {
+          unknown_objects_.emplace_back(h);
+        }
         auto obj = reinterpret_cast<const Header*>(h->nativeObj());
         obj->hdr_.marks = GCBits::Unmarked;
         break;
@@ -751,14 +754,14 @@ thread_local BloomFilter<256*1024> t_surprise_filter;
 // Structured Logging
 
 thread_local std::atomic<size_t> g_req_num;
-__thread size_t t_gc_num, t_req_num; // nth collection in this request.
+__thread size_t t_req_num; // snapshot thread-local copy of g_req_num;
+__thread size_t t_gc_num; // nth collection in this request.
 __thread bool t_enable_samples;
 __thread size_t t_trigger;
 __thread MemoryUsageStats t_pre_stats;
 
 StructuredLogEntry logCommon() {
   StructuredLogEntry sample;
-  sample.setInt("pid", (int64_t)getpid());
   sample.setInt("req_num", t_req_num);
   // MemoryUsageStats
   sample.setInt("memory_limit", t_pre_stats.limit);

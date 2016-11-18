@@ -51,7 +51,7 @@
 #ifdef __powerpc64__
 #define SAVED_TOC() m_savedToc
 #else
-#define SAVED_TOC() _dummyA
+#define SAVED_TOC() m_savedRip
 #endif
 
 TRACE_SET_MOD(vasm);
@@ -429,10 +429,6 @@ private:
     a.addi(rsfp(), rsp(), -min_frame_size);
     a.std(rvmfp(), rsfp()[AROFF(m_sfp)]);
   }
-  void emitSaveTOC() {
-    // TOC save/restore is required by ABI for external functions.
-    a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
-  }
 
   Venv& env;
   Vtext& text;
@@ -666,11 +662,6 @@ void Vgen::emit(const inittc&) {
   // initialize our rone register
   a.li(ppc64::rone(), 1);
 
-  // Set rvmfp to the previous value, as the enterTCHelper will not create
-  // a frame, so the stublogue can save the correct info regarding the
-  // previous frame, in the stublogue{ true }.
-  a.ld(rvmfp(), rsfp()[0]);
-
   // Set DataBlock on VMTOC
   VMTOC::getInstance().setTOCDataBlock(&(env.text.data()));
 
@@ -739,7 +730,8 @@ void Vgen::emit(const lea& i) {
 
 void Vgen::emit(const call& i) {
   emitCallPrologue();
-  emitSaveTOC();
+  // TOC save/restore is required by ABI for external functions.
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
   a.call(i.target, Assembler::CallArg::External);
   if (i.watch) {
     // skip the "ld 2,24(1)" or "nop" emitted by "Assembler::call" at the end
@@ -750,7 +742,8 @@ void Vgen::emit(const call& i) {
 
 void Vgen::emit(const callr& i) {
   emitCallPrologue();
-  emitSaveTOC();
+  // TOC save/restore is required by ABI for external functions.
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
   a.call(i.target.asReg(), Assembler::CallArg::External);
 }
 
@@ -759,8 +752,9 @@ void Vgen::emit(const calls& i) {
   // r1 pointer to a valid frame in order to allow LR save by callee's
   // prologue.
   emitCallPrologue();
-  emitSaveTOC();
-  emitSmashableCall(a.code(), env.meta, i.target, Assembler::CallArg::SmashExt);
+  a.std(rtoc(), rsfp()[AROFF(SAVED_TOC())]);
+  emitSmashableCall(a.code(), env.meta, i.target,
+                    Assembler::CallArg::SmashExt);
 }
 
 void Vgen::emit(const callphp& i) {
@@ -805,7 +799,7 @@ void Vgen::emit(const stubret& i) {
   // rvmfp, if necessary.
   if (i.saveframe) {
     a.ld(rvmfp(), rsp()[AROFF(m_sfp)]);
-    a.mr(rsfp(), ppc64_asm::reg::r31);
+    a.mr(rsfp(), rvmfp());
   }
 
   // restore return address.

@@ -444,7 +444,7 @@ let with_named_body opts n_fun =
   { n_fun with Nast.f_body = Nast.NamedBody n_f_body }
 
 let n_fun_fold opts fn acc (_, fun_name) =
-  match Parser_heap.find_fun_in_file_full opts fn fun_name with
+  match Parser_heap.find_fun_in_file ~full:true opts fn fun_name with
   | None -> acc
   | Some f ->
     let n_fun = Naming.fun_ opts f in
@@ -624,6 +624,7 @@ let handle_mode mode filename opts popt files_contents files_info errors =
 let decl_and_run_mode {filename; mode; no_builtins} popt tcopt =
   if mode = Dump_deps then Typing_deps.debug_trace := true;
   Local_id.track_names := true;
+  Ident.track_names := true;
   let builtins = if no_builtins then "" else builtins in
   let filename = Relative_path.create Relative_path.Dummy filename in
   let files_contents = file_to_files filename in
@@ -650,7 +651,7 @@ let decl_and_run_mode {filename; mode; no_builtins} popt tcopt =
 
     Relative_path.Map.iter files_info begin fun fn fileinfo ->
       let {FileInfo.funs; classes; typedefs; consts; _} = fileinfo in
-      NamingGlobal.make_env ~funs ~classes ~typedefs ~consts
+      NamingGlobal.make_env popt ~funs ~classes ~typedefs ~consts
     end;
 
     Relative_path.Map.iter files_info begin fun fn _ ->

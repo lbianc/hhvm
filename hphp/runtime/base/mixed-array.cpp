@@ -45,6 +45,11 @@
 #include "hphp/runtime/base/packed-array-defs.h"
 #include "hphp/runtime/base/array-iterator-defs.h"
 
+#if defined(__x86_64__) && defined(FACEBOOK) && !defined(NO_SSE42) &&\
+    defined(NO_M_DATA)
+#include "hphp/runtime/base/mixed-array-x64.h"
+#endif
+
 namespace HPHP {
 
 TRACE_SET_MOD(runtime);
@@ -175,6 +180,59 @@ MixedArray* MixedArray::MakeStruct(uint32_t size, const StringData* const* keys,
     data[i].data.m_type = tv.m_type;
     auto ei = ad->findForNewInsert(h);
     *ei = i;
+  }
+
+  assert(ad->m_size == size);
+  assert(ad->m_pos == 0);
+  assert(ad->kind() == kMixedKind);
+  assert(ad->m_scale == scale);
+  assert(ad->hasExactlyOneRef());
+  assert(ad->m_used == size);
+  assert(ad->m_nextKI == 0);
+  assert(ad->checkInvariants());
+  return ad;
+}
+
+MixedArray* MixedArray::MakeMixed(uint32_t size,
+                                  const TypedValue* keysAndValues) {
+  assert(size > 0);
+
+  auto const scale = computeScaleFromSize(size);
+  auto const ad    = reqAllocArray(scale);
+
+  auto const data = mixedData(ad);
+  auto const hash = mixedHash(data, scale);
+  ad->initHash(hash, scale);
+
+  ad->m_sizeAndPos       = size; // pos=0
+  ad->m_hdr.init(HeaderKind::Mixed, 1);
+  ad->m_scale_used       = scale | uint64_t{size} << 32; // used=size
+  ad->m_nextKI           = 0;
+
+
+  // Append values by moving -- Caller assumes we update refcount.
+  for (uint32_t i = 0; i < size; i++) {
+    hash_t h;
+    auto& kTv = keysAndValues[i * 2];
+    if (kTv.m_type == KindOfString) {
+      auto k = kTv.m_data.pstr;
+      h = k->hash();
+      auto ei = ad->findForInsert(k, h);
+      if (validPos(*ei)) return nullptr;
+      data[i].setStrKey(k, h);
+      *ei = i;
+    } else {
+      assert(kTv.m_type == KindOfInt64);
+      auto k = kTv.m_data.num;
+      h = hashint(k);
+      auto ei = ad->findForInsert(k, h);
+      if (validPos(*ei)) return nullptr;
+      data[i].setIntKey(k, h);
+      *ei = i;
+    }
+    const auto& tv = keysAndValues[(i * 2) + 1];
+    data[i].data.m_data = tv.m_data;
+    data[i].data.m_type = tv.m_type;
   }
 
   assert(ad->m_size == size);
@@ -370,7 +428,7 @@ ArrayData* MixedArray::MakeUncounted(ArrayData* array, size_t extra) {
   auto a = asMixed(array);
   assertx(!a->empty());
   auto const scale = a->scale();
-  char* mem = static_cast<char*>(std::malloc(extra + computeAllocBytes(scale)));
+  char* mem = static_cast<char*>(malloc_huge(extra + computeAllocBytes(scale)));
   auto const ad = reinterpret_cast<MixedArray*>(mem + extra);
   auto const used = a->m_used;
   // Do a raw copy first, without worrying about counted types or refcount
@@ -469,7 +527,7 @@ void MixedArray::ReleaseUncounted(ArrayData* in, size_t extra) {
     }
   }
 
-  std::free(reinterpret_cast<char*>(ad) - extra);
+  free_huge(reinterpret_cast<char*>(ad) - extra);
 }
 
 //=============================================================================
@@ -1384,7 +1442,9 @@ const TypedValue* MixedArray::NvGetInt(const ArrayData* ad, int64_t ki) {
   return LIKELY(validPos(i)) ? &a->data()[i].data : nullptr;
 }
 
-#if !defined(__x86_64__) || !defined(FACEBOOK) || defined(NO_SSE42) || !defined(NO_M_DATA)
+#if !defined(__SSE4_2__) || defined(NO_SSECRC) || !defined(NO_M_DATA) || \
+  defined(__CYGWIN__) || defined(__MINGW__) || defined(_MSC_VER)
+// This function is implemented directly in ASM in mixed-array-x64.S otherwise.
 const TypedValue* MixedArray::NvGetStr(const ArrayData* ad,
                                        const StringData* k) {
   auto a = asMixed(ad);
@@ -1394,7 +1454,17 @@ const TypedValue* MixedArray::NvGetStr(const ArrayData* ad,
   }
   return nullptr;
 }
-
+#else
+  // mixed-array-x64.S depends on StringData and MixedArray layout.
+  // If these fail, update the constants
+  static_assert(sizeof(StringData) == SD_DATA, "");
+  static_assert(StringData::sizeOff() == SD_LEN, "");
+  static_assert(StringData::hashOff() == SD_HASH, "");
+  static_assert(MixedArray::dataOff() == MA_DATA, "");
+  static_assert(MixedArray::scaleOff() == MA_SCALE, "");
+  static_assert(MixedArray::Elm::keyOff() == ELM_KEY, "");
+  static_assert(MixedArray::Elm::hashOff() == ELM_HASH, "");
+  static_assert(MixedArray::Elm::dataOff() == ELM_DATA, "");
 #endif
 
 Cell MixedArray::NvGetKey(const ArrayData* ad, ssize_t pos) {

@@ -85,7 +85,7 @@ struct IRBuilder {
    * Update the current BCContext.
    */
   void setCurMarker(BCMarker);
-  void resetCurIROff() { m_curBCContext.iroff = 0; }
+  void resetCurIROff(uint16_t off = 0) { m_curBCContext.iroff = off; }
 
   /*
    * Exception handling and IRBuilder.
@@ -128,6 +128,7 @@ struct IRBuilder {
   Type predictedInnerType(Location l) const;
   Type predictedLocalInnerType(uint32_t id) const;
   Type predictedStackInnerType(IRSPRelOffset) const;
+  Type predictedMBaseInnerType() const;
 
   /////////////////////////////////////////////////////////////////////////////
   /*
@@ -289,8 +290,10 @@ private:
   SSATmp* preOptimizeCheckLocation(IRInstruction*, Location);
   SSATmp* preOptimizeCheckLoc(IRInstruction*);
   SSATmp* preOptimizeCheckStk(IRInstruction*);
+  SSATmp* preOptimizeCheckMBase(IRInstruction*);
   SSATmp* preOptimizeHintInner(IRInstruction*, Location);
   SSATmp* preOptimizeHintLocInner(IRInstruction*);
+  SSATmp* preOptimizeHintMBaseInner(IRInstruction*);
   SSATmp* preOptimizeAssertTypeOp(IRInstruction* inst,
                                   Type oldType,
                                   SSATmp* oldVal,

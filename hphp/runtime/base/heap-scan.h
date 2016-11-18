@@ -43,6 +43,8 @@
 #include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-generator.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 
 #include "hphp/util/hphp-config.h"
 
@@ -53,6 +55,35 @@
 #include "hphp/util/type-scan.h"
 
 namespace HPHP {
+
+inline void scanFrameSlots(const ActRec* ar, type_scan::Scanner& scanner) {
+  auto num_slots = ar->func()->numSlotsInFrame();
+  auto slots = reinterpret_cast<const TypedValue*>(ar) - num_slots;
+  scanner.conservative(slots, num_slots * sizeof(TypedValue));
+}
+
+inline void scanNative(const NativeNode* node, type_scan::Scanner& scanner) {
+  auto obj = Native::obj(node);
+  auto ndi = obj->getVMClass()->getNativeDataInfo();
+  auto data = (const char*)obj - ndi->sz;
+  scanner.scanByIndex(node->typeIndex(), data, ndi->sz);
+  if (auto off = node->arOff()) {
+    scanFrameSlots((const ActRec*)((const char*)node + off), scanner);
+  }
+}
+
+inline void scanAFWH(const ObjectData* obj, type_scan::Scanner& scanner) {
+  assert(!obj->getAttribute(ObjectData::HasNativeData));
+  // scan ResumableHeader before object
+  auto r = Resumable::FromObj(obj);
+  scanFrameSlots(r->actRec(), scanner);
+  scanner.scan(*r);
+  // scan C++ properties after [ObjectData] header. should pick up
+  // unioned and bit-packed fields
+  scanner.conservative(obj + 1,
+                       sizeof(c_AsyncFunctionWaitHandle) - sizeof(*obj));
+  return obj->scan(scanner);
+}
 
 template<class F> void scanHeader(const Header* h, F& mark,
                                   type_scan::Scanner& scanner) {
@@ -73,12 +104,34 @@ template<class F> void scanHeader(const Header* h, F& mark,
       return h->apc_.scan(mark);
     case HeaderKind::Globals:
       return h->globals_.scan(mark);
-    case HeaderKind::Object:
     case HeaderKind::Closure:
+      scanner.scan(*h->closure_.hdr());
+      return h->closure_.scan(scanner); // ObjectData::scan
+    case HeaderKind::Object:
+      if (h->obj_.getAttribute(ObjectData::HasNativeData)) {
+        auto ndi = h->obj_.getVMClass()->getNativeDataInfo();
+        scanNative(Native::getNativeNode(&h->obj_, ndi), scanner);
+      }
+      return h->obj_.scan(scanner);
     case HeaderKind::WaitHandle:
+    case HeaderKind::AwaitAllWH: {
+      // scan C++ properties after [ObjectData] header. should pick up
+      // unioned and bit-packed fields
+      auto obj = &h->obj_;
+      assert(!obj->getAttribute(ObjectData::HasNativeData));
+      scanner.conservative(obj + 1, asio_object_size(obj) - sizeof(*obj));
+      return obj->scan(scanner);
+    }
     case HeaderKind::AsyncFuncWH:
-    case HeaderKind::AwaitAllWH:
-      return h->obj_.scan(mark);
+      return scanAFWH(&h->obj_, scanner);
+    case HeaderKind::NativeData:
+      scanNative(&h->native_, scanner);
+      return Native::obj(&h->native_)->scan(scanner);
+    case HeaderKind::AsyncFuncFrame:
+      return scanAFWH(h->asyncFuncWH(), scanner);
+    case HeaderKind::ClosureHdr:
+      scanner.scan(h->closure_hdr_);
+      return h->closureObj()->scan(scanner);
     case HeaderKind::Pair:
       return h->pair_.scan(mark);
     case HeaderKind::Vector:
@@ -104,12 +157,6 @@ template<class F> void scanHeader(const Header* h, F& mark,
         (&h->malloc_)+1,
         h->malloc_.nbytes - sizeof(MallocNode)
       );
-    case HeaderKind::NativeData:
-      // TODO t11247058: use typescan machenery to scan NativeData
-      return h->nativeObj()->scan(mark);
-    case HeaderKind::AsyncFuncFrame:
-      return h->asyncFuncWH()->scan(mark);
-    case HeaderKind::ClosureHdr:
     case HeaderKind::String:
     case HeaderKind::Free:
       // these don't have pointers. some clients might generically
@@ -123,38 +170,18 @@ template<class F> void scanHeader(const Header* h, F& mark,
   always_assert(false && "corrupt header in worklist");
 }
 
-template<class F> void ObjectData::scan(F& mark) const {
-  if (m_hdr.kind == HeaderKind::AsyncFuncWH) {
-    // scan the frame locals, iterators, and Resumable
-    auto r = Resumable::FromObj(this);
-    auto frame = reinterpret_cast<const TypedValue*>(r) -
-                 r->actRec()->func()->numSlotsInFrame();
-    mark(frame, uintptr_t(this) - uintptr_t(frame));
-    auto node = reinterpret_cast<const NativeNode*>(frame) - 1;
-    mark(this + 1, uintptr_t(node) + r->size() - uintptr_t(this + 1));
-  } else if (m_hdr.kind == HeaderKind::WaitHandle ||
-             m_hdr.kind == HeaderKind::AwaitAllWH) {
-    // scan C++ properties after [ObjectData] header. should pick up
-    // unioned and bit-packed fields
-    mark(this + 1, asio_object_size(this) - sizeof(*this));
-  } else if (m_hdr.kind == HeaderKind::Closure) {
-    auto closure_hdr = static_cast<const c_Closure*>(this)->hdr();
-    mark(&closure_hdr->ctx, sizeof(closure_hdr->ctx));
-  }
-
-  if (getAttribute(HasNativeData)) {
-    // [NativeNode][NativeData][ObjectData][props]
-    Native::nativeDataScan(this, mark);
-  }
-
+inline void ObjectData::scan(type_scan::Scanner& scanner) const {
   auto props = propVec();
-  for (size_t i = 0, n = m_cls->numDeclProperties(); i < n; ++i) {
-    mark(props[i]);
+  if (m_hdr.partially_inited) {
+    // we don't know which properties are initialized yet
+    scanner.conservative(props, m_cls->numDeclProperties() * sizeof(*props));
+  } else {
+    scanner.scan(*props, m_cls->numDeclProperties() * sizeof(*props));
   }
   if (getAttribute(HasDynPropArr)) {
     // nb: dynamic property arrays are in ExecutionContext::dynPropTable,
     // which is not marked as a root. Mark the array when scanning the object.
-    mark.implicit(g_context->dynPropTable[this].arr());
+    scanner.scan(g_context->dynPropTable[this]);
   }
 }
 
@@ -287,11 +314,6 @@ template<class F> void scanRoots(F& mark, type_scan::Scanner& scanner) {
   // rds, including php stack
   if (auto rds = rds::header()) {
     scanRds(mark, rds, scanner);
-  }
-  // ExecutionContext
-  if (!g_context.isNull()) {
-    mark.where(RootKind::ExecutionContext);
-    g_context->scan(mark);
   }
   // ThreadInfo
   mark.where(RootKind::ThreadInfo);

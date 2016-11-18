@@ -46,9 +46,9 @@ namespace ppc64_asm {
  * Constants definition for PPC64
  */
 
-// Must be the same value of AROFF(_dummyB).
+// Must be the same value of AROFF(m_func).
 constexpr uint8_t min_frame_size            = 4 * 8;
-// Must be the same value of AROFF(_savedToc).
+// Must be the same value of AROFF(m_savedToc).
 constexpr uint8_t toc_position_on_frame     = 3 * 8;
 
 // Amount of bytes to skip after an Assembler::call to grab the return address.
@@ -729,29 +729,29 @@ struct Assembler {
   }
 
   void branchFar(Label& l,
-                  BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::TocOnly) {
+                 BranchConditions bc = BranchConditions::Always,
+                 LinkReg lr = LinkReg::DoNotTouch,
+                 ImmType immt = ImmType::TocOnly) {
     l.branchFar(*this, bc, lr, immt);
   }
 
   void branchFar(CodeAddress c,
-                  BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::TocOnly) {
+                 BranchConditions bc = BranchConditions::Always,
+                 LinkReg lr = LinkReg::DoNotTouch,
+                 ImmType immt = ImmType::TocOnly) {
     Label l(c);
     l.branchFar(*this, bc, lr, immt);
   }
 
   void branchFar(CodeAddress c,
-                  ConditionCode cc,
-                  LinkReg lr = LinkReg::DoNotTouch,
-                  ImmType immt = ImmType::TocOnly) {
+                 ConditionCode cc,
+                 LinkReg lr = LinkReg::DoNotTouch,
+                 ImmType immt = ImmType::TocOnly) {
     branchFar(c, BranchParams::convertCC(cc), lr, immt);
   }
 
   void branchFar(CodeAddress c, BranchParams bp,
-                  ImmType immt = ImmType::TocOnly) {
+                 ImmType immt = ImmType::TocOnly) {
     LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
     branchFar(c, static_cast<BranchConditions>(bp), lr, immt);
   }

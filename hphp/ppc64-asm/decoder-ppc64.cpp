@@ -14,12 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#include <cassert>
+#include "hphp/ppc64-asm/decoder-ppc64.h"
 
 #include "hphp/ppc64-asm/branch-ppc64.h"
-#include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/ppc64-asm/isa-ppc64.h"
 #include "hphp/ppc64-asm/asm-ppc64.h"
+
+#include "hphp/util/assertions.h"
 
 namespace ppc64_asm {
 

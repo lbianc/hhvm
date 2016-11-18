@@ -72,6 +72,16 @@ const AtomicVector<const Func*>& Func::getFuncVec() {
   return s_funcVec;
 }
 
+namespace {
+inline int numProloguesForNumParams(int numParams) {
+  // The number of prologues is numParams + 2. The extra 2 are needed for
+  // the following cases:
+  //   - arguments passed > numParams
+  //   - no arguments passed
+  return numParams + 2;
+}
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Creation and destruction.
 
@@ -106,11 +116,11 @@ Func::~Func() {
 }
 
 void* Func::allocFuncMem(int numParams) {
-  int maxNumPrologues = Func::getMaxNumPrologues(numParams);
-  int numExtraPrologues = std::max(maxNumPrologues - kNumFixedPrologues, 0);
+  int numPrologues = numProloguesForNumParams(numParams);
 
   auto const funcSize =
-    sizeof(Func) + numExtraPrologues * sizeof(m_prologueTable[0]);
+    sizeof(Func) + numPrologues * sizeof(m_prologueTable[0])
+    - sizeof(m_prologueTable);
 
   return low_malloc_data(funcSize);
 }
@@ -243,10 +253,7 @@ void Func::init(int numParams) {
 }
 
 void Func::initPrologues(int numParams) {
-  int maxNumPrologues = Func::getMaxNumPrologues(numParams);
-  int numPrologues =
-    maxNumPrologues > kNumFixedPrologues ? maxNumPrologues
-                                         : kNumFixedPrologues;
+  int numPrologues = numProloguesForNumParams(numParams);
 
   if (!jit::mcgen::initialized()) {
     m_funcBody = nullptr;
@@ -591,10 +598,7 @@ const FPIEnt* Func::findPrecedingFPI(Offset o) const {
 // JIT data.
 
 int Func::numPrologues() const {
-  int maxNumPrologues = Func::getMaxNumPrologues(numParams());
-  int nPrologues = maxNumPrologues > kNumFixedPrologues ? maxNumPrologues
-                                                        : kNumFixedPrologues;
-  return nPrologues;
+  return numProloguesForNumParams(numParams());
 }
 
 void Func::resetPrologue(int numParams) {
@@ -649,13 +653,21 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
 
   const ParamInfoVec& params = shared()->m_params;
   for (uint32_t i = 0; i < params.size(); ++i) {
-    if (params[i].funcletOff != InvalidAbsoluteOffset) {
-      out << " DV for parameter " << i << " at " << params[i].funcletOff;
-      if (params[i].phpCode) {
-        out << " = " << params[i].phpCode->data();
-      }
-      out << std::endl;
+    auto const& param = params[i];
+    out << " Param: " << localVarName(i)->data();
+    if (param.typeConstraint.hasConstraint()) {
+      out << " " << param.typeConstraint.displayName();
     }
+    if (param.userType) {
+      out << " (" << param.userType->data() << ")";
+    }
+    if (param.funcletOff != InvalidAbsoluteOffset) {
+      out << " DV" << " at " << param.funcletOff;
+      if (param.phpCode) {
+        out << " = " << param.phpCode->data();
+      }
+    }
+    out << std::endl;
   }
   out << "maxStackCells: " << maxStackCells() << '\n'
       << "numLocals: " << numLocals() << '\n'

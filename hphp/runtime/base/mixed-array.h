@@ -127,6 +127,9 @@ struct MixedArray final : private ArrayData,
     static constexpr ptrdiff_t dataOff() {
       return offsetof(Elm, data);
     }
+    static constexpr ptrdiff_t hashOff() {
+      return offsetof(Elm, data) + offsetof(TypedValue, m_aux);
+    }
   };
 
   static constexpr ptrdiff_t dataOff() {
@@ -134,6 +137,9 @@ struct MixedArray final : private ArrayData,
   }
   static constexpr ptrdiff_t usedOff() {
     return offsetof(MixedArray, m_used);
+  }
+  static constexpr ptrdiff_t scaleOff() {
+    return offsetof(MixedArray, m_scale);
   }
 
   static constexpr ptrdiff_t elmOff(uint32_t pos) {
@@ -192,6 +198,13 @@ struct MixedArray final : private ArrayData,
    */
   static ArrayData* MakeReserveSame(const ArrayData* other, uint32_t capacity);
   static ArrayData* MakeReserveLike(const ArrayData* other, uint32_t capacity);
+
+  /*
+   * Allocates a new request-local array with given key,value,key,value,... in
+   * natural order. Returns nullptr if there are duplicate keys. Does not check
+   * for integer-like keys. Takes ownership of keys and values iff successful.
+   */
+  static MixedArray* MakeMixed(uint32_t size, const TypedValue* keysAndValues);
 
   /*
    * Like MakePacked, but given static strings, make a struct-like array.
