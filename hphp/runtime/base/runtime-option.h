@@ -413,6 +413,7 @@ struct RuntimeOption {
   static bool PHP7_Substr;
   static bool PHP7_InfNanFloatParse;
   static bool PHP7_UVS;
+  static bool PHP7_DisallowUnsafeCurlUploads;
 
   static int64_t HeapSizeMB;
   static int64_t HeapResetCountBase;
@@ -451,6 +452,7 @@ struct RuntimeOption {
   F(bool, JitRequireWriteLease,        false)                           \
   F(uint64_t, JitRelocationSize,       kJitRelocationSizeDefault)       \
   F(uint64_t, JitMatureSize,           25 << 20)                        \
+  F(double, JitMaturityExponent,       1.)                              \
   F(bool, JitTimer,                    kJitTimerDefault)                \
   F(int, JitConcurrently,              1)                               \
   F(int, JitThreads,                   4)                               \
@@ -484,6 +486,7 @@ struct RuntimeOption {
          with Option::HardReturnTypeHints). */                          \
   F(int32_t, CheckReturnTypeHints,     2)                               \
   F(bool, SoftClosureReturnTypeHints,  false)                           \
+  F(bool, PromoteEmptyObject,          !EnableHipHopSyntax)             \
   F(bool, AllowScopeBinding,           true)                            \
   F(bool, JitNoGdb,                    true)                            \
   F(bool, SpinOnCrash,                 false)                           \
@@ -513,6 +516,9 @@ struct RuntimeOption {
   F(uint32_t, JitProfileBCSize,        profileBCSizeDefault())          \
   F(uint32_t, JitResetProfCountersRequest, resetProfCountersDefault())  \
   F(uint32_t, JitRetranslateAllRequest, 0)                              \
+  F(double,   JitLayoutHotThreshold,   0.05)                            \
+  F(int32_t,  JitLayoutMainFactor,     1000)                            \
+  F(int32_t,  JitLayoutColdFactor,     5)                               \
   F(bool, JitProfileRecord,            false)                           \
   F(uint32_t, GdbSyncChunks,           128)                             \
   F(bool, JitKeepDbgFiles,             false)                           \

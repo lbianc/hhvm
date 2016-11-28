@@ -150,7 +150,7 @@ struct Vgen {
 
   /////////////////////////////////////////////////////////////////////////////
 
-  template<class Inst> void emit(Inst& i) {
+  template<class Inst> void emit(const Inst& i) {
     always_assert_flog(false, "unimplemented instruction: {} in B{}\n",
                        vinst_names[Vinstr(i).op], size_t(current));
   }
@@ -1596,7 +1596,7 @@ void optimizeARM(Vunit& unit, const Abi& abi, bool regalloc) {
   }
 }
 
-void emitARM(const Vunit& unit, Vtext& text, CGMeta& fixups,
+void emitARM(Vunit& unit, Vtext& text, CGMeta& fixups,
              AsmInfo* asmInfo) {
   vasm_emit<Vgen>(unit, text, fixups, asmInfo);
 }

@@ -20,7 +20,7 @@ module TNBody       = Typing_naming_body
 (*****************************************************************************)
 
 type mode =
-  | Ai of Ai_options.prepared
+  | Ai of Ai_options.t
   | Autocomplete
   | Color
   | Coverage
@@ -645,7 +645,7 @@ let decl_and_run_mode {filename; mode; no_builtins} popt tcopt =
         Parser_heap.ParserHeap.add fn (ast, Parser_heap.Full);
         let funs, classes, typedefs, consts = Ast_utils.get_defs ast in
         { FileInfo.
-          file_mode; funs; classes; typedefs; consts; comments;
+          file_mode; funs; classes; typedefs; consts; comments = Some comments;
           consider_names_just_for_autoload = false }
       end parsed_files in
 

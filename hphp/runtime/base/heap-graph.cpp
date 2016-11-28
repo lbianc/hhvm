@@ -44,7 +44,6 @@ const char* root_kind_names[] = {
   "SweepLists",
   "AsioSession",
   "GetServerNote",
-  "EzcResources"
 };
 
 namespace {
@@ -65,8 +64,6 @@ struct PtrFilter: F {
   void operator()(const Resource& p) { (*this)(p.hdr()->data()); }
   void operator()(const Variant& p) { (*this)(*p.asTypedValue()); }
   void operator()(const StringBuffer& p) { p.scan(*this); }
-  void operator()(const NameValueTable& p) { p.scan(*this); }
-  void operator()(const VarEnv& venv) { (*this)(&venv); }
 
   // mark a TypedValue or TypedValueAux. taking tv by value would exclude aux.
   void operator()(const TypedValueAux& v) { (*this)(*(const TypedValue*)&v); }
@@ -146,8 +143,6 @@ struct PtrFilter: F {
     for (auto& e : c) (*this)(e); // each element is pair<T,U>
   }
 
-  void operator()(const VarEnv* p) { if (p) p->scan(*this); }
-
   // Explicitly ignored field types.
   void operator()(const LowPtr<Class>&) {}
   void operator()(const Unit*) {}
@@ -155,10 +150,6 @@ struct PtrFilter: F {
   void operator()(const Class*) {}
   void operator()(const std::string&) {}
   void operator()(int) {}
-
-  // NVTs live inside VarEnv, and GlobalsArray has an interior ptr to one.
-  // ignore the interior pointer; NVT should be scanned by VarEnv::scan.
-  void operator()(const NameValueTable* p) {}
 
   // mark ambigous pointers in the range [start,start+len). If the start or
   // end is a partial word, don't scan that word.
@@ -190,17 +181,17 @@ void addPtr(HeapGraph& g, int from, int to, HeapGraph::PtrKind kind) {
   auto& to_node = g.nodes[to];
   auto e = g.ptrs.size();
   g.ptrs.push_back(
-    HeapGraph::Ptr{from, to, from_node.first_out, to_node.first_in, kind}
+    HeapGraph::Ptr{from, to, from_node.first_out, to_node.first_in, kind, ""}
   );
   from_node.first_out = to_node.first_in = e;
 }
 
 void addRoot(HeapGraph& g, int to, HeapGraph::PtrKind ptr_kind,
-             RootKind root_kind) {
+             const char* description) {
   auto& to_node = g.nodes[to];
   auto e = g.ptrs.size();
   g.ptrs.push_back(
-    HeapGraph::Ptr{-1, to, -1, to_node.first_in, ptr_kind, root_kind}
+    HeapGraph::Ptr{-1, to, -1, to_node.first_in, ptr_kind, description}
   );
   to_node.first_in = e;
   g.roots.push_back(e);
@@ -235,30 +226,33 @@ struct ObjMarker {
 
 struct RootMarker {
   explicit RootMarker(HeapGraph& g, PtrMap& blocks)
-    : g_(g), blocks_(blocks), root_kind_(RootKind::NotARoot)
+    : g_(g), blocks_(blocks)
   {}
   void counted(const void* p) { mark(p, HeapGraph::Counted); }
   void implicit(const void* p) { mark(p, HeapGraph::Implicit); }
   void ambig(const void* p) {
     if (auto r = blocks_.region(p)) {
-      addRoot(g_, blocks_.index(r), HeapGraph::Ambiguous, root_kind_);
+      addRoot(g_, blocks_.index(r), HeapGraph::Ambiguous, description_);
     }
   }
   void where(RootKind k) {
-    root_kind_ = k;
+    description_ = root_kind_names[(int)k];
+  }
+  void where(const char* description) {
+    description_ = description;
   }
 
  private:
   void mark(const void* p, HeapGraph::PtrKind kind) {
     assert(blocks_.header(p));
     auto r = blocks_.region(p);
-    addRoot(g_, blocks_.index(r), kind, root_kind_);
+    addRoot(g_, blocks_.index(r), kind, description_);
   }
 
  private:
   HeapGraph& g_;
   PtrMap& blocks_;
-  RootKind root_kind_;
+  const char* description_{""};
 };
 
 } // anon namespace
@@ -301,16 +295,18 @@ HeapGraph makeHeapGraph(bool include_free) {
 
   // find roots
   PtrFilter<RootMarker> rmark(g, blocks);
-  scanRoots(rmark, type_scanner);
+  scanRoots(type_scanner);
   type_scanner.finish(
-    [&](const void* p) {
+    [&](const void* p, const char* description) {
       // definitely a ptr, but maybe interior, and maybe not counted
       if (blocks.region(p)) {
+        rmark.where(description);
         rmark.implicit(p);
       }
     },
-    [&](const void* p, std::size_t size) {
+    [&](const void* p, std::size_t size, const char* description) {
       // scan the range conservatively
+      rmark.where(description);
       rmark(p, size);
     }
   );
@@ -319,15 +315,15 @@ HeapGraph makeHeapGraph(bool include_free) {
   for (size_t i = 0, n = g.nodes.size(); i < n; i++) {
     auto h = g.nodes[i].h;
     PtrFilter<ObjMarker> omark(g, blocks, h);
-    scanHeader(h, omark, type_scanner);
+    scanHeader(h, type_scanner);
     type_scanner.finish(
-      [&](const void* p) {
+      [&](const void* p, const char*) {
         // definitely a ptr, but maybe interior, and maybe not counted
         if (blocks.region(p)) {
           omark.implicit(p);
         }
       },
-      [&](const void* p, std::size_t size) {
+      [&](const void* p, std::size_t size, const char*) {
         // scan the range conservatively
         omark(p, size);
       }

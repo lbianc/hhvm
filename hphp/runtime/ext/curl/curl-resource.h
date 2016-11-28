@@ -102,6 +102,7 @@ struct CurlResource : SweepableResourceData {
   static bool isLongOption(long option);
   bool setLongOption(long option, long value);
   static bool isStringOption(long option);
+  static bool isStringFilePathOption(long option);
   bool setStringOption(long option, const String& value);
   static bool isNullableStringOption(long option);
   bool setNullableStringOption(long option, const Variant& value);
@@ -146,6 +147,7 @@ struct CurlResource : SweepableResourceData {
   Variant      m_progress_callback;
 
   bool m_emptyPost;
+  bool m_safeUpload;
   CurlHandlePoolPtr m_connPool;
   PooledCurlHandle* m_pooledHandle;
 };
