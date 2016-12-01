@@ -3142,7 +3142,7 @@ Variant HHVM_FUNCTION(imagetruecolortopalette, const Resource& image,
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
 
-  if (ncolors <= 0) {
+  if (ncolors <= 0 || ncolors >= INT_MAX) {
     raise_warning("Number of colors has to be greater than zero");
     return false;
   }
@@ -3925,6 +3925,10 @@ bool HHVM_FUNCTION(imagegammacorrect, const Resource& image,
     double inputgamma, double outputgamma) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
+  if (inputgamma <= 0.0 || outputgamma <= 0.0) {
+    raise_warning("Gamma values should be positive");
+    return false;
+  }
   if (gdImageTrueColor(im))   {
     int x, y, c;
 
@@ -7352,9 +7356,12 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo,
                   if (fgot < ImageInfo->Thumbnail.size) {
                     raise_warning("Thumbnail goes IFD boundary or "
                                     "end of file reached");
+                    IM_FREE(ImageInfo->Thumbnail.data);
+                    ImageInfo->Thumbnail.data = nullptr;
+                  } else {
+                    memcpy(ImageInfo->Thumbnail.data, str.c_str(), fgot);
+                    exif_thumbnail_build(ImageInfo);
                   }
-                  memcpy(ImageInfo->Thumbnail.data, str.c_str(), fgot);
-                  exif_thumbnail_build(ImageInfo);
                 }
               }
             }
@@ -7387,9 +7394,12 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo,
             if (fgot < ImageInfo->Thumbnail.size) {
               raise_warning("Thumbnail goes IFD boundary or "
                               "end of file reached");
+              IM_FREE(ImageInfo->Thumbnail.data);
+              ImageInfo->Thumbnail.data = nullptr;
+            } else {
+              memcpy(ImageInfo->Thumbnail.data, str.c_str(), fgot);
+              exif_thumbnail_build(ImageInfo);
             }
-            memcpy(ImageInfo->Thumbnail.data, str.c_str(), fgot);
-            exif_thumbnail_build(ImageInfo);
           }
         }
         return 1;

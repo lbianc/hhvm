@@ -112,7 +112,7 @@ let parse_check_args cmd =
       " (mode) pretty prints the file content showing what is checked (give '-' for stdin)";
     "--coverage", Arg.String (fun x -> set_mode (MODE_COVERAGE x) ()),
       " (mode) calculates the extent of typing of a given file or directory";
-    "--find-dependent-files", Arg.String (fun x -> set_mode (MODE_FIND_DEPENDENT_FILES x) ()),
+      "--find-dependent-files", Arg.String (fun x -> set_mode (MODE_FIND_DEPENDENT_FILES x) ()),
       " (mode) list all files that make any use of the provided list of files";
     "--find-refs", Arg.String (fun x -> set_mode (MODE_FIND_REFS x) ()),
       " (mode) finds references of the provided method name";
@@ -172,6 +172,8 @@ let parse_check_args cmd =
       " (mode) fuzzy search constant definitions";
     "--outline", Arg.Unit (set_mode MODE_OUTLINE),
       " (mode) prints an outline of the text on stdin";
+    "--ide-outline",
+      Arg.Unit (set_mode (MODE_OUTLINE2)), "";
     "--inheritance-children", Arg.String (fun x -> set_mode (MODE_METHOD_JUMP_CHILDREN x) ()),
       " (mode) prints a list of all related classes or methods to the given class";
     "--inheritance-ancestors", Arg.String (fun x -> set_mode (MODE_METHOD_JUMP_ANCESTORS x) ()),
@@ -224,12 +226,6 @@ let parse_check_args cmd =
     "--stats",
       Arg.Unit (set_mode MODE_STATS),
       " display some server statistics";
-    (* Server versions of methods that were exclusive to Javascript
-     * (see hh_ide.ml) so we can test how the editors are doing without it *)
-    "--find-lvar-refs",
-      Arg.String (fun x -> set_mode (MODE_FIND_LVAR_REFS x) ()),
-      (* (mode) finds references of local variable at [line:character] *)
-      (* position in file on stdin *) "";
     "--get-method-name",
       Arg.String (fun x -> set_mode (MODE_GET_METHOD_NAME x) ()),
       (* (mode) same as --identify-function, but returns more information *) "";
@@ -240,8 +236,6 @@ let parse_check_args cmd =
       ]), "";
     "--ide-get-definition",
       Arg.String (fun x -> set_mode (MODE_GET_DEFINITION x) ()), "";
-    "--ide-outline",
-      Arg.Unit (set_mode (MODE_OUTLINE2)), "";
     "--ide-find-refs",
       Arg.String (fun x -> set_mode (MODE_IDE_FIND_REFS x) ()), "";
     "--ide-highlight-refs",

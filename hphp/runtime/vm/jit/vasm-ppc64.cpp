@@ -1136,6 +1136,28 @@ X(subli,  movl, extsw, subqi,  ONE_R64(d))
 #undef ONE_R64
 #undef TWO_R64
 
+///////////////////////////////////////////////////////////////////////////////
+
+void lowerForPPC64(Vout& v, popp& inst) {
+  v << pop{inst.d0};
+  v << pop{inst.d1};
+}
+
+void lowerForPPC64(Vout& v, poppm& inst) {
+  v << popm{inst.d0};
+  v << popm{inst.d1};
+}
+
+void lowerForPPC64(Vout& v, pushp& inst) {
+  v << push{inst.s0};
+  v << push{inst.s1};
+}
+
+void lowerForPPC64(Vout& v, pushpm& inst) {
+  v << pushm{inst.s0};
+  v << pushm{inst.s1};
+}
+
 /////////////////////////////////////////////////////////////////////////////
 /*
  * PHP function ABI

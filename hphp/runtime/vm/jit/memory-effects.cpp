@@ -157,7 +157,7 @@ AliasClass pointee(
     }
 
     // The result of ElemArray{,W,U} is either the address of an array element,
-    // or &init_null_variant().
+    // or &immutable_null_base.
     if (typeNR <= TPtrToMembGen) {
       if (sinst->is(ElemArray, ElemArrayW, ElemDict,
                     ElemDictW, ElemKeyset, ElemKeysetW)) return elem();
@@ -170,7 +170,7 @@ AliasClass pointee(
 
       // These instructions can only get at tvRef when given it as a
       // src. Otherwise they can only return pointers to properties or
-      // &init_null_variant().
+      // &immutable_null_base.
       if (sinst->is(PropX, PropDX, PropQ)) {
         assertx(sinst->srcs().back()->isA(TPtrToMISGen));
         return APropAny | pointee(sinst->srcs().back(), visited_labels);
@@ -318,7 +318,11 @@ GeneralEffects may_reenter(const IRInstruction& inst, GeneralEffects x) {
 GeneralEffects may_raise(const IRInstruction& inst, GeneralEffects x) {
   return may_reenter(
     inst,
-    GeneralEffects { x.loads | AFrameAny, x.stores, x.moves, x.kills }
+    GeneralEffects {
+      x.loads |
+        (RuntimeOption::EnableContextInErrorHandler ? AFrameAny : AEmpty),
+      x.stores, x.moves, x.kills
+    }
   );
 }
 
@@ -456,7 +460,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     return ExitEffects {
       AUnknown,
       *stack_below(inst.src(1),
-                   inst.extra<JmpSwitchDest>()->irSPOff - 1).
+                   inst.extra<JmpSwitchDest>()->spOffBCFromIRSP - 1).
         precise_union(AMIStateAny)
     };
   case JmpSSwitchDest:
@@ -1558,7 +1562,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     {
       AliasClass effects = AStack {
         inst.src(0),
-        inst.extra<ProfileMethod>()->spOffset,
+        inst.extra<ProfileMethod>()->bcSPOff,
         int32_t{kNumActRecCells}
       };
       return may_load_store(effects, AEmpty);

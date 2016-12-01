@@ -21,7 +21,6 @@ type _ t =
   | COVERAGE_LEVELS : ServerUtils.file_input -> Coverage_level.result t
   | AUTOCOMPLETE : string -> AutocompleteService.result t
   | IDENTIFY_FUNCTION : string * int * int -> IdentifySymbolService.result t
-  | OUTLINE : string -> FileOutline.outline t
   | GET_DEFINITION_BY_ID : string -> string SymbolDefinition.t option t
   | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
   | FIND_DEPENDENT_FILES: string list -> string list t
@@ -42,20 +41,14 @@ type _ t =
   | DELETE_CHECKPOINT : string -> bool t
   | STATS : Stats.t t
   | KILL : unit t
-  | FIND_LVAR_REFS : string * int * int -> ServerFindLocals.result t
   | FORMAT : string * int * int -> string Format_hack.return t
   | TRACE_AI : Ai.TraceService.action -> string t
   | AI_QUERY : string -> string t
   | DUMP_FULL_FIDELITY_PARSE : string -> string t
-  | ECHO_FOR_TEST : string -> string t
   | OPEN_FILE : string * string -> unit t
   | CLOSE_FILE : string -> unit t
   | EDIT_FILE : string * (code_edit list) -> unit t
   | IDE_AUTOCOMPLETE : string * content_pos -> AutocompleteService.result t
-  | IDE_HIGHLIGHT_REF : string * content_pos ->
-      ServerHighlightRefsTypes.result t
-  | IDE_IDENTIFY_FUNCTION : string * content_pos ->
-      IdentifySymbolService.result t
   | DISCONNECT : unit t
   | SUBSCRIBE_DIAGNOSTIC : int -> unit t
   | UNSUBSCRIBE_DIAGNOSTIC : int -> unit t

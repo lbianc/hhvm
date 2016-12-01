@@ -29,8 +29,6 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         env, ServerAutoComplete.auto_complete env.tcopt content
     | IDENTIFY_FUNCTION (content, line, char) ->
         env, ServerIdentifyFunction.go_absolute content line char env.tcopt
-    | OUTLINE content ->
-        env, FileOutline.outline env.popt content
     | GET_DEFINITION_BY_ID id ->
         env, Option.map (ServerSymbolDefinition.from_symbol_id env.tcopt id)
           SymbolDefinition.to_absolute
@@ -71,8 +69,6 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     | DELETE_CHECKPOINT x -> env, ServerCheckpoint.delete_checkpoint x
     | STATS -> env, Stats.get_stats ()
     | KILL -> env, ()
-    | FIND_LVAR_REFS (content, line, char) ->
-        env, ServerFindLocals.go env.tcopt content line char
     | FORMAT (content, from, to_) ->
         env, ServerFormat.go content from to_
     | TRACE_AI action ->
@@ -82,8 +78,6 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         env, Ai.QueryService.go json
     | DUMP_FULL_FIDELITY_PARSE file ->
         env, FullFidelityParseService.go file
-    | ECHO_FOR_TEST msg ->
-        env, msg
     | OPEN_FILE (path, contents) ->
         ServerFileSync.open_file env path contents, ()
     | CLOSE_FILE path ->
@@ -106,26 +100,6 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         let edited_fc = edit_file_unsafe fc edits in
         let content = get_content edited_fc in
         env, ServerAutoComplete.auto_complete env.tcopt content
-    | IDE_HIGHLIGHT_REF (path, {line; column}) ->
-        let content =
-          ServerFileSync.try_relativize_path path >>= fun relative_path ->
-          (* This checks if the file is open in IDE already *)
-          File_heap.get_contents relative_path in
-        let content = match content with
-          | Some c -> c
-          | None -> try Sys_utils.cat path with _ -> ""
-        in
-        env, ServerHighlightRefs.go (content, line, column) env.tcopt
-    | IDE_IDENTIFY_FUNCTION (path, {line; column}) ->
-        let content =
-          ServerFileSync.try_relativize_path path >>= fun relative_path ->
-          File_heap.get_contents relative_path
-        in
-        let content = match content with
-          | Some c -> c
-          | None -> try Sys_utils.cat path with _ -> ""
-        in
-        env, ServerIdentifyFunction.go_absolute content line column env.tcopt
     | DISCONNECT ->
         ServerFileSync.clear_sync_data env, ()
     | SUBSCRIBE_DIAGNOSTIC id ->
@@ -147,7 +121,6 @@ let to_string : type a. a t -> _ = function
   | COVERAGE_LEVELS _ -> "COVERAGE_LEVELS"
   | AUTOCOMPLETE _ -> "AUTOCOMPLETE"
   | IDENTIFY_FUNCTION _ -> "IDENTIFY_FUNCTION"
-  | OUTLINE _ -> "OUTLINE"
   | METHOD_JUMP _ -> "METHOD_JUMP"
   | FIND_DEPENDENT_FILES _ -> "FIND_DEPENDENT_FILES"
   | FIND_REFS _ -> "FIND_REFS"
@@ -165,7 +138,6 @@ let to_string : type a. a t -> _ = function
   | DELETE_CHECKPOINT _ -> "DELETE_CHECKPOINT"
   | STATS -> "STATS"
   | KILL -> "KILL"
-  | FIND_LVAR_REFS _ -> "FIND_LVAR_REFS"
   | FORMAT _ -> "FORMAT"
   | TRACE_AI _ -> "TRACE_AI"
   | IDE_FIND_REFS _ -> "IDE_FIND_REFS"
@@ -173,13 +145,10 @@ let to_string : type a. a t -> _ = function
   | IDE_HIGHLIGHT_REFS _ -> "IDE_HIGHLIGHT_REFS"
   | AI_QUERY _ -> "AI_QUERY"
   | DUMP_FULL_FIDELITY_PARSE _ -> "DUMP_FULL_FIDELITY_PARSE"
-  | ECHO_FOR_TEST _ -> "ECHO_FOR_TEST"
   | OPEN_FILE _ -> "OPEN_FILE"
   | CLOSE_FILE _ -> "CLOSE_FILE"
   | EDIT_FILE _ -> "EDIT_FILE"
   | IDE_AUTOCOMPLETE _ -> "IDE_AUTOCOMPLETE"
-  | IDE_HIGHLIGHT_REF _ -> "IDE_HIGHLIGHT_REF"
-  | IDE_IDENTIFY_FUNCTION _ -> "IDE_IDENTIFY_FUNCTION"
   | DISCONNECT -> "DISCONNECT"
   | SUBSCRIBE_DIAGNOSTIC _ -> "SUBSCRIBE_DIAGNOSTIC"
   | UNSUBSCRIBE_DIAGNOSTIC _ -> "UNSUBSCRIBE_DIAGNOSTIC"

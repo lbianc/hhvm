@@ -80,6 +80,7 @@ const StaticString
   s_is_subclass_of("is_subclass_of"),
   s_method_exists("method_exists"),
   s_count("count"),
+  s_sizeof("sizeof"),
   s_ini_get("ini_get"),
   s_86metadata("86metadata"),
   s_set_frame_metadata("hh\\set_frame_metadata"),
@@ -128,7 +129,7 @@ Block* make_opt_catch(IRGS& env, const ParamPrep& params) {
     decRef(env, params[i].value);
   }
   gen(env, EndCatch,
-      IRSPRelOffsetData { bcSPOffset(env) },
+      IRSPRelOffsetData { spOffBCFromIRSP(env) },
       fp(env), sp(env));
   return exit;
 }
@@ -205,6 +206,10 @@ SSATmp* opt_count(IRGS& env, const ParamPrep& params) {
 
   // Count may throw
   return gen(env, Count, make_opt_catch(env, params), val);
+}
+
+SSATmp* opt_sizeof(IRGS& env, const ParamPrep& params) {
+  return opt_count(env, params);
 }
 
 SSATmp* opt_ord(IRGS& env, const ParamPrep& params) {
@@ -577,6 +582,7 @@ SSATmp* opt_foldable(IRGS& env,
     vmpc() = vmfp() ? vmfp()->m_func->getEntry() : nullptr;
     SCOPE_EXIT{ vmpc() = savedPC; };
 
+    assertx(!RID().getJitFolding());
     RID().setJitFolding(true);
     SCOPE_EXIT{ RID().setJitFolding(false); };
 
@@ -584,17 +590,57 @@ SSATmp* opt_foldable(IRGS& env,
                           nullptr, nullptr, ExecutionContext::InvokeNormal,
                           !func->unit()->useStrictTypes());
     SCOPE_EXIT { tvRefcountedDecRef(retVal); };
+    assertx(tvIsPlausible(retVal));
 
-    if (isStringType(retVal.m_type)) {
-      return cns(env, makeStaticString(retVal.m_data.pstr));
-    } else if (isArrayLikeType(retVal.m_type)) {
-      auto const arr = ArrayData::GetScalarArray(retVal.m_data.parr);
-      return cns(env, make_array_like_tv(arr));
-    } else if (retVal.m_type == KindOfObject ||
-               retVal.m_type == KindOfResource) {
-      return nullptr;
-    } else {
-      return cns(env, retVal);
+    switch (retVal.m_type) {
+      case KindOfNull:
+      case KindOfBoolean:
+      case KindOfInt64:
+      case KindOfDouble:
+        return cns(env, retVal);
+      case KindOfPersistentString:
+      case KindOfString:
+        return cns(env, makeStaticString(retVal.m_data.pstr));
+      case KindOfPersistentVec:
+      case KindOfVec:
+        return cns(
+          env,
+          make_tv<KindOfPersistentVec>(
+            ArrayData::GetScalarArray(retVal.m_data.parr)
+          )
+        );
+      case KindOfPersistentDict:
+      case KindOfDict:
+        return cns(
+          env,
+          make_tv<KindOfPersistentDict>(
+            ArrayData::GetScalarArray(retVal.m_data.parr)
+          )
+        );
+      case KindOfPersistentKeyset:
+      case KindOfKeyset:
+        return cns(
+          env,
+          make_tv<KindOfPersistentKeyset>(
+            ArrayData::GetScalarArray(retVal.m_data.parr)
+          )
+        );
+      case KindOfPersistentArray:
+      case KindOfArray:
+        return cns(
+          env,
+          make_tv<KindOfPersistentArray>(
+            ArrayData::GetScalarArray(retVal.m_data.parr)
+          )
+        );
+      case KindOfUninit:
+      case KindOfObject:
+      case KindOfResource:
+      case KindOfRef:
+        return nullptr;
+      case KindOfClass:
+        always_assert(0);
+        break;
     }
   } catch (...) {
     // If an exception or notice occurred, don't optimize
@@ -623,6 +669,7 @@ SSATmp* optimizedFCallBuiltin(IRGS& env,
     X(in_array)
     X(ini_get)
     X(count)
+    X(sizeof)
     X(is_a)
     X(is_subclass_of)
     X(method_exists)
@@ -805,7 +852,7 @@ struct CatchMaker {
     decRefForUnwind();
     prepareForCatch();
     gen(env, EndCatch,
-        IRSPRelOffsetData { bcSPOffset(env) },
+        IRSPRelOffsetData { spOffBCFromIRSP(env) },
         fp(env), sp(env));
     return exit;
   }
@@ -828,7 +875,7 @@ struct CatchMaker {
         decRefForUnwind();
         prepareForCatch();
         gen(env, EndCatch,
-          IRSPRelOffsetData { bcSPOffset(env) },
+          IRSPRelOffsetData { spOffBCFromIRSP(env) },
           fp(env), sp(env));
       }
     );
@@ -879,7 +926,7 @@ private:
      * So before we leave, update the marker to placate EndCatch assertions,
      * which is trying to detect failure to do this properly.
      */
-    auto const spOff = IRSPRelOffsetData { bcSPOffset(env) };
+    auto const spOff = IRSPRelOffsetData { spOffBCFromIRSP(env) };
     gen(env, EagerSyncVMRegs, spOff, fp(env), sp(env));
     updateMarker(env);  // Mark the EndCatch safe, since we're eager syncing.
   }
@@ -1301,7 +1348,7 @@ SSATmp* builtinCall(IRGS& env,
     CallBuiltin,
     retType,
     CallBuiltinData {
-      bcSPOffset(env),
+      spOffBCFromIRSP(env),
       callee,
       params.count ? -1 : numNonDefault,
       funcDestroysLocals(callee),
