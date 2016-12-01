@@ -328,7 +328,7 @@ struct Vunit;
   O(cmpwi, I(s0), U(s1), D(sf))\
   O(copycr, Inone, Un, Dn)\
   O(extsb, Inone, UH(s,d), DH(d,s))\
-  O(extsw, Inone, UH(s,d), DH(d,s))\
+  O(extsl, Inone, UH(s,d), DH(d,s))\
   O(fcmpo, Inone, U(s0) U(s1), D(sf))\
   O(fcmpu, Inone, U(s0) U(s1), D(sf))\
   O(fctidz, Inone, U(s), D(d) D(sf))\
@@ -1182,7 +1182,7 @@ struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
 struct copycr {};
 struct extsb { Vreg64 s; Vreg64 d; }; // Extend byte sign
-struct extsw { Vreg64 s; Vreg64 d; }; // Extend word sign
+struct extsl { Vreg32 s; Vreg64 d; }; // Extend word sign
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fctidz { VregDbl s; VregDbl d; VregSF sf; };

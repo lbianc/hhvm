@@ -196,7 +196,7 @@ struct Vgen {
   void emit(const divint& i) { a.divd(i.d,  i.s0, i.s1, false); }
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
   void emit(const extsb& i) { a.extsb(i.d, Reg64(i.s)); }
-  void emit(const extsw& i) { a.extsw(i.d, Reg64(i.s)); }
+  void emit(const extsl& i) { a.extsw(i.d, Reg64(i.s)); }
   void emit(const fabs& i) { a.fabs(i.d, i.s, false); }
   void emit(const fallthru& i) {}
   void emit(const fcmpo& i) {
@@ -1017,19 +1017,6 @@ X(cmpwm,  cmpq,  loadw, ONE_R64(s0))
 
 #undef X
 
-/*#define X(vasm_src, vasm_dst, vasm_load, attr_addr, attr)               \
-void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
-  Vreg tmp = v.makeReg();                                               \
-  Vptr p = inst.attr_addr;                                              \
-  v << vasm_load{p, tmp};                                               \
-  v << vasm_dst{Reg64(inst.attr), tmp, inst.sf};                        \
-}
-
-X(cmpbm, cmpq, loadb, s1, s0)
-X(cmpwm, cmpq, loadw, s1, s0)
-
-#undef X*/
-
 #define X(vasm_src, vasm_dst, vasm_ext, operands)                       \
 void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
   Vreg tmp1 = v.makeReg(), tmp2 = v.makeReg();                          \
@@ -1040,8 +1027,8 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 
 X(cmpb,  cmpq,  movzbq, NONE)
 X(testb, testq, extsb,  NONE)
-X(testl, testq, extsw,  NONE)
-X(subl,  subq,  extsw,  ONE_R64(d))
+X(testl, testq, extsl,  NONE)
+X(subl,  subq,  extsl,  ONE_R64(d))
 
 #undef X
 
@@ -1054,9 +1041,9 @@ void lowerForPPC64(Vout& v, vasm_src& inst) {                           \
 
 X(cmpbi,  cmpqi,  movzbq, NONE)
 X(subbi,  subqi,  extsb,  ONE_R64(d))
-X(subli,  subqi,  extsw,  ONE_R64(d))
+X(subli,  subqi,  extsl,  ONE_R64(d))
 X(testbi, testqi, extsb,  NONE)
-X(testli, testqi, extsw,  NONE)
+X(testli, testqi, extsl,  NONE)
 
 #undef X
 
