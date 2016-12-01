@@ -217,8 +217,6 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::cmpw:
     case Vinstr::cmpwi:
     case Vinstr::copycr:
-    case Vinstr::extrb:
-    case Vinstr::extrw:
     case Vinstr::extsb:
     case Vinstr::extsw:
     case Vinstr::fcmpo:
