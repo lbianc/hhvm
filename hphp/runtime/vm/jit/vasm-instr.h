@@ -1181,7 +1181,7 @@ struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
 struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
 struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
 struct copycr {};
-struct extsb { Vreg64 s; Vreg64 d; }; // Extend byte sign
+struct extsb { Vreg8 s; Vreg64 d; };  // Extend byte sign
 struct extsl { Vreg32 s; Vreg64 d; }; // Extend word sign
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
 struct fcmpu { VregDbl s0; VregDbl s1; VregSF sf; };

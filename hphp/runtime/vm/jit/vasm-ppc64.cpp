@@ -162,22 +162,18 @@ struct Vgen {
   void emit(const addsd& i) { a.fadd(i.d, i.s0, i.s1); }
   void emit(const andb& i) {
     a.and(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
   }
   void emit(const andl& i) {
     a.and(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
-    copyCR0toCR1(a, rAsm);
   }
-  void emit(const andq& i) {
-    a.and(i.d, i.s0, i.s1, true);
-    copyCR0toCR1(a, rAsm);
-  }
-  void emit(const andqi& i) {
-    a.andi(i.d, i.s1, i.s0);
-    copyCR0toCR1(a, rAsm);
-  } // andi changes CR0
-  void emit(const cmpl& i) {
-    a.cmpw(Reg64(i.s1), Reg64(i.s0));
+  void emit(const andq& i) { a.and(i.d, i.s0, i.s1, true); }
+  void emit(const andqi& i) { a.andi(i.d, i.s1, i.s0); } // andi changes CR0
+  void emit(const cmpd& i) { a.cmpd(i.s1, i.s0); }
+  void emit(const cmpdi& i) { a.cmpdi(i.s1, i.s0); }
+  void emit(const cmpw& i) { a.cmpw(Reg64(i.s1), Reg64(i.s0)); }
+  void emit(const cmpld& i) { a.cmpld(i.s1, i.s0, Assembler::CR::CR1); }
+  void emit(const cmpldi& i) { a.cmpldi(i.s1, i.s0, Assembler::CR::CR1); }
+  void emit(const cmplw& i) {
     a.cmplw(Reg64(i.s1), Reg64(i.s0), Assembler::CR::CR1);
   }
   void emit(const cmplwi& i) {
@@ -365,9 +361,8 @@ struct Vgen {
     }
   }
   void emit(const xorbi& i) {
-    a.li64(rAsm, i.s0.l(), false);
+    a.limmediate(rAsm, i.s0.l());
     a.xor(Reg64(i.d), Reg64(i.s1), rAsm, true /** xor. implies Rc = 1 **/);
-    copyCR0toCR1(a, rAsm);
   }
   void emit(const xorqi& i) {
     a.limmediate(rAsm, i.s0.l());
