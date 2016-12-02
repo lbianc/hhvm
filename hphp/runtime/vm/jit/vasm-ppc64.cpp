@@ -193,7 +193,6 @@ struct Vgen {
   void emit(const divsd& i) { a.fdiv(i.d, i.s1, i.s0); }
   void emit(const extsb& i) { a.extsb(i.d, Reg64(i.s)); }
   void emit(const extsl& i) { a.extsw(i.d, Reg64(i.s)); }
-  void emit(const fabs& i) { a.fabs(i.d, i.s, false); }
   void emit(const fallthru& i) {}
   void emit(const fcmpo& i) {
     a.fcmpo(i.sf, i.s0, i.s1);
@@ -414,6 +413,7 @@ struct Vgen {
   void emit(const testqi& i);
   void emit(const ucomisd& i);
   void emit(const unwind& i);
+  void emit(const absdbl& i) { a.fabs(i.d, i.s, false); }
 
   void emit_nop() {
     a.addi(rAsm, rAsm, 16);
@@ -1265,15 +1265,6 @@ void lowerForPPC64(Vout& v, cmpsd& inst) {
   }
   v << cmovq{CC_E, sf, nequal, equal, r64_d};
   v << copy{r64_d, inst.d}; // GP -> FP
-}
-
-void lowerForPPC64(Vout& v, absdbl& inst) {
-  // parameters are in FP format but in Vreg, so first copy it to a VregDbl type
-  auto before_conv = v.makeReg(), after_conv = v.makeReg(); // VregDbl register
-  v << copy{inst.s, before_conv};
-  v << fabs{before_conv, after_conv};
-  // now move it back to Vreg
-  v << copy{after_conv, inst.d};
 }
 
 void lowerForPPC64(Vout& v, decqmlock& inst) {
