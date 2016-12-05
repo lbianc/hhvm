@@ -184,8 +184,8 @@ struct Vgen {
   }
   void emit(const copycr& i) {
     a.mfcr(rAsm);
-    a.sradi(rAsm,rAsm,4);
-    a.mtocrf(0x40,rAsm);
+    a.sradi(rAsm, rAsm, 4);
+    a.mtocrf(0x40, rAsm);
   }
   void emit(const decl& i) { a.subfo(Reg64(i.d), rone(), Reg64(i.s), true); }
   void emit(const decq& i) { a.subfo(i.d, rone(), i.s, true); }
@@ -207,9 +207,8 @@ struct Vgen {
   void emit(const incq& i) { a.addo(i.d, i.s, rone(), true); }
   void emit(const incw& i) { a.addo(Reg64(i.d), Reg64(i.s), rone(), true); }
   void emit(const jmpi& i) { a.branchAuto(i.target); }
-  void emit(const landingpad&) { }
+  void emit(const landingpad&) {}
   void emit(const ldimmw& i) { a.li(Reg64(i.d), i.s); }
-  void emit(const ldarx& i) { a.ldarx(i.d, i.s); }
   void emit(const loadups& i) {
     // A lowering would be handy here, but the Vptr's displacement is only
     // later added at the optimizeCopies optimization
@@ -237,11 +236,8 @@ struct Vgen {
     a.limmediate(i.d, i.s.r.disp, imm_type);
   }
   void emit(const lead& i) { a.limmediate(i.d, (int64_t)i.s.get()); }
-  void emit(const mfcr& i) { a.mfcr(i.d); }
   void emit(const mflr& i) { a.mflr(i.d); }
-  void emit(const mfvsrd& i) { a.mfvsrd(i.d, i.s); }
   void emit(const mtlr& i) { a.mtlr(i.s); }
-  void emit(const mtvsrd& i) { a.mtvsrd(i.d, i.s); }
   void emit(const mulsd& i) { a.fmul(i.d, i.s1, i.s0); }
   void emit(const neg& i) { a.neg(i.d, i.s, true); }
   void emit(const nop& i) { a.nop(); } // no-op form
@@ -259,7 +255,6 @@ struct Vgen {
   void emit(const shrli& i) { a.srwi(Reg64(i.d), Reg64(i.s1), i.s0.b(), true); }
   void emit(const shrqi& i) { a.srdi(i.d, i.s1, i.s0.b(), true); }
   void emit(const sqrtsd& i) { a.xssqrtdp(i.d,i.s); }
-  void emit(const stdcx& i) { a.stdcx(i.s, i.d); }
   void emit(const storeups& i) {
     Vptr p(i.m);
     if ((!p.base.isValid()) || (p.base == 0)) {
@@ -288,10 +283,6 @@ struct Vgen {
     a.xor(Reg64(i.d), Reg64(i.s0), Reg64(i.s1), true);
   }
   void emit(const xorq& i) { a.xor(i.d, i.s0, i.s1, true); }
-  void emit(const xscvdpsxds& i) { a.xscvdpsxds(i.d, i.s); }
-  void emit(const xscvsxddp& i) { a.xscvsxddp(i.d, i.s); }
-  void emit(const xxlxor& i) { a.xxlxor(i.d, i.s1, i.s0); }
-  void emit(const xxpermdi& i) { a.xxpermdi(i.d, i.s1, i.s0); }
 
   void emit(const fctidz& i) {
     a.mtfsb0(23); // clear VXCVI
@@ -370,6 +361,7 @@ struct Vgen {
 
   void emit(const conjure& i) { always_assert(false); }
   void emit(const conjureuse& i) { always_assert(false); }
+  void emit(const absdbl& i) { a.fabs(i.d, i.s, false); }
 
   // The following vasms reemit other vasms. They are implemented afterwards in
   // order to guarantee that the desired vasm is already defined or else it'll
@@ -413,7 +405,6 @@ struct Vgen {
   void emit(const testqi& i);
   void emit(const ucomisd& i);
   void emit(const unwind& i);
-  void emit(const absdbl& i) { a.fabs(i.d, i.s, false); }
 
   void emit_nop() {
     a.addi(rAsm, rAsm, 16);
@@ -453,9 +444,9 @@ void Vgen::emit(const decqmlock& i) {
    {
      // Using rfuncln because rAsm scratch register
      // will be used by decq to save CR0 to CR1
-     emit(ldarx{i.m, rfuncln()});
+     a.ldarx(rfuncln(), i.m);
      emit(decq{rfuncln(), rfuncln(), i.sf});
-     emit(stdcx{rfuncln(), i.m});
+     a.stdcx(rfuncln(), i.m);
    }
    //TODO(racardoso): bne- (missing branch hint)
    a.bc(loop, BranchConditions::CR0_NotEqual);
