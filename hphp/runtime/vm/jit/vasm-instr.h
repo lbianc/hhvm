@@ -75,7 +75,6 @@ struct Vunit;
   O(ldimmw, I(s), Un, D(d))\
   O(ldimml, I(s), Un, D(d))\
   O(ldimmq, I(s), Un, D(d))\
-  O(ldimmqs, I(s), Un, D(d))\
   O(load, Inone, U(s), D(d))\
   O(store, Inone, U(s) U(d), Dn)\
   O(mcprep, Inone, Un, D(d))\
@@ -104,7 +103,8 @@ struct Vunit;
   /* php function abi */\
   O(defvmsp, Inone, Un, D(d))\
   O(syncvmsp, Inone, U(s), Dn)\
-  O(defvmret, Inone, Un, D(data) D(type))\
+  O(defvmretdata, Inone, Un, D(data))\
+  O(defvmrettype, Inone, Un, D(type))\
   O(syncvmret, Inone, U(data) U(type), Dn)\
   O(phplogue, Inone, U(fp), Dn)\
   O(phpret, Inone, U(fp) U(args), D(d))\
@@ -119,14 +119,10 @@ struct Vunit;
   O(inittc, Inone, Un, Dn)\
   O(leavetc, Inone, U(args), Dn)\
   /* exception intrinsics */\
-  O(landingpad, I(fromPHPCall), Un, Dn)\
+  O(landingpad, Inone, Un, Dn)\
   O(nothrow, Inone, Un, Dn)\
   O(syncpoint, I(fix), Un, Dn)\
   O(unwind, Inone, Un, Dn)\
-  /* arithmetic intrinsics */\
-  O(absdbl, Inone, U(s), D(d))\
-  O(srem, Inone, U(s0) U(s1), D(d))\
-  O(divint, Inone, U(s0) U(s1), D(d))\
   /* nop and trap */\
   O(nop, Inone, Un, Dn)\
   O(ud2, Inone, Un, Dn)\
@@ -157,8 +153,9 @@ struct Vunit;
   O(inclm, Inone, U(m), D(sf))\
   O(incq, Inone, UH(s,d), DH(d,s) D(sf))\
   O(incqm, Inone, U(m), D(sf))\
-  O(incqmlock, Inone, U(m), D(sf))\
   O(imul, Inone, U(s0) U(s1), D(d) D(sf))\
+  O(divint, Inone, U(s0) U(s1), D(d))\
+  O(srem, Inone, U(s0) U(s1), D(d))\
   O(neg, Inone, UH(s,d), DH(d,s) D(sf))\
   O(notb, Inone, UH(s,d), DH(d,s))\
   O(not, Inone, UH(s,d), DH(d,s))\
@@ -174,8 +171,7 @@ struct Vunit;
   O(shlqi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
   O(shrli, I(s0), UH(s1,d), DH(d,s1) D(sf))\
   O(shrqi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
-  O(psllq, I(s0), UH(s1,d), DH(d,s1))\
-  O(psrlq, I(s0), UH(s1,d), DH(d,s1))\
+  O(subb, Inone, UA(s0) U(s1), D(d) D(sf))\
   O(subbi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
   O(subl, Inone, UA(s0) U(s1), D(d) D(sf))\
   O(subli, I(s0), UH(s1,d), DH(d,s1) D(sf))\
@@ -285,6 +281,7 @@ struct Vunit;
   O(cvtsi2sdm, Inone, U(s), D(d))\
   O(unpcklpd, Inone, UA(s0) U(s1), D(d))\
   /* other floating-point */\
+  O(absdbl, Inone, UH(s,d), DH(d,s))\
   O(divsd, Inone, UA(s0) U(s1), D(d))\
   O(mulsd, Inone, U(s0) U(s1), D(d))\
   O(roundsd, I(dir), U(s), D(d))\
@@ -298,10 +295,7 @@ struct Vunit;
   O(addxi, I(s0), UH(s1,d), DH(d,s1))\
   O(asrxi, I(s0), UH(s1,d), DH(d,s1))\
   O(asrxis, I(s0), U(s1) U(d), D(df) D(sf))\
-  O(bln, Inone, Un, Dn)\
   O(cmplims, I(s0), U(s1), D(sf))\
-  O(cmpsds, I(pred), UA(s0) U(s1), D(d))\
-  O(fabs, Inone, U(s), D(d))\
   O(fcvtzs, Inone, U(s), D(d))\
   O(lslwi, I(s0), UH(s1,d), DH(d,s1))\
   O(lslwis, I(s0), U(s1) U(d), D(df) D(sf))\
@@ -313,10 +307,6 @@ struct Vunit;
   O(lsrxis, I(s0), U(s1) U(d), D(df) D(sf))\
   O(mrs, I(s), Un, D(r))\
   O(msr, I(s), U(r), Dn)\
-  O(orswi, I(s0), UH(s1,d), DH(d,s1) D(sf))\
-  O(orsw, Inone, U(s0) U(s1), D(d) D(sf)) \
-  O(subsb, Inone, UA(s0) U(s1), D(d) D(sf))\
-  O(uxth, Inone, U(s), D(d))\
   /* ppc64 instructions */\
   O(cmpd, Inone, U(s0) U(s1), D(sf))\
   O(cmpdi, I(s0), U(s1), D(sf))\
@@ -504,7 +494,6 @@ struct ldimmb { Immed s; Vreg d; };
 struct ldimmw { Immed s; Vreg16 d; };
 struct ldimml { Immed s; Vreg d; };
 struct ldimmq { Immed64 s; Vreg d; };
-struct ldimmqs { Immed64 s; Vreg d; };
 
 /*
  * Memory operand load and store.
@@ -696,7 +685,8 @@ struct syncvmsp { Vreg s; };
  * Used right after an instruction that makes a PHP call (like the
  * suggestively-named callphp{}) to receive the values as Vregs.
  */
-struct defvmret { Vreg data; Vreg type; };
+struct defvmretdata { Vreg data; };
+struct defvmrettype { Vreg type; };
 
 /*
  * Copy a PHP return value into the return registers (rreg(0) and rreg(1)).
@@ -853,7 +843,7 @@ struct leavetc { RegSet args; };
 /*
  * Header for catch blocks.
  */
-struct landingpad { bool fromPHPCall; };
+struct landingpad {};
 
 /*
  * Register a null catch trace at this position.
@@ -875,24 +865,6 @@ struct syncpoint { Fixup fix; };
  * and a fallthrough block.
  */
 struct unwind { Vlabel targets[2]; };
-
-///////////////////////////////////////////////////////////////////////////////
-// Arithmetic intrinsics.
-
-/*
- * Absolute value for a double-precision value.
- */
-struct absdbl { VregDbl s, d; };
-
-/*
- * Modulus of two integers.
- */
-struct srem { Vreg64 s0, s1, d; };
-
-/*
- * Integer division.
- */
-struct divint { Vreg64 s0, s1, d; };
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -940,9 +912,11 @@ struct incl { Vreg32 s, d; VregSF sf; };
 struct inclm { Vptr m; VregSF sf; };
 struct incq { Vreg64 s, d; VregSF sf; };
 struct incqm { Vptr m; VregSF sf; };
-struct incqmlock { Vptr m; VregSF sf; };
 // mul: s0 * s1 => d, sf
 struct imul { Vreg64 s0, s1, d; VregSF sf; };
+// div/mod: s0 / s1 => d, sf
+struct divint { Vreg64 s0, s1, d; };
+struct srem { Vreg64 s0, s1, d; };
 // neg: 0 - s => d, sf
 struct neg { Vreg64 s, d; VregSF sf; };
 // not: ~s => d
@@ -962,9 +936,8 @@ struct shlli { Immed s0; Vreg32 s1, d; VregSF sf; };
 struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; };
 struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; };
 struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; };
-struct psllq { Immed s0; VregDbl s1, d; };
-struct psrlq { Immed s0; VregDbl s1, d; };
 // sub: s1 - s0 => d, sf
+struct subb { Vreg8 s0; Vreg8 s1, d; VregSF sf; };
 struct subbi { Immed s0; Vreg8 s1, d; VregSF sf; };
 struct subl { Vreg32 s0, s1, d; VregSF sf; };
 struct subli { Immed s0; Vreg32 s1, d; VregSF sf; };
@@ -1119,6 +1092,7 @@ struct unpcklpd { VregDbl s0, s1; Vreg128 d; };
 /*
  * Undocumented floating-point instructions.
  */
+struct absdbl { VregDbl s, d; };
 struct divsd { VregDbl s0, s1, d; };
 struct mulsd  { VregDbl s0, s1, d; };
 struct roundsd { RoundDirection dir; VregDbl s, d; };
@@ -1140,11 +1114,8 @@ struct shlq { Vreg64 s, d; VregSF sf; }; // uses rcx
 struct addxi { Immed s0; Vreg64 s1, d; };
 struct asrxi { Immed s0; Vreg64 s1, d; };
 struct asrxis { Immed s0; Vreg64 s1, d, df; VregSF sf; };
-struct bln {};
 struct cmplims { Immed s0; Vptr s1; VregSF sf; };
-struct cmpsds { ComparisonPred pred; VregDbl s0, s1, d; VregSF sf; };
-struct fabs { VregDbl s, d; };
-struct fcvtzs { VregDbl s; Vreg64 d;};
+struct fcvtzs { VregDbl s; Vreg64 d; };
 struct lslwi { Immed s0; Vreg32 s1, d; };
 struct lslwis { Immed s0; Vreg32 s1, d, df; VregSF sf; };
 struct lslxi { Immed s0; Vreg64 s1, d; };
@@ -1155,10 +1126,6 @@ struct lsrxi { Immed s0; Vreg64 s1, d; };
 struct lsrxis { Immed s0; Vreg64 s1, d, df; VregSF sf; };
 struct mrs { Immed s; Vreg64 r; };
 struct msr { Vreg64 r; Immed s; };
-struct orswi { Immed s0; Vreg32 s1, d; VregSF sf; };
-struct orsw { Vreg32 s0, s1, d; VregSF sf; };
-struct subsb { Vreg8 s0, s1, d; VregSF sf; };
-struct uxth { Vreg16 s; Vreg32 d; };
 
 /*
  * ppc64 intrinsics.

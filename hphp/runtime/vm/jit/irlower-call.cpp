@@ -135,7 +135,6 @@ void cgCall(IRLS& env, const IRInstruction* inst) {
     auto const done = v.makeBlock();
     v << vinvoke{CallSpec::direct(builtinFuncPtr), v.makeVcallArgs({{rvmfp()}}),
                  v.makeTuple({}), {done, catchBlock}, Fixup(0, argc)};
-    env.catch_calls[inst->taken()] = CatchCall::CPP;
 
     v = done;
     // The native implementation already put the return value on the stack for
@@ -174,11 +173,17 @@ void cgCall(IRLS& env, const IRInstruction* inst) {
 
   auto const done = v.makeBlock();
   v << callphp{target, php_call_regs(), {{done, catchBlock}}};
-  env.catch_calls[inst->taken()] = CatchCall::PHP;
   v = done;
 
   auto const dst = dstLoc(env, inst, 0);
-  v << defvmret{dst.reg(0), dst.reg(1)};
+  auto const type = inst->dst()->type();
+  if (!type.hasConstVal() &&
+      !type.subtypeOfAny(TNullptr, TInitNull, TUninit)) {
+    v << defvmretdata{dst.reg(0)};
+  }
+  if (type.needsReg()) {
+    v << defvmrettype{dst.reg(1)};
+  }
 }
 
 void cgCallArray(IRLS& env, const IRInstruction* inst) {
@@ -203,22 +208,38 @@ void cgCallArray(IRLS& env, const IRInstruction* inst) {
   auto const done = v.makeBlock();
   v << vcallarray{target, fcall_array_regs(), args,
                   {done, label(env, inst->taken())}};
-  env.catch_calls[inst->taken()] = CatchCall::PHP;
   v = done;
 
   auto const dst = dstLoc(env, inst, 0);
-  v << defvmret{dst.reg(0), dst.reg(1)};
+  auto const type = inst->dst()->type();
+  if (!type.hasConstVal() &&
+      !type.subtypeOfAny(TNullptr, TInitNull, TUninit)) {
+    v << defvmretdata{dst.reg(0)};
+  }
+  if (type.needsReg()) {
+    v << defvmrettype{dst.reg(1)};
+  }
 }
 
 void cgCallBuiltin(IRLS& env, const IRInstruction* inst) {
   auto const extra = inst->extra<CallBuiltin>();
   auto const callee = extra->callee;
-  auto const returnType = inst->typeParam();
-  auto const funcReturnType = callee->returnType();
+  auto const funcReturnType = callee->hniReturnType();
   auto const returnByValue = callee->isReturnByValue();
 
   auto const dstData = dstLoc(env, inst, 0).reg(0);
   auto const dstType = dstLoc(env, inst, 0).reg(1);
+
+  auto returnType = inst->dst()->type();
+  // Subtract out the null possibility from the return type if it would be a
+  // reference type otherwise. Don't do this if the type is nothing but a null
+  // (which would give us TBottom. This makes it easier to test what kind of
+  // return we need to generate below.
+  if (returnType.maybe(TNull) && !(returnType <= TNull)) {
+    if ((returnType - TNull).isReferenceType()) {
+      returnType -= TNull;
+    }
+  }
 
   auto& v = vmain(env);
 
@@ -381,7 +402,6 @@ void cgNativeImpl(IRLS& env, const IRInstruction* inst) {
     {label(env, inst->next()), label(env, inst->taken())},
     makeFixup(inst->marker(), SyncOptions::Sync)
   };
-  env.catch_calls[inst->taken()] = CatchCall::CPP;
 }
 
 static void traceCallback(ActRec* fp, Cell* sp, Offset bcOff) {

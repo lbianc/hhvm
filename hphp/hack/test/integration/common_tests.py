@@ -74,15 +74,22 @@ class CommonTestDriver(object):
     def setUp(self):
         shutil.copytree(self.template_repo, self.repo_dir)
 
-    def tearDown(self):
+    def tearDownWithRetries(self, retries=3):
         (_, _, exit_code) = self.proc_call([
             hh_client,
             'stop',
             self.repo_dir
         ])
-        self.assertEqual(exit_code, 0, msg="Stopping hh_server failed")
+        if exit_code == 0:
+            shutil.rmtree(self.repo_dir)
+            return
+        elif retries > 0 and exit_code != 0:
+            self.tearDownWithRetries(retries=retries - 1)
+        else:
+            self.assertEqual(exit_code, 0, msg="Stopping hh_server failed")
 
-        shutil.rmtree(self.repo_dir)
+    def tearDown(self):
+        self.tearDownWithRetries()
 
     @classmethod
     def proc_create(cls, args, env):
@@ -108,6 +115,22 @@ class CommonTestDriver(object):
         sys.stderr.flush()
         retcode = proc.wait()
         return (stdout_data, stderr_data, retcode)
+
+    @classmethod
+    def wait_pid_with_timeout(cls, pid, timeout):
+        """
+        Like os.waitpid but with a timeout in seconds.
+        """
+        waited_time = 0
+        while True:
+            pid_expected, _ = os.waitpid(pid, os.WNOHANG)
+            if pid_expected == pid:
+                break
+            elif waited_time >= timeout:
+                raise subprocess.TimeoutExpired
+            else:
+                time.sleep(1)
+                waited_time += 1
 
     # Runs `hh_client check` asserting the stdout is equal the expected.
     # Returns stderr.
@@ -353,6 +376,30 @@ class CommonTests(object):
             '{root}foo_4.php:4:24,26: Invalid return type (Typing[4110])',
             '  {root}foo_4.php:3:27,29: This is an int',
             '  {root}foo_4.php:4:24,26: It is incompatible with a string',
+        ])
+
+    def test_new_naming_error(self):
+        """
+        Add a new file which contains a naming collisions with an old file
+        """
+        with open(os.path.join(self.repo_dir, 'foo_4.php'), 'w') as f:
+            f.write("""
+            <?hh
+            class FOO {}
+            function H () {}
+            """)
+
+        self.write_load_config('foo_4.php')
+
+        self.check_cmd([
+            '{root}foo_4.php:3:19,21: Could not find FOO (Naming[2006])',
+            '  {root}foo_3.php:7:15,17: Did you mean Foo?',
+            '{root}foo_4.php:3:19,21: Name already bound: FOO (Naming[2012])',
+            '  {root}foo_3.php:7:15,17: Previous definition Foo differs only in capitalization ',
+            '{root}foo_4.php:4:22,22: Could not find H (Naming[2006])',
+            '  {root}foo_3.php:3:18,18: Did you mean h?',
+            '{root}foo_4.php:4:22,22: Name already bound: H (Naming[2012])',
+            '  {root}foo_3.php:3:18,18: Previous definition h differs only in capitalization ',
         ])
 
     def test_deleted_file(self):
@@ -946,6 +993,53 @@ function test2(int $x) { $x = $x*x + 3; return f($x); }
             return g() + 1;
         }
 """)
+
+    def test_refactor_typedefs(self):
+        with open(os.path.join(self.repo_dir, 'foo_4.php'), 'w') as f:
+            f.write("""
+            <?hh
+            newtype NewType = int;
+            type Type = int;
+
+            class MyClass {
+                public function myFunc(Type $x): NewType {
+                    return $x;
+                }
+            }
+            """)
+        self.write_load_config('foo_4.php')
+
+        self.check_cmd_and_json_cmd(['Rewrote 1 files.'],
+        ['[{{"filename":"{root}foo_4.php","patches":[{{'
+        '"char_start":38,"char_end":45,"line":3,"col_start":21,'
+        '"col_end":27,"patch_type":"replace","replacement":"NewTypeX"}},'
+        '{{"char_start":160,"char_end":167,"line":7,"col_start":50,'
+        '"col_end":56,"patch_type":"replace","replacement":"NewTypeX"}}]'
+        '}}]'],
+        options=['--refactor', 'Class', 'NewType', 'NewTypeX'])
+
+        self.check_cmd_and_json_cmd(['Rewrote 1 files.'],
+        ['[{{"filename":"{root}foo_4.php","patches":[{{'
+        '"char_start":71,"char_end":75,"line":4,"col_start":18,'
+        '"col_end":21,"patch_type":"replace","replacement":"TypeX"}},'
+        '{{"char_start":151,"char_end":155,"line":7,"col_start":40,'
+        '"col_end":43,"patch_type":"replace","replacement":"TypeX"}}]'
+        '}}]'],
+        options=['--refactor', 'Class', 'Type', 'TypeX'])
+
+        with open(os.path.join(self.repo_dir, 'foo_4.php')) as f:
+            out = f.read()
+            self.assertEqual(out, """
+            <?hh
+            newtype NewTypeX = int;
+            type TypeX = int;
+
+            class MyClass {
+                public function myFunc(TypeX $x): NewTypeX {
+                    return $x;
+                }
+            }
+            """)
 
     def test_ide_exit_status(self):
         """

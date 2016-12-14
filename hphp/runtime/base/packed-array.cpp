@@ -37,10 +37,7 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
-std::aligned_storage<
-  sizeof(ArrayData),
-  alignof(ArrayData)
->::type s_theEmptyVecArray;
+std::aligned_storage<sizeof(ArrayData), 16>::type s_theEmptyVecArray;
 
 struct PackedArray::VecInitializer {
   VecInitializer() {
@@ -537,14 +534,14 @@ ArrayData* PackedArray::MakePackedImpl(uint32_t size,
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = size; // pos=0
     ad->m_hdr.init(CapCode::exact(cap), hk, 1);
-    assert(ad->m_size == size);
     assert(ad->m_hdr.kind == hk);
     assert(ad->cap() == cap);
   } else {
     ad = MakeReserveSlow(size, hk);
+    ad->m_sizeAndPos = size; // pos=0
   }
 
-  // Append values by moving -- Caller assumes we update refcount.
+  // Append values by moving; this function takes ownership of them.
   auto ptr = reinterpret_cast<TypedValue*>(ad + 1);
   for (auto i = uint32_t{0}; i < size; ++i) {
     auto const& src = values[reverse ? size - i - 1 : i];
@@ -554,6 +551,7 @@ ArrayData* PackedArray::MakePackedImpl(uint32_t size,
     ++ptr;
   }
 
+  assert(ad->m_size == size);
   assert(ad->m_pos == 0);
   assert(ad->hasExactlyOneRef());
   assert(checkInvariants(ad));

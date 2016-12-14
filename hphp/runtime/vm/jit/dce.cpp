@@ -75,12 +75,10 @@ bool canDCE(IRInstruction* inst) {
   case ConvIntToDbl:
   case ConvStrToDbl:
   case ConvResToDbl:
-  case ConvArrToInt:
   case ConvBoolToInt:
   case ConvDblToInt:
   case ConvStrToInt:
   case ConvResToInt:
-  case ConvBoolToStr:
   case ConvDblToStr:
   case ConvIntToStr:
   case ConvDictToVec:
@@ -265,6 +263,8 @@ bool canDCE(IRInstruction* inst) {
   case KeysetIsset:
   case KeysetEmptyElem:
   case KeysetIdx:
+  case GetTime:
+  case Select:
     assertx(!inst->isControlFlow());
     return true;
 

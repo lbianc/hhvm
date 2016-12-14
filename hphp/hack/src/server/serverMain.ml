@@ -356,13 +356,16 @@ let program_init genv =
    * This solution is not fully correct. Checkout can still happen between
    * this call and the next but it minimizes the damage.
    * *)
-  MercurialUtils.wait_until_stable_repository (ServerArgs.root genv.options);
+  let repo_wait_success =
+    MercurialUtils.wait_until_stable_repository (ServerArgs.root genv.options)
+  in
   let env, init_type =
     (* If we are saving, always start from a fresh state -- just in case
      * incremental mode introduces any errors. *)
     if genv.local_config.ServerLocalConfig.use_mini_state &&
       not (ServerArgs.no_load genv.options) &&
-      ServerArgs.save_filename genv.options = None then
+      ServerArgs.save_filename genv.options = None &&
+      repo_wait_success then
       match ServerConfig.load_mini_script genv.config with
       | None ->
         let env, _ = ServerInit.init genv in
@@ -372,8 +375,9 @@ let program_init genv =
         env, if did_load then "mini_load" else "mini_load_fail"
     else
       let env, _ = ServerInit.init genv in
-      env, "fresh"
+      env, if repo_wait_success then "fresh" else "fresh_repo_wait_fail"
   in
+  EventLogger.set_init_type init_type;
   HackEventLogger.init_end init_type;
   Hh_logger.log "Waiting for daemon(s) to be ready...";
   genv.wait_until_ready ();
@@ -394,7 +398,6 @@ let setup_server options handle =
     cpu_priority;
     io_priority;
     enable_on_nfs;
-    lazy_decl;
     lazy_parse;
     lazy_init;
     load_script_config;
@@ -410,7 +413,6 @@ let setup_server options handle =
     root
     init_id
     (Unix.gettimeofday ())
-    lazy_decl
     lazy_parse
     lazy_init
     saved_state_load_type
@@ -497,6 +499,9 @@ let daemon_main (state, options) (ic, oc) =
   | SharedMem.C_assertion_failure _ as e ->
     Hh_logger.exc e;
     Exit_status.(exit Shared_mem_assertion_failure)
+  | SharedMem.Sql_assertion_failure as e ->
+    Hh_logger.exc e;
+    Exit_status.(exit Sql_assertion_failure)
 
 let entry =
   Daemon.register_entry_point "ServerMain.daemon_main" daemon_main

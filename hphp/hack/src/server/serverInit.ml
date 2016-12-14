@@ -70,17 +70,16 @@ module ServerInitCommon = struct
    * The second line is a list of the files that have changed since the state
    * was built
    *)
-  let load_state root use_sql cmd (_ic, oc) =
+  let load_state root cmd (_ic, oc) =
     try
       let load_script_log_file = ServerFiles.load_log root in
       let cmd =
         Printf.sprintf
-          "%s %s %s %s %s"
+          "%s %s %s %s"
           (Filename.quote (Path.to_string cmd))
           (Filename.quote (Path.to_string root))
           (Filename.quote Build_id.build_revision)
-          (Filename.quote load_script_log_file)
-          (Filename.quote (string_of_bool use_sql)) in
+          (Filename.quote load_script_log_file) in
       Hh_logger.log "Running load_mini script: %s\n%!" cmd;
       let ic = Unix.open_process_in cmd in
       let json = read_json_line ic in
@@ -91,18 +90,10 @@ module ServerInitCommon = struct
         Hh_json.get_bool_exn @@ List.Assoc.find_exn kv "is_cached" in
       let deptable_fn =
         Hh_json.get_string_exn @@ List.Assoc.find_exn kv "deptable" in
-      (* The sql deptable needs to be loaded in the master process, so
-       * defer that to later, give dummy result for read time
-       *)
-      let read_deptable_time =
-        if use_sql
-        then 0
-        else SharedMem.load_dep_table deptable_fn
-      in
       let end_time = Unix.gettimeofday () in
       Daemon.to_channel oc
         @@ Ok (
-        `Fst (state_fn, is_cached, end_time, deptable_fn, read_deptable_time));
+        `Fst (state_fn, is_cached, end_time, deptable_fn));
       let json = read_json_line ic in
       assert (Unix.close_process_in ic = Unix.WEXITED 0);
       let kv = Hh_json.get_object_exn json in
@@ -120,38 +111,27 @@ module ServerInitCommon = struct
     Timeout.with_timeout ~timeout ~do_:(fun _ -> f ())
       ~on_timeout:(fun _ -> raise @@ Loader_timeout stage)
 
-  (* This generator-like function first runs the load script to download state
-   * and loads the downloaded dependency table into shared memory. It then
-   * waits for the load script to send it the list of files that have changed
-   * since the state was downloaded.
-   *
-   * The loading of the dependency table must not run concurrently with any
-   * operations that might write to the deptable. *)
-  let mk_state_future root use_sql cmd =
+  (* This generator-like function first runs the load script to download state.
+   * It then waits for the load script to send it the list of files that
+   * have changed since the state was downloaded.
+   *)
+  let mk_state_future root cmd =
     let start_time = Unix.gettimeofday () in
     Result.try_with @@ fun () ->
     let log_file =
       Sys_utils.make_link_of_timestamped (ServerFiles.load_log root) in
     let log_fd = Daemon.fd_of_path log_file in
     let {Daemon.channels = (ic, _oc); pid} as daemon =
-      Daemon.fork (log_fd, log_fd)
-                  (load_state root use_sql)
-                  cmd
+      Daemon.fork (log_fd, log_fd) (load_state root) cmd
     (** The first generator in the future, which gets the results from the
      * process. *)
     in fun () ->
     try
       Daemon.from_channel ic >>= function
       | `Snd _ -> assert false
-      | `Fst (fn, is_cached, end_time, deptable_fn, read_deptable_time) ->
-        (* As promised, the sql deptable is being loaded in the master process
-         * if we are in the sql mode
-         *)
-        let read_deptable_time =
-          if use_sql
-          then SharedMem.load_dep_table_sqlite deptable_fn
-          else read_deptable_time
-        in
+      | `Fst (fn, is_cached, end_time, deptable_fn) ->
+        (* The sql deptable must be loaded in the master process *)
+        let read_deptable_time = SharedMem.load_dep_table_sqlite deptable_fn in
         Hh_logger.log
           "Reading the dependency file took (sec): %d" read_deptable_time;
         HackEventLogger.load_deptable_end read_deptable_time;
@@ -238,6 +218,7 @@ module ServerInitCommon = struct
     in
     let hs = SharedMem.heap_size () in
     Hh_logger.log "Heap size: %d" hs;
+    HackEventLogger.global_naming_end t;
     env, (Hh_logger.log_duration "Naming" t)
 
   let type_decl genv env fast t =
@@ -331,9 +312,12 @@ module ServerInitCommon = struct
     type_check genv env fast t
 
   let get_build_targets env =
-    let targets =
-      List.map (BuildMain.get_live_targets env) (Relative_path.(concat Root)) in
-    Relative_path.set_of_list targets
+    let untracked, tracked = BuildMain.get_live_targets env in
+    let untracked =
+      List.map untracked (Relative_path.(concat Root)) in
+    let tracked =
+      List.map tracked (Relative_path.(concat Root)) in
+    Relative_path.set_of_list untracked, Relative_path.set_of_list tracked
 
   let get_state_future genv root state_future timeout =
     let state = state_future
@@ -385,7 +369,6 @@ module type InitKind = sig
     lazy_level ->
     ServerEnv.env ->
     Path.t ->
-    use_sql: bool ->
     (ServerEnv.env * float) * state_result
 end
 
@@ -414,14 +397,14 @@ end
 *)
 module ServerEagerInit : InitKind = struct
   open ServerInitCommon
-  let init ~load_mini_script genv lazy_level env root ~use_sql =
+  let init ~load_mini_script genv lazy_level env root =
     (* Spawn this first so that it can run in the background while parsing is
      * going on. The script can fail in a variety of ways, but the resolution
      * is always the same -- we fall back to rechecking everything. Running it
      * in the Result monad provides a convenient way to locate the error
      * handling code in one place. *)
     let state_future =
-     load_mini_script >>= mk_state_future root use_sql in
+     load_mini_script >>= mk_state_future root in
     let get_next, t = indexing genv in
     let lazy_parse = lazy_level = Parse in
     let env, t = parsing ~lazy_parse genv env ~get_next t in
@@ -444,14 +427,19 @@ module ServerEagerInit : InitKind = struct
     match state with
     | Ok (saved_state_fn, dirty_files, changed_while_parsing, old_modes) ->
       let old_fast = FileInfo.modes_to_fast old_modes in
-      let build_targets = get_build_targets env in
+      (* During eager init, we don't need to worry about tracked targets since
+         they we end up parsing everything anyways
+      *)
+      let build_targets, _ = get_build_targets env in
       Hh_logger.log "Successfully loaded mini-state";
-      let loaded_event = Debug_event.Loaded_saved_state {
+      let global_state = ServerGlobalState.save () in
+      let loaded_event = Debug_event.Loaded_saved_state ({
         Debug_event.filename = saved_state_fn;
         dirty_files;
         changed_while_parsing;
         build_targets;
-      } in
+      }, global_state) in
+      let () = Printf.eprintf "Sending Loaded_saved_state debug event\n%!" in
       let _ = Debug_port.write_opt loaded_event genv.debug_port in
       (* Build targets are untracked by version control, so we must always
        * recheck them. While we could query hg / git for the untracked files,
@@ -472,6 +460,7 @@ module ServerEagerInit : InitKind = struct
       type_check_dirty genv env old_fast fast dirty_files t, state
     | Error err ->
       (* Fall back to type-checking everything *)
+      SharedMem.cleanup_sqlite ();
       if err <> No_loader then begin
         HackEventLogger.load_mini_exn err;
         Hh_logger.exc ~prefix:"Could not load mini state: " err;
@@ -501,6 +490,7 @@ module ServerLazyInit : InitKind = struct
          n_consts=consts} = info in
     NamingGlobal.ndecl_file_fast k ~funs ~classes ~typedefs ~consts
     end;
+    HackEventLogger.fast_naming_end t;
     let hs = SharedMem.heap_size () in
     Hh_logger.log "Heap size: %d" hs;
     (Hh_logger.log_duration "Naming fast" t)
@@ -531,14 +521,15 @@ module ServerLazyInit : InitKind = struct
         ~next:next_fast_files;
     HackSearchService.MasterApi.update_search_index
       ~fuzzy:false (Relative_path.Map.keys fast);
+    HackEventLogger.update_search_end t;
     Hh_logger.log_duration "Updating search indices" t
 
 
 
-  let init ~load_mini_script genv lazy_level env root ~use_sql =
+  let init ~load_mini_script genv lazy_level env root =
     assert (lazy_level = Init);
     let state_future =
-      load_mini_script >>= mk_state_future root use_sql in
+      load_mini_script >>= mk_state_future root in
 
     let timeout = genv.local_config.SLC.load_mini_script_timeout in
     let state_future = state_future >>= fun f ->
@@ -549,14 +540,16 @@ module ServerLazyInit : InitKind = struct
 
     match state with
     | Ok (saved_state_fn, dirty_files, changed_while_parsing, old_modes) ->
-      let build_targets = get_build_targets env in
+      let build_targets, tracked_targets = get_build_targets env in
       Hh_logger.log "Successfully loaded mini-state";
-      let loaded_event = Debug_event.Loaded_saved_state {
+      let global_state = ServerGlobalState.save () in
+      let loaded_event = Debug_event.Loaded_saved_state ({
         Debug_event.filename = saved_state_fn;
         dirty_files;
         changed_while_parsing;
         build_targets;
-      } in
+      }, global_state) in
+      Hh_logger.log "Sending Loaded_saved_state debug event\n";
       let _ = Debug_port.write_opt loaded_event genv.debug_port in
       let t = Unix.gettimeofday () in
       (* Build targets are untracked by version control, so we must always
@@ -566,16 +559,26 @@ module ServerLazyInit : InitKind = struct
         Relative_path.Set.union dirty_files build_targets in
       let dirty_files =
         Relative_path.Set.union dirty_files changed_while_parsing in
-      let dirty_files_list = Relative_path.Set.elements dirty_files in
+      (*
+        Tracked targets are build files that are tracked by version control.
+        We don't need to typecheck them, but we do need to parse them to load
+        them into memory, since arc rebuild deletes them before running.
+        This avoids build step dependencies and file_heap_stale errors crashing
+        the server when build fails and the deleted files aren't properly
+        regenerated.
+      *)
+      let parsing_files =
+        Relative_path.Set.union dirty_files tracked_targets in
+      let parsing_files_list = Relative_path.Set.elements parsing_files in
       let old_fast = FileInfo.modes_to_fast old_modes in
       let old_info = FileInfo.modes_to_info old_modes in
       (* Parse dirty files only *)
-      let next = MultiWorker.next genv.workers dirty_files_list in
+      let next = MultiWorker.next genv.workers parsing_files_list in
       let env, t = parsing genv env ~lazy_parse:true ~get_next:next t in
       let t = update_files genv env.files_info t in
-      (* Name all the files from the old fast (except dirty) *)
+      (* Name all the files from the old fast (except the new ones we parsed) *)
       let old_fast_names = Relative_path.Map.filter old_fast (fun k _v ->
-          not (Relative_path.Set.mem dirty_files k)
+          not (Relative_path.Set.mem parsing_files k)
         ) in
 
       let t = naming_with_fast old_fast_names t in
@@ -600,6 +603,7 @@ module ServerLazyInit : InitKind = struct
       type_check_dirty genv env old_fast fast dirty_files t, state
     | Error err ->
       (* Fall back to type-checking everything *)
+      SharedMem.cleanup_sqlite ();
       if err <> No_loader then begin
         HackEventLogger.load_mini_exn err;
         Hh_logger.exc ~prefix:"Could not load mini state: " err;
@@ -665,15 +669,12 @@ let save_state env fn =
   Marshal.to_channel chan modes [];
   Sys_utils.close_out_no_fail fn chan;
   let sqlite_save_t = SharedMem.save_dep_table_sqlite (fn^".sql") in
-  let save_t = SharedMem.save_dep_table (fn^".deptable") in
   Hh_logger.log "Saving deptable using sqlite took(seconds): %d" sqlite_save_t;
-  Hh_logger.log "Saving deptable without sqlite took(seconds): %d" save_t;
   ignore @@ Hh_logger.log_duration "Saving" t
 
 
 let get_lazy_level genv =
-  let lazy_decl = genv.local_config.SLC.lazy_decl &&
-    Option.is_none (ServerArgs.ai_mode genv.options) in
+  let lazy_decl = Option.is_none (ServerArgs.ai_mode genv.options) in
   let lazy_parse = genv.local_config.SLC.lazy_parse in
   let lazy_initialize = genv.local_config.SLC.lazy_init in
   match lazy_decl, lazy_parse, lazy_initialize with
@@ -689,12 +690,12 @@ let init ?load_mini_script genv =
   let load_mini_script = Result.of_option load_mini_script ~error:No_loader in
   let env = ServerEnvBuild.make_env genv.config in
   let root = ServerArgs.root genv.options in
-  let use_sql = LSC.use_sql genv.local_config.SLC.load_script_config in
   let (env, t), state =
     if lazy_lev = Init then
-      ServerLazyInit.init ~load_mini_script genv lazy_lev env root ~use_sql
+      ServerLazyInit.init ~load_mini_script genv lazy_lev env root
     else
-      ServerEagerInit.init ~load_mini_script genv lazy_lev env root ~use_sql in
+      ServerEagerInit.init ~load_mini_script genv lazy_lev env root
+  in
   let env, _t = ai_check genv env.files_info env t in
   SharedMem.init_done ();
   print_hash_stats ();

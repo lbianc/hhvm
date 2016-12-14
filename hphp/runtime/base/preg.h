@@ -20,8 +20,11 @@
 #include "hphp/runtime/base/req-containers.h"
 #include "hphp/runtime/base/type-string.h"
 
+#include <folly/Optional.h>
+
 #include <cstdint>
 #include <cstddef>
+#include <memory>
 #include <pcre.h>
 
 #define PREG_PATTERN_ORDER          1
@@ -51,6 +54,18 @@ namespace HPHP {
 struct Array;
 struct Variant;
 
+struct pcre_literal_data {
+  pcre_literal_data(const StringData* pattern, int coptions);
+
+  bool isLiteral() const;
+  bool matches(const StringData* subject, int* offsets) const;
+
+  folly::Optional<std::string> literal_str;
+  bool match_start{false};
+  bool match_end{false};
+  bool case_insensitive{false};
+};
+
 struct pcre_cache_entry {
   pcre_cache_entry() = default;
   ~pcre_cache_entry();
@@ -64,6 +79,7 @@ struct pcre_cache_entry {
   int compile_options:31;
   int num_subpats;
   mutable std::atomic<char**> subpat_names{nullptr};
+  std::unique_ptr<pcre_literal_data> literal_data;
 };
 
 struct PCREglobals {
@@ -108,7 +124,15 @@ Variant preg_match(const String& pattern, const String& subject,
                    Variant* matches = nullptr,
                    int flags = 0, int offset = 0);
 
+Variant preg_match(const StringData* pattern, const StringData* subject,
+                   Variant* matches = nullptr,
+                   int flags = 0, int offset = 0);
+
 Variant preg_match_all(const String& pattern, const String& subject,
+                       Variant* matches = nullptr,
+                       int flags = 0, int offset = 0);
+
+Variant preg_match_all(const StringData* pattern, const StringData* subject,
                        Variant* matches = nullptr,
                        int flags = 0, int offset = 0);
 

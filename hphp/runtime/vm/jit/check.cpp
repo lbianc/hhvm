@@ -345,6 +345,16 @@ Type buildUnion(Type t, Args... ts) {
   return t | buildUnion(ts...);
 }
 
+template <uint32_t...> struct IdxSeq {};
+
+template <typename F>
+inline void forEachSrcIdx(F f, IdxSeq<>) {}
+
+template <typename F, uint32_t Idx, uint32_t... Rest>
+inline void forEachSrcIdx(F f, IdxSeq<Idx, Rest...>) {
+  f(Idx); forEachSrcIdx(f, IdxSeq<Rest...>{});
+}
+
 }
 
 /*
@@ -496,6 +506,7 @@ bool checkOperandTypes(const IRInstruction* inst, const IRUnit* unit) {
 #define DSetElem
 #define D(...)
 #define DBuiltin
+#define DCall
 #define DSubtract(src, t)checkDst(src < inst->numSrcs(),  \
                              "invalid src num");
 #define DofS(src)   checkDst(src < inst->numSrcs(),  \
@@ -506,6 +517,12 @@ bool checkOperandTypes(const IRInstruction* inst, const IRUnit* unit) {
 #define DParamMayRelax requireTypeParam();
 #define DParam         requireTypeParam();
 #define DParamPtr(k)   requireTypeParamPtr(Ptr::k);
+#define DUnion(...)    forEachSrcIdx(                                          \
+                         [&](uint32_t idx) {                                   \
+                           checkDst(idx < inst->numSrcs(), "invalid src num"); \
+                         },                                                    \
+                         IdxSeq<__VA_ARGS__>{}                                 \
+                       );
 #define DLdObjCls
 #define DUnboxPtr
 #define DBoxPtr
@@ -540,6 +557,7 @@ bool checkOperandTypes(const IRInstruction* inst, const IRUnit* unit) {
 #undef ND
 #undef D
 #undef DBuiltin
+#undef DCall
 #undef DSubtract
 #undef DMulti
 #undef DSetElem
@@ -561,6 +579,7 @@ bool checkOperandTypes(const IRInstruction* inst, const IRUnit* unit) {
 #undef DCtx
 #undef DCtxCls
 #undef DCns
+#undef DUnion
 
   return true;
 }

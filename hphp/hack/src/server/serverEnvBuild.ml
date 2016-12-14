@@ -42,13 +42,17 @@ let make_genv options config local_config handle =
   let debug_port = match debug_port,
     local_config.SLC.start_with_recorder_on with
     | Some _, _ ->
+      Hh_logger.log "Using debug-client pre-fork fd";
       debug_port
     | None, true ->
       let daemon = Recorder_daemon.start_daemon
         (ServerFiles.recorder_out_link root)
         (ServerFiles.recorder_log_link root) in
+      Hh_logger.log "Spawned recorder daemon with pid: %d." daemon.Daemon.pid;
       Some (Debug_port.out_port_of_out_channel @@ snd @@ daemon.Daemon.channels)
-    | _ -> None
+    | _ ->
+      Hh_logger.log "No debug port attached";
+      None
   in
   let indexer, notifier_async, notifier, wait_until_ready =
     match watchman_env with

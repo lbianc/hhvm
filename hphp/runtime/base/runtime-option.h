@@ -498,6 +498,10 @@ struct RuntimeOption {
   F(bool, PerfDataMap,                 false)                           \
   F(bool, KeepPerfPidMap,              false)                           \
   F(int32_t, PerfRelocate,             0)                               \
+  F(uint32_t, ThreadTCMainBufferSize,  0)                               \
+  F(uint32_t, ThreadTCColdBufferSize,  0)                               \
+  F(uint32_t, ThreadTCFrozenBufferSize,0)                               \
+  F(uint32_t, ThreadTCDataBufferSize,  0)                               \
   F(uint32_t, JitTargetCacheSize,      64 << 20)                        \
   F(uint32_t, HHBCArenaChunkSize,      10 << 20)                        \
   F(bool, ProfileBC,                   false)                           \
@@ -603,6 +607,7 @@ struct RuntimeOption {
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
   F(uint32_t, GCSampleRate,            0)                               \
+  F(uint32_t, StaticContentsLogRate,   100)                              \
   F(uint32_t, SerDesSampleRate,            0)                           \
   F(int, SimpleJsonMaxLength,        2 << 20)                           \
   F(uint32_t, JitSampleRate,               0)                           \
@@ -619,6 +624,7 @@ struct RuntimeOption {
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(bool, LogServerRestartStats, false)                                 \
+  F(bool, EnableOptTCBuffer,  false)                                    \
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \
@@ -673,6 +679,7 @@ public:
   static int32_t RepoCentralFileMode;
   static std::string RepoCentralFileUser;
   static std::string RepoCentralFileGroup;
+  static bool RepoAllowFallbackPath;
   static std::string RepoEvalMode;
   static std::string RepoJournal;
   static bool RepoCommit;

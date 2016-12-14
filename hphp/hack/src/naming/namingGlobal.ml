@@ -59,6 +59,9 @@ module GEnv = struct
         by adding more files to the unprocessed/partially-processed set in
         the previous loop.
       *)
+      let fn = FileInfo.get_pos_filename pos in
+      Hh_logger.log "File missing: %s" (Relative_path.to_absolute fn);
+      Hh_logger.log "Name missing: %s" (name);
       raise File_heap.File_heap_stale
 
   let type_pos popt name = match TypeIdHeap.get name with
@@ -185,7 +188,7 @@ module Env = struct
       if not @@ GEnv.compare_pos p' p
       then
         let p, name = GEnv.get_full_pos popt (p, name) in
-        let p', name = GEnv.get_full_pos popt (p', name) in
+        let p', canonical = GEnv.get_full_pos popt (p', canonical) in
         Errors.error_name_already_bound name canonical p p'
     | None ->
       FunPosHeap.add name p;
@@ -201,7 +204,7 @@ module Env = struct
       if not @@ GEnv.compare_pos p' p
       then
       let p, name = GEnv.get_full_pos popt (p, name) in
-      let p', name = GEnv.get_full_pos popt (p', name) in
+      let p', canonical = GEnv.get_full_pos popt (p', canonical) in
       Errors.error_name_already_bound name canonical p p'
     | None ->
       TypeIdHeap.write_through name (p, cid_kind);

@@ -83,7 +83,6 @@ struct Vgen {
   void emit(const ldimmb& i);
   void emit(const ldimml& i);
   void emit(const ldimmq& i);
-  void emit(const ldimmqs& i);
   void emit(const load& i);
   void emit(const store& i);
   void emit(const mcprep& i);
@@ -120,6 +119,7 @@ struct Vgen {
   void emit(const unwind& i);
 
   // instructions
+  void emit(absdbl i) { unary(i); a.psllq(1, i.d); a.psrlq(1, i.d); }
   void emit(andb i) { commuteSF(i); a.andb(i.s0, i.d); }
   void emit(andbi i) { binary(i); a.andb(i.s0, i.d); }
   void emit(const andbim& i) { a.andb(i.s, i.m); }
@@ -171,7 +171,6 @@ struct Vgen {
   void emit(const inclm& i) { a.incl(i.m); }
   void emit(incq i) { unary(i); a.incq(i.d); }
   void emit(const incqm& i) { a.incq(i.m); }
-  void emit(const incqmlock& i) { a.lock(); a.incq(i.m); }
   void emit(const incwm& i) { a.incw(i.m); }
   void emit(const jcc& i);
   void emit(const jcci& i);
@@ -214,8 +213,6 @@ struct Vgen {
   void emit(const pop& i) { a.pop(i.d); }
   void emit(const popm& i) { a.pop(i.d); }
   void emit(const popf& i) { assertx(i.d == RegSF{0}); a.popf(); }
-  void emit(psllq i) { binary(i); a.psllq(i.s0, i.d); }
-  void emit(psrlq i) { binary(i); a.psrlq(i.s0, i.d); }
   void emit(const push& i) { a.push(i.s); }
   void emit(const pushm& i) { a.push(i.s); }
   void emit(const pushf& i) { assertx(i.s == RegSF{0}); a.pushf(); }
@@ -372,6 +369,19 @@ bool ccImplies(ConditionCode a, ConditionCode b) {
   always_assert(false);
 }
 
+static CodeAddress toReal(Venv& env, CodeAddress a) {
+  if (env.text.main().code.contains(a)) {
+    return env.text.main().code.toDestAddress(a);
+  }
+  if (env.text.cold().code.contains(a)) {
+    return env.text.cold().code.toDestAddress(a);
+  }
+  if (env.text.frozen().code.contains(a)) {
+    return env.text.frozen().code.toDestAddress(a);
+  }
+  return a;
+}
+
 /*
  * When two jccs go to the same destination, the cc of the first is compatible
  * with the cc of the second, and they're within a one-byte offset of each
@@ -387,7 +397,7 @@ void retargetJumps(Venv& env,
     if (jmps.size() < 2) continue;
 
     for (size_t i = 0; i < jmps.size(); ++i) {
-      DecodedInstruction di(jmps[i]);
+      DecodedInstruction di(toReal(env, jmps[i]), jmps[i]);
       // Don't bother if the jump is already a short jump.
       if (di.size() != 6) continue;
 
@@ -397,7 +407,7 @@ void retargetJumps(Venv& env,
         // dest that's more than a one-byte offset away.
         if (delta < 0 || !deltaFits(delta, sz::byte)) continue;
 
-        DecodedInstruction dj(jmps[j]);
+        DecodedInstruction dj(toReal(env, jmps[j]), jmps[j]);
         if (!ccImplies(di.jccCondCode(), dj.jccCondCode())) continue;
 
         di.setPicAddress(jmps[j]);
@@ -437,14 +447,14 @@ void retargetJumps(Venv& env,
 void Vgen::patch(Venv& env) {
   for (auto& p : env.jmps) {
     assertx(env.addrs[p.target]);
-    X64Assembler::patchJmp(p.instr, env.addrs[p.target]);
+    X64Assembler::patchJmp(toReal(env, p.instr), p.instr, env.addrs[p.target]);
   }
 
   auto const optLevel = RuntimeOption::EvalJitRetargetJumps;
   jit::hash_map<TCA, jit::vector<TCA>> jccs;
   for (auto& p : env.jccs) {
     assertx(env.addrs[p.target]);
-    X64Assembler::patchJcc(p.instr, env.addrs[p.target]);
+    X64Assembler::patchJcc(toReal(env, p.instr), p.instr, env.addrs[p.target]);
     if (optLevel >= 2 ||
         (optLevel == 1 && p.target >= env.unit.blocks.size())) {
       jccs[env.addrs[p.target]].emplace_back(p.instr);
@@ -550,10 +560,6 @@ void Vgen::emit(const ldimmq& i) {
   }
 }
 
-void Vgen::emit(const ldimmqs& i) {
-  emitSmashableMovq(a.code(), env.meta, i.s.q(), i.d);
-}
-
 void Vgen::emit(const load& i) {
   prefix(a, i.s);
   auto mref = i.s.mr();
@@ -587,7 +593,7 @@ void Vgen::emit(const mcprep& i) {
    */
   auto const mov_addr = emitSmashableMovq(a.code(), env.meta, 0, r64(i.d));
   auto const imm = reinterpret_cast<uint64_t>(mov_addr);
-  smashMovq(mov_addr, (imm << 1) | 1);
+  smashMovq(a.toDestAddress(mov_addr), (imm << 1) | 1);
 
   env.meta.addressImmediates.insert(reinterpret_cast<TCA>(~imm));
 }
@@ -666,21 +672,6 @@ void Vgen::emit(const callarray& i) {
   emit(call{i.target, i.args});
 }
 
-void Vgen::emit(const calltc& i) {
-  a.push(i.exittc);
-  a.push(i.fp[AROFF(m_savedRip)]);
-
-  Label stub;
-  a.call(stub);
-
-  asm_label(a, stub);
-  assertx(!i.args.contains(reg::rax));
-  a.pop(reg::rax);  // unused
-  a.jmp(i.target);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
 void Vgen::emit(const contenter& i) {
   Label Stub, End;
   Reg64 fp = i.fp, target = i.target;
@@ -694,6 +685,21 @@ void Vgen::emit(const contenter& i) {
   a.call(Stub);
   // m_savedRip will point here.
   emit(unwind{{i.targets[0], i.targets[1]}});
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void Vgen::emit(const calltc& i) {
+  a.push(i.exittc);
+  a.push(i.fp[AROFF(m_savedRip)]);
+
+  Label stub;
+  a.call(stub);
+
+  asm_label(a, stub);
+  assertx(!i.args.contains(reg::rax));
+  a.pop(reg::rax);  // unused
+  a.jmp(i.target);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -963,15 +969,6 @@ void lower(Vunit& unit, resumetc& inst, Vlabel b, size_t i) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-void lower(Vunit& unit, absdbl& inst, Vlabel b, size_t i) {
-  lower_impl(unit, b, i, [&] (Vout& v) {
-    // Clear the high bit.
-    auto tmp = v.makeReg();
-    v << psllq{1, inst.s, tmp};
-    v << psrlq{1, tmp, inst.d};
-  });
-}
 
 void lower(Vunit& unit, sar& inst, Vlabel b, size_t i) {
   lower_impl(unit, b, i, [&] (Vout& v) {

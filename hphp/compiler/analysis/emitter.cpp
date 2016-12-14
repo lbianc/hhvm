@@ -1027,7 +1027,10 @@ public:
   };
 
   bool emitCallUserFunc(Emitter& e, SimpleFunctionCallPtr node);
-  Func* canEmitBuiltinCall(const std::string& name, int numParams);
+  Func* canEmitBuiltinCall(const std::string& name,
+                           int numParams,
+                           AnalysisResultConstPtr ar,
+                           ExpressionListPtr& params);
   void emitFuncCall(Emitter& e, FunctionCallPtr node,
                     const char* nameOverride = nullptr,
                     ExpressionListPtr paramsOverride = nullptr);
@@ -5954,7 +5957,8 @@ const StaticString
   s_invariant_violation("invariant_violation"),
   s_gennull("HH\\Asio\\null"),
   s_fromArray("fromArray"),
-  s_AwaitAllWaitHandle("HH\\AwaitAllWaitHandle")
+  s_AwaitAllWaitHandle("HH\\AwaitAllWaitHandle"),
+  s_WaitHandle("HH\\WaitHandle")
   ;
 }
 
@@ -5975,12 +5979,17 @@ bool EmitterVisitor::emitInlineGenva(
   assertx(num_params > 0);
 
   for (auto i = int{0}; i < num_params; i++) {
-    Label gwh;
+    Label gwh, have_wh;
 
     visit((*params)[i]);
     emitConvertToCell(e);
 
-    // ($_ !== null ? HH\Asio\null() : $_)->getWaitHandle()
+    // if we already have a WaitHandle, we can skip the getWaitHandle call
+    e.Dup();
+    e.InstanceOfD(s_WaitHandle.get());
+    e.JmpNZ(have_wh);
+
+    // if $_ is null, create a HH\Asio\null() instead of calling getWaitHandle
     e.Dup();
     emitIsType(e, IsTypeOp::Null);
     e.JmpZ(gwh);
@@ -5993,8 +6002,11 @@ bool EmitterVisitor::emitInlineGenva(
     }
     e.FCall(0);
     e.UnboxR();
+    e.Jmp(have_wh);
+
     gwh.set(e);
     emitConstMethodCallNoParams(e, "getWaitHandle");
+    have_wh.set(e);
   }
 
   std::vector<Id> waithandles(num_params);
@@ -6077,6 +6089,7 @@ bool EmitterVisitor::emitInlineGena(
     const auto iterStart = m_ue.bcPos();
     {
       Label loop(e);
+      Label have_wh;
 
       emitVirtualLocal(array); // for Set below
       emitVirtualLocal(key); // for Set below
@@ -6084,7 +6097,13 @@ bool EmitterVisitor::emitInlineGena(
 
       emitVirtualLocal(item);
       emitCGet(e);
+
+      // call getWaitHandle if we don't already have a WaitHandle
+      e.Dup();
+      e.InstanceOfD(s_WaitHandle.get());
+      e.JmpNZ(have_wh);
       emitConstMethodCallNoParams(e, "getWaitHandle");
+      have_wh.set(e);
 
       emitSet(e);   // array[$key] = $item->getWaitHandle();
       emitPop(e);
@@ -8134,7 +8153,7 @@ Attr EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
   assert(retType ||
          meth->isNamed("__construct") ||
          meth->isNamed("__destruct"));
-  fe->returnType = retType ? retType->dataType() : KindOfNull;
+  fe->hniReturnType = retType ? retType->dataType() : KindOfNull;
   fe->retUserType = makeStaticString(meth->getReturnTypeConstraint());
 
   FunctionScopePtr funcScope = meth->getFunctionScope();
@@ -9022,7 +9041,9 @@ bool EmitterVisitor::emitCallUserFunc(Emitter& e, SimpleFunctionCallPtr func) {
 }
 
 Func* EmitterVisitor::canEmitBuiltinCall(const std::string& name,
-                                         int numParams) {
+                                         int numParams,
+                                         AnalysisResultConstPtr ar,
+                                         ExpressionListPtr& funcParams) {
   if (RuntimeOption::EvalJitEnableRenameFunction ||
       !RuntimeOption::EvalEnableCallBuiltin) {
     return nullptr;
@@ -9044,7 +9065,7 @@ Func* EmitterVisitor::canEmitBuiltinCall(const std::string& name,
   // Only allowed to overrun the signature if we have somewhere to put it
   if ((numParams > f->numParams()) && !variadic) return nullptr;
 
-  if ((f->returnType() == KindOfDouble) &&
+  if ((f->hniReturnType() == KindOfDouble) &&
        !Native::allowFCallBuiltinDoubles()) return nullptr;
 
   bool allowDoubleArgs = Native::allowFCallBuiltinDoubles();
@@ -9053,6 +9074,17 @@ Func* EmitterVisitor::canEmitBuiltinCall(const std::string& name,
     assertx(concrete_params > 0);
     --concrete_params;
   }
+
+  auto params = [&]{
+    auto funcScope = ar->findFunction(name);
+    if (!funcScope) return ExpressionListPtr();
+    auto stmt = funcScope->getStmt();
+    if (!stmt) return ExpressionListPtr();
+    auto methStmt = dynamic_pointer_cast<MethodStatement>(stmt);
+    if (!methStmt) return ExpressionListPtr();
+    return methStmt->getParams();
+  }();
+
   for (int i = 0; i < concrete_params; i++) {
     if ((!allowDoubleArgs) &&
         (f->params()[i].builtinType == KindOfDouble)) {
@@ -9065,12 +9097,19 @@ Func* EmitterVisitor::canEmitBuiltinCall(const std::string& name,
         return nullptr;
       }
       if (pi.defaultValue.m_type == KindOfUninit) {
-        // TODO: Resolve persistent constants
-        return nullptr;
+        if (!params || i >= params->getCount()) return nullptr;
+        auto param = dynamic_pointer_cast<ParameterExpression>((*params)[i]);
+        if (!param) return nullptr;
+        auto value = param->defaultValue();
+        if (!value || !value->isScalar()) return nullptr;
+        Variant scalarValue;
+        if (!value->getScalarValue(scalarValue) ||
+            !scalarValue.isAllowedAsConstantValue()) return nullptr;
       }
     }
   }
 
+  funcParams = params;
   return f;
 }
 
@@ -9087,6 +9126,7 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
   assert(!paramsOverride || !unpack);
 
   Func* fcallBuiltin = nullptr;
+  ExpressionListPtr funcParams;
   StringData* nLiteral = nullptr;
   Offset fpiStart = 0;
   if (node->getClass() || node->hasStaticClass()) {
@@ -9123,7 +9163,12 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
   } else if (!nameStr.empty()) {
     // foo()
     nLiteral = makeStaticString(nameStr);
-    fcallBuiltin = canEmitBuiltinCall(nameStr, numParams);
+    fcallBuiltin = canEmitBuiltinCall(
+      nameStr,
+      numParams,
+      node->getFileScope()->getContainingProgram(),
+      funcParams
+    );
     if (unpack &&
         fcallBuiltin &&
         (!fcallBuiltin->hasVariadicCaptureParam() ||
@@ -9185,8 +9230,22 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
       auto &pi = fcallBuiltin->params()[i];
       assert(pi.hasDefaultValue());
       auto &def = pi.defaultValue;
-      emitBuiltinDefaultArg(e, tvAsVariant(const_cast<TypedValue*>(&def)),
-                            pi.builtinType, i);
+      if (def.m_type == KindOfUninit) {
+        assert(funcParams && i < funcParams->getCount());
+        auto param =
+          dynamic_pointer_cast<ParameterExpression>((*funcParams)[i]);
+        assert(param &&
+               param->defaultValue() &&
+               param->defaultValue()->isScalar());
+        Variant scalarValue;
+        DEBUG_ONLY bool success =
+          param->defaultValue()->getScalarValue(scalarValue);
+        assert(success && scalarValue.isAllowedAsConstantValue());
+        emitBuiltinDefaultArg(e, scalarValue, pi.builtinType, i);
+      } else {
+        emitBuiltinDefaultArg(e, tvAsVariant(const_cast<TypedValue*>(&def)),
+                              pi.builtinType, i);
+      }
     }
 
     if (variadic) {

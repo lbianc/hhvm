@@ -22,6 +22,7 @@
 #include "hphp/runtime/base/set-array.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/stats.h"
+#include "hphp/runtime/base/timestamp.h"
 #include "hphp/runtime/base/tv-conversions.h"
 #include "hphp/runtime/vm/runtime.h"
 
@@ -54,6 +55,7 @@ constexpr irlower::SyncOptions SNone = irlower::SyncOptions::None;
 constexpr irlower::SyncOptions SSync = irlower::SyncOptions::Sync;
 
 constexpr DestType DSSA  = DestType::SSA;
+constexpr DestType DDbl  = DestType::Dbl;
 constexpr DestType DTV   = DestType::TV;
 constexpr DestType DNone = DestType::None;
 
@@ -189,8 +191,6 @@ static CallMap s_callMap {
     {ConvCellToDbl,      convCellToDblHelper, DSSA, SSync,
                            {{TV, 0}}},
 
-    {ConvArrToInt,       convArrToIntHelper, DSSA, SNone,
-                           {{SSA, 0}}},
     {ConvObjToInt,       &ObjectData::toInt64, DSSA, SSync,
                            {{SSA, 0}}},
     {ConvStrToInt,       &StringData::toInt64, DSSA, SNone,
@@ -549,6 +549,9 @@ static CallMap s_callMap {
     {MethodExists, methodExistsHelper, DSSA, SNone, {{SSA, 0}, {SSA, 1}}},
 
     {GetMemoKey, getMemoKeyHelper, DTV, SSync, {{TV, 0}}},
+
+    /* microtime(true) */
+    {GetTime, TimeStamp::CurrentSecond, DDbl, SNone, {}},
 };
 
 CallMap::CallMap(CallInfoList infos) {

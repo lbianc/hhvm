@@ -22,6 +22,8 @@
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/edge.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
+#include "hphp/runtime/vm/jit/irgen-builtin.h"
+#include "hphp/runtime/vm/jit/irgen-call.h"
 #include "hphp/runtime/vm/jit/ir-instr-table.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/minstr-effects.h"
@@ -384,16 +386,34 @@ Type newColReturn(const IRInstruction* inst) {
 }
 
 Type builtinReturn(const IRInstruction* inst) {
-  assertx(inst->op() == CallBuiltin);
+  assertx(inst->is(CallBuiltin));
+  return irgen::builtinReturnType(inst->extra<CallBuiltin>()->callee);
+}
 
-  Type t = inst->typeParam();
-  if (t.isSimpleType() || t == TCell) {
-    return t;
+Type callReturn(const IRInstruction* inst) {
+  assertx(inst->is(Call, CallArray));
+
+  if (inst->is(Call)) {
+    // FCallAwait needs to load TVAux
+    if (inst->extra<Call>()->fcallAwait) return TInitGen;
+    auto callee = inst->extra<Call>()->callee;
+    return callee ? irgen::callReturnType(callee) : TInitGen;
   }
-  if (t.isReferenceType() || t == TBoxedCell) {
-    return t | TInitNull;
+  if (inst->is(CallArray)) {
+    auto callee = inst->extra<CallArray>()->callee;
+    return callee ? irgen::callReturnType(callee) : TInitGen;
   }
   not_reached();
+}
+
+template <uint32_t...> struct IdxSeq {};
+
+inline Type unionReturn(const IRInstruction* inst, IdxSeq<>) { return TBottom; }
+
+template <uint32_t Idx, uint32_t... Rest>
+inline Type unionReturn(const IRInstruction* inst, IdxSeq<Idx, Rest...>) {
+  assertx(Idx < inst->numSrcs());
+  return inst->src(Idx)->type() | unionReturn(inst, IdxSeq<Rest...>{});
 }
 
 } // namespace
@@ -430,9 +450,11 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #define DMulti          return TBottom;
 #define DSetElem        return setElemReturn(inst);
 #define DBuiltin        return builtinReturn(inst);
+#define DCall           return callReturn(inst);
 #define DSubtract(n, t) return inst->src(n)->type() - t;
 #define DCns            return TUninit | TInitNull | TBool | \
                                TInt | TDbl | TStr | TRes;
+#define DUnion(...)     return unionReturn(inst, IdxSeq<__VA_ARGS__>{});
 
 #define O(name, dstinfo, srcinfo, flags) case name: dstinfo not_reached();
 
@@ -464,9 +486,11 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #undef DCtxCls
 #undef DMulti
 #undef DSetElem
+#undef DCall
 #undef DBuiltin
 #undef DSubtract
 #undef DCns
+#undef DUnion
 }
 
 }}
