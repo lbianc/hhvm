@@ -101,6 +101,10 @@ module Program =
       to_recheck
   end
 
+let shutdown_persistent_client env client =
+  ClientProvider.shutdown_client client;
+  ServerFileSync.clear_sync_data env
+
 (*****************************************************************************)
 (* The main loop *)
 (*****************************************************************************)
@@ -110,16 +114,16 @@ let handle_connection_ genv env client =
   try
     match ClientProvider.read_connection_type client with
     | Persistent ->
-      (match env.persistent_client with
-      | Some _ ->
-        ClientProvider.send_response_to_client client
-          Persistent_client_alredy_exists;
-        env
-      | None ->
-        ClientProvider.send_response_to_client client
-          Persistent_client_connected;
-        { env with persistent_client =
-            Some (ClientProvider.make_persistent client)})
+      let env = match env.persistent_client with
+        | Some old_client ->
+          ClientProvider.send_push_message_to_client old_client
+            NEW_CLIENT_CONNECTED;
+          shutdown_persistent_client env old_client
+        | None -> env
+      in
+      ClientProvider.send_response_to_client client Connected;
+      { env with persistent_client =
+          Some (ClientProvider.make_persistent client)}
     | Non_persistent ->
       ServerCommand.handle genv env client
   with
@@ -141,15 +145,11 @@ let handle_connection_ genv env client =
   | e ->
     HackEventLogger.handle_connection_exception e;
     let msg = Printexc.to_string e in
-    EventLogger.master_exception msg;
+    EventLogger.master_exception e;
     Printf.fprintf stderr "Error: %s\n%!" msg;
     Printexc.print_backtrace stderr;
     ClientProvider.shutdown_client client;
     env
-
-let shutdown_persistent_client env client =
-  ClientProvider.shutdown_client client;
-  ServerFileSync.clear_sync_data env
 
 let handle_persistent_connection_ genv env client =
    try
@@ -163,7 +163,7 @@ let handle_persistent_connection_ genv env client =
      shutdown_persistent_client env client
    | e ->
      let msg = Printexc.to_string e in
-     EventLogger.master_exception msg;
+     EventLogger.master_exception e;
      Printf.fprintf stderr "Error: %s\n%!" msg;
      Printexc.print_backtrace stderr;
      shutdown_persistent_client env client
@@ -377,8 +377,9 @@ let program_init genv =
       let env, _ = ServerInit.init genv in
       env, if repo_wait_success then "fresh" else "fresh_repo_wait_fail"
   in
+  let timeout = genv.local_config.ServerLocalConfig.load_mini_script_timeout in
   EventLogger.set_init_type init_type;
-  HackEventLogger.init_end init_type;
+  HackEventLogger.init_end init_type timeout;
   Hh_logger.log "Waiting for daemon(s) to be ready...";
   genv.wait_until_ready ();
   ServerStamp.touch_stamp ();

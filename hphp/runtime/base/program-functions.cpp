@@ -901,6 +901,8 @@ static int start_server(const std::string &username, int xhprof) {
   BootStats::mark("pagein_self");
 
   set_execution_mode("server");
+  hphp_process_init();
+
   HttpRequestHandler::GetAccessLog().init
     (RuntimeOption::AccessLogDefaultFormat, RuntimeOption::AccessLogs,
      username);
@@ -1087,6 +1089,14 @@ static int start_server(const std::string &username, int xhprof) {
   HttpServer::Server.reset();
   return 0;
 }
+
+static void logSettings() {
+  if (RuntimeOption::ServerLogSettingsOnStartup) {
+    Logger::Info("Settings: %s\n", IniSetting::GetAllAsJSON().c_str());
+  }
+}
+
+static InitFiniNode s_logSettings(logSettings, InitFiniNode::When::ServerInit);
 
 std::string translate_stack(const char *hexencoded, bool with_frame_numbers) {
   if (!hexencoded || !*hexencoded) {
@@ -2038,6 +2048,7 @@ void hphp_process_init() {
   // TODO(9795696): Race in thread map may trigger spurious logging at
   // thread exit, so for now, only spawn threads if we're a server.
   const uint32_t maxWorkers = RuntimeOption::ServerExecutionMode() ? 3 : 0;
+  folly::SingletonVault::singleton()->registrationComplete();
   InitFiniNode::ProcessInitConcurrentStart(maxWorkers);
   SCOPE_EXIT {
     InitFiniNode::ProcessInitConcurrentWaitForEnd();

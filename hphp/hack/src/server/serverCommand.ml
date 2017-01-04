@@ -43,7 +43,12 @@ let command_needs_full_check = function
   | _ -> false
 
 let full_recheck_if_needed genv env msg =
-  if not env.ServerEnv.needs_full_check then env else
+  if
+    (not env.ServerEnv.needs_full_check) &&
+    (Relative_path.Set.is_empty env.ServerEnv.ide_needs_parsing)
+  then
+    env
+  else
   if not @@ command_needs_full_check msg then env else
   let env, _, _ = ServerTypeCheck.(check genv env Full_check) in
   env
@@ -191,7 +196,7 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
             with exn ->
               let msg = Printexc.to_string exn in
               Printf.printf "Exn in build_hook: %s" msg;
-              EventLogger.master_exception msg;
+              EventLogger.master_exception exn;
             );
             ServerTypeCheck.hook_after_parsing := None
           )
@@ -199,6 +204,8 @@ let stream_response (genv:ServerEnv.genv) env (ic, oc) ~cmd =
 
 let handle genv env client =
   let msg = ClientProvider.read_client_msg client in
+  let d_event = Debug_event.HandleServerCommand msg in
+  let _ = Debug_port.write_opt d_event genv.ServerEnv.debug_port in
   let env = full_recheck_if_needed genv env msg in
   match msg with
   | Rpc cmd ->
@@ -206,7 +213,7 @@ let handle genv env client =
       let new_env, response = ServerRpc.handle
         ~is_stale:env.ServerEnv.recent_recheck_loop_stats.ServerEnv.updates_stale
         genv env cmd in
-      let cmd_string = ServerRpc.to_string cmd in
+      let cmd_string = ServerCommandTypesUtils.debug_describe_t cmd in
       HackEventLogger.handled_command cmd_string t;
       ClientProvider.send_response_to_client client response;
       if ServerCommandTypes.is_disconnect_rpc cmd ||

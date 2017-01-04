@@ -8,6 +8,7 @@
  *
  *)
 
+include Typing_env_types
 open Core
 open Decl_env
 open Typing_defs
@@ -16,69 +17,8 @@ open Nast
 module SN = Naming_special_names
 module Dep = Typing_deps.Dep
 module TLazyHeap = Typing_lazy_heap
-
-type fake_members = {
-  last_call : Pos.t option;
-  invalid   : SSet.t;
-  valid     : SSet.t;
-}
-(* Along with a type, each local variable has a expression id associated with
- * it. This is used when generating expression dependent types for the 'this'
- * type. The idea is that if two local variables have the same expression_id
- * then they refer to the same late bound type, and thus have compatible
- * 'this' types.
- *)
-type expression_id = Ident.t
-type local = locl ty list * locl ty * expression_id
-type tparam_bounds = locl ty list
-type tparam_info = {
-  lower_bounds : tparam_bounds;
-  upper_bounds : tparam_bounds;
-}
-type tpenv = tparam_info SMap.t
-
-(* Local environment incldues types of locals and bounds on type parameters. *)
-type local_env = {
-  fake_members  : fake_members;
-  local_types   : local Local_id.Map.t;
-  (* Lower and upper bounds on generic type parameters and abstract types
-   * For constraints of the form Tu <: Tv where both Tu and Tv are type
-   * parameters, we store an upper bound for Tu and a lower bound for Tv
-   *)
-  tpenv         : tpenv;
-}
-
-type env = {
-  pos     : Pos.t      ;
-  tenv    : locl ty IMap.t ;
-  subst   : int IMap.t ;
-  lenv    : local_env  ;
-  genv    : genv       ;
-  decl_env: Decl_env.env;
-  todo    : tfun list  ;
-  in_loop : bool       ;
-}
-
-and genv = {
-  tcopt   : TypecheckerOptions.t;
-  return  : locl ty;
-  parent_id : string;
-  parent  : decl ty;
-  (* Identifier of the enclosing class *)
-  self_id : string;
-  (* Type of the enclosing class, instantiated at its generic parameters *)
-  self    : locl ty;
-  static  : bool;
-  fun_kind : Ast.fun_kind;
-  anons   : anon IMap.t;
-  file    : Relative_path.t;
-}
-
-(* An anonymous function
- * the environment + the fun parameters + the captured identifiers
-*)
-and anon = env -> locl fun_params -> env * locl ty
-and tfun = env -> env
+module LEnvC = Typing_lenv_cont
+module Cont = Typing_continuations
 
 let get_tcopt env = env.genv.tcopt
 let fresh () =
@@ -256,9 +196,9 @@ let add_fresh_generic_parameter env prefix =
 
 
 (* Replace types for locals with empty environment *)
-let env_with_locals env locals =
+let env_with_locals env locals history =
   { env with lenv = {
-      env.lenv with local_types = locals;
+      env.lenv with local_types = locals; local_type_history = history;
     }
   }
 
@@ -271,7 +211,8 @@ let empty_fake_members = {
 let empty_local tpenv = {
   tpenv = tpenv;
   fake_members = empty_fake_members;
-  local_types = Local_id.Map.empty;
+  local_types = Typing_continuations.Map.empty;
+  local_type_history = Local_id.Map.empty;
 }
 
 let empty tcopt file ~droot = {
@@ -571,7 +512,7 @@ let rec lost_info fake_name env ty =
       env, (info r, ty)
 
 let forget_members env call_pos =
-  let {fake_members; local_types; tpenv} = env.lenv in
+  let {fake_members; local_types; local_type_history; tpenv} = env.lenv in
   let old_invalid = fake_members.invalid in
   let new_invalid = fake_members.valid in
   let new_invalid = SSet.union new_invalid old_invalid in
@@ -580,7 +521,7 @@ let forget_members env call_pos =
     invalid = new_invalid;
     valid = SSet.empty;
   } in
-  { env with lenv = {fake_members; local_types; tpenv } }
+  { env with lenv = {fake_members; local_types; local_type_history; tpenv } }
 
 module FakeMembers = struct
 
@@ -624,10 +565,10 @@ module FakeMembers = struct
     SSet.mem (make_static_id cid member_name) env.lenv.fake_members.invalid
 
   let add_member env fake_id =
-    let {fake_members; local_types; tpenv} = env.lenv in
+    let {fake_members; local_types; local_type_history; tpenv} = env.lenv in
     let valid = SSet.add fake_id fake_members.valid in
     let fake_members = { fake_members with valid = valid } in
-    { env with lenv = {fake_members; local_types; tpenv } }
+    { env with lenv = {fake_members; local_types; local_type_history; tpenv } }
 
   let make _ env obj_name member_name =
     let my_fake_local_id = make_id obj_name member_name in
@@ -671,42 +612,54 @@ let unbind = unbind []
  * the last assignment to this local.
  *)
 let set_local env x new_type =
-  let {fake_members; local_types; tpenv} = env.lenv in
+  let {fake_members; local_types ; local_type_history; tpenv} = env.lenv in
   let env, new_type = unbind env new_type in
+  let next_cont = LEnvC.get_cont Cont.Next local_types in
   let all_types, expr_id =
-    match Local_id.Map.get x local_types with
-    | None -> [], Ident.tmp()
-    | Some (x, _, y) -> x, y
+    match
+      (Local_id.Map.get x next_cont, Local_id.Map.get x local_type_history)
+      with
+    | None, None -> [], Ident.tmp()
+    | Some (_, y), Some x -> x, y
+    | _ -> Exit_status.(exit Local_type_env_stale)
   in
   let all_types =
     if List.exists all_types (fun x -> x = new_type)
     then all_types
     else new_type :: all_types
   in
-  let local = all_types, new_type, expr_id in
-  let local_types = Local_id.Map.add x local local_types in
-  let env = { env with lenv = {fake_members; local_types; tpenv} } in
+  let local = new_type, expr_id in
+  let local_types = LEnvC.add_to_cont Cont.Next x local local_types in
+  let local_type_history = Local_id.Map.add x all_types local_type_history in
+  let env = { env with
+    lenv = {fake_members; local_types; local_type_history; tpenv} }
+  in
   env
 
 let get_local env x =
-  let lcl = Local_id.Map.get x env.lenv.local_types in
+  let next_cont = LEnvC.get_cont Cont.Next env.lenv.local_types in
+  let lcl = Local_id.Map.get x next_cont in
   match lcl with
   | None -> env, (Reason.Rnone, Tany)
-  | Some (_, x, _) -> env, x
+  | Some (x, _) -> env, x
 
 let set_local_expr_id env x new_eid =
-  let {fake_members; local_types; tpenv} = env.lenv in
-  match Local_id.Map.get x local_types with
-  | Some (all_types, type_, eid) when eid <> new_eid ->
-      let local = all_types, type_, new_eid in
-      let local_types = Local_id.Map.add x local local_types in
-      let env = { env with lenv = {fake_members; local_types; tpenv} } in
+  let {fake_members; local_types; local_type_history; tpenv} = env.lenv in
+  let next_cont = LEnvC.get_cont Cont.Next local_types in
+  match Local_id.Map.get x next_cont with
+  | Some (type_, eid) when eid <> new_eid ->
+      let local = type_, new_eid in
+      let local_types = LEnvC.add_to_cont Cont.Next x local local_types in
+      let env ={ env with
+        lenv = {fake_members; local_types; local_type_history; tpenv} }
+      in
       env
   | _ -> env
 
 let get_local_expr_id env x =
-  let lcl = Local_id.Map.get x env.lenv.local_types in
-  Option.map lcl ~f:(fun (_, _, x) -> x)
+  let next_cont = LEnvC.get_cont Cont.Next env.lenv.local_types in
+  let lcl = Local_id.Map.get x next_cont in
+  Option.map lcl ~f:(fun (_, x) -> x)
 
 (*****************************************************************************)
 (* This function is called when we are about to type-check a block that will
@@ -739,10 +692,13 @@ let get_local_expr_id env x =
 (*****************************************************************************)
 
 let freeze_local_env env =
-  let local_types = Local_id.Map.map begin fun (_, type_, eid) ->
-    [type_], type_, eid
-  end env.lenv.local_types in
-  env_with_locals env local_types
+  let local_types = env.lenv.local_types in
+  let next_cont = LEnvC.get_cont Cont.Next local_types in
+  let local_type_history = Local_id.Map.map
+    (fun (type_, _) -> [type_])
+    next_cont
+  in
+  env_with_locals env local_types local_type_history
 
 (*****************************************************************************)
 (* Sets up/cleans up the environment when typing an anonymous function. *)
@@ -767,3 +723,36 @@ let in_loop env f =
   let env = { env with in_loop = true } in
   let env = f env in
   { env with in_loop = old_in_loop }
+
+(*****************************************************************************)
+(* Merge and un-merge locals *)
+(*****************************************************************************)
+
+let merge_locals_and_history lenv =
+  let merge_fn _key locals history =
+    match locals, history with
+      | None, None -> None
+      | Some (type_, exp_id), Some hist -> Some (hist, type_, exp_id)
+      | _ -> Exit_status.(exit Local_type_env_stale)
+  in
+  let next_cont = LEnvC.get_cont Cont.Next lenv.local_types in
+  Local_id.Map.merge
+    merge_fn next_cont lenv.local_type_history
+
+(* TODO: Right now the only continuation we have is next
+ * so I'm putting everything in next *)
+let seperate_locals_and_history locals_and_history =
+  let conts = Typing_continuations.Map.empty in
+  let next_cont = Local_id.Map.map
+    (fun (_, type_, exp_id) -> type_, exp_id) locals_and_history
+  in
+  let locals =
+    Typing_continuations.Map.add
+      Cont.Next
+      next_cont
+      conts
+  in
+  let history = Local_id.Map.map
+    (fun (hist, _, _) -> hist) locals_and_history
+  in
+  locals, history

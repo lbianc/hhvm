@@ -440,4 +440,65 @@ module WithParser(Parser : ParserType) = struct
         parser TokenKind.RightBrace SyntaxError.error1006 parse_item in
     parse_braced_list parser parse_items
 
+  let parse_bracketted_list parser parse_items =
+    parse_delimited_list parser TokenKind.LeftBracket SyntaxError.error1026
+      TokenKind.RightBracket SyntaxError.error1031 parse_items
+
+  let parse_bracketted_comma_list_opt_allow_trailing parser parse_item =
+    let parse_items parser =
+      parse_comma_list_opt_allow_trailing
+        parser TokenKind.RightBracket SyntaxError.error1031 parse_item in
+    parse_bracketted_list parser parse_items
+
+  let parse_double_angled_list parser parse_items =
+    parse_delimited_list parser TokenKind.LessThanLessThan SyntaxError.error1029
+      TokenKind.GreaterThanGreaterThan SyntaxError.error1029 parse_items
+
+  let parse_double_angled_comma_list_allow_trailing parser parse_item =
+    let parse_items parser =
+      parse_comma_list_allow_trailing parser
+        TokenKind.GreaterThanGreaterThan SyntaxError.error1029 parse_item in
+    parse_double_angled_list parser parse_items
+
+  (* Parse with parse_item while a condition is met. *)
+  let parse_list_while parser parse_item predicate =
+    let rec aux parser acc =
+      if peek_token_kind parser = TokenKind.EndOfFile ||
+        not (predicate parser) then
+        (parser, acc)
+      else
+        let (parser, result) = parse_item parser in
+        aux parser (result :: acc) in
+    let (parser, items) = aux parser [] in
+    (parser, make_list (List.rev items))
+
+  let parse_terminated_list parser parse_item terminator =
+    let predicate parser = peek_token_kind parser != terminator in
+    parse_list_while parser parse_item predicate
+
+  let parse_list_until_none parser parse_item =
+    let rec aux parser acc =
+      let (parser, maybe_item) = parse_item parser in
+      match maybe_item with
+      | None -> (parser, acc)
+      | Some item -> aux parser (item :: acc) in
+    let (parser, items) = aux parser [] in
+    (parser, make_list (List.rev items))
+
+  (* Parse a comma-separated list of items until there is an item that
+  does not end in a comma. *)
+  let parse_list_until_no_comma parser parse_item =
+    let rec aux parser acc =
+      let (parser, item) = parse_item parser in
+      match syntax item with
+      | ListItem { list_item; list_separator } ->
+        if is_missing list_separator then
+          (parser, item :: acc)
+        else
+          aux parser (item :: acc)
+      | _ ->
+        (parser, item :: acc) in
+    let (parser, items) = aux parser [] in
+    (parser, make_list (List.rev items))
+
 end

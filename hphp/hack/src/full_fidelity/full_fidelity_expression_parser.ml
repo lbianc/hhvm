@@ -75,7 +75,8 @@ module WithStatementAndDeclAndTypeParser
     with_operator_precedence parser operator parse_expression
 
   (* try to parse an expression. If parser cannot make progress, return None *)
-  and parse_expression_optional parser ~reset_prec =
+  (* TODO: Not currently used; can we delete this? *)
+  and _parse_expression_optional parser ~reset_prec =
     let module Lexer = PrecedenceParser.Lexer in
     let offset = Lexer.start_offset (lexer parser) in
     let (parser, expr) =
@@ -1254,54 +1255,75 @@ module WithStatementAndDeclAndTypeParser
     (parser, syntax)
 
   and parse_list_expression parser =
-    let parser, keyword_token = next_token parser in
-    let parser, left_paren = expect_left_paren parser in
-    let parser, members =
-      with_reset_precedence parser parse_list_expression_list in
-    let parser, right_paren = expect_right_paren parser in
-    let syntax = make_list_expression
-      (make_token keyword_token) left_paren members right_paren in
-    (parser, syntax)
+    (* SPEC:
+      list-intrinsic:
+        list  (  list-expression-list-opt  )
+      list-expression-list:
+        expression
+        ,
+        list-expression-list  ,  expression-opt
 
-  and parse_list_expression_list parser =
-    let rec aux parser acc =
-      let (parser1, token) = next_token parser in
-      match Token.kind token with
-      | Comma ->
-        let missing_expr = make_missing () in
-        let item = make_list_item missing_expr (make_token token) in
-        aux parser1 (item :: acc)
-      | RightParen
-      | Equal -> (* list intrinsic appears only on LHS of equal sign *)
-        (parser, make_list (List.rev acc))
-      | _ -> begin
-        match parse_expression_optional parser ~reset_prec:false with
-        | None ->
-          (* ERROR RECOVERY if parser makes no progress, make an error *)
-          let parser = with_error parser SyntaxError.error1015 in
-          (parser, make_missing () :: acc |> List.rev |> make_list)
-        | Some (parser, expr) ->
-          let (parser1, token) = next_token parser in
-          let parser, trailing = begin
-            match Token.kind token with
-            | Comma -> parser1, make_list_item expr (make_token token)
-            | RightParen -> parser, make_list_item expr (make_missing ())
-            | _ ->
-              (* ERROR RECOVERY: require a comma or right paren *)
-              let parser = with_error parser SyntaxError.error1009 in
-              parser, make_list_item expr (make_missing ())
-          end in
-          aux parser (trailing :: acc)
-    end in
-    aux parser []
+      list-intrinsic must be used as the left-hand operand in a
+      simple-assignment-expression of which the right-hand operand
+      must be an expression that designates a vector-like array or
+      an instance of the class types Vector, ImmVector, or Pair
+      (the "source").
+
+      TODO: Produce an error later if the list is not on the left side of
+      an assignment.
+
+      TODO: Produce an error later if the expressions in the list destructuring
+      are not lvalues.
+      *)
+
+    (* TODO: Spec problems
+       https://github.com/hhvm/hack-langspec/issues/82
+       Note that the grammar of the list destructuring operator is a little
+       weird. The grammar above implies that we can have lists
+       () (,) (,,) (,$x,,) and so on. However, the spec also says
+       "Only the right-most list-or-variable can be omitted."  But HHVM
+       does not enforce that rule, and if we want that rule, then we should
+       simply say that we have an optional list of expressions that may be
+       comma terminated.
+
+       For now we will parse what it says in the spec, but if that is wrong
+       then come back and replace all this code with the helper method that
+       parses a parenthensized, optional, comma-separated, comma-terminated
+       list of expressions.
+    *)
+    let (parser, keyword) = assert_token parser List in
+    let (parser, left) = expect_left_paren parser in
+    (* TODO: ERROR RECOVERY
+    It might be better to bail out when we encounter a token
+    that cannot begin an expression, rather than going until
+    we find the matching right paren. *)
+    let (parser, items) = parse_terminated_list
+      parser parse_list_expression_item RightParen in
+    let (parser, right) = expect_right_paren parser in
+    let result = make_list_expression keyword left items right in
+    (parser, result)
+
+  and parse_list_expression_item parser =
+    match peek_token_kind parser with
+    | Comma ->
+      let expr = make_missing () in
+      let (parser, comma) = assert_token parser Comma in
+      let result = make_list_item expr comma in
+      (parser, result)
+    | _ ->
+      let (parser, expr) = parse_expression_with_reset_precedence parser in
+      let (parser, comma) = optional_token parser Comma in
+      let result = make_list_item expr comma in
+      (parser, result)
+
   (* grammar:
    * array_intrinsic := array ( array-initializer-opt )
    *)
   and parse_array_intrinsic_expression parser =
     let (parser, array_keyword) = assert_token parser Array in
-    let (parser, left_paren) = expect_left_paren parser in
-    let (parser, members) = parse_array_initializer_opt parser true in
-    let (parser, right_paren) = expect_right_paren parser in
+    let (parser, left_paren, members, right_paren) =
+      parse_parenthesized_comma_list_opt_allow_trailing
+        parser parse_array_element_init in
     let syntax = make_array_intrinsic_expression array_keyword left_paren
       members right_paren in
     (parser, syntax)
@@ -1359,58 +1381,21 @@ module WithStatementAndDeclAndTypeParser
         members right_bracket in
       (parser, result)
 
-  (* array_creation_expression := [ array-initializer-opt ] *)
+  (* array_creation_expression :=
+       [ array-initializer-opt ]
+     array-initializer :=
+       array-initializer-list ,-opt
+     array-initializer-list :=
+        array-element-initializer
+        array-element-initializer , array-initializer-list
+  *)
   and parse_array_creation_expression parser =
-    let (parser, left_bracket) = expect_left_bracket parser in
-    let (parser, members) = parse_array_initializer_opt parser false in
-    let (parser, right_bracket) = expect_right_bracket parser in
+    let (parser, left_bracket, members, right_bracket) =
+      parse_bracketted_comma_list_opt_allow_trailing
+      parser parse_array_element_init in
     let syntax = make_array_creation_expression left_bracket
       members right_bracket in
     (parser, syntax)
-  (* array-initializer := array-initializer-list ,-opt *)
-  and parse_array_initializer_opt parser is_intrinsic =
-    let token = peek_token parser in
-    match Token.kind token with
-    | RightParen when is_intrinsic -> (parser, make_missing ())
-    | RightBracket when not is_intrinsic -> (parser, make_missing ())
-    | _ ->  parse_array_init_list parser is_intrinsic
-  (* array-initializer-list :=
-   * array-element-initializer
-   * array-element-initializer , array-initializer-list *)
-  and parse_array_init_list parser is_intrinsic =
-    (* TODO: use comma separated list helpers *)
-    let rec aux parser acc =
-      let parser, element = parse_array_element_init parser in
-      let parser1, token = next_token parser in
-      match Token.kind token with
-      | Comma ->
-        let item = make_list_item element (make_token token) in
-        let acc = item :: acc in
-        let next_token = peek_token parser1 in
-        begin
-          match Token.kind next_token with
-          (* special case when comma finishes the array definition *)
-          | RightParen when is_intrinsic ->
-            (parser1, make_list (List.rev acc))
-          | RightBracket when not is_intrinsic ->
-            (parser1, make_list (List.rev acc))
-          | _ -> aux parser1 acc
-        end
-      (* end of array definition *)
-      | RightParen when is_intrinsic ->
-        let item = make_list_item element (make_missing ()) in
-        (parser, make_list (List.rev (item :: acc)))
-      | RightBracket when not is_intrinsic ->
-        let item = make_list_item element (make_missing ()) in
-        (parser, make_list (List.rev (item :: acc)))
-      | _ -> (* ERROR RECOVERY *)
-        let error = if is_intrinsic then SyntaxError.error1009
-                    else SyntaxError.error1031 in
-        let parser = with_error parser error in
-        (* do not eat token here *)
-        (parser, element :: acc |> List.rev |> make_list)
-    in
-    aux parser []
 
   (* array-element-initializer :=
    * expression
@@ -1577,70 +1562,56 @@ module WithStatementAndDeclAndTypeParser
     (parser, result)
 
   and parse_braced_expression parser =
-    let (parser, left_brace) = next_token parser in
-    (* TODO: Rewrite this to use helper methods. *)
-    let precedence = parser.precedence in
-    let parser = with_precedence parser 0 in
-    let (parser, expression) = parse_expression parser in
+    let (parser, left_brace) = assert_token parser LeftBrace in
+    let (parser, expression) = parse_expression_with_reset_precedence parser in
     let (parser, right_brace) = expect_right_brace parser in
-    let parser = with_precedence parser precedence in
-    let node =
-      make_braced_expression (make_token left_brace) expression right_brace in
+    let node = make_braced_expression left_brace expression right_brace in
     (parser, node)
 
-  and parse_xhp_attribute parser name =
+  and parse_xhp_attribute parser =
     let (parser1, token, _) = next_xhp_element_token parser in
-    if (Token.kind token) != Equal then
-      let node = make_xhp_attribute name (make_missing()) (make_missing()) in
-      let parser = with_error parser SyntaxError.error1016 in
-      (* ERROR RECOVERY: The = is missing; assume that the name belongs
-         to the attribute, but that the remainder is missing, and start
-         looking for the next attribute. *)
-      (parser, node)
+    if (Token.kind token) != XHPElementName then
+      (parser, None)
     else
-      let equal = make_token token in
-      let (parser2, token, text) = next_xhp_element_token parser1 in
-      match (Token.kind token) with
-      | XHPStringLiteral ->
-        let node = make_xhp_attribute name equal (make_token token) in
-        (parser2, node)
-      | LeftBrace ->
-        let (parser, expr) = parse_braced_expression parser1 in
-        let node = make_xhp_attribute name equal expr in
-        (parser, node)
-      | _ ->
+      let name = make_token token in
+      let (parser, token, _) = next_xhp_element_token parser1 in
+      if (Token.kind token) != Equal then
+        let node = make_xhp_attribute name (make_missing()) (make_missing()) in
+        let parser = with_error parser SyntaxError.error1016 in
+        (* ERROR RECOVERY: The = is missing; assume that the name belongs
+           to the attribute, but that the remainder is missing, and start
+           looking for the next attribute. *)
+        (parser, Some node)
+      else
+        let equal = make_token token in
+        let (parser2, token, text) = next_xhp_element_token parser in
+        match (Token.kind token) with
+        | XHPStringLiteral ->
+          let node = make_xhp_attribute name equal (make_token token) in
+          (parser2, Some node)
+        | LeftBrace ->
+          let (parser, expr) = parse_braced_expression parser in
+          let node = make_xhp_attribute name equal expr in
+          (parser, Some node)
+        | _ ->
         (* ERROR RECOVERY: The expression is missing; assume that the "name ="
            belongs to the attribute and start looking for the next attribute. *)
-        let node = make_xhp_attribute name equal (make_missing()) in
-        let parser = with_error parser1 SyntaxError.error1017 in
-        (parser, node)
+          let node = make_xhp_attribute name equal (make_missing()) in
+          let parser = with_error parser SyntaxError.error1017 in
+          (parser, Some node)
 
-  and parse_xhp_attributes parser =
-    let rec aux parser acc =
-      let (parser1, token, _) = next_xhp_element_token parser in
-      if (Token.kind token) = XHPElementName then
-        let (parser, attr) = parse_xhp_attribute parser1 (make_token token) in
-        aux parser (attr :: acc)
-      else
-        (parser, acc) in
-    let (parser, attrs) = aux parser [] in
-    (parser, make_list (List.rev attrs))
-
-  and parse_xhp_body parser =
-    let rec aux acc parser =
-      let (parser1, token) = next_xhp_body_token parser in
-      match Token.kind token with
-      | XHPComment
-      | XHPBody -> aux ((make_token token) :: acc) parser1
-      | LeftBrace ->
-        let (parser, expr) = parse_braced_expression parser in
-        aux (expr :: acc) parser
-      | XHPElementName ->
-        let (parser, expr) = parse_possible_xhp_expression parser in
-        aux (expr :: acc) parser
-      | _ -> (parser, acc) in
-    let (parser, body_elements) = aux [] parser in
-    (parser, make_list (List.rev body_elements))
+  and parse_xhp_body_element parser =
+    let (parser1, token) = next_xhp_body_token parser in
+    match Token.kind token with
+    | XHPComment
+    | XHPBody -> (parser1, Some (make_token token))
+    | LeftBrace ->
+      let (parser, expr) = parse_braced_expression parser in
+      (parser, Some expr)
+    | XHPElementName ->
+      let (parser, expr) = parse_possible_xhp_expression parser in
+      (parser, Some expr)
+    | _ -> (parser, None)
 
   and parse_xhp_close parser _ =
     let (parser1, less_than_slash, _) = next_xhp_element_token parser in
@@ -1671,7 +1642,7 @@ module WithStatementAndDeclAndTypeParser
         (make_token less_than_slash) (make_missing()) (make_missing()))
 
   and parse_xhp_expression parser name name_text =
-    let (parser, attrs) = parse_xhp_attributes parser in
+    let (parser, attrs) = parse_list_until_none parser parse_xhp_attribute in
     let (parser1, token, _) = next_xhp_element_token parser in
     match (Token.kind token) with
     | SlashGreaterThan ->
@@ -1681,7 +1652,8 @@ module WithStatementAndDeclAndTypeParser
       (parser1, xhp)
     | GreaterThan ->
       let xhp_open = make_xhp_open name attrs (make_token token) in
-      let (parser, xhp_body) = parse_xhp_body parser1 in
+      let (parser, xhp_body) =
+        parse_list_until_none parser1 parse_xhp_body_element in
       let (parser, xhp_close) = parse_xhp_close parser name_text in
       let xhp = make_xhp_expression xhp_open xhp_body xhp_close in
       (parser, xhp)

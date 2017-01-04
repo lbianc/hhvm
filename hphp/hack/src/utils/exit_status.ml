@@ -61,12 +61,13 @@ type t =
   | Out_of_shared_memory
   | Shared_mem_assertion_failure
   | Hash_table_full
-  | IDE_persistent_client_already_exists
+  | IDE_new_client_connected
   | Lazy_decl_bug
   | Decl_heap_elems_bug
   | Parser_heap_build_error
   | Heap_full
   | Sql_assertion_failure
+  | Local_type_env_stale
 
 exception Exit_with of t
 
@@ -118,12 +119,13 @@ let exit_code = function
   | Nfs_root ->                     204
   | IDE_init_failure ->             205
   | IDE_typechecker_died ->         206
-  | IDE_persistent_client_already_exists -> 207
+  | IDE_new_client_connected ->     207
   | Lazy_decl_bug ->                208
   | Decl_heap_elems_bug ->          209
   | Parser_heap_build_error ->      210
   | File_heap_stale ->              211
   | Sql_assertion_failure ->        212
+  | Local_type_env_stale ->         213
 
 
 let exit t =
@@ -177,14 +179,14 @@ let to_string = function
   | Shared_mem_assertion_failure -> "Shared_mem_assertion_failure"
   | Out_of_shared_memory -> "Out_of_shared_memory"
   | Hash_table_full -> "Hash_table_full"
-  | IDE_persistent_client_already_exists ->
-    "IDE_persistent_client_already_exists"
+  | IDE_new_client_connected -> "IDE_new_client_connected"
   | Lazy_decl_bug -> "Lazy_decl_bug"
   | Decl_heap_elems_bug -> "Decl_heap_elems_bug"
   | Parser_heap_build_error -> "Parser_heap_build_error"
   | Heap_full -> "Heap_full"
   | File_heap_stale -> "File_heap_stale"
   | Sql_assertion_failure -> "Sql_assertion_failure"
+  | Local_type_env_stale -> "Local_type_env_stale"
 
 
 let unpack = function

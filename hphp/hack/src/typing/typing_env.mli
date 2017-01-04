@@ -7,44 +7,11 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  *
  *)
+include Typing_env_types_sig.S
 
 open Typing_defs
 open Typing_heap
 
-type fake_members = {
-  last_call : Pos.t option;
-  invalid : SSet.t;
-  valid : SSet.t;
-}
-type expression_id = Ident.t
-type local = locl ty list * locl ty * expression_id
-type tpenv
-type tparam_bounds = locl ty list
-
-(* Local environment incldues types of locals and bounds on type parameters. *)
-type local_env = {
-  fake_members  : fake_members;
-  local_types   : local Local_id.Map.t;
-  (* Type parameter environment, assigning lower and upper bounds to type
-   * parameters.  Contraasting with tenv and subst, bounds are
-   * *assumptions* for type inference, not conclusions.
-   *)
-  tpenv         : tpenv;
-}
-
-type env = {
-  pos : Pos.t;
-  tenv : locl ty IMap.t;
-  subst : int IMap.t;
-  lenv : local_env;
-  genv : genv;
-  decl_env : Decl_env.env;
-  todo : tfun list;
-  in_loop : bool;
-}
-and genv
-and anon = env -> locl fun_params -> env * locl ty
-and tfun = env -> env
 val get_tcopt : env -> TypecheckerOptions.t
 val fresh : unit -> int
 val fresh_type : unit -> locl ty
@@ -139,6 +106,11 @@ val get_generic_parameters : env -> string list
 val add_fresh_generic_parameter : env -> string -> env * string
 val get_tpenv_size : env -> int
 val freeze_local_env : env -> env
-val env_with_locals : env -> local Local_id.Map.t -> env
+val env_with_locals :
+  env -> local_types -> local_history Local_id.Map.t -> env
 val anon : local_env -> env -> (env -> env * locl ty) -> env * locl ty
 val in_loop : env -> (env -> env) -> env
+val merge_locals_and_history : local_env -> old_local Local_id.Map.t
+val seperate_locals_and_history :
+  old_local Local_id.Map.t ->
+  (local_types * local_history Local_id.Map.t)

@@ -66,19 +66,15 @@ void recordRelocationMetaData(SrcKey sk, SrcRec& srcRec, const TransLoc& loc,
                      fixups);
 }
 
-static Debug::TCRange rangeFrom(const CodeBlock& cb, const TCA addr,
-                                bool isAcold) {
-  assertx(cb.contains(addr));
-  return Debug::TCRange(addr, cb.frontier(), isAcold);
-}
-
 void recordGdbTranslation(SrcKey sk, const Func* srcFunc, const CodeBlock& cb,
-                          const TCA start, bool exit, bool inPrologue) {
-  if (start != cb.frontier()) {
+                          const TCA start, const TCA end, bool exit,
+                          bool inPrologue) {
+  assertx(cb.contains(start) && cb.contains(end));
+  if (start != end) {
     assertOwnsCodeLock();
     if (!RuntimeOption::EvalJitNoGdb) {
       Debug::DebugInfo::Get()->recordTracelet(
-        rangeFrom(cb, start, &cb == &code().cold()),
+        Debug::TCRange(start, end, &cb == &code().cold()),
         srcFunc,
         srcFunc->unit() ? srcFunc->unit()->at(sk.offset()) : nullptr,
         exit, inPrologue
@@ -86,7 +82,7 @@ void recordGdbTranslation(SrcKey sk, const Func* srcFunc, const CodeBlock& cb,
     }
     if (RuntimeOption::EvalPerfPidMap) {
       Debug::DebugInfo::Get()->recordPerfMap(
-        rangeFrom(cb, start, &cb == &code().cold()),
+        Debug::TCRange(start, end, &cb == &code().cold()),
         sk,
         srcFunc,
         exit,
@@ -127,13 +123,17 @@ void reportJitMaturity(const CodeCache& code) {
     // code that will give us full performance, so recover the "fully mature"
     // size with some math.
     auto const fullSize = RuntimeOption::EvalJitMatureSize * 5;
-    auto const after = codeSize >= fullSize
+    auto after = codeSize >= fullSize
         ? 100
         : (static_cast<int64_t>(
               std::pow(
                   static_cast<double>(codeSize) / static_cast<double>(fullSize),
                   RuntimeOption::EvalJitMaturityExponent) *
               100));
+    // Make sure jit maturity is less than 100 before code.main is full.
+    if (after > 99 && code.main().used() < CodeCache::ASize * 127 / 128) {
+      after = 99;
+    }
     auto const before = jitMaturityCounter->getValue();
     if (after > before) jitMaturityCounter->setValue(after);
   }

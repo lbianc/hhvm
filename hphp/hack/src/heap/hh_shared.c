@@ -110,6 +110,7 @@
 
 #ifndef NO_SQLITE3
 #include <sqlite3.h>
+#define assert_sql(x, y) (assert_sql_with_line((x), (y), __LINE__))
 #endif
 
 // Ideally these would live in a handle.h file but our internal build system
@@ -411,6 +412,7 @@ static char *db_filename = NULL;
 #ifndef NO_SQLITE3
 // SQLite DB pointer
 static sqlite3 *db = NULL;
+static sqlite3_stmt *get_dep_select_stmt = NULL;
 #endif
 
 /* Where the heap started (bottom) */
@@ -1788,9 +1790,17 @@ void hh_cleanup_sqlite() {
 
 #ifndef NO_SQLITE3
 
-static void assert_sql(int b)
-{
-  if (b) return;
+static void assert_sql_with_line(
+  int result,
+  int correct_result,
+  int line_number
+) {
+  if (result == correct_result) return;
+  fprintf(stderr,
+          "SQL assertion failure: Line: %d -> Expected: %d, Got: %d\n",
+          line_number,
+          correct_result,
+          result);
   static value *exn = NULL;
   if (!exn) exn = caml_named_value("sql_assertion_failure");
   caml_raise_constant(*exn);
@@ -1803,34 +1813,34 @@ static void create_sqlite_header(sqlite3 *db) {
                "MAGIC_CONSTANT INTEGER PRIMARY KEY NOT NULL," \
                "BUILDINFO TEXT NOT NULL);";
 
-  assert_sql(sqlite3_exec(db, sql, NULL, 0, NULL) == SQLITE_OK);
+  assert_sql(sqlite3_exec(db, sql, NULL, 0, NULL), SQLITE_OK);
 
   // Insert magic constant and build info
   sqlite3_stmt *insert_stmt = NULL;
   sql = "INSERT INTO HEADER (MAGIC_CONSTANT, BUILDINFO) VALUES (?,?)";
-  assert_sql(sqlite3_prepare_v2(db, sql, -1, &insert_stmt, NULL) == SQLITE_OK);
-  assert_sql(sqlite3_bind_int64(insert_stmt, 1, MAGIC_CONSTANT) == SQLITE_OK);
+  assert_sql(sqlite3_prepare_v2(db, sql, -1, &insert_stmt, NULL), SQLITE_OK);
+  assert_sql(sqlite3_bind_int64(insert_stmt, 1, MAGIC_CONSTANT), SQLITE_OK);
   assert_sql(sqlite3_bind_text(insert_stmt, 2,
         BuildInfo_kRevision, -1,
-        SQLITE_TRANSIENT)
-      == SQLITE_OK);
-  assert_sql(sqlite3_step(insert_stmt) == SQLITE_DONE);
-  assert_sql(sqlite3_finalize(insert_stmt) == SQLITE_OK);
+        SQLITE_TRANSIENT),
+        SQLITE_OK);
+  assert_sql(sqlite3_step(insert_stmt), SQLITE_DONE);
+  assert_sql(sqlite3_finalize(insert_stmt), SQLITE_OK);
 }
 
 // Expects the database to be open
 static void verify_sqlite_header(sqlite3 *db) {
   sqlite3_stmt *select_stmt = NULL;
   const char *sql = "SELECT * FROM HEADER;";
-  assert_sql(sqlite3_prepare_v2(db, sql, -1, &select_stmt, NULL) == SQLITE_OK);
+  assert_sql(sqlite3_prepare_v2(db, sql, -1, &select_stmt, NULL), SQLITE_OK);
 
   if (sqlite3_step(select_stmt) == SQLITE_ROW) {
       // Columns are 0 indexed
-      assert_sql(sqlite3_column_int64(select_stmt, 0) == MAGIC_CONSTANT);
+      assert(sqlite3_column_int64(select_stmt, 0) == MAGIC_CONSTANT);
       assert(strcmp((char *)sqlite3_column_text(select_stmt, 1),
                     BuildInfo_kRevision) == 0);
   }
-  assert_sql(sqlite3_finalize(select_stmt) == SQLITE_OK);
+  assert_sql(sqlite3_finalize(select_stmt), SQLITE_OK);
 }
 
 size_t deptbl_entry_count_for_slot(size_t slot) {
@@ -1869,7 +1879,7 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
 
   sqlite3 *db_out;
   // sqlite3_open creates the db
-  assert_sql(sqlite3_open(String_val(out_filename), &db_out) == SQLITE_OK);
+  assert_sql(sqlite3_open(String_val(out_filename), &db_out), SQLITE_OK);
 
   // Create header for verification while we read from the db
   create_sqlite_header(db_out);
@@ -1879,18 +1889,18 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
                "KEY_VERTEX INT PRIMARY KEY NOT NULL," \
                "VALUE_VERTEX BLOB NOT NULL);";
 
-  assert_sql(sqlite3_exec(db_out, sql, NULL, 0, NULL)
-    == SQLITE_OK);
+  assert_sql(sqlite3_exec(db_out, sql, NULL, 0, NULL), SQLITE_OK);
   // Hand-off the data to the OS for writing and continue,
   // don't wait for it to complete
-  assert_sql(sqlite3_exec(db_out, "PRAGMA synchronous = OFF", NULL, 0, NULL)
-    == SQLITE_OK);
+  assert_sql(sqlite3_exec(db_out, "PRAGMA synchronous = OFF", NULL, 0, NULL),
+    SQLITE_OK);
   // Store the rollback journal in memory
-  assert_sql(sqlite3_exec(db_out, "PRAGMA journal_mode = MEMORY", NULL, 0, NULL)
-    == SQLITE_OK);
+  assert_sql(
+    sqlite3_exec(db_out, "PRAGMA journal_mode = MEMORY", NULL, 0, NULL),
+    SQLITE_OK);
   // Use one transaction for all the insertions
-  assert_sql(sqlite3_exec(db_out, "BEGIN TRANSACTION", NULL, 0, NULL)
-    == SQLITE_OK);
+  assert_sql(sqlite3_exec(db_out, "BEGIN TRANSACTION", NULL, 0, NULL),
+    SQLITE_OK);
 
   // Create entries on the table
   size_t slot;
@@ -1900,8 +1910,8 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
   size_t iter;
   sqlite3_stmt *insert_stmt = NULL;
   sql = "INSERT INTO DEPTABLE (KEY_VERTEX, VALUE_VERTEX) VALUES (?,?)";
-  assert_sql(sqlite3_prepare_v2(db_out, sql, -1, &insert_stmt, NULL)
-    == SQLITE_OK);
+  assert_sql(sqlite3_prepare_v2(db_out, sql, -1, &insert_stmt, NULL),
+    SQLITE_OK);
   for (slot = 0; slot < dep_size; ++slot) {
     count = deptbl_entry_count_for_slot(slot);
     if (count == 0) {
@@ -1919,8 +1929,8 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
 
     if (slotval.raw != 0 && slotval.s.key.tag == TAG_KEY) {
       // This is the head of a linked list aka KEY VERTEX
-      assert_sql(sqlite3_bind_int(insert_stmt, 1, slotval.s.key.num)
-        == SQLITE_OK);
+      assert_sql(sqlite3_bind_int(insert_stmt, 1, slotval.s.key.num),
+        SQLITE_OK);
 
       // Then combine each value to VALUE VERTEX
       while (slotval.s.next.tag == TAG_NEXT) {
@@ -1933,12 +1943,13 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
       // The final "next" in the list is always a value, not a next pointer.
       values[iter] = slotval.s.next.num;
       iter++;
-      assert_sql(sqlite3_bind_blob(insert_stmt, 2, values,
-                               iter * sizeof(uint32_t), SQLITE_TRANSIENT)
-          == SQLITE_OK);
-      assert_sql(sqlite3_step(insert_stmt) == SQLITE_DONE);
-      assert_sql(sqlite3_clear_bindings(insert_stmt) == SQLITE_OK);
-      assert_sql(sqlite3_reset(insert_stmt) == SQLITE_OK);
+      assert_sql(
+        sqlite3_bind_blob(insert_stmt, 2, values,
+                          iter * sizeof(uint32_t), SQLITE_TRANSIENT),
+        SQLITE_OK);
+      assert_sql(sqlite3_step(insert_stmt), SQLITE_DONE);
+      assert_sql(sqlite3_clear_bindings(insert_stmt), SQLITE_OK);
+      assert_sql(sqlite3_reset(insert_stmt), SQLITE_OK);
     }
   }
 
@@ -1946,11 +1957,10 @@ CAMLprim value hh_save_dep_table_sqlite(value out_filename) {
     free(values);
   }
 
-  assert_sql(sqlite3_finalize(insert_stmt) == SQLITE_OK);
-  assert_sql(sqlite3_exec(db_out, "END TRANSACTION", NULL, 0, NULL)
-    == SQLITE_OK);
+  assert_sql(sqlite3_finalize(insert_stmt), SQLITE_OK);
+  assert_sql(sqlite3_exec(db_out, "END TRANSACTION", NULL, 0, NULL), SQLITE_OK);
 
-  assert_sql(sqlite3_close(db_out) == SQLITE_OK);
+  assert_sql(sqlite3_close(db_out), SQLITE_OK);
   tv2 = log_duration("Writing dependency file with sqlite", tv);
   int secs = tv2.tv_sec - tv.tv_sec;
   // Reporting only seconds, ignore milli seconds
@@ -1977,7 +1987,9 @@ CAMLprim value hh_load_dep_table_sqlite(value in_filename) {
   memcpy(db_filename, filename, filename_len);
   db_filename[filename_len] = '\0';
 
-  assert_sql(sqlite3_open(filename, &db) == SQLITE_OK);
+  // SQLITE_OPEN_READONLY makes sure that we throw if the db doesn't exist
+  assert_sql(sqlite3_open_v2(db_filename, &db, SQLITE_OPEN_READONLY, NULL),
+    SQLITE_OK);
 
   // Verify the header
   verify_sqlite_header(db);
@@ -2007,8 +2019,8 @@ CAMLprim value hh_get_dep_sqlite(value ocaml_key) {
       // since we are not connected yet, soo.. try to connect
       assert_not_master();
       // SQLITE_OPEN_READONLY makes sure that we throw if the db doesn't exist
-      assert_sql(sqlite3_open_v2(db_filename, &db, SQLITE_OPEN_READONLY, NULL)
-        == SQLITE_OK);
+      assert_sql(sqlite3_open_v2(db_filename, &db, SQLITE_OPEN_READONLY, NULL),
+        SQLITE_OK);
     }
     // By now, we either set the db or returned an empty list (not sql case)
     assert(db != NULL);
@@ -2022,16 +2034,23 @@ CAMLprim value hh_get_dep_sqlite(value ocaml_key) {
   uint32_t *values;
   size_t size, count, i;
 
-  sqlite3_stmt *select_stmt = NULL;
-  const char *sql = "SELECT VALUE_VERTEX FROM DEPTABLE WHERE KEY_VERTEX=?;";
-  assert_sql(sqlite3_prepare_v2(db, sql, -1, &select_stmt, NULL) == SQLITE_OK);
-  assert_sql(sqlite3_bind_int(select_stmt, 1, key) == SQLITE_OK);
+  if (get_dep_select_stmt == NULL) {
+    const char *sql = "SELECT VALUE_VERTEX FROM DEPTABLE WHERE KEY_VERTEX=?;";
+    assert_sql(sqlite3_prepare_v2(db, sql, -1, &get_dep_select_stmt, NULL),
+      SQLITE_OK);
+    assert(get_dep_select_stmt != NULL);
+  }
 
-  if (sqlite3_step(select_stmt) == SQLITE_ROW) {
+  assert_sql(sqlite3_bind_int(get_dep_select_stmt, 1, key), SQLITE_OK);
+
+  int err_num = sqlite3_step(get_dep_select_stmt);
+  // err_num is SQLITE_ROW if there is a row to look at,
+  // SQLITE_DONE if no results
+  if (err_num == SQLITE_ROW) {
     // Means we found it in the table
     // Columns are 0 indexed
-    values = (uint32_t *) sqlite3_column_blob(select_stmt, 0);
-    size = (size_t) sqlite3_column_bytes(select_stmt, 0);
+    values = (uint32_t *) sqlite3_column_blob(get_dep_select_stmt, 0);
+    size = (size_t) sqlite3_column_bytes(get_dep_select_stmt, 0);
     // Make sure we don't have malformed output
     assert(size % sizeof(uint32_t) == 0);
     count = size / sizeof(uint32_t);
@@ -2042,8 +2061,13 @@ CAMLprim value hh_get_dep_sqlite(value ocaml_key) {
       Field(cell, 1) = result;
       result = cell;
     }
+  } else if (err_num != SQLITE_DONE) {
+    // Something went wrong in sqlite3_step, lets crash
+    assert_sql(err_num, SQLITE_ROW);
   }
-  assert_sql(sqlite3_finalize(select_stmt) == SQLITE_OK);
+
+  assert_sql(sqlite3_clear_bindings(get_dep_select_stmt), SQLITE_OK);
+  assert_sql(sqlite3_reset(get_dep_select_stmt), SQLITE_OK);
   CAMLreturn(result);
 }
 
