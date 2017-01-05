@@ -224,8 +224,8 @@ struct Vunit;
   O(lead, I(s), Un, D(d))\
   /* copies */\
   O(movb, Inone, UH(s,d), DH(d,s))\
-  O(movl, Inone, UH(s,d), DH(d,s))\
   O(movw, Inone, UH(s,d), DH(d,s))\
+  O(movl, Inone, UH(s,d), DH(d,s))\
   O(movzbw, Inone, UH(s,d), DH(d,s))\
   O(movzbl, Inone, UH(s,d), DH(d,s))\
   O(movzbq, Inone, UH(s,d), DH(d,s))\
@@ -297,15 +297,6 @@ struct Vunit;
   O(mrs, I(s), Un, D(r))\
   O(msr, I(s), U(r), Dn)\
   /* ppc64 instructions */\
-  O(cmpd, Inone, U(s0) U(s1), D(sf))\
-  O(cmpdi, I(s0), U(s1), D(sf))\
-  O(cmpld, Inone, U(s0) U(s1), D(sf))\
-  O(cmpldi, I(s0), U(s1), D(sf))\
-  O(cmplw, Inone, U(s0) U(s1), D(sf))\
-  O(cmplwi, I(s0), U(s1), D(sf))\
-  O(cmpw, Inone, U(s0) U(s1), D(sf))\
-  O(cmpwi, I(s0), U(s1), D(sf))\
-  O(copycr, Inone, Un, Dn)\
   O(extsb, Inone, UH(s,d), DH(d,s))\
   O(extsl, Inone, UH(s,d), DH(d,s))\
   O(fcmpo, Inone, U(s0) U(s1), D(sf))\
@@ -998,8 +989,8 @@ struct lead { VdataPtr<void> s; Vreg64 d; };
  */
 // moves
 struct movb { Vreg8 s, d; };
-struct movl { Vreg32 s, d; };
 struct movw { Vreg16 s, d; };
+struct movl { Vreg32 s, d; };
 // zero-extended s to d
 struct movzbw { Vreg8 s; Vreg16 d; };
 struct movzbl { Vreg8 s; Vreg32 d; };
@@ -1108,15 +1099,6 @@ struct msr { Vreg64 r; Immed s; };
 /*
  * ppc64 intrinsics.
  */
-struct cmpd { Vreg64 s0; Vreg64 s1; VregSF sf; };
-struct cmpdi { Immed s0; Vreg64 s1; VregSF sf; };
-struct cmpld { Vreg64 s0; Vreg64 s1; VregSF sf; };
-struct cmpldi { Immed s0; Vreg64 s1; VregSF sf; };
-struct cmplw { Vreg32 s0; Vreg32 s1; VregSF sf; };
-struct cmplwi { Immed s0; Vreg32 s1; VregSF sf; };
-struct cmpw { Vreg32 s0; Vreg32 s1; VregSF sf; };
-struct cmpwi { Immed s0; Vreg64 s1; VregSF sf; };
-struct copycr {};
 struct extsb { Vreg8 s; Vreg64 d; };  // Extend byte sign
 struct extsl { Vreg32 s; Vreg64 d; }; // Extend word sign
 struct fcmpo { VregDbl s0; VregDbl s1; VregSF sf; };
@@ -1129,7 +1111,7 @@ struct mtlr { Vreg64 s; };
 
 struct Vinstr {
 #define O(name, imms, uses, defs) name,
-  enum Opcode : uint16_t { VASM_OPCODES };
+  enum Opcode : uint8_t { VASM_OPCODES };
 #undef O
 
   /*
