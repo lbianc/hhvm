@@ -49,7 +49,7 @@ const RegSet kGPCalleeSaved =
 const RegSet kGPUnreserved = kGPCallerSaved | kGPCalleeSaved;
 
 const RegSet kGPReserved =
-  rtoc() | rsp() | rvmfp() | rvmtl() | rvmsp() | rAsm | rsfp() | reg::r31 |
+  rtoc() | rsp() | rvmfp() | rvmtl() | rvmsp() | rAsm | rsfp() |
   rfuncln() | rfuncentry() | rthreadptr() | rone() | r_svcreq_stub();
 
 const RegSet kGPRegs = kGPUnreserved | kGPReserved;
