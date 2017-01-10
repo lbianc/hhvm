@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -161,11 +161,33 @@ void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static void registerFallbackJump(Venv& env, TCA jmp, ConditionCode cc) {
+namespace {
+
+/*
+ * Record in ProfData that the control-transfer instruction `jmp' is associated
+ * with the current translation being emitted.
+ */
+void setJmpTransID(Venv& env, TCA jmp) {
+  if (!env.unit.context) return;
+
+  env.meta.setJmpTransID(
+    jmp, env.unit.context->transID, env.unit.context->kind
+  );
+}
+
+void registerFallbackJump(Venv& env, TCA jmp, ConditionCode cc) {
   auto const incoming = cc == CC_None ? IncomingBranch::jmpFrom(jmp)
                                       : IncomingBranch::jccFrom(jmp);
 
   env.meta.inProgressTailJumps.push_back(incoming);
+}
+
+}
+
+bool emit(Venv& env, const callphp& i) {
+  const auto call = emitSmashableCall(*env.cb, env.meta, i.stub);
+  setJmpTransID(env, call);
+  return true;
 }
 
 bool emit(Venv& env, const bindjmp& i) {
@@ -315,12 +337,6 @@ const uint64_t* alloc_literal(Venv& env, uint64_t val) {
   return addr;
 }
 
-void setJmpTransID(Venv& env, TCA jmp) {
-  if (!env.unit.context) return;
-
-  env.meta.setJmpTransID(
-    jmp, env.unit.context->transID, env.unit.context->kind
-  );
-}
+///////////////////////////////////////////////////////////////////////////////
 
 }}

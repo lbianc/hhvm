@@ -132,6 +132,9 @@ let parse_options () =
       Exit_status.(exit Input_error)
   | _ -> ());
   let root_path = Path.make !root in
+  ai_mode := (match !ai_mode with
+    | Some (ai) -> Some(Ai_options.set_json_mode ai !json_mode)
+    | None -> None);
   Wwwroot.assert_www_directory root_path;
   {
     json_mode     = !json_mode;
@@ -177,3 +180,9 @@ let no_load options = options.no_load
 let save_filename options = options.save_filename
 let waiting_client options = options.waiting_client
 let debug_client options = options.debug_client
+
+(*****************************************************************************)
+(* Setters *)
+(*****************************************************************************)
+
+let set_no_load options is_no_load = {options with no_load = is_no_load}

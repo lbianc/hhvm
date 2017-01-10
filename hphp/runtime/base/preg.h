@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -55,10 +55,10 @@ struct Array;
 struct Variant;
 
 struct pcre_literal_data {
-  pcre_literal_data(const StringData* pattern, int coptions);
+  pcre_literal_data(const char* pattern, int coptions);
 
   bool isLiteral() const;
-  bool matches(const StringData* subject, int* offsets) const;
+  bool matches(const StringData* subject, int pos, int* offsets) const;
 
   folly::Optional<std::string> literal_str;
   bool match_start{false};

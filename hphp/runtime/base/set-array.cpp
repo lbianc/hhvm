@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -904,13 +904,13 @@ bool SetArray::AdvanceMArrayIter(ArrayData*, MArrayIter&) {
   );
 }
 
-void SetArray::SortThrow(ArrayData*, int, bool) {
+void SetArray::Sort(ArrayData*, int, bool) {
   SystemLib::throwInvalidOperationExceptionObject(
     "Invalid keyset operation (sort)"
   );
 }
 
-bool SetArray::USortThrow(ArrayData*, const Variant&) {
+bool SetArray::Usort(ArrayData*, const Variant&) {
   SystemLib::throwInvalidOperationExceptionObject(
     "Invalid keyset operation (usort)"
   );

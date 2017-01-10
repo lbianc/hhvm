@@ -123,13 +123,24 @@ abstract class EditableSyntax implements ArrayAccess {
     case 'list':
       return EditableList::from_json($json, $position, $source);
     case 'whitespace':
-      return Whitespace::from_json($json, $position, $source);
+      return WhiteSpace::from_json($json, $position, $source);
     case 'end_of_line':
       return EndOfLine::from_json($json, $position, $source);
     case 'delimited_comment':
       return DelimitedComment::from_json($json, $position, $source);
     case 'single_line_comment':
       return SingleLineComment::from_json($json, $position, $source);
+    case 'unsafe':
+      return Unsafe::from_json($json, $position, $source);
+    case 'unsafe_expression':
+      return UnsafeExpression::from_json($json, $position, $source);
+    case 'fix_me':
+      return FixMe::from_json($json, $position, $source);
+    case 'ignore_error':
+      return IgnoreError::from_json($json, $position, $source);
+    case 'fall_through':
+      return FallThrough::from_json($json, $position, $source);
+
     case 'missing':
       return Missing::missing();
     case 'header':
@@ -571,8 +582,6 @@ final class EditableList extends EditableSyntax implements ArrayAccess {
     array<EditableSyntax> $syntax_list): EditableSyntax {
     if (count($syntax_list) === 0)
       return Missing::missing();
-    else if (count($syntax_list) === 1)
-      return $syntax_list[0];
     else
       return new EditableList($syntax_list);
   }
@@ -3957,10 +3966,25 @@ abstract class EditableTrivia extends EditableSyntax {
     string $source) {
     $trivia_text = substr($source, $position, $json->width);
     switch($json->kind) {
-      case 'whitespace': return new Whitespace($trivia_text);
-      case 'end_of_line': return new EndOfLine($trivia_text);
-      case 'single_line_comment': return new SingleLineComment($trivia_text);
-      case 'delimited_comment': return new DelimitedComment($trivia_text);
+      case 'whitespace':
+        return new WhiteSpace($trivia_text);
+      case 'end_of_line':
+        return new EndOfLine($trivia_text);
+      case 'delimited_comment':
+        return new DelimitedComment($trivia_text);
+      case 'single_line_comment':
+        return new SingleLineComment($trivia_text);
+      case 'unsafe':
+        return new Unsafe($trivia_text);
+      case 'unsafe_expression':
+        return new UnsafeExpression($trivia_text);
+      case 'fix_me':
+        return new FixMe($trivia_text);
+      case 'ignore_error':
+        return new IgnoreError($trivia_text);
+      case 'fall_through':
+        return new FallThrough($trivia_text);
+
       default:
         throw new Exception('unexpected json kind: ' . $json->kind);
         // TODO: Better error
@@ -3974,12 +3998,13 @@ public function rewrite(
     return $rewriter($this, $parents ?? []);
   }
 }
-class Whitespace extends EditableTrivia {
+
+class WhiteSpace extends EditableTrivia {
   public function __construct(string $text) {
     parent::__construct('whitespace', $text);
   }
-  public function with_text(string $text): Whitespace {
-    return new Whitespace($text);
+  public function with_text(string $text): WhiteSpace {
+    return new WhiteSpace($text);
   }
 }
 
@@ -3987,17 +4012,8 @@ class EndOfLine extends EditableTrivia {
   public function __construct(string $text) {
     parent::__construct('end_of_line', $text);
   }
-  public function with_text(string $text): Whitespace {
+  public function with_text(string $text): EndOfLine {
     return new EndOfLine($text);
-  }
-}
-
-class SingleLineComment extends EditableTrivia {
-  public function __construct(string $text) {
-    parent::__construct('single_line_comment', $text);
-  }
-  public function with_text(string $text): Whitespace {
-    return new SingleLineComment($text);
   }
 }
 
@@ -4005,10 +4021,66 @@ class DelimitedComment extends EditableTrivia {
   public function __construct(string $text) {
     parent::__construct('delimited_comment', $text);
   }
-  public function with_text(string $text): Whitespace {
+  public function with_text(string $text): DelimitedComment {
     return new DelimitedComment($text);
   }
 }
+
+class SingleLineComment extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('single_line_comment', $text);
+  }
+  public function with_text(string $text): SingleLineComment {
+    return new SingleLineComment($text);
+  }
+}
+
+class Unsafe extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('unsafe', $text);
+  }
+  public function with_text(string $text): Unsafe {
+    return new Unsafe($text);
+  }
+}
+
+class UnsafeExpression extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('unsafe_expression', $text);
+  }
+  public function with_text(string $text): UnsafeExpression {
+    return new UnsafeExpression($text);
+  }
+}
+
+class FixMe extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('fix_me', $text);
+  }
+  public function with_text(string $text): FixMe {
+    return new FixMe($text);
+  }
+}
+
+class IgnoreError extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('ignore_error', $text);
+  }
+  public function with_text(string $text): IgnoreError {
+    return new IgnoreError($text);
+  }
+}
+
+class FallThrough extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('fall_through', $text);
+  }
+  public function with_text(string $text): FallThrough {
+    return new FallThrough($text);
+  }
+}
+
+
 
 final class Missing extends EditableSyntax {
   private static ?Missing $_missing = null;

@@ -60,13 +60,24 @@ class EditableSyntax
     case 'list':
       return EditableList.from_json(json, position, source);
     case 'whitespace':
-      return Whitespace.from_json(json, position, source);
+      return WhiteSpace.from_json(json, position, source);
     case 'end_of_line':
       return EndOfLine.from_json(json, position, source);
     case 'delimited_comment':
       return DelimitedComment.from_json(json, position, source);
     case 'single_line_comment':
       return SingleLineComment.from_json(json, position, source);
+    case 'unsafe':
+      return Unsafe.from_json(json, position, source);
+    case 'unsafe_expression':
+      return UnsafeExpression.from_json(json, position, source);
+    case 'fix_me':
+      return FixMe.from_json(json, position, source);
+    case 'ignore_error':
+      return IgnoreError.from_json(json, position, source);
+    case 'fall_through':
+      return FallThrough.from_json(json, position, source);
+
     case 'missing':
       return Missing.missing;
     case 'header':
@@ -475,8 +486,6 @@ class EditableSyntax
   {
     if (syntax_list.length == 0)
       return Missing.missing;
-    else if (syntax_list.length == 1)
-      return syntax_list[0];
     else
       return new EditableList(syntax_list);
   }
@@ -2406,10 +2415,25 @@ class EditableTrivia extends EditableSyntax
     let trivia_text = source.substring(position, position + json.width);
     switch(json.kind)
     {
-      case 'whitespace': return new Whitespace(trivia_text);
-      case 'end_of_line': return new EndOfLine(trivia_text);
-      case 'single_line_comment': return new SingleLineComment(trivia_text);
-      case 'delimited_comment': return new DelimitedComment(trivia_text);
+      case 'whitespace':
+        return new WhiteSpace(trivia_text);
+      case 'end_of_line':
+        return new EndOfLine(trivia_text);
+      case 'delimited_comment':
+        return new DelimitedComment(trivia_text);
+      case 'single_line_comment':
+        return new SingleLineComment(trivia_text);
+      case 'unsafe':
+        return new Unsafe(trivia_text);
+      case 'unsafe_expression':
+        return new UnsafeExpression(trivia_text);
+      case 'fix_me':
+        return new FixMe(trivia_text);
+      case 'ignore_error':
+        return new IgnoreError(trivia_text);
+      case 'fall_through':
+        return new FallThrough(trivia_text);
+
       default: throw 'unexpected json kind: ' + json.kind; // TODO: Better error
     }
   }
@@ -2424,41 +2448,88 @@ class EditableTrivia extends EditableSyntax
   }
 }
 
-class Whitespace extends EditableTrivia
+class WhiteSpace extends EditableTrivia
 {
-  constructor(text) { super('whitespace', text); }
+  constructor(text) { super(whitespace, text); }
   with_text(text)
   {
-    return new Whitespace(text);
+    return new WhiteSpace(text);
   }
 }
 
 class EndOfLine extends EditableTrivia
 {
-  constructor(text) { super('end_of_line', text); }
+  constructor(text) { super(end_of_line, text); }
   with_text(text)
   {
     return new EndOfLine(text);
   }
 }
 
+class DelimitedComment extends EditableTrivia
+{
+  constructor(text) { super(delimited_comment, text); }
+  with_text(text)
+  {
+    return new DelimitedComment(text);
+  }
+}
+
 class SingleLineComment extends EditableTrivia
 {
-  constructor(text) { super('single_line_comment', text); }
+  constructor(text) { super(single_line_comment, text); }
   with_text(text)
   {
     return new SingleLineComment(text);
   }
 }
 
-class DelimitedComment extends EditableTrivia
+class Unsafe extends EditableTrivia
 {
-  constructor(text) { super('delimited_comment', text); }
+  constructor(text) { super(unsafe, text); }
   with_text(text)
   {
-    return new DelimitedComment(text);
+    return new Unsafe(text);
   }
 }
+
+class UnsafeExpression extends EditableTrivia
+{
+  constructor(text) { super(unsafe_expression, text); }
+  with_text(text)
+  {
+    return new UnsafeExpression(text);
+  }
+}
+
+class FixMe extends EditableTrivia
+{
+  constructor(text) { super(fix_me, text); }
+  with_text(text)
+  {
+    return new FixMe(text);
+  }
+}
+
+class IgnoreError extends EditableTrivia
+{
+  constructor(text) { super(ignore_error, text); }
+  with_text(text)
+  {
+    return new IgnoreError(text);
+  }
+}
+
+class FallThrough extends EditableTrivia
+{
+  constructor(text) { super(fall_through, text); }
+  with_text(text)
+  {
+    return new FallThrough(text);
+  }
+}
+
+
 
 class Missing extends EditableSyntax
 {
@@ -14698,10 +14769,16 @@ exports.XHPBodyToken = XHPBodyToken;
 exports.XHPCommentToken = XHPCommentToken;
 
 exports.EditableTrivia = EditableTrivia;
-exports.Whitespace = Whitespace;
+exports.WhiteSpace = WhiteSpace;
 exports.EndOfLine = EndOfLine;
 exports.DelimitedComment = DelimitedComment;
 exports.SingleLineComment = SingleLineComment;
+exports.Unsafe = Unsafe;
+exports.UnsafeExpression = UnsafeExpression;
+exports.FixMe = FixMe;
+exports.IgnoreError = IgnoreError;
+exports.FallThrough = FallThrough;
+
 exports.ScriptHeader = ScriptHeader;
 exports.Script = Script;
 exports.ScriptFooter = ScriptFooter;

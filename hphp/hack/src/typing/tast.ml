@@ -11,6 +11,7 @@
 type sid = Nast.sid
 type pstring = Nast.pstring
 type ty = Typing_defs.locl Typing_defs.ty
+type shape_field_name = Nast.shape_field_name
 
 (* Typed statement.
  * For now, this is a straight copy of Nast.stmt but it will evolve
@@ -60,7 +61,6 @@ and class_id =
  *)
 and expr =
   | Any
-  | Array of afield list
   | Shape of expr Nast.ShapeMap.t
   | ValCollection of Nast.vc_kind * expr list
   | KeyValCollection of Nast.kvc_kind * field list
@@ -73,7 +73,10 @@ and expr =
   (* meth_caller('Class name', 'method name') *)
   | Method_caller of sid * pstring
   | Smethod_id of sid * pstring
-  | Obj_get of expr * expr * Nast.og_null_flavor
+  (* Dynamic instance property access e.g. $x->$f; not legal in strict files *)
+  | Obj_dynamic_get of expr * expr * Nast.og_null_flavor
+  (* Statically-known instance property access e.g. $x->f *)
+  | Obj_get of ty * expr * sid * Nast.og_null_flavor
   | Array_get of expr * expr option
   | Class_get of class_id * pstring
   | Class_const of class_id * pstring
@@ -92,12 +95,34 @@ and expr =
   | Yield_break
   | Yield of afield
   | Await of ty * expr
-  | List of expr list
+  (* TODO TAST: we should be able to consolidate these *)
+  (* e1, ..., en : tn
+   *   ==> New_tuple [e1; ...; en] : (t1, ..., tn)
+   *)
+  | New_tuple of expr list
+  (* e1 : t1, ..., en : tn
+   *   ==> New_tuple_array [e1; ...; en] : tuple_array<t1, ..., tn>
+   *)
+  | New_tuple_array of expr list
+  (* e1 : t, ..., en : t
+   *   ==> New_vec_array(t, [e1; ...; en]): array<t> *)
+  | New_vec_array of ty * expr list
+  (* e1 : t1, ..., en : tn ==>
+   *   New_shape_array [(f1,t1); ...; (fn,tn)] : shape_array<f1=>t1,...,fn=>tn>
+   *)
+  | New_shape_array of (shape_field_name * expr) list
+  (* k1 : tk, ..., kn : tk and
+   * e1 : tv, ..., en : tv
+   *   New_map_array(tk, tv, [(k1,e1);...;(kn,en)]) : array<tk,tv>
+   *)
+  | New_map_array of ty * ty * (expr * expr) list
   | Pair of expr * expr
-  | Expr_list of expr list
   | Cast of ty * expr
-  | Unop of Ast.uop * expr
-  | Binop of Ast.bop * expr * expr
+  (* TODO TAST: use an "instrinsic" to precisely describe the
+   * overloaded operation that we have resolved for unop and binop
+   *)
+  | Unop of Ast.uop * expr * ty
+  | Binop of Ast.bop * expr * expr * ty
   (** The ID of the $$ that is implicitly declared by this pipe. *)
   | Pipe of Local_id.t * expr * expr
   (* Explicit type must be a supertype of the types of the branches. *)

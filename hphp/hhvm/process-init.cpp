@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -120,8 +120,8 @@ void ProcessInit() {
   }
 
   if (!hhas.empty()) {
-    SystemLib::s_hhas_unit = compile_string(hhas.c_str(), hhas.size(),
-                                            "systemlib.hhas");
+    SystemLib::s_hhas_unit = compile_systemlib_string(
+      hhas.c_str(), hhas.size(), "systemlib.hhas");
     if (SystemLib::s_hhas_unit->compileTimeFatal(msg, line)) {
       Logger::Error("An error has been introduced in the hhas portion of "
                     "systemlib.");

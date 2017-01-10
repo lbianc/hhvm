@@ -374,7 +374,12 @@ module WithStatementAndDeclAndTypeParser
       | _ -> aux parser (merge_head token acc) in
 
     let (parser, results) = aux parser [head] in
-    let result = make_literal_expression (make_list (List.rev results)) in
+    (* If we've ended up with a single string literal with no internal
+    structure, do not represent that as a list with one item. *)
+    let results = match results with
+    | h :: [] -> h
+    | _ -> make_list (List.rev results) in
+    let result = make_literal_expression results in
     (parser, result)
 
   and parse_inclusion_expression parser =
@@ -1257,11 +1262,14 @@ module WithStatementAndDeclAndTypeParser
   and parse_list_expression parser =
     (* SPEC:
       list-intrinsic:
-        list  (  list-expression-list-opt  )
-      list-expression-list:
+        list  (  expression-list-opt  )
+      expression-list:
+        expressions  ,-opt
+      expressions:
         expression
-        ,
-        list-expression-list  ,  expression-opt
+        expressions , expression
+
+      See https://github.com/hhvm/hack-langspec/issues/82
 
       list-intrinsic must be used as the left-hand operand in a
       simple-assignment-expression of which the right-hand operand
@@ -1275,46 +1283,12 @@ module WithStatementAndDeclAndTypeParser
       TODO: Produce an error later if the expressions in the list destructuring
       are not lvalues.
       *)
-
-    (* TODO: Spec problems
-       https://github.com/hhvm/hack-langspec/issues/82
-       Note that the grammar of the list destructuring operator is a little
-       weird. The grammar above implies that we can have lists
-       () (,) (,,) (,$x,,) and so on. However, the spec also says
-       "Only the right-most list-or-variable can be omitted."  But HHVM
-       does not enforce that rule, and if we want that rule, then we should
-       simply say that we have an optional list of expressions that may be
-       comma terminated.
-
-       For now we will parse what it says in the spec, but if that is wrong
-       then come back and replace all this code with the helper method that
-       parses a parenthensized, optional, comma-separated, comma-terminated
-       list of expressions.
-    *)
     let (parser, keyword) = assert_token parser List in
-    let (parser, left) = expect_left_paren parser in
-    (* TODO: ERROR RECOVERY
-    It might be better to bail out when we encounter a token
-    that cannot begin an expression, rather than going until
-    we find the matching right paren. *)
-    let (parser, items) = parse_terminated_list
-      parser parse_list_expression_item RightParen in
-    let (parser, right) = expect_right_paren parser in
+    let (parser, left, items, right) =
+      parse_parenthesized_comma_list_opt_allow_trailing
+        parser parse_expression_with_reset_precedence in
     let result = make_list_expression keyword left items right in
     (parser, result)
-
-  and parse_list_expression_item parser =
-    match peek_token_kind parser with
-    | Comma ->
-      let expr = make_missing () in
-      let (parser, comma) = assert_token parser Comma in
-      let result = make_list_item expr comma in
-      (parser, result)
-    | _ ->
-      let (parser, expr) = parse_expression_with_reset_precedence parser in
-      let (parser, comma) = optional_token parser Comma in
-      let result = make_list_item expr comma in
-      (parser, result)
 
   (* grammar:
    * array_intrinsic := array ( array-initializer-opt )
@@ -1568,6 +1542,26 @@ module WithStatementAndDeclAndTypeParser
     let node = make_braced_expression left_brace expression right_brace in
     (parser, node)
 
+  and expect_right_brace_xhp parser =
+    let (parser1, token) = next_xhp_body_token parser in
+    if (Token.kind token) = TokenKind.RightBrace then
+      (parser1, make_token token)
+    else
+      (* ERROR RECOVERY: Create a missing token for the expected token,
+         and continue on from the current token. Don't skip it. *)
+      (with_error parser SyntaxError.error1006, (make_missing()))
+
+  and parse_xhp_body_braced_expression parser =
+    (* The difference between a regular braced expression and an
+       XHP body braced expression is:
+       <foo bar={$x}/*this_is_a_comment*/>{$y}/*this_is_body_text!*/</foo>
+    *)
+    let (parser, left_brace) = assert_token parser LeftBrace in
+    let (parser, expression) = parse_expression_with_reset_precedence parser in
+    let (parser, right_brace) = expect_right_brace_xhp parser in
+    let node = make_braced_expression left_brace expression right_brace in
+    (parser, node)
+
   and parse_xhp_attribute parser =
     let (parser1, token, _) = next_xhp_element_token parser in
     if (Token.kind token) != XHPElementName then
@@ -1606,7 +1600,7 @@ module WithStatementAndDeclAndTypeParser
     | XHPComment
     | XHPBody -> (parser1, Some (make_token token))
     | LeftBrace ->
-      let (parser, expr) = parse_braced_expression parser in
+      let (parser, expr) = parse_xhp_body_braced_expression parser in
       (parser, Some expr)
     | XHPElementName ->
       let (parser, expr) = parse_possible_xhp_expression parser in

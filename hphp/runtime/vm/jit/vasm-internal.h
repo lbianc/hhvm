@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -117,12 +117,6 @@ void vasm_emit(Vunit& u, Vtext& text, CGMeta& fixups,
  * returned instead.
  */
 const uint64_t* alloc_literal(Venv& env, uint64_t val);
-
-/*
- * Record in ProfData that the control-transfer instruction `jmp' is associated
- * with the current translation being emitted.
- */
-void setJmpTransID(Venv& env, TCA jmp);
 
 ///////////////////////////////////////////////////////////////////////////////
 }}
