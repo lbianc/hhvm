@@ -1,6 +1,6 @@
 { "description" :
   "Auto-generated JSON schema of the Hack Full Fidelity Parser AST",
-  "version" : "2016-12-22-0001",
+  "version" : "2017-01-11-0001",
   "trivia" : [
     { "trivia_kind_name" : "WhiteSpace",
       "trivia_type_name" : "whitespace" },
@@ -63,6 +63,8 @@
       "token_text" : "continue" },
     { "token_kind" : "Default",
       "token_text" : "default" },
+    { "token_kind" : "Define",
+      "token_text" : "define" },
     { "token_kind" : "Destruct",
       "token_text" : "__destruct" },
     { "token_kind" : "Dict",
@@ -81,6 +83,8 @@
       "token_text" : "empty" },
     { "token_kind" : "Enum",
       "token_text" : "enum" },
+    { "token_kind" : "Eval",
+      "token_text" : "eval" },
     { "token_kind" : "Extends",
       "token_text" : "extends" },
     { "token_kind" : "Float",
@@ -113,6 +117,8 @@
       "token_text" : "int" },
     { "token_kind" : "Interface",
       "token_text" : "interface" },
+    { "token_kind" : "Isset",
+      "token_text" : "isset" },
     { "token_kind" : "Keyset",
       "token_text" : "keyset" },
     { "token_kind" : "List",
@@ -380,6 +386,13 @@
     { "token_kind" : "EndOfFile",
       "token_text" : null } ],
   "AST" : [
+    { "kind_name" : "EndOfFile",
+      "type_name" : "end_of_file",
+      "description" : "end_of_file",
+      "prefix" : "end_of_file",
+      "fields" : [
+        { "field_name" : "token" }
+      ] },
     { "kind_name" : "ScriptHeader",
       "type_name" : "script_header",
       "description" : "header",
@@ -1120,6 +1133,46 @@
         { "field_name" : "colon" },
         { "field_name" : "alternative" }
       ] },
+    { "kind_name" : "EvalExpression",
+      "type_name" : "eval_expression",
+      "description" : "eval_expression",
+      "prefix" : "eval",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "left_paren" },
+        { "field_name" : "argument" },
+        { "field_name" : "right_paren" }
+      ] },
+    { "kind_name" : "EmptyExpression",
+      "type_name" : "empty_expression",
+      "description" : "empty_expression",
+      "prefix" : "empty",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "left_paren" },
+        { "field_name" : "argument" },
+        { "field_name" : "right_paren" }
+      ] },
+    { "kind_name" : "DefineExpression",
+      "type_name" : "define_expression",
+      "description" : "define_expression",
+      "prefix" : "define",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "left_paren" },
+        { "field_name" : "argument_list" },
+        { "field_name" : "right_paren" }
+      ] },
+    { "kind_name" : "IssetExpression",
+      "type_name" : "isset_expression",
+      "description" : "isset_expression",
+      "prefix" : "isset",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "left_paren" },
+        { "field_name" : "argument_list" },
+        { "field_name" : "right_paren" }
+      ] },
     { "kind_name" : "FunctionCallExpression",
       "type_name" : "function_call_expression",
       "description" : "function_call_expression",
@@ -1358,9 +1411,29 @@
     { "kind_name" : "VectorTypeSpecifier",
       "type_name" : "vector_type_specifier",
       "description" : "vector_type_specifier",
-      "prefix" : "vector",
+      "prefix" : "vector_type",
       "fields" : [
-        { "field_name" : "array" },
+        { "field_name" : "keyword" },
+        { "field_name" : "left_angle" },
+        { "field_name" : "type" },
+        { "field_name" : "right_angle" }
+      ] },
+    { "kind_name" : "KeysetTypeSpecifier",
+      "type_name" : "keyset_type_specifier",
+      "description" : "keyset_type_specifier",
+      "prefix" : "keyset_type",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "left_angle" },
+        { "field_name" : "type" },
+        { "field_name" : "right_angle" }
+      ] },
+    { "kind_name" : "VectorArrayTypeSpecifier",
+      "type_name" : "vector_array_type_specifier",
+      "description" : "vector_array_type_specifier",
+      "prefix" : "vector_array",
+      "fields" : [
+        { "field_name" : "keyword" },
         { "field_name" : "left_angle" },
         { "field_name" : "type" },
         { "field_name" : "right_angle" }
@@ -1382,12 +1455,24 @@
         { "field_name" : "keyword" },
         { "field_name" : "type" }
       ] },
-    { "kind_name" : "MapTypeSpecifier",
-      "type_name" : "map_type_specifier",
-      "description" : "map_type_specifier",
-      "prefix" : "map",
+    { "kind_name" : "MapArrayTypeSpecifier",
+      "type_name" : "map_array_type_specifier",
+      "description" : "map_array_type_specifier",
+      "prefix" : "map_array",
       "fields" : [
-        { "field_name" : "array" },
+        { "field_name" : "keyword" },
+        { "field_name" : "left_angle" },
+        { "field_name" : "key" },
+        { "field_name" : "comma" },
+        { "field_name" : "value" },
+        { "field_name" : "right_angle" }
+      ] },
+    { "kind_name" : "DictionaryTypeSpecifier",
+      "type_name" : "dictionary_type_specifier",
+      "description" : "dictionary_type_specifier",
+      "prefix" : "dictionary_type",
+      "fields" : [
+        { "field_name" : "keyword" },
         { "field_name" : "left_angle" },
         { "field_name" : "key" },
         { "field_name" : "comma" },

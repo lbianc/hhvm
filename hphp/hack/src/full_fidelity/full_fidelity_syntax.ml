@@ -94,6 +94,9 @@ module WithToken(Token: TokenType) = struct
       syntax : syntax ;
       value : SyntaxValue.t
     }
+    and end_of_file = {
+      end_of_file_token: t;
+    }
     and script_header = {
       header_less_than: t;
       header_question: t;
@@ -534,6 +537,30 @@ module WithToken(Token: TokenType) = struct
       conditional_colon: t;
       conditional_alternative: t;
     }
+    and eval_expression = {
+      eval_keyword: t;
+      eval_left_paren: t;
+      eval_argument: t;
+      eval_right_paren: t;
+    }
+    and empty_expression = {
+      empty_keyword: t;
+      empty_left_paren: t;
+      empty_argument: t;
+      empty_right_paren: t;
+    }
+    and define_expression = {
+      define_keyword: t;
+      define_left_paren: t;
+      define_argument_list: t;
+      define_right_paren: t;
+    }
+    and isset_expression = {
+      isset_keyword: t;
+      isset_left_paren: t;
+      isset_argument_list: t;
+      isset_right_paren: t;
+    }
     and function_call_expression = {
       function_call_receiver: t;
       function_call_left_paren: t;
@@ -670,10 +697,22 @@ module WithToken(Token: TokenType) = struct
       type_constant_right_type: t;
     }
     and vector_type_specifier = {
-      vector_array: t;
-      vector_left_angle: t;
-      vector_type: t;
-      vector_right_angle: t;
+      vector_type_keyword: t;
+      vector_type_left_angle: t;
+      vector_type_type: t;
+      vector_type_right_angle: t;
+    }
+    and keyset_type_specifier = {
+      keyset_type_keyword: t;
+      keyset_type_left_angle: t;
+      keyset_type_type: t;
+      keyset_type_right_angle: t;
+    }
+    and vector_array_type_specifier = {
+      vector_array_keyword: t;
+      vector_array_left_angle: t;
+      vector_array_type: t;
+      vector_array_right_angle: t;
     }
     and type_parameter = {
       type_variance: t;
@@ -684,13 +723,21 @@ module WithToken(Token: TokenType) = struct
       constraint_keyword: t;
       constraint_type: t;
     }
-    and map_type_specifier = {
-      map_array: t;
-      map_left_angle: t;
-      map_key: t;
-      map_comma: t;
-      map_value: t;
-      map_right_angle: t;
+    and map_array_type_specifier = {
+      map_array_keyword: t;
+      map_array_left_angle: t;
+      map_array_key: t;
+      map_array_comma: t;
+      map_array_value: t;
+      map_array_right_angle: t;
+    }
+    and dictionary_type_specifier = {
+      dictionary_type_keyword: t;
+      dictionary_type_left_angle: t;
+      dictionary_type_key: t;
+      dictionary_type_comma: t;
+      dictionary_type_value: t;
+      dictionary_type_right_angle: t;
     }
     and closure_type_specifier = {
       closure_outer_left_paren: t;
@@ -775,6 +822,7 @@ module WithToken(Token: TokenType) = struct
     | Token of Token.t
     | Missing
     | SyntaxList of t list
+    | EndOfFile of end_of_file
     | ScriptHeader of script_header
     | Script of script
     | ScriptFooter of script_footer
@@ -850,6 +898,10 @@ module WithToken(Token: TokenType) = struct
     | BinaryExpression of binary_expression
     | InstanceofExpression of instanceof_expression
     | ConditionalExpression of conditional_expression
+    | EvalExpression of eval_expression
+    | EmptyExpression of empty_expression
+    | DefineExpression of define_expression
+    | IssetExpression of isset_expression
     | FunctionCallExpression of function_call_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
@@ -876,9 +928,12 @@ module WithToken(Token: TokenType) = struct
     | XHPClose of xhp_close
     | TypeConstant of type_constant
     | VectorTypeSpecifier of vector_type_specifier
+    | KeysetTypeSpecifier of keyset_type_specifier
+    | VectorArrayTypeSpecifier of vector_array_type_specifier
     | TypeParameter of type_parameter
     | TypeConstraint of type_constraint
-    | MapTypeSpecifier of map_type_specifier
+    | MapArrayTypeSpecifier of map_array_type_specifier
+    | DictionaryTypeSpecifier of dictionary_type_specifier
     | ClosureTypeSpecifier of closure_type_specifier
     | ClassnameTypeSpecifier of classname_type_specifier
     | FieldSpecifier of field_specifier
@@ -916,6 +971,8 @@ module WithToken(Token: TokenType) = struct
       | Missing -> SyntaxKind.Missing
       | Token _  -> SyntaxKind.Token
       | SyntaxList _ -> SyntaxKind.SyntaxList
+      | EndOfFile _ ->
+        SyntaxKind.EndOfFile
       | ScriptHeader _ ->
         SyntaxKind.ScriptHeader
       | Script _ ->
@@ -1066,6 +1123,14 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.InstanceofExpression
       | ConditionalExpression _ ->
         SyntaxKind.ConditionalExpression
+      | EvalExpression _ ->
+        SyntaxKind.EvalExpression
+      | EmptyExpression _ ->
+        SyntaxKind.EmptyExpression
+      | DefineExpression _ ->
+        SyntaxKind.DefineExpression
+      | IssetExpression _ ->
+        SyntaxKind.IssetExpression
       | FunctionCallExpression _ ->
         SyntaxKind.FunctionCallExpression
       | ParenthesizedExpression _ ->
@@ -1118,12 +1183,18 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.TypeConstant
       | VectorTypeSpecifier _ ->
         SyntaxKind.VectorTypeSpecifier
+      | KeysetTypeSpecifier _ ->
+        SyntaxKind.KeysetTypeSpecifier
+      | VectorArrayTypeSpecifier _ ->
+        SyntaxKind.VectorArrayTypeSpecifier
       | TypeParameter _ ->
         SyntaxKind.TypeParameter
       | TypeConstraint _ ->
         SyntaxKind.TypeConstraint
-      | MapTypeSpecifier _ ->
-        SyntaxKind.MapTypeSpecifier
+      | MapArrayTypeSpecifier _ ->
+        SyntaxKind.MapArrayTypeSpecifier
+      | DictionaryTypeSpecifier _ ->
+        SyntaxKind.DictionaryTypeSpecifier
       | ClosureTypeSpecifier _ ->
         SyntaxKind.ClosureTypeSpecifier
       | ClassnameTypeSpecifier _ ->
@@ -1165,6 +1236,8 @@ module WithToken(Token: TokenType) = struct
     let is_list node =
       kind node = SyntaxKind.SyntaxList
 
+    let is_end_of_file node =
+      kind node = SyntaxKind.EndOfFile
     let is_script_header node =
       kind node = SyntaxKind.ScriptHeader
     let is_script node =
@@ -1315,6 +1388,14 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.InstanceofExpression
     let is_conditional_expression node =
       kind node = SyntaxKind.ConditionalExpression
+    let is_eval_expression node =
+      kind node = SyntaxKind.EvalExpression
+    let is_empty_expression node =
+      kind node = SyntaxKind.EmptyExpression
+    let is_define_expression node =
+      kind node = SyntaxKind.DefineExpression
+    let is_isset_expression node =
+      kind node = SyntaxKind.IssetExpression
     let is_function_call_expression node =
       kind node = SyntaxKind.FunctionCallExpression
     let is_parenthesized_expression node =
@@ -1367,12 +1448,18 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.TypeConstant
     let is_vector_type_specifier node =
       kind node = SyntaxKind.VectorTypeSpecifier
+    let is_keyset_type_specifier node =
+      kind node = SyntaxKind.KeysetTypeSpecifier
+    let is_vector_array_type_specifier node =
+      kind node = SyntaxKind.VectorArrayTypeSpecifier
     let is_type_parameter node =
       kind node = SyntaxKind.TypeParameter
     let is_type_constraint node =
       kind node = SyntaxKind.TypeConstraint
-    let is_map_type_specifier node =
-      kind node = SyntaxKind.MapTypeSpecifier
+    let is_map_array_type_specifier node =
+      kind node = SyntaxKind.MapArrayTypeSpecifier
+    let is_dictionary_type_specifier node =
+      kind node = SyntaxKind.DictionaryTypeSpecifier
     let is_closure_type_specifier node =
       kind node = SyntaxKind.ClosureTypeSpecifier
     let is_classname_type_specifier node =
@@ -1440,6 +1527,12 @@ module WithToken(Token: TokenType) = struct
     let is_ellipsis = is_specific_token Full_fidelity_token_kind.DotDotDot
     let is_comma = is_specific_token Full_fidelity_token_kind.Comma
     let is_array = is_specific_token Full_fidelity_token_kind.Array
+
+    let get_end_of_file_children {
+      end_of_file_token;
+    } = (
+      end_of_file_token
+    )
 
     let get_script_header_children {
       header_less_than;
@@ -2321,6 +2414,54 @@ module WithToken(Token: TokenType) = struct
       conditional_alternative
     )
 
+    let get_eval_expression_children {
+      eval_keyword;
+      eval_left_paren;
+      eval_argument;
+      eval_right_paren;
+    } = (
+      eval_keyword,
+      eval_left_paren,
+      eval_argument,
+      eval_right_paren
+    )
+
+    let get_empty_expression_children {
+      empty_keyword;
+      empty_left_paren;
+      empty_argument;
+      empty_right_paren;
+    } = (
+      empty_keyword,
+      empty_left_paren,
+      empty_argument,
+      empty_right_paren
+    )
+
+    let get_define_expression_children {
+      define_keyword;
+      define_left_paren;
+      define_argument_list;
+      define_right_paren;
+    } = (
+      define_keyword,
+      define_left_paren,
+      define_argument_list,
+      define_right_paren
+    )
+
+    let get_isset_expression_children {
+      isset_keyword;
+      isset_left_paren;
+      isset_argument_list;
+      isset_right_paren;
+    } = (
+      isset_keyword,
+      isset_left_paren,
+      isset_argument_list,
+      isset_right_paren
+    )
+
     let get_function_call_expression_children {
       function_call_receiver;
       function_call_left_paren;
@@ -2592,15 +2733,39 @@ module WithToken(Token: TokenType) = struct
     )
 
     let get_vector_type_specifier_children {
-      vector_array;
-      vector_left_angle;
-      vector_type;
-      vector_right_angle;
+      vector_type_keyword;
+      vector_type_left_angle;
+      vector_type_type;
+      vector_type_right_angle;
     } = (
-      vector_array,
-      vector_left_angle,
-      vector_type,
-      vector_right_angle
+      vector_type_keyword,
+      vector_type_left_angle,
+      vector_type_type,
+      vector_type_right_angle
+    )
+
+    let get_keyset_type_specifier_children {
+      keyset_type_keyword;
+      keyset_type_left_angle;
+      keyset_type_type;
+      keyset_type_right_angle;
+    } = (
+      keyset_type_keyword,
+      keyset_type_left_angle,
+      keyset_type_type,
+      keyset_type_right_angle
+    )
+
+    let get_vector_array_type_specifier_children {
+      vector_array_keyword;
+      vector_array_left_angle;
+      vector_array_type;
+      vector_array_right_angle;
+    } = (
+      vector_array_keyword,
+      vector_array_left_angle,
+      vector_array_type,
+      vector_array_right_angle
     )
 
     let get_type_parameter_children {
@@ -2621,20 +2786,36 @@ module WithToken(Token: TokenType) = struct
       constraint_type
     )
 
-    let get_map_type_specifier_children {
-      map_array;
-      map_left_angle;
-      map_key;
-      map_comma;
-      map_value;
-      map_right_angle;
+    let get_map_array_type_specifier_children {
+      map_array_keyword;
+      map_array_left_angle;
+      map_array_key;
+      map_array_comma;
+      map_array_value;
+      map_array_right_angle;
     } = (
-      map_array,
-      map_left_angle,
-      map_key,
-      map_comma,
-      map_value,
-      map_right_angle
+      map_array_keyword,
+      map_array_left_angle,
+      map_array_key,
+      map_array_comma,
+      map_array_value,
+      map_array_right_angle
+    )
+
+    let get_dictionary_type_specifier_children {
+      dictionary_type_keyword;
+      dictionary_type_left_angle;
+      dictionary_type_key;
+      dictionary_type_comma;
+      dictionary_type_value;
+      dictionary_type_right_angle;
+    } = (
+      dictionary_type_keyword,
+      dictionary_type_left_angle,
+      dictionary_type_key,
+      dictionary_type_comma,
+      dictionary_type_value,
+      dictionary_type_right_angle
     )
 
     let get_closure_type_specifier_children {
@@ -2800,6 +2981,11 @@ module WithToken(Token: TokenType) = struct
       | Missing -> []
       | Token _ -> []
       | SyntaxList x -> x
+      | EndOfFile {
+        end_of_file_token;
+      } -> [
+        end_of_file_token;
+      ]
       | ScriptHeader {
         header_less_than;
         header_question;
@@ -3605,6 +3791,50 @@ module WithToken(Token: TokenType) = struct
         conditional_colon;
         conditional_alternative;
       ]
+      | EvalExpression {
+        eval_keyword;
+        eval_left_paren;
+        eval_argument;
+        eval_right_paren;
+      } -> [
+        eval_keyword;
+        eval_left_paren;
+        eval_argument;
+        eval_right_paren;
+      ]
+      | EmptyExpression {
+        empty_keyword;
+        empty_left_paren;
+        empty_argument;
+        empty_right_paren;
+      } -> [
+        empty_keyword;
+        empty_left_paren;
+        empty_argument;
+        empty_right_paren;
+      ]
+      | DefineExpression {
+        define_keyword;
+        define_left_paren;
+        define_argument_list;
+        define_right_paren;
+      } -> [
+        define_keyword;
+        define_left_paren;
+        define_argument_list;
+        define_right_paren;
+      ]
+      | IssetExpression {
+        isset_keyword;
+        isset_left_paren;
+        isset_argument_list;
+        isset_right_paren;
+      } -> [
+        isset_keyword;
+        isset_left_paren;
+        isset_argument_list;
+        isset_right_paren;
+      ]
       | FunctionCallExpression {
         function_call_receiver;
         function_call_left_paren;
@@ -3851,15 +4081,37 @@ module WithToken(Token: TokenType) = struct
         type_constant_right_type;
       ]
       | VectorTypeSpecifier {
-        vector_array;
-        vector_left_angle;
-        vector_type;
-        vector_right_angle;
+        vector_type_keyword;
+        vector_type_left_angle;
+        vector_type_type;
+        vector_type_right_angle;
       } -> [
-        vector_array;
-        vector_left_angle;
-        vector_type;
-        vector_right_angle;
+        vector_type_keyword;
+        vector_type_left_angle;
+        vector_type_type;
+        vector_type_right_angle;
+      ]
+      | KeysetTypeSpecifier {
+        keyset_type_keyword;
+        keyset_type_left_angle;
+        keyset_type_type;
+        keyset_type_right_angle;
+      } -> [
+        keyset_type_keyword;
+        keyset_type_left_angle;
+        keyset_type_type;
+        keyset_type_right_angle;
+      ]
+      | VectorArrayTypeSpecifier {
+        vector_array_keyword;
+        vector_array_left_angle;
+        vector_array_type;
+        vector_array_right_angle;
+      } -> [
+        vector_array_keyword;
+        vector_array_left_angle;
+        vector_array_type;
+        vector_array_right_angle;
       ]
       | TypeParameter {
         type_variance;
@@ -3877,20 +4129,35 @@ module WithToken(Token: TokenType) = struct
         constraint_keyword;
         constraint_type;
       ]
-      | MapTypeSpecifier {
-        map_array;
-        map_left_angle;
-        map_key;
-        map_comma;
-        map_value;
-        map_right_angle;
+      | MapArrayTypeSpecifier {
+        map_array_keyword;
+        map_array_left_angle;
+        map_array_key;
+        map_array_comma;
+        map_array_value;
+        map_array_right_angle;
       } -> [
-        map_array;
-        map_left_angle;
-        map_key;
-        map_comma;
-        map_value;
-        map_right_angle;
+        map_array_keyword;
+        map_array_left_angle;
+        map_array_key;
+        map_array_comma;
+        map_array_value;
+        map_array_right_angle;
+      ]
+      | DictionaryTypeSpecifier {
+        dictionary_type_keyword;
+        dictionary_type_left_angle;
+        dictionary_type_key;
+        dictionary_type_comma;
+        dictionary_type_value;
+        dictionary_type_right_angle;
+      } -> [
+        dictionary_type_keyword;
+        dictionary_type_left_angle;
+        dictionary_type_key;
+        dictionary_type_comma;
+        dictionary_type_value;
+        dictionary_type_right_angle;
       ]
       | ClosureTypeSpecifier {
         closure_outer_left_paren;
@@ -4040,6 +4307,11 @@ module WithToken(Token: TokenType) = struct
       | Missing -> []
       | Token _ -> []
       | SyntaxList _ -> []
+      | EndOfFile {
+        end_of_file_token;
+      } -> [
+        "end_of_file_token";
+      ]
       | ScriptHeader {
         header_less_than;
         header_question;
@@ -4845,6 +5117,50 @@ module WithToken(Token: TokenType) = struct
         "conditional_colon";
         "conditional_alternative";
       ]
+      | EvalExpression {
+        eval_keyword;
+        eval_left_paren;
+        eval_argument;
+        eval_right_paren;
+      } -> [
+        "eval_keyword";
+        "eval_left_paren";
+        "eval_argument";
+        "eval_right_paren";
+      ]
+      | EmptyExpression {
+        empty_keyword;
+        empty_left_paren;
+        empty_argument;
+        empty_right_paren;
+      } -> [
+        "empty_keyword";
+        "empty_left_paren";
+        "empty_argument";
+        "empty_right_paren";
+      ]
+      | DefineExpression {
+        define_keyword;
+        define_left_paren;
+        define_argument_list;
+        define_right_paren;
+      } -> [
+        "define_keyword";
+        "define_left_paren";
+        "define_argument_list";
+        "define_right_paren";
+      ]
+      | IssetExpression {
+        isset_keyword;
+        isset_left_paren;
+        isset_argument_list;
+        isset_right_paren;
+      } -> [
+        "isset_keyword";
+        "isset_left_paren";
+        "isset_argument_list";
+        "isset_right_paren";
+      ]
       | FunctionCallExpression {
         function_call_receiver;
         function_call_left_paren;
@@ -5091,15 +5407,37 @@ module WithToken(Token: TokenType) = struct
         "type_constant_right_type";
       ]
       | VectorTypeSpecifier {
-        vector_array;
-        vector_left_angle;
-        vector_type;
-        vector_right_angle;
+        vector_type_keyword;
+        vector_type_left_angle;
+        vector_type_type;
+        vector_type_right_angle;
       } -> [
-        "vector_array";
-        "vector_left_angle";
-        "vector_type";
-        "vector_right_angle";
+        "vector_type_keyword";
+        "vector_type_left_angle";
+        "vector_type_type";
+        "vector_type_right_angle";
+      ]
+      | KeysetTypeSpecifier {
+        keyset_type_keyword;
+        keyset_type_left_angle;
+        keyset_type_type;
+        keyset_type_right_angle;
+      } -> [
+        "keyset_type_keyword";
+        "keyset_type_left_angle";
+        "keyset_type_type";
+        "keyset_type_right_angle";
+      ]
+      | VectorArrayTypeSpecifier {
+        vector_array_keyword;
+        vector_array_left_angle;
+        vector_array_type;
+        vector_array_right_angle;
+      } -> [
+        "vector_array_keyword";
+        "vector_array_left_angle";
+        "vector_array_type";
+        "vector_array_right_angle";
       ]
       | TypeParameter {
         type_variance;
@@ -5117,20 +5455,35 @@ module WithToken(Token: TokenType) = struct
         "constraint_keyword";
         "constraint_type";
       ]
-      | MapTypeSpecifier {
-        map_array;
-        map_left_angle;
-        map_key;
-        map_comma;
-        map_value;
-        map_right_angle;
+      | MapArrayTypeSpecifier {
+        map_array_keyword;
+        map_array_left_angle;
+        map_array_key;
+        map_array_comma;
+        map_array_value;
+        map_array_right_angle;
       } -> [
-        "map_array";
-        "map_left_angle";
-        "map_key";
-        "map_comma";
-        "map_value";
-        "map_right_angle";
+        "map_array_keyword";
+        "map_array_left_angle";
+        "map_array_key";
+        "map_array_comma";
+        "map_array_value";
+        "map_array_right_angle";
+      ]
+      | DictionaryTypeSpecifier {
+        dictionary_type_keyword;
+        dictionary_type_left_angle;
+        dictionary_type_key;
+        dictionary_type_comma;
+        dictionary_type_value;
+        dictionary_type_right_angle;
+      } -> [
+        "dictionary_type_keyword";
+        "dictionary_type_left_angle";
+        "dictionary_type_key";
+        "dictionary_type_comma";
+        "dictionary_type_value";
+        "dictionary_type_right_angle";
       ]
       | ClosureTypeSpecifier {
         closure_outer_left_paren;
@@ -5334,6 +5687,12 @@ module WithToken(Token: TokenType) = struct
 
     let syntax_from_children kind ts =
       match kind, ts with
+      | (SyntaxKind.EndOfFile, [
+          end_of_file_token;
+        ]) ->
+        EndOfFile {
+          end_of_file_token;
+        }
       | (SyntaxKind.ScriptHeader, [
           header_less_than;
           header_question;
@@ -6214,6 +6573,54 @@ module WithToken(Token: TokenType) = struct
           conditional_colon;
           conditional_alternative;
         }
+      | (SyntaxKind.EvalExpression, [
+          eval_keyword;
+          eval_left_paren;
+          eval_argument;
+          eval_right_paren;
+        ]) ->
+        EvalExpression {
+          eval_keyword;
+          eval_left_paren;
+          eval_argument;
+          eval_right_paren;
+        }
+      | (SyntaxKind.EmptyExpression, [
+          empty_keyword;
+          empty_left_paren;
+          empty_argument;
+          empty_right_paren;
+        ]) ->
+        EmptyExpression {
+          empty_keyword;
+          empty_left_paren;
+          empty_argument;
+          empty_right_paren;
+        }
+      | (SyntaxKind.DefineExpression, [
+          define_keyword;
+          define_left_paren;
+          define_argument_list;
+          define_right_paren;
+        ]) ->
+        DefineExpression {
+          define_keyword;
+          define_left_paren;
+          define_argument_list;
+          define_right_paren;
+        }
+      | (SyntaxKind.IssetExpression, [
+          isset_keyword;
+          isset_left_paren;
+          isset_argument_list;
+          isset_right_paren;
+        ]) ->
+        IssetExpression {
+          isset_keyword;
+          isset_left_paren;
+          isset_argument_list;
+          isset_right_paren;
+        }
       | (SyntaxKind.FunctionCallExpression, [
           function_call_receiver;
           function_call_left_paren;
@@ -6485,16 +6892,40 @@ module WithToken(Token: TokenType) = struct
           type_constant_right_type;
         }
       | (SyntaxKind.VectorTypeSpecifier, [
-          vector_array;
-          vector_left_angle;
-          vector_type;
-          vector_right_angle;
+          vector_type_keyword;
+          vector_type_left_angle;
+          vector_type_type;
+          vector_type_right_angle;
         ]) ->
         VectorTypeSpecifier {
-          vector_array;
-          vector_left_angle;
-          vector_type;
-          vector_right_angle;
+          vector_type_keyword;
+          vector_type_left_angle;
+          vector_type_type;
+          vector_type_right_angle;
+        }
+      | (SyntaxKind.KeysetTypeSpecifier, [
+          keyset_type_keyword;
+          keyset_type_left_angle;
+          keyset_type_type;
+          keyset_type_right_angle;
+        ]) ->
+        KeysetTypeSpecifier {
+          keyset_type_keyword;
+          keyset_type_left_angle;
+          keyset_type_type;
+          keyset_type_right_angle;
+        }
+      | (SyntaxKind.VectorArrayTypeSpecifier, [
+          vector_array_keyword;
+          vector_array_left_angle;
+          vector_array_type;
+          vector_array_right_angle;
+        ]) ->
+        VectorArrayTypeSpecifier {
+          vector_array_keyword;
+          vector_array_left_angle;
+          vector_array_type;
+          vector_array_right_angle;
         }
       | (SyntaxKind.TypeParameter, [
           type_variance;
@@ -6514,21 +6945,37 @@ module WithToken(Token: TokenType) = struct
           constraint_keyword;
           constraint_type;
         }
-      | (SyntaxKind.MapTypeSpecifier, [
-          map_array;
-          map_left_angle;
-          map_key;
-          map_comma;
-          map_value;
-          map_right_angle;
+      | (SyntaxKind.MapArrayTypeSpecifier, [
+          map_array_keyword;
+          map_array_left_angle;
+          map_array_key;
+          map_array_comma;
+          map_array_value;
+          map_array_right_angle;
         ]) ->
-        MapTypeSpecifier {
-          map_array;
-          map_left_angle;
-          map_key;
-          map_comma;
-          map_value;
-          map_right_angle;
+        MapArrayTypeSpecifier {
+          map_array_keyword;
+          map_array_left_angle;
+          map_array_key;
+          map_array_comma;
+          map_array_value;
+          map_array_right_angle;
+        }
+      | (SyntaxKind.DictionaryTypeSpecifier, [
+          dictionary_type_keyword;
+          dictionary_type_left_angle;
+          dictionary_type_key;
+          dictionary_type_comma;
+          dictionary_type_value;
+          dictionary_type_right_angle;
+        ]) ->
+        DictionaryTypeSpecifier {
+          dictionary_type_keyword;
+          dictionary_type_left_angle;
+          dictionary_type_key;
+          dictionary_type_comma;
+          dictionary_type_value;
+          dictionary_type_right_angle;
         }
       | (SyntaxKind.ClosureTypeSpecifier, [
           closure_outer_left_paren;
@@ -6729,6 +7176,13 @@ module WithToken(Token: TokenType) = struct
         match items with
         | [] -> make_missing()
         | _ -> from_children SyntaxKind.SyntaxList items
+
+    let make_end_of_file
+      end_of_file_token
+    =
+      from_children SyntaxKind.EndOfFile [
+        end_of_file_token;
+      ]
 
     let make_script_header
       header_less_than
@@ -7685,6 +8139,58 @@ module WithToken(Token: TokenType) = struct
         conditional_alternative;
       ]
 
+    let make_eval_expression
+      eval_keyword
+      eval_left_paren
+      eval_argument
+      eval_right_paren
+    =
+      from_children SyntaxKind.EvalExpression [
+        eval_keyword;
+        eval_left_paren;
+        eval_argument;
+        eval_right_paren;
+      ]
+
+    let make_empty_expression
+      empty_keyword
+      empty_left_paren
+      empty_argument
+      empty_right_paren
+    =
+      from_children SyntaxKind.EmptyExpression [
+        empty_keyword;
+        empty_left_paren;
+        empty_argument;
+        empty_right_paren;
+      ]
+
+    let make_define_expression
+      define_keyword
+      define_left_paren
+      define_argument_list
+      define_right_paren
+    =
+      from_children SyntaxKind.DefineExpression [
+        define_keyword;
+        define_left_paren;
+        define_argument_list;
+        define_right_paren;
+      ]
+
+    let make_isset_expression
+      isset_keyword
+      isset_left_paren
+      isset_argument_list
+      isset_right_paren
+    =
+      from_children SyntaxKind.IssetExpression [
+        isset_keyword;
+        isset_left_paren;
+        isset_argument_list;
+        isset_right_paren;
+      ]
+
     let make_function_call_expression
       function_call_receiver
       function_call_left_paren
@@ -7981,16 +8487,42 @@ module WithToken(Token: TokenType) = struct
       ]
 
     let make_vector_type_specifier
-      vector_array
-      vector_left_angle
-      vector_type
-      vector_right_angle
+      vector_type_keyword
+      vector_type_left_angle
+      vector_type_type
+      vector_type_right_angle
     =
       from_children SyntaxKind.VectorTypeSpecifier [
-        vector_array;
-        vector_left_angle;
-        vector_type;
-        vector_right_angle;
+        vector_type_keyword;
+        vector_type_left_angle;
+        vector_type_type;
+        vector_type_right_angle;
+      ]
+
+    let make_keyset_type_specifier
+      keyset_type_keyword
+      keyset_type_left_angle
+      keyset_type_type
+      keyset_type_right_angle
+    =
+      from_children SyntaxKind.KeysetTypeSpecifier [
+        keyset_type_keyword;
+        keyset_type_left_angle;
+        keyset_type_type;
+        keyset_type_right_angle;
+      ]
+
+    let make_vector_array_type_specifier
+      vector_array_keyword
+      vector_array_left_angle
+      vector_array_type
+      vector_array_right_angle
+    =
+      from_children SyntaxKind.VectorArrayTypeSpecifier [
+        vector_array_keyword;
+        vector_array_left_angle;
+        vector_array_type;
+        vector_array_right_angle;
       ]
 
     let make_type_parameter
@@ -8013,21 +8545,38 @@ module WithToken(Token: TokenType) = struct
         constraint_type;
       ]
 
-    let make_map_type_specifier
-      map_array
-      map_left_angle
-      map_key
-      map_comma
-      map_value
-      map_right_angle
+    let make_map_array_type_specifier
+      map_array_keyword
+      map_array_left_angle
+      map_array_key
+      map_array_comma
+      map_array_value
+      map_array_right_angle
     =
-      from_children SyntaxKind.MapTypeSpecifier [
-        map_array;
-        map_left_angle;
-        map_key;
-        map_comma;
-        map_value;
-        map_right_angle;
+      from_children SyntaxKind.MapArrayTypeSpecifier [
+        map_array_keyword;
+        map_array_left_angle;
+        map_array_key;
+        map_array_comma;
+        map_array_value;
+        map_array_right_angle;
+      ]
+
+    let make_dictionary_type_specifier
+      dictionary_type_keyword
+      dictionary_type_left_angle
+      dictionary_type_key
+      dictionary_type_comma
+      dictionary_type_value
+      dictionary_type_right_angle
+    =
+      from_children SyntaxKind.DictionaryTypeSpecifier [
+        dictionary_type_keyword;
+        dictionary_type_left_angle;
+        dictionary_type_key;
+        dictionary_type_comma;
+        dictionary_type_value;
+        dictionary_type_right_angle;
       ]
 
     let make_closure_type_specifier

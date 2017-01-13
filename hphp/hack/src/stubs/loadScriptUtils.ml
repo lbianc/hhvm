@@ -8,6 +8,4 @@
  *
  *)
 
-let go results output_json =
-  let results_json = Hh_json.JSON_Object (ArgumentInfoService.to_json results) in
-  print_endline (Hh_json.json_to_string results_json)
+let delete_corrupted_saved_state _ = ()

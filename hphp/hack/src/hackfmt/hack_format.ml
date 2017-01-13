@@ -258,16 +258,6 @@ let builder = object (this)
     List.rev_filter
       chunk_groups ~f:(fun cg -> Chunk_group.(cg.print_range <> No))
 
-  method __debug chunks =
-    let d_chunks = chunks in
-    List.iter d_chunks ~f:(fun c ->
-      Printf.printf
-        "Span count:%d\t Rule:%s\t Text:%s\n"
-        (List.length c.Chunk.spans)
-        "Todo" (*TODO: refactor (Rule.to_string c.Chunk.rule) *)
-        c.Chunk.text
-    )
-
   (* TODO: move the partial formatting logic to it's own module somehow *)
   method advance n =
     seen_chars <- seen_chars + n;
@@ -450,6 +440,9 @@ offending text is '%s'." (text node)));
     t q;
     t lang_kw;
     builder#end_chunks ();
+  | EndOfFile x ->
+    let token = get_end_of_file_children x in
+    t token;
   | Script x ->
     let (header, declarations) = get_script_children x in
     t header;
@@ -950,19 +943,13 @@ offending text is '%s'." (text node)));
     t name;
     ()
   | MemberSelectionExpression x ->
-    let (obj, op, name) = get_member_selection_expression_children x in
-    t obj;
-    builder#simple_split ();
-    t op;
-    t name;
-    ()
+    handle_possible_chaining
+      (get_member_selection_expression_children x)
+      None
   | SafeMemberSelectionExpression x ->
-    (* TODO: unify code with member_selection_expression, and fix chaining *)
-    let (obj, op, name) = get_safe_member_selection_expression_children x in
-    t obj;
-    builder#simple_split ();
-    t op;
-    t name;
+    handle_possible_chaining
+      (get_safe_member_selection_expression_children x)
+      None
   | YieldExpression x ->
     let (kw, operand) = get_yield_expression_children x in
     t kw;
@@ -1018,6 +1005,22 @@ offending text is '%s'." (text node)));
     ()
   | FunctionCallExpression x ->
     handle_function_call_expression x
+  | EvalExpression x ->
+    let (kw, left_p, args, right_p) = get_eval_expression_children x in
+    t kw;
+    transform_argish left_p args right_p;
+  | EmptyExpression x ->
+    let (kw, left_p, args, right_p) = get_empty_expression_children x in
+    t kw;
+    transform_argish left_p args right_p;
+  | IssetExpression x ->
+    let (kw, left_p, args, right_p) = get_isset_expression_children x in
+    t kw;
+    transform_argish left_p args right_p;
+  | DefineExpression x ->
+    let (kw, left_p, args, right_p) = get_define_expression_children x in
+    t kw;
+    transform_argish left_p args right_p;
   | ParenthesizedExpression x ->
     let (left_p, expr, right_p) = get_parenthesized_expression_children x in
     t left_p;
@@ -1221,9 +1224,21 @@ offending text is '%s'." (text node)));
     t left_type;
     t separator;
     t right_type;
+  | VectorArrayTypeSpecifier x ->
+    let (kw, left_a, vec_type, right_a) =
+      get_vector_array_type_specifier_children x in
+    t kw;
+    transform_argish left_a vec_type right_a;
+    ()
   | VectorTypeSpecifier x ->
     let (kw, left_a, vec_type, right_a) =
       get_vector_type_specifier_children x in
+    t kw;
+    transform_argish left_a vec_type right_a;
+    ()
+  | KeysetTypeSpecifier x ->
+    let (kw, left_a, vec_type, right_a) =
+      get_keyset_type_specifier_children x in
     t kw;
     transform_argish left_a vec_type right_a;
     ()
@@ -1238,9 +1253,17 @@ offending text is '%s'." (text node)));
     t kw;
     pending_space ();
     t constraint_type;
-  | MapTypeSpecifier x ->
+  | MapArrayTypeSpecifier x ->
     let (kw, left_a, key, comma_kw, value, right_a) =
-      get_map_type_specifier_children x in
+      get_map_array_type_specifier_children x in
+    t kw;
+    let key_list_item = make_list_item key comma_kw in
+    let val_list_item = make_list_item value (make_missing ()) in
+    let args = make_list [key_list_item; val_list_item] in
+    transform_argish left_a args right_a;
+  | DictionaryTypeSpecifier x ->
+    let (kw, left_a, key, comma_kw, value, right_a) =
+      get_dictionary_type_specifier_children x in
     t kw;
     let key_list_item = make_list_item key comma_kw in
     let val_list_item = make_list_item value (make_missing ()) in
@@ -1409,26 +1432,44 @@ and handle_function_call_expression fce =
   let (receiver, lp, args, rp) = get_function_call_expression_children fce in
   match syntax receiver with
     | MemberSelectionExpression mse ->
-      handle_possible_method_chaining mse (Some (lp, args, rp))
+      handle_possible_chaining
+        (get_member_selection_expression_children mse)
+        (Some (lp, args, rp))
+    | SafeMemberSelectionExpression smse ->
+      handle_possible_chaining
+        (get_safe_member_selection_expression_children smse)
+        (Some (lp, args, rp))
     | _ ->
       transform receiver;
       transform_argish lp args rp
 
-and handle_possible_method_chaining mse argish =
-  let (obj, arrow1, member1) = get_member_selection_expression_children mse in
+and handle_possible_chaining (obj, arrow1, member1) argish =
   let rec handle_chaining obj =
+    let handle_mse_or_smse (obj, arrow, member) fun_paren_args =
+      let (obj, l) = handle_chaining obj in
+      obj, l @ [(arrow, member, fun_paren_args)]
+    in
     match syntax obj with
       | FunctionCallExpression x ->
         let (receiver, lp, args, rp) =
           get_function_call_expression_children x in
         (match syntax receiver with
           | MemberSelectionExpression mse ->
-            let (obj, arrow, member) =
-              get_member_selection_expression_children mse in
-            let (obj, l) = handle_chaining obj in
-            obj, l @ [(arrow, member, Some (lp, args, rp))]
+            handle_mse_or_smse
+              (get_member_selection_expression_children mse)
+              (Some (lp, args, rp))
+          | SafeMemberSelectionExpression smse ->
+            handle_mse_or_smse
+              (get_safe_member_selection_expression_children smse)
+              (Some (lp, args, rp))
           | _ -> obj, []
         )
+      | MemberSelectionExpression mse ->
+        handle_mse_or_smse
+          (get_member_selection_expression_children mse) None
+      | SafeMemberSelectionExpression smse ->
+        handle_mse_or_smse
+          (get_safe_member_selection_expression_children smse) None
       | _ -> obj, []
   in
 
@@ -1659,43 +1700,10 @@ and transform_binary_expression ~is_nested expr =
         raise (Failure "Expected non empty list of binary expression pieces")
   end
 
-let debug_chunk_groups chunk_groups =
-  let get_range cg =
-    let chunks = cg.Chunk_group.chunks in
-    let a, b, c = Chunk_group.(match cg.print_range with
-      | No -> "No", -1, -1
-      | All -> "All", 0, List.length chunks
-      | Range (s, e) ->  "Range", s, e
-      | StartAt s -> "StartAt", s, List.length chunks
-      | EndAt e -> "EndAt", 0, e
-    ) in
-    Printf.sprintf "%s %d %d" a b c
-  in
-  Printf.printf "%d\n" (List.length chunk_groups);
-  List.iteri chunk_groups ~f:(fun i cg ->
-    Printf.printf "%d\n" i;
-    Printf.printf "Indentation: %d\n" cg.Chunk_group.block_indentation;
-    Printf.printf "Chunk count:%d\n" (List.length cg.Chunk_group.chunks);
-    Printf.printf "%s\n" @@ get_range cg;
-    List.iteri cg.Chunk_group.chunks ~f:(fun i c ->
-      Printf.printf "\t%d - %s - Nesting:%d Pending:%d\n"
-        i (Chunk.to_string c) (Chunk.get_nesting_id c)
-        (Option.value ~default:(-1) c.Chunk.comma_rule)
-    );
-    Printf.printf "Rule count %d\n"
-      (IMap.cardinal cg.Chunk_group.rule_map);
-    IMap.iter (fun k v ->
-      Printf.printf "\t%d - %s\n" k (Rule.to_string v);
-    ) cg.Chunk_group.rule_map;
-  );
-  ()
-
 let format_node ?(debug=false) node start_char end_char =
   builder#reset start_char end_char;
   transform node;
-  (* split (); *)
   let chunk_groups = builder#_end () in
-  if debug then debug_chunk_groups chunk_groups;
   chunk_groups
 
 let format_content content =

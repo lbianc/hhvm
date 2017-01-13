@@ -20,6 +20,7 @@ type t =
 | Token
 | Missing
 | SyntaxList
+| EndOfFile
 | ScriptHeader
 | Script
 | ScriptFooter
@@ -95,6 +96,10 @@ type t =
 | BinaryExpression
 | InstanceofExpression
 | ConditionalExpression
+| EvalExpression
+| EmptyExpression
+| DefineExpression
+| IssetExpression
 | FunctionCallExpression
 | ParenthesizedExpression
 | BracedExpression
@@ -121,9 +126,12 @@ type t =
 | XHPClose
 | TypeConstant
 | VectorTypeSpecifier
+| KeysetTypeSpecifier
+| VectorArrayTypeSpecifier
 | TypeParameter
 | TypeConstraint
-| MapTypeSpecifier
+| MapArrayTypeSpecifier
+| DictionaryTypeSpecifier
 | ClosureTypeSpecifier
 | ClassnameTypeSpecifier
 | FieldSpecifier
@@ -146,6 +154,7 @@ let to_string kind =
   | Missing -> "missing"
   | Token -> "token"
   | SyntaxList -> "list"
+  | EndOfFile -> "end_of_file"
   | ScriptHeader -> "header"
   | Script -> "script"
   | ScriptFooter -> "footer"
@@ -221,6 +230,10 @@ let to_string kind =
   | BinaryExpression -> "binary_expression"
   | InstanceofExpression -> "instanceof_expression"
   | ConditionalExpression -> "conditional_expression"
+  | EvalExpression -> "eval_expression"
+  | EmptyExpression -> "empty_expression"
+  | DefineExpression -> "define_expression"
+  | IssetExpression -> "isset_expression"
   | FunctionCallExpression -> "function_call_expression"
   | ParenthesizedExpression -> "parenthesized_expression"
   | BracedExpression -> "braced_expression"
@@ -247,9 +260,12 @@ let to_string kind =
   | XHPClose -> "xhp_close"
   | TypeConstant -> "type_constant"
   | VectorTypeSpecifier -> "vector_type_specifier"
+  | KeysetTypeSpecifier -> "keyset_type_specifier"
+  | VectorArrayTypeSpecifier -> "vector_array_type_specifier"
   | TypeParameter -> "type_parameter"
   | TypeConstraint -> "type_constraint"
-  | MapTypeSpecifier -> "map_type_specifier"
+  | MapArrayTypeSpecifier -> "map_array_type_specifier"
+  | DictionaryTypeSpecifier -> "dictionary_type_specifier"
   | ClosureTypeSpecifier -> "closure_type_specifier"
   | ClassnameTypeSpecifier -> "classname_type_specifier"
   | FieldSpecifier -> "field_specifier"

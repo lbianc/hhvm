@@ -216,6 +216,7 @@ let rec get_doc node =
   | QualifiedNameExpression x -> get_doc x.qualified_name_expression
   | PipeVariableExpression x -> get_doc x.pipe_variable_expression
   | ListItem x -> (get_doc x.list_item) ^^^ (get_doc x.list_separator)
+  | EndOfFile { end_of_file_token } -> get_doc end_of_file_token
   | ScriptHeader x -> get_doc x.header_less_than ^^^
                       get_doc x.header_question ^^^
                       (x.header_language |> get_doc |> add_break)
@@ -857,6 +858,46 @@ let rec get_doc node =
     let args = get_doc function_call_argument_list in
     let rparen = get_doc function_call_right_paren in
     receiver ^^^ lparen ^^^ args ^^^ rparen
+  | EvalExpression {
+    eval_keyword;
+    eval_left_paren;
+    eval_argument;
+    eval_right_paren } ->
+    let keyword = get_doc eval_keyword in
+    let lparen = get_doc eval_left_paren in
+    let arg = get_doc eval_argument in
+    let rparen = get_doc eval_right_paren in
+    keyword ^^^ lparen ^^^ arg ^^^ rparen
+  | EmptyExpression {
+    empty_keyword;
+    empty_left_paren;
+    empty_argument;
+    empty_right_paren } ->
+    let keyword = get_doc empty_keyword in
+    let lparen = get_doc empty_left_paren in
+    let arg = get_doc empty_argument in
+    let rparen = get_doc empty_right_paren in
+    keyword ^^^ lparen ^^^ arg ^^^ rparen
+  | IssetExpression {
+    isset_keyword;
+    isset_left_paren;
+    isset_argument_list;
+    isset_right_paren } ->
+    let keyword = get_doc isset_keyword in
+    let lparen = get_doc isset_left_paren in
+    let args = get_doc isset_argument_list in
+    let rparen = get_doc isset_right_paren in
+    keyword ^^^ lparen ^^^ args ^^^ rparen
+  | DefineExpression {
+    define_keyword;
+    define_left_paren;
+    define_argument_list;
+    define_right_paren } ->
+    let keyword = get_doc define_keyword in
+    let lparen = get_doc define_left_paren in
+    let args = get_doc define_argument_list in
+    let rparen = get_doc define_right_paren in
+    keyword ^^^ lparen ^^^ args ^^^ rparen
   | ParenthesizedExpression {
     parenthesized_expression_left_paren;
     parenthesized_expression_expression;
@@ -1037,19 +1078,68 @@ let rec get_doc node =
     let name = get_doc generic_class_type in
     let argument = get_doc generic_argument_list in
     group_doc (indent_doc_no_space name argument indt)
-  | VectorTypeSpecifier x ->
-    let ar = get_doc x.vector_array in
-    let la = get_doc x.vector_left_angle in
-    let ty = get_doc x.vector_type in
-    let ra = get_doc x.vector_right_angle in
+  | VectorArrayTypeSpecifier {
+      vector_array_keyword;
+      vector_array_left_angle;
+      vector_array_type;
+      vector_array_right_angle
+    } ->
+    let ar = get_doc vector_array_keyword in
+    let la = get_doc vector_array_left_angle in
+    let ty = get_doc vector_array_type in
+    let ra = get_doc vector_array_right_angle in
     ar ^^^ la ^^^ ty ^^^ ra
-  | MapTypeSpecifier x ->
-    let ar = get_doc x.map_array in
-    let la = get_doc x.map_left_angle in
-    let kt = get_doc x.map_key in
-    let co = get_doc x.map_comma in
-    let vt = get_doc x.map_value in
-    let ra = get_doc x.map_right_angle in
+  | VectorTypeSpecifier {
+      vector_type_keyword;
+      vector_type_left_angle;
+      vector_type_type;
+      vector_type_right_angle
+    } ->
+    let ar = get_doc vector_type_keyword in
+    let la = get_doc vector_type_left_angle in
+    let ty = get_doc vector_type_type in
+    let ra = get_doc vector_type_right_angle in
+    ar ^^^ la ^^^ ty ^^^ ra
+  | KeysetTypeSpecifier {
+      keyset_type_keyword;
+      keyset_type_left_angle;
+      keyset_type_type;
+      keyset_type_right_angle
+    } ->
+    let ar = get_doc keyset_type_keyword in
+    let la = get_doc keyset_type_left_angle in
+    let ty = get_doc keyset_type_type in
+    let ra = get_doc keyset_type_right_angle in
+    ar ^^^ la ^^^ ty ^^^ ra
+  | DictionaryTypeSpecifier {
+      dictionary_type_keyword;
+      dictionary_type_left_angle;
+      dictionary_type_key;
+      dictionary_type_comma;
+      dictionary_type_value;
+      dictionary_type_right_angle
+    } ->
+    let ar = get_doc dictionary_type_keyword in
+    let la = get_doc dictionary_type_left_angle in
+    let kt = get_doc dictionary_type_key in
+    let co = get_doc dictionary_type_comma in
+    let vt = get_doc dictionary_type_value in
+    let ra = get_doc dictionary_type_right_angle in
+    ar ^^^ la ^^^ kt ^^^ co ^| vt ^^^ ra
+  | MapArrayTypeSpecifier {
+      map_array_keyword;
+      map_array_left_angle;
+      map_array_key;
+      map_array_comma;
+      map_array_value;
+      map_array_right_angle
+    } ->
+    let ar = get_doc map_array_keyword in
+    let la = get_doc map_array_left_angle in
+    let kt = get_doc map_array_key in
+    let co = get_doc map_array_comma in
+    let vt = get_doc map_array_value in
+    let ra = get_doc map_array_right_angle in
     ar ^^^ la ^^^ kt ^^^ co ^| vt ^^^ ra
   | ClosureTypeSpecifier
   { closure_outer_left_paren;

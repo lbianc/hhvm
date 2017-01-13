@@ -89,7 +89,7 @@ struct SSATmp;
  *
  *     NA               instruction takes no sources
  *     S(t1,...,tn)     source must be a subtype of {t1|..|tn}
- *     AK(<kind>)       source must be an array with specified kind
+ *     S(AK(<kind>))    source must be an array with specified kind
  *     C(type)          source must be a constant, and subtype of type
  *     CStr             same as C(StaticStr)
  *     SVar(t1,...,tn)  variadic source list, all subtypes of {t1|..|tn}
@@ -112,7 +112,6 @@ struct SSATmp;
  *      T     isTerminal
  *      B     isBranch
  *      P     passthrough
- *      K     killsSource
  *      MProp MInstrProp
  *      MElem MInstrElem
  */

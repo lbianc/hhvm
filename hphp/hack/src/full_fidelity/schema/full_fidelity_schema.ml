@@ -10,7 +10,7 @@
 
 (* If you make changes to the schema that cause it to serialize / deserialize
 differently, please update this version number *)
-let full_fidelity_schema_version_number = "2016-12-22-0001"
+let full_fidelity_schema_version_number = "2017-01-11-0001"
 (* TODO: Consider basing the version number on an auto-generated
 hash of a file rather than relying on people remembering to update it. *)
 (* TODO: It may be worthwhile to investigate how Thrift describes data types
@@ -82,6 +82,11 @@ let trivia_node_from_list l =
   | _ -> failwith "bad trivia schema"
 
 let schema = List.map from_list [
+  [ "EndOfFile";
+    "end_of_file";
+    "end_of_file";
+    "end_of_file";
+    "token" ];
   [ "ScriptHeader";
     "script_header";
     "header";
@@ -673,6 +678,38 @@ let schema = List.map from_list [
     "consequence";
     "colon";
     "alternative" ];
+  [ "EvalExpression";
+    "eval_expression";
+    "eval_expression";
+    "eval";
+    "keyword";
+    "left_paren";
+    "argument";
+    "right_paren" ];
+  [ "EmptyExpression";
+    "empty_expression";
+    "empty_expression";
+    "empty";
+    "keyword";
+    "left_paren";
+    "argument";
+    "right_paren" ];
+  [ "DefineExpression";
+    "define_expression";
+    "define_expression";
+    "define";
+    "keyword";
+    "left_paren";
+    "argument_list";
+    "right_paren" ];
+  [ "IssetExpression";
+    "isset_expression";
+    "isset_expression";
+    "isset";
+    "keyword";
+    "left_paren";
+    "argument_list";
+    "right_paren" ];
   [ "FunctionCallExpression";
     "function_call_expression";
     "function_call_expression";
@@ -861,8 +898,24 @@ let schema = List.map from_list [
   [ "VectorTypeSpecifier";
     "vector_type_specifier";
     "vector_type_specifier";
-    "vector";
-    "array";
+    "vector_type";
+    "keyword";
+    "left_angle";
+    "type";
+    "right_angle" ];
+  [ "KeysetTypeSpecifier";
+    "keyset_type_specifier";
+    "keyset_type_specifier";
+    "keyset_type";
+    "keyword";
+    "left_angle";
+    "type";
+    "right_angle" ];
+  [ "VectorArrayTypeSpecifier";
+    "vector_array_type_specifier";
+    "vector_array_type_specifier";
+    "vector_array";
+    "keyword";
     "left_angle";
     "type";
     "right_angle" ];
@@ -879,11 +932,21 @@ let schema = List.map from_list [
     "constraint";
     "keyword";
     "type" ];
-  [ "MapTypeSpecifier";
-    "map_type_specifier";
-    "map_type_specifier";
-    "map";
-    "array";
+  [ "MapArrayTypeSpecifier";
+    "map_array_type_specifier";
+    "map_array_type_specifier";
+    "map_array";
+    "keyword";
+    "left_angle";
+    "key";
+    "comma";
+    "value";
+    "right_angle" ];
+  [ "DictionaryTypeSpecifier";
+    "dictionary_type_specifier";
+    "dictionary_type_specifier";
+    "dictionary_type";
+    "keyword";
     "left_angle";
     "key";
     "comma";
@@ -1051,6 +1114,7 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Construct"; "__construct" ];
   [ "Continue"; "continue" ];
   [ "Default"; "default" ];
+  [ "Define"; "define"];
   [ "Destruct"; "__destruct" ];
   [ "Dict"; "dict" ];
   [ "Do"; "do" ];
@@ -1060,6 +1124,7 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Elseif"; "elseif" ];
   [ "Empty"; "empty" ];
   [ "Enum"; "enum" ];
+  [ "Eval"; "eval" ];
   [ "Extends"; "extends" ];
   [ "Float"; "float" ];
   [ "Final"; "final" ];
@@ -1076,6 +1141,7 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Insteadof"; "insteadof" ];
   [ "Int"; "int" ];
   [ "Interface"; "interface" ];
+  [ "Isset"; "isset" ];
   [ "Keyset"; "keyset" ];
   [ "List"; "list" ];
   [ "Mixed"; "mixed" ];

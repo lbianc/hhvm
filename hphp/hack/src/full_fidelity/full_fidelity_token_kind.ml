@@ -41,6 +41,7 @@ type t =
   | Construct
   | Continue
   | Default
+  | Define
   | Destruct
   | Dict
   | Do
@@ -50,6 +51,7 @@ type t =
   | Elseif
   | Empty
   | Enum
+  | Eval
   | Extends
   | Float
   | Final
@@ -66,6 +68,7 @@ type t =
   | Insteadof
   | Int
   | Interface
+  | Isset
   | Keyset
   | List
   | Mixed
@@ -225,6 +228,7 @@ let from_string keyword =
   | "__construct" -> Some Construct
   | "continue" -> Some Continue
   | "default" -> Some Default
+  | "define" -> Some Define
   | "__destruct" -> Some Destruct
   | "dict" -> Some Dict
   | "do" -> Some Do
@@ -234,6 +238,7 @@ let from_string keyword =
   | "elseif" -> Some Elseif
   | "empty" -> Some Empty
   | "enum" -> Some Enum
+  | "eval" -> Some Eval
   | "extends" -> Some Extends
   | "float" -> Some Float
   | "final" -> Some Final
@@ -250,6 +255,7 @@ let from_string keyword =
   | "insteadof" -> Some Insteadof
   | "int" -> Some Int
   | "interface" -> Some Interface
+  | "isset" -> Some Isset
   | "keyset" -> Some Keyset
   | "list" -> Some List
   | "mixed" -> Some Mixed
@@ -382,6 +388,7 @@ match kind with
   | Construct -> "__construct"
   | Continue -> "continue"
   | Default -> "default"
+  | Define -> "define"
   | Destruct -> "__destruct"
   | Dict -> "dict"
   | Do -> "do"
@@ -391,6 +398,7 @@ match kind with
   | Elseif -> "elseif"
   | Empty -> "empty"
   | Enum -> "enum"
+  | Eval -> "eval"
   | Extends -> "extends"
   | Float -> "float"
   | Final -> "final"
@@ -407,6 +415,7 @@ match kind with
   | Insteadof -> "insteadof"
   | Int -> "int"
   | Interface -> "interface"
+  | Isset -> "isset"
   | Keyset -> "keyset"
   | List -> "list"
   | Mixed -> "mixed"
