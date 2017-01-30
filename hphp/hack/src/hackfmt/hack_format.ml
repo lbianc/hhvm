@@ -16,6 +16,9 @@ module Trivia = Full_fidelity_editable_trivia
 open Syntax
 open Core
 
+(* TODO: move this to a config file *)
+let __INDENT_WIDTH = 2
+
 type open_span = {
   open_span_start: int;
   open_span_cost: int;
@@ -162,13 +165,11 @@ let builder = object (this)
     next_split_rule <- Some Rule.Always;
     ()
 
-  method nest ?amount:(amount=2) () =
-    nesting_alloc <- Nesting_allocator.nest nesting_alloc amount;
-    ()
+  method nest ?(amount=__INDENT_WIDTH) ?(skip_parent=false) () =
+    nesting_alloc <- Nesting_allocator.nest nesting_alloc amount skip_parent
 
   method unnest () =
-    nesting_alloc <- Nesting_allocator.unnest nesting_alloc;
-    ()
+    nesting_alloc <- Nesting_allocator.unnest nesting_alloc
 
   method start_rule ?(rule_type=Rule.Simple) () =
     (* Override next_split_rule unless it's an Always rule *)
@@ -685,6 +686,9 @@ offending text is '%s'." (text node)));
     (* TODO: span and split, figure out attr and vis rules *)
     t name;
     t default;
+  | VariadicParameter x ->
+    let ellipsis = get_variadic_parameter_children x in
+    t ellipsis;
   | AttributeSpecification x ->
     let (left_da, attrs, right_da) = get_attribute_specification_children x in
     transform_argish left_da attrs right_da;
@@ -856,6 +860,8 @@ offending text is '%s'." (text node)));
     raise (Failure "CaseLabel should be handled by handle_switch_body")
   | DefaultLabel x ->
     raise (Failure "DefaultLabel should be handled by handle_switch_body")
+  | SwitchFallthrough x ->
+    raise (Failure "SwitchFallthrough should be handled by handle_switch_body")
   | ReturnStatement x ->
     let (kw, expr, semi) = get_return_statement_children x in
     transform_keyword_expression_statement kw expr semi;
@@ -1170,6 +1176,9 @@ offending text is '%s'." (text node)));
     t init;
     if not (is_missing req) then pending_space ();
     t req;
+  | XHPSimpleClassAttribute x ->
+    let attr_type = get_xhp_simple_class_attribute_children x in
+    t attr_type;
   | XHPAttribute x ->
     let (name, eq, expr) = get_xhp_attribute_children x in
     tl_with ~span ~f:(fun () ->
@@ -1502,6 +1511,15 @@ and handle_switch_body left_b sections right_b =
   builder#end_chunks ();
   builder#start_block_nest ();
   tl_with ~f:(fun () ->
+    let handle_fallthrough fallthrough =
+      match syntax fallthrough with
+      | SwitchFallthrough x ->
+        let (kw, semi) = get_switch_fallthrough_children x in
+        transform kw;
+        transform semi;
+        ()
+      | _ -> ()
+    in
     let handle_label label =
       match syntax label with
       | CaseLabel x ->
@@ -1535,6 +1553,7 @@ and handle_switch_body left_b sections right_b =
           (syntax_node_to_list s.switch_section_labels) ~f:handle_label;
         List.iter
           (syntax_node_to_list s.switch_section_statements) ~f:handle_statement;
+        handle_fallthrough s.switch_section_fallthrough;
         ()
       | _ -> ()
     in
@@ -1690,12 +1709,14 @@ and transform_binary_expression ~is_nested expr =
     match binary_expresion_syntax_list with
       | hd :: tl ->
         transform_operand hd;
+        if not is_nested then builder#nest ~skip_parent:true ();
         tl_with ~rule:(Some Rule.Argument) ~nest:is_nested ~f:(fun () ->
           List.iteri tl ~f:(fun i x ->
             if (i mod 2) = 0 then begin add_space (); transform x end
             else begin split ~space:true (); transform_operand x end
           )
-        ) ()
+        ) ();
+        if not is_nested then builder#unnest ();
       | _ ->
         raise (Failure "Expected non empty list of binary expression pieces")
   end

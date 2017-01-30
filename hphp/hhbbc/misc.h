@@ -58,12 +58,18 @@ using SArray  = const ArrayData*;
 /*
  * HHBC evaluation stack flavors.
  */
-enum class Flavor { C, V, A, R, F, U, CR, CVU };
+enum class Flavor { C, V, A, R, F, U, CR, CVU, CUV };
 
 /*
  * Types of parameter preparation (or unknown).
  */
 enum class PrepKind { Ref, Val, Unknown };
+
+using LocalId = uint32_t;
+constexpr const LocalId NoLocalId = -1;
+using IterId = uint32_t;
+using BlockId = uint32_t;
+constexpr const BlockId NoBlockId = -1;
 
 //////////////////////////////////////////////////////////////////////
 

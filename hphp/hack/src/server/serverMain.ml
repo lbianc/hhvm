@@ -188,7 +188,7 @@ let recheck genv old_env check_kind =
  * right after one rechecking round finishes to be part of the same
  * rebase, and we don't log the recheck_end event until the update list
  * is no longer getting populated. *)
-let rec recheck_loop acc genv env new_client =
+let rec recheck_loop acc genv env new_client has_persistent =
   let open ServerNotifierTypes in
   let t = Unix.gettimeofday () in
   (** When a new client connects, we use the synchronous notifier.
@@ -223,7 +223,7 @@ let rec recheck_loop acc genv env new_client =
   in
   let updates = Program.process_updates genv env raw_updates in
 
-  let is_idle = t -. env.last_command_time > 0.1 in
+  let is_idle = (not has_persistent) && t -. env.last_command_time > 0.1 in
 
   let disk_recheck = not (Relative_path.Set.is_empty updates) in
   let ide_recheck =
@@ -248,11 +248,12 @@ let rec recheck_loop acc genv env new_client =
       rechecked_count = acc.rechecked_count + rechecked;
       total_rechecked_count = acc.total_rechecked_count + total_rechecked;
     } in
-    recheck_loop acc genv env new_client
+    recheck_loop acc genv env new_client has_persistent
   end
 
-let recheck_loop genv env client =
-  let stats, env = recheck_loop empty_recheck_loop_stats genv env client in
+let recheck_loop genv env client has_persistent =
+  let stats, env =
+    recheck_loop empty_recheck_loop_stats genv env client has_persistent in
   { env with recent_recheck_loop_stats = stats }
 
 let new_serve_iteration_id () =
@@ -285,7 +286,7 @@ let serve_one_iteration genv env client_provider =
   end else env in
   let start_t = Unix.gettimeofday () in
   HackEventLogger.with_id ~stage:`Recheck recheck_id @@ fun () ->
-  let env = recheck_loop genv env client in
+  let env = recheck_loop genv env client has_persistent in
   let stats = env.recent_recheck_loop_stats in
   if stats.rechecked_count > 0 then begin
     HackEventLogger.recheck_end start_t has_parsing_hook
@@ -473,43 +474,9 @@ let daemon_main (state, options) (ic, oc) =
     in case the tmp folder changes *)
   ignore (Hhi.get_hhi_root());
 
-  try daemon_main_exn options (ic, oc)
-  with
-  | SharedMem.Out_of_shared_memory ->
-    ServerInit.print_hash_stats ();
-    Printf.eprintf "Error: failed to allocate in the shared heap.\n%!";
-    Exit_status.(exit Out_of_shared_memory)
-  | SharedMem.Hash_table_full ->
-    ServerInit.print_hash_stats ();
-    Printf.eprintf "Error: failed to allocate in the shared hashtable.\n%!";
-    Exit_status.(exit Hash_table_full)
-  | Worker.Worker_oomed as e->
-    Hh_logger.exc e;
-    Exit_status.(exit Worker_oomed)
-  | Worker.Worker_busy as e ->
-    Hh_logger.exc e;
-    Exit_status.(exit Worker_busy)
-  | (Worker.Worker_exited_abnormally i) as e ->
-    Hh_logger.exc e;
-    (** Exit with the same exit code that that worker used. *)
-    exit i
-  | Worker.Worker_failed_to_send_job _ as e->
-    Hh_logger.exc e;
-    Exit_status.(exit Worker_failed_to_send_job)
-  | Decl_class.Decl_heap_elems_bug ->
-    Exit_status.(exit Decl_heap_elems_bug)
-  | SharedMem.C_assertion_failure _ as e ->
-    Hh_logger.exc e;
-    Exit_status.(exit Shared_mem_assertion_failure)
-  | SharedMem.Sql_assertion_failure err_num as e ->
-    Hh_logger.exc e;
-    let exit_code = match err_num with
-      | 11 -> Exit_status.Sql_corrupt
-      | 14 -> Exit_status.Sql_cantopen
-      | 21 -> Exit_status.Sql_misuse
-      | _ -> Exit_status.Sql_assertion_failure
-    in
-    Exit_status.exit exit_code
+  ServerUtils.with_exit_on_exception @@ fun () ->
+  daemon_main_exn options (ic, oc)
+
 
 let entry =
   Daemon.register_entry_point "ServerMain.daemon_main" daemon_main

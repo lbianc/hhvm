@@ -379,8 +379,8 @@ void handleInPublicStaticElemU(ISS& env) {
 // MInstrs can throw in between each op, so the states of locals
 // need to be propagated across factored exit edges.
 void miThrow(ISS& env) {
-  for (auto& factored : env.blk.factoredExits) {
-    env.propagate(*factored, without_stacks(env.state));
+  for (auto factored : env.blk.factoredExits) {
+    env.propagate(factored, without_stacks(env.state));
   }
 }
 
@@ -447,7 +447,7 @@ Type resolveArrayChain(ISS& env, Type val) {
   return val;
 }
 
-void moveBase(ISS& env, folly::Optional<Base> base) {
+void moveBase(ISS& env, folly::Optional<Base> base, bool updateLocal) {
   SCOPE_EXIT { if (base) env.state.base = *base; };
 
   // Note: these miThrows probably can be left out if base is folly::none
@@ -461,17 +461,23 @@ void moveBase(ISS& env, folly::Optional<Base> base) {
        * update the type of the local for new minstrs, and for the exception
        * edge of old minstrs.
        */
-      setLocalForBase(env, currentChainType(env, base->type));
+      if (updateLocal) {
+        setLocalForBase(env, currentChainType(env, base->type));
+      }
       miThrow(env);
     } else {
-      setLocalForBase(env, resolveArrayChain(env, env.state.base.type));
+      if (updateLocal) {
+        setLocalForBase(env, resolveArrayChain(env, env.state.base.type));
+      }
     }
 
     return;
   }
 
   if (mustBeInFrame(env.state.base)) {
-    setLocalForBase(env, env.state.base.type);
+    if (updateLocal) {
+      setLocalForBase(env, env.state.base.type);
+    }
     miThrow(env);
   }
 }
@@ -609,12 +615,13 @@ Type key_type(ISS& env, MKey mkey) {
 //////////////////////////////////////////////////////////////////////
 // base ops
 
-Base miBaseLoc(ISS& env, borrowed_ptr<php::Local> locBase, bool isDefine) {
+Base miBaseLoc(ISS& env, LocalId locBase, bool isDefine) {
+  auto const locName = env.ctx.func->locals[locBase].name;
   if (!isDefine) {
     return Base { derefLoc(env, locBase),
                   BaseLoc::Frame,
                   TBottom,
-                  locBase->name,
+                  locName,
                   locBase };
   }
 
@@ -625,7 +632,7 @@ Base miBaseLoc(ISS& env, borrowed_ptr<php::Local> locBase, bool isDefine) {
   return Base { locAsCell(env, locBase),
                 BaseLoc::Frame,
                 TBottom,
-                locBase->name,
+                locName,
                 locBase };
 }
 
@@ -653,7 +660,9 @@ void miProp(ISS& env, bool isNullsafe, MOpMode mode, Type key) {
   auto const name     = mStringKey(key);
   auto const isDefine = mode == MOpMode::Define;
   auto const isUnset  = mode == MOpMode::Unset;
-
+  // PHP5 doesn't modify an unset local if you unset a property or
+  // array elem on it, but hhvm does (it promotes it to init-null).
+  auto const updateLocal = isDefine || isUnset;
   /*
    * MOpMode::Unset Props doesn't promote "emptyish" things to stdClass, or
    * affect arrays, however it can define a property on an object base.  This
@@ -694,22 +703,28 @@ void miProp(ISS& env, bool isNullsafe, MOpMode mode, Type key) {
     auto const thisTy    = optThisTy ? *optThisTy : TObj;
     if (name) {
       auto const propTy = thisPropAsCell(env, name);
-      moveBase(env, Base { propTy ? *propTy : TInitCell,
-                           BaseLoc::PostProp,
-                           thisTy,
-                           name });
+      moveBase(env,
+               Base { propTy ? *propTy : TInitCell,
+                      BaseLoc::PostProp,
+                      thisTy,
+                      name },
+              updateLocal);
     } else {
-      moveBase(env, Base { TInitCell, BaseLoc::PostProp, thisTy });
+      moveBase(env,
+               Base { TInitCell, BaseLoc::PostProp, thisTy },
+               updateLocal);
     }
     return;
   }
 
   // We know for sure we're going to be in an object property.
   if (env.state.base.type.subtypeOf(TObj)) {
-    moveBase(env, Base { TInitCell,
-                         BaseLoc::PostProp,
-                         env.state.base.type,
-                         name });
+    moveBase(env,
+             Base { TInitCell,
+                    BaseLoc::PostProp,
+                    env.state.base.type,
+                    name },
+             updateLocal);
     return;
   }
 
@@ -729,12 +744,16 @@ void miProp(ISS& env, bool isNullsafe, MOpMode mode, Type key) {
       ? objExact(env.index.builtin_class(s_stdClass.get()))
       : TTop;
 
-  moveBase(env, Base { TInitCell, BaseLoc::PostProp, newBaseLocTy, name });
+  moveBase(env,
+           Base { TInitCell, BaseLoc::PostProp, newBaseLocTy, name },
+           updateLocal);
 }
 
 void miElem(ISS& env, MOpMode mode, Type key) {
   auto const isDefine = mode == MOpMode::Define;
   auto const isUnset  = mode == MOpMode::Unset;
+
+  auto const updateLocal = isDefine || isUnset;
 
   /*
    * Elem dims with MOpMode::Unset can change a base from a static array into a
@@ -776,7 +795,7 @@ void miElem(ISS& env, MOpMode mode, Type key) {
                            BaseLoc::LocalArrChain,
                            TBottom,
                            env.state.base.locName,
-                           env.state.base.local });
+                           env.state.base.local }, true);
       return;
     }
   }
@@ -784,17 +803,17 @@ void miElem(ISS& env, MOpMode mode, Type key) {
   if (env.state.base.type.subtypeOf(TArr)) {
     moveBase(env, Base { array_elem(env.state.base.type, key),
                          BaseLoc::PostElem,
-                         env.state.base.type });
+                         env.state.base.type }, updateLocal);
     return;
   }
   if (auto ty = hack_array_do(env, elem, key)) {
     moveBase(env, Base { *ty,
                          BaseLoc::PostElem,
-                         env.state.base.type });
+                         env.state.base.type }, updateLocal);
     return;
   }
   if (env.state.base.type.subtypeOf(TStr)) {
-    moveBase(env, Base { TStr, BaseLoc::PostElem });
+    moveBase(env, Base { TStr, BaseLoc::PostElem }, updateLocal);
     return;
   }
 
@@ -806,7 +825,7 @@ void miElem(ISS& env, MOpMode mode, Type key) {
    * init_null_variant, or inside tvScratch.  We represent this with the
    * PostElem base location with locType TTop.
    */
-  moveBase(env, Base { TInitCell, BaseLoc::PostElem, TTop });
+  moveBase(env, Base { TInitCell, BaseLoc::PostElem, TTop }, updateLocal);
 }
 
 void miNewElem(ISS& env) {
@@ -833,16 +852,18 @@ void miNewElem(ISS& env) {
                          BaseLoc::LocalArrChain,
                          TBottom,
                          env.state.base.locName,
-                         env.state.base.local });
+                         env.state.base.local }, true);
     return;
   }
 
   if (env.state.base.type.subtypeOf(TArr) || isvec || isdict || iskeyset) {
-    moveBase(env, Base { TInitNull, BaseLoc::PostElem, env.state.base.type });
+    moveBase(env,
+             Base { TInitNull, BaseLoc::PostElem, env.state.base.type },
+             true);
     return;
   }
 
-  moveBase(env, Base { TInitCell, BaseLoc::PostElem, TTop });
+  moveBase(env, Base { TInitCell, BaseLoc::PostElem, TTop }, true);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1383,7 +1404,7 @@ void miFinalSetWithRef(ISS& env) {
   auto const isvec = env.state.base.type.subtypeOf(TVec);
   auto const isdict = env.state.base.type.subtypeOf(TDict);
   auto const iskeyset = env.state.base.type.subtypeOf(TKeyset);
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
   if (!isvec && !isdict && !iskeyset) {
     killLocals(env);
     killThisProps(env);
@@ -1405,12 +1426,38 @@ void miBaseSImpl(ISS& env, bool hasRhs, Type prop) {
 template<typename A, typename B>
 void mergePaths(ISS& env, A a, B b) {
   auto const start = env.state;
+  assert(!env.flags.canConstProp);
+  assert(env.flags.wasPEI);
   a();
   auto const aState = env.state;
+  auto const aFlags = env.flags;
+  env.flags.canConstProp = false;
+  env.flags.wasPEI = true;
   env.state = start;
   b();
   merge_into(env.state, aState);
+  // The bases must match. The types could be different because the
+  // Define side could have promoted the base, or at least removed
+  // Uninit.
+  if (env.state.base.loc == BaseLoc::LocalArrChain) {
+    resolveArrayChain(env, env.state.base.type);
+    env.state.base.loc = BaseLoc::PostElem;
+  }
+  assert(env.state.base.loc == aState.base.loc);
+  if (aState.base.loc == BaseLoc::Frame) {
+    assert(env.state.base.loc == aState.base.loc);
+    assert(env.state.base.locTy == aState.base.locTy);
+    assert(env.state.base.locName == aState.base.locName);
+    assert(env.state.base.local == aState.base.local);
+  }
+  auto newT = union_of(env.state.base.type, aState.base.type);
+  if (newT != env.state.base.type) {
+    env.state.base.type = newT;
+  }
+  env.flags.wasPEI |= aFlags.wasPEI;
+  env.flags.canConstProp &= aFlags.canConstProp;
   assert(env.flags.wasPEI);
+  // an FPass instruction can have side effects if it ends up by-ref
   assert(!env.flags.canConstProp);
 }
 
@@ -1611,7 +1658,7 @@ void in(ISS& env, const bc::VGetM& op) {
   } else {
     miFinalVGetNewElem(env, op.arg1);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::SetM& op) {
@@ -1623,7 +1670,7 @@ void in(ISS& env, const bc::SetM& op) {
   } else {
     miFinalSetNewElem(env, op.arg1);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::IncDecM& op) {
@@ -1635,7 +1682,7 @@ void in(ISS& env, const bc::IncDecM& op) {
   } else {
     miFinalIncDecNewElem(env, op.arg1);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::SetOpM& op) {
@@ -1647,7 +1694,7 @@ void in(ISS& env, const bc::SetOpM& op) {
   } else {
     miFinalSetOpNewElem(env, op.arg1);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::BindM& op) {
@@ -1659,7 +1706,7 @@ void in(ISS& env, const bc::BindM& op) {
   } else {
     miFinalBindNewElem(env, op.arg1);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::UnsetM& op) {
@@ -1670,7 +1717,7 @@ void in(ISS& env, const bc::UnsetM& op) {
     assert(mcodeIsElem(op.mkey.mcode));
     miFinalUnsetElem(env, op.arg1, key);
   }
-  moveBase(env, folly::none);
+  moveBase(env, folly::none, true);
 }
 
 void in(ISS& env, const bc::SetWithRefLML& op) {
@@ -1699,6 +1746,104 @@ void in(ISS& env, const bc::FPassM& op) {
     [&] { in(env, cget); },
     [&] { in(env, vget); }
   );
+}
+
+namespace {
+
+// Find a contiguous local range which is equivalent to the given range and has
+// a smaller starting id. Only returns the equivalent first local because the
+// size doesn't change.
+LocalId equivLocalRange(ISS& env, const LocalRange& range) {
+  auto const equivFirst = findLocEquiv(env, range.first);
+  if (equivFirst == NoLocalId || equivFirst >= range.first) return NoLocalId;
+
+  for (uint32_t i = 0; i < range.restCount; ++i) {
+    auto const equiv = findLocEquiv(env, range.first + i + 1);
+    if (equiv == NoLocalId || equiv != equivFirst + i + 1) return NoLocalId;
+  }
+
+  return equivFirst;
+}
+
+}
+
+void in(ISS& env, const bc::MemoGet& op) {
+  always_assert(env.ctx.func->isMemoizeWrapper);
+  always_assert(env.state.arrayChain.empty());
+  always_assert(op.locrange.first + op.locrange.restCount
+                < env.ctx.func->locals.size());
+
+  // If we can use an equivalent, earlier range, then use that instead.
+  auto const equiv = equivLocalRange(env, op.locrange);
+  if (equiv != NoLocalId) {
+    return reduce(
+      env,
+      bc::MemoGet { op.arg1, LocalRange { equiv, op.locrange.restCount } }
+    );
+  }
+
+  nothrow(env);
+  for (uint32_t i = 0; i < op.locrange.restCount + 1; ++i) {
+    mayReadLocal(env, op.locrange.first + i);
+  }
+  discard(env, op.arg1);
+  // The pushed value is always the return type of the wrapped function with
+  // TUninit unioned in, but that's always going to result in TCell right now.
+  push(env, TCell);
+}
+
+void in(ISS& env, const bc::MemoSet& op) {
+  always_assert(env.ctx.func->isMemoizeWrapper);
+  always_assert(env.state.arrayChain.empty());
+  always_assert(op.locrange.first + op.locrange.restCount
+                < env.ctx.func->locals.size());
+
+  // If we can use an equivalent, earlier range, then use that instead.
+  auto const equiv = equivLocalRange(env, op.locrange);
+  if (equiv != NoLocalId) {
+    return reduce(
+      env,
+      bc::MemoSet { op.arg1, LocalRange { equiv, op.locrange.restCount } }
+    );
+  }
+
+  nothrow(env);
+  for (uint32_t i = 0; i < op.locrange.restCount + 1; ++i) {
+    mayReadLocal(env, op.locrange.first + i);
+  }
+
+  auto const t1 = popC(env);
+  discard(env, op.arg1);
+
+  // The cache set always writes a counted non-empty dict to the base.
+  env.state.base.type = TCDictN;
+
+  if (couldBeInThis(env, env.state.base)) {
+    if (auto const name = env.state.base.locName) {
+      mergeThisProp(env, name, env.state.base.type);
+    } else {
+      mergeEachThisPropRaw(env, [&](Type){ return env.state.base.type; });
+    }
+  }
+
+  if (couldBeInSelf(env, env.state.base)) {
+    if (auto const name = env.state.base.locName) {
+      mergeSelfProp(env, name, env.state.base.type);
+    } else {
+      mergeEachSelfPropRaw(env, [&](Type){ return env.state.base.type; });
+    }
+  }
+
+  if (couldBeInPublicStatic(env, env.state.base)) {
+    if (auto const indexer = env.collect.publicStatics) {
+      auto const name = baseLocNameType(env.state.base);
+      indexer->merge(env.ctx, env.state.base.locTy, name, env.state.base.type);
+    }
+  }
+
+  if (mustBeInFrame(env.state.base)) setLocalForBase(env, env.state.base.type);
+
+  push(env, t1);
 }
 
 }

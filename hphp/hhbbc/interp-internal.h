@@ -116,7 +116,7 @@ void impl(ISS& env, Ts&&... ts) {
 
     auto const wasPEI = env.flags.wasPEI;
 
-    FTRACE(3, "    (impl {}\n", show(*it));
+    FTRACE(3, "    (impl {}\n", show(env.ctx.func, *it));
     env.flags.wasPEI          = true;
     env.flags.canConstProp    = false;
     env.flags.strengthReduced = folly::none;
@@ -178,6 +178,8 @@ void killLocals(ISS& env) {
   FTRACE(2, "    killLocals\n");
   readUnknownLocals(env);
   for (auto& l : env.state.locals) l = TGen;
+  for (auto& e : env.state.stack) e.equivLocal = NoLocalId;
+  env.state.equivLocals.clear();
 }
 
 void doRet(ISS& env, Type t) {
@@ -259,7 +261,7 @@ void specialFunctionEffects(ISS& env, ActRec ar) {
 
 Type popT(ISS& env) {
   assert(!env.state.stack.empty());
-  auto const ret = env.state.stack.back();
+  auto const ret = env.state.stack.back().type;
   FTRACE(2, "    pop:  {}\n", show(ret));
   env.state.stack.pop_back();
   return ret;
@@ -267,7 +269,7 @@ Type popT(ISS& env) {
 
 Type popC(ISS& env) {
   auto const v = popT(env);
-  assert(v.subtypeOf(TInitCell)); // or it would be popU, which doesn't exist
+  assert(v.subtypeOf(TInitCell));
   return v;
 }
 
@@ -283,10 +285,21 @@ Type popA(ISS& env) {
   return v;
 }
 
+Type popU(ISS& env) {
+  auto const v = popT(env);
+  assert(v.subtypeOf(TUninit));
+  return v;
+}
+
+Type popCU(ISS& env) {
+  auto const v = popT(env);
+  assert(v.subtypeOf(TCell));
+  return v;
+}
+
 Type popR(ISS& env)  { return popT(env); }
 Type popF(ISS& env)  { return popT(env); }
 Type popCV(ISS& env) { return popT(env); }
-Type popU(ISS& env)  { return popT(env); }
 
 void discard(ISS& env, int n) {
   for (auto i = 0; i < n; ++i) {
@@ -296,7 +309,7 @@ void discard(ISS& env, int n) {
 
 Type topT(ISS& env, uint32_t idx = 0) {
   assert(idx < env.state.stack.size());
-  return env.state.stack[env.state.stack.size() - idx - 1];
+  return env.state.stack[env.state.stack.size() - idx - 1].type;
 }
 
 Type topA(ISS& env, uint32_t i = 0) {
@@ -316,9 +329,10 @@ Type topV(ISS& env, uint32_t i = 0) {
   return topT(env, i);
 }
 
-void push(ISS& env, Type t) {
+void push(ISS& env, Type t, LocalId l = NoLocalId) {
   FTRACE(2, "    push: {}\n", show(t));
-  env.state.stack.push_back(t);
+  always_assert(l == NoLocalId || !is_volatile_local(env.ctx.func, l));
+  env.state.stack.push_back(StackElem {t, l});
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -359,29 +373,81 @@ void mayReadLocal(ISS& env, uint32_t id) {
   }
 }
 
-Type locRaw(ISS& env, borrowed_ptr<const php::Local> l) {
-  mayReadLocal(env, l->id);
-  auto ret = env.state.locals[l->id];
+// Find a local which is equivalent to the given local
+LocalId findLocEquiv(ISS& env, LocalId l) {
+  if (l >= env.state.equivLocals.size()) return NoLocalId;
+  assert(env.state.equivLocals[l] == NoLocalId ||
+         !is_volatile_local(env.ctx.func, l));
+  return env.state.equivLocals[l];
+}
+
+// Record an equivalency between two locals.
+void addLocEquiv(ISS& env,
+                 LocalId from,
+                 LocalId to) {
+  always_assert(!is_volatile_local(env.ctx.func, from));
+  always_assert(!is_volatile_local(env.ctx.func, to));
+  if (env.state.equivLocals.size() <= from) {
+    env.state.equivLocals.resize(from + 1, NoLocalId);
+  }
+  env.state.equivLocals[from] = to;
+}
+
+// Kill all equivalencies involving the given local to other locals
+void killLocEquiv(ISS& env, LocalId l) {
+  for (auto& to : env.state.equivLocals) {
+    if (to == l) to = NoLocalId;
+  }
+  if (l >= env.state.equivLocals.size()) return;
+  env.state.equivLocals[l] = NoLocalId;
+}
+
+void killAllLocEquiv(ISS& env) {
+  env.state.equivLocals.clear();
+}
+
+// Obtain a local which is equivalent to the given stack value
+LocalId topStkEquiv(ISS& env, uint32_t idx = 0) {
+  assert(idx < env.state.stack.size());
+  return env.state.stack[env.state.stack.size() - idx - 1].equivLocal;
+}
+
+// Kill all equivalencies involving the given local to stack values
+void killStkEquiv(ISS& env, LocalId l) {
+  for (auto& e : env.state.stack) {
+    if (e.equivLocal == l) e.equivLocal = NoLocalId;
+  }
+}
+
+void killAllStkEquiv(ISS& env) {
+  for (auto& e : env.state.stack) e.equivLocal = NoLocalId;
+}
+
+Type locRaw(ISS& env, LocalId l) {
+  mayReadLocal(env, l);
+  auto ret = env.state.locals[l];
   if (is_volatile_local(env.ctx.func, l)) {
     always_assert_flog(ret == TGen, "volatile local was not TGen");
   }
   return ret;
 }
 
-void setLocRaw(ISS& env, borrowed_ptr<const php::Local> l, Type t) {
-  mayReadLocal(env, l->id);
+void setLocRaw(ISS& env, LocalId l, Type t) {
+  mayReadLocal(env, l);
+  killLocEquiv(env, l);
+  killStkEquiv(env, l);
   if (is_volatile_local(env.ctx.func, l)) {
-    auto current = env.state.locals[l->id];
+    auto current = env.state.locals[l];
     always_assert_flog(current == TGen, "volatile local was not TGen");
     return;
   }
-  env.state.locals[l->id] = t;
+  env.state.locals[l] = t;
 }
 
 // Read a local type in the sense of CGetL.  (TUninits turn into
 // TInitNull, and potentially reffy types return the "inner" type,
 // which is always a subtype of InitCell.)
-Type locAsCell(ISS& env, borrowed_ptr<const php::Local> l) {
+Type locAsCell(ISS& env, LocalId l) {
   auto t = locRaw(env, l);
   return !t.subtypeOf(TCell) ? TInitCell :
           t.subtypeOf(TUninit) ? TInitNull :
@@ -390,14 +456,18 @@ Type locAsCell(ISS& env, borrowed_ptr<const php::Local> l) {
 
 // Read a local type, dereferencing refs, but without converting
 // potential TUninits to TInitNull.
-Type derefLoc(ISS& env, borrowed_ptr<const php::Local> l) {
+Type derefLoc(ISS& env, LocalId l) {
   auto v = locRaw(env, l);
   if (v.subtypeOf(TCell)) return v;
   return v.couldBe(TUninit) ? TCell : TInitCell;
 }
 
-bool locCouldBeUninit(ISS& env, borrowed_ptr<const php::Local> l) {
+bool locCouldBeUninit(ISS& env, LocalId l) {
   return locRaw(env, l).couldBe(TUninit);
+}
+
+bool locCouldBeRef(ISS& env, LocalId l) {
+  return locRaw(env, l).couldBe(TRef);
 }
 
 /*
@@ -405,23 +475,25 @@ bool locCouldBeUninit(ISS& env, borrowed_ptr<const php::Local> l) {
  * not known to be not boxed, we can't change the type.  May be used
  * to set locals to types that include Uninit.
  */
-void setLoc(ISS& env, borrowed_ptr<const php::Local> l, Type t) {
+void setLoc(ISS& env, LocalId l, Type t) {
+  killLocEquiv(env, l);
+  killStkEquiv(env, l);
   auto v = locRaw(env, l);
   if (is_volatile_local(env.ctx.func, l)) {
     always_assert_flog(v == TGen, "volatile local was not TGen");
     return;
   }
-  if (v.subtypeOf(TCell)) env.state.locals[l->id] = t;
+  if (v.subtypeOf(TCell)) env.state.locals[l] = t;
 }
 
-borrowed_ptr<php::Local> findLocal(ISS& env, SString name) {
+LocalId findLocal(ISS& env, SString name) {
   for (auto& l : env.ctx.func->locals) {
-    if (l->name->same(name)) {
-      mayReadLocal(env, l->id);
-      return borrow(l);
+    if (l.name->same(name)) {
+      mayReadLocal(env, l.id);
+      return l.id;
     }
   }
-  return nullptr;
+  return NoLocalId;
 }
 
 // Force non-ref locals to TCell.  Used when something modifies an
@@ -432,6 +504,8 @@ void loseNonRefLocalTypes(ISS& env) {
   for (auto& l : env.state.locals) {
     if (l.subtypeOf(TCell)) l = TCell;
   }
+  killAllLocEquiv(env);
+  killAllStkEquiv(env);
 }
 
 void boxUnknownLocal(ISS& env) {
@@ -440,22 +514,26 @@ void boxUnknownLocal(ISS& env) {
   for (auto& l : env.state.locals) {
     if (!l.subtypeOf(TRef)) l = TGen;
   }
+  killAllLocEquiv(env);
+  killAllStkEquiv(env);
 }
 
 void unsetUnknownLocal(ISS& env) {
   readUnknownLocals(env);
   FTRACE(2, "  unsetUnknownLocal\n");
   for (auto& l : env.state.locals) l = union_of(l, TUninit);
+  killAllLocEquiv(env);
+  killAllStkEquiv(env);
 }
 
 //////////////////////////////////////////////////////////////////////
 // iterators
 
-void setIter(ISS& env, borrowed_ptr<php::Iter> iter, Iter iterState) {
-  env.state.iters[iter->id] = std::move(iterState);
+void setIter(ISS& env, IterId iter, Iter iterState) {
+  env.state.iters[iter] = std::move(iterState);
 }
-void freeIter(ISS& env, borrowed_ptr<php::Iter> iter) {
-  env.state.iters[iter->id] = UnknownIter {};
+void freeIter(ISS& env, IterId iter) {
+  env.state.iters[iter] = UnknownIter {};
 }
 
 //////////////////////////////////////////////////////////////////////

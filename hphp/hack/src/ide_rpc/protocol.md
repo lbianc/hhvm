@@ -4,7 +4,7 @@
 
 Running:
 
-  hh_client ide <path>
+    hh_client ide <path>
 
 Where `<path>` is a directory (or descendant of directory) containing `.hhconfig` file will launch a persistent client that you can communicate with via standard input / output. If the server for this directory is not running, you need to start it first with `hh_client start <path>`. The server supports only having one persistent client, and if there is already a client connected, it will be disconnected (and exit with non-zero exit code).
 
@@ -26,42 +26,116 @@ All of the string typed members are intended only to be displayed in editor - th
 
 `Position:`
 
-  {
-    /**
-     * 1-based line number
-     */
-    line : integer;
-    /**
-     * 1-based column number
-     */
-    column : integer;
-  }
+    {
+      /**
+       * 1-based line number
+       */
+      line : integer;
+      /**
+       * 1-based column number
+       */
+      column : integer;
+    }
 
 `Range:`
 
-  {
-    /**
-     * Range start position (inclusive)
-     */
-    start : Position;
-    /**
-     * Range end position (exclusive)
-     */
-    end : Position;
-  }
+    {
+      /**
+       * Range start position (inclusive)
+       */
+      start : Position;
+      /**
+       * Range end position (exclusive)
+       */
+      end : Position;
+    }
 
 `FilePosition:`
 
-  {
-    /**
-     * Absolute path of a file
-     */
-    filename : string;
-    /**
-     * Position inside this file
-     */
-    position : Position;
-  }
+    {
+      /**
+       * Absolute path of a file
+       */
+      filename : string;
+      /**
+       * Position inside this file
+       */
+      position : Position;
+    }
+
+`SymbolDefinition`:
+
+    {
+      /**
+       * Display name of the symbol
+       */
+      name : string;
+      /**
+       * Kind of the symbol
+       */
+      kind: SymbolDefinitionKind;
+      /**
+       * Canonical position of the symbol (place where "go to
+       * definition" for this symbol should bring the cursor).
+       * Usually the definition symbol name.
+       */
+      position : Position;
+      /**
+       * Entire span of symbol declaration.
+       */
+      span :  Range;
+      /**
+       * Filename that position and span refer to, if it's not implied
+       * otherwise (by request type, by enclosing symbol, etc.)
+       */
+      filename? : string;
+      /**
+       * Symbol definition modifiers, e.g. "static", "async", "private"
+       */
+      modifiers : SymbolDefinitionModifier[];  
+      /**
+       * For symbols that can contain other symbols
+       * (like classes, interfaces, traits, namespaces), symbols contained
+       * within.
+       */
+      children? : SymbolDefinition[];
+      /**
+       * For callable symbols (functions, methods), callable parameters
+       */
+      params? : SymbolDefinition[];
+      /**
+       * Docblock of the symbol, if present
+       */
+      docblock? : string;
+    }
+
+where `SymbolDefinitionKind` is defined as:
+
+    string enum {
+      function,
+      class,
+      method,
+      property,
+      const,
+      enum,
+      interface,
+      trait,
+      typeconst,
+      local,
+      param,
+    }
+
+and `SymbolDefinitionModifier`:
+
+    string enum {
+      final,
+      static,
+      abstract,
+      private,
+      public,
+      protected,
+      async,
+    }
 
 ## Requests and notifications
 
@@ -71,31 +145,31 @@ This request **must** be the first request sent by the client after establishing
 
 *Client request:*
 
-  method : "init"
-  params : InitParams
+    method : "init"
+    params : InitParams
 
 where `InitParams` is defined as:
 
-  {
-    /**
-     * Arbitrary name identifying the client, provided for
-     * statistics purposes. Example: "Nuclide 0.182"
-     */
-    client_name : string;
-    /**
-     * The version of this API that client supports.
-     */
-    client_api_version : integer;
-  }
+    {
+      /**
+       * Arbitrary name identifying the client, provided for
+       * statistics purposes. Example: "Nuclide 0.182"
+       */
+      client_name : string;
+      /**
+       * The version of this API that client supports.
+       */
+      client_api_version : integer;
+    }
 
 *Server response:*
 
-  {
-    /**
-     * The most recent version of this API that server supports.
-     */
-    server_api_version : integer;
-  }
+    {
+      /**
+       * The most recent version of this API that server supports.
+       */
+      server_api_version : integer;
+    }
 
 `client_api_version` is just a suggestion for the server to ease introducing breaking changes: the server might try to match the behavior of `client_api_version` < `server_api_version` version of the API, but it's not required to do so in all of the cases - the decision is left to the server on per-feature basis, subject to individual judgment on how long do we want to wait before stopping support for older versions / features. Move fast!
 
@@ -109,21 +183,21 @@ Notifies the server about opening the file in editor. From now on, server will i
 
 *Client notification:*
 
-  method : "didOpenFile"
-  params : DidOpenFileParams
+    method : "didOpenFile"
+    params : DidOpenFileParams
 
 where `DidOpenFileParams` is defined as:
 
-  {
-    /**
-     * Absolute path of the file that was opened.
-     */
-    filename : string;
-    /**
-     * Contents of opened file.
-     */
-    text : string;
-  }
+    {
+      /**
+       * Absolute path of the file that was opened.
+       */
+      filename : string;
+      /**
+       * Contents of opened file.
+       */
+      text : string;
+    }
 
 #### Change file notification
 
@@ -131,38 +205,38 @@ Notifies the server about change to a file that was previously opened in editor.
 
 *Client notification:*
 
-  method : "didChangeFile"
-  params : DidChangeFileParams
+    method : "didChangeFile"
+    params : DidChangeFileParams
 
 where `DidChangeFileParams` is defined as:
 
-  {
-    /**
-     * Absolute path of the file that was changed.
-     */
-    filename : string;
-    /**
-     * Changes to file contents. In case of multiple changes, they are
-     * applied to the file serially in the order they appear in the
-     * list.
-     */
-    changes : TextEdit[];
-  }
+    {
+      /**
+       * Absolute path of the file that was changed.
+       */
+      filename : string;
+      /**
+       * Changes to file contents. In case of multiple changes, they are
+       * applied to the file serially in the order they appear in the
+       * list.
+       */
+      changes : TextEdit[];
+    }
 
 `TextEdit:`
 
-  {
-    /**
-     * The range of the file to be replaced by text.
-     * If omitted, entire file is replaced.
-     */
-    range? : Range;
-    /**
-     * New contents to be inserted. Set to empty string to represent
-     * deletions.
-     */
-    text : string;
-  }
+    {
+      /**
+       * The range of the file to be replaced by text.
+       * If omitted, entire file is replaced.
+       */
+      range? : Range;
+      /**
+       * New contents to be inserted. Set to empty string to represent
+       * deletions.
+       */
+      text : string;
+    }
 
 #### Close file notification
 
@@ -170,17 +244,17 @@ Notifies the server that a previously opened file was closed in editor. The serv
 
 *Client notification:*
 
-  method : "didCloseFile"
-  params : DidCloseParams
+    method : "didCloseFile"
+    params : DidCloseParams
 
 where `DidCloseParams` is defined as:
 
-  {
-    /**
-     * Absolute path of the file that was closed.
-     */
-    filename : string;
-  }
+    {
+      /**
+       * Absolute path of the file that was closed.
+       */
+      filename : string;
+    }
 
 #### Diagnostics notification
 
@@ -188,26 +262,26 @@ The server will analyze the files on the disk and modified via file synchronizat
 
 *Server notification:*
 
-  method : “diagnostics”
-  params : DiagnosticsParams
+    method : “diagnostics”
+    params : DiagnosticsParams
 
 where DiagnosticsParams is defined as:
 
-  {
-    filename : string;
-    errors : Error[];
-  }
+    {
+      filename : string;
+      errors : Error[];
+    }
 
 `Error:`
 
-  ErrorMessage[]
+    ErrorMessage[]
 
 `ErrorMessage:`
 
-  {
-    message : string;
-    position : FilePosition;
-  }
+    {
+      message : string;
+      position : FilePosition;
+    }
 
 ### Autocomplete request
 
@@ -218,54 +292,130 @@ where DiagnosticsParams is defined as:
 
 *Server response:*
 
-  AutocompleteItem[]
+    AutocompleteItem[]
 
 `AutocompleteItem:`
 
-  {
-    /**
-     * The text to be inserted when selecting this completion item.
-     *
-     * The text includes the prefix which is already typed out in the
-     * file. For example:
-     *
-     * $x = new Fo<autocomplete here>
-     *
-     * can include "Foo" as text to complete.
-     */
-    text : string;
-
-    /**
-     * Additional information about completion type, e.g:
-     * "abstract class", "function"
-     */
-    type : string;
-
-    /**
-     * For callable completions (functions, methods), additional
-     * information about it.
-     */
-    callable_details? : {
+    {
       /**
-       * Callable return type.
+       * The text to be inserted when selecting this completion item.
+       *
+       * The text includes the prefix which is already typed out in the
+       * file. For example:
+       *
+       * $x = new Fo<autocomplete here>
+       *
+       * can include "Foo" as text to complete.
        */
-      return_type : string;
+      text : string;
+
       /**
-       * Informations about all of the callable parameters.
+       * Additional information about completion type, e.g:
+       * "abstract class", "function"
        */
-      params: CallableParam[]
-    }  
-  }
+      type : string;
+
+      /**
+       * For callable completions (functions, methods), additional
+       * information about it.
+       */
+      callable_details? : {
+        /**
+         * Callable return type.
+         */
+        return_type : string;
+        /**
+         * Informations about all of the callable parameters.
+         */
+        params: CallableParam[]
+      }
+    }
 
 `CallableParam:`
 
-  {
-    /**
-     * Argument name, as specified in callable declaration.
-     */
-    name : string;
-    /**
-     * Expected type of callable argument.
-     */
-    type : string;
-  }
+    {
+      /**
+       * Argument name, as specified in callable declaration.
+       */
+      name : string;
+      /**
+       * Expected type of callable argument.
+       */
+      type : string;
+    }
+
+#### Infer type request
+
+What Hack thinks is the type of the expression at this position. Displayed in editor on mouse-hover over an expression.
+
+*Client request:*
+
+    method : "inferType"
+    params : FilePosition
+
+*Server response:*
+
+    string
+
+### Identify Symbol request
+
+Identify name and kind of symbol at position, locate its definition.
+
+*Client request:*
+
+    method : "identifySymbol"
+    params : FilePosition
+
+*Server response:*
+
+    {
+      /**
+       * Name of the identified symbol.
+       */
+      name : string;    
+      /**
+       * Kind of the identified symbol.
+       */
+      kind : SymbolOccurrenceKind;    
+      /**
+       * Span of the identified symbol occurrence.
+       */
+      span : Range;    
+      /**
+       * Symbol definition, if it has one.
+       */
+      definition : ?SymbolDefinition;
+    }
+
+where `SymbolOccurrenceKind` is defined as:
+
+    string enum {
+      type_id, /* class or trait or interface or enum -
+                  use definition.kind to disambiguate */
+      method,
+      function,
+      local,
+      property,
+      member_const, (* class constant or enum member *)
+      typeconst,
+      global_const,
+    }
+
+### File Outline request
+
+List all symbols defined in the file.
+
+*Client request:*
+
+    method : "outline"
+    params : OutlineParams
+
+where `OutlineParams` is defined as:
+
+    {
+      filename : string
+    }
+
+*Server response:*
+
+    SymbolDefinition[]

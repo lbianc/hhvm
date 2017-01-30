@@ -330,7 +330,7 @@ void pop(Env& env) { pop(env, Use::Used, InstrIdSet{}); }
 
 Type topT(Env& env, uint32_t idx = 0) {
   assert(idx < env.stateBefore.stack.size());
-  return env.stateBefore.stack[env.stateBefore.stack.size() - idx - 1];
+  return env.stateBefore.stack[env.stateBefore.stack.size() - idx - 1].type;
 }
 
 Type topC(Env& env, uint32_t idx = 0) {
@@ -445,8 +445,8 @@ bool isLive(Env& env, uint32_t id) {
   return env.dceState.liveLocals[id];
 }
 
-Type locRaw(Env& env, borrowed_ptr<php::Local> loc) {
-  return env.stateBefore.locals[loc->id];
+Type locRaw(Env& env, LocalId loc) {
+  return env.stateBefore.locals[loc];
 }
 
 void readDtorLocs(Env& env) {
@@ -479,6 +479,7 @@ void dce(Env& env, const bc::PopC&)       { discardNonDtors(env); }
 // For PopV and PopR currently we never know if can't run a
 // destructor.
 void dce(Env& env, const bc::PopA&)       { discard(env); }
+void dce(Env& env, const bc::PopU&)       { discard(env); }
 void dce(Env& env, const bc::Int&)        { pushRemovable(env); }
 void dce(Env& env, const bc::String&)     { pushRemovable(env); }
 void dce(Env& env, const bc::Array&)      { pushRemovable(env); }
@@ -530,7 +531,7 @@ void dce(Env& env, const bc::Dup&) {
 
 void dce(Env& env, const bc::CGetL& op) {
   auto const ty = locRaw(env, op.loc1);
-  addGen(env, op.loc1->id);
+  addGen(env, op.loc1);
   if (readCouldHaveSideEffects(ty)) {
     push(env);
   } else {
@@ -540,7 +541,7 @@ void dce(Env& env, const bc::CGetL& op) {
 
 void dce(Env& env, const bc::CGetL2& op) {
   auto const ty = locRaw(env, op.loc1);
-  addGen(env, op.loc1->id);
+  addGen(env, op.loc1);
   auto const u1 = push(env);
   auto const u2 = push(env);
   if (readCouldHaveSideEffects(ty)) {
@@ -552,7 +553,7 @@ void dce(Env& env, const bc::CGetL2& op) {
 
 void dce(Env& env, const bc::CGetL3& op) {
   auto const ty = locRaw(env, op.loc1);
-  addGen(env, op.loc1->id);
+  addGen(env, op.loc1);
   auto const u1 = push(env);
   auto const u2 = push(env);
   auto const u3 = push(env);
@@ -573,13 +574,13 @@ void dce(Env& env, const bc::Exit&)  { push(env); pop(env); readDtorLocs(env); }
 void dce(Env& env, const bc::SetL& op) {
   auto const oldTy   = locRaw(env, op.loc1);
   auto const effects = setCouldHaveSideEffects(oldTy);
-  if (!isLive(env, op.loc1->id) && !effects) return markDead(env);
+  if (!isLive(env, op.loc1) && !effects) return markDead(env);
   push(env);
   pop(env);
   if (effects) {
-    addGen(env, op.loc1->id);
+    addGen(env, op.loc1);
   } else {
-    addKill(env, op.loc1->id);
+    addKill(env, op.loc1);
   }
 }
 
@@ -587,11 +588,11 @@ void dce(Env& env, const bc::UnsetL& op) {
   auto const oldTy   = locRaw(env, op.loc1);
   auto const effects = setCouldHaveSideEffects(oldTy);
   if (oldTy.subtypeOf(TUninit)) return markDead(env);
-  if (!isLive(env, op.loc1->id) && !effects) return markDead(env);
+  if (!isLive(env, op.loc1) && !effects) return markDead(env);
   if (effects) {
-    addGen(env, op.loc1->id);
+    addGen(env, op.loc1);
   } else {
-    addKill(env, op.loc1->id);
+    addKill(env, op.loc1);
   }
 }
 
@@ -606,10 +607,10 @@ void dce(Env& env, const bc::IncDecL& op) {
   auto const effects = setCouldHaveSideEffects(oldTy) ||
                          readCouldHaveSideEffects(oldTy);
   auto const u1      = push(env);
-  if (!isLive(env, op.loc1->id) && !effects && allUnused(u1)) {
+  if (!isLive(env, op.loc1) && !effects && allUnused(u1)) {
     return markSetDead(env, u1.second);
   }
-  addGen(env, op.loc1->id);
+  addGen(env, op.loc1);
 }
 
 /*
@@ -623,13 +624,13 @@ void dce(Env& env, const bc::SetOpL& op) {
   auto const oldTy   = locRaw(env, op.loc1);
   auto const effects = setCouldHaveSideEffects(oldTy) ||
                          readCouldHaveSideEffects(oldTy);
-  if (!isLive(env, op.loc1->id) && !effects) {
+  if (!isLive(env, op.loc1) && !effects) {
     popCond(env, push(env));
   } else {
     push(env);
     pop(env);
   }
-  addGen(env, op.loc1->id);
+  addGen(env, op.loc1);
 }
 
 /*
@@ -695,7 +696,7 @@ dce_visit(const Index& index,
   for (auto idx = blk->hhbcs.size(); idx-- > 0;) {
     auto const& op = blk->hhbcs[idx];
 
-    FTRACE(2, "  == #{} {}\n", idx, show(op));
+    FTRACE(2, "  == #{} {}\n", idx, show(ctx.func, op));
 
     auto visit_env = Env {
       dceState,
@@ -731,7 +732,7 @@ dce_visit(const Index& index,
       [&] {
         using namespace folly::gen;
         return from(states[idx].first.stack)
-          | map([&] (const Type& t) { return show(t); })
+          | map([&] (const StackElem& e) { return show(e.type); })
           | unsplit<std::string>(" ");
       }()
     );
@@ -813,24 +814,16 @@ void remove_unused_locals(Context const ctx,
    */
   if (func->isClosureBody) return;
 
-  func->locals.erase(
-    std::remove_if(
-      begin(func->locals) + func->params.size(),
-      end(func->locals),
-      [&] (const std::unique_ptr<php::Local>& l) {
-        if (l->id < kMaxTrackedLocals && !usedLocals.test(l->id)) {
-          FTRACE(2, "  removing: {}\n", local_string(borrow(l)));
-          return true;
-        }
-        return false;
-      }
-    ),
-    end(func->locals)
-  );
-
-  // Fixup local ids, in case we removed any.
-  for (auto i = uint32_t{0}; i < func->locals.size(); ++i) {
-    func->locals[i]->id = i;
+  for (auto loc = func->locals.begin() + func->params.size();
+       loc != func->locals.end(); ++loc) {
+    if (loc->killed) {
+      assert(loc->id < kMaxTrackedLocals && !usedLocals.test(loc->id));
+      continue;
+    }
+    if (loc->id < kMaxTrackedLocals && !usedLocals.test(loc->id)) {
+      FTRACE(2, "  killing: {}\n", local_string(*func, loc->id));
+      const_cast<php::Local&>(*loc).killed = true;
+    }
   }
 }
 
@@ -868,8 +861,9 @@ void global_dce(const Index& index, const FuncAnalysis& ai) {
     auto i = uint32_t{0};
     return from(ai.ctx.func->locals)
       | mapped(
-        [&] (const std::unique_ptr<php::Local>& l) {
-          return folly::sformat("  {} {}\n", i++, local_string(borrow(l)));
+        [&] (const php::Local& l) {
+          return folly::sformat("  {} {}\n",
+                                i++, local_string(*ai.ctx.func, l.id));
         })
       | unsplit<std::string>("");
   }());
@@ -1008,26 +1002,26 @@ void global_dce(const Index& index, const FuncAnalysis& ai) {
 //////////////////////////////////////////////////////////////////////
 
 void remove_unreachable_blocks(const Index& index, const FuncAnalysis& ainfo) {
-  auto reachable = [&](php::Block& b) {
-    return ainfo.bdata[b.id].stateIn.initialized;
+  auto reachable = [&](BlockId id) {
+    return ainfo.bdata[id].stateIn.initialized;
   };
 
   for (auto& blk : ainfo.rpoBlocks) {
-    if (reachable(*blk)) continue;
+    if (reachable(blk->id)) continue;
     auto const srcLoc = blk->hhbcs.front().srcLoc;
     blk->hhbcs = {
       bc_with_loc(srcLoc, bc::String { s_unreachable.get() }),
       bc_with_loc(srcLoc, bc::Fatal { FatalOp::Runtime })
     };
-    blk->fallthrough = nullptr;
+    blk->fallthrough = NoBlockId;
   }
 
   if (!options.RemoveDeadBlocks) return;
 
   for (auto& blk : ainfo.rpoBlocks) {
     auto reachableTargets = false;
-    forEachTakenEdge(blk->hhbcs.back(), [&] (php::Block& target) {
-        if (reachable(target)) reachableTargets = true;
+    forEachTakenEdge(blk->hhbcs.back(), [&] (BlockId id) {
+        if (reachable(id)) reachableTargets = true;
       });
     if (reachableTargets) continue;
     switch (blk->hhbcs.back().op) {
@@ -1056,13 +1050,14 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
   // find all the blocks with multiple preds; they can't be merged
   // into their predecessors
   for (auto& blk : func.blocks) {
+    if (blk->id == NoBlockId) continue;
     int numSucc = 0;
     if (!reachable(*blk)) multiplePreds[blk->id] = true;
-    forEachSuccessor(*blk, [&](php::Block& succ) {
-        if (hasPred[succ.id]) {
-          multiplePreds[succ.id] = true;
+    forEachSuccessor(*blk, [&](BlockId succId) {
+        if (hasPred[succId]) {
+          multiplePreds[succId] = true;
         } else {
-          hasPred[succ.id] = true;
+          hasPred[succId] = true;
         }
         numSucc++;
       });
@@ -1077,7 +1072,9 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
 
   bool removedAny = false;
   for (auto& blk : func.blocks) {
-    while (auto nxt = blk->fallthrough) {
+    if (blk->id == NoBlockId) continue;
+    while (blk->fallthrough != NoBlockId) {
+      auto nxt = borrow(func.blocks[blk->fallthrough]);
       if (multipleSuccs[blk->id] ||
           multiplePreds[nxt->id] ||
           blk->exnNode != nxt->exnNode ||
@@ -1091,7 +1088,7 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
       blk->fallthroughNS = nxt->fallthroughNS;
       if (nxt->factoredExits.size()) {
         if (blk->factoredExits.size()) {
-          std::set<borrowed_ptr<php::Block>> exitSet;
+          std::set<BlockId> exitSet;
           std::copy(begin(blk->factoredExits), end(blk->factoredExits),
                     std::inserter(exitSet, begin(exitSet)));
           std::copy(nxt->factoredExits.begin(), nxt->factoredExits.end(),
@@ -1105,22 +1102,13 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
       }
       std::copy(nxt->hhbcs.begin(), nxt->hhbcs.end(),
                 std::back_inserter(blk->hhbcs));
-      nxt->fallthrough = nullptr;
-      removed[nxt->id] = removedAny = true;
+      nxt->fallthrough = NoBlockId;
+      nxt->id = NoBlockId;
+      removedAny = true;
     }
   }
 
-  if (!removedAny) return false;
-
-  func.blocks.erase(std::remove_if(func.blocks.begin(), func.blocks.end(),
-                                   [&](std::unique_ptr<php::Block>& blk) {
-                                     return removed[blk->id];
-                                   }), func.blocks.end());
-  func.nextBlockId = 0;
-  for (auto& blk : func.blocks) {
-    blk->id = func.nextBlockId++;
-  }
-  return true;
+  return removedAny;
 }
 
 //////////////////////////////////////////////////////////////////////

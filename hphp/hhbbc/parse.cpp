@@ -88,6 +88,15 @@ struct ParseUnitState {
     int32_t,
     std::unordered_set<borrowed_ptr<php::Func>>
   > createClMap;
+
+  struct SrcLocHash {
+    size_t operator()(const php::SrcLoc& sl) const {
+      auto const h1 = ((size_t)sl.start.col << 32) | sl.start.line;
+      auto const h2 = ((size_t)sl.past.col << 32) | sl.past.line;
+      return hash_int64_pair(h1, h2);
+    }
+  };
+  std::unordered_map<php::SrcLoc, int32_t, SrcLocHash> srcLocs;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -230,7 +239,7 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
         auto const fault = findBlock(eh.m_fault);
         ret.funcletNodes[fault].push_back(borrow(node));
         ret.faultFuncletStarts.insert(eh.m_fault);
-        node->info = php::FaultRegion { fault, eh.m_iterId, eh.m_itRef };
+        node->info = php::FaultRegion { fault->id, eh.m_iterId, eh.m_itRef };
       }
       break;
     case EHEnt::Type::Catch:
@@ -240,7 +249,7 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
           auto const catchBlk = findBlock(centry.second);
           treg.catches.emplace_back(
             fe.ue().lookupLitstr(centry.first),
-            catchBlk
+            catchBlk->id
           );
         }
         node->info = treg;
@@ -362,7 +371,7 @@ template<class T> void decode(PC& pc, T& val) {
 MKey make_mkey(const php::Func& func, MemberKey mk) {
   switch (mk.mcode) {
     case MEL: case MPL:
-      return MKey{mk.mcode, borrow(func.locals[mk.iva])};
+      return MKey{mk.mcode, static_cast<LocalId>(mk.iva)};
     case MEC: case MPC:
       return MKey{mk.mcode, mk.iva};
     case MET: case MPT: case MQT:
@@ -387,7 +396,7 @@ void populate_block(ParseUnitState& puState,
 
   auto decode_stringvec = [&] {
     auto const vecLen = decode<int32_t>(pc);
-    std::vector<SString> keys;
+    CompactVector<SString> keys;
     for (auto i = size_t{0}; i < vecLen; ++i) {
       keys.push_back(ue.lookupLitstr(decode<int32_t>(pc)));
     }
@@ -400,7 +409,7 @@ void populate_block(ParseUnitState& puState,
     for (int32_t i = 0; i < vecLen; ++i) {
       ret.push_back(findBlock(
         opPC + decode<Offset>(pc) - ue.bc()
-      ));
+      )->id);
     }
     return ret;
   };
@@ -412,17 +421,15 @@ void populate_block(ParseUnitState& puState,
     for (int32_t i = 0; i < vecLen - 1; ++i) {
       auto const id = decode<Id>(pc);
       auto const offset = decode<Offset>(pc);
-      ret.emplace_back(
-        ue.lookupLitstr(id),
-        findBlock(opPC + offset - ue.bc())
-      );
+      ret.emplace_back(ue.lookupLitstr(id),
+                       findBlock(opPC + offset - ue.bc())->id);
     }
 
     // Final case is the default, and must have a litstr id of -1.
     DEBUG_ONLY auto const defId = decode<Id>(pc);
     auto const defOff = decode<Offset>(pc);
     assert(defId == -1);
-    ret.emplace_back(nullptr, findBlock(opPC + defOff - ue.bc()));
+    ret.emplace_back(nullptr, findBlock(opPC + defOff - ue.bc())->id);
     return ret;
   };
 
@@ -432,7 +439,7 @@ void populate_block(ParseUnitState& puState,
     for (int32_t i = 0; i < vecLen; ++i) {
       auto const kind = static_cast<IterKind>(decode<int32_t>(pc));
       auto const id = decode<int32_t>(pc);
-      ret.emplace_back(kind, borrow(func.iters[id]));
+      ret.emplace_back(kind, id);
     }
     return ret;
   };
@@ -453,26 +460,32 @@ void populate_block(ParseUnitState& puState,
 #define IMM_IVA(n)     auto arg##n = decode_iva(pc);
 #define IMM_I64A(n)    auto arg##n = decode<int64_t>(pc);
 #define IMM_LA(n)      auto loc##n = [&] {                       \
-                         auto id = decode_iva(pc);               \
+                         LocalId id = decode_iva(pc);            \
                          always_assert(id < func.locals.size()); \
-                         return borrow(func.locals[id]);         \
+                         return id;                              \
                        }();
 #define IMM_IA(n)      auto iter##n = [&] {                      \
-                         auto id = decode_iva(pc);               \
-                         always_assert(id < func.iters.size());  \
-                         return borrow(func.iters[id]);          \
+                         IterId id = decode_iva(pc);             \
+                         always_assert(id < func.numIters);      \
+                         return id;                              \
                        }();
 #define IMM_DA(n)      auto dbl##n = decode<double>(pc);
 #define IMM_SA(n)      auto str##n = ue.lookupLitstr(decode<Id>(pc));
 #define IMM_RATA(n)    auto rat = decodeRAT(ue, pc);
 #define IMM_AA(n)      auto arr##n = ue.lookupArray(decode<Id>(pc));
-#define IMM_BA(n)      assert(next == past); \
+#define IMM_BA(n)      assert(next == past);     \
                        auto target = findBlock(  \
-                         opPC + decode<Offset>(pc) - ue.bc());
+                         opPC + decode<Offset>(pc) - ue.bc())->id;
 #define IMM_OA_IMPL(n) subop##n; decode(pc, subop##n);
 #define IMM_OA(type)   type IMM_OA_IMPL
 #define IMM_VSA(n)     auto keys = decode_stringvec();
 #define IMM_KA(n)      auto mkey = make_mkey(func, decode_member_key(pc, &ue));
+#define IMM_LAR(n)     auto locrange = [&] {                                 \
+                         auto const range = decodeLocalRange(pc);            \
+                         always_assert(range.first + range.restCount         \
+                                       < func.locals.size());                \
+                         return LocalRange { range.first, range.restCount }; \
+                       }();
 
 #define IMM_NA
 #define IMM_ONE(x)           IMM_##x(1)
@@ -495,7 +508,7 @@ void populate_block(ParseUnitState& puState,
     {                                                 \
       auto b = Bytecode {};                           \
       b.op = Op::opcode;                              \
-      b.srcLoc = srcLoc;                              \
+      b.srcLoc = srcLocIx;                            \
       IMM_##imms                                      \
       new (&b.opcode) bc::opcode { IMM_ARG_##imms };  \
       if (Op::opcode == Op::DefCls)    defcls(b);     \
@@ -538,12 +551,15 @@ void populate_block(ParseUnitState& puState,
       }
     );
 
+    auto const srcLocIx = puState.srcLocs.emplace(
+      srcLoc, puState.srcLocs.size()).first->second;
+
     auto const op = decode_op(pc);
     switch (op) { OPCODES }
 
     if (next == past) {
       if (instrAllowsFallThru(op)) {
-        blk.fallthrough = findBlock(next - ue.bc());
+        blk.fallthrough = findBlock(next - ue.bc())->id;
       }
     }
 
@@ -567,6 +583,7 @@ void populate_block(ParseUnitState& puState,
 #undef IMM_OA_IMPL
 #undef IMM_OA
 #undef IMM_VSA
+#undef IMM_LAR
 
 #undef IMM_NA
 #undef IMM_ONE
@@ -666,8 +683,10 @@ void build_cfg(ParseUnitState& puState,
   link_entry_points(func, fe, findBlock);
   find_fault_funclets(exnTreeInfo, func, blockStarts, findBlock);
 
+  func.blocks.resize(blockMap.size());
   for (auto& kv : blockMap) {
-    func.blocks.emplace_back(std::move(kv.second));
+    auto const id = kv.second->id;
+    func.blocks[id] = std::move(kv.second);
   }
 }
 
@@ -688,22 +707,15 @@ void add_frame_variables(php::Func& func, const FuncEmitter& fe) {
     );
   }
 
-  func.locals.resize(fe.numLocals());
-  for (size_t id = 0; id < func.locals.size(); ++id) {
-    auto& loc = func.locals[id];
-    loc = folly::make_unique<php::Local>();
-    loc->id = id;
-    loc->name = nullptr;
+  func.locals.reserve(fe.numLocals());
+  for (LocalId id = 0; id < fe.numLocals(); ++id) {
+    func.locals.push_back({nullptr, id, false});
   }
   for (auto& kv : fe.localNameMap()) {
-    func.locals[kv.second]->name = kv.first;
+    func.locals[kv.second].name = kv.first;
   }
 
-  func.iters.resize(fe.numIterators());
-  for (uint32_t i = 0; i < func.iters.size(); ++i) {
-    func.iters[i] = folly::make_unique<php::Iter>();
-    func.iters[i]->id = i;
-  }
+  func.numIters = fe.numIterators();
 
   func.staticLocals.reserve(fe.staticVars.size());
   for (auto& sv : fe.staticVars) {
@@ -740,6 +752,7 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
   ret->isGenerator        = fe.isGenerator;
   ret->isPairGenerator    = fe.isPairGenerator;
   ret->isNative           = fe.isNative;
+  ret->isMemoizeWrapper   = fe.isMemoizeWrapper;
   ret->dynCallWrapperId   = fe.dynCallWrapperId;
 
   /*
@@ -950,6 +963,11 @@ std::unique_ptr<php::Unit> parse_unit(const UnitEmitter& ue) {
     } else {
       ret->funcs.push_back(std::move(func));
     }
+  }
+
+  ret->srcLocs.resize(puState.srcLocs.size());
+  for (auto& srcInfo : puState.srcLocs) {
+    ret->srcLocs[srcInfo.second] = srcInfo.first;
   }
 
   for (auto& ta : ue.typeAliases()) {

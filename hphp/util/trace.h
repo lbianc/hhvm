@@ -1,4 +1,5 @@
 /*
+
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
@@ -22,6 +23,7 @@
 #include <stdarg.h>
 
 #include <folly/Format.h>
+#include <folly/portability/Unistd.h>
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/portability.h"
@@ -152,6 +154,7 @@ namespace Trace {
       TM(pgo)           \
       TM(printir)       \
       TM(prof_branch)   \
+      TM(prof_array)    \
       TM(rat)           \
       TM(refcount)      \
       TM(regalloc)      \

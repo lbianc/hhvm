@@ -172,7 +172,18 @@ struct Base {
    */
   Type locTy;
   SString locName;
-  borrowed_ptr<php::Local> local;
+  LocalId local;
+};
+
+// An element on the eval stack
+struct StackElem {
+  Type type;
+  // A local which is known to have an equivalent value to this stack value.
+  LocalId equivLocal;
+
+  bool operator==(const StackElem& other) const {
+    return type == other.type && equivLocal == other.equivLocal;
+  }
 };
 
 /*
@@ -208,7 +219,7 @@ struct State {
   bool thisAvailable = false;
   std::vector<Type> locals;
   std::vector<Iter> iters;
-  std::vector<Type> stack;
+  std::vector<StackElem> stack;
   std::vector<ActRec> fpiStack;
 
   /*
@@ -224,6 +235,12 @@ struct State {
    * at each stage.  See irgen-minstr.cpp:resolveArrayChain().
    */
   std::vector<std::pair<Type,Type>> arrayChain;
+
+  /*
+   * Mapping of a local to another local which is known to have an equivalent
+   * value.
+   */
+  std::vector<LocalId> equivLocals;
 };
 
 /*

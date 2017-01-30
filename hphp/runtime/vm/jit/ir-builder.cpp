@@ -30,6 +30,7 @@
 #include "hphp/runtime/vm/jit/mutation.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/punt.h"
+#include "hphp/runtime/vm/jit/simple-propagation.h"
 #include "hphp/runtime/vm/jit/simplify.h"
 #include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/translator.h"
@@ -111,6 +112,8 @@ inline bool unionTypeMightRelax(const IRInstruction* inst,
 #define DSubtract(n,t) DofS(n)
 #define DCns           return false; // fixed type
 #define DUnion(...)    return unionTypeMightRelax(inst, IdxSeq<__VA_ARGS__>{});
+#define DMemoKey       assertx(inst->is(GetMemoKey)); \
+                         return typeMightRelax(inst->src(0));
 
 bool typeMightRelax(const SSATmp* tmp) {
   if (tmp == nullptr) return true;

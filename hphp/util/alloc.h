@@ -22,6 +22,7 @@
 #include <atomic>
 
 #include <folly/Portability.h>
+#include <folly/portability/PThread.h>
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/exception.h"
@@ -451,10 +452,10 @@ struct LowAllocator {
 template <class T>
 struct HugeAllocator {
   using value_type = T;
-  using pointer = T *;
-  using const_pointer = const T *;
-  using reference = T &;
-  using const_reference = const T &;
+  using pointer = T*;
+  using const_pointer = const T*;
+  using reference = T&;
+  using const_reference = const T&;
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
 
@@ -494,11 +495,11 @@ struct HugeAllocator {
     free_huge((void*)p);
   }
 
-  template<class U> bool operator==(const LowAllocator<U>&) const {
+  template<class U> bool operator==(const HugeAllocator<U>&) const {
     return true;
   }
 
-  template<class U> bool operator!=(const LowAllocator<U>&) const {
+  template<class U> bool operator!=(const HugeAllocator<U>&) const {
     return false;
   }
 };

@@ -56,8 +56,8 @@ const StaticString s_Closure("Closure");
  * Short-hand to get the rpoId of a block in a given FuncAnalysis.  (The RPO
  * ids are re-assigned per analysis.)
  */
-uint32_t rpoId(const FuncAnalysis& ai, borrowed_ptr<php::Block> blk) {
-  return ai.bdata[blk->id].rpoId;
+uint32_t rpoId(const FuncAnalysis& ai, BlockId blk) {
+  return ai.bdata[blk].rpoId;
 }
 
 State pseudomain_entry_state(borrowed_ptr<const php::Func> func) {
@@ -65,7 +65,7 @@ State pseudomain_entry_state(borrowed_ptr<const php::Func> func) {
   ret.initialized = true;
   ret.thisAvailable = false;
   ret.locals.resize(func->locals.size());
-  ret.iters.resize(func->iters.size());
+  ret.iters.resize(func->numIters);
   for (auto& l : ret.locals) l = TGen;
   return ret;
 }
@@ -78,7 +78,7 @@ State entry_state(const Index& index,
   ret.initialized = true;
   ret.thisAvailable = index.lookup_this_available(ctx.func);
   ret.locals.resize(ctx.func->locals.size());
-  ret.iters.resize(ctx.func->iters.size());
+  ret.iters.resize(ctx.func->numIters);
 
   // TODO(#3788877): when we're doing a context sensitive analyze_func_inline,
   // thisAvailable and specific type of $this should be able to come from the
@@ -142,7 +142,7 @@ State entry_state(const Index& index,
   // Finally, make sure any volatile locals are set to Gen, even if they are
   // parameters.
   for (auto locId = uint32_t{0}; locId < ctx.func->locals.size(); ++locId) {
-    if (is_volatile_local(ctx.func, borrow(ctx.func->locals[locId]))) {
+    if (is_volatile_local(ctx.func, locId)) {
       ret.locals[locId] = TGen;
     }
   }
@@ -189,7 +189,7 @@ prepare_incompleteQ(const Index& index,
       for (auto i = knownArgs->size(); i < numParams; ++i) {
         if (auto const dv = ctx.func->params[i].dvEntryPoint) {
           ai.bdata[dv->id].stateIn = entryState;
-          incompleteQ.push(rpoId(ai, dv));
+          incompleteQ.push(rpoId(ai, dv->id));
           return true;
         }
       }
@@ -198,7 +198,7 @@ prepare_incompleteQ(const Index& index,
 
     if (!useDvInit) {
       ai.bdata[ctx.func->mainEntry->id].stateIn = entryState;
-      incompleteQ.push(rpoId(ai, ctx.func->mainEntry));
+      incompleteQ.push(rpoId(ai, ctx.func->mainEntry->id));
     }
 
     return incompleteQ;
@@ -207,7 +207,7 @@ prepare_incompleteQ(const Index& index,
   for (auto paramId = uint32_t{0}; paramId < numParams; ++paramId) {
     if (auto const dv = ctx.func->params[paramId].dvEntryPoint) {
       ai.bdata[dv->id].stateIn = entryState;
-      incompleteQ.push(rpoId(ai, dv));
+      incompleteQ.push(rpoId(ai, dv->id));
       for (auto locId = paramId; locId < numParams; ++locId) {
         ai.bdata[dv->id].stateIn.locals[locId] =
           ctx.func->params[locId].isVariadic ? TArr : TUninit;
@@ -216,7 +216,7 @@ prepare_incompleteQ(const Index& index,
   }
 
   ai.bdata[ctx.func->mainEntry->id].stateIn = entryState;
-  incompleteQ.push(rpoId(ai, ctx.func->mainEntry));
+  incompleteQ.push(rpoId(ai, ctx.func->mainEntry->id));
 
   return incompleteQ;
 }
@@ -297,9 +297,9 @@ FuncAnalysis do_analyze_collect(const Index& index,
       property_state_string(collect.props));
     ++interp_counter;
 
-    auto propagate = [&] (php::Block& target, const State& st) {
+    auto propagate = [&] (BlockId target, const State& st) {
       auto const needsWiden =
-        nonWideVisits[target.id] >= options.analyzeFuncWideningLimit;
+        nonWideVisits[target] >= options.analyzeFuncWideningLimit;
 
       // We haven't optimized the widening operator much, because it
       // doesn't happen in practice right now.  We want to know when
@@ -310,18 +310,18 @@ FuncAnalysis do_analyze_collect(const Index& index,
           ctx.func->name->data());
       }
 
-      FTRACE(2, "     {}-> {}\n", needsWiden ? "widening " : "", target.id);
+      FTRACE(2, "     {}-> {}\n", needsWiden ? "widening " : "", target);
       FTRACE(4, "target old {}",
-        state_string(*ctx.func, ai.bdata[target.id].stateIn));
+        state_string(*ctx.func, ai.bdata[target].stateIn));
 
       auto const changed =
-        needsWiden ? widen_into(ai.bdata[target.id].stateIn, st)
-                   : merge_into(ai.bdata[target.id].stateIn, st);
+        needsWiden ? widen_into(ai.bdata[target].stateIn, st)
+                   : merge_into(ai.bdata[target].stateIn, st);
       if (changed) {
-        incompleteQ.push(rpoId(ai, &target));
+        incompleteQ.push(rpoId(ai, target));
       }
       FTRACE(4, "target new {}",
-        state_string(*ctx.func, ai.bdata[target.id].stateIn));
+        state_string(*ctx.func, ai.bdata[target].stateIn));
     };
 
     auto stateOut = ai.bdata[blk->id].stateIn;
@@ -416,21 +416,19 @@ void expand_hni_prop_types(ClassAnalysis& clsAnalysis) {
     if (it == end(propState)) return;
 
     /*
-     * When HardTypeHints isn't on, AllFuncsInterceptable is on, or any
-     * InterceptableFunctions are listed, we don't require the constraints to
-     * actually match, and relax all the HNI types to Gen.
+     * When HardTypeHints isn't on, or any functions are
+     * interceptable, we don't require the constraints to actually
+     * match, and relax all the HNI types to Gen.
      *
-     * This is because extensions may wish to assign to properties after a
-     * typehint guard, which is going to fail without HardTypeHints.  Or, with
-     * AllFuncsInterceptable or InterceptableFunctions, it's quite possible
-     * that some function calls in systemlib might not be known to return
-     * things matching the property type hints for some properties, or not to
-     * take their arguments by reference.
+     * This is because extensions may wish to assign to properties
+     * after a typehint guard, which is going to fail without
+     * HardTypeHints.  Or, with any interceptable functions, it's
+     * quite possible that some function calls in systemlib might not
+     * be known to return things matching the property type hints for
+     * some properties, or not to take their arguments by reference.
      */
     auto const hniTy =
-      !options.HardTypeHints ||
-          options.AllFuncsInterceptable ||
-          !options.InterceptableFunctions.empty()
+      !options.HardTypeHints || clsAnalysis.anyInterceptable
         ? TGen
         : from_hni_constraint(prop.typeConstraint);
     if (it->second.subtypeOf(hniTy)) {
@@ -502,7 +500,7 @@ ClassAnalysis analyze_class(const Index& index, Context const ctx) {
   assert(ctx.cls && !ctx.func);
   FTRACE(2, "{:#^70}\n", "Class");
 
-  ClassAnalysis clsAnalysis(ctx);
+  ClassAnalysis clsAnalysis(ctx, index.any_interceptable_functions());
   auto const associatedClosures = index.lookup_closures(ctx.cls);
   auto const isHNIBuiltin       = ctx.cls->attrs & AttrBuiltin;
 

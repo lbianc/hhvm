@@ -19,14 +19,14 @@
 
 #include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/collections.h"
-
 #include "hphp/runtime/vm/native-prop-handler.h"
 
-#include "hphp/runtime/vm/jit/minstr-effects.h"
 #include "hphp/runtime/vm/jit/array-kind-profile.h"
 #include "hphp/runtime/vm/jit/array-offset-profile.h"
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
+#include "hphp/runtime/vm/jit/minstr-effects.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
+#include "hphp/runtime/vm/jit/type-array-elem.h"
 #include "hphp/runtime/vm/jit/type-constraint.h"
 #include "hphp/runtime/vm/jit/type.h"
 
@@ -2168,6 +2168,38 @@ void emitSetWithRefRML(IRGS& env, int32_t keyLoc) {
   setWithRefImpl(env, keyLoc, top(env, BCSPRelOffset{0}, DataTypeGeneric));
   popDecRef(env);
   mFinalImpl(env, 0, nullptr);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void emitMemoGet(IRGS& env, int32_t ndiscard, LocalRange locals) {
+  assertx(curFunc(env)->isMemoizeWrapper());
+  assertx(!curFunc(env)->isReturnRef());
+  assertx(locals.first + locals.restCount < curFunc(env)->numLocals());
+
+  auto const base = ldMBase(env);
+  auto const ret = gen(env, MemoGet, MemoData { locals }, fp(env), base);
+
+  // The returned type is always the return type of the wrapped function, plus
+  // TUninit. HHBBC should always derive the same return type for the wrapper
+  // (this function) and the wrapped function, so for simplicity just use our
+  // own return type. Even without HHBBC inference, we know the return type will
+  // be at least TInitCell (memoize invariant).
+  auto const retTy =
+    (typeFromRAT(curFunc(env)->repoReturnType(), curClass(env)) & TInitCell) |
+    TUninit;
+
+  mFinalImpl(env, ndiscard, gen(env, AssertType, retTy, ret));
+}
+
+void emitMemoSet(IRGS& env, int32_t ndiscard, LocalRange locals) {
+  assertx(curFunc(env)->isMemoizeWrapper());
+  assertx(locals.first + locals.restCount < curFunc(env)->numLocals());
+
+  auto const value = topC(env, BCSPRelOffset{0}, DataTypeGeneric);
+  gen(env, MemoSet, MemoData { locals }, fp(env), ldMBase(env), value);
+  popC(env, DataTypeGeneric);
+  mFinalImpl(env, ndiscard, value);
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -25,26 +25,24 @@
 
 #include <folly/Hash.h>
 
-#include "hphp/util/tiny-vector.h"
+#include "hphp/util/compact-vector.h"
 #include "hphp/runtime/vm/hhbc.h"
 
 #include "hphp/hhbbc/src-loc.h"
 #include "hphp/hhbbc/misc.h"
 #include "hphp/hhbbc/type-system.h"
 
-namespace HPHP {
-struct StringData;
-struct ArrayData;
-}
-
 namespace HPHP { namespace HHBBC {
 
 struct Bytecode;
 
 namespace php {
-  struct Block;
-  struct Local;
-  struct Iter;
+
+struct Block;
+struct Local;
+struct Iter;
+struct Func;
+
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -67,7 +65,7 @@ struct MKey {
     , int64{0}
   {}
 
-  MKey(MemberCode mcode, borrowed_ptr<php::Local> local)
+  MKey(MemberCode mcode, LocalId local)
     : mcode{mcode}
     , local{local}
   {}
@@ -92,7 +90,7 @@ struct MKey {
     SString litstr;
     int64_t int64;
     int64_t idx;
-    borrowed_ptr<php::Local> local;
+    LocalId local;
   };
 };
 
@@ -104,6 +102,21 @@ inline bool operator!=(MKey a, MKey b) {
   return !(a == b);
 }
 
+// Represents a non-empty range of locals. There's always a first local,
+// followed by a count of additional ones.
+struct LocalRange {
+  LocalId  first;
+  uint32_t restCount;
+};
+
+inline bool operator==(const LocalRange& a, const LocalRange& b) {
+  return a.first == b.first && a.restCount == b.restCount;
+}
+
+inline bool operator!=(const LocalRange& a, const LocalRange& b) {
+  return !(a == b);
+}
+
 struct BCHashHelper {
   static size_t hash(RepoAuthType rat) { return rat.hash(); }
   static size_t hash(SString s) { return s->hash(); }
@@ -112,13 +125,17 @@ struct BCHashHelper {
   }
 
   template<class T>
-  static size_t hash(const std::vector<T>& v) {
+  static size_t hash(const CompactVector<T>& v) {
     assert(!v.empty());
-    return v.size() && hash(v.front());
+    return v.size() ^ hash(v.front());
   }
 
-  static size_t hash(std::pair<IterKind,borrowed_ptr<php::Iter>> kv) {
-    return std::hash<decltype(kv.second)>()(kv.second);
+  static size_t hash(std::pair<IterKind, IterId> kv) {
+    return std::hash<IterId>()(kv.second);
+  }
+
+  static size_t hash(LocalRange range) {
+    return HPHP::hash_int64_pair(range.first, range.restCount);
   }
 
   template<class T>
@@ -137,15 +154,15 @@ struct BCHashHelper {
   >::type hash(const T& t) { return std::hash<T>()(t); }
 };
 
-using IterTabEnt    = std::pair<IterKind,borrowed_ptr<php::Iter>>;
-using IterTab       = std::vector<IterTabEnt>;
+using IterTabEnt    = std::pair<IterKind, IterId>;
+using IterTab       = CompactVector<IterTabEnt>;
 
-using SwitchTab     = std::vector<borrowed_ptr<php::Block>>;
+using SwitchTab     = CompactVector<BlockId>;
 
 // The final entry in the SSwitchTab is the default case, it will
 // always have a nullptr for the string.
-using SSwitchTabEnt = std::pair<SString,borrowed_ptr<php::Block>>;
-using SSwitchTab    = std::vector<SSwitchTabEnt>;
+using SSwitchTabEnt = std::pair<SString,BlockId>;
+using SSwitchTab    = CompactVector<SSwitchTabEnt>;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -156,16 +173,17 @@ namespace bc {
 #define IMM_TY_ILA      IterTab
 #define IMM_TY_IVA      int32_t
 #define IMM_TY_I64A     int64_t
-#define IMM_TY_LA       borrowed_ptr<php::Local>
-#define IMM_TY_IA       borrowed_ptr<php::Iter>
+#define IMM_TY_LA       LocalId
+#define IMM_TY_IA       IterId
 #define IMM_TY_DA       double
 #define IMM_TY_SA       SString
 #define IMM_TY_RATA     RepoAuthType
 #define IMM_TY_AA       SArray
-#define IMM_TY_BA       borrowed_ptr<php::Block>
+#define IMM_TY_BA       BlockId
 #define IMM_TY_OA(type) type
-#define IMM_TY_VSA      std::vector<SString>
+#define IMM_TY_VSA      CompactVector<SString>
 #define IMM_TY_KA       MKey
+#define IMM_TY_LAR      LocalRange
 
 #define IMM_NAME_BLA(n)     targets
 #define IMM_NAME_SLA(n)     targets
@@ -183,6 +201,7 @@ namespace bc {
 #define IMM_NAME_OA(type)   IMM_NAME_OA_IMPL
 #define IMM_NAME_VSA(n)     keys
 #define IMM_NAME_KA(n)      mkey
+#define IMM_NAME_LAR(n)     locrange
 
 #define IMM_EXTRA_BLA
 #define IMM_EXTRA_SLA
@@ -199,6 +218,7 @@ namespace bc {
 #define IMM_EXTRA_OA(x)
 #define IMM_EXTRA_VSA
 #define IMM_EXTRA_KA
+#define IMM_EXTRA_LAR
 
 #define IMM_MEM(which, n)          IMM_TY_##which IMM_NAME_##which(n)
 #define IMM_MEM_NA
@@ -250,7 +270,8 @@ namespace bc {
 #define IMM_CTOR_FOUR(x, y, z, l)  IMM_CTOR(x, 1), IMM_CTOR(y, 2), \
                                    IMM_CTOR(z, 3), IMM_CTOR(l, 4)
 
-#define IMM_INIT(which, n)         IMM_NAME_##which(n) ( IMM_NAME_##which(n) )
+#define IMM_INIT(which, n)         IMM_NAME_##which(n) \
+                                     ( std::move(IMM_NAME_##which(n)) )
 #define IMM_INIT_NA
 #define IMM_INIT_ONE(x)            : IMM_INIT(x, 1)
 #define IMM_INIT_TWO(x, y)         : IMM_INIT(x, 1), IMM_INIT(y, 2)
@@ -265,6 +286,7 @@ namespace bc {
 #define POP_VV  if (i == 0) return Flavor::V
 #define POP_FV  if (i == 0) return Flavor::F
 #define POP_RV  if (i == 0) return Flavor::R
+#define POP_CUV if (i == 0) return Flavor::CUV;
 
 #define POP_NOV             uint32_t numPop() const { return 0; } \
                             Flavor popFlavor(uint32_t) const { not_reached(); }
@@ -408,6 +430,7 @@ OPCODES
 #undef IMM_TY_OA
 #undef IMM_TY_VSA
 #undef IMM_TY_KA
+#undef IMM_TY_LAR
 
 // These are deliberately not undefined, so they can be used in other
 // places.
@@ -425,6 +448,7 @@ OPCODES
 // #undef IMM_NAME_BA
 // #undef IMM_NAME_OA
 // #undef IMM_NAME_OA_IMPL
+// #undef IMM_NAME_LAR
 
 #undef IMM_EXTRA_BLA
 #undef IMM_EXTRA_SLA
@@ -440,6 +464,7 @@ OPCODES
 #undef IMM_EXTRA_BA
 #undef IMM_EXTRA_OA
 #undef IMM_EXTRA_KA
+#undef IMM_EXTRA_LAR
 
 #undef IMM_MEM
 #undef IMM_MEM_NA
@@ -492,8 +517,8 @@ OPCODES
 struct Bytecode {
   // Default construction creates a Nop.
   Bytecode()
-    : op(Op::Nop)
-    , Nop(bc::Nop{})
+    : Nop(bc::Nop{})
+    , op(Op::Nop)
   {}
 
 #define O(opcode, ...)                          \
@@ -561,12 +586,13 @@ struct Bytecode {
     not_reached();
   }
 
-  Op op;
-  php::SrcLoc srcLoc;
+  int32_t srcLoc{-1};
 
 #define O(opcode, ...) bc::opcode opcode;
   union { OPCODES };
 #undef O
+
+  Op op;
 
 private:
   void destruct() {
@@ -615,7 +641,7 @@ inline size_t hash(const Bytecode& b) {
  * Ex:
  *    auto b = bc_with_loc(something.srcLoc, bc::Nop {});
  */
-template<class T> Bytecode bc_with_loc(php::SrcLoc loc, const T& t) {
+template<class T> Bytecode bc_with_loc(int32_t loc, const T& t) {
   Bytecode b = t;
   b.srcLoc = loc;
   return b;
@@ -645,7 +671,11 @@ BOOST_MPL_HAS_XXX_TRAIT_NAMED_DEF(has_target, has_target_flag, false);
 
 //////////////////////////////////////////////////////////////////////
 
-std::string show(const Bytecode& bc);
+std::string show(const php::Func&, const Bytecode& bc);
+inline std::string show(borrowed_ptr<const php::Func> func,
+                        const Bytecode& bc) {
+  return show(*func, bc);
+}
 
 //////////////////////////////////////////////////////////////////////
 

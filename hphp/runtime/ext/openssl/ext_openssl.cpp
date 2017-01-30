@@ -16,6 +16,7 @@
 */
 
 #include "hphp/runtime/ext/openssl/ext_openssl.h"
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/ssl-socket.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-string.h"
@@ -138,6 +139,14 @@ struct Key : SweepableResourceData {
     case EVP_PKEY_DH:
       assert(m_key->pkey.dh);
       if (!m_key->pkey.dh->p || !m_key->pkey.dh->priv_key) {
+        return false;
+      }
+      break;
+#endif
+#ifdef HAVE_EVP_PKEY_EC
+    case EVP_PKEY_EC:
+      assert(m_key->pkey.ec);
+      if (EC_KEY_get0_private_key(m_key->pkey.ec) == nullptr) {
         return false;
       }
       break;
@@ -1764,17 +1773,22 @@ const StaticString
   s_rsa("rsa"),
   s_dsa("dsa"),
   s_dh("dh"),
+  s_ec("ec"),
   s_n("n"),
   s_e("e"),
   s_d("d"),
   s_p("p"),
   s_q("q"),
   s_g("g"),
+  s_x("x"),
+  s_y("y"),
   s_dmp1("dmp1"),
   s_dmq1("dmq1"),
   s_iqmp("iqmp"),
   s_priv_key("priv_key"),
-  s_pub_key("pub_key");
+  s_pub_key("pub_key"),
+  s_curve_name("curve_name"),
+  s_curve_oid("curve_oid");
 
 static void add_bignum_as_string(Array &arr,
                                  StaticString key,
@@ -1842,8 +1856,57 @@ Array HHVM_FUNCTION(openssl_pkey_get_details, const Resource& key) {
     add_bignum_as_string(details, s_pub_key, dh->pub_key);
     ret.set(s_dh, details);
     break;
-#ifdef EVP_PKEY_EC
-  case EVP_PKEY_EC:      ktype = OPENSSL_KEYTYPE_EC;    break;
+#ifdef HAVE_EVP_PKEY_EC
+  case EVP_PKEY_EC:
+    {
+      ktype = OPENSSL_KEYTYPE_EC;
+      auto const ec = pkey->pkey.ec;
+      assert(ec);
+
+      auto const ec_group = EC_KEY_get0_group(ec);
+      auto const nid = EC_GROUP_get_curve_name(ec_group);
+      if (nid == NID_undef) {
+        break;
+      }
+
+      auto const crv_sn = OBJ_nid2sn(nid);
+      if (crv_sn != nullptr) {
+        details.set(s_curve_name, String(crv_sn, CopyString));
+      }
+
+      auto const obj = OBJ_nid2obj(nid);
+      if (obj != nullptr) {
+        SCOPE_EXIT {
+          ASN1_OBJECT_free(obj);
+        };
+        char oir_buf[256];
+        OBJ_obj2txt(oir_buf, sizeof(oir_buf) - 1, obj, 1);
+        details.set(s_curve_oid, String(oir_buf, CopyString));
+      }
+
+      auto x = BN_new();
+      auto y = BN_new();
+      SCOPE_EXIT {
+        BN_free(x);
+        BN_free(y);
+      };
+      auto const pub = EC_KEY_get0_public_key(ec);
+      if (EC_POINT_get_affine_coordinates_GFp(ec_group, pub, x, y, nullptr)) {
+        add_bignum_as_string(details, s_x, x);
+        add_bignum_as_string(details, s_y, y);
+      }
+
+      auto d = BN_dup(EC_KEY_get0_private_key(ec));
+      SCOPE_EXIT {
+        BN_free(d);
+      };
+      if (d != nullptr) {
+        add_bignum_as_string(details, s_d, d);
+      }
+
+      ret.set(s_ec, details);
+    }
+    break;
 #endif
   }
   ret.set(s_type, ktype);
@@ -3101,6 +3164,28 @@ Array HHVM_FUNCTION(openssl_get_cipher_methods, bool aliases /* = false */) {
   return ret;
 }
 
+Variant HHVM_FUNCTION(openssl_get_curve_names) {
+#ifdef HAVE_EVP_PKEY_EC
+  const size_t len = EC_get_builtin_curves(nullptr, 0);
+  std::unique_ptr<EC_builtin_curve[]> curves(new EC_builtin_curve[len]);
+  if (!EC_get_builtin_curves(curves.get(), len)) {
+    return false;
+  }
+
+  PackedArrayInit ret(len);
+  for (size_t i = 0; i < len; ++i) {
+    auto const sname = OBJ_nid2sn(curves[i].nid);
+    if (sname != nullptr) {
+      ret.append(String(sname, CopyString));
+    }
+  }
+
+  return ret.toArray();
+#else
+  return false;
+#endif
+}
+
 Array HHVM_FUNCTION(openssl_get_md_methods, bool aliases /* = false */) {
   Array ret = Array::Create();
   OBJ_NAME_do_all_sorted(OBJ_NAME_TYPE_MD_METH,
@@ -3145,7 +3230,9 @@ struct opensslExtension final : Extension {
     HHVM_RC_INT_SAME(OPENSSL_KEYTYPE_RSA);
     HHVM_RC_INT_SAME(OPENSSL_KEYTYPE_DSA);
     HHVM_RC_INT_SAME(OPENSSL_KEYTYPE_DH);
+#ifdef HAVE_EVP_PKEY_EC
     HHVM_RC_INT_SAME(OPENSSL_KEYTYPE_EC);
+#endif
 
     HHVM_RC_INT_SAME(OPENSSL_VERSION_NUMBER);
 
@@ -3211,6 +3298,7 @@ struct opensslExtension final : Extension {
     HHVM_FE(openssl_decrypt);
     HHVM_FE(openssl_digest);
     HHVM_FE(openssl_get_cipher_methods);
+    HHVM_FE(openssl_get_curve_names);
     HHVM_FE(openssl_get_md_methods);
 
     loadSystemlib();

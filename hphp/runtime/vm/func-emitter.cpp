@@ -57,6 +57,7 @@ FuncEmitter::FuncEmitter(UnitEmitter& ue, int sn, Id id, const StringData* n)
   , docComment(nullptr)
   , originalFilename(nullptr)
   , memoizePropName(nullptr)
+  , memoizeGuardPropName(nullptr)
   , memoizeSharedPropIndex(0)
   , m_numLocals(0)
   , m_numUnnamedLocals(0)
@@ -80,6 +81,7 @@ FuncEmitter::FuncEmitter(UnitEmitter& ue, int sn, const StringData* n,
   , docComment(nullptr)
   , originalFilename(nullptr)
   , memoizePropName(nullptr)
+  , memoizeGuardPropName(nullptr)
   , memoizeSharedPropIndex(0)
   , m_numLocals(0)
   , m_numUnnamedLocals(0)
@@ -156,10 +158,17 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
   if (preClass && preClass->attrs() & AttrInterface) {
     attrs |= AttrAbstract;
   }
-  if (attrs & AttrPersistent &&
-      ((RuntimeOption::EvalJitEnableRenameFunction && !isGenerated) ||
-       (!RuntimeOption::RepoAuthoritative && SystemLib::s_inited) ||
-       attrs & AttrInterceptable)) {
+  if (!RuntimeOption::RepoAuthoritative) {
+    if (RuntimeOption::EvalJitEnableRenameFunction) {
+      attrs |= AttrInterceptable;
+    } else {
+      attrs = Attr(attrs & ~AttrInterceptable);
+    }
+  }
+  if (attrs & AttrPersistent && !preClass &&
+      (RuntimeOption::EvalJitEnableRenameFunction ||
+       attrs & AttrInterceptable ||
+       (!RuntimeOption::RepoAuthoritative && SystemLib::s_inited))) {
     if (attrs & AttrBuiltin) {
       SystemLib::s_anyNonPersistentBuiltins = true;
     }
@@ -169,10 +178,10 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
     // In non-RepoAuthoritative mode, any function could get a VarEnv because
     // of evalPHPDebugger.
     attrs |= AttrMayUseVV;
-  } else if (RuntimeOption::EvalJitEnableRenameFunction &&
-      !name->empty() &&
-      !Func::isSpecial(name) &&
-      !isClosureBody) {
+  } else if ((attrs & AttrInterceptable) &&
+             !name->empty() &&
+             !Func::isSpecial(name) &&
+             !isClosureBody) {
     // intercepted functions need to pass all args through
     // to the interceptee
     attrs |= AttrMayUseVV;
@@ -213,6 +222,7 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
     ex->m_line2 = line2;
     ex->m_past = past;
     ex->m_returnByValue = false;
+    ex->m_isMemoizeWrapper = false;
   }
 
   std::vector<Func::ParamInfo> fParams;
@@ -242,6 +252,7 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
   f->shared()->m_isGenerated = isGenerated;
   f->shared()->m_repoReturnType = repoReturnType;
   f->shared()->m_repoAwaitedReturnType = repoAwaitedReturnType;
+  f->shared()->m_isMemoizeWrapper = isMemoizeWrapper;
 
   if (isNative) {
     auto const ex = f->extShared();
@@ -315,6 +326,7 @@ void FuncEmitter::serdeMetaData(SerDe& sd) {
     (isPairGenerator)
     (containsCalls)
     (isNative)
+    (isMemoizeWrapper)
 
     (params)
     (m_localNames)

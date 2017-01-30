@@ -67,10 +67,57 @@ let test_autocomplete_call () =
     }
   )
 
+let test_infer_type_call () =
+  let msg = build_request_message "inferType"
+    {|
+      "filename" : "test.php",
+      "position" : {
+        "line" : 11,
+        "column" : 12
+      }
+    |} in
+  test msg @@
+  expect_api_message (
+    Infer_type {
+      filename = "test.php";
+      position = {line = 11; column = 12};
+    }
+  )
+
+let test_identify_symbol () =
+  let msg = build_request_message "identifySymbol"
+    {|
+      "filename" : "test.php",
+      "position" : {
+        "line" : 9,
+        "column" : 10
+      }
+    |} in
+  test msg @@
+  expect_api_message (
+    Identify_symbol {
+      filename = "test.php";
+      position = {line = 9; column = 10};
+    }
+  )
+
+let test_outline () =
+  let msg = build_request_message "outline"
+    {|
+      "filename" : "test.php"
+    |} in
+  test msg @@
+  expect_api_message (
+    Outline "test.php"
+  )
+
 let tests = [
   "test_init", test_init;
   "test_did_open_file", test_did_open_file;
   "test_autocomplete_call", test_autocomplete_call;
+  "test_infer_type_call", test_infer_type_call;
+  "test_identify_symbol", test_identify_symbol;
+  "test_outline", test_outline;
 ]
 
 let () =

@@ -205,6 +205,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return DecoratedExpression::from_json($json, $position, $source);
     case 'parameter_declaration':
       return ParameterDeclaration::from_json($json, $position, $source);
+    case 'variadic_parameter':
+      return VariadicParameter::from_json($json, $position, $source);
     case 'attribute_specification':
       return AttributeSpecification::from_json($json, $position, $source);
     case 'attribute':
@@ -243,6 +245,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return SwitchStatement::from_json($json, $position, $source);
     case 'switch_section':
       return SwitchSection::from_json($json, $position, $source);
+    case 'switch_fallthrough':
+      return SwitchFallthrough::from_json($json, $position, $source);
     case 'case_label':
       return CaseLabel::from_json($json, $position, $source);
     case 'default_label':
@@ -343,6 +347,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return XHPClassAttributeDeclaration::from_json($json, $position, $source);
     case 'xhp_class_attribute':
       return XHPClassAttribute::from_json($json, $position, $source);
+    case 'xhp_simple_class_attribute':
+      return XHPSimpleClassAttribute::from_json($json, $position, $source);
     case 'xhp_attribute':
       return XHPAttribute::from_json($json, $position, $source);
     case 'xhp_open':
@@ -794,6 +800,8 @@ abstract class EditableToken extends EditableSyntax {
        return new EvalToken($leading, $trailing);
     case 'extends':
        return new ExtendsToken($leading, $trailing);
+    case 'fallthrough':
+       return new FallthroughToken($leading, $trailing);
     case 'float':
        return new FloatToken($leading, $trailing);
     case 'final':
@@ -1660,6 +1668,21 @@ final class ExtendsToken extends EditableToken {
 
   public function with_trailing(EditableSyntax $trailing): ExtendsToken {
     return new ExtendsToken($this->leading(), $trailing);
+  }
+}
+final class FallthroughToken extends EditableToken {
+  public function __construct(
+    EditableSyntax $leading,
+    EditableSyntax $trailing) {
+    parent::__construct('fallthrough', $leading, $trailing, 'fallthrough');
+  }
+
+  public function with_leading(EditableSyntax $leading): FallthroughToken {
+    return new FallthroughToken($leading, $this->trailing());
+  }
+
+  public function with_trailing(EditableSyntax $trailing): FallthroughToken {
+    return new FallthroughToken($this->leading(), $trailing);
   }
 }
 final class FloatToken extends EditableToken {
@@ -7698,6 +7721,49 @@ final class ParameterDeclaration extends EditableSyntax {
     yield break;
   }
 }
+final class VariadicParameter extends EditableSyntax {
+  private EditableSyntax $_ellipsis;
+  public function __construct(
+    EditableSyntax $ellipsis) {
+    parent::__construct('variadic_parameter');
+    $this->_ellipsis = $ellipsis;
+  }
+  public function ellipsis(): EditableSyntax {
+    return $this->_ellipsis;
+  }
+  public function with_ellipsis(EditableSyntax $ellipsis): VariadicParameter {
+    return new VariadicParameter(
+      $ellipsis);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $ellipsis = $this->ellipsis()->rewrite($rewriter, $new_parents);
+    if (
+      $ellipsis === $this->ellipsis()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new VariadicParameter(
+        $ellipsis), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $ellipsis = EditableSyntax::from_json(
+      $json->variadic_parameter_ellipsis, $position, $source);
+    $position += $ellipsis->width();
+    return new VariadicParameter(
+        $ellipsis);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_ellipsis;
+    yield break;
+  }
+}
 final class AttributeSpecification extends EditableSyntax {
   private EditableSyntax $_left_double_angle;
   private EditableSyntax $_attributes;
@@ -10105,12 +10171,15 @@ final class SwitchStatement extends EditableSyntax {
 final class SwitchSection extends EditableSyntax {
   private EditableSyntax $_labels;
   private EditableSyntax $_statements;
+  private EditableSyntax $_fallthrough;
   public function __construct(
     EditableSyntax $labels,
-    EditableSyntax $statements) {
+    EditableSyntax $statements,
+    EditableSyntax $fallthrough) {
     parent::__construct('switch_section');
     $this->_labels = $labels;
     $this->_statements = $statements;
+    $this->_fallthrough = $fallthrough;
   }
   public function labels(): EditableSyntax {
     return $this->_labels;
@@ -10118,15 +10187,26 @@ final class SwitchSection extends EditableSyntax {
   public function statements(): EditableSyntax {
     return $this->_statements;
   }
+  public function fallthrough(): EditableSyntax {
+    return $this->_fallthrough;
+  }
   public function with_labels(EditableSyntax $labels): SwitchSection {
     return new SwitchSection(
       $labels,
-      $this->_statements);
+      $this->_statements,
+      $this->_fallthrough);
   }
   public function with_statements(EditableSyntax $statements): SwitchSection {
     return new SwitchSection(
       $this->_labels,
-      $statements);
+      $statements,
+      $this->_fallthrough);
+  }
+  public function with_fallthrough(EditableSyntax $fallthrough): SwitchSection {
+    return new SwitchSection(
+      $this->_labels,
+      $this->_statements,
+      $fallthrough);
   }
 
   public function rewrite(
@@ -10137,14 +10217,17 @@ final class SwitchSection extends EditableSyntax {
     array_push($new_parents, $this);
     $labels = $this->labels()->rewrite($rewriter, $new_parents);
     $statements = $this->statements()->rewrite($rewriter, $new_parents);
+    $fallthrough = $this->fallthrough()->rewrite($rewriter, $new_parents);
     if (
       $labels === $this->labels() &&
-      $statements === $this->statements()) {
+      $statements === $this->statements() &&
+      $fallthrough === $this->fallthrough()) {
       return $rewriter($this, $parents ?? []);
     } else {
       return $rewriter(new SwitchSection(
         $labels,
-        $statements), $parents ?? []);
+        $statements,
+        $fallthrough), $parents ?? []);
     }
   }
 
@@ -10155,13 +10238,81 @@ final class SwitchSection extends EditableSyntax {
     $statements = EditableSyntax::from_json(
       $json->switch_section_statements, $position, $source);
     $position += $statements->width();
+    $fallthrough = EditableSyntax::from_json(
+      $json->switch_section_fallthrough, $position, $source);
+    $position += $fallthrough->width();
     return new SwitchSection(
         $labels,
-        $statements);
+        $statements,
+        $fallthrough);
   }
   public function children(): Generator<string, EditableSyntax, void> {
     yield $this->_labels;
     yield $this->_statements;
+    yield $this->_fallthrough;
+    yield break;
+  }
+}
+final class SwitchFallthrough extends EditableSyntax {
+  private EditableSyntax $_keyword;
+  private EditableSyntax $_semicolon;
+  public function __construct(
+    EditableSyntax $keyword,
+    EditableSyntax $semicolon) {
+    parent::__construct('switch_fallthrough');
+    $this->_keyword = $keyword;
+    $this->_semicolon = $semicolon;
+  }
+  public function keyword(): EditableSyntax {
+    return $this->_keyword;
+  }
+  public function semicolon(): EditableSyntax {
+    return $this->_semicolon;
+  }
+  public function with_keyword(EditableSyntax $keyword): SwitchFallthrough {
+    return new SwitchFallthrough(
+      $keyword,
+      $this->_semicolon);
+  }
+  public function with_semicolon(EditableSyntax $semicolon): SwitchFallthrough {
+    return new SwitchFallthrough(
+      $this->_keyword,
+      $semicolon);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $keyword = $this->keyword()->rewrite($rewriter, $new_parents);
+    $semicolon = $this->semicolon()->rewrite($rewriter, $new_parents);
+    if (
+      $keyword === $this->keyword() &&
+      $semicolon === $this->semicolon()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new SwitchFallthrough(
+        $keyword,
+        $semicolon), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $keyword = EditableSyntax::from_json(
+      $json->fallthrough_keyword, $position, $source);
+    $position += $keyword->width();
+    $semicolon = EditableSyntax::from_json(
+      $json->fallthrough_semicolon, $position, $source);
+    $position += $semicolon->width();
+    return new SwitchFallthrough(
+        $keyword,
+        $semicolon);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_keyword;
+    yield $this->_semicolon;
     yield break;
   }
 }
@@ -14946,6 +15097,49 @@ final class XHPClassAttribute extends EditableSyntax {
     yield $this->_name;
     yield $this->_initializer;
     yield $this->_required;
+    yield break;
+  }
+}
+final class XHPSimpleClassAttribute extends EditableSyntax {
+  private EditableSyntax $_type;
+  public function __construct(
+    EditableSyntax $type) {
+    parent::__construct('xhp_simple_class_attribute');
+    $this->_type = $type;
+  }
+  public function type(): EditableSyntax {
+    return $this->_type;
+  }
+  public function with_type(EditableSyntax $type): XHPSimpleClassAttribute {
+    return new XHPSimpleClassAttribute(
+      $type);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $type = $this->type()->rewrite($rewriter, $new_parents);
+    if (
+      $type === $this->type()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new XHPSimpleClassAttribute(
+        $type), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $type = EditableSyntax::from_json(
+      $json->xhp_simple_class_attribute_type, $position, $source);
+    $position += $type->width();
+    return new XHPSimpleClassAttribute(
+        $type);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_type;
     yield break;
   }
 }

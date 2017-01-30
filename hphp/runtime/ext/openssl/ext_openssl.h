@@ -52,12 +52,16 @@ extern const int64_t k_OPENSSL_PKCS1_PADDING;
 #define OPENSSL_ALGO_RMD160     10
 #endif
 
+#if !defined(OPENSSL_NO_EC) && defined(EVP_PKEY_EC)
+#define HAVE_EVP_PKEY_EC 1
+#endif
+
 enum php_openssl_key_type {
   OPENSSL_KEYTYPE_RSA,
   OPENSSL_KEYTYPE_DSA,
   OPENSSL_KEYTYPE_DH,
   OPENSSL_KEYTYPE_DEFAULT = OPENSSL_KEYTYPE_RSA,
-#ifdef EVP_PKEY_EC
+#ifdef HAVE_EVP_PKEY_EC
   OPENSSL_KEYTYPE_EC = OPENSSL_KEYTYPE_DH + 1
 #endif
 };
@@ -214,6 +218,7 @@ Variant HHVM_FUNCTION(openssl_decrypt, const String& data, const String& method,
 Variant HHVM_FUNCTION(openssl_digest, const String& data, const String& method,
                                       bool raw_output = false);
 Array HHVM_FUNCTION(openssl_get_cipher_methods, bool aliases = false);
+Variant HHVM_FUNCTION(openssl_get_curve_names);
 Array HHVM_FUNCTION(openssl_get_md_methods, bool aliases = false);
 
 ///////////////////////////////////////////////////////////////////////////////

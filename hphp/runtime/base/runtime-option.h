@@ -303,6 +303,7 @@ struct RuntimeOption {
   static int64_t UnserializationBigMapThreshold;
 
   static std::string TakeoverFilename;
+  static std::string AdminServerIP;
   static int AdminServerPort;
   static int AdminThreadCount;
   static int AdminServerQueueToWorkerRatio;
@@ -606,10 +607,12 @@ struct RuntimeOption {
   /* only run eager-gc once at each surprise point (much faster) */     \
   F(bool, FilterGCPoints,              true)                            \
   F(bool, Quarantine,                  eagerGcDefault())                \
+  F(uint32_t, GCSampleRate,            0)                               \
+  F(int64_t, GCMinTrigger,             64L<<20)                         \
+  F(double, GCTriggerPct,              0.5)                             \
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
-  F(uint32_t, GCSampleRate,            0)                               \
-  F(uint32_t, StaticContentsLogRate,   100)                              \
+  F(uint32_t, StaticContentsLogRate,   100)                             \
   F(uint32_t, SerDesSampleRate,            0)                           \
   F(int, SimpleJsonMaxLength,        2 << 20)                           \
   F(uint32_t, JitSampleRate,               0)                           \
@@ -657,6 +660,8 @@ struct RuntimeOption {
   F(uint32_t, PerfMemEventSampleFreq, 80)                               \
   /* Sampling frequency for TC branch profiling. */                     \
   F(uint32_t, ProfBranchSampleFreq, 0)                                  \
+  /* Sampling frequency for profiling packed array accesses. */         \
+  F(uint32_t, ProfPackedArraySampleFreq, 0)                             \
   /* */
 
 private:

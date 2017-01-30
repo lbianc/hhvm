@@ -71,6 +71,10 @@ struct EmitUnitState {
 
 //////////////////////////////////////////////////////////////////////
 
+php::SrcLoc srcLoc(const php::Func& func, int32_t ix) {
+  return ix >= 0 ? func.unit->srcLocs[ix] : php::SrcLoc{};
+}
+
 /*
  * Order the blocks for bytecode emission.
  *
@@ -175,22 +179,6 @@ struct EmitBcInfo {
   std::vector<BlockInfo> blockInfo;
 };
 
-MemberKey make_member_key(MKey mkey) {
-  switch (mkey.mcode) {
-    case MEC: case MPC:
-      return MemberKey{mkey.mcode, mkey.idx};
-    case MEL: case MPL:
-      return MemberKey{mkey.mcode, int32_t(mkey.local->id)};
-    case MET: case MPT: case MQT:
-      return MemberKey{mkey.mcode, mkey.litstr};
-    case MEI:
-      return MemberKey{mkey.mcode, mkey.int64};
-    case MW:
-      return MemberKey{};
-  }
-  not_reached();
-}
-
 EmitBcInfo emit_bytecode(EmitUnitState& euState,
                          UnitEmitter& ue,
                          const php::Func& func) {
@@ -208,13 +196,38 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
   // allocated in the loop.)
   std::vector<uint8_t> immVec;
 
+  auto map_local = [&] (LocalId id) {
+    auto const loc = func.locals[id];
+    assert(!loc.killed);
+    assert(loc.id <= id);
+    return loc.id;
+  };
+
+  auto make_member_key = [&] (MKey mkey) {
+    switch (mkey.mcode) {
+      case MEC: case MPC:
+        return MemberKey{mkey.mcode, mkey.idx};
+      case MEL: case MPL:
+        return MemberKey{
+          mkey.mcode, static_cast<int32_t>(map_local(mkey.local))
+        };
+      case MET: case MPT: case MQT:
+        return MemberKey{mkey.mcode, mkey.litstr};
+      case MEI:
+        return MemberKey{mkey.mcode, mkey.int64};
+      case MW:
+        return MemberKey{};
+    }
+    not_reached();
+  };
+
   auto emit_inst = [&] (const Bytecode& inst) {
     auto const startOffset = ue.bcPos();
 
-    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(inst),
-      show(inst.srcLoc));
+    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(&func, inst),
+           show(srcLoc(func, inst.srcLoc)));
 
-    auto emit_vsa = [&] (const std::vector<SString>& keys) {
+    auto emit_vsa = [&] (const CompactVector<SString>& keys) {
       auto n = keys.size();
       ue.emitInt32(n);
       for (size_t i = 0; i < n; ++i) {
@@ -222,8 +235,8 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
       }
     };
 
-    auto emit_branch = [&] (const php::Block& target) {
-      auto& info = blockInfo[target.id];
+    auto emit_branch = [&] (BlockId id) {
+      auto& info = blockInfo[id];
 
       if (info.expectedStackDepth) {
         assert(*info.expectedStackDepth == currentStackDepth);
@@ -241,31 +254,32 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 
     auto emit_switch = [&] (const SwitchTab& targets) {
       ue.emitInt32(targets.size());
-      for (auto& t : targets) emit_branch(*t);
+      for (auto t : targets) emit_branch(t);
     };
 
     auto emit_sswitch = [&] (const SSwitchTab& targets) {
       ue.emitInt32(targets.size());
       for (size_t i = 0; i < targets.size() - 1; ++i) {
         ue.emitInt32(ue.mergeLitstr(targets[i].first));
-        emit_branch(*targets[i].second);
+        emit_branch(targets[i].second);
       }
       ue.emitInt32(-1);
-      emit_branch(*targets[targets.size() - 1].second);
+      emit_branch(targets[targets.size() - 1].second);
     };
 
     auto emit_itertab = [&] (const IterTab& iterTab) {
       ue.emitInt32(iterTab.size());
       for (auto& kv : iterTab) {
         ue.emitInt32(kv.first);
-        ue.emitInt32(kv.second->id);
+        ue.emitInt32(kv.second);
       }
     };
 
     auto emit_srcloc = [&] {
-      if (!inst.srcLoc.isValid()) return;
-      Location::Range loc(inst.srcLoc.start.line, inst.srcLoc.start.col,
-                          inst.srcLoc.past.line, inst.srcLoc.past.col);
+      auto const sl = srcLoc(func, inst.srcLoc);
+      if (!sl.isValid()) return;
+      Location::Range loc(sl.start.line, sl.start.col,
+                          sl.past.line, sl.past.col);
       ue.recordSourceLocation(loc, startOffset);
     };
 
@@ -306,22 +320,31 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
       euState.defClsMap[id] = startOffset;
     };
 
+    auto emit_lar = [&](const LocalRange& range) {
+      always_assert(range.first + range.restCount < func.locals.size());
+      auto const first = map_local(range.first);
+      DEBUG_ONLY auto const last = map_local(range.first + range.restCount);
+      assert(last - first == range.restCount);
+      encodeLocalRange(ue, HPHP::LocalRange{first, range.restCount});
+    };
+
 #define IMM_BLA(n)     emit_switch(data.targets);
 #define IMM_SLA(n)     emit_sswitch(data.targets);
 #define IMM_ILA(n)     emit_itertab(data.iterTab);
 #define IMM_IVA(n)     ue.emitIVA(data.arg##n);
 #define IMM_I64A(n)    ue.emitInt64(data.arg##n);
-#define IMM_LA(n)      ue.emitIVA(data.loc##n->id);
-#define IMM_IA(n)      ue.emitIVA(data.iter##n->id);
+#define IMM_LA(n)      ue.emitIVA(map_local(data.loc##n));
+#define IMM_IA(n)      ue.emitIVA(data.iter##n);
 #define IMM_DA(n)      ue.emitDouble(data.dbl##n);
 #define IMM_SA(n)      ue.emitInt32(ue.mergeLitstr(data.str##n));
 #define IMM_RATA(n)    encodeRAT(ue, data.rat);
 #define IMM_AA(n)      ue.emitInt32(ue.mergeArray(data.arr##n));
 #define IMM_OA_IMPL(n) ue.emitByte(static_cast<uint8_t>(data.subop##n));
 #define IMM_OA(type)   IMM_OA_IMPL
-#define IMM_BA(n)      emit_branch(*data.target);
+#define IMM_BA(n)      emit_branch(data.target);
 #define IMM_VSA(n)     emit_vsa(data.keys);
 #define IMM_KA(n)      encode_member_key(make_member_key(data.mkey), ue);
+#define IMM_LAR(n)     emit_lar(data.locrange);
 
 #define IMM_NA
 #define IMM_ONE(x)           IMM_##x(1)
@@ -391,6 +414,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #undef IMM_OA
 #undef IMM_VSA
 #undef IMM_KA
+#undef IMM_LAR
 
 #undef IMM_NA
 #undef IMM_ONE
@@ -448,8 +472,9 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 
     for (auto& inst : b->hhbcs) emit_inst(inst);
 
-    if (b->fallthrough) {
-      if (std::next(blockIt) == endBlockIt || blockIt[1] != b->fallthrough) {
+    if (b->fallthrough != NoBlockId) {
+      if (std::next(blockIt) == endBlockIt ||
+          blockIt[1]->id != b->fallthrough) {
         if (b->fallthroughNS) {
           emit_inst(bc::JmpNS { b->fallthrough });
         } else {
@@ -471,7 +496,8 @@ void emit_locals_and_params(FuncEmitter& fe,
   Id id = 0;
 
   for (auto& loc : func.locals) {
-    if (id < func.params.size()) {
+    if (loc.id < func.params.size()) {
+      assert(!loc.killed);
       auto& param = func.params[id];
       FuncEmitter::ParamInfo pinfo;
       pinfo.defaultValue = param.defaultValue;
@@ -482,23 +508,24 @@ void emit_locals_and_params(FuncEmitter& fe,
       pinfo.builtinType = param.builtinType;
       pinfo.byRef = param.byRef;
       pinfo.variadic = param.isVariadic;
-      fe.appendParam(func.locals[id]->name, pinfo);
+      fe.appendParam(func.locals[id].name, pinfo);
       if (auto const dv = param.dvEntryPoint) {
         fe.params[id].funcletOff = info.blockInfo[dv->id].offset;
       }
-    } else {
-      if (loc->name) {
-        fe.allocVarId(loc->name);
-        assert(fe.lookupVarId(loc->name) == id);
+      ++id;
+    } else if (!loc.killed) {
+      if (loc.name) {
+        fe.allocVarId(loc.name);
+        assert(fe.lookupVarId(loc.name) == id);
+        assert(loc.id == id);
       } else {
         fe.allocUnnamedLocal();
       }
+      ++id;
     }
-
-    ++id;
   }
   assert(fe.numLocals() == id);
-  fe.setNumIterators(func.iters.size());
+  fe.setNumIterators(func.numIters);
 
   for (auto& sv : func.staticLocals) {
     fe.staticVars.push_back(Func::SVInfo {sv.name, sv.phpCode});
@@ -542,7 +569,7 @@ void emit_eh_region(FuncEmitter& fe,
       for (auto& c : tr.catches) {
         eh.m_catches.emplace_back(
           fe.ue().mergeLitstr(c.first),
-          blockInfo[c.second->id].offset
+          blockInfo[c.second].offset
         );
       }
       eh.m_fault = kInvalidOffset;
@@ -551,7 +578,7 @@ void emit_eh_region(FuncEmitter& fe,
     },
     [&] (const php::FaultRegion& fr) {
       eh.m_type = EHEnt::Type::Fault;
-      eh.m_fault = blockInfo[fr.faultEntry->id].offset;
+      eh.m_fault = blockInfo[fr.faultEntry].offset;
       eh.m_iterId = fr.iterId;
       eh.m_itRef = fr.itRef;
     }
@@ -797,6 +824,7 @@ void emit_finish_func(EmitUnitState& state,
   fe.isGenerator = func.isGenerator;
   fe.isPairGenerator = func.isPairGenerator;
   fe.isNative = func.isNative;
+  fe.isMemoizeWrapper = func.isMemoizeWrapper;
   fe.dynCallWrapperId = func.dynCallWrapperId;
 
   auto const retTy = state.index.lookup_return_type_raw(&func);
@@ -834,6 +862,17 @@ void emit_finish_func(EmitUnitState& state,
 }
 
 void emit_init_func(FuncEmitter& fe, const php::Func& func) {
+  Id id = 0;
+
+  for (auto& loc : const_cast<php::Func&>(func).locals) {
+    if (loc.killed) {
+      // make sure its out of range, in case someone tries to read it.
+      loc.id = INT_MAX;
+    } else {
+      loc.id = id++;
+    }
+  }
+
   fe.init(
     std::get<0>(func.srcInfo.loc),
     std::get<1>(func.srcInfo.loc),

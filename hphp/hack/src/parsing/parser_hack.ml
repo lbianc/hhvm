@@ -403,7 +403,7 @@ let identifier env =
 (* $variable *)
 let variable env =
   match L.token env.file env.lb with
-  | Tlvar | Tdollardollar ->
+  | Tlvar  ->
       Pos.make env.file env.lb, Lexing.lexeme env.lb
   | _ ->
       error_expect env "variable";
@@ -414,15 +414,18 @@ let ref_variable env =
   let is_ref = ref_opt env in
   (variable env, is_ref)
 
-(* &...$arg *)
-let ref_param env =
+(* &...$parameter *)
+let ref_param is_variadic_already env =
   let is_ref = ref_opt env in
-  let is_variadic = match L.token env.file env.lb with
+  (* If the parameter is already variadic -- because it was prefixed with ... --
+  then we must not check to see if there is a ... before the variable. *)
+  let is_variadic_prefix = if is_variadic_already then false
+  else match L.token env.file env.lb with
     | Tellipsis -> true
     | _ -> L.back env.lb; false
   in
   let var = variable env in
-  is_ref, is_variadic, var
+  is_ref, is_variadic_prefix, var
 
 (*****************************************************************************)
 (* Entry point *)
@@ -2395,10 +2398,30 @@ and echo_args env =
 (*****************************************************************************)
 
 and parameter_list env =
+  (* A parameter list follows one of these five patterns:
+
+    (  )
+    ( normal-parameters )
+    ( normal-parameters  ,  )
+    ( variadic-parameter  )
+    ( normal-parameters  ,  variadic-parameter  )
+
+    A variadic parameter follows one of these two patterns:
+
+    ...
+    optional-attributes optional-type  ...  $variable
+
+    Note that:
+    * A variadic parameter is never followed by a comma
+    * A variadic parameter with a type must also have a variable.
+
+ *)
   expect env Tlp;
   parameter_list_remain env
 
 and parameter_list_remain env =
+  (* We have either just parsed the left paren that opens a parameter list,
+  or a normal parameter -- possibly ending in a comma. *)
   match L.token env.file env.lb with
   | Trp -> []
   | Tellipsis ->
@@ -2422,7 +2445,6 @@ and parameter_list_remain env =
 and parameter_varargs env =
   let pos = Pos.make env.file env.lb in
   (match L.token env.file env.lb with
-    | Tcomma -> expect env Trp; make_param_ellipsis pos
     | Trp -> make_param_ellipsis pos;
     | _ ->
       L.back env.lb;
@@ -2444,16 +2466,16 @@ and param ~variadic env =
   let attrs = attribute env in
   let modifs = parameter_modifier env in
   let h = parameter_hint env in
-  let is_ref, variadic_after_hint, name = ref_param env in
-  assert ((not variadic_after_hint) || (not variadic));
-  let variadic = variadic || variadic_after_hint in
+  let is_ref, variadic_prefix, name = ref_param variadic env in
+  assert ((not variadic_prefix) || (not variadic));
+  let variadic = variadic || variadic_prefix in
   let default = parameter_default env in
   let default =
     if variadic && default <> None then
       let () = error env "Variadic arguments don't have default values" in
       None
     else default in
-  if variadic_after_hint then begin
+  if variadic_prefix then begin
     expect env Trp;
     L.back env.lb
   end else ();

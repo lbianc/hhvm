@@ -19,6 +19,7 @@
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/base/repo-auth-type-array.h"
 #include "hphp/runtime/vm/func.h"
+
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/edge.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
@@ -30,11 +31,13 @@
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/simplify.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
+#include "hphp/runtime/vm/jit/type-array-elem.h"
 #include "hphp/runtime/vm/jit/type.h"
 
-#include "hphp/util/arena.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_static-wait-handle.h"
+
+#include "hphp/util/arena.h"
 
 #include <folly/Range.h>
 
@@ -406,6 +409,16 @@ Type callReturn(const IRInstruction* inst) {
   not_reached();
 }
 
+// Integers get mapped to integer memo keys, everything else gets mapped to
+// strings.
+Type memoKeyReturn(const IRInstruction* inst) {
+  assertx(inst->is(GetMemoKey));
+  auto const srcType = inst->src(0)->type();
+  if (srcType <= TInt) return TInt;
+  if (!srcType.maybe(TInt)) return TStr;
+  return TInt | TStr;
+}
+
 template <uint32_t...> struct IdxSeq {};
 
 inline Type unionReturn(const IRInstruction* inst, IdxSeq<>) { return TBottom; }
@@ -455,6 +468,7 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #define DCns            return TUninit | TInitNull | TBool | \
                                TInt | TDbl | TStr | TRes;
 #define DUnion(...)     return unionReturn(inst, IdxSeq<__VA_ARGS__>{});
+#define DMemoKey        return memoKeyReturn(inst);
 
 #define O(name, dstinfo, srcinfo, flags) case name: dstinfo not_reached();
 
@@ -491,6 +505,7 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #undef DSubtract
 #undef DCns
 #undef DUnion
+#undef DMemoKey
 }
 
 }}

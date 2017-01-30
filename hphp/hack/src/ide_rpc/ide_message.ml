@@ -15,6 +15,7 @@
  *)
 
 type position = File_content.content_pos
+type range = File_content.content_range
 type text_edit = File_content.code_edit
 type error = Pos.absolute Errors.error_
 
@@ -26,6 +27,9 @@ type file_position = {
 type request =
   | Init of init_params
   | Autocomplete of file_position
+  | Infer_type of file_position
+  | Identify_symbol of file_position
+  | Outline of string
   | Did_open_file of did_open_file_params
   | Did_close_file of did_close_file_params
   | Did_change_file of did_change_file_params
@@ -57,6 +61,10 @@ and did_change_file_params = {
 type response =
   | Init_response of init_response
   | Autocomplete_response of autocomplete_response
+  | Infer_type_response of infer_type_response
+  | Identify_symbol_response of identify_symbol_response
+  | Symbol_by_id_response of symbol_by_id_response
+  | Outline_response of outline_response
   | Diagnostics_notification of diagnostics_notification
 
 and init_response = {
@@ -71,18 +79,31 @@ and autocomplete_item = {
   callable_details : callable_details option;
 }
 
+and infer_type_response = string option
+
 and callable_details = {
   return_type : string;
-  params : callable_param list;
+  callable_params : callable_param list;
 }
 
 and callable_param = {
-  name : string;
-  type_ : string;
+  callable_param_name : string;
+  callable_param_type : string;
 }
 
+and identify_symbol_response = identify_symbol_item list
+
+and identify_symbol_item = {
+  occurrence : string SymbolOccurrence.t;
+  definition : string SymbolDefinition.t option;
+}
+
+and outline_response = string SymbolDefinition.t list
+
+and symbol_by_id_response = string SymbolDefinition.t option
+
 and diagnostics_notification = {
-  subscription_id : int; (* Nuclide-rpc spcific *)
+  subscription_id : int; (* Nuclide-rpc specific *)
   diagnostics_notification_filename : string;
   diagnostics : error list;
 }

@@ -106,9 +106,9 @@ struct Block {
    * and Precise Modeling of Exceptions for the Analysis of Java
    * Programs" (http://dl.acm.org/citation.cfm?id=316171).
    */
-  borrowed_ptr<Block> fallthrough;
+  BlockId fallthrough{NoBlockId};
   bool fallthroughNS = false;
-  std::vector<borrowed_ptr<Block>> factoredExits;
+  std::vector<BlockId> factoredExits;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -142,11 +142,11 @@ struct Block {
  * php-level finally blocks cloned into fault funclets).
  */
 
-struct FaultRegion { borrowed_ptr<Block> faultEntry;
+struct FaultRegion { BlockId faultEntry;
                      Id iterId;
                      bool itRef; };
 
-using CatchEnt     = std::pair<const StringData*,borrowed_ptr<Block>>;
+using CatchEnt     = std::pair<const StringData*,BlockId>;
 struct TryRegion   { std::vector<CatchEnt> catches; };
 
 struct ExnNode {
@@ -226,15 +226,9 @@ struct Param {
  * nullptr, for unnamed locals.
  */
 struct Local {
-  SString name;
-  uint32_t id;
-};
-
-/*
- * Metadata about function iterator variables.
- */
-struct Iter {
-  uint32_t id;
+  SString  name;
+  uint32_t id     : 31;
+  uint32_t killed : 1;
 };
 
 /*
@@ -283,8 +277,8 @@ struct Func {
    * vector).
    */
   std::vector<Param> params;
-  std::vector<std::unique_ptr<Local>> locals;
-  std::vector<std::unique_ptr<Iter>> iters;
+  std::vector<Local> locals;
+  IterId             numIters;
   std::vector<StaticLocalInfo> staticLocals;
 
   /*
@@ -319,6 +313,8 @@ struct Func {
    * This is an HNI function
    */
   bool isNative : 1;
+
+  bool isMemoizeWrapper : 1;
 
   /*
    * All owning pointers to blocks are in this vector, which has the
@@ -554,6 +550,7 @@ struct Unit {
   std::vector<std::unique_ptr<Func>> funcs;
   std::vector<std::unique_ptr<Class>> classes;
   std::vector<std::unique_ptr<TypeAlias>> typeAliases;
+  std::vector<SrcLoc> srcLocs;
 };
 
 /*
@@ -569,7 +566,7 @@ std::string show(const Func&);
 std::string show(const Class&);
 std::string show(const Unit&);
 std::string show(const Program&);
-std::string local_string(borrowed_ptr<const php::Local>);
+std::string local_string(const Func&, LocalId);
 
 //////////////////////////////////////////////////////////////////////
 

@@ -61,8 +61,11 @@ bool ignoresStackInput(Op op) {
   switch (op) {
   case Op::UnboxRNop:
   case Op::BoxRNop:
+  case Op::UGetCUNop:
+  case Op::CGetCUNop:
   case Op::FPassVNop:
   case Op::FPassC:
+  case Op::PopU:
     return true;
   default:
     return false;
@@ -95,18 +98,18 @@ void insert_assertions_step(ArrayTypeTable::Builder& arrTable,
                             Gen gen) {
   if (state.unreachable) return;
 
-  for (size_t i = 0; i < state.locals.size(); ++i) {
+  for (LocalId i = 0; i < state.locals.size(); ++i) {
+    if (func.locals[i].killed) continue;
     if (options.FilterAssertions) {
+      // MemoGet and MemoSet read from a range of locals, but don't gain any
+      // benefit from knowing their types.
+      if (bcode.op == Op::MemoGet || bcode.op == Op::MemoSet) continue;
       if (i < mayReadLocalSet.size() && !mayReadLocalSet.test(i)) {
         continue;
       }
     }
     auto const realT = state.locals[i];
-    auto const op = makeAssert<bc::AssertRATL>(
-      arrTable,
-      borrow(func.locals[i]),
-      realT
-    );
+    auto const op = makeAssert<bc::AssertRATL>(arrTable, i, realT);
     if (op) gen(*op);
   }
 
@@ -114,7 +117,7 @@ void insert_assertions_step(ArrayTypeTable::Builder& arrTable,
 
   auto const assert_stack = [&] (size_t idx) {
     assert(idx < state.stack.size());
-    auto const realT = state.stack[state.stack.size() - idx - 1];
+    auto const realT = state.stack[state.stack.size() - idx - 1].type;
     auto const flav  = stack_flav(realT);
 
     if (flav.subtypeOf(TCls)) return;
@@ -241,6 +244,7 @@ bool hasObviousStackOutput(Op op) {
   case Op::EmptyS:
   case Op::IsTypeC:
   case Op::IsTypeL:
+  case Op::IsUninit:
   case Op::OODeclExists:
     return true;
 
@@ -272,12 +276,12 @@ void insert_assertions(const Index& index,
   CollectedInfo collect { index, ctx, nullptr, nullptr };
   auto interp = Interp { index, ctx, collect, blk, state };
   for (auto& op : blk->hhbcs) {
-    FTRACE(2, "  == {}\n", show(op));
+    FTRACE(2, "  == {}\n", show(ctx.func, op));
 
     auto gen = [&] (const Bytecode& newb) {
       newBCs.push_back(newb);
       newBCs.back().srcLoc = op.srcLoc;
-      FTRACE(2, "   + {}\n", show(newBCs.back()));
+      FTRACE(2, "   + {}\n", show(ctx.func, newBCs.back()));
 
       lastStackOutputObvious =
         newb.numPush() != 0 && hasObviousStackOutput(newb.op);
@@ -313,7 +317,7 @@ bool propagate_constants(const Bytecode& op, const State& state, Gen gen) {
   // All outputs of the instruction must have constant types for this
   // to be allowed.
   for (auto i = size_t{0}; i < numPush; ++i) {
-    if (!tv(state.stack[stkSize - i - 1])) return false;
+    if (!tv(state.stack[stkSize - i - 1].type)) return false;
   }
 
   // Pop the inputs, and push the constants.
@@ -329,6 +333,10 @@ bool propagate_constants(const Bytecode& op, const State& state, Gen gen) {
     case Flavor::F:  not_reached();    break;
     case Flavor::U:  not_reached();    break;
     case Flavor::CR: not_reached();    break;
+    case Flavor::CUV:
+      // We only support C's for CUV right now.
+      gen(bc::PopC {});
+      break;
     case Flavor::CVU:
       // Note that we only support C's for CVU so far (this only comes up with
       // FCallBuiltin)---we'll fail the verifier if something changes to send
@@ -339,7 +347,7 @@ bool propagate_constants(const Bytecode& op, const State& state, Gen gen) {
   }
 
   for (auto i = size_t{0}; i < numPush; ++i) {
-    auto const v = tv(state.stack[stkSize - i - 1]);
+    auto const v = tv(state.stack[stkSize - i - 1].type);
     switch (v->m_type) {
     case KindOfUninit:        not_reached();          break;
     case KindOfNull:          gen(bc::Null {});       break;
@@ -453,12 +461,12 @@ void first_pass(const Index& index,
   std::vector<Op> srcStack(state.stack.size(), Op::LowInvalid);
 
   for (auto& op : blk->hhbcs) {
-    FTRACE(2, "  == {}\n", show(op));
+    FTRACE(2, "  == {}\n", show(ctx.func, op));
 
     auto const stateIn = state; // Peephole expects input eval state.
     auto gen = [&,srcStack] (const Bytecode& newBC) {
       const_cast<Bytecode&>(newBC).srcLoc = op.srcLoc;
-      FTRACE(2, "   + {}\n", show(newBC));
+      FTRACE(2, "   + {}\n", show(ctx.func, newBC));
       if (options.Peephole) {
         peephole.append(newBC, stateIn, srcStack);
       } else {
@@ -493,14 +501,14 @@ void first_pass(const Index& index,
         gen(bc::BreakTraceHint {});
       }
       if (state.fpiStack.empty()) {
-        if (!blk->fallthrough ||
-            ainfo.bdata[blk->fallthrough->id].stateIn.initialized) {
+        if (blk->fallthrough == NoBlockId ||
+            ainfo.bdata[blk->fallthrough].stateIn.initialized) {
           auto const fatal = make_block(ainfo, blk, state);
           fatal->hhbcs = {
             bc_with_loc(op.srcLoc, bc::String { s_unreachable.get() }),
             bc_with_loc(op.srcLoc, bc::Fatal { FatalOp::Runtime })
           };
-          blk->fallthrough = fatal;
+          blk->fallthrough = fatal->id;
         }
         break;
       }

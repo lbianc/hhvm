@@ -34,7 +34,7 @@ let parse_init method_name params =
   Result.Ok (Init params)
 
 let parse_did_open_file_params params =
-  get_filename_filed params >>= fun did_open_file_filename ->
+  get_filename_field params >>= fun did_open_file_filename ->
   get_text_field params >>= fun did_open_file_text ->
   Result.Ok { did_open_file_filename; did_open_file_text; }
 
@@ -43,10 +43,28 @@ let parse_did_open_file method_name params =
   parse_did_open_file_params >>= fun params ->
   Result.Ok (Did_open_file params)
 
+let parse_infer_type method_name params =
+  assert_params_required method_name params >>=
+  get_file_position_field >>= fun file_position ->
+  Result.Ok (Infer_type file_position)
+
+let parse_identify_symbol method_name params =
+  assert_params_required method_name params >>=
+  get_file_position_field >>= fun file_position ->
+  Result.Ok (Identify_symbol file_position)
+
+let parse_outline method_name params =
+  assert_params_required method_name params >>=
+  get_filename_field >>= fun filename ->
+  Result.Ok (Outline filename)
+
 let parse_method method_name params = match method_name with
   | "init" -> parse_init method_name params
   | "didOpenFile" -> parse_did_open_file method_name params
   | "autocomplete" -> delegate_to_previous_version "getCompletions" params
+  | "inferType" -> parse_infer_type method_name params
+  | "identifySymbol" -> parse_identify_symbol method_name params
+  | "outline" -> parse_outline method_name params
   | _ -> delegate_to_previous_version method_name params
 
 let parse ~method_name ~params =

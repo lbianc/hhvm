@@ -15,27 +15,68 @@ let chunk_size = 65536
 (** Reuse the buffer for reading. Just an allocation optimization. *)
 let buffer = String.create chunk_size
 
+(** Read from the FD if there is something to be read. This should only be
+ * done after the child process has exited. *)
+let rec maybe_consume fd acc =
+  match Unix.select [fd] [] [] 0.0 with
+  | [], _, _ -> acc
+  | _ ->
+    let bytes_read = Unix.read fd buffer 0 chunk_size in
+    if bytes_read = 0 then
+      acc
+    else
+      let chunk = String.sub buffer 0 bytes_read in
+      maybe_consume fd (chunk :: acc)
+
 (** Recursively read from fds. If EOF is reached, remove that
- * fd from fds; terminatin when fds is empty.
+ * fd from fds; termination when fds is empty.
  *
  * fd and err_fd helps us track which accumulator to put the read
- * data from. *)
+ * data from.
+ *
+ * The implementation is a little complicated because:
+ *   (1) The pipe can get filled up and the child process will pause
+ *       until it's emptied out.
+ *   (2) If the child process itself forks a grandchild, the
+ *       granchild will unknowingly inherit the pipe's file descriptors;
+ *       in this case, the pipe will not provide an EOF as you'd expect.
+ *
+ * Due to (1), we can't just blockingly waitpid followed by reading the
+ * data from the pipe.
+ *
+ * Due to (2), we can't just read data from the pipes until an EOF is
+ * reached and then do a waitpid.
+ *
+ * We must do some weird alternating between them.
+ *)
 let rec read_and_close_pid fd err_fd fds pid acc acc_err =
   if fds = [] then
+    (** EOF has been reached for all FDs. Waitpid and return result. *)
     let () = Unix.close fd in
     let () = Unix.close err_fd in
     match Unix.waitpid [] pid with
-    | _, Unix.WEXITED 0 ->
-      let result = String.concat "" (List.rev acc) in
-      result
     | _, status ->
+      let result = String.concat "" (List.rev acc) in
       let err = String.concat "" (List.rev acc_err) in
-      raise (Process_types.Process_exited_with_error (status, err))
+      status, result, err
   else
-    let ready_fds, _, _ = Unix.select fds [] [] 9999999.9 in
-    if ready_fds = [] then
-       raise Process_types.Select_timed_out
+    let ready_fds, _, _ = Unix.select fds [] [] 0.1 in
+    if ready_fds = [] then begin
+      (** Here's where we switch from attempting to read from pipe to
+       * attempting a non-blocking waitpid. *)
+      match Unix.waitpid [Unix.WNOHANG] pid with
+      | i, status when i = pid ->
+        let acc = maybe_consume fd acc in
+        let out = String.concat "" (List.rev acc) in
+        let acc_err = maybe_consume err_fd acc_err in
+        let err = String.concat "" (List.rev acc_err) in
+        status, out, err
+      | _ ->
+        (** Process has not exited. Keep going. *)
+        read_and_close_pid fd err_fd fds pid acc acc_err
+    end
     else
+
     let fds, acc, acc_err = List.fold_left ready_fds ~init:(fds, acc, acc_err)
     ~f:begin fun (fds, acc, acc_err) fd ->
       let bytes_read = Unix.read fd buffer 0 chunk_size in
@@ -56,15 +97,7 @@ let rec read_and_close_pid fd err_fd fds pid acc acc_err =
    stdout_fd;
    stderr_fd;
    pid; } =
-   try read_and_close_pid
-     stdout_fd stderr_fd [stdout_fd; stderr_fd] pid [] [] with
-     | Process_types.Process_exited_with_error (_, stderr) as e ->
-       let user = Option.value (Sys_utils.getenv_user ()) ~default:"" in
-       let home = Option.value (Sys_utils.getenv_home ()) ~default:"" in
-       let () = Printf.eprintf
-         "Process failed. See also env USER=%s. HOME=%s\n" user home in
-       let () = Printf.eprintf "Stderr:%s\n" stderr in
-       raise e
+     read_and_close_pid stdout_fd stderr_fd [stdout_fd; stderr_fd] pid [] []
 
 let exec prog ?env args =
   let args = Array.of_list (prog :: args) in

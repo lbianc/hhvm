@@ -276,6 +276,9 @@ module WithToken(Token: TokenType) = struct
       parameter_name: t;
       parameter_default_value: t;
     }
+    and variadic_parameter = {
+      variadic_parameter_ellipsis: t;
+    }
     and attribute_specification = {
       attribute_specification_left_double_angle: t;
       attribute_specification_attributes: t;
@@ -400,6 +403,11 @@ module WithToken(Token: TokenType) = struct
     and switch_section = {
       switch_section_labels: t;
       switch_section_statements: t;
+      switch_section_fallthrough: t;
+    }
+    and switch_fallthrough = {
+      fallthrough_keyword: t;
+      fallthrough_semicolon: t;
     }
     and case_label = {
       case_keyword: t;
@@ -671,6 +679,9 @@ module WithToken(Token: TokenType) = struct
       xhp_attribute_decl_initializer: t;
       xhp_attribute_decl_required: t;
     }
+    and xhp_simple_class_attribute = {
+      xhp_simple_class_attribute_type: t;
+    }
     and xhp_attribute = {
       xhp_attribute_name: t;
       xhp_attribute_equal: t;
@@ -853,6 +864,7 @@ module WithToken(Token: TokenType) = struct
     | TypeConstDeclaration of type_const_declaration
     | DecoratedExpression of decorated_expression
     | ParameterDeclaration of parameter_declaration
+    | VariadicParameter of variadic_parameter
     | AttributeSpecification of attribute_specification
     | Attribute of attribute
     | InclusionExpression of inclusion_expression
@@ -872,6 +884,7 @@ module WithToken(Token: TokenType) = struct
     | ForeachStatement of foreach_statement
     | SwitchStatement of switch_statement
     | SwitchSection of switch_section
+    | SwitchFallthrough of switch_fallthrough
     | CaseLabel of case_label
     | DefaultLabel of default_label
     | ReturnStatement of return_statement
@@ -922,6 +935,7 @@ module WithToken(Token: TokenType) = struct
     | XHPRequired of xhp_required
     | XHPClassAttributeDeclaration of xhp_class_attribute_declaration
     | XHPClassAttribute of xhp_class_attribute
+    | XHPSimpleClassAttribute of xhp_simple_class_attribute
     | XHPAttribute of xhp_attribute
     | XHPOpen of xhp_open
     | XHPExpression of xhp_expression
@@ -1033,6 +1047,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.DecoratedExpression
       | ParameterDeclaration _ ->
         SyntaxKind.ParameterDeclaration
+      | VariadicParameter _ ->
+        SyntaxKind.VariadicParameter
       | AttributeSpecification _ ->
         SyntaxKind.AttributeSpecification
       | Attribute _ ->
@@ -1071,6 +1087,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.SwitchStatement
       | SwitchSection _ ->
         SyntaxKind.SwitchSection
+      | SwitchFallthrough _ ->
+        SyntaxKind.SwitchFallthrough
       | CaseLabel _ ->
         SyntaxKind.CaseLabel
       | DefaultLabel _ ->
@@ -1171,6 +1189,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.XHPClassAttributeDeclaration
       | XHPClassAttribute _ ->
         SyntaxKind.XHPClassAttribute
+      | XHPSimpleClassAttribute _ ->
+        SyntaxKind.XHPSimpleClassAttribute
       | XHPAttribute _ ->
         SyntaxKind.XHPAttribute
       | XHPOpen _ ->
@@ -1298,6 +1318,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.DecoratedExpression
     let is_parameter_declaration node =
       kind node = SyntaxKind.ParameterDeclaration
+    let is_variadic_parameter node =
+      kind node = SyntaxKind.VariadicParameter
     let is_attribute_specification node =
       kind node = SyntaxKind.AttributeSpecification
     let is_attribute node =
@@ -1336,6 +1358,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.SwitchStatement
     let is_switch_section node =
       kind node = SyntaxKind.SwitchSection
+    let is_switch_fallthrough node =
+      kind node = SyntaxKind.SwitchFallthrough
     let is_case_label node =
       kind node = SyntaxKind.CaseLabel
     let is_default_label node =
@@ -1436,6 +1460,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.XHPClassAttributeDeclaration
     let is_xhp_class_attribute node =
       kind node = SyntaxKind.XHPClassAttribute
+    let is_xhp_simple_class_attribute node =
+      kind node = SyntaxKind.XHPSimpleClassAttribute
     let is_xhp_attribute node =
       kind node = SyntaxKind.XHPAttribute
     let is_xhp_open node =
@@ -1892,6 +1918,12 @@ module WithToken(Token: TokenType) = struct
       parameter_default_value
     )
 
+    let get_variadic_parameter_children {
+      variadic_parameter_ellipsis;
+    } = (
+      variadic_parameter_ellipsis
+    )
+
     let get_attribute_specification_children {
       attribute_specification_left_double_angle;
       attribute_specification_attributes;
@@ -2137,9 +2169,19 @@ module WithToken(Token: TokenType) = struct
     let get_switch_section_children {
       switch_section_labels;
       switch_section_statements;
+      switch_section_fallthrough;
     } = (
       switch_section_labels,
-      switch_section_statements
+      switch_section_statements,
+      switch_section_fallthrough
+    )
+
+    let get_switch_fallthrough_children {
+      fallthrough_keyword;
+      fallthrough_semicolon;
+    } = (
+      fallthrough_keyword,
+      fallthrough_semicolon
     )
 
     let get_case_label_children {
@@ -2680,6 +2722,12 @@ module WithToken(Token: TokenType) = struct
       xhp_attribute_decl_name,
       xhp_attribute_decl_initializer,
       xhp_attribute_decl_required
+    )
+
+    let get_xhp_simple_class_attribute_children {
+      xhp_simple_class_attribute_type;
+    } = (
+      xhp_simple_class_attribute_type
     )
 
     let get_xhp_attribute_children {
@@ -3314,6 +3362,11 @@ module WithToken(Token: TokenType) = struct
         parameter_name;
         parameter_default_value;
       ]
+      | VariadicParameter {
+        variadic_parameter_ellipsis;
+      } -> [
+        variadic_parameter_ellipsis;
+      ]
       | AttributeSpecification {
         attribute_specification_left_double_angle;
         attribute_specification_attributes;
@@ -3541,9 +3594,18 @@ module WithToken(Token: TokenType) = struct
       | SwitchSection {
         switch_section_labels;
         switch_section_statements;
+        switch_section_fallthrough;
       } -> [
         switch_section_labels;
         switch_section_statements;
+        switch_section_fallthrough;
+      ]
+      | SwitchFallthrough {
+        fallthrough_keyword;
+        fallthrough_semicolon;
+      } -> [
+        fallthrough_keyword;
+        fallthrough_semicolon;
       ]
       | CaseLabel {
         case_keyword;
@@ -4034,6 +4096,11 @@ module WithToken(Token: TokenType) = struct
         xhp_attribute_decl_name;
         xhp_attribute_decl_initializer;
         xhp_attribute_decl_required;
+      ]
+      | XHPSimpleClassAttribute {
+        xhp_simple_class_attribute_type;
+      } -> [
+        xhp_simple_class_attribute_type;
       ]
       | XHPAttribute {
         xhp_attribute_name;
@@ -4640,6 +4707,11 @@ module WithToken(Token: TokenType) = struct
         "parameter_name";
         "parameter_default_value";
       ]
+      | VariadicParameter {
+        variadic_parameter_ellipsis;
+      } -> [
+        "variadic_parameter_ellipsis";
+      ]
       | AttributeSpecification {
         attribute_specification_left_double_angle;
         attribute_specification_attributes;
@@ -4867,9 +4939,18 @@ module WithToken(Token: TokenType) = struct
       | SwitchSection {
         switch_section_labels;
         switch_section_statements;
+        switch_section_fallthrough;
       } -> [
         "switch_section_labels";
         "switch_section_statements";
+        "switch_section_fallthrough";
+      ]
+      | SwitchFallthrough {
+        fallthrough_keyword;
+        fallthrough_semicolon;
+      } -> [
+        "fallthrough_keyword";
+        "fallthrough_semicolon";
       ]
       | CaseLabel {
         case_keyword;
@@ -5360,6 +5441,11 @@ module WithToken(Token: TokenType) = struct
         "xhp_attribute_decl_name";
         "xhp_attribute_decl_initializer";
         "xhp_attribute_decl_required";
+      ]
+      | XHPSimpleClassAttribute {
+        xhp_simple_class_attribute_type;
+      } -> [
+        "xhp_simple_class_attribute_type";
       ]
       | XHPAttribute {
         xhp_attribute_name;
@@ -6051,6 +6137,12 @@ module WithToken(Token: TokenType) = struct
           parameter_name;
           parameter_default_value;
         }
+      | (SyntaxKind.VariadicParameter, [
+          variadic_parameter_ellipsis;
+        ]) ->
+        VariadicParameter {
+          variadic_parameter_ellipsis;
+        }
       | (SyntaxKind.AttributeSpecification, [
           attribute_specification_left_double_angle;
           attribute_specification_attributes;
@@ -6296,10 +6388,20 @@ module WithToken(Token: TokenType) = struct
       | (SyntaxKind.SwitchSection, [
           switch_section_labels;
           switch_section_statements;
+          switch_section_fallthrough;
         ]) ->
         SwitchSection {
           switch_section_labels;
           switch_section_statements;
+          switch_section_fallthrough;
+        }
+      | (SyntaxKind.SwitchFallthrough, [
+          fallthrough_keyword;
+          fallthrough_semicolon;
+        ]) ->
+        SwitchFallthrough {
+          fallthrough_keyword;
+          fallthrough_semicolon;
         }
       | (SyntaxKind.CaseLabel, [
           case_keyword;
@@ -6840,6 +6942,12 @@ module WithToken(Token: TokenType) = struct
           xhp_attribute_decl_name;
           xhp_attribute_decl_initializer;
           xhp_attribute_decl_required;
+        }
+      | (SyntaxKind.XHPSimpleClassAttribute, [
+          xhp_simple_class_attribute_type;
+        ]) ->
+        XHPSimpleClassAttribute {
+          xhp_simple_class_attribute_type;
         }
       | (SyntaxKind.XHPAttribute, [
           xhp_attribute_name;
@@ -7572,6 +7680,13 @@ module WithToken(Token: TokenType) = struct
         parameter_default_value;
       ]
 
+    let make_variadic_parameter
+      variadic_parameter_ellipsis
+    =
+      from_children SyntaxKind.VariadicParameter [
+        variadic_parameter_ellipsis;
+      ]
+
     let make_attribute_specification
       attribute_specification_left_double_angle
       attribute_specification_attributes
@@ -7835,10 +7950,21 @@ module WithToken(Token: TokenType) = struct
     let make_switch_section
       switch_section_labels
       switch_section_statements
+      switch_section_fallthrough
     =
       from_children SyntaxKind.SwitchSection [
         switch_section_labels;
         switch_section_statements;
+        switch_section_fallthrough;
+      ]
+
+    let make_switch_fallthrough
+      fallthrough_keyword
+      fallthrough_semicolon
+    =
+      from_children SyntaxKind.SwitchFallthrough [
+        fallthrough_keyword;
+        fallthrough_semicolon;
       ]
 
     let make_case_label
@@ -8429,6 +8555,13 @@ module WithToken(Token: TokenType) = struct
         xhp_attribute_decl_name;
         xhp_attribute_decl_initializer;
         xhp_attribute_decl_required;
+      ]
+
+    let make_xhp_simple_class_attribute
+      xhp_simple_class_attribute_type
+    =
+      from_children SyntaxKind.XHPSimpleClassAttribute [
+        xhp_simple_class_attribute_type;
       ]
 
     let make_xhp_attribute

@@ -1,6 +1,6 @@
 { "description" :
   "Auto-generated JSON schema of the Hack Full Fidelity Parser AST",
-  "version" : "2017-01-11-0001",
+  "version" : "2017-01-18-0002",
   "trivia" : [
     { "trivia_kind_name" : "WhiteSpace",
       "trivia_type_name" : "whitespace" },
@@ -87,6 +87,8 @@
       "token_text" : "eval" },
     { "token_kind" : "Extends",
       "token_text" : "extends" },
+    { "token_kind" : "Fallthrough",
+      "token_text" : "fallthrough" },
     { "token_kind" : "Float",
       "token_text" : "float" },
     { "token_kind" : "Final",
@@ -692,6 +694,13 @@
         { "field_name" : "name" },
         { "field_name" : "default_value" }
       ] },
+    { "kind_name" : "VariadicParameter",
+      "type_name" : "variadic_parameter",
+      "description" : "variadic_parameter",
+      "prefix" : "variadic_parameter",
+      "fields" : [
+        { "field_name" : "ellipsis" }
+      ] },
     { "kind_name" : "AttributeSpecification",
       "type_name" : "attribute_specification",
       "description" : "attribute_specification",
@@ -891,7 +900,16 @@
       "prefix" : "switch_section",
       "fields" : [
         { "field_name" : "labels" },
-        { "field_name" : "statements" }
+        { "field_name" : "statements" },
+        { "field_name" : "fallthrough" }
+      ] },
+    { "kind_name" : "SwitchFallthrough",
+      "type_name" : "switch_fallthrough",
+      "description" : "switch_fallthrough",
+      "prefix" : "fallthrough",
+      "fields" : [
+        { "field_name" : "keyword" },
+        { "field_name" : "semicolon" }
       ] },
     { "kind_name" : "CaseLabel",
       "type_name" : "case_label",
@@ -1362,6 +1380,13 @@
         { "field_name" : "name" },
         { "field_name" : "initializer" },
         { "field_name" : "required" }
+      ] },
+    { "kind_name" : "XHPSimpleClassAttribute",
+      "type_name" : "xhp_simple_class_attribute",
+      "description" : "xhp_simple_class_attribute",
+      "prefix" : "xhp_simple_class_attribute",
+      "fields" : [
+        { "field_name" : "type" }
       ] },
     { "kind_name" : "XHPAttribute",
       "type_name" : "xhp_attribute",

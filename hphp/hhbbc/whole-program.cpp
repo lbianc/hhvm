@@ -341,7 +341,7 @@ void update_mayusevv(Index& index, php::Program& program) {
   auto const results = parallel::map(
     all_function_contexts(program),
     [&] (Context ctx) {
-      if (is_pseudomain(ctx.func)) {
+      if (is_pseudomain(ctx.func) || ctx.func->attrs & AttrInterceptable) {
         return std::make_tuple(true, ctx.func);
       }
       auto info = CollectedInfo { index, ctx, nullptr, nullptr };
@@ -419,8 +419,13 @@ std::pair<
   std::vector<std::unique_ptr<UnitEmitter>>,
   std::unique_ptr<ArrayTypeTable::Builder>
 >
-whole_program(std::vector<std::unique_ptr<UnitEmitter>> ues) {
+whole_program(std::vector<std::unique_ptr<UnitEmitter>> ues,
+              int num_threads) {
   trace_time tracer("whole program");
+
+  if (num_threads > 0) {
+    parallel::num_threads = num_threads;
+  }
 
   LitstrTable::get().setReading();
 

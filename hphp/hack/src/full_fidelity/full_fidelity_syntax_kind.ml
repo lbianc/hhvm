@@ -51,6 +51,7 @@ type t =
 | TypeConstDeclaration
 | DecoratedExpression
 | ParameterDeclaration
+| VariadicParameter
 | AttributeSpecification
 | Attribute
 | InclusionExpression
@@ -70,6 +71,7 @@ type t =
 | ForeachStatement
 | SwitchStatement
 | SwitchSection
+| SwitchFallthrough
 | CaseLabel
 | DefaultLabel
 | ReturnStatement
@@ -120,6 +122,7 @@ type t =
 | XHPRequired
 | XHPClassAttributeDeclaration
 | XHPClassAttribute
+| XHPSimpleClassAttribute
 | XHPAttribute
 | XHPOpen
 | XHPExpression
@@ -185,6 +188,7 @@ let to_string kind =
   | TypeConstDeclaration -> "type_const_declaration"
   | DecoratedExpression -> "decorated_expression"
   | ParameterDeclaration -> "parameter_declaration"
+  | VariadicParameter -> "variadic_parameter"
   | AttributeSpecification -> "attribute_specification"
   | Attribute -> "attribute"
   | InclusionExpression -> "inclusion_expression"
@@ -204,6 +208,7 @@ let to_string kind =
   | ForeachStatement -> "foreach_statement"
   | SwitchStatement -> "switch_statement"
   | SwitchSection -> "switch_section"
+  | SwitchFallthrough -> "switch_fallthrough"
   | CaseLabel -> "case_label"
   | DefaultLabel -> "default_label"
   | ReturnStatement -> "return_statement"
@@ -254,6 +259,7 @@ let to_string kind =
   | XHPRequired -> "xhp_required"
   | XHPClassAttributeDeclaration -> "xhp_class_attribute_declaration"
   | XHPClassAttribute -> "xhp_class_attribute"
+  | XHPSimpleClassAttribute -> "xhp_simple_class_attribute"
   | XHPAttribute -> "xhp_attribute"
   | XHPOpen -> "xhp_open"
   | XHPExpression -> "xhp_expression"

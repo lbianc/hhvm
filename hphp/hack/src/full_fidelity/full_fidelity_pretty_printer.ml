@@ -315,6 +315,8 @@ let rec get_doc node =
     let i = get_doc xhp_attribute_decl_initializer in
     let r = get_doc xhp_attribute_decl_required in
     group_doc (t ^| n ^| i ^| r)
+  | XHPSimpleClassAttribute { xhp_simple_class_attribute_type } ->
+    get_doc xhp_simple_class_attribute_type
   | TraitUse {
     trait_use_keyword;
     trait_use_names;
@@ -508,6 +510,8 @@ let rec get_doc node =
     group_doc
       ( attr ^| visibility ^| parameter_type ^| parameter_name
       ^| parameter_default )
+  | VariadicParameter { variadic_parameter_ellipsis } ->
+      get_doc variadic_parameter_ellipsis
   | AttributeSpecification {
       attribute_specification_left_double_angle;
       attribute_specification_attributes;
@@ -734,11 +738,20 @@ let rec get_doc node =
     h ^| sections ^| rbrace
   | SwitchSection {
     switch_section_labels;
-    switch_section_statements } ->
+    switch_section_statements;
+    switch_section_fallthrough } ->
     (* TODO Fix this *)
     let labels = get_doc switch_section_labels in
     let statements = get_doc switch_section_statements in
-    (add_break labels) ^| (add_break statements)
+    let fallthrough = get_doc switch_section_fallthrough in
+    (add_break labels) ^| (add_break statements) ^| (add_break fallthrough)
+  | SwitchFallthrough {
+    fallthrough_keyword;
+    fallthrough_semicolon
+  } ->
+    let f = get_doc fallthrough_keyword in
+    let s = get_doc fallthrough_semicolon in
+    f ^^^ s
   | ScopeResolutionExpression x ->
     let q = get_doc x.scope_resolution_qualifier in
     let o = get_doc x.scope_resolution_operator in
