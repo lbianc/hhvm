@@ -31,7 +31,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     "attributes"
     "maybe-uninitialized"
   )
-  
+
   # Warnings to disable by name when building C code.
   set(DISABLED_C_NAMED_WARNINGS)
   list(APPEND DISABLED_C_NAMED_WARNINGS
@@ -90,14 +90,10 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       "return-type-c-linkage"
     )
 
-    execute_process(
-      COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1} --version COMMAND head -1
-      OUTPUT_VARIABLE _clang_version_info)
-    string(REGEX MATCH "(clang version|based on LLVM) ([0-9]\\.[0-9]\\.?[0-9]?)"
-      CLANG_VERSION "${_clang_version_info}")
     # Enabled GCC/LLVM stack-smashing protection
     if(ENABLE_SSP)
-      if(CLANG_VERSION VERSION_GREATER 3.6 OR CLANG_VERSION VERSION_EQUAL 3.6)
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 3.6 OR
+         CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 3.6)
         list(APPEND GENERAL_OPTIONS "fstack-protector-strong")
       else()
         list(APPEND GENERAL_OPTIONS "fstack-protector")
@@ -149,8 +145,8 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     )
     endif()
 
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_COMPILER_ARG1} -dumpversion OUTPUT_VARIABLE GCC_VERSION)
-    if(GCC_VERSION VERSION_GREATER 4.8 OR GCC_VERSION VERSION_EQUAL 4.8)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.8)
       # FIXME: GCC 4.8+ regressions http://git.io/4r7VCQ
       list(APPEND GENERAL_OPTIONS
         "ftrack-macro-expansion=0"
@@ -161,31 +157,37 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     endif()
 
     # Fix problem with GCC 4.9, https://kb.isc.org/article/AA-01167
-    if(GCC_VERSION VERSION_GREATER 4.9 OR GCC_VERSION VERSION_EQUAL 4.9)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.9)
       list(APPEND GENERAL_OPTIONS "fno-delete-null-pointer-checks")
     endif()
 
-    if(GCC_VERSION VERSION_GREATER 5.0 OR GCC_VERSION VERSION_EQUAL 5.0)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 5.0)
       message(WARNING "HHVM is primarily tested on GCC 4.8 and GCC 4.9. Using other versions may produce unexpected results, or may not even build at all.")
     endif()
 
-    if(GCC_VERSION VERSION_GREATER 5.1 OR GCC_VERSION VERSION_EQUAL 5.1)
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.1 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 5.1)
       list(APPEND DISABLED_NAMED_WARNINGS "bool-compare")
       list(APPEND GENERAL_OPTIONS "DFOLLY_HAVE_MALLOC_H")
     endif()
-    
-    if(GCC_VERSION VERSION_GREATER 6.0 OR GCC_VERSION VERSION_EQUAL 6.0)
+
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 6.0 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 6.0)
       list(APPEND GENERAL_CXX_OPTIONS "Wno-misleading-indentation")
     endif()
 
     # Enabled GCC/LLVM stack-smashing protection
     if(ENABLE_SSP)
-      if(GCC_VERSION VERSION_GREATER 4.8 OR GCC_VERSION VERSION_EQUAL 4.8)
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8 OR
+         CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.8)
         if(LINUX)
           # https://isisblogs.poly.edu/2011/06/01/relro-relocation-read-only/
           list(APPEND GENERAL_OPTIONS "Wl,-z,relro,-z,now")
         endif()
-        if(GCC_VERSION VERSION_GREATER 4.9 OR GCC_VERSION VERSION_EQUAL 4.9)
+        if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9 OR
+           CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.9)
           list(APPEND GENERAL_OPTIONS "fstack-protector-strong")
         endif()
       else()
@@ -207,6 +209,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       set(AARCH64_TARGET_CPU "" CACHE STRING "CPU to tell gcc to optimize for (-mcpu)")
       if(AARCH64_TARGET_CPU)
         list(APPEND GENERAL_OPTIONS "mcpu=${AARCH64_TARGET_CPU}")
+        set(CMAKE_ASM_FLAGS  "${CMAKE_ASM_FLAGS} -mcpu=${AARCH64_TARGET_CPU}")
 
         # Make sure GCC is not using the fix for errata 843419. This change
         # interferes with the gold linker. Note that GCC applies this fix
@@ -223,16 +226,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     # PPC64
     if(NOT IS_PPC64)
       list(APPEND RELEASE_CXX_OPTIONS "momit-leaf-frame-pointer")
-    endif()
-
-    if(CYGWIN)
-      # in debug mode large files can overflow pe/coff sections
-      # this switches binutils to use the pe+ format
-      list(APPEND DEBUG_CXX_OPTIONS "Wa,-mbig-obj")
-      # stack limit is set at compile time on windows
-      # code expects a minimum of 8 * 1024 * 1024 + 8 for a buffer
-      # the default is 2 mb
-      list(APPEND GENERAL_CXX_FLAGS "Wl,--stack,8388616")
     endif()
 
     if(STATIC_CXX_LIB)
@@ -257,12 +250,12 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
   set(CMAKE_C_FLAGS_RELWITHDEBINFO   "-O2 -g${GDB_SUBOPTION} -DNDEBUG")
   set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g${GDB_SUBOPTION} -DNDEBUG")
   set(CMAKE_C_FLAGS                  "${CMAKE_C_FLAGS} -W -Werror=implicit-function-declaration")
-  
+
 
   foreach(opt ${DISABLED_NAMED_WARNINGS})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-${opt}")
   endforeach()
-  
+
   foreach(opt ${DISABLED_C_NAMED_WARNINGS})
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-${opt}")
   endforeach()

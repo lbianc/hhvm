@@ -35,14 +35,14 @@ let type_fun opts fn x =
   match Parser_heap.find_fun_in_file ~full:true opts fn x with
   | Some f ->
     let fun_ = Naming.fun_ opts f in
-    Typing.fun_def opts fun_
+    ignore (Typing.fun_def opts fun_)
   | None -> ()
 
 let type_class opts fn x =
   match Parser_heap.find_class_in_file ~full:true opts fn x with
   | Some cls ->
     let class_ = Naming.class_ opts cls in
-    Typing.class_def opts class_
+    ignore (Typing.class_def opts class_)
   | None -> ()
 
 let check_typedef opts fn x =

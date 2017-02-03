@@ -40,6 +40,7 @@ endif ()
 set(HHVM_LINK_LIBRARIES
   ${HHVM_WRAP_SYMS}
   hphp_analysis
+  hphp_facts_parser
   hphp_system
   hphp_parser
   hphp_zend
@@ -164,12 +165,7 @@ if (LINUX)
   add_definitions(-D_GNU_SOURCE)
 endif()
 
-# cygwin headers are easily confused
-if(CYGWIN)
-  add_definitions(-D_GLIBCXX_USE_C99=1)
-endif()
-
-if(MSVC OR CYGWIN OR MINGW)
+if(MSVC)
   add_definitions(-DGLOG_NO_ABBREVIATED_SEVERITIES)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
 endif()
@@ -203,7 +199,7 @@ if(ALWAYS_ASSERT)
   add_definitions(-DALWAYS_ASSERT=1)
 endif()
 
-if(APPLE OR FREEBSD OR CYGWIN OR MSVC OR MINGW)
+if(APPLE OR FREEBSD OR MSVC)
   add_definitions(-DSKIP_USER_CHANGE=1)
 endif()
 

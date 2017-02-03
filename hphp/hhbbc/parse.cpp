@@ -81,7 +81,7 @@ struct ParseUnitState {
   std::vector<borrowed_ptr<php::Func>> defClsMap;
 
   /*
-   * Map from Closure names to the function(s) containing their
+   * Map from Closure index to the function(s) containing their
    * associated CreateCl opcode(s).
    */
   std::unordered_map<
@@ -162,14 +162,7 @@ std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
   for (auto& eh : fe.ehtab) {
     markBlock(eh.m_base);
     markBlock(eh.m_past);
-    switch (eh.m_type) {
-    case EHEnt::Type::Catch:
-      for (auto& centry : eh.m_catches) markBlock(centry.second);
-      break;
-    case EHEnt::Type::Fault:
-      markBlock(eh.m_fault);
-      break;
-    }
+    markBlock(eh.m_handler);
   }
 
   // Now, each interval in blockStarts delinates a basic block.
@@ -236,23 +229,16 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
     switch (eh.m_type) {
     case EHEnt::Type::Fault:
       {
-        auto const fault = findBlock(eh.m_fault);
+        auto const fault = findBlock(eh.m_handler);
         ret.funcletNodes[fault].push_back(borrow(node));
-        ret.faultFuncletStarts.insert(eh.m_fault);
+        ret.faultFuncletStarts.insert(eh.m_handler);
         node->info = php::FaultRegion { fault->id, eh.m_iterId, eh.m_itRef };
       }
       break;
     case EHEnt::Type::Catch:
       {
-        auto treg = php::TryRegion {};
-        for (auto& centry : eh.m_catches) {
-          auto const catchBlk = findBlock(centry.second);
-          treg.catches.emplace_back(
-            fe.ue().lookupLitstr(centry.first),
-            catchBlk->id
-          );
-        }
-        node->info = treg;
+        auto const catchBlk = findBlock(eh.m_handler);
+        node->info = php::CatchRegion { catchBlk->id, eh.m_iterId, eh.m_itRef };
       }
       break;
     }
@@ -276,35 +262,25 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
 
 /*
  * Instead of breaking blocks on instructions that could throw, we
- * represent the control flow edges for exception paths as a set of
- * factored edges at the end of each block.
+ * represent the control flow edges for exception paths as a factored
+ * edge at the end of each block.
  *
  * When we initially add them here, no attempt is made to determine if
  * the edge is actually possible to traverse.
  */
 void add_factored_exits(php::Block& blk,
                         borrowed_ptr<const php::ExnNode> node) {
-  for (; node; node = node->parent) {
-    match<void>(
-      node->info,
-      [&] (const php::TryRegion& tr) {
-        /*
-         * Note: it seems like we should be able to stop adding edges
-         * when we see a catch handler for Exception; however, fatal
-         * errors don't stop there (and still run Fault handlers).
-         *
-         * For now we add all the edges, although we might be able to be
-         * less pessimistic later.
-         */
-        for (auto& c : tr.catches) {
-          blk.factoredExits.push_back(c.second);
-        }
-      },
-      [&] (const php::FaultRegion& fr) {
-        blk.factoredExits.push_back(fr.faultEntry);
-      }
-    );
-  }
+  if (!node) return;
+
+  match<void>(
+    node->info,
+    [&] (const php::CatchRegion& cr) {
+      blk.factoredExits.push_back(cr.catchEntry);
+    },
+    [&] (const php::FaultRegion& fr) {
+      blk.factoredExits.push_back(fr.faultEntry);
+    }
+  );
 }
 
 /*
@@ -348,9 +324,9 @@ void find_fault_funclets(ExnTreeInfo& tinfo,
       // targets the funclet.  This means we might have duplicate
       // factored exits now, so we need to remove them.
       std::sort(begin(blk->factoredExits), end(blk->factoredExits));
-      blk->factoredExits.erase(
-        std::unique(begin(blk->factoredExits), end(blk->factoredExits)),
-        end(blk->factoredExits)
+      blk->factoredExits.resize(
+        std::unique(begin(blk->factoredExits), end(blk->factoredExits)) -
+        begin(blk->factoredExits)
       );
 
       ++offIt;
@@ -396,7 +372,7 @@ void populate_block(ParseUnitState& puState,
 
   auto decode_stringvec = [&] {
     auto const vecLen = decode<int32_t>(pc);
-    CompactVector<SString> keys;
+    CompactVector<LSString> keys;
     for (auto i = size_t{0}; i < vecLen; ++i) {
       keys.push_back(ue.lookupLitstr(decode<int32_t>(pc)));
     }
@@ -622,15 +598,15 @@ template<class FindBlk>
 void link_entry_points(php::Func& func,
                        const FuncEmitter& fe,
                        FindBlk findBlock) {
-  func.dvEntries.resize(fe.params.size());
+  func.dvEntries.resize(fe.params.size(), NoBlockId);
   for (size_t i = 0, sz = fe.params.size(); i < sz; ++i) {
     if (fe.params[i].hasDefaultValue()) {
-      auto const dv = findBlock(fe.params[i].funcletOff);
+      auto const dv = findBlock(fe.params[i].funcletOff)->id;
       func.params[i].dvEntryPoint = dv;
       func.dvEntries[i] = dv;
     }
   }
-  func.mainEntry = findBlock(fe.base);
+  func.mainEntry = findBlock(fe.base)->id;
 }
 
 void build_cfg(ParseUnitState& puState,
@@ -654,7 +630,7 @@ void build_cfg(ParseUnitState& puState,
     auto& ptr = blockMap[off];
     if (!ptr) {
       ptr               = folly::make_unique<php::Block>();
-      ptr->id           = func.nextBlockId++;
+      ptr->id           = blockMap.size() - 1;
       ptr->section      = php::Block::Section::Main;
       ptr->exnNode      = nullptr;
     }
@@ -664,8 +640,8 @@ void build_cfg(ParseUnitState& puState,
   auto exnTreeInfo = build_exn_tree(fe, func, findBlock);
 
   for (auto it = begin(blockStarts);
-      std::next(it) != end(blockStarts);
-      ++it) {
+       std::next(it) != end(blockStarts);
+       ++it) {
     auto const block   = findBlock(*it);
     auto const bcStart = bc + *it;
     auto const bcStop  = bc + *std::next(it);
@@ -695,7 +671,7 @@ void add_frame_variables(php::Func& func, const FuncEmitter& fe) {
     func.params.push_back(
       php::Param {
         param.defaultValue,
-        nullptr,
+        NoBlockId,
         param.typeConstraint,
         param.userType,
         param.phpCode,
@@ -738,7 +714,6 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
                                         fe.docComment };
   ret->unit            = unit;
   ret->cls             = cls;
-  ret->nextBlockId     = 0;
 
   ret->attrs              = static_cast<Attr>(fe.attrs & ~AttrNoOverride);
   ret->userAttributes     = fe.userAttributes;
@@ -753,16 +728,16 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
   ret->isPairGenerator    = fe.isPairGenerator;
   ret->isNative           = fe.isNative;
   ret->isMemoizeWrapper   = fe.isMemoizeWrapper;
-  ret->dynCallWrapperId   = fe.dynCallWrapperId;
 
   /*
    * Builtin functions get some extra information.  The returnType flag is only
    * non-folly::none for these, but note that something may be a builtin and
    * still have a folly::none return type.
    */
-  if (fe.attrs & AttrBuiltin) {
-    ret->nativeInfo             = folly::make_unique<php::NativeInfo>();
-    ret->nativeInfo->returnType = fe.hniReturnType;
+  if (fe.isNative) {
+    ret->nativeInfo                   = folly::make_unique<php::NativeInfo>();
+    ret->nativeInfo->returnType       = fe.hniReturnType;
+    ret->nativeInfo->dynCallWrapperId = fe.dynCallWrapperId;
   }
 
   add_frame_variables(*ret, fe);
@@ -823,11 +798,12 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
     ret->interfaceNames.push_back(iface);
   }
 
-  ret->usedTraitNames    = pce.usedTraits();
-  ret->traitPrecRules    = pce.traitPrecRules();
-  ret->traitAliasRules   = pce.traitAliasRules();
-  ret->requirements      = pce.requirements();
-  ret->numDeclMethods    = pce.numDeclMethods();
+  copy(ret->usedTraitNames,  pce.usedTraits());
+  copy(ret->traitPrecRules,  pce.traitPrecRules());
+  copy(ret->traitAliasRules, pce.traitAliasRules());
+  copy(ret->requirements,    pce.requirements());
+
+  ret->numDeclMethods = pce.numDeclMethods();
 
   parse_methods(puState, borrow(ret), unit, pce);
   add_stringish(borrow(ret));
@@ -931,9 +907,11 @@ void find_additional_metadata(const ParseUnitState& puState,
 
 }
 
-std::unique_ptr<php::Unit> parse_unit(const UnitEmitter& ue) {
-  Trace::Bump bumper{Trace::hhbbc, kSystemLibBump, ue.isASystemLib()};
-  FTRACE(2, "parse_unit {}\n", ue.m_filepath->data());
+std::unique_ptr<php::Unit> parse_unit(std::unique_ptr<UnitEmitter> uep) {
+  Trace::Bump bumper{Trace::hhbbc, kSystemLibBump, uep->isASystemLib()};
+  FTRACE(2, "parse_unit {}\n", uep->m_filepath->data());
+
+  auto const& ue = *uep;
 
   auto ret      = folly::make_unique<php::Unit>();
   ret->md5      = ue.md5();

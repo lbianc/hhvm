@@ -34,6 +34,7 @@
 #include "hphp/util/alloc.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
+#include "hphp/util/timer.h"
 #include "hphp/util/trace.h"
 
 #include <folly/Random.h>
@@ -191,7 +192,7 @@ MemoryManager::~MemoryManager() {
   dropRootMaps();
   if (debug) {
     // Check that every allocation in heap has been freed before destruction.
-    forEachHeader([&](Header* h) {
+    forEachHeader([&](Header* h, size_t) {
       assert(h->kind() == HeaderKind::Free);
     });
   }
@@ -223,7 +224,7 @@ void MemoryManager::resetRuntimeOptions() {
     deleteRootMaps();
     checkHeap("resetRuntimeOptions");
     // check that every allocation in heap has been freed before reset
-    iterate([&](Header* h) {
+    iterate([&](Header* h, size_t) {
       assert(h->kind() == HeaderKind::Free);
     });
   }
@@ -638,21 +639,22 @@ void MemoryManager::checkHeap(const char* phase) {
   PtrMap free_blocks, apc_arrays, apc_strings;
   size_t counts[NumHeaderKinds];
   for (unsigned i=0; i < NumHeaderKinds; i++) counts[i] = 0;
-  forEachHeader([&](Header* h) {
+  forEachHeader([&](Header* h, size_t alloc_size) {
     hdrs.push_back(&*h);
-    bytes += h->size();
-    counts[(int)h->kind()]++;
-    switch (h->kind()) {
+    bytes += alloc_size;
+    auto kind = h->kind();
+    counts[(int)kind]++;
+    switch (kind) {
       case HeaderKind::Free:
-        free_blocks.insert(h);
+        free_blocks.insert(h, alloc_size);
         break;
       case HeaderKind::Apc:
         if (h->apc_.m_sweep_index != kInvalidSweepIndex) {
-          apc_arrays.insert(h);
+          apc_arrays.insert(h, alloc_size);
         }
         break;
       case HeaderKind::String:
-        if (h->str_.isProxy()) apc_strings.insert(h);
+        if (h->str_.isProxy()) apc_strings.insert(h, alloc_size);
         break;
       case HeaderKind::Packed:
       case HeaderKind::Mixed:
@@ -1081,9 +1083,10 @@ bool MemoryManager::triggerProfiling(const std::string& filename) {
 }
 
 void MemoryManager::requestInit() {
-  auto trigger = s_trigger.exchange(nullptr);
+  MM().m_req_start_micros = HPHP::Timer::GetThreadCPUTimeNanos() / 1000;
 
   // If the trigger has already been claimed, do nothing.
+  auto trigger = s_trigger.exchange(nullptr);
   if (trigger == nullptr) return;
 
   always_assert(MM().empty());
@@ -1330,13 +1333,9 @@ Header* BigHeap::find(const void* p) {
     if (hdr->kind() != HeaderKind::BigObj) {
       // `p' is part of the MallocNode.
       return hdr;
-    } else {
-      auto const sub = reinterpret_cast<Header*>(*big + 1);
-      auto const start = reinterpret_cast<const char*>(sub);
-      return start <= p && p < start + sub->size()
-        ? sub   // `p' is part of the allocated object.
-        : hdr;  // `p' is part of the MallocNode.
     }
+    auto const sub = reinterpret_cast<Header*>(*big + 1);
+    return p >= sub ? sub : hdr;
   }
   return nullptr;
 }

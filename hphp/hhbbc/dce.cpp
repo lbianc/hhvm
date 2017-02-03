@@ -1039,10 +1039,10 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
   auto& func = *ainfo.ctx.func;
   FTRACE(2, "merge_blocks: {}\n", func.name);
 
-  boost::dynamic_bitset<> hasPred(func.nextBlockId);
-  boost::dynamic_bitset<> multiplePreds(func.nextBlockId);
-  boost::dynamic_bitset<> multipleSuccs(func.nextBlockId);
-  boost::dynamic_bitset<> removed(func.nextBlockId);
+  boost::dynamic_bitset<> hasPred(func.blocks.size());
+  boost::dynamic_bitset<> multiplePreds(func.blocks.size());
+  boost::dynamic_bitset<> multipleSuccs(func.blocks.size());
+  boost::dynamic_bitset<> removed(func.blocks.size());
   auto reachable = [&](php::Block& b) {
     auto const& state = ainfo.bdata[b.id].stateIn;
     return state.initialized && !state.unreachable;
@@ -1063,10 +1063,10 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
       });
     if (numSucc > 1) multipleSuccs[blk->id] = true;
   }
-  multiplePreds[func.mainEntry->id] = true;
-  for (auto& blk: func.dvEntries) {
-    if (blk) {
-      multiplePreds[blk->id] = true;
+  multiplePreds[func.mainEntry] = true;
+  for (auto& blkId: func.dvEntries) {
+    if (blkId != NoBlockId) {
+      multiplePreds[blkId] = true;
     }
   }
 
@@ -1093,9 +1093,9 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
                     std::inserter(exitSet, begin(exitSet)));
           std::copy(nxt->factoredExits.begin(), nxt->factoredExits.end(),
                     std::inserter(exitSet, begin(exitSet)));
-          blk->factoredExits.clear();
-          std::copy(begin(exitSet), end(exitSet),
-                    std::back_inserter(blk->factoredExits));
+          blk->factoredExits.resize(exitSet.size());
+          std::copy(begin(exitSet), end(exitSet), blk->factoredExits.begin());
+          nxt->factoredExits = decltype(nxt->factoredExits) {};
         } else {
           blk->factoredExits = std::move(nxt->factoredExits);
         }
@@ -1104,6 +1104,7 @@ bool merge_blocks(const FuncAnalysis& ainfo) {
                 std::back_inserter(blk->hhbcs));
       nxt->fallthrough = NoBlockId;
       nxt->id = NoBlockId;
+      nxt->hhbcs = { bc::Nop {} };
       removedAny = true;
     }
   }

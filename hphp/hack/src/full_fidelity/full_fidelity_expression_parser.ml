@@ -132,7 +132,7 @@ module WithStatementAndDeclAndTypeParser
     | QualifiedName -> parse_name_or_collection_literal_expression parser1 token
     | Self
     | Parent
-    | Static -> parse_scope_resolution_expression parser1 (make_token token)
+    | Static -> parse_scope_resolution_or_name parser
     | Yield -> parse_yield_expression parser
     | Print -> parse_print_expression parser
     | Exclamation
@@ -180,12 +180,17 @@ module WithStatementAndDeclAndTypeParser
       * Should this be in the specification?
       * Empty is case-insensitive; should use of non-lowercase be an error?
     *)
-    let (parser, keyword) = assert_token parser Empty in
-    let (parser, left) = expect_left_paren parser in
-    let (parser, arg) = parse_expression_with_reset_precedence parser in
-    let (parser, right) = expect_right_paren parser in
-    let result = make_empty_expression keyword left arg right in
-    (parser, result)
+    (* TODO: The original Hack and HHVM parsers accept "empty" as an
+    identifier, so we do too; consider whether it should be reserved. *)
+    let (parser1, keyword) = assert_token parser Empty in
+    if peek_token_kind parser1 = LeftParen then
+      let (parser, left) = assert_token parser1 LeftParen in
+      let (parser, arg) = parse_expression_with_reset_precedence parser in
+      let (parser, right) = expect_right_paren parser in
+      let result = make_empty_expression keyword left arg right in
+      (parser, result)
+    else
+      parse_as_name_or_error parser
 
   and parse_eval_expression parser =
     (* TODO: This is a PHP-ism. Open questions:
@@ -196,12 +201,17 @@ module WithStatementAndDeclAndTypeParser
       * Should this be in the specification?
       * Eval is case-insensitive. Should use of non-lowercase be an error?
     *)
-    let (parser, keyword) = assert_token parser Eval in
-    let (parser, left) = expect_left_paren parser in
-    let (parser, arg) = parse_expression_with_reset_precedence parser in
-    let (parser, right) = expect_right_paren parser in
-    let result = make_eval_expression keyword left arg right in
-    (parser, result)
+    (* TODO: The original Hack and HHVM parsers accept "eval" as an
+    identifier, so we do too; consider whether it should be reserved. *)
+    let (parser1, keyword) = assert_token parser Eval in
+    if peek_token_kind parser1 = LeftParen then
+      let (parser, left) = assert_token parser LeftParen in
+      let (parser, arg) = parse_expression_with_reset_precedence parser in
+      let (parser, right) = expect_right_paren parser in
+      let result = make_eval_expression keyword left arg right in
+      (parser, result)
+    else
+      parse_as_name_or_error parser
 
   and parse_isset_expression parser =
     (* TODO: This is a PHP-ism. Open questions:
@@ -213,10 +223,16 @@ module WithStatementAndDeclAndTypeParser
         that? if so, should we give the error in the parser or a later pass?
       * Isset is case-insensitive. Should use of non-lowercase be an error?
     *)
-    let (parser, keyword) = assert_token parser Isset in
-    let (parser, left, args, right) = parse_expression_list_opt parser in
-    let result = make_isset_expression keyword left args right in
-    (parser, result)
+    (* TODO: The original Hack and HHVM parsers accept "isset" as an
+    identifier, so we do too; consider whether it should be reserved. *)
+
+    let (parser1, keyword) = assert_token parser Isset in
+    if peek_token_kind parser1 = LeftParen then
+      let (parser, left, args, right) = parse_expression_list_opt parser1 in
+      let result = make_isset_expression keyword left args right in
+      (parser, result)
+    else
+      parse_as_name_or_error parser
 
   and parse_define_expression parser =
     (* TODO: This is a PHP-ism. Open questions:
@@ -230,10 +246,15 @@ module WithStatementAndDeclAndTypeParser
         that? if so, should we give the error in the parser or a later pass?
       * is define case-insensitive?
     *)
-    let (parser, keyword) = assert_token parser Define in
-    let (parser, left, args, right) = parse_expression_list_opt parser in
-    let result = make_define_expression keyword left args right in
-    (parser, result)
+    (* TODO: The original Hack and HHVM parsers accept "define" as an
+    identifier, so we do too; consider whether it should be reserved. *)
+    let (parser1, keyword) = assert_token parser Define in
+    if peek_token_kind parser1 = LeftParen then
+      let (parser, left, args, right) = parse_expression_list_opt parser1 in
+      let result = make_define_expression keyword left args right in
+      (parser, result)
+    else
+      parse_as_name_or_error parser
 
   and parse_double_quoted_string parser head =
     parse_string_literal parser head ""
@@ -587,7 +608,8 @@ module WithStatementAndDeclAndTypeParser
     | QuestionMinusGreaterThan
     | MinusGreaterThan -> parse_member_selection_expression parser term
     | ColonColon ->
-      parse_scope_resolution_expression parser term
+      let (parser, result) = parse_scope_resolution_expression parser term in
+      parse_remaining_expression parser result
     | PlusPlus
     | MinusMinus -> parse_postfix_unary parser term
     | LeftParen -> parse_function_call parser term
@@ -595,7 +617,8 @@ module WithStatementAndDeclAndTypeParser
     | LeftBrace -> parse_subscript parser term
     | Question ->
       let (parser, token) = assert_token parser Question in
-      parse_conditional_expression parser term token
+      let (parser, result) = parse_conditional_expression parser term token in
+      parse_remaining_expression parser result
     | _ -> (parser, term)
 
   and parse_member_selection_expression parser term =
@@ -651,6 +674,18 @@ module WithStatementAndDeclAndTypeParser
 
   and parse_expression_list_opt parser =
     (* SPEC
+
+      TODO: This business of allowing ... does not appear in the spec. Add it.
+
+      ERROR RECOVERY: A ... expression can only appear at the end of a
+      formal parameter list. However, we parse it everywhere without error,
+      and detect the error in a later pass.
+
+      Note that it *is* legal for a ... expression be followed by a trailing
+      comma, even though it is not legal for such in a formal parameter list.
+
+      TODO: Can *any* expression appear after the ... ?
+
       argument-expression-list:
         argument-expressions   ,-opt
       argument-expressions:
@@ -863,6 +898,7 @@ module WithStatementAndDeclAndTypeParser
     | Var
     | Vec
     | Void
+    | Where
     | While
     | Yield -> true
     (* Names that imply cast *)
@@ -1020,9 +1056,8 @@ module WithStatementAndDeclAndTypeParser
     let (parser, cast_type) = next_token parser in
     let cast_type = make_token cast_type in
     let (parser, right) = assert_token parser RightParen in
-    (* TODO: Do we need to set the precedence of the expression
-    parser here? *)
-    let (parser, operand) = parse_expression parser in
+    let (parser, operand) = parse_expression_with_operator_precedence
+      parser Operator.CastOperator in
     let result = make_cast_expression left cast_type right operand in
     (parser, result)
 
@@ -1323,7 +1358,10 @@ module WithStatementAndDeclAndTypeParser
     else
       with_reset_precedence parser parse_expression in
     let (parser, colon) = expect_colon parser in
-    let (parser, alternative) = with_reset_precedence parser parse_expression in
+    let (parser, term) = parse_term parser in
+    let precedence = Operator.precedence Operator.ConditionalQuestionOperator in
+    let (parser, alternative) = parse_remaining_binary_expression_helper
+      parser term precedence in
     let result = make_conditional_expression
       test question consequence colon alternative in
     (parser, result)
@@ -1563,13 +1601,15 @@ module WithStatementAndDeclAndTypeParser
       (parser, result)
 
   and parse_anon_or_lambda_or_awaitable parser =
+    (* TODO: The original Hack parser accepts "async" as an identifier, and
+    so we do too. We might consider making it reserved. *)
     let (parser1, _) = assert_token parser Async in
-    if peek_token_kind parser1 = Function then
-      parse_anon parser
-    else if peek_token_kind parser1 = LeftBrace then
-      parse_async_block parser
-    else
-      parse_lambda_expression parser
+    match peek_token_kind parser1 with
+    | Function -> parse_anon parser
+    | LeftBrace -> parse_async_block parser
+    | Variable
+    | LeftParen -> parse_lambda_expression parser
+    | _ -> parse_as_name_or_error parser
 
   and parse_async_block parser =
     (*
@@ -1782,6 +1822,18 @@ module WithStatementAndDeclAndTypeParser
       remainder as the right side. We'll go for the former for now. *)
       (with_error parser SyntaxError.error1015, (make_token token))
 
+  and parse_scope_resolution_or_name parser =
+    (* parent, self and static are legal identifiers.  If the next
+    thing that follows is a scope resolution operator, parse them as
+    ordinary tokens, and then we'll pick them up as the operand to the
+    scope resolution operator when we call parse_remaining_expression.
+    Otherwise, parse them as ordinary names.  *)
+    let (parser1, qualifier) = next_token parser in
+    if peek_token_kind parser1 = ColonColon then
+      (parser1, (make_token qualifier))
+    else
+      parse_as_name_or_error parser
+
   and parse_scope_resolution_expression parser qualifier =
     (* SPEC
       scope-resolution-expression:
@@ -1805,5 +1857,5 @@ module WithStatementAndDeclAndTypeParser
     let (parser, op) = expect_coloncolon parser in
     let (parser, name) = expect_name_variable_or_class parser in
     let result = make_scope_resolution_expression qualifier op name in
-    parse_remaining_expression parser result
+    (parser, result)
 end

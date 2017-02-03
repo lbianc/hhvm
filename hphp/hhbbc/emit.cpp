@@ -184,7 +184,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
                          const php::Func& func) {
   EmitBcInfo ret = {};
   auto& blockInfo = ret.blockInfo;
-  blockInfo.resize(func.nextBlockId);
+  blockInfo.resize(func.blocks.size());
 
   // Track the stack depth while emitting to determine maxStackDepth.
   int32_t currentStackDepth { 0 };
@@ -227,7 +227,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
     FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(&func, inst),
            show(srcLoc(func, inst.srcLoc)));
 
-    auto emit_vsa = [&] (const CompactVector<SString>& keys) {
+    auto emit_vsa = [&] (const CompactVector<LSString>& keys) {
       auto n = keys.size();
       ue.emitInt32(n);
       for (size_t i = 0; i < n; ++i) {
@@ -509,8 +509,9 @@ void emit_locals_and_params(FuncEmitter& fe,
       pinfo.byRef = param.byRef;
       pinfo.variadic = param.isVariadic;
       fe.appendParam(func.locals[id].name, pinfo);
-      if (auto const dv = param.dvEntryPoint) {
-        fe.params[id].funcletOff = info.blockInfo[dv->id].offset;
+      auto const dv = param.dvEntryPoint;
+      if (dv != NoBlockId) {
+        fe.params[id].funcletOff = info.blockInfo[dv].offset;
       }
       ++id;
     } else if (!loc.killed) {
@@ -564,21 +565,15 @@ void emit_eh_region(FuncEmitter& fe,
 
   match<void>(
     region->node->info,
-    [&] (const php::TryRegion& tr) {
+    [&] (const php::CatchRegion& cr) {
       eh.m_type = EHEnt::Type::Catch;
-      for (auto& c : tr.catches) {
-        eh.m_catches.emplace_back(
-          fe.ue().mergeLitstr(c.first),
-          blockInfo[c.second].offset
-        );
-      }
-      eh.m_fault = kInvalidOffset;
-      eh.m_iterId = -1;
-      eh.m_itRef = false;
+      eh.m_handler = blockInfo[cr.catchEntry].offset;
+      eh.m_iterId = cr.iterId;
+      eh.m_itRef = cr.itRef;
     },
     [&] (const php::FaultRegion& fr) {
       eh.m_type = EHEnt::Type::Fault;
-      eh.m_fault = blockInfo[fr.faultEntry].offset;
+      eh.m_handler = blockInfo[fr.faultEntry].offset;
       eh.m_iterId = fr.iterId;
       eh.m_itRef = fr.itRef;
     }
@@ -825,7 +820,6 @@ void emit_finish_func(EmitUnitState& state,
   fe.isPairGenerator = func.isPairGenerator;
   fe.isNative = func.isNative;
   fe.isMemoizeWrapper = func.isMemoizeWrapper;
-  fe.dynCallWrapperId = func.dynCallWrapperId;
 
   auto const retTy = state.index.lookup_return_type_raw(&func);
   if (!retTy.subtypeOf(TBottom)) {
@@ -849,6 +843,7 @@ void emit_finish_func(EmitUnitState& state,
   if (func.isNative) {
     assert(func.nativeInfo);
     fe.hniReturnType = func.nativeInfo->returnType;
+    fe.dynCallWrapperId = func.nativeInfo->dynCallWrapperId;
   }
   fe.retTypeConstraint = func.retTypeConstraint;
 

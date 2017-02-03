@@ -469,7 +469,7 @@ static inline uint64_t pgoThresholdDefault() {
 }
 
 static inline bool evalJitDefault() {
-#if defined(__CYGWIN__) || defined(_MSC_VER)
+#ifdef _MSC_VER
   return false;
 #else
   return true;
@@ -1136,7 +1136,8 @@ void RuntimeOption::Load(
     HardwareCounter::Init(EvalProfileHWEnable,
                           url_decode(EvalProfileHWEvents.data(),
                                      EvalProfileHWEvents.size()).toCppString(),
-                          false);
+                          false,
+                          EvalProfileHWExcludeKernel);
 
     Config::Bind(EnableEmitterStats, ini, config, "Eval.EnableEmitterStats",
                  EnableEmitterStats);

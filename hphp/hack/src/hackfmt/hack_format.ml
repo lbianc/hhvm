@@ -24,6 +24,11 @@ type open_span = {
   open_span_cost: int;
 }
 
+type rule_state =
+  | NoRule
+  | RuleKind of Rule.kind
+  | LazyRuleID of int
+
 let open_span start cost = {
   open_span_start = start;
   open_span_cost = cost;
@@ -32,10 +37,13 @@ let open_span start cost = {
 let builder = object (this)
   val open_spans = Stack.create ();
   val mutable rules = [];
+  val mutable lazy_rules = ISet.empty;
 
   val mutable chunks = [];
 
-  val mutable next_split_rule = None;
+  val mutable next_split_rule = NoRule;
+  val mutable next_lazy_rules = ISet.empty;
+  val mutable pending_spans = [];
   val mutable space_if_not_split = false;
   val mutable pending_comma = None;
 
@@ -44,6 +52,7 @@ let builder = object (this)
   val mutable chunk_groups = [];
   val mutable rule_alloc = Rule_allocator.make ();
   val mutable nesting_alloc = Nesting_allocator.make ();
+  val mutable span_alloc = Span_allocator.make ();
   val mutable block_indent = 0;
 
   val mutable in_range = Chunk_group.No;
@@ -57,14 +66,18 @@ let builder = object (this)
   method reset start_c end_c =
     Stack.clear open_spans;
     rules <- [];
+    lazy_rules <- ISet.empty;
     chunks <- [];
-    next_split_rule <- None;
+    next_split_rule <- NoRule;
+    next_lazy_rules <- ISet.empty;
+    pending_spans <- [];
     space_if_not_split <- false;
     pending_comma <- None;
     pending_whitespace <- "";
     chunk_groups <- [];
     rule_alloc <- Rule_allocator.make ();
     nesting_alloc <- Nesting_allocator.make ();
+    span_alloc <- Span_allocator.make ();
     block_indent <- 0;
 
     in_range <- Chunk_group.No;
@@ -73,23 +86,44 @@ let builder = object (this)
     seen_chars <- 0;
     ()
 
-  method add_string s =
+  method add_string ?(is_trivia=false) s =
     chunks <- (match chunks with
       | hd :: tl when hd.Chunk.is_appendable ->
         let text = hd.Chunk.text ^ pending_whitespace ^ s in
         {hd with Chunk.text = text} :: tl
       | _ -> begin
           let nesting = nesting_alloc.Nesting_allocator.current_nesting in
+          let handle_started_next_split_rule () =
+            let cs = Chunk.make s (List.hd rules) nesting :: chunks in
+            this#end_rule ();
+            next_split_rule <- NoRule;
+            cs
+          in
           match next_split_rule with
-            | None -> Chunk.make s (List.hd rules) nesting :: chunks
-            | Some rule_type ->
-              this#start_rule ~rule_type ();
-              let cs = Chunk.make s (List.hd rules) nesting :: chunks in
-              this#end_rule ();
-              next_split_rule <- None;
-              cs
+            | NoRule -> Chunk.make s (List.hd rules) nesting :: chunks
+            | LazyRuleID rule_id ->
+              this#start_lazy_rule rule_id;
+              handle_started_next_split_rule ()
+            | RuleKind rule_kind ->
+              this#start_rule_kind ~rule_kind ();
+              handle_started_next_split_rule ()
       end
     );
+
+    if not is_trivia then begin
+      ISet.iter (fun rule_id -> lazy_rules <- ISet.add rule_id lazy_rules)
+        next_lazy_rules;
+      next_lazy_rules <- ISet.empty;
+    end;
+
+    if not is_trivia then begin
+      let rev_pending_spans_stack = List.rev pending_spans in
+      pending_spans <- [];
+      List.iter rev_pending_spans_stack ~f:(fun cost ->
+        Stack.push (open_span ((List.length chunks) - 1) cost) open_spans
+      );
+    end;
+
     pending_whitespace <- ""
 
   method set_pending_comma () =
@@ -107,7 +141,8 @@ let builder = object (this)
       | hd :: tl when hd.Chunk.is_appendable ->
         let rule_id = hd.Chunk.rule in
         let rule = match rules with
-          | [] when rule_id = Rule.null_rule_id -> this#add_rule Rule.Simple
+          | [] when rule_id = Rule.null_rule_id ->
+            this#_create_rule (Rule.Simple Cost.base)
           | hd :: _ when rule_id = Rule.null_rule_id -> hd
           | _ -> rule_id
         in
@@ -119,10 +154,15 @@ let builder = object (this)
       | _ -> chunks
     )
 
-  method add_rule rule_kind =
+  method _create_rule rule_kind =
     let ra, rule = Rule_allocator.make_rule rule_alloc rule_kind in
     rule_alloc <- ra;
     rule.Rule.id
+
+  method create_lazy_rule ?(rule_kind=Rule.Simple Cost.base) () =
+    let id = this#_create_rule rule_kind in
+    next_lazy_rules <- ISet.add id next_lazy_rules;
+    id
 
   (* TODO: after unit tests, make this idempotency a property of method split *)
   method simple_space_split_if_unsplit () =
@@ -139,7 +179,7 @@ let builder = object (this)
   method add_always_empty_chunk () =
     let nesting = nesting_alloc.Nesting_allocator.current_nesting in
     let create_empty_chunk () =
-      let rule = this#add_rule Rule.Always in
+      let rule = this#_create_rule Rule.Always in
       let chunk = Chunk.make "" (Some rule) nesting in
       Chunk.finalize chunk rule rule_alloc false None
     in
@@ -150,20 +190,26 @@ let builder = object (this)
       (* TODO: this is probably wrong, figure out what this means *)
       | _ -> chunks)
 
-  method simple_space_split () =
+  method simple_space_split ?(cost=Cost.base) () =
     this#split true;
-    next_split_rule <- Some Rule.Simple;
+    this#set_next_split_rule (RuleKind (Rule.Simple cost));
     ()
 
-  method simple_split () =
+  method simple_split ?(cost=Cost.base) () =
     this#split false;
-    next_split_rule <- Some Rule.Simple;
+    this#set_next_split_rule (RuleKind (Rule.Simple cost));
     ()
 
   method hard_split () =
     this#split false;
-    next_split_rule <- Some Rule.Always;
+    this#set_next_split_rule (RuleKind Rule.Always);
     ()
+
+  method set_next_split_rule rule_type =
+    next_split_rule <- (match next_split_rule with
+      | RuleKind Rule.Always -> next_split_rule
+      | _ -> rule_type
+    )
 
   method nest ?(amount=__INDENT_WIDTH) ?(skip_parent=false) () =
     nesting_alloc <- Nesting_allocator.nest nesting_alloc amount skip_parent
@@ -171,15 +217,29 @@ let builder = object (this)
   method unnest () =
     nesting_alloc <- Nesting_allocator.unnest nesting_alloc
 
-  method start_rule ?(rule_type=Rule.Simple) () =
+  method _start_rule_id rule_id =
+    rule_alloc <- Rule_allocator.mark_dependencies
+      rule_alloc lazy_rules rules rule_id;
+    rules <- rule_id :: rules
+
+  method start_rule_kind ?(rule_kind=Rule.Simple Cost.base) () =
     (* Override next_split_rule unless it's an Always rule *)
     next_split_rule <- (match next_split_rule with
-      | Some kind when kind <> Rule.Always -> None
+      | RuleKind kind when kind <> Rule.Always -> NoRule
       | _ -> next_split_rule
     );
-    let rule = this#add_rule rule_type in
-    rule_alloc <- Rule_allocator.mark_dependencies rule_alloc rules rule;
-    rules <- rule :: rules
+    let rule = this#_create_rule rule_kind in
+    this#_start_rule_id rule
+
+  method start_lazy_rule lazy_rule_id =
+    if ISet.mem lazy_rule_id next_lazy_rules then begin
+      next_lazy_rules <- ISet.remove lazy_rule_id next_lazy_rules;
+      this#_start_rule_id lazy_rule_id
+    end else if ISet.mem lazy_rule_id lazy_rules then begin
+      lazy_rules <- ISet.remove lazy_rule_id lazy_rules;
+      this#_start_rule_id lazy_rule_id
+    end else
+      raise (Failure "Called start_lazy_rule with a rule id is not a lazy rule")
 
   method end_rule () =
     rules <- match rules with
@@ -191,22 +251,25 @@ let builder = object (this)
       (Rule_allocator.get_rule_kind rule_alloc id) = kind
     )
 
-  method start_span () =
-    let os = open_span (List.length chunks) 1 in
-    Stack.push os open_spans
+  method start_span ?(cost=Cost.base) () =
+    pending_spans <- cost :: pending_spans;
 
   method end_span () =
-    let os = Stack.pop open_spans in
-    let span = Span.make os.open_span_cost in
-    let r_chunks = List.rev chunks in
-    chunks <- List.rev_mapi r_chunks ~f:(fun n x ->
-      if n <= os.open_span_start then
-        x
-      else
-        (* TODO: handle required hard splits *)
-        {x with Chunk.spans = span :: x.Chunk.spans}
-    );
-    ()
+    pending_spans <- match pending_spans with
+      | hd :: tl -> tl
+      | [] ->
+        let os = Stack.pop open_spans in
+        let sa, span = Span_allocator.make_span span_alloc os.open_span_cost in
+        span_alloc <- sa;
+        let r_chunks = List.rev chunks in
+        chunks <- List.rev_mapi r_chunks ~f:(fun n x ->
+        if n <= os.open_span_start then
+          x
+        else
+          (* TODO: handle required hard splits *)
+          {x with Chunk.spans = span :: x.Chunk.spans}
+        );
+        []
 
   (*
     TODO: find a better way to represt the rules empty case
@@ -251,7 +314,8 @@ let builder = object (this)
     );
     chunks <- [];
     rule_alloc <- Rule_allocator.make ();
-    nesting_alloc <- Nesting_allocator.make ()
+    nesting_alloc <- Nesting_allocator.make ();
+    span_alloc <- Span_allocator.make ()
 
   method _end () =
     (*TODO: warn if not empty? *)
@@ -271,7 +335,7 @@ let builder = object (this)
       else begin match chunks with
         | [] -> Chunk_group.All
         | hd :: _ ->
-          next_split_rule <- Some Rule.Always;
+          next_split_rule <- RuleKind Rule.Always;
           this#simple_split_if_unsplit ();
           Chunk_group.StartAt (List.length chunks)
       end;
@@ -341,7 +405,7 @@ let builder = object (this)
             | TriviaKind.SingleLineComment
             | TriviaKind.DelimitedComment ->
               handle_newlines ~is_trivia:true newlines;
-              this#add_string @@ Trivia.text t;
+              this#add_string ~is_trivia:true @@ Trivia.text t;
               0, false
         )
       ) in
@@ -422,7 +486,7 @@ let pending_space () =
 
 let rec transform node =
   let t = transform in
-  let span = true in
+  let span = Some Cost.base in
   let nest = true in
   let space = true in
 
@@ -512,7 +576,7 @@ offending text is '%s'." (text node)));
       get_property_declaration_children x in
     handle_possible_list ~after_each:(fun _ -> add_space ()) modifiers;
     t prop_type;
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       handle_possible_list ~before_each:(split ~space) declarators;
     ) ();
     t semi;
@@ -541,6 +605,20 @@ offending text is '%s'." (text node)));
     ()
   | FunctionDeclarationHeader x ->
     transform_function_declaration_header ~span_started:false x;
+    ()
+  | WhereClause x ->
+    let (where, constraints) = get_where_clause_children x in
+    t where;
+    add_space ();
+    t constraints;
+    ()
+  | WhereConstraint x ->
+    let (left, op, right) = get_where_constraint_children x in
+    t left;
+    add_space ();
+    t op;
+    add_space ();
+    t right;
     ()
   | MethodishDeclaration x ->
     let (attr, modifiers, func_decl, body, semi) =
@@ -614,7 +692,7 @@ offending text is '%s'." (text node)));
   | TraitUse x ->
     let (kw, elements, semi) = get_trait_use_children x in
     t kw;
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       handle_possible_list ~before_each:(split ~space) elements;
     ) ();
     t semi;
@@ -638,7 +716,7 @@ offending text is '%s'." (text node)));
     t kw;
     if not (is_missing const_type) then add_space ();
     t const_type;
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       handle_possible_list ~before_each:(split ~space) declarators;
     ) ();
     t semi;
@@ -659,14 +737,12 @@ offending text is '%s'." (text node)));
     t type_kw;
     pending_space ();
     t name;
+    pending_space ();
+    t type_constraint;
+    pending_space ();
+    t eq;
     builder#simple_space_split ();
-    tl_with ~nest ~f:(fun () ->
-      t type_constraint;
-      pending_space ();
-      t eq;
-      builder#simple_space_split ();
-      t_with ~nest type_spec;
-    ) ();
+    t_with ~nest type_spec;
     t semi;
     builder#end_chunks ();
     ()
@@ -681,10 +757,14 @@ offending text is '%s'." (text node)));
     in
     t attr;
     t visibility;
+    pending_space ();
     t param_type;
-    if not (is_missing param_type) then add_space ();
-    (* TODO: span and split, figure out attr and vis rules *)
-    t name;
+    if is_missing visibility && is_missing param_type
+    then t name
+    else begin
+      builder#simple_space_split ();
+      t_with ~nest name
+    end;
     t default;
   | VariadicParameter x ->
     let ellipsis = get_variadic_parameter_children x in
@@ -724,7 +804,7 @@ offending text is '%s'." (text node)));
     add_space ();
     t x.while_left_paren;
     split ();
-    tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       t_with ~nest x.while_condition;
       split ();
       t x.while_right_paren;
@@ -801,7 +881,7 @@ offending text is '%s'." (text node)));
     t kw;
     add_space ();
     t left_p;
-    tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       split ();
       tl_with ~nest ~f:(fun () ->
         handle_possible_list init;
@@ -847,7 +927,7 @@ offending text is '%s'." (text node)));
     add_space ();
     t left_p;
     split ();
-    tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       tl_with ~nest ~f:(fun () -> t expr) ();
       t right_p;
     ) ();
@@ -895,7 +975,7 @@ offending text is '%s'." (text node)));
     let (eq_kw, value) = get_simple_initializer_children x in
     pending_space ();
     t eq_kw;
-    builder#simple_space_split ();
+    builder#simple_space_split ~cost:Cost.assignment ();
     t_with ~nest value;
   | AnonymousFunction x ->
     let (async_kw, fun_kw, lp, params, rp, colon, ret_type, use, body) =
@@ -996,16 +1076,16 @@ offending text is '%s'." (text node)));
     let (test_expr, q_kw, true_expr, c_kw, false_expr) =
       get_conditional_expression_children x in
     t test_expr;
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
-      builder#simple_space_split ();
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+      split ~space ();
       t q_kw;
       if not (is_missing true_expr) then begin
-        add_space ();
+        pending_space ();
         t true_expr;
-        builder#simple_space_split ();
+        split ~space ();
       end;
       t c_kw;
-      add_space ();
+      pending_space ();
       t false_expr;
     ) ();
     ()
@@ -1031,7 +1111,7 @@ offending text is '%s'." (text node)));
     let (left_p, expr, right_p) = get_parenthesized_expression_children x in
     t left_p;
     split ();
-    tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       tl_with ~nest ~f:(fun () ->
         (* TODO t14945172: remove this
           This is required due to the xhp children declaration split, th
@@ -1046,7 +1126,7 @@ offending text is '%s'." (text node)));
     let (left_b, expr, right_b) = get_braced_expression_children x in
     t left_b;
     split ();
-    tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       t_with ~nest expr;
       split ();
       t right_b
@@ -1069,7 +1149,7 @@ offending text is '%s'." (text node)));
       ()
     end else begin
       split ~space ();
-      tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+      tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
         tl_with ~nest ~f:(fun () ->
           handle_possible_list ~after_each:after_each_literal initializers
         ) ();
@@ -1143,7 +1223,7 @@ offending text is '%s'." (text node)));
     let (kw, categories, semi) = get_xhp_category_declaration_children x in
     t kw;
     (* TODO: Eliminate code duplication *)
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       handle_possible_list ~before_each:(split ~space) categories;
     ) ();
     t semi;
@@ -1161,7 +1241,7 @@ offending text is '%s'." (text node)));
     let (kw, xhp_attributes, semi) =
       get_xhp_class_attribute_declaration_children x in
     t kw;
-    tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
       handle_possible_list ~before_each:(split ~space) xhp_attributes;
     ) ();
     t semi;
@@ -1193,7 +1273,7 @@ offending text is '%s'." (text node)));
     t name;
     if not (is_missing attrs) then begin
       split ~space ();
-      tl_with ~nest ~rule:(Some Rule.Argument) ~f:(fun () ->
+      tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
         handle_possible_list ~after_each:(fun is_last ->
           if not is_last then split ~space (); ()
         ) attrs;
@@ -1215,9 +1295,9 @@ offending text is '%s'." (text node)));
 
     if builder#has_rule_kind Rule.XHPExpression then begin
       t op;
-      tl_with ~rule:(Some Rule.XHPExpression) ~f:(handle_body_close) ();
+      tl_with ~rule:(RuleKind Rule.XHPExpression) ~f:(handle_body_close) ();
     end else begin
-      tl_with ~rule:(Some Rule.XHPExpression) ~f:(fun () ->
+      tl_with ~rule:(RuleKind Rule.XHPExpression) ~f:(fun () ->
         t op;
         handle_body_close ();
       ) ();
@@ -1351,19 +1431,25 @@ and transform_and_unnest_closing_brace right_b =
   builder#closing_brace_token token;
   ()
 
-and tl_with ?(nest=false) ?(rule=None) ?(span=false) ~f () =
-  Option.iter rule ~f:(fun rule_type -> builder#start_rule ~rule_type ());
+and tl_with ?(nest=false) ?(rule=NoRule) ?(span=None) ~f () =
+  (match rule with
+    | NoRule -> ()
+    | LazyRuleID id -> builder#start_lazy_rule id
+    | RuleKind rule_kind -> builder#start_rule_kind ~rule_kind ()
+  );
   if nest then builder#nest ();
-  if span then builder#start_span ();
+  Option.iter span ~f:(fun cost -> builder#start_span ~cost ());
 
   f ();
 
-  if span then builder#end_span ();
+  Option.iter span ~f:(fun _ -> builder#end_span ());
   if nest then builder#unnest ();
-  Option.iter rule ~f:(fun _ -> builder#end_rule ());
-  ()
+  (match rule with
+    | NoRule -> ()
+    | _ -> builder#end_rule ()
+  )
 
-and t_with ?(nest=false) ?(rule=None) ?(span=false) ?(f=transform) node =
+and t_with ?(nest=false) ?(rule=NoRule) ?(span=None) ?(f=transform) node =
   tl_with ~nest ~rule ~span ~f:(fun () -> f node) ();
   ()
 
@@ -1378,9 +1464,10 @@ and handle_lambda_body node =
     | CompoundStatement x ->
       handle_compound_statement x;
     | _ ->
-      split ~space:true ();
-      t_with ~rule:(Some Rule.Simple) ~nest:true node;
-      ()
+      tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+        split ~space:true ();
+        t_with ~nest:true node;
+      ) ()
 
 and handle_possible_compound_statement node =
   match syntax node with
@@ -1484,7 +1571,6 @@ and handle_possible_chaining (obj, arrow1, member1) argish =
 
   let (obj, chain_list) = handle_chaining obj in
   let chain_list = chain_list @ [(arrow1, member1, argish)] in
-  transform obj;
 
   let transform_chain (arrow, member, argish) =
     transform arrow;
@@ -1493,11 +1579,15 @@ and handle_possible_chaining (obj, arrow1, member1) argish =
   in
   (match chain_list with
     | hd :: [] ->
+      transform obj;
       builder#simple_split ();
       tl_with ~nest:true ~f:(fun () -> transform_chain hd) ();
     | hd :: tl ->
+      let lazy_argument_rule = builder#create_lazy_rule
+        ~rule_kind:(Rule.Argument) () in
+      transform obj;
       split ();
-      tl_with ~nest:true ~rule:(Some Rule.Argument) ~f:(fun () ->
+      tl_with ~nest:true ~rule:(LazyRuleID lazy_argument_rule) ~f:(fun () ->
         transform_chain hd;
         List.iter tl ~f:(fun x -> split (); transform_chain x);
       ) ();
@@ -1565,7 +1655,7 @@ and handle_switch_body left_b sections right_b =
 
 and transform_function_declaration_header ~span_started x =
   let (async, kw, amp, name, type_params, leftp, params, rightp, colon,
-    ret_type) = get_function_declaration_header_children x
+    ret_type, where) = get_function_declaration_header_children x
   in
 
   if not span_started then builder#start_span ();
@@ -1579,6 +1669,7 @@ and transform_function_declaration_header ~span_started x =
   transform type_params;
   transform_argish_with_return_type ~in_span:true leftp params rightp colon
     ret_type;
+  transform where;
 
 and transform_argish_with_return_type ~in_span left_p params right_p colon
     ret_type =
@@ -1586,7 +1677,7 @@ and transform_argish_with_return_type ~in_span left_p params right_p colon
   split ();
   if in_span then builder#end_span ();
 
-  tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+  tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
     tl_with ~nest:true ~f:(fun () ->
       handle_possible_list
         ~after_each:after_each_argument ~handle_last:transform_last_arg params
@@ -1600,15 +1691,18 @@ and transform_argish_with_return_type ~in_span left_p params right_p colon
 
 and transform_argish left_p arg_list right_p =
   transform left_p;
-  split ();
-  tl_with ~span:true ~rule:(Some Rule.Argument) ~f:(fun () ->
-    tl_with ~nest:true ~f:(fun () ->
-      handle_possible_list
-        ~after_each:after_each_argument ~handle_last:transform_last_arg arg_list
-    ) ();
+  if not (is_missing arg_list) then begin
     split ();
-    transform right_p
-  ) ();
+    tl_with ~span:(Some Cost.base) ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+      tl_with ~nest:true ~f:(fun () ->
+        handle_possible_list
+          ~after_each:after_each_argument
+          ~handle_last:transform_last_arg arg_list
+      ) ();
+      split ();
+      transform right_p;
+    ) ();
+  end else transform right_p;
   ()
 
 and transform_last_arg node =
@@ -1631,7 +1725,7 @@ and transform_mapish_entry key arrow value =
   transform key;
   pending_space ();
   transform arrow;
-  builder#simple_space_split ();
+  builder#simple_space_split ~cost:Cost.assignment ();
   t_with ~nest:true value;
 
 and transform_keyword_expression_statement kw expr semi =
@@ -1648,7 +1742,7 @@ and transform_keyword_expression_statement kw expr semi =
 
 and transform_keyword_expr_list_statement kw expr_list semi =
   transform kw;
-  tl_with ~nest:true ~rule:(Some Rule.Argument) ~f:(fun () ->
+  tl_with ~nest:true ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
     handle_possible_list ~before_each:(split ~space:true) expr_list;
   ) ();
   transform semi;
@@ -1657,7 +1751,7 @@ and transform_keyword_expr_list_statement kw expr_list semi =
 and transform_condition left_p condition right_p =
   transform left_p;
   split ();
-  tl_with ~rule:(Some Rule.Argument) ~f:(fun () ->
+  tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
     t_with ~nest:true condition;
     split ();
     transform right_p;
@@ -1674,14 +1768,21 @@ and transform_binary_expression ~is_nested expr =
   let (left, operator, right) = get_binary_expression_children expr in
   let operator_t = get_operator_type operator in
 
-  if Full_fidelity_operator.(
-    is_assignment operator_t ||
-    is_comparison operator_t
-  ) then begin
+  if Full_fidelity_operator.is_comparison operator_t then begin
+    let lazy_argument_rule =
+      builder#create_lazy_rule ~rule_kind:(Rule.Argument) () in
     transform left;
-    add_space ();
+    pending_space ();
     transform operator;
-    builder#simple_space_split ();
+    tl_with ~rule:(LazyRuleID lazy_argument_rule) ~f:(fun () ->
+      builder#split true;
+      t_with ~nest:true right;
+    ) ();
+  end else if Full_fidelity_operator.is_assignment operator_t then begin
+    transform left;
+    pending_space ();
+    transform operator;
+    builder#simple_space_split ~cost:Cost.assignment ();
     t_with ~nest:true right;
   end else begin
     let precedence = Full_fidelity_operator.precedence operator_t in
@@ -1708,13 +1809,16 @@ and transform_binary_expression ~is_nested expr =
       flatten_expression (make_binary_expression left operator right) in
     match binary_expresion_syntax_list with
       | hd :: tl ->
+        let lazy_argument_rule =
+          builder#create_lazy_rule ~rule_kind:(Rule.Argument) () in
         transform_operand hd;
         if not is_nested then builder#nest ~skip_parent:true ();
-        tl_with ~rule:(Some Rule.Argument) ~nest:is_nested ~f:(fun () ->
-          List.iteri tl ~f:(fun i x ->
-            if (i mod 2) = 0 then begin add_space (); transform x end
-            else begin split ~space:true (); transform_operand x end
-          )
+        tl_with ~rule:(LazyRuleID lazy_argument_rule) ~nest:is_nested ~f:(
+          fun () ->
+            List.iteri tl ~f:(fun i x ->
+              if (i mod 2) = 0 then begin add_space (); transform x end
+              else begin split ~space:true (); transform_operand x end
+            )
         ) ();
         if not is_nested then builder#unnest ();
       | _ ->

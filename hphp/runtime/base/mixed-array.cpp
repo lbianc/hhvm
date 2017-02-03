@@ -1439,8 +1439,8 @@ const TypedValue* MixedArray::NvGetInt(const ArrayData* ad, int64_t ki) {
   return LIKELY(validPos(i)) ? &a->data()[i].data : nullptr;
 }
 
-#if !defined(__SSE4_2__) || defined(NO_SSECRC) || !defined(NO_M_DATA) || \
-  defined(__CYGWIN__) || defined(__MINGW__) || defined(_MSC_VER)
+#if !defined(__SSE4_2__) || defined(NO_HWCRC) || !defined(NO_M_DATA) || \
+  defined(_MSC_VER)
 // This function is implemented directly in ASM in mixed-array-x64.S otherwise.
 const TypedValue* MixedArray::NvGetStr(const ArrayData* ad,
                                        const StringData* k) {
@@ -1827,11 +1827,62 @@ ArrayData* MixedArray::ToPHPArray(ArrayData* ad, bool) {
 }
 
 ArrayData* MixedArray::ToPHPArrayDict(ArrayData* adIn, bool copy) {
-  assert(asMixed(adIn)->checkInvariants());
-  assert(adIn->isDict());
-  ArrayData* ad = copy ? Copy(adIn) : adIn;
-  ad->m_hdr.kind = HeaderKind::Mixed;
-  return ad;
+  assertx(adIn->isDict());
+
+  auto a = asMixed(adIn);
+  assertx(a->checkInvariants());
+
+  auto const size = a->size();
+  auto const elms = a->data();
+
+  if (!size) return staticEmptyArray();
+
+  // If we don't necessarily have to make a copy, first scan the dict looking
+  // for any int-like string keys. If we don't find any, we can transform the
+  // dict in place.
+  if (!copy) {
+    for (uint32_t i = 0, limit = a->m_used; i < limit; ++i) {
+      auto& e = elms[i];
+      if (e.isTombstone()) continue;
+      if (e.hasStrKey()) {
+        int64_t ignore;
+        if (e.skey->isStrictlyInteger(ignore)) {
+          copy = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!copy) {
+    // No int-like string keys, so transform in place.
+    a->m_hdr.kind = HeaderKind::Mixed;
+    assertx(a->checkInvariants());
+    return a;
+  }
+
+  // Either we need to make a copy anyways, or we don't, but there are int-like
+  // string keys. In either case, create the array from scratch, inserting each
+  // element one-by-one, doing key conversion as necessary.
+  auto newAd = asMixed(MakeReserveMixed(size));
+  for (uint32_t i = 0, limit = a->m_used; i < limit; ++i) {
+    auto& e = elms[i];
+    if (e.isTombstone()) continue;
+    if (e.hasIntKey()) {
+      newAd->update(e.ikey, *tvAssertCell(&e.data));
+    } else {
+      int64_t n;
+      if (e.skey->isStrictlyInteger(n)) {
+        newAd->update(n, *tvAssertCell(&e.data));
+      } else {
+        newAd->update(e.skey, *tvAssertCell(&e.data));
+      }
+    }
+  }
+
+  assertx(newAd->checkInvariants());
+  assertx(newAd->hasExactlyOneRef());
+  return newAd;
 }
 
 MixedArray* MixedArray::ToDictInPlace(ArrayData* ad) {

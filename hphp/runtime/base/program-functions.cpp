@@ -99,9 +99,9 @@
 #include <folly/Range.h>
 #include <folly/Portability.h>
 #include <folly/Singleton.h>
-#include <folly/portability/Environment.h>
 #include <folly/portability/Fcntl.h>
 #include <folly/portability/Libgen.h>
+#include <folly/portability/Stdlib.h>
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -122,7 +122,7 @@
 #include <string>
 #include <vector>
 
-#if (defined(__CYGWIN__) || defined(__MINGW__) || defined(_MSC_VER))
+#ifdef _MSC_VER
 #include <windows.h>
 #include <winuser.h>
 #endif
@@ -725,7 +725,7 @@ void execute_command_line_end(int xhprof, bool coverage, const char *program) {
   }
 }
 
-#if defined(__APPLE__) || defined(__CYGWIN__) || defined(_MSC_VER)
+#if defined(__APPLE__) || defined(_MSC_VER)
 const void* __hot_start = nullptr;
 const void* __hot_end = nullptr;
 #endif
@@ -903,6 +903,10 @@ static int start_server(const std::string &username, int xhprof) {
 
   set_execution_mode("server");
   hphp_process_init();
+  SCOPE_EXIT {
+    hphp_process_exit();
+    try { Logger::Info("all servers stopped"); } catch(...) {}
+  };
 
   HttpRequestHandler::GetAccessLog().init
     (RuntimeOption::AccessLogDefaultFormat, RuntimeOption::AccessLogs,
@@ -1281,13 +1285,9 @@ static void set_stack_size() {
   struct rlimit rlim;
   if (getrlimit(RLIMIT_STACK, &rlim) != 0) return;
 
-  if (rlim.rlim_cur < kStackSizeMinimum
-#ifndef __CYGWIN__
-      || rlim.rlim_cur == RLIM_INFINITY
-#endif
-      ) {
-#ifdef __CYGWIN__
-    Logger::Error("stack limit too small, use peflags -x to increase  %zd\n",
+  if (rlim.rlim_cur < kStackSizeMinimum || rlim.rlim_cur == RLIM_INFINITY) {
+#ifdef _WIN32
+    Logger::Error("stack limit too small, use peflags -x to increase %zd\n",
                   kStackSizeMinimum);
 #else
     rlim.rlim_cur = kStackSizeMinimum;
@@ -1706,6 +1706,8 @@ static int execute_program_impl(int argc, char** argv) {
     }
 
     hphp_process_init();
+    SCOPE_EXIT { hphp_process_exit(); };
+
     try {
       auto const unit = lookupUnit(
         makeStaticString(po.lint.c_str()), "", nullptr);
@@ -1764,6 +1766,7 @@ static int execute_program_impl(int argc, char** argv) {
 
     int ret = 0;
     hphp_process_init();
+    SCOPE_EXIT { hphp_process_exit(); };
 
     std::string file;
     if (new_argc > 0) {
@@ -1833,7 +1836,6 @@ static int execute_program_impl(int argc, char** argv) {
     }
 
     free(new_argv);
-    hphp_process_exit();
 
     return ret;
   }
@@ -2362,22 +2364,27 @@ void hphp_session_exit() {
   s_extra_request_microseconds = 0;
 }
 
-void hphp_process_exit() {
-  Xenon::getInstance().stop();
-  jit::mcgen::processExit();
-  PageletServer::Stop();
-  XboxServer::Stop();
+void hphp_process_exit() noexcept {
+  // We want to do clean up on a best-effort basis: don't skip later steps if
+  // an earlier step fails, and don't propagate exceptions ouf of this function
+#define LOG_AND_IGNORE(voidexpr) try { voidexpr; } catch (...) { \
+    Logger::Error("got exception in cleanup step: " #voidexpr); }
+  LOG_AND_IGNORE(Xenon::getInstance().stop())
+  LOG_AND_IGNORE(jit::mcgen::processExit())
+  LOG_AND_IGNORE(PageletServer::Stop())
+  LOG_AND_IGNORE(XboxServer::Stop())
   // Debugger::Stop() needs an execution context
-  g_context.getCheck();
-  Eval::Debugger::Stop();
-  g_context.destroy();
-  ExtensionRegistry::moduleShutdown();
+  LOG_AND_IGNORE(g_context.getCheck())
+  LOG_AND_IGNORE(Eval::Debugger::Stop())
+  LOG_AND_IGNORE(g_context.destroy())
+  LOG_AND_IGNORE(ExtensionRegistry::moduleShutdown())
 #ifndef _MSC_VER
-  LightProcess::Close();
+  LOG_AND_IGNORE(LightProcess::Close())
 #endif
-  InitFiniNode::ProcessFini();
-  folly::SingletonVault::singleton()->destroyInstances();
-  embedded_data_cleanup();
+  LOG_AND_IGNORE(InitFiniNode::ProcessFini())
+  LOG_AND_IGNORE(folly::SingletonVault::singleton()->destroyInstances())
+  LOG_AND_IGNORE(embedded_data_cleanup())
+#undef LOG_AND_IGNORE
 }
 
 bool is_hphp_session_initialized() {

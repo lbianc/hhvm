@@ -503,15 +503,12 @@ int prepareOptions(CompilerOptions &po, int argc, char **argv) {
 
 int process(const CompilerOptions &po) {
   if (po.coredump) {
-#if defined(__MINGW__) || defined(_MSC_VER)
+#ifdef _MSC_VER
 /**
  * Windows actually does core dump size and control at a system, not an app
- * level.  So we do nothing here and are at the mercy of Dr. Watson
- *
- * Cygwin has a compat layer in place and does its own core dumping, so we
- * still call setrlimit for core dumps
+ * level.  So we do nothing here and are at the mercy of Dr. Watson.
  */
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__CYGWIN__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
     struct rlimit rl;
     getrlimit(RLIMIT_CORE, &rl);
     rl.rlim_cur = 80000000LL;
@@ -547,12 +544,20 @@ int process(const CompilerOptions &po) {
   // one time initialization
   BuiltinSymbols::LoadSuperGlobals();
 
+  bool processInitRan = false;
+  SCOPE_EXIT {
+    if (processInitRan) {
+      hphp_process_exit();
+    }
+  };
+
   bool isPickledPHP = (po.target == "php" && po.format == "pickled");
   if (!isPickledPHP) {
     bool wp = Option::WholeProgram;
     Option::WholeProgram = false;
     BuiltinSymbols::s_systemAr = ar;
     hphp_process_init();
+    processInitRan = true;
     BuiltinSymbols::s_systemAr.reset();
     Option::WholeProgram = wp;
     if (po.target == "hhbc" && !Option::WholeProgram) {
@@ -565,6 +570,7 @@ int process(const CompilerOptions &po) {
     }
   } else {
     hphp_process_init();
+    processInitRan = true;
   }
 
   {

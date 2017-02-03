@@ -18,6 +18,7 @@
 #include "hphp/util/alloc.h"
 #include "hphp/util/compatibility.h"
 #include "hphp/util/logger.h"
+#include "hphp/util/numa.h"
 #include "hphp/util/timer.h"
 
 #include "hphp/runtime/base/apc-stats.h"
@@ -30,7 +31,7 @@
 #include <folly/portability/SysMman.h>
 
 #if !defined(HAVE_POSIX_FALLOCATE) && \
-  (_XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L || defined(__CYGWIN__))
+  (_XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L)
 # define HAVE_POSIX_FALLOCATE 1
 #endif
 

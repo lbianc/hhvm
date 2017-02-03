@@ -8,19 +8,6 @@
  *
 *)
 
-(**
- * This module is needed because Unix.select doesn't play well with
- * input_line on Ocaml channels.. i.e., when a buffered read into an
- * Ocaml channel consumes two complete lines from the file descriptor, the next
- * select will say there is nothing to read when in fact there is
- * something in the channel. This wouldn't be a problem if Ocaml channel's API
- * supported a "has buffered content" call, so you could check if the
- * buffer contains something as well as doing a Unix select to know for real if
- * there is content coming.
- *
- * The "has_buffered_content" method below does exactly that.
- *)
-
 open Core
 
 (** Our Unix systems only allow reading 64KB chunks at a time.
@@ -111,9 +98,17 @@ let create fd = {
   unconsumed_buffer = ref None;
   }
 
-let null_reader = {
-  fd = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0o440;
-  unconsumed_buffer = ref None;
-  }
+let null_reader_ref = ref None
+
+let get_null_reader () =
+  match !null_reader_ref with
+    | Some x -> x
+    | None ->
+        let null_reader = {
+          fd = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0o440;
+          unconsumed_buffer = ref None;
+        } in
+        null_reader_ref := Some null_reader;
+        null_reader
 
 let get_fd r = r.fd

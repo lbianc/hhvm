@@ -22,7 +22,7 @@
 #include <atomic>
 #include <vector>
 
-#if !defined(__CYGWIN__) && !defined(_MSC_VER)
+#ifndef _MSC_VER
 #include <execinfo.h>
 #endif
 
@@ -36,6 +36,7 @@
 
 #include "hphp/util/logger.h"
 #include "hphp/util/maphuge.h"
+#include "hphp/util/numa.h"
 #include "hphp/util/type-scan.h"
 
 #include "hphp/runtime/base/rds-header.h"
@@ -607,7 +608,7 @@ void threadInit(bool shouldRegister) {
     "Failed to mmap persistent RDS region. errno = {}",
     folly::errnoStr(errno).c_str()
   );
-#if defined(__CYGWIN__) || defined(_MSC_VER)
+#ifdef _MSC_VER
   // MapViewOfFileEx() requires "the specified memory region is not already in
   // use by the calling process" when mapping the shared area below. Otherwise
   // it will return MAP_FAILED. We first map the full size to make sure the
@@ -682,7 +683,7 @@ void threadExit(bool shouldUnregister) {
 
   auto const base = tl_base;
   auto do_unmap = [base] {
-#if defined(__CYGWIN__) || defined(_MSC_VER)
+#ifdef _MSC_VER
     munmap(base, s_persistent_base);
     munmap((char*)base + s_persistent_base,
            RuntimeOption::EvalJitTargetCacheSize - s_persistent_base);

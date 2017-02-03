@@ -227,28 +227,6 @@ PropState make_unknown_propstate(borrowed_ptr<const php::Class> cls,
   return ret;
 }
 
-//////////////////////////////////////////////////////////////////////
-
-}
-
-//////////////////////////////////////////////////////////////////////
-
-/*
- * Sometimes function resolution can't determine which function
- * something will call, but can restrict it to a family of functions.
- *
- * For example, if you want to call an abstract function on a base
- * class with all unique derived classes, we will resolve the function
- * to a FuncFamily that contains references to all the possible
- * overriding-functions.
- */
-struct FuncFamily {
-  bool containsInterceptables = false;
-  std::vector<borrowed_ptr<FuncInfo>> possibleFuncs;
-};
-
-//////////////////////////////////////////////////////////////////////
-
 /*
  * Currently inferred information about a PHP function.
  *
@@ -257,12 +235,7 @@ struct FuncFamily {
  * not complete information), because we may deduce other facts based
  * on it.
  */
-struct FuncInfo {
-  /*
-   * Pointer to the underlying php::Func this has information about.
-   */
-  borrowed_ptr<const php::Func> func = nullptr;
-
+struct FuncInfoValue {
   /*
    * The best-known return type of the function, if we have any
    * information.  May be TBottom if the function is known to never
@@ -295,6 +268,33 @@ struct FuncInfo {
    */
   ContextRetTyMap contextualReturnTypes;
 };
+
+using FuncInfoMap = std::unordered_map<borrowed_ptr<const php::Func>,
+                                       FuncInfoValue>;
+
+//////////////////////////////////////////////////////////////////////
+
+}
+
+//////////////////////////////////////////////////////////////////////
+
+/*
+ * Sometimes function resolution can't determine which function
+ * something will call, but can restrict it to a family of functions.
+ *
+ * For example, if you want to call an abstract function on a base
+ * class with all unique derived classes, we will resolve the function
+ * to a FuncFamily that contains references to all the possible
+ * overriding-functions.
+ */
+struct FuncFamily {
+  bool containsInterceptables = false;
+  std::vector<borrowed_ptr<FuncInfo>> possibleFuncs;
+};
+
+//////////////////////////////////////////////////////////////////////
+
+struct FuncInfo : FuncInfoMap::value_type {};
 
 /*
  * Known information about a particular possible instantiation of a
@@ -486,7 +486,7 @@ bool Class::couldBe(const Class& o) const {
 SString Class::name() const {
   return val.match(
     [] (SString s) { return s; },
-    [] (borrowed_ptr<ClassInfo> ci) { return ci->cls->name; }
+    [] (borrowed_ptr<ClassInfo> ci) { return ci->cls->name.get(); }
   );
 }
 
@@ -543,7 +543,7 @@ std::string show(const Class& c) {
       return s->data();
     },
     [] (borrowed_ptr<ClassInfo> cinfo) {
-      return folly::format("{}*", cinfo->cls->name).str();
+      return folly::sformat("{}*", cinfo->cls->name);
     }
   );
 }
@@ -566,12 +566,12 @@ SString Func::name() const {
     val,
     [&] (FuncName s) { return s.name; },
     [&] (MethodName s) { return s.name; },
-    [&] (borrowed_ptr<FuncInfo> fi) { return fi->func->name; },
+    [&] (borrowed_ptr<FuncInfo> fi) { return fi->first->name; },
     [&] (borrowed_ptr<FuncFamily> fa) {
-      auto const name = fa->possibleFuncs.front()->func->name;
+      auto const name = fa->possibleFuncs.front()->first->name;
       if (debug) {
         for (DEBUG_ONLY auto& f : fa->possibleFuncs) {
-          assert(f->func->name->isame(name));
+          assert(f->first->name->isame(name));
         }
       }
       return name;
@@ -585,7 +585,7 @@ borrowed_ptr<const php::Func> Func::exactFunc() const {
     val,
     [&] (FuncName s)                  { return Ret{}; },
     [&] (MethodName s)                { return Ret{}; },
-    [&] (borrowed_ptr<FuncInfo> fi)   { return fi->func; },
+    [&] (borrowed_ptr<FuncInfo> fi)   { return fi->first; },
     [&] (borrowed_ptr<FuncFamily> fa) { return Ret{}; }
   );
 }
@@ -606,11 +606,11 @@ bool Func::mightReadCallerFrame() const {
     [&] (FuncName s)                  { return false; },
     [&] (MethodName s)                { return false; },
     [&] (borrowed_ptr<FuncInfo> fi)   {
-      return fi->func->attrs & AttrReadsCallerFrame;
+      return fi->first->attrs & AttrReadsCallerFrame;
     },
     [&] (borrowed_ptr<FuncFamily> fa) {
       for (auto const& finfo : fa->possibleFuncs) {
-        if (finfo->func->attrs & AttrReadsCallerFrame) return true;
+        if (finfo->first->attrs & AttrReadsCallerFrame) return true;
       }
       return false;
     }
@@ -623,11 +623,11 @@ bool Func::mightWriteCallerFrame() const {
     [&] (FuncName s)                  { return false; },
     [&] (MethodName s)                { return false; },
     [&] (borrowed_ptr<FuncInfo> fi)   {
-      return fi->func->attrs & AttrWritesCallerFrame;
+      return fi->first->attrs & AttrWritesCallerFrame;
     },
     [&] (borrowed_ptr<FuncFamily> fa) {
       for (auto const& finfo : fa->possibleFuncs) {
-        if (finfo->func->attrs & AttrWritesCallerFrame) return true;
+        if (finfo->first->attrs & AttrWritesCallerFrame) return true;
       }
       return false;
     }
@@ -640,12 +640,12 @@ bool Func::isFoldable() const {
     [&] (FuncName s)                  { return false; },
     [&] (MethodName s)                { return false; },
     [&] (borrowed_ptr<FuncInfo> fi)   {
-      return fi->func->attrs & AttrIsFoldable;
+      return fi->first->attrs & AttrIsFoldable;
     },
     [&] (borrowed_ptr<FuncFamily> fa) {
       if (fa->possibleFuncs.empty()) return false;
       for (auto const& finfo : fa->possibleFuncs) {
-        if (!(finfo->func->attrs & AttrIsFoldable)) return false;
+        if (!(finfo->first->attrs & AttrIsFoldable)) return false;
       }
       return true;
     }
@@ -691,7 +691,7 @@ struct IndexData {
   // functions of that class.
   std::unordered_map<
     borrowed_ptr<const php::Class>,
-    std::unordered_set<borrowed_ptr<php::Class>>
+    CompactVector<borrowed_ptr<const php::Class>>
   > classClosureMap;
 
   /*
@@ -709,7 +709,7 @@ struct IndexData {
   std::vector<std::unique_ptr<FuncFamily>> funcFamilies;
 
   std::mutex funcInfoLock;
-  std::unordered_map<borrowed_ptr<const php::Func>,FuncInfo> funcInfo;
+  FuncInfoMap funcInfo;
 
   // Private instance and static property types are stored separately
   // from ClassInfo, because you don't need to resolve a class to get
@@ -775,16 +775,17 @@ void add_dependency(IndexData& data,
 // be in a single threaded situation).
 borrowed_ptr<FuncInfo> create_func_info(IndexData& data,
                                         borrowed_ptr<const php::Func> f) {
-  auto& ret = data.funcInfo[f];
-  if (ret.func) return &ret;
-  ret.func = f;
-  if (f->nativeInfo) {
-    // We'd infer this anyway when we look at the bytecode body
-    // (NativeImpl) for the HNI function, but just initializing it
-    // here saves on whole-program iterations.
-    ret.returnTy = native_function_return_type(f);
+  auto val = data.funcInfo.emplace(f, FuncInfoValue{});
+  auto& ret = static_cast<FuncInfo&>(*val.first);
+  if (val.second) {
+    if (f->nativeInfo) {
+      // We'd infer this anyway when we look at the bytecode body
+      // (NativeImpl) for the HNI function, but just initializing it
+      // here saves on whole-program iterations.
+      ret.second.returnTy = native_function_return_type(f);
+    }
+    ret.second.thisAvailable = false;
   }
-  ret.thisAvailable = false;
   return &ret;
 }
 
@@ -946,6 +947,11 @@ bool build_cls_info(borrowed_ptr<ClassInfo> cinfo) {
 //////////////////////////////////////////////////////////////////////
 
 void add_unit_to_index(IndexData& index, const php::Unit& unit) {
+  std::unordered_map<
+    borrowed_ptr<const php::Class>,
+    std::unordered_set<borrowed_ptr<const php::Class>>
+  > closureMap;
+
   for (auto& c : unit.classes) {
     if (c->attrs & AttrEnum) {
       index.enums.insert({c->name, borrow(c)});
@@ -961,7 +967,16 @@ void add_unit_to_index(IndexData& index, const php::Unit& unit) {
     }
 
     if (c->closureContextCls) {
-      index.classClosureMap[c->closureContextCls].insert(borrow(c));
+      closureMap[c->closureContextCls].insert(borrow(c));
+    }
+  }
+
+  if (!closureMap.empty()) {
+    for (auto const& c1 : closureMap) {
+      auto& s = index.classClosureMap[c1.first];
+      for (auto const& c2 : c1.second) {
+        s.push_back(c2);
+      }
     }
   }
 
@@ -1078,7 +1093,7 @@ void resolve_combinations(IndexData& index,
 
   if (!build_cls_info(borrow(cinfo))) return;
 
-  ITRACE(2, "  resolved: {}\n", cls->name->data());
+  ITRACE(2, "  resolved: {}\n", cls->name);
   index.allClassInfos.push_back(std::move(cinfo));
   index.classInfo.emplace(cls->name, borrow(index.allClassInfos.back()));
 }
@@ -1089,7 +1104,7 @@ void preresolve(IndexData& index, NamingEnv& env, SString clsName) {
   // TODO(#3649211): we'll need to handle inheritance cycles here
   // after hphpc is fixed not to just remove them.
 
-  ITRACE(2, "preresolve: {}\n", clsName->data());
+  ITRACE(2, "preresolve: {}\n", clsName);
   for (auto& kv : find_range(index.classes, clsName)) {
     if (kv.second->parentName) {
       preresolve(index, env, kv.second->parentName);
@@ -1425,7 +1440,7 @@ void mark_no_override_classes(IndexData& index) {
         cinfo->cls->attrs & AttrUnique) {
       assert(cinfo->subclassList.front() == borrow(cinfo));
       if (!(cinfo->cls->attrs & AttrNoOverride)) {
-        FTRACE(2, "Adding AttrNoOverride to {}\n", cinfo->cls->name->data());
+        FTRACE(2, "Adding AttrNoOverride to {}\n", cinfo->cls->name);
       }
       add_attribute(cinfo->cls, AttrNoOverride);
     }
@@ -1435,7 +1450,7 @@ void mark_no_override_classes(IndexData& index) {
       if (!(cinfo.get()->*kv.second.pmem).derivedHas) {
         FTRACE(2, "Adding no-override of {} to {}\n",
           kv.first->data(),
-          cinfo->cls->name->data());
+          cinfo->cls->name);
         add_attribute(cinfo->cls, kv.second.attrBit);
       }
     }
@@ -1463,8 +1478,8 @@ void mark_no_override_functions(IndexData& index) {
         if (it->second.func != derivedMethod.second.func) {
           if (it->second.func->attrs & AttrNoOverride) {
             FTRACE(2, "Removing AttrNoOverride on {}::{}\n",
-              it->second.func->cls->name->data(),
-              it->second.func->name->data());
+              it->second.func->cls->name,
+              it->second.func->name);
           }
           remove_attribute(it->second.func, AttrNoOverride);
         }
@@ -1556,9 +1571,9 @@ void check_invariants(IndexData& data) {
   // name.
   for (auto& ffam : data.funcFamilies) {
     always_assert(!ffam->possibleFuncs.empty());
-    auto const name = ffam->possibleFuncs.front()->func->name;
+    auto const name = ffam->possibleFuncs.front()->first->name;
     for (auto& finfo : ffam->possibleFuncs) {
-      always_assert(finfo->func->name->isame(name));
+      always_assert(finfo->first->name->isame(name));
     }
   }
 
@@ -1572,7 +1587,7 @@ void check_invariants(IndexData& data) {
 Type context_sensitive_return_type(const Index& index,
                                    borrowed_ptr<FuncInfo> finfo,
                                    CallContext callCtx) {
-  auto const callInsensitiveType = finfo->returnTy;
+  auto const callInsensitiveType = finfo->second.returnTy;
 
   constexpr auto max_interp_nexting_level = 2;
   static __thread uint32_t interp_nesting_level;
@@ -1583,14 +1598,14 @@ Type context_sensitive_return_type(const Index& index,
   // $this.)
   bool const tryContextSensitive =
     options.ContextSensitiveInterp &&
-    !finfo->func->params.empty() &&
+    !finfo->first->params.empty() &&
     interp_nesting_level + 1 < max_interp_nexting_level;
   if (!tryContextSensitive) {
     return callInsensitiveType;
   }
 
   ContextRetTyMap::accessor acc;
-  if (finfo->contextualReturnTypes.insert(acc, callCtx)) {
+  if (finfo->second.contextualReturnTypes.insert(acc, callCtx)) {
     acc->second = TTop;
   }
 
@@ -1601,9 +1616,9 @@ Type context_sensitive_return_type(const Index& index,
     SCOPE_EXIT { --interp_nesting_level; };
 
     auto const calleeCtx = Context {
-      finfo->func->unit,
-      const_cast<borrowed_ptr<php::Func>>(finfo->func),
-      finfo->func->cls
+      finfo->first->unit,
+      const_cast<borrowed_ptr<php::Func>>(finfo->first),
+      finfo->first->cls
     };
     return analyze_func_inline(index, calleeCtx, callCtx.args).inferredReturn;
   }();
@@ -1651,8 +1666,8 @@ Type context_sensitive_return_type(const Index& index,
     FTRACE(1, "{} <= {} didn't happen on {} called from {} ({})\n",
       show(contextType),
       show(callInsensitiveType),
-      finfo->func->name->data(),
-      callCtx.caller.func->name->data(),
+      finfo->first->name,
+      callCtx.caller.func->name,
       callCtx.caller.cls ? callCtx.caller.cls->name->data() : "");
     return callInsensitiveType;
   }
@@ -1702,7 +1717,7 @@ PrepKind prep_kind_from_set(PossibleFuncRange range, uint32_t paramId) {
   struct FuncFind {
     using F = borrowed_ptr<const php::Func>;
     static F get(std::pair<SString,F> p) { return p.second; }
-    static F get(borrowed_ptr<FuncInfo> finfo) { return finfo->func; }
+    static F get(borrowed_ptr<FuncInfo> finfo) { return finfo->first; }
   };
 
   folly::Optional<PrepKind> prep;
@@ -1829,14 +1844,13 @@ Index::~Index() {}
 
 //////////////////////////////////////////////////////////////////////
 
-std::vector<borrowed_ptr<php::Class>>
+const CompactVector<borrowed_ptr<const php::Class>>*
 Index::lookup_closures(borrowed_ptr<const php::Class> cls) const {
-  std::vector<borrowed_ptr<php::Class>> ret;
   auto const it = m_data->classClosureMap.find(cls);
   if (it != end(m_data->classClosureMap)) {
-    ret.assign(begin(it->second), end(it->second));
+    return &it->second;
   }
-  return ret;
+  return nullptr;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -2301,11 +2315,11 @@ bool Index::is_async_func(res::Func rfunc) const {
     [&] (res::Func::FuncName s)        { return false; },
     [&] (res::Func::MethodName s)      { return false; },
     [&] (borrowed_ptr<FuncInfo> finfo) {
-      return finfo->func->isAsync && !finfo->func->isGenerator;
+      return finfo->first->isAsync && !finfo->first->isGenerator;
     },
     [&] (borrowed_ptr<FuncFamily> fam) {
       for (auto const& finfo : fam->possibleFuncs) {
-        if (!finfo->func->isAsync || finfo->func->isGenerator) {
+        if (!finfo->first->isAsync || finfo->first->isGenerator) {
           return false;
         }
       }
@@ -2346,14 +2360,14 @@ Type Index::lookup_return_type(Context ctx, res::Func rfunc) const {
     [&] (res::Func::FuncName s) { return TInitGen; },
     [&] (res::Func::MethodName s) { return TInitGen; },
     [&] (borrowed_ptr<FuncInfo> finfo) {
-      add_dependency(*m_data, finfo->func, ctx, Dep::ReturnTy);
-      return finfo->returnTy;
+      add_dependency(*m_data, finfo->first, ctx, Dep::ReturnTy);
+      return finfo->second.returnTy;
     },
     [&] (borrowed_ptr<FuncFamily> fam) {
       auto ret = TBottom;
       for (auto& f : fam->possibleFuncs) {
-        add_dependency(*m_data, f->func, ctx, Dep::ReturnTy);
-        ret = union_of(ret, f->returnTy);
+        add_dependency(*m_data, f->first, ctx, Dep::ReturnTy);
+        ret = union_of(ret, f->second.returnTy);
       }
       return ret;
     }
@@ -2370,7 +2384,7 @@ Type Index::lookup_return_type(CallContext callCtx, res::Func rfunc) const {
       return lookup_return_type(callCtx.caller, rfunc);
     },
     [&] (borrowed_ptr<FuncInfo> finfo) {
-      add_dependency(*m_data, finfo->func, callCtx.caller, Dep::ReturnTy);
+      add_dependency(*m_data, finfo->first, callCtx.caller, Dep::ReturnTy);
       return context_sensitive_return_type(*this, finfo, callCtx);
     },
     [&] (borrowed_ptr<FuncFamily> fam) {
@@ -2425,7 +2439,7 @@ PrepKind Index::lookup_param_prep(Context ctx,
       return kind == PrepKind::Ref ? PrepKind::Unknown : kind;
     },
     [&] (borrowed_ptr<FuncInfo> finfo) {
-      return func_param_prep(finfo->func, paramId);
+      return func_param_prep(finfo->first, paramId);
     },
     [&] (borrowed_ptr<FuncFamily> fam) {
       return prep_kind_from_set(fam->possibleFuncs, paramId);
@@ -2501,7 +2515,7 @@ Index::refine_return_type(borrowed_ptr<const php::Func> func, Type t) {
   auto const fdata = create_func_info(*m_data, func);
 
   always_assert_flog(
-    t.subtypeOf(fdata->returnTy),
+    t.subtypeOf(fdata->second.returnTy),
     "Index return type invariant violated in {} {}{}.\n"
     "   {} is not a subtype of {}\n",
     func->unit->filename->data(),
@@ -2509,17 +2523,17 @@ Index::refine_return_type(borrowed_ptr<const php::Func> func, Type t) {
               : std::string{},
     func->name->data(),
     show(t),
-    show(fdata->returnTy)
+    show(fdata->second.returnTy)
   );
 
-  if (!t.strictSubtypeOf(fdata->returnTy)) return {};
-  if (fdata->returnRefinments + 1 < options.returnTypeRefineLimit) {
-    fdata->returnTy = t;
-    ++fdata->returnRefinments;
+  if (!t.strictSubtypeOf(fdata->second.returnTy)) return {};
+  if (fdata->second.returnRefinments + 1 < options.returnTypeRefineLimit) {
+    fdata->second.returnTy = t;
+    ++fdata->second.returnRefinments;
     return find_deps(*m_data, func, Dep::ReturnTy);
   }
   FTRACE(1, "maxed out return type refinements on {}:{}\n",
-    func->unit->filename->data(), func->name->data());
+    func->unit->filename, func->name);
   return {};
 }
 
@@ -2624,8 +2638,8 @@ void Index::refine_public_statics(const PublicSPropIndexer& indexer) {
     auto const it      = cinfo->publicStaticProps.find(name);
 
     FTRACE(2, "refine_public_statics: {} {} <-- {}\n",
-      cinfo->cls->name->data(),
-      name->data(),
+      cinfo->cls->name,
+      name,
       show(newType));
 
     // Cases where it's not public should've already been filtered out in the

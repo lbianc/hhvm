@@ -119,7 +119,8 @@ inline bool operator!=(const LocalRange& a, const LocalRange& b) {
 
 struct BCHashHelper {
   static size_t hash(RepoAuthType rat) { return rat.hash(); }
-  static size_t hash(SString s) { return s->hash(); }
+  static size_t hash(SString s)  { return s->hash(); }
+  static size_t hash(LSString s) { return s->hash(); }
   static size_t hash(MKey mkey) {
     return HPHP::hash_int64_pair(mkey.mcode, mkey.int64);
   }
@@ -132,6 +133,10 @@ struct BCHashHelper {
 
   static size_t hash(std::pair<IterKind, IterId> kv) {
     return std::hash<IterId>()(kv.second);
+  }
+
+  static size_t hash(std::pair<LSString, BlockId> kv) {
+    return HPHP::hash_int64_pair(kv.first->hash(), kv.second);
   }
 
   static size_t hash(LocalRange range) {
@@ -161,7 +166,7 @@ using SwitchTab     = CompactVector<BlockId>;
 
 // The final entry in the SSwitchTab is the default case, it will
 // always have a nullptr for the string.
-using SSwitchTabEnt = std::pair<SString,BlockId>;
+using SSwitchTabEnt = std::pair<LSString,BlockId>;
 using SSwitchTab    = CompactVector<SSwitchTabEnt>;
 
 //////////////////////////////////////////////////////////////////////
@@ -181,7 +186,7 @@ namespace bc {
 #define IMM_TY_AA       SArray
 #define IMM_TY_BA       BlockId
 #define IMM_TY_OA(type) type
-#define IMM_TY_VSA      CompactVector<SString>
+#define IMM_TY_VSA      CompactVector<LSString>
 #define IMM_TY_KA       MKey
 #define IMM_TY_LAR      LocalRange
 
@@ -517,8 +522,8 @@ OPCODES
 struct Bytecode {
   // Default construction creates a Nop.
   Bytecode()
-    : Nop(bc::Nop{})
-    , op(Op::Nop)
+    : op(Op::Nop)
+    , Nop(bc::Nop{})
   {}
 
 #define O(opcode, ...)                          \
@@ -586,13 +591,12 @@ struct Bytecode {
     not_reached();
   }
 
+  Op op;
   int32_t srcLoc{-1};
 
 #define O(opcode, ...) bc::opcode opcode;
   union { OPCODES };
 #undef O
-
-  Op op;
 
 private:
   void destruct() {
