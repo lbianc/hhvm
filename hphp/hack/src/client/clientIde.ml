@@ -8,6 +8,7 @@
  *
 *)
 open Core
+open Ide_api_types
 open Ide_message
 open Ide_rpc_protocol_parser_types
 
@@ -89,7 +90,7 @@ let rpc conn command =
 let read_push_message_from_server fd : ServerCommandTypes.push =
   let open ServerCommandTypes in
   match Marshal_tools.from_fd_with_preamble fd with
-  | Response s -> failwith "unexpected response without a request"
+  | Response _ -> failwith "unexpected response without a request"
   | Push m -> m
 
 let get_next_push_message fd =
@@ -159,7 +160,7 @@ let with_id_required id protocol f =
   | None -> handle_error id protocol
       (Internal_error "Id field is required for this request")
 
-let handle_init conn id protocol { client_name; client_api_version; } =
+let handle_init conn id protocol { client_name=_; client_api_version=_; } =
   if !did_init then
     handle_error id protocol (Server_error "init was already called")
   else begin
@@ -177,6 +178,9 @@ let handle_init conn id protocol { client_name; client_api_version; } =
     print_response id protocol
   end
 
+let file_position_to_tuple {filename; position={line; column}} =
+  filename, line, column
+
 let handle_request conn id protocol = function
   | Init init_params ->
     handle_init conn id protocol init_params
@@ -184,21 +188,40 @@ let handle_request conn id protocol = function
     rpc conn (Rpc.IDE_AUTOCOMPLETE (filename, position)) |>
     AutocompleteService.autocomplete_result_to_ide_response |>
     print_response id protocol
-  | Infer_type { filename; position; } ->
+  | Infer_type args ->
+    let filename, line, column = file_position_to_tuple args in
     let filename = ServerUtils.FileName filename in
-    let { File_content.line; column; } = position in
     rpc conn (Rpc.INFER_TYPE (filename, line, column)) |>
     InferAtPosService.infer_result_to_ide_response |>
     print_response id protocol
-  | Identify_symbol { filename; position; } ->
+  | Identify_symbol args ->
+    let filename, line, column = file_position_to_tuple args in
     let filename = ServerUtils.FileName filename in
-    let { File_content.line; column; } = position in
     rpc conn (Rpc.IDENTIFY_FUNCTION (filename, line, column)) |>
     IdentifySymbolService.result_to_ide_message |>
     print_response id protocol
   | Outline filename ->
     let result = rpc conn (Rpc.OUTLINE filename) in
     Ide_message.Outline_response result |>
+    print_response id protocol
+  | Find_references args ->
+    let filename, line, column = file_position_to_tuple args in
+    rpc conn (Rpc.IDE_FIND_REFS (filename, line, column)) |>
+    FindRefsService.result_to_ide_message |>
+    print_response id protocol
+  | Highlight_references args ->
+    let filename, line, column = file_position_to_tuple args in
+    let r = rpc conn (Rpc.IDE_HIGHLIGHT_REFS (filename, line, column)) in
+    print_response id protocol (Highlight_references_response r)
+  | Format args ->
+    begin match rpc conn (Rpc.IDE_FORMAT args) with
+      | Result.Ok r -> print_response id protocol (Format_response r)
+      | Result.Error e -> handle_error id protocol (Server_error e)
+    end
+  | Coverage_levels filename ->
+    let filename = ServerUtils.FileName filename in
+    rpc conn (Rpc.COVERAGE_LEVELS filename) |>
+    Coverage_level.result_to_ide_message |>
     print_response id protocol
   | Did_open_file { did_open_file_filename; did_open_file_text; } ->
     rpc conn (Rpc.OPEN_FILE (did_open_file_filename, did_open_file_text))

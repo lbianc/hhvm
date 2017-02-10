@@ -466,6 +466,14 @@ let get_bool_exn = function
   | JSON_Bool b -> b
   | _ -> assert false
 
+let opt_string_to_json = function
+  | Some x -> JSON_String x
+  | None -> JSON_Null
+
+let opt_int_to_json = function
+  | Some x -> JSON_Number (string_of_int x)
+  | None -> JSON_Null
+
 type json_type =
   | Object_t
   | Array_t
@@ -495,7 +503,7 @@ module type Access = sig
   val return : 'a -> 'a m
 
   val (>>=) : 'a m -> (('a * keytrace) -> 'b m) -> 'b m
-  val project : ('a -> 'b) -> (access_failure -> 'b) -> 'a m -> 'b
+  val counit_with : (access_failure -> 'a) -> 'a m -> 'a
   val get_obj : string -> json * keytrace -> json m
   val get_bool : string -> json * keytrace -> bool m
   val get_string : string -> json * keytrace -> string m
@@ -531,11 +539,11 @@ module Access = struct
 
   let (>>=) m f = Result.bind m f
 
-  let project f g m = match m with
+  let counit_with f m = match m with
     | Result.Ok (v, _) ->
-      f v
+      v
     | Result.Error e ->
-      g e
+      f e
 
   let catch_type_error exp f (v, keytrace) =
     try Result.Ok (f v, keytrace) with

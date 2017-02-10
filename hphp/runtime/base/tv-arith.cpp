@@ -156,6 +156,7 @@ struct Add {
   Cell operator()(int64_t a, int64_t b) const { return make_int(a + b); }
 
   ArrayData* operator()(ArrayData* a1, ArrayData* a2) const {
+    if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
     a1->incRefCount(); // force COW
     SCOPE_EXIT { a1->decRefCount(); };
     return a1->plusEq(a2);
@@ -302,6 +303,7 @@ struct AddEq {
   double  operator()(double  a, double  b) const { return a + b; }
 
   ArrayData* operator()(ArrayData* ad1, ArrayData* ad2) const {
+    if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
     if (ad2->empty() || ad1 == ad2) return ad1;
     if (ad1->empty()) {
       ad2->incRefCount();
@@ -510,7 +512,11 @@ struct DecBase {
   void dblCase(Cell& cell) { --cell.m_data.dbl; }
   Cell emptyString() const { return make_int(-1); }
   void nullCase(Cell&) const {}
-  void nonNumericString(Cell&) const {}
+  void nonNumericString(Cell& cell) const {
+    if (RuntimeOption::EnableHipHopSyntax) {
+      raise_notice("Decrement on string '%s'", cell.m_data.pstr->data());
+    }
+  }
 };
 
 struct Dec : DecBase {

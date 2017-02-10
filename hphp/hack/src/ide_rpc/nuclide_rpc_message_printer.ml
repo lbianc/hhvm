@@ -51,12 +51,8 @@ let autocomplete_response_to_json x =
   JSON_Array (List.map x ~f:autocomplete_response_to_json)
 
 let infer_type_response_to_json x =
-  let ty_json = match x with
-    | Some x -> Hh_json.JSON_String x
-    | None -> Hh_json.JSON_Null
-  in
   Hh_json.JSON_Object [
-    ("type", ty_json);
+    ("type", opt_string_to_json x);
     ("pos", deprecated_pos_field);
   ]
 
@@ -67,10 +63,7 @@ let identify_symbol_response_to_json results =
         let open SymbolDefinition in
         let pos = Pos.json x.pos in
         let span = Pos.multiline_json x.span in
-        let id = match x.id with
-          | Some id -> JSON_String id
-          | None -> JSON_Null
-        in
+        let id = opt_string_to_json x.id in
         pos, span, id
     | None -> (JSON_Null, JSON_Null, JSON_Null)
   in
@@ -103,10 +96,6 @@ let identify_symbol_response_to_json results =
   in
   JSON_Array (List.map results ~f:symbol_to_json)
 
-let opt_string_to_json = function
-  | Some x -> JSON_String x
-  | None -> JSON_Null
-
 let rec definition_to_json def =
   let open SymbolDefinition in
 
@@ -135,9 +124,51 @@ let rec definition_to_json def =
 and outline_response_to_json x =
   Hh_json.JSON_Array (List.map x ~f:definition_to_json)
 
+let coverage_levels_response_to_json = function
+  | Range_coverage_levels_response _ -> should_not_happen
+  | Deprecated_text_span_coverage_levels_response spans ->
+      let opt_coverage_level_to_string = Option.value_map
+        ~f:Coverage_level.string_of_level
+        ~default:"default"
+      in
+      let span_to_json (color, text) =
+        JSON_Object [
+          ("color", JSON_String (opt_coverage_level_to_string color));
+          ("text", JSON_String text);
+        ]
+      in
+      JSON_Array (List.map spans ~f:span_to_json)
+
 let symbol_by_id_response_to_json = function
   | Some def -> definition_to_json def
   | None -> JSON_Null
+
+let find_references_response_to_json = function
+  | None -> JSON_Array []
+  | Some {symbol_name; references} ->
+    let entries = List.map references begin fun x ->
+      let open Ide_api_types in
+      Hh_json.JSON_Object [
+        "name", Hh_json.JSON_String symbol_name;
+        "filename", Hh_json.JSON_String x.range_filename;
+        "line", Hh_json.int_ x.file_range.st.line;
+        "char_start", Hh_json.int_ x.file_range.st.column;
+        "char_end", Hh_json.int_ (x.file_range.ed.column - 1);
+      ]
+    end in
+    Hh_json.JSON_Array entries
+
+let highlight_references_response_to_json l =
+  JSON_Array begin
+    List.map l ~f:begin fun x ->
+      let open Ide_api_types in
+      Hh_json.JSON_Object [
+        "line", Hh_json.int_ x.st.line;
+        "char_start", Hh_json.int_ x.st.column;
+        "char_end", Hh_json.int_ (x.ed.column - 1);
+      ]
+    end
+  end
 
 let diagnostics_to_json x =
   JSON_Object [
@@ -146,14 +177,10 @@ let diagnostics_to_json x =
   ]
 
 let response_to_json id result =
-  let id = match id with
-    | Some x -> JSON_Number (string_of_int x)
-    | None -> JSON_Null
-  in
   JSON_Object [
     ("protocol", JSON_String "service_framework3_rpc");
     ("type", JSON_String "response");
-    ("id", id);
+    ("id", opt_int_to_json id);
     ("result", result);
   ]
 
@@ -172,7 +199,11 @@ let to_json ~response = match response with
   | Infer_type_response x -> infer_type_response_to_json x
   | Identify_symbol_response x -> identify_symbol_response_to_json x
   | Outline_response x -> outline_response_to_json x
+  | Coverage_levels_response x -> coverage_levels_response_to_json x
   | Symbol_by_id_response x -> symbol_by_id_response_to_json x
+  | Find_references_response x -> find_references_response_to_json x
+  | Highlight_references_response x -> highlight_references_response_to_json x
+  | Format_response _ -> should_not_happen
   | Diagnostics_notification x -> diagnostics_to_json x
 
 let print_json ~response =

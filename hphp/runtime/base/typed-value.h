@@ -35,7 +35,7 @@ struct StringData;
 struct ObjectData;
 struct RefData;
 struct ResourceHdr;
-struct TypedValue;
+struct MaybeCountable;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -53,6 +53,7 @@ union Value {
   ResourceHdr*  pres;   // KindOfResource
   Class*        pcls;   // only in vm stack, no type tag.
   RefData*      pref;   // KindOfRef
+  MaybeCountable* pcnt; // for alias-safe generic refcounting operations
 };
 
 enum VarNrFlag { NR_FLAG = 1<<29 };
@@ -111,14 +112,14 @@ struct TypedValue {
 
   TYPE_SCAN_CUSTOM() {
     switch (m_type) {
-      case KindOfObject: scanner.enqueue(m_data.pobj); break;
-      case KindOfResource: scanner.enqueue(m_data.pres); break;
-      case KindOfString: scanner.enqueue(m_data.pstr); break;
+      case KindOfObject: scanner.scan(m_data.pobj); break;
+      case KindOfResource: scanner.scan(m_data.pres); break;
+      case KindOfString: scanner.scan(m_data.pstr); break;
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray: scanner.enqueue(m_data.parr); break;
-      case KindOfRef: scanner.enqueue(m_data.pref); break;
+      case KindOfArray: scanner.scan(m_data.parr); break;
+      case KindOfRef: scanner.scan(m_data.pref); break;
       case KindOfUninit:
       case KindOfNull:
       case KindOfBoolean:

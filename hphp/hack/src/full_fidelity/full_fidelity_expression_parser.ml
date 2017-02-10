@@ -28,9 +28,7 @@ module WithStatementAndDeclAndTypeParser
   include PrecedenceParser
   include Full_fidelity_parser_helpers.WithParser(PrecedenceParser)
 
-  (* This method is unused right now; in the event that we need a type
-  parser for instanceof, cast operator, etc, in the future, it's here. *)
-  let _parse_type_specifier parser =
+  let parse_type_specifier parser =
     let type_parser = TypeParser.make parser.lexer parser.errors in
     let (type_parser, node) = TypeParser.parse_type_specifier type_parser in
     let lexer = TypeParser.lexer type_parser in
@@ -108,6 +106,8 @@ module WithStatementAndDeclAndTypeParser
   and parse_term parser =
     let (parser1, token) = next_xhp_class_name_or_other parser in
     match (Token.kind token) with
+    | ExecutionString -> (* TODO: Make these an error in Hack *)
+       (parser1, make_literal_expression (make_token token))
     | DecimalLiteral
     | OctalLiteral
     | HexadecimalLiteral
@@ -606,7 +606,9 @@ module WithStatementAndDeclAndTypeParser
     | Instanceof ->
       parse_instanceof_expression parser term
     | QuestionMinusGreaterThan
-    | MinusGreaterThan -> parse_member_selection_expression parser term
+    | MinusGreaterThan ->
+      let (parser, result) = parse_member_selection_expression parser term in
+      parse_remaining_expression parser result
     | ColonColon ->
       let (parser, result) = parse_scope_resolution_expression parser term in
       parse_remaining_expression parser result
@@ -632,17 +634,26 @@ module WithStatementAndDeclAndTypeParser
       postfix-expression  ?->  name
       postfix-expression  ?->  variable-name
       postfix-expression  ?->  xhp-class-name (DRAFT XHP SPEC)
+
+    PHP allows $a->{$b}; to be more compatible with PHP, and give
+    good errors, we allow that here as well.
+
+    TODO: Produce an error if the braced syntax is used in Hack.
+
     *)
     let (parser, token) = next_token parser in
     let op = make_token token in
     (* TODO: We are putting the name / variable into the tree as a token
     leaf, rather than as a name or variable expression. Is that right? *)
-    let (parser, name) = expect_xhp_class_name_or_name_or_variable parser in
+    let (parser, name) = if peek_token_kind parser = LeftBrace then
+      parse_braced_expression parser
+    else
+      expect_xhp_class_name_or_name_or_variable parser in
     let result = if (Token.kind token) = MinusGreaterThan then
       make_member_selection_expression term op name
     else
       make_safe_member_selection_expression term op name in
-    parse_remaining_expression parser result
+    (parser, result)
 
   and parse_subscript parser term =
     (* SPEC
@@ -719,6 +730,10 @@ module WithStatementAndDeclAndTypeParser
           scope-resolution-expression
           subscript-expression
           variable-name
+
+TODO: Update the spec to allow qualified-name < type arguments >
+TODO: This will need to be fixed to allow situations where the qualified name
+      is also a non-reserved token.
     *)
     let (parser1, token) = next_token parser in
     let kind = peek_token_kind parser1 in
@@ -727,6 +742,11 @@ module WithStatementAndDeclAndTypeParser
     | Self
     | Static when kind = LeftParen ->
       (parser1, make_token token)
+    | Name
+    | QualifiedName when kind = LeftParen || kind = LessThan ->
+      (* We want to parse new C() and new C<int>() as types, but
+      new C::$x() as an expression. *)
+      parse_type_specifier parser
     | _ ->
         parse_expression_with_operator_precedence parser Operator.NewOperator
         (* TODO: We need to verify in a later pass that the expression is a
@@ -924,6 +944,7 @@ module WithStatementAndDeclAndTypeParser
     | DoubleQuotedStringLiteralHead
     | StringLiteralBody
     | DoubleQuotedStringLiteralTail
+    | ExecutionString
     | FloatingLiteral
     | HeredocStringLiteral
     | HeredocStringLiteralHead

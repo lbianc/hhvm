@@ -119,7 +119,6 @@ let minimal_tests =
     "test_foreach_statements";
     "test_types";
     "test_types_type_const";
-    "test_object_creation";
     "test_function_call";
     "test_array_expression";
     "test_attribute_spec";
@@ -139,9 +138,7 @@ let minimal_tests =
     "test_closure_type";
     "test_inclusion_directive";
     "test_awaitable_creation";
-    "test_phpisms";
     "test_literals";
-    "test_cast";
   ] ~f:mapper
 
 let error_tests =

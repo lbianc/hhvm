@@ -52,6 +52,7 @@ using ArrayDataMap = tbb::concurrent_hash_map<ArrayData::ScalarArrayKey,
 static ArrayDataMap s_arrayDataMap;
 
 const StaticString s_InvalidKeysetOperationMsg("Invalid operation on keyset");
+const StaticString s_VecUnsetMsg("Vecs do not support unsetting non-end elements");
 
 ArrayData::ScalarArrayKey ArrayData::GetScalarArrayKey(const char* str,
                                                        size_t sz) {
@@ -1190,5 +1191,36 @@ void throwInvalidAdditionException(const ArrayData* ad) {
   );
 }
 
+void throwVecUnsetException() {
+  SystemLib::throwInvalidOperationExceptionObject(s_VecUnsetMsg);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
+
+void raiseHackArrCompatRefBind(int64_t k) {
+  raise_hackarr_compat_notice(
+    folly::sformat("Binding ref in array with key {}", k)
+  );
+}
+
+void raiseHackArrCompatRefBind(const StringData* k) {
+  raise_hackarr_compat_notice(
+    folly::sformat("Binding ref in array with key \"{}\"", k)
+  );
+}
+
+void raiseHackArrCompatRefNew() {
+  raise_hackarr_compat_notice("Binding new-element ref in array");
+}
+
+void raiseHackArrCompatRefIter() {
+  raise_hackarr_compat_notice("Ref binding iteration on array");
+}
+
+void raiseHackArrCompatAdd() {
+  raise_hackarr_compat_notice("Using + operator on arrays");
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 }

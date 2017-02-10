@@ -34,6 +34,9 @@ val get_string_exn : json -> string
 val get_number_exn : json -> string
 val get_bool_exn : json -> bool
 
+val opt_string_to_json : string option -> json
+val opt_int_to_json : int option -> json
+
 val int_ : int -> json
 
 (** Types and functions for monadic API for traversing a JSON object. *)
@@ -88,9 +91,8 @@ module type Access = sig
 
   val (>>=) : 'a m -> (('a * keytrace) -> 'b m) -> 'b m
 
-  (** Kind of the opposite of "return". Projects down from the monad (so we
-   * exit the monad). *)
-  val project : ('a -> 'b) -> (access_failure -> 'b) -> 'a m -> 'b
+  (** This is a comonad, but we need a little help to deal with failure *)
+  val counit_with : (access_failure -> 'a) -> 'a m -> 'a
 
   (**
    * The following getters operate on a JSON_Object by accessing keys on it,

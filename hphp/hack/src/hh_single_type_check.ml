@@ -9,7 +9,7 @@
  *)
 
 open Core
-open Coverage_level
+open Ide_api_types
 open String_utils
 open Sys_utils
 
@@ -207,7 +207,8 @@ let builtins =
   "function meth_caller(string $cls_name, string $meth_name);\n"^
   "namespace HH\\Asio {"^
   "  function va(...$args);\n"^
-  "}\n"
+  "}\n"^
+  "function hh_log_level(int $level) {}\n"
 
 (*****************************************************************************)
 (* Helpers *)
@@ -404,7 +405,7 @@ let print_colored fn type_acc =
 
 let print_coverage fn type_acc =
   let counts = ServerCoverageMetric.count_exprs fn type_acc in
-  ClientCoverageMetric.go ~json:false (Some (Leaf counts))
+  ClientCoverageMetric.go ~json:false (Some (Coverage_level.Leaf counts))
 
 let check_errors opts errors files_info =
   Relative_path.Map.fold files_info ~f:begin fun fn fileinfo errors ->
@@ -553,7 +554,7 @@ let handle_mode mode filename opts popt files_contents files_info errors =
     } in
     let file = cat (Relative_path.to_absolute filename) in
     let results = ServerFindRefs.go_from_file (file, line, column) genv env in
-    FindRefsService.print results;
+    ClientFindRefs.print_ide_readable results;
   | Highlight_refs (line, column) ->
     let file = cat (Relative_path.to_absolute filename) in
     let results = ServerHighlightRefs.go (file, line, column) opts  in
