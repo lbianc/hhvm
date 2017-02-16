@@ -243,6 +243,7 @@ bool canDCE(IRInstruction* inst) {
   case ColIsEmpty:
   case ColIsNEmpty:
   case LdUnwinderValue:
+  case LdColVec:
   case LdColArray:
   case OrdStr:
   case ChrInt:
@@ -359,7 +360,8 @@ bool canDCE(IRInstruction* inst) {
   case ReturnHook:
   case SuspendHookE:
   case SuspendHookR:
-  case Halt:
+  case EndBlock:
+  case Unreachable:
   case Jmp:
   case DefLabel:
   case Box:
@@ -456,6 +458,7 @@ bool canDCE(IRInstruction* inst) {
   case RaiseArrayIndexNotice:
   case RaiseArrayKeyNotice:
   case RaiseVarEnvDynCall:
+  case RaiseHackArrCompatNotice:
   case InitClosureStaticLoc:
   case InitStaticLoc:
   case PrintStr:

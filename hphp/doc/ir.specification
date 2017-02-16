@@ -113,7 +113,7 @@ The third column describes the sources, separated by whitespace, using macros
 documented in hphp/runtime/vm/jit/ir-opcode.h, or NA if there are no sources.
 
 The fourth column contains the flags, described below. The short name of the
-flag (used in this file) is given first, with the long name that it expands to 
+flag (used in this file) is given first, with the long name that it expands to
 in hphp/runtime/vm/jit/ir-opcode.cpp in parentheses after it.
 
 NF
@@ -907,9 +907,17 @@ To string conversions:
   Surprise flag hook for suspending resumed async functions or generators.  For
   generators, the second parameter should be Nullptr.
 
-| Halt, ND, NA, T
+| Unreachable, ND, NA, T
 
-  Halt execution. Used only in tests or unreachable code.
+  Indicates an unreachable code path. Any instructions that are post-dominated
+  by an Unreachable may be treated as unreachable by the optimizer, and the
+  behavior of a program that attempts to execute an Unreachable is undefined.
+
+| EndBlock, ND, NA, T
+
+  Halt execution, without implying anything about the reachability of
+  instructions preceding this. Intended for use in internal tests or other code
+  not meant to be executed.
 
 | Jmp, ND, SVar(Top), B|T
 
@@ -1004,11 +1012,17 @@ To string conversions:
   Loads the element at index S1 from the base pointer in S0. The index in S1 is
   the number of bytes from the base in S0.
 
+| LdColVec, D(Vec), S(Obj), NF
+
+  Load the vec array backing a collection instance in S0, which must be a
+  Vector or ImmVector, and that specific object type must be known at compile
+  time.
+
 | LdColArray, D(Arr), S(Obj), NF
 
-  Load the array backing a collection instance in S0, which must be a Vector,
-  Map, Set, ImmVector, ImmMap, or ImmSet, and that specific object type must be
-  known at compile time.
+  Load the array backing a collection instance in S0, which must be a Map, Set,
+  ImmMap, or ImmSet, and that specific object type must be known at compile
+  time.
 
 | CheckRefInner<T>, ND, S(BoxedCell), B
 
@@ -1435,7 +1449,7 @@ To string conversions:
 
   Create an empty new collection of `type'.
 
-| NewColFromArray<type>, DCol, S(Arr), PRc|CRc
+| NewColFromArray<type>, DCol, S(Arr|Vec), PRc|CRc
 
   Create a collection of `type` from an array. `type` cannot be Pair. The array
   will be used to back the new collection without duplication or conversion.
@@ -1887,6 +1901,10 @@ To string conversions:
   frame. These wrapper functions are called instead of the builtin when the
   builtin is called dynamically. Func should refer to the builtin, not the
   wrapper itself.
+
+| RaiseHackArrCompatNotice, ND, S(Str), Er
+
+  Raises a Hack array compat notice with the text in S0 as its message.
 
 | InitClosureStaticLoc, ND, S(BoxedCell) S(Cell), NF
 

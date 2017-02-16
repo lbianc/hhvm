@@ -983,6 +983,7 @@ struct Func final {
   /*
    * Locate FPI regions by offset.
    */
+  static const FPIEnt* findFPI(const FPIEnt* b, const FPIEnt* e, Offset o);
   const FPIEnt* findFPI(Offset o) const;
   const FPIEnt* findPrecedingFPI(Offset o) const;
 

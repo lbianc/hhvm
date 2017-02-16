@@ -713,6 +713,11 @@ void raiseHackArrCompatRefIter();
 
 void raiseHackArrCompatAdd();
 
+void raiseHackArrCompatArrMixedCmp();
+
+std::string makeHackArrCompatImplicitArrayKeyMsg(const TypedValue* key);
+void raiseHackArrCompatImplicitArrayKey(const TypedValue* key);
+
 ///////////////////////////////////////////////////////////////////////////////
 }
 

@@ -38,6 +38,7 @@ type mode =
   | Find_refs of int * int
   | Symbol_definition_by_id of string
   | Highlight_refs of int * int
+  | Hhas_codegen
 
 type options = {
   filename : string;
@@ -237,75 +238,78 @@ let parse_options () =
   let options = [
     "--ai",
       Arg.String (set_ai),
-    "Run the abstract interpreter";
+    " Run the abstract interpreter";
     "--all-errors",
       Arg.Unit (set_mode AllErrors),
-      "List all errors not just the first one";
+      " List all errors not just the first one";
     "--auto-complete",
       Arg.Unit (set_mode Autocomplete),
-      "Produce autocomplete suggestions";
+      " Produce autocomplete suggestions";
     "--colour",
       Arg.Unit (set_mode Color),
-      "Produce colour output";
+      " Produce colour output";
     "--color",
       Arg.Unit (set_mode Color),
-      "Produce color output";
+      " Produce color output";
     "--coverage",
       Arg.Unit (set_mode Coverage),
-      "Produce coverage output";
+      " Produce coverage output";
     "--dump-symbol-info",
       Arg.Unit (set_mode Dump_symbol_info),
-      "Dump all symbol information";
+      " Dump all symbol information";
     "--dump-tast",
       Arg.Unit (set_mode Dump_tast),
-      "Check for errors then dump the Typed AST";
+      " Check for errors then dump the Typed AST";
     "--lint",
       Arg.Unit (set_mode Lint),
-      "Produce lint errors";
+      " Produce lint errors";
     "--suggest",
       Arg.Unit (set_mode Suggest),
-      "Suggest missing typehints";
+      " Suggest missing typehints";
     "--no-builtins",
       Arg.Set no_builtins,
-      "Don't use builtins (e.g. ConstSet)";
+      " Don't use builtins (e.g. ConstSet)";
     "--dump-deps",
       Arg.Unit (set_mode Dump_deps),
-      "Print dependencies";
+      " Print dependencies";
     "--dump-inheritance",
       Arg.Unit (set_mode Dump_inheritance),
-      "Print inheritance";
+      " Print inheritance";
     "--identify-symbol",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
         Arg.Int (fun column -> set_mode (Identify_symbol (!line, column)) ());
       ]),
-      "Show info about symbol at given line and column";
+      "<pos> Show info about symbol at given line and column";
     "--symbol-by-id",
       Arg.String (fun s -> set_mode (Symbol_definition_by_id s) ()),
-      "Show info about symbol with given id";
+      "<id> Show info about symbol with given id";
     "--find-local",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
         Arg.Int (fun column -> set_mode (Find_local (!line, column)) ());
       ]),
-      "Find all usages of local at given line and column";
+      "<pos> Find all usages of local at given line and column";
     "--outline",
       Arg.Unit (set_mode Outline),
-      "Print file outline";
+      " Print file outline";
     "--find-refs",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
         Arg.Int (fun column -> set_mode (Find_refs (!line, column)) ());
       ]),
-      "Find all usages of a symbol at given line and column";
+      "<pos> Find all usages of a symbol at given line and column";
     "--highlight-refs",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
         Arg.Int (fun column -> set_mode (Highlight_refs (!line, column)) ());
       ]),
-      "Highlight all usages of a symbol at given line and column";
+      "<pos> Highlight all usages of a symbol at given line and column";
+    "--hhas-codegen",
+      Arg.Unit (set_mode Hhas_codegen),
+      " Generates the HHAS text file";
   ] in
-  let options = Arg.align options in
+  let options = Arg.align ~limit:25 options in
   Arg.parse options (fun fn -> fn_ref := Some fn) usage;
   let fn = match !fn_ref with
     | Some fn -> fn
@@ -573,7 +577,23 @@ let handle_mode mode filename opts popt files_contents files_info errors =
       then (List.iter ~f:(error ~indent:true) errors; exit 2)
       else Printf.printf "No errors\n"
   | Dump_tast -> Printf.printf "no typed AST to dump, yet\n"
-
+  | Hhas_codegen ->
+    let f_fold fn fileinfo text = begin
+      let hhas_text = if (Relative_path.S.to_string fn) = "|builtins.hhi" then
+        ""
+      else
+        let (named_functions, named_classes, _named_typedefs, _named_consts) =
+          Typing_check_utils.get_nast_from_fileinfo opts fn fileinfo in
+        let compiled_funs = Hhbc_from_nast.from_functions named_functions in
+        let compiled_classes = Hhbc_from_nast.from_classes named_classes in
+        let _compiled_typedefs = [] in (* TODO *)
+        let _compiled_consts = [] in (* TODO *)
+        let hhas_prog = Hhbc_ast.make compiled_funs compiled_classes in
+        Hhbc_hhas.to_string hhas_prog in
+      text ^ hhas_text
+    end in
+    let hhas_text = Relative_path.Map.fold files_info ~f:f_fold ~init:"" in
+    Printf.printf "%s" hhas_text
 
 (*****************************************************************************)
 (* Main entry point *)

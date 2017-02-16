@@ -135,6 +135,7 @@ module WithStatementAndDeclAndTypeParser
     | Static -> parse_scope_resolution_or_name parser
     | Yield -> parse_yield_expression parser
     | Print -> parse_print_expression parser
+    | Dollar
     | Exclamation
     | PlusPlus
     | MinusMinus
@@ -205,7 +206,7 @@ module WithStatementAndDeclAndTypeParser
     identifier, so we do too; consider whether it should be reserved. *)
     let (parser1, keyword) = assert_token parser Eval in
     if peek_token_kind parser1 = LeftParen then
-      let (parser, left) = assert_token parser LeftParen in
+      let (parser, left) = assert_token parser1 LeftParen in
       let (parser, arg) = parse_expression_with_reset_precedence parser in
       let (parser, right) = expect_right_paren parser in
       let result = make_eval_expression keyword left arg right in
@@ -933,6 +934,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | LeftParen
     | Minus
     | MinusMinus
+    | Dollar
     | Plus
     | PlusPlus
     | Tilde -> true
@@ -973,7 +975,6 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | Colon
     | ColonColon
     | Comma
-    | Dollar
     | Dot
     | DotEqual
     | DotDotDot

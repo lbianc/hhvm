@@ -149,7 +149,7 @@ bool tvDecRefWillRelease(TypedValue* tv) {
   if (tv->m_type == KindOfRef) {
     return tv->m_data.pref->getRealCount() <= 1;
   }
-  return TV_GENERIC_DISPATCH(*tv, decWillRelease);
+  return tv->m_data.pcnt->decWillRelease();
 }
 
 void tvCastToBooleanInPlace(TypedValue* tv) {
@@ -732,6 +732,11 @@ void tvCastToVecInPlace(TypedValue* tv) {
         auto* obj = tv->m_data.pobj;
         if (obj->isCollection()) {
           a = arrayFromCollection(obj).toVec().detach();
+          decRefObj(obj);
+          tv->m_data.parr = a;
+          tv->m_type = KindOfVec;
+          assert(cellIsPlausible(*tv));
+          return;
         } else if (obj->instanceof(SystemLib::s_IteratorClass)) {
           auto arr = Array::CreateVec();
           for (ArrayIter iter(obj); iter; ++iter) {

@@ -551,10 +551,24 @@ SSATmp* opt_foldable(IRGS& env,
                      uint32_t numNonDefaultArgs) {
   if (!func->isFoldable()) return nullptr;
 
+  ArrayData* variadicArgs = nullptr;
+  uint32_t numVariadicArgs = 0;
+  if (numNonDefaultArgs > func->numNonVariadicParams()) {
+    assertx(params.size() == func->numParams());
+    auto const variadic = params.info.back().value;
+    if (!variadic->type().hasConstVal()) return nullptr;
+
+    variadicArgs = variadic->variantVal().asCArrRef().get();
+    numVariadicArgs = variadicArgs->size();
+    assertx(variadicArgs->isStatic() &&
+            (!numVariadicArgs || variadicArgs->hasPackedLayout()));
+    numNonDefaultArgs = func->numNonVariadicParams();
+  }
+
   // Don't pop the args yet---if the builtin throws at compile time (because
   // it would raise a warning or something at runtime) we're going to leave
   // the call alone.
-  PackedArrayInit args(params.size());
+  PackedArrayInit args(numNonDefaultArgs + numVariadicArgs);
   for (auto i = 0; i < numNonDefaultArgs; ++i) {
     auto const t = params[i].value->type();
     if (!t.hasConstVal() && !t.subtypeOfAny(TUninit, TInitNull, TNullptr)) {
@@ -563,12 +577,7 @@ SSATmp* opt_foldable(IRGS& env,
       args.append(params[i].value->variantVal());
     }
   }
-  if (params.size() != func->numNonVariadicParams()) {
-    auto const variadic = params.info.back().value;
-    if (!variadic->type().hasConstVal()) return nullptr;
-
-    auto const variadicArgs = variadic->variantVal().asCArrRef().get();
-    auto const numVariadicArgs = variadicArgs->size();
+  if (variadicArgs) {
     for (auto i = 0; i < numVariadicArgs; i++) {
       args.append(variadicArgs->get(i));
     }
@@ -1699,6 +1708,19 @@ void implArrayIdx(IRGS& env, SSATmp* loaded_collection_array) {
     auto const key = popC(env);
     auto const stack_base = popC(env);
 
+    if (!loaded_collection_array && RuntimeOption::EvalHackArrCompatNotices) {
+      gen(
+        env,
+        RaiseHackArrCompatNotice,
+        cns(
+          env,
+          makeStaticString(
+            makeHackArrCompatImplicitArrayKeyMsg(uninit_variant.asTypedValue())
+          )
+        )
+      );
+    }
+
     // if the key is null it will not be found so just return the default
     push(env, def);
     decRef(env, stack_base);
@@ -1758,35 +1780,38 @@ void implMapIdx(IRGS& env) {
   finish(pelem);
 }
 
-void implVecIdx(IRGS& env) {
+void implVecIdx(IRGS& env, SSATmp* loaded_collection_vec) {
   auto const def = popC(env);
   auto const key = popC(env);
-  auto const vec = popC(env);
-
-  assertx(vec->isA(TVec));
+  auto const stack_base = popC(env);
 
   auto const finish = [&](SSATmp* elem) {
     pushIncRef(env, elem);
     decRef(env, def);
     decRef(env, key);
-    decRef(env, vec);
+    decRef(env, stack_base);
   };
 
   if (key->isA(TNull | TStr)) return finish(def);
 
   if (!key->isA(TInt)) {
-    gen(env, ThrowInvalidArrayKey, vec, key);
+    gen(env, ThrowInvalidArrayKey, stack_base, key);
     return;
   }
+
+  auto const use_base = loaded_collection_vec
+    ? loaded_collection_vec
+    : stack_base;
+  assertx(use_base->isA(TVec));
 
   auto const elem = cond(
     env,
     [&] (Block* taken) {
-      auto const length = gen(env, CountVec, vec);
+      auto const length = gen(env, CountVec, use_base);
       auto const cmp = gen(env, CheckRange, key, length);
       gen(env, JmpZero, taken, cmp);
     },
-    [&] { return gen(env, LdVecElem, vec, key); },
+    [&] { return gen(env, LdVecElem, use_base, key); },
     [&] { return def; }
   );
 
@@ -1849,7 +1874,7 @@ void implGenericIdx(IRGS& env) {
  * Idx bytecode.
  */
 TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
-                                 bool& useCollection, bool& useMap) {
+                                 bool& useArr, bool& useVec, bool& useMap) {
   if (baseType < TObj && baseType.clsSpec()) {
     auto const cls = baseType.clsSpec().cls();
 
@@ -1860,7 +1885,7 @@ TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
     auto const isMapOrSet = isMap ||
                             collections::isType(cls, CollectionType::Set) ||
                             collections::isType(cls, CollectionType::ImmSet);
-    auto const okMapOrSet = [&]() {
+    useArr = [&]() {
       if (!isMapOrSet) return false;
       if (keyType <= TInt) return true;
       if (!keyType.hasConstVal(TStr)) return false;
@@ -1868,21 +1893,21 @@ TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
       if (keyType.strVal()->isStrictlyInteger(dummy)) return false;
       return true;
     }();
-    // Similarly, Vector is only usable with int keys, so we can only do this
-    // for Vector if it's an Int.
-    auto const isVector = collections::isType(cls, CollectionType::Vector) ||
-                          collections::isType(cls, CollectionType::ImmVector);
-    auto const okVector = isVector && keyType <= TInt;
 
-    useCollection = okMapOrSet || okVector;
+    // Vector is only usable with int keys, so we can only optimize for
+    // Vector if the key is an Int
+    useVec = (collections::isType(cls, CollectionType::Vector) ||
+              collections::isType(cls, CollectionType::ImmVector)) &&
+             keyType <= TInt;
+
     // If it's a map with a non-static string key, we can do a map-specific
     // optimization.
     useMap = isMap && keyType <= TStr;
 
-    if (useCollection || useMap) return TypeConstraint(cls);
+    if (useArr || useVec || useMap) return TypeConstraint(cls);
   }
 
-  useCollection = useMap = false;
+  useArr = useVec = useMap = false;
   return DataTypeSpecific;
 }
 
@@ -1892,7 +1917,7 @@ TypeConstraint idxBaseConstraint(Type baseType, Type keyType,
 
 void emitArrayIdx(IRGS& env) {
   auto const arrType = topC(env, BCSPRelOffset{2}, DataTypeGeneric)->type();
-  if (arrType <= TVec) return implVecIdx(env);
+  if (arrType <= TVec) return implVecIdx(env, nullptr);
   if (arrType <= TDict) return implDictKeysetIdx(env, true);
   if (arrType <= TKeyset) return implDictKeysetIdx(env, false);
 
@@ -1911,14 +1936,33 @@ void emitIdx(IRGS& env) {
   auto const keyType  = key->type();
   auto const baseType = base->type();
 
-  if (baseType <= TVec) return implVecIdx(env);
+  if (baseType <= TVec) return implVecIdx(env, nullptr);
   if (baseType <= TDict) return implDictKeysetIdx(env, true);
   if (baseType <= TKeyset) return implDictKeysetIdx(env, false);
 
   if (keyType <= TNull || !baseType.maybe(TArr | TObj | TStr)) {
     auto const def = popC(env, DataTypeGeneric);
-    popC(env, keyType <= TNull ? DataTypeSpecific : DataTypeGeneric);
-    popC(env, keyType <= TNull ? DataTypeGeneric : DataTypeSpecific);
+
+    if (RuntimeOption::EvalHackArrCompatNotices &&
+        keyType <= TNull && baseType <= TArr) {
+      // Constrain to specific
+      popC(env);
+      popC(env);
+      gen(
+        env,
+        RaiseHackArrCompatNotice,
+        cns(
+          env,
+          makeStaticString(
+            makeHackArrCompatImplicitArrayKeyMsg(uninit_variant.asTypedValue())
+          )
+        )
+      );
+    } else {
+      popC(env, keyType <= TNull ? DataTypeSpecific : DataTypeGeneric);
+      popC(env, keyType <= TNull ? DataTypeGeneric : DataTypeSpecific);
+    }
+
     push(env, def);
     decRef(env, base);
     decRef(env, key);
@@ -1938,15 +1982,18 @@ void emitIdx(IRGS& env) {
     return;
   }
 
-  bool useCollection, useMap;
-  auto const tc = idxBaseConstraint(baseType, keyType, useCollection, useMap);
-  if (useCollection || useMap) {
+  bool useArr, useVec, useMap;
+  auto const tc = idxBaseConstraint(baseType, keyType, useArr, useVec, useMap);
+  if (useArr || useVec || useMap) {
     env.irb->constrainValue(base, tc);
     env.irb->constrainValue(key, DataTypeSpecific);
 
-    if (useCollection) {
+    if (useArr) {
       auto const arr = gen(env, LdColArray, base);
       implArrayIdx(env, arr);
+    } else if (useVec) {
+      auto const vec = gen(env, LdColVec, base);
+      implVecIdx(env, vec);
     } else {
       implMapIdx(env);
     }
@@ -2007,6 +2054,19 @@ void emitAKExists(IRGS& env) {
       push(env, cns(env, false));
       decRef(env, arr);
       return;
+    }
+
+    if (RuntimeOption::EvalHackArrCompatNotices) {
+      gen(
+        env,
+        RaiseHackArrCompatNotice,
+        cns(
+          env,
+          makeStaticString(
+            makeHackArrCompatImplicitArrayKeyMsg(uninit_variant.asTypedValue())
+          )
+        )
+      );
     }
 
     key = cns(env, staticEmptyString());
