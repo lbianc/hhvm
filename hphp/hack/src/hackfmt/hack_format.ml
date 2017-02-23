@@ -653,12 +653,15 @@ offending text is '%s'." (text node)));
       ) ();
     ) ();
 
+    let after_each_ancestor is_last = if is_last then () else split ~space () in
+
     if not (is_missing extends_kw) then begin
       split ~space ();
-      tl_with ~span ~nest ~f:(fun () ->
+      tl_with ~span ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
         t extends_kw;
-        tl_with ~nest ~f:(fun () ->
-          handle_possible_list ~before_each:(split ~space) extends
+        split ~space ();
+        tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+          handle_possible_list ~after_each:after_each_ancestor extends
         ) ();
       ) ();
       ()
@@ -666,10 +669,11 @@ offending text is '%s'." (text node)));
 
     if not (is_missing impl_kw) then begin
       split ~space ();
-      tl_with ~span ~nest ~f:(fun () ->
+      tl_with ~span ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
         t impl_kw;
-        tl_with ~nest ~f:(fun () ->
-          handle_possible_list ~before_each:(split ~space) impls
+        split ~space ();
+        tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+          handle_possible_list ~after_each:after_each_ancestor impls
         ) ();
       ) ();
       ()
@@ -1347,13 +1351,11 @@ offending text is '%s'." (text node)));
     let args = make_list [key_list_item; val_list_item] in
     transform_argish left_a args right_a;
   | DictionaryTypeSpecifier x ->
-    let (kw, left_a, key, comma_kw, value, right_a) =
-      get_dictionary_type_specifier_children x in
+    let (kw, left_a, members, right_a) =
+      get_dictionary_type_specifier_children x
+    in
     t kw;
-    let key_list_item = make_list_item key comma_kw in
-    let val_list_item = make_list_item value (make_missing ()) in
-    let args = make_list [key_list_item; val_list_item] in
-    transform_argish left_a args right_a;
+    transform_argish left_a members right_a;
   | ClosureTypeSpecifier x ->
     let (outer_left_p, kw, inner_left_p, param_types, inner_right_p, colon,
       ret_type, outer_right_p) = get_closure_type_specifier_children x in

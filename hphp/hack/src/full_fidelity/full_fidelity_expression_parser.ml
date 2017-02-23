@@ -562,6 +562,7 @@ module WithStatementAndDeclAndTypeParser
     else match peek_token_kind parser with
     (* Binary operators *)
     (* TODO Add an error if PHP and / or / xor are used in Hack.  *)
+    (* TODO Add an error if PHP style <> is used in Hack. *)
     | And
     | Or
     | Xor
@@ -591,6 +592,7 @@ module WithStatementAndDeclAndTypeParser
     | AmpersandAmpersand
     | BarBar
     | ExclamationEqual
+    | LessThanGreaterThan
     | LessThan
     | ExclamationEqualEqual
     | LessThanEqual
@@ -984,6 +986,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | EqualEqualGreaterThan
     | EqualGreaterThan
     | ExclamationEqual
+    | LessThanGreaterThan
     | ExclamationEqualEqual
     | GreaterThan
     | GreaterThanEqual
@@ -1432,10 +1435,8 @@ TODO: This will need to be fixed to allow situations where the qualified name
       list-intrinsic:
         list  (  expression-list-opt  )
       expression-list:
-        expressions  ,-opt
-      expressions:
-        expression
-        expressions , expression
+        expression-opt
+        expression-list , expression-opt
 
       See https://github.com/hhvm/hack-langspec/issues/82
 
@@ -1453,7 +1454,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
       *)
     let (parser, keyword) = assert_token parser List in
     let (parser, left, items, right) =
-      parse_parenthesized_comma_list_opt_allow_trailing
+      parse_parenthesized_comma_list_opt_items_opt
         parser parse_expression_with_reset_precedence in
     let result = make_list_expression keyword left items right in
     (parser, result)
@@ -1772,6 +1773,12 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | LeftBrace ->
       let (parser, expr) = parse_xhp_body_braced_expression parser in
       (parser, Some expr)
+    | RightBrace ->
+      (* If we find a free-floating right-brace in the middle of an XHP body
+      that's just fine. It's part of the text. However, it is also likely
+      to be a mis-edit, so we'll keep it as a right-brace token so that
+      tooling can flag it as suspicious. *)
+      (parser1, Some (make_token token))
     | XHPElementName ->
       let (parser, expr) = parse_possible_xhp_expression parser in
       (parser, Some expr)

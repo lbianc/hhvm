@@ -438,6 +438,8 @@ struct RuntimeOption {
   // Namespace aliases for the compiler
   static std::map<std::string, std::string> AliasedNamespaces;
 
+  static std::vector<std::string> TzdataSearchPaths;
+
 #define EVALFLAGS()                                                     \
   /* F(type, name, defaultVal) */                                       \
   /*                                                                    \
@@ -555,7 +557,6 @@ struct RuntimeOption {
   F(bool, HHIRGenerateAsserts,         false)                           \
   F(bool, HHIRDeadCodeElim,            true)                            \
   F(bool, HHIRGlobalValueNumbering,    true)                            \
-  F(bool, HHIRTypeCheckHoisting,       false) /* Task: 7568599 */       \
   F(bool, HHIRPredictionOpts,          true)                            \
   F(bool, HHIRMemoryOpts,              true)                            \
   F(bool, HHIRStorePRE,                true)                            \
@@ -726,6 +727,7 @@ public:
   static bool EnableDebuggerServer;
   static bool EnableDebuggerUsageLog;
   static bool DebuggerDisableIPv6;
+  static std::string DebuggerServerIP;
   static int DebuggerServerPort;
   static int DebuggerDefaultRpcPort;
   static std::string DebuggerDefaultRpcAuth;
@@ -734,7 +736,7 @@ public:
   static std::string DebuggerDefaultSandboxPath;
   static std::string DebuggerStartupDocument;
   static int DebuggerSignalTimeout;
-  static std::string DebuggerAuthTokenScript;
+  static std::string DebuggerAuthTokenScriptBin;
 
   // Mail options
   static std::string SendmailPath;

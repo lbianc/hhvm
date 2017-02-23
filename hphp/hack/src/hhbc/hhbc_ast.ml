@@ -20,8 +20,12 @@ type iter_vec = int
 type check_started = bool
 type free_iterator = int
 type repo_auth_type = string (* see see runtime/base/repo-auth-type.h *)
-type local_id = int
-type param_id = int
+type local_id =
+  | Local_unnamed of int
+  | Local_named of string
+type param_id =
+  | Param_unnamed of int
+  | Param_named of string
 type iterator_id = int
 type stack_index = int
 type class_id = string
@@ -125,7 +129,7 @@ type instruct_operator =
   | CastDict
   | CastKeyset
   | InstanceOf
-  | InstanceOfD
+  | InstanceOfD of Litstr.id
   | Print
   | Clone
   | Exit
@@ -165,7 +169,7 @@ type instruct_get =
   | AGetC
   | AGetL of local_id
 
-type operand =
+type istype_op =
   | OpNull
   | OpBool
   | OpInt
@@ -175,7 +179,7 @@ type operand =
   | OpObj
   | OpScalar (* Int or Dbl or Str or Bool *)
 
-type instuct_isset_emty_type_querying =
+type instruct_isset =
   | IssetC
   | IssetL of local_id
   | IssetN
@@ -185,22 +189,53 @@ type instuct_isset_emty_type_querying =
   | EmptyN
   | EmptyG
   | EmptyS
-  | IsTypeC of operand
-  | IsTypeL of local_id * operand
+  | IsTypeC of istype_op
+  | IsTypeL of local_id * istype_op
+
+type eq_op =
+  | PlusEqual
+  | MinusEqual
+  | MulEqual
+  | ConcatEqual
+  | DivEqual
+  | PowEqual
+  | ModEqual
+  | AndEqual
+  | OrEqual
+  | XorEqual
+  | SlEqual
+  | SrEqual
+  | PlusEqualO
+  | MinusEqualO
+  | MulEqualO
+
+type incdec_op =
+  | PreInc
+  | PostInc
+  | PreDec
+  | PostDec
+  | PreIncO
+  | PostIncO
+  | PreDecO
+  | PostDecO
+
+type initprop_op =
+  | Static
+  | NonStatic
 
 type instruct_mutator =
   | SetL of local_id
   | SetN
   | SetG
   | SetS
-  | SetOpL of local_id * operand
-  | SetOpN of operand
-  | SetOpG of operand
-  | SetOpS of operand
-  | IncDecl of local_id * operand
-  | IncDecN of operand
-  | IncDecG of operand
-  | IncDecS of operand
+  | SetOpL of local_id * eq_op
+  | SetOpN of eq_op
+  | SetOpG of eq_op
+  | SetOpS of eq_op
+  | IncDecL of local_id * incdec_op
+  | IncDecN of incdec_op
+  | IncDecG of incdec_op
+  | IncDecS of incdec_op
   | BindL of local_id
   | BindN
   | BindG
@@ -208,20 +243,20 @@ type instruct_mutator =
   | UnsetN
   | UnsetG
   | CheckProp of property_name
-  | InitProp of property_name * operand
+  | InitProp of property_name * initprop_op
 
 type instruct_call =
   | FPushFunc of num_params
   | FPushFuncD of num_params * Litstr.id
   | FPushFuncU of num_params * Litstr.id * Litstr.id
   | FPushObjMethod of num_params
-  | FPushObjMethodD of num_params * Litstr.id
+  | FPushObjMethodD of num_params * Litstr.id * Ast.og_null_flavor
   | FPushClsMethod of num_params
   | FPushClsMethodF of num_params
   | FPushClsMethodD of num_params * Litstr.id * Litstr.id
   | FPushCtor of num_params
   | FPushCtorD of num_params * Litstr.id
-  | FpushCtorI of num_params * class_id
+  | FPushCtorI of num_params * class_id
   | DecodeCufIter of num_params * rel_offset
   | FPushCufIter of num_params * iterator_id
   | FPushCuf of num_params
@@ -234,11 +269,12 @@ type instruct_call =
   | FPassCE of param_id
   | FPassV of param_id
   | FPassVNop of param_id
+  | FPassR of param_id
   | FPassL of param_id * local_id
   | FPassN of param_id
   | FPassG of param_id
   | FPassS of param_id
-  | FCall of param_id
+  | FCall of num_params
   | FCallD of num_params * class_id * function_id
   | FCallArray
   | FCallAwait of num_params * class_id * function_id
@@ -297,18 +333,18 @@ type op_member_final =
   | EmptyElemL of local_id
   | SetElemC
   | SetElemL of local_id
-  | SetOpElemC of operand
-  | SetOpElemL of operand * local_id
-  | IncDecElemC of operand
-  | IncDecElemL of operand * local_id
+  | SetOpElemC of eq_op
+  | SetOpElemL of eq_op * local_id
+  | IncDecElemC of incdec_op
+  | IncDecElemL of incdec_op * local_id
   | BindElemC
   | BindElemL of local_id
   | UnsetElemC
   | UnsetElemL of local_id
   | VGetNewElem
   | SetNewElem
-  | SetOpNewElem of operand
-  | IncDecNewElem of operand
+  | SetOpNewElem of eq_op
+  | IncDecNewElem of incdec_op
   | BindNewElem
   | CGetPropC
   | CGetPropL of local_id
@@ -320,10 +356,10 @@ type op_member_final =
   | EmptyPropL of local_id
   | SetPropC
   | SetPropL of local_id
-  | SetOpPropC of operand
-  | SetOpPropL of operand * local_id
-  | IncDecPropC of operand
-  | IncDecPropL of operand * local_id
+  | SetOpPropC of eq_op
+  | SetOpPropL of eq_op * local_id
+  | IncDecPropC of incdec_op
+  | IncDecPropL of incdec_op * local_id
   | BindPropC
   | BindPropL of local_id
   | UnsetPropC
@@ -351,8 +387,8 @@ type op_final =
   | VGetM of num_params * member_key
   | FPassM of param_id * num_params * member_key
   | SetM of num_params * member_key
-  | IncDecM of num_params * operand * member_key
-  | SetOpM of num_params  * operand * member_key
+  | IncDecM of num_params * incdec_op * member_key
+  | SetOpM of num_params  * eq_op * member_key
   | BindM of num_params * member_key
   | UnsetM of num_params * member_key
   | SetWithRefLML of local_id * local_id
@@ -416,6 +452,8 @@ type instruct_misc =
   | VerifyRetTypeV
   | Self
   | Parent
+  | LateBoundCls
+  | NativeImpl
   | IncStat of int * int (* counter id, value *)
   | AKExists
   | CreateCl of num_params * class_id
@@ -440,7 +478,7 @@ type gen_creation_execution =
   | ContKey
   | ContGetReturn
 
-type gen_delegtion =
+type gen_delegation =
   | ContAssignDelegate
   | ContEnterDelegate
   | YieldFromDelegate
@@ -450,21 +488,56 @@ type async_functions =
   | WHResult
   | Await
 
+type exception_label =
+  | CatchL
+  | FaultL
+
 type instruct =
   | IBasic of instruct_basic
   | ILitConst of instruct_lit_const
   | IOp of instruct_operator
   | IContFlow of instruct_control_flow
   | ICall of instruct_call
+  | IMisc of instruct_misc
+  | IGet of instruct_get
+  | IMutator of instruct_mutator
+  | IIsset of instruct_isset
+  | ILabel of rel_offset
+  | IExceptionLabel of rel_offset * exception_label
+  | ITryFault of rel_offset * instruct list
+  | ITryCatch of (rel_offset * Litstr.id) list * instruct list
+  | IComment of string
 
-type fun_return_type = {
-  param_name : Litstr.id;
+type type_constraint_flag =
+  | Nullable
+  | HHType
+  | ExtendedHint
+  | TypeVar
+  | Soft
+  | TypeConstant
+
+(* A type constraint is just a name and flags *)
+type type_constraint = {
+  tc_flags : type_constraint_flag list;
+  tc_name : string option;
+}
+
+(* Type info has additional optional user type *)
+type type_info = {
+  ti_user_type : string option;
+  ti_type_constraint : type_constraint;
+}
+
+type param = {
+  param_name      : Litstr.id;
+  param_type_info : type_info option;
 }
 
 type fun_def = {
   f_name          : Litstr.id;
   f_body          : instruct list;
-  f_return_types  : fun_return_type list;
+  f_params        : param list;
+  f_return_type   : type_info option;
 }
 
 type method_def = {

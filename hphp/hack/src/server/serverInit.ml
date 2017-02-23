@@ -34,15 +34,7 @@ module ServerInitCommon = struct
       (List.map ~f:(Relative_path.(create Root)))
       (genv.indexer ServerEnv.file_filter) in
     let hhi_root = Hhi.get_hhi_root () in
-    let hhi_filter = begin fun s ->
-      (FindUtils.is_php s)
-        (** If experimental disabled, we don't parse hhi files under
-         * the experimental directory. *)
-        && (TypecheckerOptions.experimental_feature_enabled
-            (ServerConfig.typechecker_options genv.config)
-            TypecheckerOptions.experimental_dict
-          || not (FindUtils.has_ancestor s "experimental"))
-    end in
+    let hhi_filter = FindUtils.is_php in
     let next_files_hhi = compose
       (List.map ~f:(Relative_path.(create Hhi)))
       (Find.make_next_files
@@ -172,7 +164,7 @@ module ServerInitCommon = struct
             let old_saved = Marshal.from_channel chan in
             let dirty_files =
             List.map dirty_files Relative_path.(concat Root) in
-            HackEventLogger.vcs_changed_files_end t;
+            HackEventLogger.vcs_changed_files_end t (List.length dirty_files);
             let _ = Hh_logger.log_duration "Finding changed files" t in
             Result.Ok (
               fn,
@@ -328,6 +320,7 @@ module ServerInitCommon = struct
    * are newly created. Then we use the deptable to figure out the files
    * that referred to them. Finally we recheck the lot. *)
   let type_check_dirty genv env old_fast fast dirty_files t =
+    let start_time = Unix.gettimeofday () in
     let fast = get_dirty_fast old_fast fast dirty_files in
     let names = Relative_path.Map.fold fast ~f:begin fun _k v acc ->
       FileInfo.merge_names v acc
@@ -335,7 +328,10 @@ module ServerInitCommon = struct
     let deps = get_all_deps names in
     let to_recheck = Typing_deps.get_files deps in
     let fast = extend_fast fast env.files_info to_recheck in
-    type_check genv env fast t
+    let result = type_check genv env fast t in
+    HackEventLogger.type_check_dirty start_time
+      (Relative_path.Set.cardinal dirty_files);
+    result
 
   let get_build_targets env =
     let untracked, tracked = BuildMain.get_live_targets env in
@@ -673,21 +669,23 @@ let ai_check genv files_info env t =
   match ServerArgs.ai_mode genv.options with
   | Some ai_opt ->
     let all_passed = List.for_all
-      [env.failed_parsing; env.failed_decl]
+      [env.failed_parsing; env.failed_decl; env.failed_check;]
       (fun m -> Relative_path.Set.is_empty m) in
     if not all_passed then begin
       Hh_logger.log "Cannot run AI because of errors in source";
-      Exit_status.exit Exit_status.CantRunAI
-    end;
-    let check_mode = ServerArgs.check_mode genv.options in
-    let errorl, failed = Ai.go
-      Typing_check_utils.check_defs genv.workers files_info
-        env.tcopt ai_opt check_mode in
-    let env = { env with
-      errorl = Errors.merge errorl env.errorl;
-      failed_check = Relative_path.Set.union failed env.failed_check;
-    } in
-    env, (Hh_logger.log_duration "Ai" t)
+      env, t
+    end
+    else begin
+      let check_mode = ServerArgs.check_mode genv.options in
+      let errorl, failed = Ai.go
+          Typing_check_utils.check_defs genv.workers files_info
+          env.tcopt ai_opt check_mode in
+      let env = { env with
+                  errorl = Errors.merge errorl env.errorl;
+                  failed_check = Relative_path.Set.union failed env.failed_check;
+                } in
+      env, (Hh_logger.log_duration "Ai" t)
+    end
   | None -> env, t
 
 let save_state env fn =

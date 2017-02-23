@@ -387,6 +387,56 @@ and gconst = {
   cst_value: expr option;
 }
 
+let expr_to_string expr =
+  match expr with
+  | Any -> "Any"
+  | Array _ -> "Array"
+  | Shape _ -> "Shape"
+  | ValCollection _ -> "ValCollection"
+  | KeyValCollection _ -> "KeyValCollection"
+  | This -> "This"
+  | Id _ -> "Id"
+  | Lvar _ -> "Lvar"
+  | Lvarvar _ -> "Lvarvar"
+  | Lplaceholder _ -> "Lplaceholder"
+  | Dollardollar _ -> "Dollardollar"
+  | Fun_id _ -> "Fun_id"
+  | Method_id _ -> "Method_id"
+  | Method_caller _ -> "Method_caller"
+  | Smethod_id _ -> "Smethod_id"
+  | Obj_get _ -> "Obj_get"
+  | Array_get _ -> "Array_get"
+  | Class_get _  -> "Class_get"
+  | Class_const _  -> "Class_const"
+  | Call _  -> "Call"
+  | True -> "True"
+  | False -> "False"
+  | Int _  -> "Int"
+  | Float _  -> "Float"
+  | Null -> "Null"
+  | String _  -> "String"
+  | String2 _  -> "String2"
+  | Special_func _  -> "Special_func"
+  | Yield_break -> "Yield_break"
+  | Yield _  -> "Yield"
+  | Await _  -> "Await"
+  | List _  -> "List"
+  | Pair _  -> "Pair"
+  | Expr_list _  -> "Expr_list"
+  | Cast _  -> "Cast"
+  | Unop _  -> "Unop"
+  | Binop _  -> "Binop"
+  | Pipe _  -> "Pipe"
+  | Eif _  -> "Eif"
+  | NullCoalesce _  -> "NullCoalesce"
+  | InstanceOf _  -> "InstanceOf"
+  | New _  -> "New"
+  | Efun _  -> "Efun"
+  | Xml _  -> "Xml"
+  | Assert _  -> "Assert"
+  | Clone _  -> "Clone"
+  | Typename _  -> "Typename"
+
 type def =
   | Fun of fun_
   | Class of class_
@@ -904,17 +954,11 @@ let class_id_to_str = function
   | CIexpr _ -> assert false
   | CI x -> get_instantiated_sid_name x
 
-let is_kvc_kind experimental_enabled p name = match name with
-  | x when
-    x = SN.Collections.cMap
-    || x = SN.Collections.cImmMap
-    || x = SN.Collections.cStableMap -> true
-  | x when x = SN.Collections.cDict -> begin
-    if not experimental_enabled then
-      Errors.experimental_feature p "dict";
-    true
-  end
-  | _ -> false
+let is_kvc_kind name =
+  name = SN.Collections.cMap ||
+  name = SN.Collections.cImmMap ||
+  name = SN.Collections.cStableMap ||
+  name = SN.Collections.cDict
 
 let get_kvc_kind name = match name with
   | x when x = SN.Collections.cMap -> `Map
@@ -930,20 +974,13 @@ let kvc_kind_to_name kind = match kind with
   | `ImmMap -> SN.Collections.cImmMap
   | `Dict -> SN.Collections.cDict
 
-let is_vc_kind experimental_enabled p name =
+let is_vc_kind name =
   name = SN.Collections.cVector ||
   name = SN.Collections.cImmVector ||
   name = SN.Collections.cSet ||
   name = SN.Collections.cImmSet ||
-  (if name = SN.Collections.cKeyset then begin
-    if not experimental_enabled then
-      Errors.experimental_feature p "keyset";
-    true
-  end else if name = SN.Collections.cVec then begin
-    if not experimental_enabled then
-      Errors.experimental_feature p "vec";
-    true
-  end else false)
+  name = SN.Collections.cKeyset ||
+  name = SN.Collections.cVec
 
 let get_vc_kind name = match name with
   | x when x = SN.Collections.cVector -> `Vector

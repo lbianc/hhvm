@@ -992,6 +992,7 @@ public:
   bool emitInlineHHAS(Emitter& e, SimpleFunctionCallPtr);
   bool emitHHInvariant(Emitter& e, SimpleFunctionCallPtr);
   void emitMethodDVInitializers(Emitter& e,
+                                FuncEmitter* fe,
                                 MethodStatementPtr& meth,
                                 Label& topOfBody);
   void emitPostponedCtors();
@@ -1221,7 +1222,7 @@ private:
     /* Process opcode's effects on the EvalStack and emit it */         \
     Offset curPos UNUSED = getUnitEmitter().bcPos();                    \
     {                                                                   \
-      Trace::Indent indent;                                             \
+      Trace::Indent indent2;                                            \
       getEmitterVisitor().prepareEvalStack();                           \
       char idxAPop UNUSED;                                              \
       POP_##pop;                                                        \
@@ -3725,7 +3726,7 @@ bool checkKeys(ExpressionPtr init_expr, bool check_size, Fun fun) {
     return false;
   }
 
-  for (int i = 0, n = el->getCount(); i < n; ++i) {
+  for (int i = 0; i < n; ++i) {
     ExpressionPtr ex = (*el)[i];
     if (ex->getKindOf() != Expression::KindOfArrayPairExpression) {
       return false;
@@ -4017,8 +4018,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
           continue;
         }
         StringData* nLiteral = makeStaticString(sv->getName());
-        Id i = m_curFunc->lookupVarId(nLiteral);
-        emitVirtualLocal(i);
+        Id id = m_curFunc->lookupVarId(nLiteral);
+        emitVirtualLocal(id);
         e.String(nLiteral);
         markGlobalName(e);
         e.VGetG();
@@ -8072,7 +8073,7 @@ Attr EmitterVisitor::bindNativeFunc(MethodStatementPtr meth,
   } else {
     e.NativeImpl();
   }
-  emitMethodDVInitializers(e, meth, topOfBody);
+  emitMethodDVInitializers(e, fe, meth, topOfBody);
   return attributes;
 }
 
@@ -8350,27 +8351,53 @@ void EmitterVisitor::emitMethod(MethodStatementPtr meth) {
   }
 
   if (!m_curFunc->isMemoizeImpl) {
-    emitMethodDVInitializers(e, meth, topOfBody);
+    emitMethodDVInitializers(e, m_curFunc, meth, topOfBody);
   }
 }
 
 void EmitterVisitor::emitMethodDVInitializers(Emitter& e,
+                                              FuncEmitter* fe,
                                               MethodStatementPtr& meth,
                                               Label& topOfBody) {
   bool hasOptional = false;
   ExpressionListPtr params = meth->getParams();
   int numParam = params ? params->getCount() : 0;
+  Offset skippedDefault = kInvalidOffset;
+
+  auto hasRuntimeTypeCheck = [] (const FuncEmitter::ParamInfo& pi) {
+    if (pi.byRef) return false;
+    if (pi.builtinType) return true;
+    return pi.typeConstraint.isNullable() &&
+      pi.typeConstraint.underlyingDataType();
+  };
+
   for (int i = 0; i < numParam; i++) {
     auto par = static_pointer_cast<ParameterExpression>((*params)[i]);
     if (par->isOptional()) {
       hasOptional = true;
       Label entryPoint(e);
+      if (fe->isNative) {
+        auto const& pi = fe->params[i];
+        if (pi.defaultValue.m_type == KindOfNull &&
+            !hasRuntimeTypeCheck(pi)) {
+
+          // builtins with untyped, default null params expect to
+          // get uninits, rather than nulls.
+          if (skippedDefault == kInvalidOffset) {
+            e.Nop();
+            skippedDefault = entryPoint.getAbsoluteOffset();
+          }
+          m_curFunc->params[i].funcletOff = skippedDefault;
+          continue;
+        }
+      }
       emitVirtualLocal(i);
       visit(par->defaultValue());
       emitCGet(e);
       emitSet(e);
       e.PopC();
       m_curFunc->params[i].funcletOff = entryPoint.getAbsoluteOffset();
+      skippedDefault = kInvalidOffset;
     }
   }
   if (hasOptional) e.JmpNS(topOfBody);
@@ -8829,7 +8856,7 @@ void EmitterVisitor::emitMemoizeMethod(MethodStatementPtr meth,
 
   assert(m_evalStack.size() == 0);
 
-  emitMethodDVInitializers(e, meth, topOfBody);
+  emitMethodDVInitializers(e, m_curFunc, meth, topOfBody);
 }
 
 void EmitterVisitor::emitPostponedCtors() {
@@ -8883,6 +8910,7 @@ void EmitterVisitor::emitPostponedPSinit(PostponedNonScalars& p, bool pinit) {
       e.JmpNZ(isset);
     }
     visit((*p.m_vec)[i].second);
+    emitConvertToCell(e);
     e.InitProp(const_cast<StringData*>(propName), op);
     isset.set(e);
   }
@@ -9206,14 +9234,14 @@ void EmitterVisitor::emitFuncCall(Emitter& e, FunctionCallPtr node,
       // cls::foo()
       StringData* cLiteral =
         makeStaticString(node->getOriginalClassName());
-      StringData* nLiteral = makeStaticString(nameStr);
+      nLiteral = makeStaticString(nameStr);
       fpiStart = m_ue.bcPos();
       e.FPushClsMethodD(numParams, nLiteral, cLiteral);
     } else {
       emitVirtualClassBase(e, node.get());
       if (!nameStr.empty()) {
         // ...::foo()
-        StringData* nLiteral = makeStaticString(nameStr);
+        nLiteral = makeStaticString(nameStr);
         e.String(nLiteral);
       } else {
         // ...::$foo()
