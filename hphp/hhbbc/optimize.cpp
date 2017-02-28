@@ -353,60 +353,16 @@ bool propagate_constants(const Bytecode& op, const State& state, Gen gen) {
 
   for (auto i = size_t{0}; i < numPush; ++i) {
     auto const v = tv(state.stack[stkSize - i - 1].type);
-    switch (v->m_type) {
-    case KindOfUninit:        not_reached();          break;
-    case KindOfNull:          gen(bc::Null {});       break;
-    case KindOfBoolean:
-      if (v->m_data.num) {
-        gen(bc::True {});
-      } else {
-        gen(bc::False {});
-      }
-      break;
-    case KindOfInt64:
-      gen(bc::Int { v->m_data.num });
-      break;
-    case KindOfDouble:
-      gen(bc::Double { v->m_data.dbl });
-      break;
-    case KindOfPersistentString:
-      gen(bc::String { v->m_data.pstr });
-      break;
-    case KindOfPersistentVec:
-      assert(v->m_data.parr->isVecArray());
-      gen(bc::Vec { v->m_data.parr });
-      break;
-    case KindOfPersistentDict:
-      assert(v->m_data.parr->isDict());
-      gen(bc::Dict { v->m_data.parr });
-      break;
-    case KindOfPersistentKeyset:
-      assert(v->m_data.parr->isKeyset());
-      gen(bc::Keyset { v->m_data.parr });
-      break;
-    case KindOfPersistentArray:
-      assert(v->m_data.parr->isPHPArray());
-      gen(bc::Array { v->m_data.parr });
-      break;
-
-    case KindOfRef:
-    case KindOfResource:
-    case KindOfString:
-    case KindOfVec:
-    case KindOfDict:
-    case KindOfKeyset:
-    case KindOfArray:
-    case KindOfObject:
-    case KindOfClass:
-      always_assert(0 && "invalid constant in propagate_constants");
-    }
+    gen(gen_constant(*v));
 
     // Special case for FPass* instructions.  We just put a C on the
     // stack, so we need to get it to be an F.
     if (isFPassStar(op.op)) {
-      // We should only ever const prop for FPassL right now.
-      always_assert(numPush == 1 && op.op == Op::FPassL);
-      gen(bc::FPassC { op.FPassL.arg1 });
+      if (state.fpiStack.back().kind != FPIKind::Builtin) {
+        // We should only ever const prop for FPassL right now.
+        always_assert(numPush == 1 && op.op == Op::FPassL);
+        gen(bc::FPassC { op.FPassL.arg1 });
+      }
       continue;
     }
 
@@ -495,29 +451,34 @@ void first_pass(const Index& index,
       }
     }
 
-    /*
-     * We only try to remove mid-block unreachable code if we're not in an FPI
-     * region, because it's the easiest way to maintain FPI region invariants
-     * in the emitted bytecode.
-     */
-    if (state.unreachable) {
-      gen(op);
-      if (!stateIn.unreachable) {
-        gen(bc::BreakTraceHint {});
-      }
-      if (state.fpiStack.empty()) {
-        if (blk->fallthrough == NoBlockId ||
-            ainfo.bdata[blk->fallthrough].stateIn.initialized) {
-          auto const fatal = make_block(ainfo, blk, state);
-          fatal->hhbcs = {
-            bc_with_loc(op.srcLoc, bc::String { s_unreachable.get() }),
-            bc_with_loc(op.srcLoc, bc::Fatal { FatalOp::Runtime })
-          };
-          blk->fallthrough = fatal->id;
+    auto genOut = [&] (const Bytecode* op) -> Op {
+      if (options.StrengthReduce && flags.strengthReduced) {
+        for (auto i = 0; i < flags.strengthReduced->size() - 1; i++) {
+          gen(flags.strengthReduced.value()[i]);
         }
-        break;
+        op = &flags.strengthReduced->back();
       }
-      continue;
+
+      if (options.ConstantProp && flags.canConstProp) {
+        if (propagate_constants(*op, state, gen)) return Op::Nop;
+      }
+
+      gen(*op);
+      return op->op;
+    };
+
+    if (state.unreachable) {
+      // We should still perform the requested transformations; we
+      // might be part way through converting an FPush/FCall to an
+      // FCallBuiltin, for example
+      auto opc = genOut(&op);
+      blk->fallthrough = NoBlockId;
+      if (!(instrFlags(opc) & TF)) {
+        gen(bc::BreakTraceHint {});
+        gen(bc::String { s_unreachable.get() });
+        gen(bc::Fatal { FatalOp::Runtime });
+      }
+      break;
     }
 
     if (options.RemoveDeadBlocks &&
@@ -549,22 +510,23 @@ void first_pass(const Index& index,
       }
     }
 
-    if (options.ConstantProp && flags.canConstProp) {
-      if (propagate_constants(op, state, gen)) continue;
-    }
-
-    if (options.StrengthReduce && flags.strengthReduced) {
-      for (auto& hh : *flags.strengthReduced) gen(hh);
-      continue;
-    }
-
-    gen(op);
+    genOut(&op);
   }
 
   if (options.Peephole) {
     peephole.finalize();
   }
   blk->hhbcs = std::move(newBCs);
+  auto& fpiStack = ainfo.bdata[blk->id].stateIn.fpiStack;
+  auto it = std::remove_if(fpiStack.begin(), fpiStack.end(),
+                           [](const ActRec& ar) {
+                             return ar.kind == FPIKind::Builtin;
+                           });
+
+  if (it != fpiStack.end()) {
+    fpiStack.erase(it, fpiStack.end());
+    ainfo.builtinsRemoved = true;
+  }
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -618,7 +580,12 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
   do {
     again = false;
     visit_blocks_mutable("first pass", index, ainfo, first_pass);
+    if (ainfo.builtinsRemoved) {
+      again = true;
+      ainfo.builtinsRemoved = false;
+    }
 
+    FTRACE(10, "{}", show(*ainfo.ctx.func));
     /*
      * Note: it's useful to do dead block removal before DCE, so it can remove
      * code relating to the branch to the dead block.
@@ -671,6 +638,56 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
 }
 
 //////////////////////////////////////////////////////////////////////
+
+Bytecode gen_constant(const Cell& cell) {
+  switch (cell.m_type) {
+    case KindOfUninit:
+      return bc::NullUninit {};
+    case KindOfNull:
+      return bc::Null {};
+    case KindOfBoolean:
+      if (cell.m_data.num) {
+        return bc::True {};
+      } else {
+        return bc::False {};
+      }
+    case KindOfInt64:
+      return bc::Int { cell.m_data.num };
+    case KindOfDouble:
+      return bc::Double { cell.m_data.dbl };
+    case KindOfString:
+      assert(cell.m_data.pstr->isStatic());
+    case KindOfPersistentString:
+      return bc::String { cell.m_data.pstr };
+    case KindOfVec:
+      assert(cell.m_data.parr->isStatic());
+    case KindOfPersistentVec:
+      assert(cell.m_data.parr->isVecArray());
+      return bc::Vec { cell.m_data.parr };
+    case KindOfDict:
+      assert(cell.m_data.parr->isStatic());
+    case KindOfPersistentDict:
+      assert(cell.m_data.parr->isDict());
+      return bc::Dict { cell.m_data.parr };
+    case KindOfKeyset:
+      assert(cell.m_data.parr->isStatic());
+    case KindOfPersistentKeyset:
+      assert(cell.m_data.parr->isKeyset());
+      return bc::Keyset { cell.m_data.parr };
+    case KindOfArray:
+      assert(cell.m_data.parr->isStatic());
+    case KindOfPersistentArray:
+      assert(cell.m_data.parr->isPHPArray());
+      return bc::Array { cell.m_data.parr };
+
+    case KindOfRef:
+    case KindOfResource:
+    case KindOfObject:
+    case KindOfClass:
+      always_assert(0 && "invalid constant in propagate_constants");
+  }
+  not_reached();
+}
 
 void optimize_func(const Index& index, FuncAnalysis&& ainfo) {
   Trace::Bump bumper{Trace::hhbbc, kSystemLibBump,

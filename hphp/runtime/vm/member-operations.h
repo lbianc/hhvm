@@ -425,8 +425,14 @@ NEVER_INLINE const TypedValue* ElemSlow(TypedValue& tvRef,
   switch (base->m_type) {
     case KindOfUninit:
     case KindOfNull:
+      if (RuntimeOption::EvalHackArrCompatNotices) {
+        raise_hackarr_compat_notice("Cannot index into null");
+      }
       return ElemEmptyish();
     case KindOfBoolean:
+      if (RuntimeOption::EvalHackArrCompatNotices) {
+        raise_hackarr_compat_notice("Cannot index into a boolean");
+      }
       return ElemBoolean(base);
     case KindOfInt64:
     case KindOfDouble:
@@ -1122,6 +1128,13 @@ inline TypedValue* NewElem(TypedValue& tvRef,
 template <KeyType keyType>
 inline void SetElemEmptyish(TypedValue* base, key_type<keyType> key,
                             Cell* value) {
+  if (RuntimeOption::EvalHackArrCompatNotices) {
+    if (base->m_type == KindOfNull) {
+      raise_hackarr_compat_notice("Promoting null to array");
+    } else if (base->m_type == KindOfBoolean) {
+      raise_hackarr_compat_notice("Promoting false to array");
+    }
+  }
   auto const& scratchKey = initScratchKey(key);
   tvAsVariant(base) = Array::Create();
   tvAsVariant(base).asArrRef().set(tvAsCVarRef(&scratchKey),

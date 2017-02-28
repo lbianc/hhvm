@@ -42,6 +42,11 @@ let string_of_lit_const instruction =
     | True        -> "True"
     | False       -> "False"
     | Double d    -> "Double " ^ string_of_float d
+    | Array (i,_, _) -> "Array @A_" ^ string_of_int i
+    | NewMixedArray i -> "NewMixedArray " ^ string_of_int i
+    | NewPackedArray i -> "NewPackedArray " ^ string_of_int i
+    | AddElemC -> "AddElemC"
+    | AddNewElemC -> "AddNewElemC"
     | _ -> failwith "unexpected literal kind in string_of_lit_const"
 
 let string_of_operator instruction =
@@ -102,6 +107,7 @@ let string_of_local_id x =
   match x with
   | Local_unnamed i -> string_of_int i
   | Local_named s -> s
+  | Local_pipe -> failwith "$$ should not have survived to codegen"
 
 let string_of_get x =
   match x with
@@ -182,6 +188,7 @@ let string_of_mutator x =
   | BindN -> "BindN"
   | BindG -> "BindG"
   | BindS -> "BindS"
+  | UnsetL id -> "UnsetL " ^ string_of_local_id id
   | UnsetN -> "UnsetN"
   | UnsetG -> "UnsetG"
   | CheckProp _ -> failwith "NYI"
@@ -292,8 +299,37 @@ let string_of_misc instruction =
     | Catch -> "Catch"
     | _ -> failwith "instruct_misc Not Implemented"
 
+let string_of_iterator instruction =
+  match instruction with
+  | IterInit (id, label, value) ->
+    "IterInit " ^
+    (string_of_iterator_id id) ^ " " ^
+    (string_of_label label) ^ " " ^
+    (string_of_local_id value)
+  | IterInitK (id, label, key, value) ->
+    "IterInitK " ^
+    (string_of_iterator_id id) ^ " " ^
+    (string_of_label label) ^ " " ^
+    (string_of_local_id key) ^ " " ^
+    (string_of_local_id value)
+  | IterNext (id, label, value) ->
+    "IterNext " ^
+    (string_of_iterator_id id) ^ " " ^
+    (string_of_label label) ^ " " ^
+    (string_of_local_id value)
+  | IterNextK (id, label, key, value) ->
+    "IterNextK " ^
+    (string_of_iterator_id id) ^ " " ^
+    (string_of_label label) ^ " " ^
+    (string_of_local_id key) ^ " " ^
+    (string_of_local_id value)
+  | IterFree id ->
+    "IterFree " ^ (string_of_iterator_id id)
+  | _ -> "### string_of_iterator instruction not implemented"
+
 let string_of_instruction instruction =
   match instruction with
+  | IIterator            i -> string_of_iterator i
   | IBasic               i -> string_of_basic i
   | ILitConst            i -> string_of_lit_const i
   | IOp                  i -> string_of_operator i
@@ -308,11 +344,8 @@ let string_of_instruction instruction =
   | IComment             s -> "# " ^ s
   | _ -> failwith "invalid instruction"
 
-let string_of_catch (label, id) =
-  "(" ^
-  Litstr.to_string id ^
-  " " ^
-  string_of_exception_label label CatchL ^ ")"
+let string_of_catch label =
+  string_of_exception_label label CatchL
 
 let rec add_try_fault_block buffer indent label instructions =
   B.add_string buffer ".try_fault ";
@@ -322,12 +355,11 @@ let rec add_try_fault_block buffer indent label instructions =
   B.add_string buffer (String.make indent ' ');
   B.add_string buffer "}"
 
-and add_try_catch_block buffer indent ids instructions =
+and add_try_catch_block buffer indent label try_block =
   B.add_string buffer ".try_catch ";
-  let catch_strings = List.map string_of_catch ids in
-  B.add_string buffer @@ String.concat " " catch_strings;
+  B.add_string buffer (string_of_catch label);
   B.add_string buffer " {\n";
-  add_instruction_list buffer (indent + 2) instructions;
+  add_instruction_list buffer (indent + 2) try_block;
   B.add_string buffer (String.make indent ' ');
   B.add_string buffer "}"
 
@@ -335,14 +367,14 @@ and add_instruction_list buffer indent instructions =
   let process_instr instr =
     let actual_indent =
       match instr with
-      | ILabel _
       | IComment _ -> 0
+      | ILabel _
       | IExceptionLabel _ -> indent - 2
       | _ -> indent
     in
     B.add_string buffer (String.make actual_indent ' ');
     begin match instr with
-      | ITryFault (l, il) -> add_try_fault_block buffer actual_indent l il
+      | ITryFault (l, il, _) -> add_try_fault_block buffer actual_indent l il
       | ITryCatch (l, il) -> add_try_catch_block buffer actual_indent l il
       | _ -> B.add_string buffer (string_of_instruction instr)
     end;
@@ -401,20 +433,28 @@ let fix_xhp_name s =
 
 let fmt_name s = fix_xhp_name (Utils.strip_ns s)
 
+let add_decl_vars buf decl_vars = if decl_vars = [] then () else begin
+  B.add_string buf "  .declvars ";
+  B.add_string buf @@ String.concat " " decl_vars;
+  B.add_string buf ";\n"
+  end
+
 let add_fun_def buf fun_def =
   let function_name = fmt_name (Hhas_function.name fun_def) in
   let function_return_type = Hhas_function.return_type fun_def in
   let function_params = Hhas_function.params fun_def in
   let function_body = Hhas_function.body fun_def in
+  let function_decl_vars = Hhas_function.decl_vars fun_def in
   B.add_string buf "\n.function ";
   B.add_string buf (string_of_type_info_option function_return_type);
   B.add_string buf function_name;
   B.add_string buf (string_of_params function_params);
   B.add_string buf " {\n";
+  add_decl_vars buf function_decl_vars;
   add_instruction_list buf 2 function_body;
   B.add_string buf "}\n"
 
-let attribute_argument_to_string index argument =
+let attribute_argument_to_string argument =
   let value = match argument with
   | Null -> "N"
   | Double f -> Printf.sprintf "d:%f" f
@@ -425,21 +465,33 @@ let attribute_argument_to_string index argument =
   | True -> "i:1"
   | Int i -> "i:" ^ (Int64.to_string i)
   | _ -> failwith "unexpected value in attribute_argument_to_string" in
-  Printf.sprintf "i:%d;%s;" index value
+  Printf.sprintf "%s;" value
 
 let attribute_arguments_to_string arguments =
-  let rec aux index arguments acc =
+  let rec aux arguments acc =
     match arguments with
-    | h :: t -> aux (index + 1) t (acc ^ attribute_argument_to_string index h)
+    | h :: t -> aux t (acc ^ attribute_argument_to_string h)
     | _ -> acc in
-  aux 0 arguments ""
+  aux arguments ""
+
+let attribute_to_string_helper ~if_class_attribute name args =
+  let count = List.length args in
+  let count =
+    if count mod 2 = 0 then count / 2
+    else failwith "attribute string should have even amount of arguments"
+  in
+  let arguments = attribute_arguments_to_string args in
+  let attribute_str = format_of_string @@
+    if if_class_attribute
+    then "\"%s\"(\"\"\"a:%n:{%s}\"\"\")"
+    else "\"\"\"%s:%n:{%s}\"\"\""
+  in
+  Printf.sprintf attribute_str name count arguments
 
 let attribute_to_string a =
   let name = Hhas_attribute.name a in
   let args = Hhas_attribute.arguments a in
-  let count = List.length args in
-  let arguments = attribute_arguments_to_string args in
-  Printf.sprintf "\"%s\"(\"\"\"a:%n:{%s}\"\"\")" name count arguments
+  attribute_to_string_helper ~if_class_attribute:true name args
 
 let method_attributes m =
   let user_attrs = Hhas_method.attributes m in
@@ -527,6 +579,12 @@ let add_constant buf c =
   (* TODO: Get the actual initializer when we can codegen it. *)
   B.add_string buf " = \"\"\"N;\"\"\";\n"
 
+let add_type_constant buf c =
+  B.add_string buf "\n  .const ";
+  B.add_string buf (Hhas_type_constant.name c);
+  (* TODO: Get the actual initializer when we can codegen it. *)
+  B.add_string buf " isType = \"\"\"N;\"\"\";\n"
+
 let add_class_def buf class_def =
   let class_name = fmt_name (Hhas_class.name class_def) in
   (* TODO: user attributes *)
@@ -537,6 +595,7 @@ let add_class_def buf class_def =
   add_implements buf (Hhas_class.implements class_def);
   B.add_string buf " {\n";
   List.iter (add_constant buf) (Hhas_class.constants class_def);
+  List.iter (add_type_constant buf) (Hhas_class.type_constants class_def);
   List.iter (add_property buf) (Hhas_class.properties class_def);
   List.iter (add_method_def buf) (Hhas_class.methods class_def);
   (* TODO: other members *)
@@ -546,6 +605,27 @@ let add_defcls buf classes =
   List.iteri
     (fun count _ -> B.add_string buf (Printf.sprintf "  DefCls %n\n" count))
     classes
+
+let add_data_region buf functions =
+  let rec add_data_region_list buf instr =
+    List.iter (add_data_region_aux buf) instr
+  and add_data_region_aux buf = function
+    | ILitConst (Array (num, name, arguments)) ->
+      B.add_string buf ".adata A_";
+      B.add_string buf @@ string_of_int num;
+      B.add_string buf " = ";
+      B.add_string buf
+        @@ attribute_to_string_helper ~if_class_attribute:false name arguments;
+      B.add_string buf ";\n"
+    | ITryFault (_, il, _)
+    | ITryCatch (_, il) -> add_data_region_list buf il
+    | _ -> ()
+  and iter_aux buf fun_def =
+    let function_body = Hhas_function.body fun_def in
+    add_data_region_list buf function_body
+  in
+  List.iter (iter_aux buf) functions;
+  B.add_string buf "\n"
 
 let add_top_level buf hhas_prog =
   let main_stmts =
@@ -560,8 +640,10 @@ let add_top_level buf hhas_prog =
 
 let add_program buf hhas_prog =
   B.add_string buf "#starts here\n";
+  let functions = Hhas_program.functions hhas_prog in
+  add_data_region buf functions;
   add_top_level buf hhas_prog;
-  List.iter (add_fun_def buf) (Hhas_program.functions hhas_prog);
+  List.iter (add_fun_def buf) functions;
   List.iter (add_class_def buf) (Hhas_program.classes hhas_prog);
   B.add_string buf "\n#ends here\n"
 

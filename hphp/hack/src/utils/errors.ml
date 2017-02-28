@@ -517,6 +517,7 @@ module NastCheck                            = struct
   let constructor_required                  = 3030 (* DONT MODIFY!!!! *)
   let interface_with_partial_typeconst      = 3031 (* DONT MODIFY!!!! *)
   let multiple_xhp_category                 = 3032 (* DONT MODIFY!!!! *)
+  let optional_shape_fields_not_supported   = 3033 (* DONT MODIFY!!!! *)
   (* EXTEND HERE WITH NEW VALUES IF NEEDED *)
 end
 
@@ -1224,6 +1225,10 @@ let dangerous_method_name pos =
   "if you want to define a constructor, use "^
   "__construct"
 )
+
+let optional_shape_fields_not_supported pos =
+  add NastCheck.optional_shape_fields_not_supported pos
+    "Optional shape fields are not supported."
 
 (*****************************************************************************)
 (* Nast terminality *)
@@ -2027,10 +2032,11 @@ let instanceof_always_true pos =
   add Typing.instanceof_always_true pos
     "This 'instanceof' test will always succeed"
 
-let instanceof_generic_classname pos =
+let instanceof_generic_classname pos name =
   add Typing.instanceof_generic_classname pos
-    "'instanceof' cannot be used on a generic classname because types are erased at runtime"
-
+    ("'instanceof' cannot be used on 'classname<" ^ name ^ ">' because '" ^
+    name ^ "' may be instantiated with a type such as \
+     'C<int>' that cannot be checked at runtime")
 
 (*****************************************************************************)
 (* Typing decl errors *)

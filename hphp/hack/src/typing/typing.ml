@@ -1856,8 +1856,8 @@ and exception_ty pos env ty =
   Type.sub_type pos (Reason.URthrow) env ty exn_ty
 
 and shape_field_pos = function
-  | SFlit (p, _) -> p
-  | SFclass_const ((cls_pos, _), (member_pos, _)) -> Pos.btw cls_pos member_pos
+  | Ast.SFlit (p, _) -> p
+  | Ast.SFclass_const ((cls_pos, _), (mem_pos, _)) -> Pos.btw cls_pos mem_pos
 
 and check_shape_keys_validity env pos keys =
     (* If the key is a class constant, get its class name and type. *)
@@ -1866,13 +1866,13 @@ and check_shape_keys_validity env pos keys =
       (* Empty strings or literals that start with numbers are not
          permitted as shape field names. *)
       (match key with
-        | SFlit (_, key_name) ->
+        | Ast.SFlit (_, key_name) ->
            if (String.length key_name = 0) then
              (Errors.invalid_shape_field_name_empty key_pos)
            else if (key_name.[0] >= '0' && key_name.[0] <='9') then
              (Errors.invalid_shape_field_name_number key_pos);
            env, key_pos, None
-        | SFclass_const (_, cls as x, y) ->
+        | Ast.SFclass_const (_, cls as x, y) ->
           let env, _te, ty = class_const env pos (CI (x, []), y) in
           let env = Typing_enum.check_valid_array_key_type
             Errors.invalid_shape_field_type ~allow_any:false
@@ -4224,12 +4224,16 @@ and condition env tparamet =
           Reason.none, Tclass ((Pos.none, SN.Classes.cAwaitable), [Reason.none, Tany])
         ) then () else Async.enforce_not_awaitable env (fst ivar) x_ty;
 
+      let safe_instanceof_enabled =
+        TypecheckerOptions.experimental_feature_enabled
+          (Env.get_options env) TypecheckerOptions.experimental_instanceof in
       let rec resolve_obj env obj_ty =
         (* Expand so that we don't modify x *)
         let env, obj_ty = Env.expand_type env obj_ty in
         match obj_ty with
-        | _, Tabstract (AKgeneric _, _) ->
-          Errors.instanceof_generic_classname p;
+        | _, Tabstract (AKgeneric name, _) ->
+          if safe_instanceof_enabled
+          then Errors.instanceof_generic_classname p name;
           env, obj_ty
         | _, Tabstract (AKdependent (`this, []), Some (_, Tclass _)) ->
           let obj_ty =
@@ -4273,10 +4277,7 @@ and condition env tparamet =
                 (* We only implement the safe instanceof in strict mode *)
                 (* Also: for generic types we implememt it only with
                  * experimental feature enabled *)
-              if Env.is_strict env &&
-                 (tyl = [] || TypecheckerOptions.experimental_feature_enabled
-                   (Env.get_options env)
-                   TypecheckerOptions.experimental_instanceof)
+              if Env.is_strict env && (tyl = [] || safe_instanceof_enabled)
               then safe_instanceof env obj_ty _c class_info
               else env, obj_ty
           end

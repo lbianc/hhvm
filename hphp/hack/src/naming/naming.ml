@@ -623,7 +623,7 @@ let check_repetition s param =
   if x <> SN.SpecialIdents.placeholder then SSet.add x s else s
 
 let convert_shape_name env = function
-  | SFlit (pos, s) -> (pos, N.SFlit (pos, s))
+  | SFlit (pos, s) -> (pos, SFlit (pos, s))
   | SFclass_const (x, (pos, y)) ->
     let class_name =
       if (snd x) = SN.Classes.cSelf then
@@ -631,7 +631,7 @@ let convert_shape_name env = function
         | Some (cid, _) -> cid
         | None -> Errors.self_outside_class pos; (pos, SN.Classes.cUnknown)
       else Env.type_name env x ~allow_typedef:false in
-    (pos, N.SFclass_const (class_name, (pos, y)))
+    (pos, SFclass_const (class_name, (pos, y)))
 
 let arg_unpack_unexpected = function
   | [] -> ()
@@ -686,6 +686,12 @@ module Make (GetLocals : GetLocals) = struct
     p, hint_ ~forbid_this ~allow_retonly ~allow_typedef ~allow_wildcard
       is_static_var env h
 
+  and shape_field_to_shape_field_info env { sf_optional; sf_name=_; sf_hint } =
+    N.{
+      sfi_optional=sf_optional;
+      sfi_hint=hint env sf_hint;
+    }
+
   and hint_ ~forbid_this ~allow_retonly ~allow_typedef ~allow_wildcard
         is_static_var env x =
     let hint =
@@ -735,11 +741,12 @@ module Make (GetLocals : GetLocals) = struct
       N.Haccess ((pos, root_ty), id :: ids)
     | Hshape fdl -> N.Hshape
       begin
-        List.fold_left fdl ~init:ShapeMap.empty ~f:begin fun fdm (pname, h) ->
-          let pos, name = convert_shape_name env pname in
+        List.fold_left fdl ~init:ShapeMap.empty ~f:begin fun fdm shape_field ->
+          let pos, name = convert_shape_name env shape_field.sf_name in
           if ShapeMap.mem name fdm
           then Errors.fd_name_already_bound pos;
-          ShapeMap.add name (hint env h) fdm
+          ShapeMap.add
+            name (shape_field_to_shape_field_info env shape_field) fdm
         end
     end
 

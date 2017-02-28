@@ -303,7 +303,7 @@ let priorities = [
   (Left, [Tlp]);
   (NonAssoc, [Tnew; Tclone]);
   (Left, [Tlb]);
-  (Right, [Teq; Tpluseq; Tminuseq; Tstareq;
+  (Right, [Teq; Tpluseq; Tminuseq; Tstareq; Tstarstareq;
            Tslasheq; Tdoteq; Tpercenteq;
            Tampeq; Tbareq; Txoreq; Tlshifteq; Trshifteq]);
   (Left, [Tarrow; Tnsarrow]);
@@ -2604,6 +2604,8 @@ and expr_remain env e1 =
       expr_assign env Tbareq (Eq (Some Bar)) e1
   | Tpluseq ->
       expr_assign env Tpluseq (Eq (Some Plus)) e1
+  | Tstarstareq ->
+      expr_assign env Tstarstareq (Eq (Some Starstar)) e1
   | Tstareq ->
       expr_assign env Tstareq (Eq (Some Star)) e1
   | Tslasheq ->
@@ -3807,6 +3809,10 @@ and shape_field_list_remain env =
       | _ -> error_expect env ")"; [fd]
 
 and shape_field env =
+  if L.token env.file env.lb = Tqm then
+    error env "Shape construction should not specify optional types.";
+  L.back env.lb;
+
   let name = shape_field_name env in
   expect env Tsarrow;
   let value = expr { env with priority = 0 } in
@@ -4072,10 +4078,19 @@ and hint_shape_field_list_remain env =
           [fd]
 
 and hint_shape_field env =
-  let name = shape_field_name env in
+  (* Consume the next token to determine if we're creating an optional field. *)
+  let sf_optional =
+    if L.token env.file env.lb = Tqm then
+      true
+    else
+      (* In this case, we did not find an optional type, so we'll back out by a
+         token to parse the shape. *)
+      (L.back env.lb; false)
+  in
+  let sf_name = shape_field_name env in
   expect env Tsarrow;
-  let ty = hint env in
-  name, ty
+  let sf_hint = hint env in
+  { sf_optional; sf_name; sf_hint }
 
 (*****************************************************************************)
 (* Namespaces *)

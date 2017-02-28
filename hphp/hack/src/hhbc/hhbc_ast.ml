@@ -23,6 +23,7 @@ type repo_auth_type = string (* see see runtime/base/repo-auth-type.h *)
 type local_id =
   | Local_unnamed of int
   | Local_named of string
+  | Local_pipe (* Will be rewritten to an unnamed local. *)
 type param_id =
   | Param_unnamed of int
   | Param_named of string
@@ -55,7 +56,7 @@ type instruct_lit_const =
   | Int of int64
   | Double of float
   | String of Litstr.id
-  | Array of int
+  | Array of int * Litstr.id * instruct_lit_const list
   | Vec of int (* scalar vec id *)
   | Dict of int (* scalar dict id *)
   | Keyset of int (* scalar keyset id *)
@@ -144,12 +145,16 @@ type instruct_control_flow =
   | JmpNS of rel_offset
   | JmpZ of rel_offset
   | JmpNZ of rel_offset
-  | Switch of switchkind * int * int list (* bounded, base, offset vector *)
-  | SSwitch of (Litstr.id * rel_offset) list (* litstr id / offset vector *)
+  (* bounded, base, offset vector *)
+  | Switch of switchkind * int * rel_offset list
+  (* litstr id / offset vector *)
+  | SSwitch of (Litstr.id * rel_offset) list
   | RetC
   | RetV
   | Unwind
   | Throw
+  | Continue of int  (* This will be rewritten *)
+  | Break of int  (* This will be rewritten *)
 
 type instruct_get =
   | CGetL of local_id
@@ -240,6 +245,7 @@ type instruct_mutator =
   | BindN
   | BindG
   | BindS
+  | UnsetL of local_id
   | UnsetN
   | UnsetG
   | CheckProp of property_name
@@ -494,6 +500,7 @@ type exception_label =
 
 type instruct =
   | IBasic of instruct_basic
+  | IIterator of instruct_iterator
   | ILitConst of instruct_lit_const
   | IOp of instruct_operator
   | IContFlow of instruct_control_flow
@@ -504,8 +511,8 @@ type instruct =
   | IIsset of instruct_isset
   | ILabel of rel_offset
   | IExceptionLabel of rel_offset * exception_label
-  | ITryFault of rel_offset * instruct list
-  | ITryCatch of (rel_offset * Litstr.id) list * instruct list
+  | ITryFault of rel_offset * instruct list * instruct list
+  | ITryCatch of rel_offset * instruct list
   | IComment of string
 
 type type_constraint_flag =
