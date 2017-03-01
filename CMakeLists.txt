@@ -75,6 +75,7 @@ include(MSVCDefaults)
 include(Options)
 include(HPHPCompiler)
 include(HPHPFindLibs)
+include(HPHPSetup)
 
 ADD_SUBDIRECTORY(third-party)
 ADD_SUBDIRECTORY(hphp)
