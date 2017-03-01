@@ -1,4 +1,5 @@
 if (${CMAKE_MAJOR_VERSION} GREATER 2)
+  cmake_policy(SET CMP0011 OLD)
   cmake_policy(SET CMP0026 OLD)
 endif()
 
