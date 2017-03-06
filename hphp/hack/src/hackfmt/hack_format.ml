@@ -13,8 +13,10 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module Syntax = Full_fidelity_editable_syntax
 module TriviaKind = Full_fidelity_trivia_kind
 module Trivia = Full_fidelity_editable_trivia
+module Rewriter = Full_fidelity_rewriter.WithSyntax(Syntax)
 open Syntax
 open Core
+(* open Hackfmt_utils *)
 
 (* TODO: move this to a config file *)
 let __INDENT_WIDTH = 2
@@ -273,19 +275,21 @@ let builder = object (this)
     for end chunks and block nesting
   *)
   method start_block_nest () =
-    if List.is_empty rules
+    if List.is_empty rules && not (Nesting_allocator.is_nested nesting_alloc)
     then block_indent <- block_indent + 2
     else this#nest ()
 
   method end_block_nest () =
-    if List.is_empty rules
+    if List.is_empty rules && not (Nesting_allocator.is_nested nesting_alloc)
     then block_indent <- block_indent - 2
     else this#unnest ()
 
   method end_chunks () =
     this#hard_split ();
-    if List.is_empty rules && not @@ List.is_empty chunks
-      then this#push_chunk_group ()
+    if List.is_empty rules &&
+      not (List.is_empty chunks) &&
+      not (Nesting_allocator.is_nested nesting_alloc)
+    then this#push_chunk_group ()
 
   method push_chunk_group () =
     let print_range = Chunk_group.(match in_range with
@@ -388,7 +392,10 @@ let builder = object (this)
         ~f:(fun (newlines, only_whitespace) t ->
           this#advance (Trivia.width t);
           (match Trivia.kind t with
-            | TriviaKind.WhiteSpace -> newlines, only_whitespace
+            | TriviaKind.WhiteSpace ->
+              (* Needed for the XHP whitespace hack, see XHPExpression *)
+              this#check_range ();
+              newlines, only_whitespace
             | TriviaKind.EndOfLine ->
               if only_whitespace && is_leading then
                 this#add_always_empty_chunk ();
@@ -403,6 +410,13 @@ let builder = object (this)
             | TriviaKind.DelimitedComment ->
               handle_newlines ~is_trivia:true newlines;
               this#add_string ~is_trivia:true @@ Trivia.text t;
+              (match Trivia.kind t with
+                | TriviaKind.Unsafe
+                | TriviaKind.FallThrough
+                | TriviaKind.SingleLineComment ->
+                  this#hard_split ();
+                | _ -> ()
+              );
               0, false
         )
       ) in
@@ -494,8 +508,8 @@ let rec transform node =
     ()
   | SyntaxList _ ->
     raise (Failure (Printf.sprintf
-"Error: SyntaxList should never be handled directly;
-offending text is '%s'." (text node)));
+      "Error: SyntaxList should never be handled directly;
+      offending text is '%s'." (text node)));
   | ScriptHeader x ->
     let (lt, q, lang_kw) = get_script_header_children x in
     t lt;
@@ -591,7 +605,7 @@ offending text is '%s'." (text node)));
   | NamespaceUseClause _ ->
     let error = Printf.sprintf "%s not supported - exiting \n"
       (SyntaxKind.to_string (kind node)) in
-    raise (Failure error);
+    raise (Hackfmt_error.UnsupportedSyntax error);
   | FunctionDeclaration x ->
     let (attr, header, body) = get_function_declaration_children x in
     t attr;
@@ -1010,7 +1024,7 @@ offending text is '%s'." (text node)));
     t async;
     if not (is_missing async) then add_space ();
     t signature;
-    add_space ();
+    pending_space ();
     t arrow;
     handle_lambda_body body;
     ()
@@ -1270,7 +1284,7 @@ offending text is '%s'." (text node)));
     tl_with ~span ~f:(fun () ->
       t name;
       t eq;
-      split ();
+      builder#simple_split ~cost:Cost.Assignment ();
       t_with ~nest expr
     ) ();
     ()
@@ -1288,23 +1302,79 @@ offending text is '%s'." (text node)));
     handle_xhp_open_right_angle_token right_a;
     ()
   | XHPExpression x ->
-    let (op, body, close) = get_xhp_expression_children x in
+    (**
+     * XHP breaks the normal rules of trivia. If there is a newline after the
+     * XHPOpen tag then it becomes leading trivia for the first token in the
+     * XHPBody instead of trailing trivia for the open tag.
+     *
+     * To deal with this we map these newlines to whitespace. We do this instead
+     * of removing the trivia in order to maintain an accurate character
+     * processed count for partial formatting.
+     *)
+    let token_has_trailing_trivia_kind trivia_kind node =
+      List.exists (Syntax.trailing_trivia node)
+        ~f:(fun trivia -> Trivia.kind trivia = trivia_kind)
+    in
+    let token_has_trailing_newline =
+      token_has_trailing_trivia_kind TriviaKind.EndOfLine in
+    let token_has_trailing_whitespace =
+      token_has_trailing_trivia_kind TriviaKind.WhiteSpace in
+    let remove_leading_trivia node =
+      let found = ref false in
+      let rewritten_node, _ = Rewriter.rewrite_pre (fun rewrite_node ->
+        match syntax rewrite_node with
+          | Token t when not !found ->
+            found := true;
+            let new_triv = List.map (EditableToken.leading t) ~f:(fun triv ->
+              match Trivia.kind triv with
+                | TriviaKind.EndOfLine -> Trivia.make_whitespace @@
+                  (String.make (Trivia.width triv) ' ')
+                | _ -> triv
+            ) in
+            Some (
+              Syntax.make_token {t with EditableToken.leading = new_triv},
+              true
+            )
+          | _  -> Some (rewrite_node, false)
+      ) node in
+      rewritten_node
+    in
 
+    let handle_xhp_body body =
+      let body_with_stripped_hd = remove_leading_trivia body in
+      let after_each_with_node node is_last =
+        if token_has_trailing_whitespace node then pending_space ();
+        if not is_last && token_has_trailing_newline node
+          then builder#hard_split ();
+      in
+      let rec aux l = match l with
+        | hd :: tl -> t hd; after_each_with_node hd (List.is_empty tl); aux tl;
+        | [] -> ()
+      in
+      match syntax body_with_stripped_hd with
+        | Missing -> ()
+        | SyntaxList sl -> split (); aux sl
+        | _ -> split (); aux [body]
+    in
+
+    let (xhp_open, body, close) = get_xhp_expression_children x in
     let handle_body_close = (fun () ->
       tl_with ~nest ~f:(fun () ->
-        handle_possible_list ~before_each:(fun _ -> split ()) body
+        handle_xhp_body body
       ) ();
       if not (is_missing close) then split ();
-      t close;
+      t (remove_leading_trivia close);
       ()
     ) in
 
     if builder#has_rule_kind Rule.XHPExpression then begin
-      t op;
-      tl_with ~rule:(RuleKind Rule.XHPExpression) ~f:(handle_body_close) ();
+      let expr_rule = builder#create_lazy_rule
+        ~rule_kind:(Rule.XHPExpression) () in
+      t xhp_open;
+      tl_with ~rule:(LazyRuleID expr_rule) ~f:(handle_body_close) ();
     end else begin
       tl_with ~rule:(RuleKind Rule.XHPExpression) ~f:(fun () ->
-        t op;
+        t xhp_open;
         handle_body_close ();
       ) ();
     end;
@@ -1341,7 +1411,8 @@ offending text is '%s'." (text node)));
     let (variance, name, constraints) = get_type_parameter_children x in
     t variance;
     t name;
-    pending_space ();
+    if syntax constraints <> Missing then
+      pending_space ();
     handle_possible_list constraints;
   | TypeConstraint x ->
     let (kw, constraint_type) = get_type_constraint_children x in
@@ -1419,7 +1490,7 @@ offending text is '%s'." (text node)));
     let (left_p, types, right_p) = get_tuple_type_specifier_children x in
     transform_argish left_p types right_p;
   | ErrorSyntax _ ->
-    raise (Failure "Error: Cannot format a syntax tree with an error node");
+    raise Hackfmt_error.InvalidSyntax
   | ListItem x ->
     t x.list_item;
     t x.list_separator
@@ -1709,19 +1780,37 @@ and transform_argish left_p arg_list right_p =
   end else transform right_p;
   ()
 
+and remove_trailing_trivia node =
+  let trailing_token = match Syntax.trailing_token node with
+    | Some t -> t
+    | None -> failwith "Expected trailing token"
+  in
+  let rewritten_node, changed = Rewriter.rewrite_pre (fun rewrite_node ->
+    match syntax rewrite_node with
+      | Token t when t == trailing_token ->
+        Some (Syntax.make_token {t with EditableToken.trailing = []}, true)
+      | _  -> Some (rewrite_node, false)
+  ) node in
+  if not changed then failwith "Trailing token not rewritten";
+  rewritten_node, EditableToken.trailing trailing_token
+
 and transform_last_arg node =
   match syntax node with
     | ListItem x ->
       let (item, separator) = get_list_item_children x in
-      transform item;
-      builder#set_pending_comma ();
       (match syntax separator with
-        | Token x -> builder#token_trivia_only x;
-        | Missing -> ();
+        | Token x ->
+          transform item;
+          builder#set_pending_comma ();
+          builder#token_trivia_only x;
+        | Missing ->
+          let item, trailing_trivia = remove_trailing_trivia item in
+          transform item;
+          builder#set_pending_comma ();
+          builder#handle_trivia ~is_leading:false trailing_trivia;
         | _ -> raise (Failure "Expected separator to be a token");
       );
     | _ ->
-      (* TODO: handle case where last arg has trivia but no comma) *)
       transform node;
       builder#set_pending_comma ();
 
@@ -1767,6 +1856,14 @@ and transform_binary_expression ~is_nested expr =
       | Token t -> Full_fidelity_operator.trailing_from_token
         (EditableToken.kind t)
       | _ -> raise (Failure "Operator should always be a token")
+  in
+  let operator_has_surrounding_spaces op =
+    match op with
+      | None -> failwith "operator_has_surrounding_spaces: Operator expected"
+      | Some op ->
+        match get_operator_type op with
+          | Full_fidelity_operator.ConcatenationOperator -> false
+          | _ -> true
   in
 
   let (left, operator, right) = get_binary_expression_children expr in
@@ -1819,9 +1916,21 @@ and transform_binary_expression ~is_nested expr =
         if not is_nested then builder#nest ~skip_parent:true ();
         tl_with ~rule:(LazyRuleID lazy_argument_rule) ~nest:is_nested ~f:(
           fun () ->
-            List.iteri tl ~f:(fun i x ->
-              if (i mod 2) = 0 then begin add_space (); transform x end
-              else begin split ~space:true (); transform_operand x end
+            ignore @@ List.foldi tl ~init:None ~f:(fun i last_op x ->
+              if (i mod 2) = 0 then begin
+                let op = x in
+                let op_has_spaces = operator_has_surrounding_spaces (Some op) in
+                if op_has_spaces then pending_space ();
+                transform op;
+                Some op
+              end
+              else begin
+                let operand = x in
+                let op_has_spaces = operator_has_surrounding_spaces last_op in
+                split ~space:op_has_spaces ();
+                transform_operand operand;
+                None
+              end
             )
         ) ();
         if not is_nested then builder#unnest ();
@@ -1838,5 +1947,7 @@ let format_node ?(debug=false) node start_char end_char =
 let format_content content =
   let source_text = SourceText.make content in
   let syntax_tree = SyntaxTree.make source_text in
+  if not @@ List.is_empty @@ SyntaxTree.errors syntax_tree
+    then raise Hackfmt_error.InvalidSyntax;
   let editable = Full_fidelity_editable_syntax.from_tree syntax_tree in
   format_node editable

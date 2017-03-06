@@ -60,7 +60,7 @@ using SArray   = const ArrayData*;
 /*
  * HHBC evaluation stack flavors.
  */
-enum class Flavor { C, V, A, R, F, U, CR, CVU, CUV };
+enum class Flavor { C, V, R, F, U, CR, CVU, CUV };
 
 /*
  * Types of parameter preparation (or unknown).
@@ -70,6 +70,8 @@ enum class PrepKind { Ref, Val, Unknown };
 using LocalId = uint32_t;
 constexpr const LocalId NoLocalId = -1;
 using IterId = uint32_t;
+using ClsRefSlotId = uint32_t;
+constexpr const ClsRefSlotId NoClsRefSlotId = -1;
 using BlockId = uint32_t;
 constexpr const BlockId NoBlockId = -1;
 

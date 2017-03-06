@@ -543,10 +543,11 @@ struct Func final {
   // Locals, iterators, and stack.                                      [const]
 
   /*
-   * Number of locals, iterators, or named locals.
+   * Number of locals, iterators, class-ref slots, or named locals.
    */
   int numLocals() const;
   int numIterators() const;
+  int numClsRefSlots() const;
   Id numNamedLocals() const;
 
   /*
@@ -981,11 +982,24 @@ struct Func final {
   const EHEnt* findEH(Offset o) const;
 
   /*
+   * Same as non-static findEH(), but takes as an operand any ehtab-like
+   * container.
+   */
+  template<class Container>
+  static const typename Container::value_type*
+  findEH(const Container& ehtab, Offset o);
+
+  /*
    * Locate FPI regions by offset.
    */
-  static const FPIEnt* findFPI(const FPIEnt* b, const FPIEnt* e, Offset o);
   const FPIEnt* findFPI(Offset o) const;
   const FPIEnt* findPrecedingFPI(Offset o) const;
+
+  /*
+   * Same as non-static findFPI(), but takes as an operand the start and end
+   * iterators of an fpitab.
+   */
+  static const FPIEnt* findFPI(const FPIEnt* b, const FPIEnt* e, Offset o);
 
   bool shouldSampleJit() const { return m_shouldSampleJit; }
 
@@ -1159,7 +1173,7 @@ private:
     FPIEntVec m_fpitab;
 
     /*
-     * Up to 32 bits worth of bools.
+     * Up to 32 bits.
      */
     bool m_top : 1;
     bool m_isClosureBody : 1;
@@ -1170,6 +1184,12 @@ private:
     bool m_hasExtendedSharedData : 1;
     bool m_returnByValue : 1; // only for builtins
     bool m_isMemoizeWrapper : 1;
+    // Needing more than 2 class ref slots basically doesn't happen, so just use
+    // two bits normally. If we actually need more than that, we'll store the
+    // count in ExtendedSharedData.
+    unsigned int m_numClsRefSlots : 2;
+
+    // 21 bits of padding here in LOWPTR builds
 
     LowStringPtr m_retUserType;
     UserAttributeMap m_userAttributes;
@@ -1217,6 +1237,7 @@ private:
     int m_line2;    // Only read if SharedData::m_line2 is kSmallDeltaLimit
     Func* m_dynCallWrapper{nullptr};
     Func* m_dynCallTarget{nullptr};
+    Id m_actualNumClsRefSlots;
   };
 
   /*
@@ -1350,19 +1371,25 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template<class Container>
-const typename Container::value_type* findEH(const Container& ehtab, Offset o) {
-  uint32_t i;
-  uint32_t sz = ehtab.size();
+/*
+ * Whether dynamic calls to builtin functions that touch the caller's frame are
+ * forbidden.
+ */
+bool disallowDynamicVarEnvFuncs();
 
-  const typename Container::value_type* eh = nullptr;
-  for (i = 0; i < sz; i++) {
-    if (ehtab[i].m_base <= o && o < ehtab[i].m_past) {
-      eh = &ehtab[i];
-    }
-  }
-  return eh;
-}
+/*
+ * Could the function destroy the locals in the environment of its caller?
+ *
+ * This occurs, e.g., if `func' is extract().
+ */
+bool funcDestroysLocals(const Func*);
+
+/*
+ * Could the function `callee` attempt to read the caller frame?
+ *
+ * This occurs, e.g., if `func' is is_callable().
+ */
+bool funcNeedsCallerFrame(const Func*);
 
 ///////////////////////////////////////////////////////////////////////////////
 

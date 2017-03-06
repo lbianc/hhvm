@@ -176,23 +176,7 @@ let diagnostics_to_json x =
     ("errors", JSON_Array (List.map x.diagnostics ~f:Errors.to_json));
   ]
 
-let response_to_json id result =
-  JSON_Object [
-    ("protocol", JSON_String "service_framework3_rpc");
-    ("type", JSON_String "response");
-    ("id", opt_int_to_json id);
-    ("result", result);
-  ]
-
-let subscription_to_json id result=
-   JSON_Object [
-    ("protocol", JSON_String "service_framework3_rpc");
-    ("type", JSON_String "next");
-    ("id", int_ id);
-    ("value", result);
-  ]
-
-let to_json ~response = match response with
+let response_to_json = function
   (* Init request is not part of Nuclide protocol *)
   | Init_response _ -> should_not_happen
   | Autocomplete_response x -> autocomplete_response_to_json x
@@ -204,16 +188,17 @@ let to_json ~response = match response with
   | Find_references_response x -> find_references_response_to_json x
   | Highlight_references_response x -> highlight_references_response_to_json x
   | Format_response _ -> should_not_happen
+
+let notification_to_json = function
   | Diagnostics_notification x -> diagnostics_to_json x
 
+let to_json ~message = match message with
+  | Response r -> response_to_json r
+  | Request (Server_notification n) -> notification_to_json n
+  (* There is no use-case for printing client requests for now *)
+  | Request (Client_request _) ->  failwith "not implemented"
+
 let print_json ~response =
-  to_json ~response |>
+  to_json (Response response) |>
   Hh_json.json_to_string |>
   print_endline
-
-let to_message_json ~id ~response =
-  to_json ~response |>
-  match response with
-  (* Subscriptions are special snowflakes with different output format *)
-  | Diagnostics_notification x -> subscription_to_json x.subscription_id
-  | _ -> response_to_json id

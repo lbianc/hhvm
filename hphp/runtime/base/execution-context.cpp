@@ -866,7 +866,7 @@ bool ExecutionContext::callUserErrorHandler(const Exception &e, int errnum,
       }
     } catch (const RequestTimeoutException&) {
       static auto requestErrorHandlerTimeoutCounter =
-          ServiceData::createTimeseries("requests_timed_out_error_handler",
+          ServiceData::createTimeSeries("requests_timed_out_error_handler",
                                         {ServiceData::StatsType::COUNT});
       requestErrorHandlerTimeoutCounter->addValue(1);
       ServerStats::Log("request.timed_out.error_handler", 1);
@@ -874,7 +874,7 @@ bool ExecutionContext::callUserErrorHandler(const Exception &e, int errnum,
       if (!swallowExceptions) throw;
     } catch (const RequestCPUTimeoutException&) {
       static auto requestErrorHandlerCPUTimeoutCounter =
-          ServiceData::createTimeseries("requests_cpu_timed_out_error_handler",
+          ServiceData::createTimeSeries("requests_cpu_timed_out_error_handler",
                                         {ServiceData::StatsType::COUNT});
       requestErrorHandlerCPUTimeoutCounter->addValue(1);
       ServerStats::Log("request.cpu_timed_out.error_handler", 1);
@@ -882,7 +882,7 @@ bool ExecutionContext::callUserErrorHandler(const Exception &e, int errnum,
       if (!swallowExceptions) throw;
     } catch (const RequestMemoryExceededException&) {
       static auto requestErrorHandlerMemoryExceededCounter =
-          ServiceData::createTimeseries(
+          ServiceData::createTimeSeries(
               "requests_memory_exceeded_error_handler",
               {ServiceData::StatsType::COUNT});
       requestErrorHandlerMemoryExceededCounter->addValue(1);
@@ -891,7 +891,7 @@ bool ExecutionContext::callUserErrorHandler(const Exception &e, int errnum,
       if (!swallowExceptions) throw;
     } catch (...) {
       static auto requestErrorHandlerOtherExceptionCounter =
-          ServiceData::createTimeseries(
+          ServiceData::createTimeSeries(
               "requests_other_exception_error_handler",
               {ServiceData::StatsType::COUNT});
       requestErrorHandlerOtherExceptionCounter->addValue(1);
@@ -1837,7 +1837,7 @@ bool ExecutionContext::evalUnit(Unit* unit, PC& pc, int funcType) {
   ar->initNumArgs(0);
   assert(vmfp());
   ar->setReturn(vmfp(), pc, jit::tc::ustubs().retHelper);
-  pushLocalsAndIterators(func);
+  pushFrameSlots(func);
   assert(vmfp()->func()->attrs() & AttrMayUseVV);
   if (!vmfp()->hasVarEnv()) {
     vmfp()->setVarEnv(VarEnv::createLocal(vmfp()));

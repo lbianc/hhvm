@@ -221,6 +221,7 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
   for (auto const& pred : typePredictions) {
     auto type = pred.type;
     auto loc  = pred.location;
+    assertx(type <= TGen);
     irgen::predictType(irgs, loc, type);
   }
 
@@ -228,13 +229,8 @@ void emitPredictionsAndPreConditions(irgen::IRGS& irgs,
   for (auto const& preCond : typePreConditions) {
     auto type = preCond.type;
     auto loc  = preCond.location;
-    if (type <= TCls) {
-      // Do not generate guards for class; instead assert the type.
-      assertx(loc.tag() == LTag::Stack);
-      irgen::assertTypeLocation(irgs, loc, type);
-    } else {
-      irgen::checkType(irgs, loc, type, bcOff, checkOuterTypeOnly);
-    }
+    assertx(type <= TGen);
+    irgen::checkType(irgs, loc, type, bcOff, checkOuterTypeOnly);
   }
 
   // Emit reffiness predictions.
@@ -407,14 +403,14 @@ bool tryTranslateSingletonInline(irgen::IRGS& irgs,
 
   auto stringProp = same_string_as(0);
   auto stringCls  = same_string_as(1);
-  auto agetc = Atom(Op::AGetC);
+  auto agetc = Atom(Op::ClsRefGetC);
   auto cgets = Atom(Op::CGetS);
 
   // Look for a class static singleton pattern.
   result = BCPattern {
     Atom(Op::String).capture(),
     Atom(Op::String).capture(),
-    Atom(Op::AGetC),
+    Atom(Op::ClsRefGetC),
     Atom(Op::CGetS),
     Atom(Op::IsTypeC),
     Atom::alt(
@@ -514,10 +510,10 @@ RegionDescPtr getInlinableCalleeRegion(const ProfSrcKey& psk,
     return nullptr;
   }
 
-  // Make sure the FPushOp wasn't interpreted, based on an FPushCuf, or spanned
-  // another call
+  // Make sure the FPushOp wasn't interpreted, based on an FPushCuf, spanned
+  // another call, or marked as not eligible for inlining by frame-state.
   auto const& info = fpiStack.back();
-  if (isFPushCuf(info.fpushOpc) || info.interp || info.spansCall) {
+  if (isFPushCuf(info.fpushOpc) || !info.inlineEligible || info.spansCall) {
     return nullptr;
   }
 

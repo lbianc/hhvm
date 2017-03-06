@@ -1134,20 +1134,11 @@ void baseGImpl(IRGS& env, SSATmp* name, MOpMode mode) {
   gen(env, StMBase, gblPtr);
 }
 
-void baseSImpl(IRGS& env, SSATmp* name, int32_t clsIdx) {
+void baseSImpl(IRGS& env, SSATmp* name, uint32_t clsRefSlot) {
   if (!name->isA(TStr)) PUNT(BaseS-non-string-name);
-
-  auto cls = topA(env, BCSPRelOffset{clsIdx});
-  auto spropPtr = ldClsPropAddr(env, cls, name, true);
+  auto const cls = takeClsRef(env, clsRefSlot);
+  auto const spropPtr = ldClsPropAddr(env, cls, name, true);
   gen(env, StMBase, spropPtr);
-
-  if (clsIdx == 1) {
-    auto rhs = pop(env, DataTypeGeneric);
-    popA(env);
-    push(env, rhs);
-  } else {
-    popA(env);
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1653,6 +1644,7 @@ SSATmp* emitArrayLikeSet(IRGS& env, SSATmp* key, SSATmp* value) {
         case LTag::Stack:
           return top(env, offsetFromBCSP(env, baseLoc->stackIdx()));
         case LTag::MBase:
+        case LTag::CSlot:
           always_assert(false);
       }
       not_reached();
@@ -1683,6 +1675,7 @@ SSATmp* emitArrayLikeSet(IRGS& env, SSATmp* key, SSATmp* value) {
           sp(env), newArr);
       break;
     case LTag::MBase:
+    case LTag::CSlot:
       always_assert(false);
   }
   return value;
@@ -1882,17 +1875,17 @@ void emitFPassBaseGL(IRGS& env, int32_t arg, int32_t locId) {
   emitBaseGL(env, locId, fpassFlags(env, arg));
 }
 
-void emitBaseSC(IRGS& env, int32_t propIdx, int32_t clsIdx) {
+void emitBaseSC(IRGS& env, int32_t propIdx, uint32_t slot) {
   initTvRefs(env);
   auto name = top(env, BCSPRelOffset{propIdx});
-  baseSImpl(env, name, clsIdx);
+  baseSImpl(env, name, slot);
 }
 
-void emitBaseSL(IRGS& env, int32_t locId, int32_t clsIdx) {
+void emitBaseSL(IRGS& env, int32_t locId, uint32_t slot) {
   initTvRefs(env);
   auto name = ldLocInner(env, locId, makeExit(env), makePseudoMainExit(env),
                          DataTypeSpecific);
-  baseSImpl(env, name, clsIdx);
+  baseSImpl(env, name, slot);
 }
 
 void emitBaseL(IRGS& env, int32_t locId, MOpMode mode) {

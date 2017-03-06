@@ -10,157 +10,27 @@
 
 open Core
 open Hhbc_ast
+open Instruction_sequence
 
 module A = Ast
-module N = Nast
 module H = Hhbc_ast
 module TC = Hhas_type_constraint
 module SN = Naming_special_names
+module CBR = Continue_break_rewriter
 
 (* These are the three flavors of value that can live on the stack:
  *   C = cell
  *   R = ref
  *   A = classref
  *)
-type flavor =
-  | Flavor_C
-  | Flavor_R
-  | Flavor_A
-
-(* The various from_X functions below take some kind of AST (expression,
- * statement, etc.) and produce what is logically a sequence of instructions.
- * This could simply be represented by a list, but then we would need to
- * use an accumulator to avoid the quadratic complexity associated with
- * repeated appending to a list. Instead, we simply build a tree of
- * instructions which can easily be flattened at the end.
- *)
-type instr_seq =
-| Instr_list of instruct list
-| Instr_concat of instr_seq list
-
-(* Some helper constructors *)
-let instr x = Instr_list [x]
-let instrs x = Instr_list x
-let gather x = Instr_concat x
-let empty = Instr_list []
-
-let instr_iterinit iter_id label value =
-  instr (IIterator (IterInit (iter_id, label, value)))
-let instr_iterinitk id label key value =
-  instr (IIterator (IterInitK (id, label, key, value)))
-let instr_iternext id label value =
-  instr (IIterator (IterNext (id, label, value)))
-let instr_iternextk id label key value =
-  instr (IIterator (IterNextK (id, label, key, value)))
-let instr_iterfree id =
-  instr (IIterator (IterFree id))
-
-let instr_jmp label = instr (IContFlow (Jmp label))
-let instr_jmpz label = instr (IContFlow (JmpZ label))
-let instr_jmpnz label = instr (IContFlow (JmpNZ label))
-let instr_label label = instr (ILabel label)
-let instr_label_catch label = instr (IExceptionLabel (label, CatchL))
-let instr_continue level = instr (IContFlow (Continue level))
-let instr_break level = instr (IContFlow (Break level))
-let instr_unwind = instr (IContFlow Unwind)
-let instr_false = instr (ILitConst False)
-let instr_true = instr (ILitConst True)
-let instr_eq = instr (IOp Eq)
-let instr_retc = instr (IContFlow RetC)
-let instr_null = instr (ILitConst Null)
-let instr_catch = instr (IMisc Catch)
-let instr_dup = instr (IBasic Dup)
-let instr_instanceofd s = instr (IOp (InstanceOfD s))
-
-let instr_setl_named local =
-  instr (IMutator (SetL (Local_named local)))
-let instr_setl_unnamed local =
-  instr (IMutator (SetL (Local_unnamed local)))
-let instr_unsetl_unnamed local =
-  instr (IMutator (UnsetL (Local_unnamed local)))
-let instr_cgetl2_pipe = instr (IGet (CGetL2 (Local_pipe)))
-let instr_popc = instr (IBasic PopC)
-let instr_throw = instr (IContFlow Throw)
-
-let instr_add_elemc = instr (ILitConst (AddElemC))
-let instr_add_new_elemc = instr (ILitConst (AddNewElemC))
-
-(* Functions on instr_seq that correspond to existing Core.List functions *)
-module InstrSeq = struct
-  let rec flat_map instrseq ~f =
-    let flat_map_list items ~f = Core.List.bind items f in
-    match instrseq with
-    | Instr_list instrl ->
-      let mapper instr =
-        match instr with
-        | ITryFault(l, instrl1, instrl2) ->
-          [ ITryFault(l, flat_map_list instrl1 f,
-            flat_map_list instrl2 f) ]
-        | ITryCatch(x, instrl) ->
-          [ ITryCatch(x, flat_map_list instrl f) ]
-        | _ ->
-          f instr in
-      Instr_list (flat_map_list instrl ~f:mapper)
-    | Instr_concat instrseql ->
-      Instr_concat (List.map instrseql (flat_map ~f))
-
-  let rec fold_left instrseq ~f ~init =
-    match instrseq with
-    | Instr_list instrl ->
-      List.fold_left instrl ~f:(fun init instr ->
-        match instr with
-        | ITryFault(_, instrl1, instrl2) ->
-          List.fold_left instrl2 ~f ~init:(List.fold_left instrl1 ~f ~init)
-        | ITryCatch(_, instrl) ->
-          List.fold_left instrl ~f ~init
-        | _ -> f init instr
-        ) ~init
-    | Instr_concat instrseql ->
-      List.fold_left instrseql
-        ~f:(fun init instrseq -> fold_left instrseq ~f ~init)
-        ~init
-
-  let rec filter_map instrseq ~f =
-    match instrseq with
-    | Instr_list instrl ->
-      Instr_list (List.filter_map instrl ~f:(fun instr ->
-        match instr with
-        | ITryFault(l, instrl1, instrl2) ->
-          Some (ITryFault(l, List.filter_map instrl1 f,
-            List.filter_map instrl2 f))
-        | ITryCatch(x, instrl) ->
-          Some (ITryCatch(x, List.filter_map instrl f))
-        | _ ->
-          f instr
-        ))
-    | Instr_concat instrseql ->
-      Instr_concat (List.map instrseql (filter_map ~f))
-
-  let map instrseq ~f = filter_map instrseq ~f:(fun x -> Some (f x))
-
+module Flavor = struct
+  type t = C | R | A
 end
 
-(* Could write this in terms of InstrSeq.fold_left *)
-let rec instr_seq_to_list_aux sl result =
-  match sl with
-  | [] -> List.rev result
-  | s::sl ->
-    match s with
-    | Instr_list instrl ->
-      instr_seq_to_list_aux sl (List.rev_append instrl result)
-    | Instr_concat sl' -> instr_seq_to_list_aux (sl' @ sl) result
-
-let instr_seq_to_list t = instr_seq_to_list_aux [t] []
-
-let instr_try_fault_no_catch fault_label try_body fault_body =
-  let try_body = instr_seq_to_list try_body in
-  let fault_body = instr_seq_to_list fault_body in
-  let fl = IExceptionLabel (fault_label, FaultL) in
-  instr (ITryFault (fault_label, try_body, fl :: fault_body))
-
-let instr_try_catch catch_label try_body =
-  let try_body = instr_seq_to_list try_body in
-  instr (ITryCatch (catch_label, try_body))
+(* When using the PassX instructions we need to emit the right kind *)
+module PassByRefKind = struct
+  type t = AllowCell | WarnOnCell | ErrorOnCell
+end
 
 (* Emit a comment in lieu of instructions for not-yet-implemented features *)
 let emit_nyi description =
@@ -237,11 +107,49 @@ let emit_cast (_, hint_) =
     instr (IOp CastDouble)
   | _ -> emit_nyi "cast type"
 
-let rec from_expr expr =
+let collection_type = function
+  | "Vector"    -> 17
+  | "Map"       -> 18
+  | "Set"       -> 19
+  | "Pair"      -> 20
+  | "ImmVector" -> 21
+  | "ImmMap"    -> 22
+  | "ImmSet"    -> 23
+  | x -> failwith ("unknown collection type '" ^ x ^ "'")
+
+(* See EmitterVisitor::getPassByRefKind in emitter.cpp *)
+let get_passByRefKind expr =
+  let open PassByRefKind in
+  let rec from_non_list_assignment permissive_kind expr =
+    match snd expr with
+    | A.New _ | A.Lvar _ | A.Clone _ -> AllowCell
+    | A.Binop(A.Eq None, (_, A.List _), e) ->
+      from_non_list_assignment WarnOnCell e
+    | A.Array_get(_, Some _) -> permissive_kind
+    | A.Binop(A.Eq _, _, _) -> WarnOnCell
+    | A.Unop((A.Uincr | A.Udecr), _) -> WarnOnCell
+    | _ -> ErrorOnCell in
+  from_non_list_assignment AllowCell expr
+
+let extract_shape_field_name_pstring = function
+  | A.SFlit p
+  | A.SFclass_const (_, p) ->  p
+
+let extract_shape_field_name = function
+  | A.SFlit (_, s)
+  | A.SFclass_const (_, (_, s)) -> s
+
+let rec expr_and_newc instr_to_add_new instr_to_add = function
+  | A.AFvalue e ->
+    gather [from_expr e; instr_to_add_new]
+  | A.AFkvalue (k, v) ->
+    gather [from_expr k; from_expr v; instr_to_add]
+
+and from_expr expr =
   (* Note that this takes an Ast.expr, not a Nast.expr. *)
   match snd expr with
   | A.Float (_, litstr) ->
-    instr (ILitConst (Double (float_of_string litstr)))
+    instr (ILitConst (Double litstr))
   | A.String (_, litstr) ->
     instr (ILitConst (String litstr))
   | A.Int (_, litstr) ->
@@ -251,7 +159,7 @@ let rec from_expr expr =
   | A.False -> instr (ILitConst False)
   | A.True -> instr (ILitConst True)
   | A.Lvar (_, x) when x = SN.SpecialIdents.this -> instr (IMisc This)
-  | A.Lvar (_, x) -> instr (IGet (CGetL (Local_named x)))
+  | A.Lvar (_, x) -> instr_cgetl (Local.Named x)
   | A.Class_const ((_, cid), (_, id)) when id = SN.Members.mClass ->
     instr (ILitConst (String cid))
   | A.Unop (op, e) ->
@@ -264,7 +172,7 @@ let rec from_expr expr =
     emit_assignment obop e1 e2
   (* Special case to make use of CGetL2 *)
   | A.Binop (op, (_, A.Lvar (_, x)), e) ->
-    gather [from_expr e; instr (IGet (CGetL2 (Local_named x))); from_binop op]
+    gather [from_expr e; instr_cgetl2 (Local.Named x); from_binop op]
   | A.Binop (op, e1, e2) ->
     gather [from_expr e2; from_expr e1; from_binop op]
   | A.Pipe (e1, e2) ->
@@ -276,50 +184,53 @@ let rec from_expr expr =
   | A.InstanceOf (e1, e2) ->
     gather [from_expr e1; from_expr e2; instr (IOp InstanceOf)]
   | A.NullCoalesce(e1, e2) ->
-    let end_label = Label.get_next_label () in
+    let end_label = Label.next_regular () in
     gather [
       emit_quiet_expr e1;
       instr (IBasic Dup);
       instr (IIsset (IsTypeC OpNull));
       instr (IOp Not);
-      instr (IContFlow (JmpNZ end_label));
+      instr_jmpnz end_label;
       instr (IBasic PopC);
       from_expr e2;
-      instr (ILabel end_label);
+      instr_label end_label;
     ]
   | A.Cast(hint, e) ->
     gather [from_expr e; emit_cast hint]
   | A.Eif (etest, Some etrue, efalse) ->
-    let false_label = Label.get_next_label () in
-    let end_label = Label.get_next_label () in
+    let false_label = Label.next_regular () in
+    let end_label = Label.next_regular () in
     gather [
       from_expr etest;
-      instr (IContFlow (JmpZ false_label));
+      instr_jmpz false_label;
       from_expr etrue;
-      instr (IContFlow (Jmp end_label));
-      instr (ILabel false_label);
+      instr_jmp end_label;
+      instr_label false_label;
       from_expr efalse;
-      instr (ILabel end_label)
+      instr_label end_label;
     ]
   | A.Eif (etest, None, efalse) ->
-    let end_label = Label.get_next_label () in
+    let end_label = Label.next_regular () in
     gather [
       from_expr etest;
       instr (IBasic Dup);
-      instr (IContFlow (JmpNZ end_label));
+      instr_jmpnz end_label;
       instr (IBasic PopC);
       from_expr efalse;
-      instr (ILabel end_label)
+      instr_label end_label;
     ]
   | A.Expr_list es -> gather @@ List.map es ~f:from_expr
+  | A.Call ((p, A.Id (_, "tuple")), es, _) ->
+    (* Did you know that tuples are functions? *)
+    let af_list = List.map es ~f:(fun e -> A.AFvalue e) in
+    from_expr (p, A.Array af_list)
   | A.Call _ ->
     let instrs, flavor = emit_flavored_expr expr in
     gather [
       instrs;
       (* If the instruction has produced a ref then unbox it *)
-      if flavor = Flavor_R then instr (IBasic UnboxR) else empty
+      if flavor = Flavor.R then instr (IBasic UnboxR) else empty
     ]
-
   | A.New ((_, A.Id (_, id)), args, uargs) ->
       let nargs = List.length args + List.length uargs in
       gather [
@@ -327,87 +238,181 @@ let rec from_expr expr =
         emit_args_and_call args uargs;
         instr (IBasic PopR)
       ]
-  | A.Array es ->
-    (* We need to make sure everything is literal to use static construction *)
-    let all_literal = List.for_all es
-      ~f:(function A.AFvalue e -> is_literal e
-                 | A.AFkvalue (k,v) -> is_literal k && is_literal v)
-    in
-    if all_literal then begin
-    let a_label = Label.get_next_data_label () in
-    (* Arrays can either contains values or key/value pairs *)
-    let _, es =
-      List.fold_left
-        es
-        ~init:(0, [])
-        ~f:(fun (index, l) x ->
-              (index + 1, match x with
-              | A.AFvalue e ->
-                literal_from_expr e :: Int (Int64.of_int index) :: l
-              | A.AFkvalue (k,v) ->
-                literal_from_expr v :: literal_from_expr k :: l)
-            )
-    in
-    instr (ILitConst (Array (a_label, "a", List.rev es)));
-    end else begin
-    (* If there is at least one associative element,
-     * then it will be a NewMixedArray otherwise NewPackedArray *)
-    let is_mixed_array =
-      List.exists es ~f:(function A.AFkvalue _ -> true | _ -> false)
-    in
-    let count = List.length es in
-    if is_mixed_array then begin
-      gather @@
-        (instr @@ ILitConst (NewPackedArray count)) ::
-        (List.map es
-          ~f:(function A.AFvalue e ->
-                        gather [from_expr e; instr_add_new_elemc]
-                     | A.AFkvalue (k, v) ->
-                        gather [from_expr k; from_expr v; instr_add_elemc]))
-    end else begin
-      gather [
-        gather @@
-        List.map es
-          ~f:(function A.AFvalue e -> from_expr e | _ -> failwith "impossible");
-        instr @@ ILitConst (NewPackedArray count);
+  | A.Array es
+  | A.Collection ((_, "dict"), es)
+  | A.Collection ((_, "vec"), es)
+  | A.Collection ((_, "keyset"), es) -> emit_collection expr es
+  | A.Collection ((pos, "Set"), fields)  -> begin
+    let collection_type = collection_type "Set" in
+    match fields with
+    | [] -> instr @@ ILitConst (NewCol collection_type)
+    | _ -> gather
+      [ from_expr (pos, A.Array fields)
+      ; instr @@ ILitConst (ColFromArray collection_type)
       ]
-    end
-    end
-  | _ ->
-    emit_nyi "expression"
+  end
+  | A.Collection ((_, "Pair"), fields) -> begin
+    let collection_type = collection_type "Pair" in
+    let values = List.fold_right
+      fields
+      ~f:(fun x acc ->
+        expr_and_newc instr_col_add_new_elemc instr_col_add_new_elemc x::acc)
+      ~init:[] in
+    let newCol = instr @@ ILitConst (NewCol collection_type) in
+    gather (newCol::values)
+  end
+  | A.Array_get(e1, Some e2) ->
+    emit_array_get None e1 e2
+  | A.Clone e ->
+    gather [
+      from_expr e;
+      instr (IOp Clone)
+    ]
+  | A.Shape fl ->
+    let are_values_all_literals =
+      List.for_all fl ~f:(fun (_, e) -> is_literal e)
+    in
+    let p = fst expr in
+    if are_values_all_literals then
+      let fl =
+        List.map fl
+          ~f:(fun (fn, e) ->
+                A.AFkvalue ((p,
+                  A.String (extract_shape_field_name_pstring fn)), e))
+      in
+      from_expr (fst expr, A.Array fl)
+    else
+      let es = List.map fl ~f:(fun (_, e) -> from_expr e) in
+      let keys = List.map fl ~f:(fun (fn, _) -> extract_shape_field_name fn) in
+      gather [
+        gather es;
+        instr @@ ILitConst (NewStructArray keys);
+      ]
+
+  | A.Obj_get (expr, prop, nullflavor)  ->
+    emit_obj_get expr prop nullflavor
+
+  (* TODO *)
+  | A.Collection ((_, type_str), _) ->
+    emit_nyi @@ "collection: " ^ type_str
+  | A.New _                     -> emit_nyi "new"
+  | A.Yield_break               -> emit_nyi "yield_break"
+  | A.Id _                      -> emit_nyi "id"
+  | A.Id_type_arguments (_, _)  -> emit_nyi "id_type_arguments"
+  | A.Lvarvar (_, _)            -> emit_nyi "lvarvar"
+  | A.Array_get (_, _)          -> emit_nyi "array_get"
+  | A.Class_get (_, _)          -> emit_nyi "class_get"
+  | A.Class_const (_, _)        -> emit_nyi "class_const"
+  | A.String2 _                 -> emit_nyi "string2"
+  | A.Yield _                   -> emit_nyi "yield"
+  | A.Await _                   -> emit_nyi "await"
+  | A.List _                    -> emit_nyi "list"
+  | A.Efun (_, _)               -> emit_nyi "efun"
+  | A.Lfun _                    -> emit_nyi "lfun"
+  | A.Xml (_, _, _)             -> emit_nyi "xml"
+  | A.Unsafeexpr _              -> emit_nyi "unsafexpr"
+  | A.Import (_, _)             -> emit_nyi "import"
+
+and emit_static_collection expr es =
+  let a_label = Label.get_next_data_label () in
+  (* Arrays can either contains values or key/value pairs *)
+  let need_index = match snd expr with
+    | A.Collection ((_, "vec"), _)
+    | A.Collection ((_, "keyset"), _) -> false
+    | _ -> true
+  in
+  let _, es =
+    List.fold_left
+      es
+      ~init:(0, [])
+      ~f:(fun (index, l) x ->
+            (index + 1, match x with
+            | A.AFvalue e when need_index ->
+              literal_from_expr e :: Int (Int64.of_int index) :: l
+            | A.AFvalue e ->
+              literal_from_expr e :: l
+            | A.AFkvalue (k,v) ->
+              literal_from_expr v :: literal_from_expr k :: l)
+          )
+  in
+  let es = List.rev es in
+  let lit_constructor = match snd expr with
+    | A.Array _ -> Array (a_label, es)
+    | A.Collection ((_, "dict"), _) -> Dict (a_label, es)
+    | A.Collection ((_, "vec"), _) -> Vec (a_label, es)
+    | A.Collection ((_, "keyset"), _) -> Keyset (a_label, es)
+    | _ -> failwith "impossible"
+  in
+  instr (ILitConst lit_constructor)
+
+and emit_dynamic_collection expr es =
+  let is_only_values =
+    List.for_all es ~f:(function A.AFkvalue _ -> false | _ -> true)
+  in
+  let count = List.length es in
+  if is_only_values then begin
+    let lit_constructor = match snd expr with
+      | A.Array _ -> NewPackedArray count
+      | A.Collection ((_, "vec"), _) -> NewVecArray count
+      | A.Collection ((_, "keyset"), _) -> NewKeysetArray count
+      | _ -> failwith "impossible"
+    in
+    gather [
+      gather @@
+      List.map es
+        ~f:(function A.AFvalue e -> from_expr e | _ -> failwith "impossible");
+      instr @@ ILitConst lit_constructor;
+    ]
+  end else begin
+    let lit_constructor = match snd expr with
+      | A.Array _ -> NewMixedArray count
+      | A.Collection ((_, "dict"), _) -> NewDictArray count
+      | _ -> failwith "impossible"
+    in
+    gather @@
+      (instr @@ ILitConst lit_constructor) ::
+      (List.map es ~f:(expr_and_newc instr_add_new_elemc instr_add_elemc))
+  end
+
+and emit_collection expr es =
+  let all_literal = List.for_all es
+    ~f:(function A.AFvalue e -> is_literal e
+               | A.AFkvalue (k,v) -> is_literal k && is_literal v)
+  in
+  if all_literal then
+    emit_static_collection expr es
+  else
+    emit_dynamic_collection expr es
 
 and emit_pipe e1 e2 =
-  (* TODO: We need a local generator, like a label generator.
-  For now, just use the label generator. *)
-  (* TODO: Unnamed locals should be codegen'd with a leading _ *)
-  let temp = Label.get_next_label () in
-  let fault_label = Label.get_next_label () in
+  let temp = Local.get_unnamed_local () in
+  let fault_label = Label.next_fault () in
   let rewrite_dollardollar e =
     let rewriter i =
       match i with
-      | IGet (CGetL2 (Local_pipe)) ->
-        IGet (CGetL2 (Local_unnamed temp))
+      | IGet (CGetL2 Local.Pipe) ->
+        IGet (CGetL2 temp)
       | _ -> i in
     InstrSeq.map e ~f:rewriter in
   gather [
     from_expr e1;
-    instr_setl_unnamed temp;
+    instr_setl temp;
     instr_popc;
-    instr_try_fault_no_catch
+    instr_try_fault
       fault_label
       (* try block *)
       (rewrite_dollardollar (from_expr e2))
       (* fault block *)
       (gather [
-        instr_unsetl_unnamed temp;
+        instr_unsetl temp;
         instr_unwind ]);
-    instr_unsetl_unnamed temp
+    instr_unsetl temp
   ]
 
 and emit_logical_and e1 e2 =
-  let left_is_false = Label.get_next_label () in
-  let right_is_true = Label.get_next_label () in
-  let its_done = Label.get_next_label () in
+  let left_is_false = Label.next_regular () in
+  let right_is_true = Label.next_regular () in
+  let its_done = Label.next_regular () in
   gather [
     from_expr e1;
     instr_jmpz left_is_false;
@@ -421,8 +426,8 @@ and emit_logical_and e1 e2 =
     instr_label its_done ]
 
 and emit_logical_or e1 e2 =
-  let its_true = Label.get_next_label () in
-  let its_done = Label.get_next_label () in
+  let its_true = Label.next_regular () in
+  let its_done = Label.next_regular () in
   gather [
     from_expr e1;
     instr_jmpnz its_true;
@@ -437,27 +442,118 @@ and emit_logical_or e1 e2 =
 and emit_quiet_expr (_, expr_ as expr) =
   match expr_ with
   | A.Lvar (_, x) ->
-    instr (IGet (CGetQuietL (Local_named x)))
+    instr_cgetquietl (Local.Named x)
   | _ ->
     from_expr expr
 
+(* Emit code for e1[e2].
+ * If param_num_opt = Some i
+ * then this is the i'th parameter to a function
+ *)
+and emit_array_get param_num_opt e1 e2 =
+  let base_instrs, n = emit_base param_num_opt e1 in
+  let mk, stack_size =
+    match snd e2 with
+      (* Special case for local index *)
+    | A.Lvar (_, x) -> MemberKey.EL (Local.Named x), n
+      (* Special case for literal integer index *)
+    | A.Int (_, litstr) -> MemberKey.EI (Int64.of_string litstr), n
+      (* Special case for literal string index *)
+    | A.String (_, litstr) -> MemberKey.ET litstr, n
+      (* General case *)
+    | _ -> MemberKey.EC, n+1 in
+  let final_instr =
+    instr (IFinal (
+      match param_num_opt with
+      | None -> QueryM (stack_size, QueryOp.CGet, mk)
+      | Some i -> FPassM (i, stack_size, mk)
+    )) in
+  match mk with
+  | MemberKey.EC ->
+    gather [
+      from_expr e2;
+      base_instrs;
+      final_instr
+    ]
+  | _ ->
+    gather [
+      base_instrs;
+      final_instr
+    ]
+
+(* TODO: Nullflavor is currently being ignored, start using it *)
+and emit_obj_get expr prop _ =
+  let base_instrs, n = emit_base None expr in
+  let mk, stack_size =
+    match snd prop with
+    | A.Id (_, litstr) -> MemberKey.PT litstr, n
+    | A.Lvar (_, x) -> MemberKey.PL (Local.Named x), n
+      (* TODO: Work out when to use MemberKey.QT  *)
+    | _ -> MemberKey.PC, n+1 in
+    let final_instr =
+      instr (IFinal (
+        (* TODO: Work out when this should be FPassM *)
+        match None with
+        | None -> QueryM (stack_size, QueryOp.CGet, mk)
+        | Some id -> FPassM (id, stack_size, mk)
+      )) in
+      gather [
+        if mk = MemberKey.PC then from_expr prop else empty;
+        base_instrs;
+        final_instr
+      ]
+
+(* Emit instructions to construct base for `expr`, and also return
+ * the stack size for subsequent query operations *)
+and emit_base param_num_opt (_, expr_ as expr) =
+  match expr_ with
+  | A.Lvar (_, x) when x = SN.SpecialIdents.this ->
+    gather [
+     instr (IMisc CheckThis);
+     instr (IBase BaseH)
+    ], 0
+  | A.Lvar (_, x) ->
+    instr (IBase (
+      match param_num_opt with
+      | None -> BaseL (Local.Named x, MemberOpMode.Warn)
+      | Some i -> FPassBaseL (i, Local.Named x)
+      )), 0
+  | _ ->
+    let instrs, flavor = emit_flavored_expr expr in
+    gather [
+      instrs;
+      instr (IBase (if flavor = Flavor.R then BaseR 0 else BaseC 0))
+    ], 1
+
+and instr_fpass kind i =
+  match kind with
+  | PassByRefKind.AllowCell -> instr (ICall (FPassC i))
+  | PassByRefKind.WarnOnCell -> instr (ICall (FPassCW i))
+  | PassByRefKind.ErrorOnCell -> instr (ICall (FPassCE i))
+
+and instr_fpassr i = instr (ICall (FPassR i))
+
 and emit_arg i ((_, expr_) as e) =
   match expr_ with
-  | A.Lvar (_, x) ->
-    instr (ICall (FPassL (Param_unnamed i, Local_named x)))
+  | A.Lvar (_, x) -> instr_fpassl i (Local.Named x)
+
+  | A.Array_get(e1, Some e2) ->
+    emit_array_get (Some i) e1 e2
+
   | _ ->
     let instrs, flavor = emit_flavored_expr e in
     gather [
       instrs;
-      instr (ICall (if flavor = Flavor_R then FPassR (Param_unnamed i)
-                      else FPassCE (Param_unnamed i)));
+      if flavor = Flavor.R
+      then instr_fpassr i
+      else instr_fpass (get_passByRefKind e) i
     ]
 
 and emit_pop flavor =
   match flavor with
-  | Flavor_R -> instr (IBasic PopR)
-  | Flavor_C -> instr (IBasic PopC)
-  | Flavor_A -> instr (IBasic PopA)
+  | Flavor.R -> instr (IBasic PopR)
+  | Flavor.C -> instr (IBasic PopC)
+  | Flavor.A -> instr (IBasic PopA)
 
 and emit_ignored_expr e =
   let instrs, flavor = emit_flavored_expr e in
@@ -509,18 +605,18 @@ and emit_call (_, expr_ as expr) args uargs =
          gather [
            from_expr arg;
            instr (IOp Print);
-           if i = nargs-1 then empty else emit_pop Flavor_C
+           if i = nargs-1 then empty else emit_pop Flavor.C
          ] end in
-    instrs, Flavor_C
+    instrs, Flavor.C
 
   | A.Obj_get _ | A.Class_const _ | A.Id _ ->
     gather [
       emit_call_lhs expr nargs;
       emit_args_and_call args uargs;
-    ], Flavor_R
+    ], Flavor.R
 
   | _ ->
-    emit_nyi "call expression", Flavor_C
+    emit_nyi "call expression", Flavor.C
 
 (* Emit code for an expression that might leave a cell or reference on the
  * stack. Return which flavor it left.
@@ -530,7 +626,7 @@ and emit_flavored_expr (_, expr_ as expr) =
   | A.Call (e, args, uargs) ->
     emit_call e args uargs
   | _ ->
-    from_expr expr, Flavor_C
+    from_expr expr, Flavor.C
 
 and is_literal expr =
   match snd expr with
@@ -544,44 +640,32 @@ and is_literal expr =
 
 and literal_from_expr expr =
   match snd expr with
-  | A.Float (_, litstr) -> Double (float_of_string litstr)
+  | A.Float (_, litstr) -> Double litstr
   | A.String (_, litstr) -> String litstr
   | A.Int (_, litstr) -> Int (Int64.of_string litstr)
   | A.Null -> Null
   | A.False -> False
   | A.True -> True
-  | _ -> failwith "literal_from_expr - NYI"
-
-and literal_from_named_expr expr =
-  match snd expr with
-  | N.Float (_, litstr) -> Double (float_of_string litstr)
-  | N.String (_, litstr) -> String litstr
-  | N.Int (_, litstr) -> Int (Int64.of_string litstr)
-  | N.Null -> Null
-  | N.False -> False
-  | N.True -> True
   (* TODO: HHVM does not allow <<F(2+2)>> in an attribute, but Hack does, and
    this seems reasonable to allow. Right now this will crash if given an
    expression rather than a literal in here.  In particular, see what unary
    minus does; do we allow it on a literal int? We should. *)
-  | _ -> failwith (Printf.sprintf
-    "Expected a literal expression in literal_from_named_expr, got %s"
-    (N.expr_to_string (snd expr)))
+   | _ -> failwith "Expected a literal expression"
 
-and literals_from_named_exprs_with_index exprs =
+and literals_from_exprs_with_index exprs =
   List.rev @@ snd @@
   List.fold_left
     exprs
     ~init:(0, [])
     ~f:(fun (index, l) e ->
-      (index + 1, literal_from_named_expr e :: Int (Int64.of_int index) :: l))
+      (index + 1, literal_from_expr e :: Int (Int64.of_int index) :: l))
 
 (* Emit code for an l-value, returning instructions and the location that
  * must be set. For now, this is just a local. *)
 and emit_lval (_, expr_) =
   match expr_ with
-  | A.Lvar id -> empty, Local_named (snd id)
-  | _ -> emit_nyi "lval expression", Local_unnamed 0
+  | A.Lvar (_, id) -> empty, Local.Named id
+  | _ -> emit_nyi "lval expression", Local.Unnamed 0
 
 and emit_assignment obop e1 e2 =
   let instrs1, lval = emit_lval e1 in
@@ -672,8 +756,8 @@ and from_stmt st =
   | A.Noop -> empty
 
 and from_if condition consequence alternative =
-  let alternative_label = Label.get_next_label () in
-  let done_label = Label.get_next_label () in
+  let alternative_label = Label.next_regular () in
+  let done_label = Label.next_regular () in
   gather [
     from_expr condition;
     instr_jmpz alternative_label;
@@ -684,109 +768,10 @@ and from_if condition consequence alternative =
     instr_label done_label;
   ]
 
-and rewrite_continue_break instrs cont_label break_label =
-  (* PHP supports multi-level continue and break; the level must be a compile-
-  time constant.
-
-  TODO: Right now we only supports one-level continue and break, but this code
-  is designed to handle multi-level continue and break.  Write tests for
-  multi-level continue and break.
-
-  TODO: This rewriting will be more complex once we support continue and break
-  inside try-finally blocks.
-
-  Suppose we are generating code for:
-
-  do {
-    do {
-      if (a)
-        break 2;
-      if (b)
-        break;
-    } while (c);
-    if (d) break;
-  } while (e);
-
-When we codegen the nested do-loop we will first generate the inner do loop:
-
-L1:  a
-     JmpZ L2
-     Break 2
-L2:  b
-     JmpZ L3
-     Break 1
-L3:  c
-     JmpNZ L1
-L4:
-
-Then we run a pass over it which changes all the Break 1 to Jmp L4, and
-all the Break 2 to Break 1:
-
-L1:  a
-     JmpZ L2
-     Break 1
-L2:  b
-     JmpZ L3
-     Jmp L4
-L3:  c
-     JmpNZ L1
-L4:
-
-Then we keep on generating code for the outer do-loop:
-
-L1:  a
-     JmpZ L2
-     Break 1
-L2:  b
-     JmpZ L3
-     Jmp L4
-L3:  c
-     JmpNZ L1
-L4:  d
-     JmpZ L5
-     Break 1
-L5:  e
-     JmpNZ L1
-L6:
-
-And then we run another rewriting pass over the whole thing which turns
-the Break 1s into Jmp L6:
-
-L1:  a
-     JmpZ L2
-     Jmp L6
-L2:  b
-     JmpZ L3
-     Jmp L4
-L3:  c
-     JmpNZ L1
-L4:  d
-     JmpZ L5
-     Jmp L6
-L5:  e
-     JmpNZ L1
-L6:
-
-And we're done. We've rewritten all the multi-level break and continues into
-unconditional jumps to the right place. *)
-
-  let rewriter i =
-    match i with
-    | IContFlow (Continue level) when level > 1 ->
-      IContFlow (Continue (level - 1))
-    | IContFlow (Continue _) ->
-      IContFlow (Jmp cont_label)
-    | IContFlow (Break level) when level > 1 ->
-      IContFlow (Break (level - 1))
-    | IContFlow (Break _) ->
-      IContFlow (Jmp break_label)
-    | _ -> i in
-  InstrSeq.map instrs ~f:rewriter
-
 and from_while e b =
-  let break_label = Label.get_next_label () in
-  let cont_label = Label.get_next_label () in
-  let start_label = Label.get_next_label () in
+  let break_label = Label.next_regular () in
+  let cont_label = Label.next_regular () in
+  let start_label = Label.next_regular () in
   let cond = from_expr e in
   (* TODO: This is *bizarre* codegen for a while loop.
   It would be better to generate this as
@@ -807,12 +792,12 @@ and from_while e b =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  rewrite_continue_break instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label
 
 and from_do b e =
-  let cont_label = Label.get_next_label () in
-  let break_label = Label.get_next_label () in
-  let start_label = Label.get_next_label () in
+  let cont_label = Label.next_regular () in
+  let break_label = Label.next_regular () in
+  let start_label = Label.next_regular () in
   let instrs = gather [
     instr_label start_label;
     from_stmt b;
@@ -821,12 +806,12 @@ and from_do b e =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  rewrite_continue_break instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label
 
 and from_for e1 e2 e3 b =
-  let break_label = Label.get_next_label () in
-  let cont_label = Label.get_next_label () in
-  let start_label = Label.get_next_label () in
+  let break_label = Label.next_regular () in
+  let cont_label = Label.next_regular () in
+  let start_label = Label.next_regular () in
   let cond = from_expr e2 in
   (* TODO: this is bizarre codegen for a "for" loop.
      This should be codegen'd as
@@ -852,11 +837,11 @@ and from_for e1 e2 e3 b =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  rewrite_continue_break instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label
 
 and from_switch e cl =
   let switched = from_expr e in
-  let end_label = Label.get_next_label () in
+  let end_label = Label.next_regular () in
   (* "continue" in a switch in PHP has the same semantics as break! *)
   let cl = List.map cl ~f:from_case in
   let bodies = gather @@ List.map cl ~f:snd in
@@ -874,15 +859,17 @@ and from_switch e cl =
     bodies;
     instr_label end_label;
   ] in
-  rewrite_continue_break instrs end_label end_label
+  CBR.rewrite_in_switch instrs end_label
 
-and from_catch end_label ((_, id1), (_, id2), b) =
-    let next_catch = Label.get_next_label () in
+and from_catch end_label ((_, catch_type), (_, catch_local), b) =
+    (* Note that this is a "regular" label; we're not going to branch to
+    it directly in the event of an exception. *)
+    let next_catch = Label.next_regular () in
     gather [
       instr_dup;
-      instr_instanceofd id1;
+      instr_instanceofd catch_type;
       instr_jmpz next_catch;
-      instr_setl_named id2;
+      instr_setl (Local.Named catch_local);
       instr_popc;
       from_stmt (A.Block b);
       instr_jmp end_label;
@@ -893,15 +880,17 @@ and from_catches catch_list end_label =
   gather (List.map catch_list ~f:(from_catch end_label))
 
 and from_try_catch try_block catch_list =
-  let end_label = Label.get_next_label () in
-  let catch_label = Label.get_next_label () in
+  let end_label = Label.next_regular () in
+  let catch_label = Label.next_catch () in
   let try_body = gather [
     from_stmt try_block;
     instr_jmp end_label;
   ] in
   gather [
-    instr_try_catch catch_label try_body;
-    instr_label_catch catch_label;
+    instr_try_catch_begin catch_label;
+    try_body;
+    instr_try_catch_end;
+    instr_label catch_label;
     instr_catch;
     from_catches catch_list end_label;
     instr_throw;
@@ -909,84 +898,162 @@ and from_try_catch try_block catch_list =
   ]
 
 and from_try_finally try_block finally_block =
-  let l0 = Label.get_next_label () in
+  (*
+  We need to generate four things:
+  (1) the try-body, which will be followed by
+  (2) the normal-continuation finally body, and
+  (3) an epilogue to the finally body that deals with finally-blocked
+      break and continue
+  (4) the exceptional-continuation fault body.
+  *)
+
+  (* (1) Try body
+
+  The try body might have un-rewritten continues and breaks which
+  branch to a label outside of the try. This means that we must
+  first run the normal-continuation finally, and then branch to the
+  appropriate label.
+
+  We do this by running a rewriter which turns continues and breaks
+  inside the try body into setting temp_local to an integer which indicates
+  what action the finally must perform when it is finished, followed by a
+  jump directly to the finally.
+  *)
   let try_body = from_stmt try_block in
-  let try_body = gather [try_body; instr_jmp l0;] in
-  let try_body = rewrite_continue_break try_body l0 l0 in
+  let temp_local = Local.get_unnamed_local () in
+  let finally_start = Label.next_regular () in
+  let finally_end = Label.next_regular () in
+  let cont_and_break = CBR.get_continues_and_breaks try_body in
+  let try_body = CBR.rewrite_in_try_finally
+    try_body cont_and_break temp_local finally_start in
+
+  (* (2) Finally body
+
+  Note that this is used both in the normal-continuation and
+  exceptional-continuation cases; we generate the same code twice.
+
+  TODO: We might consider changing the codegen so that the finally block
+  is only generated once. We could do this by making the fault block set a
+  temp local to -1, and then branch to the finally block. In the finally block
+  epilogue it can check to see if the local is -1, and if so, issue an unwind
+  instruction.
+
+  It is illegal to have a continue or break which branches out of a finally.
+  Unfortunately we at present do not detect this at parse time; rather, we
+  generate an exception at run-time by rewriting continue and break
+  instructions found inside finally blocks.
+
+  TODO: If we make this illegal at parse time then we can remove this pass.
+  *)
   let finally_body = from_stmt finally_block in
+  let finally_body = CBR.rewrite_in_finally finally_body in
+
+  (* (3) Finally epilogue *)
+
+  let finally_epilogue =
+    CBR.emit_finally_epilogue cont_and_break temp_local finally_end in
+
+  (* (4) Fault body
+
+  We now emit the fault body; it is just cleanup code for the temp_local,
+  a copy of the finally body (without the branching epilogue, since we are
+  going to unwind rather than branch), and an unwind instruction.
+
+  TODO: The HHVM emitter sometimes emits seemingly spurious
+  unset-unnamed-local instructions into the fault block.  These look
+  like bugs in the emitter. Investigate; if they are bugs in the HHVM
+  emitter, get them fixed there. If not, get a clear explanation of
+  what they are for and why they are required.
+  *)
+
+  let cleanup_local =
+    if cont_and_break = [] then empty else instr_unsetl temp_local in
   let fault_body = gather [
-      (* TODO: What are these unnamed locals? *)
-      instr_unsetl_unnamed 0;
-      instr_unsetl_unnamed 0;
+      cleanup_local;
       finally_body;
       instr_unwind;
     ] in
-  let fault_label = Label.get_next_label () in
+  let fault_label = Label.next_fault () in
+  (* Put it all together. *)
   gather [
-    instr_try_fault_no_catch fault_label try_body fault_body;
-    instr_label l0;
+    instr_try_fault fault_label try_body fault_body;
+    instr_label finally_start;
     finally_body;
+    finally_epilogue;
+    instr_label finally_end;
   ]
 
 and get_foreach_lvalue e =
   match e with
-  | A.Lvar (_, x) -> H.Local_named x
-  | _ -> failwith "foreach codegen does not support arbitrary lvalues yet"
+  | A.Lvar (_, x) -> Some (Local.Named x)
+  | _ -> None
 
 and get_foreach_key_value iterator =
   match iterator with
   | A.As_kv ((_, k), (_, v)) ->
-    (Some (get_foreach_lvalue k)), get_foreach_lvalue v
+    begin match get_foreach_lvalue v with
+    | None -> None
+    | Some v_lid ->
+      match get_foreach_lvalue k with
+      | None -> None
+      | Some k_lid ->
+        Some (Some k_lid, v_lid)
+    end
   | A.As_v (_, v) ->
-    None, get_foreach_lvalue v
+    begin match get_foreach_lvalue v with
+    | None -> None
+    | Some lid -> Some (None, lid)
+    end
 
 and from_foreach _has_await collection iterator block =
   (* TODO: await *)
   (* TODO: generate .numiters based on maximum nesting depth *)
-  (* TODO: We need an iterator generator. Use the label generator for now. *)
   (* TODO: We need to be able to process arbitrary lvalues in the key, value
      pair. This will require writing a preamble into the block, in the general
      case. For now we just support locals. *)
-  let iterator_number = Label.get_next_label () in
-  let fault_label = Label.get_next_label () in
-  let loop_continue_label = Label.get_next_label () in
-  let loop_break_label = Label.get_next_label () in
-  let (k, v) = get_foreach_key_value iterator in
-  let init, next = match k with
-  | Some k ->
-    let init = instr_iterinitk iterator_number loop_break_label k v in
-    let cont = instr_iternextk iterator_number loop_continue_label k v in
-    init, cont
-  | None ->
-    let init = instr_iterinit iterator_number loop_break_label v in
-    let cont = instr_iternext iterator_number loop_continue_label v in
-    init, cont in
-  let body = from_stmt block in
-  let instrs = gather [
-    from_expr collection;
-    init;
-    instr_try_fault_no_catch
-      fault_label
-      (* try body *)
-      (gather [
-        instr_label loop_continue_label;
-        body;
-        next
-      ])
-      (* fault body *)
-      (gather [
-        instr_iterfree iterator_number;
-        instr_unwind ]);
-    instr_label loop_break_label
-  ] in
-  rewrite_continue_break instrs loop_continue_label loop_break_label
+  let iterator_number = Iterator.get_iterator () in
+  let fault_label = Label.next_fault () in
+  let loop_continue_label = Label.next_regular () in
+  let loop_break_label = Label.next_regular () in
+  match get_foreach_key_value iterator with
+  | None -> emit_nyi "foreach codegen does not support arbitrary lvalues yet"
+  | Some (k, v) ->
+    let init, next = match k with
+    | Some k ->
+      let init = instr_iterinitk iterator_number loop_break_label k v in
+      let cont = instr_iternextk iterator_number loop_continue_label k v in
+      init, cont
+    | None ->
+      let init = instr_iterinit iterator_number loop_break_label v in
+      let cont = instr_iternext iterator_number loop_continue_label v in
+      init, cont in
+    let body = from_stmt block in
+    let result = gather [
+      from_expr collection;
+      init;
+      instr_try_fault
+        fault_label
+        (* try body *)
+        (gather [
+          instr_label loop_continue_label;
+          body;
+          next
+        ])
+        (* fault body *)
+        (gather [
+          instr_iterfree iterator_number;
+          instr_unwind ]);
+      instr_label loop_break_label
+    ] in
+    CBR.rewrite_in_loop
+      result loop_continue_label loop_break_label
 
 and from_stmts stl =
   let results = List.map stl from_stmt in
   gather results
 
 and from_case c =
-  let l = Label.get_next_label () in
+  let l = Label.next_regular () in
   let b = match c with
     | A.Default b
     | A.Case (_, b) ->
@@ -998,102 +1065,85 @@ and from_case c =
   in
   (e, l), gather [instr_label l; b]
 
-let fmt_prim x =
-  match x with
-  | N.Tvoid   -> "HH\\void"
-  | N.Tint    -> "HH\\int"
-  | N.Tbool   -> "HH\\bool"
-  | N.Tfloat  -> "HH\\float"
-  | N.Tstring -> "HH\\string"
-  | N.Tnum    -> "HH\\num"
-  | N.Tresource -> "HH\\resource"
-  | N.Tarraykey -> "HH\\arraykey"
-  | N.Tnoreturn -> "HH\\noreturn"
-
 (* TODO *)
 let fmt_name s = s
 
-let extract_shape_fields smap =
-  let get_pos =
-    function A.SFlit (p, _) | A.SFclass_const ((p, _), _) -> p in
-  List.sort (fun (k1, _) (k2, _) -> Pos.compare (get_pos k1) (get_pos k2))
-    (Nast.ShapeMap.elements smap)
+let fmt_name_or_prim x =
+  match x with
+  | "void" -> "HH\\void"
+  | "int" -> "HH\\int"
+  | "bool" -> "HH\\bool"
+  | "float" -> "HH\\float"
+  | "string" -> "HH\\string"
+  | "num" -> "HH\\num"
+  | "resource" -> "HH\\resource"
+  | "arraykey" -> "HH\\arraykey"
+  | "noreturn" -> "HH\\noreturn"
+  | "mixed" -> "HH\\mixed"
+  | "this" -> "HH\\this"
+  | _ -> fmt_name x
 
 (* Produce the "userType" bit of the annotation *)
 let rec fmt_hint (_, h) =
   match h with
-  | N.Hany -> ""
-  | N.Hmixed -> "HH\\mixed"
-  | N.Hthis -> "HH\\this"
-  | N.Hprim prim -> fmt_prim prim
-  | N.Habstr s -> fmt_name s
+  | A.Happly ((_, s), []) -> fmt_name_or_prim s
+  | A.Happly ((_, s), args) ->
+    fmt_name_or_prim s ^ "<" ^ String.concat ", " (List.map args fmt_hint) ^ ">"
 
-  | N.Happly ((_, s), []) -> fmt_name s
-  | N.Happly ((_, s), args) ->
-    fmt_name s ^ "<" ^ String.concat ", " (List.map args fmt_hint) ^ ">"
-
-  | N.Hfun (args, _, ret) ->
+  | A.Hfun (args, _, ret) ->
     "(function (" ^ String.concat ", " (List.map args fmt_hint) ^ "): " ^
       fmt_hint ret ^ ")"
 
-  | N.Htuple hs ->
+  | A.Htuple hs ->
     "(" ^ String.concat ", " (List.map hs fmt_hint) ^ ")"
 
-  | N.Haccess (h, accesses) ->
-    fmt_hint h ^ "::" ^ String.concat "::" (List.map accesses snd)
+  | A.Haccess (h1, h2, accesses) ->
+    String.concat "::" (List.map (h1::h2::accesses) snd)
 
-  | N.Hoption t -> "?" ^ fmt_hint t
+  | A.Hoption t -> "?" ^ fmt_hint t
 
-  | N.Harray (None, None) -> "array"
-  | N.Harray (Some h, None) -> "array<" ^ fmt_hint h ^ ">"
-  | N.Harray (Some h1, Some h2) ->
-    "array<" ^ fmt_hint h1 ^ ", " ^ fmt_hint h2 ^ ">"
-  | N.Harray _ -> failwith "bogus array"
-  | N.Hshape smap ->
+  | A.Hshape smap ->
     let fmt_field = function
       | A.SFlit (_, s) -> "'" ^ s ^ "'"
       | A.SFclass_const ((_, s1), (_, s2)) -> fmt_name s1 ^ "::" ^ s2
     in
-    let format_shape_field (k, { N.sfi_hint; _ }) =
-      fmt_field k ^ "=>" ^ fmt_hint sfi_hint in
+    let format_shape_field ({ A.sf_name; A.sf_hint; _ }) =
+      fmt_field sf_name ^ "=>" ^ fmt_hint sf_hint in
     let shape_fields =
-      List.map ~f:format_shape_field (extract_shape_fields smap) in
+      List.map ~f:format_shape_field smap in
     "HH\\shape(" ^ String.concat ", " shape_fields ^ ")"
 
 let rec hint_to_type_constraint tparams (_, h) =
 match h with
-| N.Hany | N.Hmixed | N.Hfun (_, _, _) | N.Hthis
-| N.Hprim N.Tvoid ->
+| A.Happly ((_, ("mixed" | "this" | "void")), []) ->
   TC.make None []
 
-| N.Hprim prim ->
-  let tc_name = Some (fmt_prim prim) in
-  let tc_flags = [TC.HHType] in
-  TC.make tc_name tc_flags
+| A.Hfun (_, _, _) ->
+  TC.make None []
 
-| N.Haccess (_, _) ->
+| A.Haccess _ ->
   let tc_name = Some "" in
   let tc_flags = [TC.HHType; TC.ExtendedHint; TC.TypeConstant] in
   TC.make tc_name tc_flags
 
 (* Need to differentiate between type params and classes *)
-| N.Habstr s | N.Happly ((_, s), _) ->
+| A.Happly ((_, s), _) ->
   if List.mem tparams s then
     let tc_name = Some "" in
     let tc_flags = [TC.HHType; TC.ExtendedHint; TC.TypeVar] in
     TC.make tc_name tc_flags
   else
-    let tc_name = Some s in
+    let tc_name = Some (fmt_name_or_prim s) in
     let tc_flags = [TC.HHType] in
     TC.make tc_name tc_flags
 
 (* Shapes and tuples are just arrays *)
-| N.Harray (_, _) | N.Hshape _ |  N.Htuple _ ->
+| A.Hshape _ |  A.Htuple _ ->
   let tc_name = Some "array" in
   let tc_flags = [TC.HHType] in
   TC.make tc_name tc_flags
 
-| N.Hoption t ->
+| A.Hoption t ->
   let tc = hint_to_type_constraint tparams t in
   let tc_name = TC.name tc in
   let tc_flags = TC.flags tc in
@@ -1118,10 +1168,13 @@ let hints_to_type_infos ~always_extended tparams hints =
   List.map hints mapper
 
 let from_param tparams p =
-  let param_name = p.N.param_name in
-  let param_type_info = Option.map p.N.param_hint
+  let param_name = snd p.A.param_id in
+  let param_type_info = Option.map p.A.param_hint
     (hint_to_type_info ~always_extended:false tparams) in
-  Hhas_param.make param_name param_type_info
+  let param_default_value = Option.map p.A.param_expr
+    ~f:(fun e -> Label.next_default_arg (), e)
+  in
+  Hhas_param.make param_name param_type_info param_default_value
 
 let has_type_constraint ti =
   match ti with
@@ -1136,20 +1189,54 @@ let emit_method_prolog params =
     then Some (instr (IMisc (VerifyParamType (Param_named param_name))))
     else None))
 
+let emit_param_default_value_setter params =
+  let setters = List.filter_map params (fun p ->
+    let param_name = Hhas_param.name p in
+    let dvo = Hhas_param.default_value p in
+    Option.map dvo (fun (l, e) ->
+      gather [
+        instr_label l;
+        from_expr e;
+        instr_setl (Local.Named param_name);
+        instr_popc;
+      ]) )
+  in
+  if List.length setters = 0
+  then empty, empty
+  else
+    let l = Label.next_regular () in
+    instr_label l, gather [gather setters; instr_jmpns l]
+
 let tparams_to_strings tparams =
   List.map tparams (fun (_, (_, s), _) -> s)
 
-(* TODO: This function is grossly inefficient,
- * I wonder how we can do it better *)
-let rec emit_fault_instructions stmt_instrs =
-  let emit_fault_instruction_aux = function
-    | ITryFault (_, il, fault) ->
-      gather [emit_fault_instructions @@ instrs il; instrs fault;]
-    | ITryCatch (_, il) -> emit_fault_instructions @@ instrs il
-    | _ -> empty
-  in
-  let instr_list = instr_seq_to_list stmt_instrs in
-  gather @@ List.map instr_list ~f:emit_fault_instruction_aux
+(*  Note that at this time we do NOT want to recurse on the instruction
+    sequence in the fault block. Why not?  Consider:
+    try { x } finally { try { y } finally { z } }
+    We make a copy of the code generated for "try { y } finally { z }" in
+    both the "finally" code which follows try-fault F1 { x }, and in
+    the fault block for the outer try. Which means that now there are two
+    places in the code where there is a TryFaultBegin instruction for the
+    *inner*  try. We don't want to detect it twice and generate fault blocks
+    twice.
+
+    This means that if we ever synthesize a fault-only try-fault, without
+    a finally block copying its contents, and that fault block itself
+    contains a try-fault or try-finally, then the fault block of the inner
+    try-fault will never be detected here. Right now we never do that; we
+    only generate synthetic try-faults for simple cleanup operations. If we
+    ever do generate nested try-faults then we'll need a more sophisticated
+    algorithm here to ensure that each fault block is emitted once.
+ *)
+let emit_fault_instructions instrseq =
+  let rec aux instrseq acc =
+    match instrseq with
+    | Instr_try_fault (try_body, fault_body) ->
+      aux try_body (fault_body :: acc)
+    | Instr_list _ -> acc
+    | Instr_concat ([]) -> acc
+    | Instr_concat (h :: t) -> aux (Instr_concat t) (aux h acc) in
+  gather (aux instrseq [])
 
 let verify_returns body =
   let rewriter i =
@@ -1160,51 +1247,53 @@ let verify_returns body =
   InstrSeq.flat_map body ~f:rewriter
 
 let from_body tparams params ret b =
+  Label.reset_label ();
+  Local.reset_local ();
+  Iterator.reset_iterator ();
   let params = List.map params (from_param tparams) in
   let return_type_info = Option.map ret
     (hint_to_type_info ~always_extended:true tparams) in
-  let stmt_instrs = from_stmts b.N.fub_ast in
+  let stmt_instrs = from_stmts b in
   let stmt_instrs =
     if has_type_constraint return_type_info then
       verify_returns stmt_instrs
     else
       stmt_instrs in
   let ret_instrs =
-    match List.last b.N.fub_ast with Some (A.Return _) -> empty | _ ->
+    match List.last b with Some (A.Return _) -> empty | _ ->
     gather [instr_null; instr_retc]
   in
   let fault_instrs = emit_fault_instructions stmt_instrs in
+  let begin_label, default_value_setters =
+    emit_param_default_value_setter params
+  in
   let body_instrs = gather [
+    begin_label;
     emit_method_prolog params;
     stmt_instrs;
     ret_instrs;
+    default_value_setters;
     fault_instrs;
   ] in
   body_instrs, params, return_type_info
 
-(* In order to be efficient,
- * keep around a set to check for membership and a list for order *)
-let rec extract_decl_vars set l body_instrs =
-  let add_if_not_exists set l s =
-    if SSet.mem s set then (set, l) else (SSet.add s set, s::l)
-  in
-  let extract_decl_vars_aux set l = function
-    | IMutator (SetL (Local_named s)) -> add_if_not_exists set l s
-    | ITryFault (_, il, _)
-    | ITryCatch (_, il) -> extract_decl_vars set l il
-    | _ -> (set, l)
-  in
-  List.fold_left
-    body_instrs
-    ~init:(set, l)
-    ~f:(fun (set, l) i -> extract_decl_vars_aux set l i)
+let extract_decl_vars instrseq =
+  let module ULS = Unique_list_string in
+  (* TODO: Both reads and writes need to go into decl vars *)
+  (* TODO: Default arguments should not be in declvars *)
+  let folder uniq_list instruction =
+    match instruction with
+    | IMutator (SetL (Local.Named s)) -> ULS.add uniq_list s
+    | _ -> uniq_list in
+  let decl_vars = InstrSeq.fold_left instrseq ~init:ULS.empty ~f:folder in
+  List.rev (ULS.items decl_vars)
 
 (* Create a map from defined labels to instruction offset *)
 let create_label_to_offset_map instrseq =
   snd @@
   InstrSeq.fold_left instrseq ~init:(0, IMap.empty) ~f:(fun (i, m) instr ->
     begin match instr with
-    | ILabel l -> (i,     IMap.add l i m)
+    | ILabel (Label.Regular l) -> (i, IMap.add l i m)
     | _        -> (i + 1, m)
     end)
 
@@ -1221,6 +1310,7 @@ let create_label_ref_map defs instrseq =
   InstrSeq.fold_left instrseq ~init:(0, (ISet.empty, IMap.empty))
     ~f:(fun acc instr ->
     let process_ref (n, (used, refs) as acc) l =
+      let l = Label.id l in
       let ix = lookup_def l defs in
       match IMap.get ix refs with
       (* This is the first time we've seen a reference to a label for
@@ -1247,7 +1337,10 @@ let create_label_ref_map defs instrseq =
       List.fold_left ls ~f:process_ref ~init:acc
     | IContFlow (SSwitch pairs) ->
       List.fold_left pairs ~f:(fun acc (_,l) -> process_ref acc l) ~init:acc
-    (* TODO: other uses of rel_offset in instructions *)
+    (* TODO: other uses of Label.t in instructions:
+      DecodeCufIter
+      IterBreak
+     *)
     | _ -> acc)
 
 (* Relabel the instruction sequence so that
@@ -1259,12 +1352,37 @@ let relabel_instrseq instrseq =
   let defs = create_label_to_offset_map instrseq in
   let used, refs = create_label_ref_map defs instrseq in
   let relabel l =
+    let l = Label.id l in
     let ix = lookup_def l defs in
     match IMap.get ix refs with
     | None -> failwith "relabel_instrseq: offset not in refs"
-    | Some l' -> l' in
+    | Some l' -> Label.Regular l' in
   InstrSeq.filter_map instrseq ~f:(fun instr ->
     match instr with
+    | IIterator (IterInit (id, l, v)) ->
+      Some (IIterator (IterInit (id, relabel l, v)))
+    | IIterator (IterInitK (id, l, k, v)) ->
+      Some (IIterator (IterInitK (id, relabel l, k, v)))
+    | IIterator (WIterInit (id, l, v)) ->
+      Some (IIterator (WIterInit (id, relabel l, v)))
+    | IIterator (WIterInitK (id, l, k, v)) ->
+      Some (IIterator (WIterInitK (id, relabel l, k, v)))
+    | IIterator (MIterInit (id, l, v)) ->
+      Some (IIterator (MIterInit (id, relabel l, v)))
+    | IIterator (MIterInitK (id, l, k, v)) ->
+      Some (IIterator (MIterInitK (id, relabel l, k, v)))
+    | IIterator (IterNext (id, l, v)) ->
+      Some (IIterator (IterNext (id, relabel l, v)))
+    | IIterator (IterNextK (id, l, k, v)) ->
+      Some (IIterator (IterNextK (id, relabel l, k, v)))
+    | IIterator (WIterNext (id, l, v)) ->
+      Some (IIterator (WIterNext (id, relabel l, v)))
+    | IIterator (WIterNextK (id, l, k, v)) ->
+      Some (IIterator (WIterNextK (id, relabel l, k, v)))
+    | IIterator (MIterNext (id, l, v)) ->
+      Some (IIterator (MIterNext (id, relabel l, v)))
+    | IIterator (MIterNextK (id, l, k, v)) ->
+      Some (IIterator (MIterNextK (id, relabel l, k, v)))
     | IContFlow (Jmp l)   -> Some (IContFlow (Jmp (relabel l)))
     | IContFlow (JmpNS l) -> Some (IContFlow (JmpNS (relabel l)))
     | IContFlow (JmpZ l)  -> Some (IContFlow (JmpZ (relabel l)))
@@ -1274,37 +1392,33 @@ let relabel_instrseq instrseq =
     | IContFlow (SSwitch pairs) ->
       Some (IContFlow (SSwitch
         (List.map pairs (fun (id,l) -> (id, relabel l)))))
-    (* TODO: other uses of rel_offset in instructions *)
-    | ILabel l ->
+    (* TODO: other uses of Label.t in instructions:
+      DecodeCufIter
+      IterBreak
+     *)
+    | ILabel (Label.Regular l) ->
+      (* TODO: Write test cases for things like catch and fault labels followed
+      by loop start labels. *)
       if ISet.mem l used then
         let ix = lookup_def l defs in
         begin match IMap.get ix refs with
-        | Some l' -> Some (ILabel l')
+        | Some l' -> Some (ILabel (Label.Regular l'))
         | None -> None
         end
       else None
     | _ -> Some instr)
 
-
-let from_fun_ : Nast.fun_ -> Hhas_function.t option =
-  fun nast_fun ->
-  Label.reset_label ();
-  let function_name = Litstr.to_string @@ snd nast_fun.Nast.f_name in
-  match nast_fun.N.f_body with
-  | N.NamedBody _ ->
-    None
-  | N.UnnamedBody b ->
-    let tparams = tparams_to_strings nast_fun.N.f_tparams in
+let from_fun_ : A.fun_ -> Hhas_function.t option =
+  fun ast_fun ->
+  let function_name = Litstr.to_string @@ snd ast_fun.A.f_name in
+  match ast_fun.A.f_body with
+  | b ->
+    let tparams = tparams_to_strings ast_fun.A.f_tparams in
     let body_instrs, function_params, function_return_type =
-      from_body tparams nast_fun.N.f_params nast_fun.N.f_ret b in
+      from_body tparams ast_fun.A.f_params ast_fun.A.f_ret b in
     let body_instrs = relabel_instrseq body_instrs in
+    let function_decl_vars = extract_decl_vars body_instrs in
     let function_body = instr_seq_to_list body_instrs in
-    let (_, function_decl_vars) =
-      extract_decl_vars SSet.empty [] function_body
-    in
-    (* In order to be efficient,
-     * we cons everything, hence the need to reverse *)
-    let function_decl_vars = List.rev function_decl_vars in
     Some (Hhas_function.make
       function_name
       function_params
@@ -1312,45 +1426,39 @@ let from_fun_ : Nast.fun_ -> Hhas_function.t option =
       function_body
       function_decl_vars)
 
-let from_functions nast_functions =
-  Core.List.filter_map nast_functions from_fun_
+let from_functions ast_functions =
+  List.filter_map ast_functions from_fun_
 
 let from_attribute_base attribute_name arguments =
-  let attribute_arguments = literals_from_named_exprs_with_index arguments in
+  let attribute_arguments = literals_from_exprs_with_index arguments in
   Hhas_attribute.make attribute_name attribute_arguments
 
-let from_attribute : Nast.user_attribute -> Hhas_attribute.t =
-  fun nast_attr ->
-  let attribute_name = Litstr.to_string @@ snd nast_attr.Nast.ua_name in
-  from_attribute_base attribute_name nast_attr.Nast.ua_params
+let from_attribute : A.user_attribute -> Hhas_attribute.t =
+  fun ast_attr ->
+  let attribute_name = Litstr.to_string @@ snd ast_attr.A.ua_name in
+  from_attribute_base attribute_name ast_attr.A.ua_params
 
-let from_attributes nast_attributes =
-  (* The list of attributes is reversed in the Nast. *)
-  List.map (List.rev nast_attributes) from_attribute
+let from_attributes ast_attributes =
+  (* The list of attributes is reversed in the A. *)
+  List.map (List.rev ast_attributes) from_attribute
 
-let from_method : bool -> Nast.class_ -> Nast.method_ -> Hhas_method.t option =
-  fun method_is_static nast_class nast_method ->
-  let class_tparams = tparams_to_strings (fst nast_class.N.c_tparams) in
-  let method_name = Litstr.to_string @@ snd nast_method.Nast.m_name in
-  let method_is_abstract = nast_method.Nast.m_abstract in
-  (* TODO: An abstract method must generate
-.method [protected abstract] <"HH\\void" N  > protected_abstract_method() {
-String "Cannot call abstract method AbstractClass::protected_abstract_method()"
-Fatal RuntimeOmitFrame
-} *)
-  let method_is_final = nast_method.Nast.m_final in
-  let method_is_private = nast_method.Nast.m_visibility = Nast.Private in
-  let method_is_protected = nast_method.Nast.m_visibility = Nast.Protected in
-  let method_is_public = nast_method.Nast.m_visibility = Nast.Public in
-  let method_attributes = from_attributes nast_method.Nast.m_user_attributes in
-  match nast_method.N.m_body with
-  | N.NamedBody _ ->
-    None
-  | N.UnnamedBody b ->
-    let method_tparams = tparams_to_strings nast_method.N.m_tparams in
+let from_method : A.class_ -> A.method_ -> Hhas_method.t option =
+  fun ast_class ast_method ->
+  let class_tparams = tparams_to_strings ast_class.A.c_tparams in
+  let method_name = Litstr.to_string @@ snd ast_method.A.m_name in
+  let method_is_abstract = List.mem ast_method.A.m_kind A.Abstract in
+  let method_is_final = List.mem ast_method.A.m_kind A.Final in
+  let method_is_private = List.mem ast_method.A.m_kind A.Private in
+  let method_is_protected = List.mem ast_method.A.m_kind A.Protected in
+  let method_is_public = List.mem ast_method.A.m_kind A.Public in
+  let method_is_static = List.mem ast_method.A.m_kind A.Static in
+  let method_attributes = from_attributes ast_method.A.m_user_attributes in
+  match ast_method.A.m_body with
+  | b ->
+    let method_tparams = tparams_to_strings ast_method.A.m_tparams in
     let tparams = class_tparams @ method_tparams in
     let body_instrs, method_params, method_return_type =
-      from_body tparams nast_method.N.m_params nast_method.N.m_ret b in
+      from_body tparams ast_method.A.m_params ast_method.A.m_ret b in
     let method_body = instr_seq_to_list body_instrs in
     let m = Hhas_method.make
       method_attributes
@@ -1366,20 +1474,20 @@ Fatal RuntimeOmitFrame
       method_body in
     Some m
 
-let from_methods method_is_static nast_class nast_methods =
-  Core.List.filter_map nast_methods (from_method method_is_static nast_class)
+let from_methods ast_class ast_methods =
+  List.filter_map ast_methods (from_method ast_class)
 
-let is_interface nast_class =
-  nast_class.N.c_kind = Ast.Cinterface
+let is_interface ast_class =
+  ast_class.A.c_kind = Ast.Cinterface
 
-let default_constructor nast_class =
+let default_constructor ast_class =
   let method_attributes = [] in
   let method_name = "86ctor" in
   let method_body = instr_seq_to_list (gather [
     instr (ILitConst Null);
     instr (IContFlow RetC)
   ]) in
-  let method_is_abstract = is_interface nast_class in
+  let method_is_abstract = is_interface ast_class in
   let method_is_final = false in
   let method_is_private = false in
   let method_is_protected = false in
@@ -1400,15 +1508,6 @@ let default_constructor nast_class =
     method_return_type
     method_body
 
-let add_constructor nast_class class_methods =
-  match nast_class.N.c_constructor with
-  | None -> (default_constructor nast_class) :: class_methods
-  | Some nast_ctor ->
-    begin
-      match from_method false nast_class nast_ctor with
-      | None -> class_methods
-      | Some m -> m :: class_methods
-    end
 
 let from_extends tparams extends =
   (* TODO: This prints out "extends <"\\Mammal" "\\Mammal" hh_type >"
@@ -1426,23 +1525,22 @@ let from_implements tparams implements =
   *)
   hints_to_type_infos ~always_extended:false tparams implements
 
-let from_property property_is_static class_var =
+let from_class_var cv_kind_list class_var =
+  let (_, (_, cv_name), _) = class_var in
   (* TODO: xhp, type, initializer *)
   (* TODO: Hack allows a property to be marked final, which is nonsensical.
   HHVM does not allow this.  Fix this in the Hack parser? *)
-  let property_name = Litstr.to_string @@ snd class_var.N.cv_id in
-  let property_is_private = class_var.N.cv_visibility = N.Private in
-  let property_is_protected = class_var.N.cv_visibility = N.Protected in
-  let property_is_public = class_var.N.cv_visibility = N.Public in
+  let property_name = Litstr.to_string @@ cv_name in
+  let property_is_private = List.mem cv_kind_list A.Private in
+  let property_is_protected = List.mem cv_kind_list A.Protected in
+  let property_is_public = List.mem cv_kind_list A.Public in
+  let property_is_static = List.mem cv_kind_list A.Static in
   Hhas_property.make
     property_is_private
     property_is_protected
     property_is_public
     property_is_static
     property_name
-
-let from_properties property_is_static class_vars =
-  List.map class_vars (from_property property_is_static)
 
 let from_constant (_hint, name, const_init) =
   (* The type hint is omitted. *)
@@ -1453,49 +1551,75 @@ let from_constant (_hint, name, const_init) =
     let constant_name = Litstr.to_string @@ snd name in
     Some (Hhas_constant.make constant_name)
 
-let from_constants nast_constants =
-  Core.List.filter_map nast_constants from_constant
+let from_constants ast_constants =
+  List.filter_map ast_constants from_constant
 
-let from_type_constant nast_type_constant =
-  match nast_type_constant.N.c_tconst_type with
+let from_type_constant ast_type_constant =
+  match ast_type_constant.A.tconst_type with
   | None -> None (* Abstract type constants are omitted *)
   | Some _init ->
     (* TODO: Deal with the initializer *)
     let type_constant_name = Litstr.to_string @@
-      snd nast_type_constant.N.c_tconst_name in
+      snd ast_type_constant.A.tconst_name in
     Some (Hhas_type_constant.make type_constant_name)
 
-let from_type_constants nast_type_constants =
-  Core.List.filter_map nast_type_constants from_type_constant
+let from_type_constants ast_type_constants =
+  List.filter_map ast_type_constants from_type_constant
 
-let from_class : Nast.class_ -> Hhas_class.t =
-  fun nast_class ->
-  let class_attributes = from_attributes nast_class.N.c_user_attributes in
-  let class_name = Litstr.to_string @@ snd nast_class.N.c_name in
-  let class_is_trait = nast_class.N.c_kind = Ast.Ctrait in
-  let class_is_enum = nast_class.N.c_kind = Ast.Cenum in
-  let class_is_interface = is_interface nast_class in
-  let class_is_abstract = nast_class.N.c_kind = Ast.Cabstract in
+let from_class_elt_method ast_class elt =
+  match elt with
+  | A.Method m -> from_method ast_class m
+  | _ -> None
+
+let from_class_elt_classvars elt =
+  match elt with
+  | A.ClassVars (kind_list, _, cvl) ->
+    List.map cvl (from_class_var kind_list)
+  | _ -> []
+
+let from_class_elt_constants elt =
+  match elt with
+  | A.Const(hint_opt, l) ->
+    List.filter_map l (fun (id, e) -> from_constant (hint_opt, id, Some e))
+  | _ -> []
+
+let from_class_elt_typeconsts elt =
+  match elt with
+  | A.TypeConst tc -> from_type_constant tc
+  | _ -> None
+
+let from_class : A.class_ -> Hhas_class.t =
+  fun ast_class ->
+  let class_attributes = from_attributes ast_class.A.c_user_attributes in
+  let class_name = Litstr.to_string @@ snd ast_class.A.c_name in
+  let class_is_trait = ast_class.A.c_kind = Ast.Ctrait in
+  let class_is_enum = ast_class.A.c_kind = Ast.Cenum in
+  let class_is_interface = is_interface ast_class in
+  let class_is_abstract = ast_class.A.c_kind = Ast.Cabstract in
   let class_is_final =
-    nast_class.N.c_final || class_is_trait || class_is_enum in
-  let tparams = tparams_to_strings (fst nast_class.N.c_tparams) in
+    ast_class.A.c_final || class_is_trait || class_is_enum in
+  let tparams = tparams_to_strings ast_class.A.c_tparams in
   let class_base =
     if class_is_interface then None
-    else from_extends tparams nast_class.N.c_extends in
+    else from_extends tparams ast_class.A.c_extends in
   let implements =
-    if class_is_interface then nast_class.N.c_extends
-    else nast_class.N.c_implements in
+    if class_is_interface then ast_class.A.c_extends
+    else ast_class.A.c_implements in
   let class_implements = from_implements tparams implements in
-  let instance_methods = from_methods false nast_class nast_class.N.c_methods in
-  let static_methods =
-    from_methods true nast_class nast_class.N.c_static_methods in
-  let class_methods = instance_methods @ static_methods in
-  let class_methods = add_constructor nast_class class_methods in
-  let instance_properties = from_properties false nast_class.N.c_vars in
-  let static_properties = from_properties true nast_class.N.c_static_vars in
-  let class_properties = static_properties @ instance_properties in
-  let class_constants = from_constants nast_class.N.c_consts in
-  let class_type_constants = from_type_constants nast_class.N.c_typeconsts in
+  let class_body = ast_class.A.c_body in
+  let has_constructor = List.exists class_body
+    (fun elt -> match elt with
+                | A.Method { A.m_name; _} -> snd m_name = SN.Members.__construct
+                | _ -> false) in
+  let class_methods =
+    if has_constructor then [] else [default_constructor ast_class] in
+  let class_methods =
+    List.filter_map class_body (from_class_elt_method ast_class)
+    @ class_methods in
+  let class_properties = List.concat_map class_body from_class_elt_classvars in
+  let class_constants = List.concat_map class_body from_class_elt_constants in
+  let class_type_constants =
+    List.filter_map class_body from_class_elt_typeconsts in
   (* TODO: uses, xhp attr uses, xhp category *)
   Hhas_class.make
     class_attributes
@@ -1512,5 +1636,5 @@ let from_class : Nast.class_ -> Hhas_class.t =
     class_constants
     class_type_constants
 
-let from_classes nast_classes =
-  Core.List.map nast_classes from_class
+let from_classes ast_classes =
+  List.map ast_classes from_class

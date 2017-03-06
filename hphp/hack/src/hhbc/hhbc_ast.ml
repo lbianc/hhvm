@@ -10,28 +10,67 @@
 
 (**
  * TODO (hgo): see within HHVM codebase what those types actually are *)
-type collection_type = string
-type rel_offset = int
 type property_name = string
-type member_op_mode = int
-type query_op = int
-type member_key = int
 type iter_vec = int
 type check_started = bool
 type free_iterator = int
 type repo_auth_type = string (* see see runtime/base/repo-auth-type.h *)
-type local_id =
-  | Local_unnamed of int
-  | Local_named of string
-  | Local_pipe (* Will be rewritten to an unnamed local. *)
+type local_id = Local.t
+
 type param_id =
   | Param_unnamed of int
   | Param_named of string
-type iterator_id = int
+type param_num = int
 type stack_index = int
 type class_id = string
 type function_id = string
 type num_params = int
+
+type collection_type = int
+
+module MemberOpMode = struct
+
+  type t =
+  | ModeNone
+  | Warn
+  | Define
+  | Unset
+
+  let to_string op =
+  match op with
+  | ModeNone -> "None"
+  | Warn -> "Warn"
+  | Define -> "Define"
+  | Unset -> "Unset"
+
+end (* of MemberOpMode *)
+
+module QueryOp = struct
+  type t =
+  | CGet
+  | Isset
+  | Empty
+
+  let to_string op =
+  match op with
+  | CGet -> "CGet"
+  | Isset -> "Isset"
+  | Empty -> "Empty"
+
+end (* of QueryOp *)
+
+module MemberKey = struct
+  type t =
+  | EC
+  | EL of local_id
+  | ET of Litstr.id
+  | EI of int64
+  | PC
+  | PL of local_id
+  | PT of Litstr.id
+  | QT of Litstr.id
+  | W
+end (* Of MemberKey *)
 
 type instruct_basic =
   | Nop
@@ -54,12 +93,12 @@ type instruct_lit_const =
   | False
   | NullUninit
   | Int of int64
-  | Double of float
+  | Double of Litstr.id
   | String of Litstr.id
-  | Array of int * Litstr.id * instruct_lit_const list
-  | Vec of int (* scalar vec id *)
-  | Dict of int (* scalar dict id *)
-  | Keyset of int (* scalar keyset id *)
+  | Array of int * instruct_lit_const list
+  | Vec of int * instruct_lit_const list
+  | Dict of int * instruct_lit_const list
+  | Keyset of int * instruct_lit_const list
   | NewArray of int (* capacity hint *)
   | NewMixedArray of int (* capacity hint *)
   | NewDictArray of int (* capacity hint *)
@@ -67,7 +106,7 @@ type instruct_lit_const =
   | NewMSArray of int (* capacity hint *)
   | NewLikeArrayL of local_id * int (* capacity hint *)
   | NewPackedArray of int
-  | NewStructArray of int list
+  | NewStructArray of Litstr.id list
   | NewVecArray of int
   | NewKeysetArray of int
   | AddElemC
@@ -141,20 +180,22 @@ type switchkind =
   | Unbounded
 
 type instruct_control_flow =
-  | Jmp of rel_offset
-  | JmpNS of rel_offset
-  | JmpZ of rel_offset
-  | JmpNZ of rel_offset
+  | Jmp of Label.t
+  | JmpNS of Label.t
+  | JmpZ of Label.t
+  | JmpNZ of Label.t
   (* bounded, base, offset vector *)
-  | Switch of switchkind * int * rel_offset list
+  | Switch of switchkind * int * Label.t list
   (* litstr id / offset vector *)
-  | SSwitch of (Litstr.id * rel_offset) list
+  | SSwitch of (Litstr.id * Label.t) list
   | RetC
   | RetV
   | Unwind
   | Throw
-  | Continue of int  (* This will be rewritten *)
-  | Break of int  (* This will be rewritten *)
+
+type instruct_special_flow =
+  | Continue of int * int  (* This will be rewritten *)
+  | Break of int * int  (* This will be rewritten *)
 
 type instruct_get =
   | CGetL of local_id
@@ -263,51 +304,29 @@ type instruct_call =
   | FPushCtor of num_params
   | FPushCtorD of num_params * Litstr.id
   | FPushCtorI of num_params * class_id
-  | DecodeCufIter of num_params * rel_offset
-  | FPushCufIter of num_params * iterator_id
+  | DecodeCufIter of num_params * Label.t
+  | FPushCufIter of num_params * Iterator.t
   | FPushCuf of num_params
   | FPushCufF of num_params
   | FPushCufSafe of num_params
   | CufSafeArray
   | CufSafeReturn
-  | FPassC of param_id
-  | FPassCW of param_id
-  | FPassCE of param_id
-  | FPassV of param_id
-  | FPassVNop of param_id
-  | FPassR of param_id
-  | FPassL of param_id * local_id
-  | FPassN of param_id
-  | FPassG of param_id
-  | FPassS of param_id
+  | FPassC of param_num
+  | FPassCW of param_num
+  | FPassCE of param_num
+  | FPassV of param_num
+  | FPassVNop of param_num
+  | FPassR of param_num
+  | FPassL of param_num * local_id
+  | FPassN of param_num
+  | FPassG of param_num
+  | FPassS of param_num
   | FCall of num_params
   | FCallD of num_params * class_id * function_id
   | FCallArray
   | FCallAwait of num_params * class_id * function_id
   | FCallUnpack of num_params
   | FCallBuiltin of num_params * num_params * Litstr.id
-
-type op_member_base =
-  | BaseC
-  | BaseR
-  | BaseL of local_id
-  | BaseLW of local_id
-  | BaseLD of local_id
-  | BaseNC
-  | BaseNL of local_id
-  | BaseNCW
-  | BaseNLW of local_id
-  | BaseNCD
-  | BaseNLD of local_id
-  | BaseGC
-  | BaseGL of local_id
-  | BaseGCW
-  | BaseGLW of local_id
-  | BaseGCD
-  | BaseGLD of local_id
-  | BaseSC
-  | BaseSL of local_id
-  | BaseH
 
 type op_member_intermediate =
   | ElemC
@@ -371,52 +390,52 @@ type op_member_final =
   | UnsetPropC
   | UnsetPropL of local_id
 
-type op_base =
-  | BaseNC of stack_index * member_op_mode
-  | BaseNL of local_id * member_op_mode
-  | FPassBaseNC of param_id * stack_index
-  | FPassBaseNL of param_id * local_id
-  | BaseGC of stack_index * member_op_mode
-  | BaseGL of local_id * member_op_mode
-  | FPassBaseGC of param_id * stack_index
-  | FPassBaseGL of param_id * local_id
+type instruct_base =
+  | BaseNC of stack_index * MemberOpMode.t
+  | BaseNL of local_id * MemberOpMode.t
+  | FPassBaseNC of param_num * stack_index
+  | FPassBaseNL of param_num * local_id
+  | BaseGC of stack_index * MemberOpMode.t
+  | BaseGL of local_id * MemberOpMode.t
+  | FPassBaseGC of param_num * stack_index
+  | FPassBaseGL of param_num * local_id
   | BaseSC of stack_index * stack_index
   | BaseSL of local_id * stack_index
-  | BaseL of local_id * member_op_mode
-  | FPassBaseL of param_id * local_id
+  | BaseL of local_id * MemberOpMode.t
+  | FPassBaseL of param_num * local_id
   | BaseC of stack_index
   | BaseR of stack_index
   | BaseH
 
-type op_final =
-  | QueryM of num_params * query_op * member_key
-  | VGetM of num_params * member_key
-  | FPassM of param_id * num_params * member_key
-  | SetM of num_params * member_key
-  | IncDecM of num_params * incdec_op * member_key
-  | SetOpM of num_params  * eq_op * member_key
-  | BindM of num_params * member_key
-  | UnsetM of num_params * member_key
+type instruct_final =
+  | QueryM of num_params * QueryOp.t * MemberKey.t
+  | VGetM of num_params * MemberKey.t
+  | FPassM of param_num * num_params * MemberKey.t
+  | SetM of num_params * MemberKey.t
+  | IncDecM of num_params * incdec_op * MemberKey.t
+  | SetOpM of num_params  * eq_op * MemberKey.t
+  | BindM of num_params * MemberKey.t
+  | UnsetM of num_params * MemberKey.t
   | SetWithRefLML of local_id * local_id
   | SetWithRefRML of local_id
 
 type instruct_iterator =
-  | IterInit of iterator_id * rel_offset * local_id
-  | IterInitK of iterator_id * rel_offset * local_id * local_id
-  | WIterInit of iterator_id * rel_offset * local_id
-  | WIterInitK of iterator_id * rel_offset * local_id * local_id
-  | MIterInit of iterator_id * rel_offset * local_id
-  | MIterInitK of iterator_id * rel_offset * local_id * local_id
-  | IterNext of iterator_id * rel_offset * local_id
-  | IterNextK of iterator_id * rel_offset * local_id * local_id
-  | WIterNext of iterator_id * rel_offset * local_id
-  | WIterNextK of iterator_id * rel_offset * local_id * local_id
-  | MIterNext of iterator_id * rel_offset * local_id
-  | MIterNextK of iterator_id * rel_offset * local_id * local_id
-  | IterFree of iterator_id
-  | MIterFree of iterator_id
-  | CIterFree of iterator_id
-  | IterBreak of rel_offset * iter_vec
+  | IterInit of Iterator.t * Label.t * local_id
+  | IterInitK of Iterator.t * Label.t * local_id * local_id
+  | WIterInit of Iterator.t * Label.t * local_id
+  | WIterInitK of Iterator.t * Label.t * local_id * local_id
+  | MIterInit of Iterator.t * Label.t * local_id
+  | MIterInitK of Iterator.t * Label.t * local_id * local_id
+  | IterNext of Iterator.t * Label.t * local_id
+  | IterNextK of Iterator.t * Label.t * local_id * local_id
+  | WIterNext of Iterator.t * Label.t * local_id
+  | WIterNextK of Iterator.t * Label.t * local_id * local_id
+  | MIterNext of Iterator.t * Label.t * local_id
+  | MIterNextK of Iterator.t * Label.t * local_id * local_id
+  | IterFree of Iterator.t
+  | MIterFree of Iterator.t
+  | CIterFree of Iterator.t
+  | IterBreak of Label.t * iter_vec
 
 type instruct_include_eval_define =
   | Incl
@@ -494,25 +513,28 @@ type async_functions =
   | WHResult
   | Await
 
-type exception_label =
-  | CatchL
-  | FaultL
+type instruct_try =
+  | TryCatchBegin of Label.t
+  | TryCatchEnd
+  | TryFaultBegin of Label.t
+  | TryFaultEnd
 
-type instruct =
+and instruct =
   | IBasic of instruct_basic
   | IIterator of instruct_iterator
   | ILitConst of instruct_lit_const
   | IOp of instruct_operator
   | IContFlow of instruct_control_flow
+  | ISpecialFlow of instruct_special_flow
   | ICall of instruct_call
   | IMisc of instruct_misc
   | IGet of instruct_get
   | IMutator of instruct_mutator
   | IIsset of instruct_isset
-  | ILabel of rel_offset
-  | IExceptionLabel of rel_offset * exception_label
-  | ITryFault of rel_offset * instruct list * instruct list
-  | ITryCatch of rel_offset * instruct list
+  | IBase of instruct_base
+  | IFinal of instruct_final
+  | ILabel of Label.t
+  | ITry of instruct_try
   | IComment of string
 
 type type_constraint_flag =

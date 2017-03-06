@@ -38,9 +38,6 @@ struct Bytecode;
 
 namespace php {
 
-struct Block;
-struct Local;
-struct Iter;
 struct Func;
 
 }
@@ -288,6 +285,8 @@ namespace imm {
 #define IMM_ID_I64A     I64A
 #define IMM_ID_LA       LA
 #define IMM_ID_IA       IA
+#define IMM_ID_CAR      CAR
+#define IMM_ID_CAW      CAW
 #define IMM_ID_DA       DA
 #define IMM_ID_SA       SA
 #define IMM_ID_RATA     RATA
@@ -305,6 +304,8 @@ namespace imm {
 #define IMM_TY_I64A     int64_t
 #define IMM_TY_LA       LocalId
 #define IMM_TY_IA       IterId
+#define IMM_TY_CAR      ClsRefSlotId
+#define IMM_TY_CAW      ClsRefSlotId
 #define IMM_TY_DA       double
 #define IMM_TY_SA       SString
 #define IMM_TY_RATA     RepoAuthType
@@ -322,6 +323,8 @@ namespace imm {
 #define IMM_NAME_I64A(n)    arg##n
 #define IMM_NAME_LA(n)      loc##n
 #define IMM_NAME_IA(n)      iter##n
+#define IMM_NAME_CAR(n)     slot
+#define IMM_NAME_CAW(n)     slot
 #define IMM_NAME_DA(n)      dbl##n
 #define IMM_NAME_SA(n)      str##n
 #define IMM_NAME_RATA(n)    rat
@@ -340,6 +343,8 @@ namespace imm {
 #define IMM_EXTRA_I64A
 #define IMM_EXTRA_LA
 #define IMM_EXTRA_IA
+#define IMM_EXTRA_CAR       using has_car_flag = std::true_type;
+#define IMM_EXTRA_CAW       using has_caw_flag = std::true_type;
 #define IMM_EXTRA_DA
 #define IMM_EXTRA_SA
 #define IMM_EXTRA_RATA
@@ -411,11 +416,10 @@ namespace imm {
 
 #define POP_UV  if (i == 0) return Flavor::U
 #define POP_CV  if (i == 0) return Flavor::C
-#define POP_AV  if (i == 0) return Flavor::A
 #define POP_VV  if (i == 0) return Flavor::V
 #define POP_FV  if (i == 0) return Flavor::F
 #define POP_RV  if (i == 0) return Flavor::R
-#define POP_CUV if (i == 0) return Flavor::CUV;
+#define POP_CUV if (i == 0) return Flavor::CUV
 
 #define POP_NOV             uint32_t numPop() const { return 0; } \
                             Flavor popFlavor(uint32_t) const { not_reached(); }
@@ -470,11 +474,6 @@ namespace imm {
                       return Flavor::CVU;                     \
                     }
 
-#define POP_IDX_A  uint32_t numPop() const { return arg2 + 1; } \
-                   Flavor popFlavor(uint32_t i) const {         \
-                     return i == arg2 ? Flavor::C : Flavor::A;  \
-                   }
-
 #define PUSH_NOV          uint32_t numPush() const { return 0; }
 
 #define PUSH_ONE(x)       uint32_t numPush() const { return 1; }
@@ -482,10 +481,6 @@ namespace imm {
 #define PUSH_TWO(x, y)    uint32_t numPush() const { return 2; }
 
 #define PUSH_INS_1(...)   uint32_t numPush() const { return 1; }
-
-#define PUSH_INS_2(...)   uint32_t numPush() const { return 1; }
-
-#define PUSH_IDX_A        uint32_t numPush() const { return arg2; }
 
 #define FLAGS_NF
 #define FLAGS_TF
@@ -581,12 +576,9 @@ OPCODES
 #undef PUSH_ONE
 #undef PUSH_TWO
 #undef PUSH_INS_1
-#undef PUSH_INS_2
-#undef PUSH_IDX_A
 
 #undef POP_UV
 #undef POP_CV
-#undef POP_AV
 #undef POP_VV
 #undef POP_FV
 #undef POP_RV
@@ -603,7 +595,6 @@ OPCODES
 #undef POP_SMANY
 #undef POP_FMANY
 #undef POP_CVUMANY
-#undef POP_IDX_A
 
 #undef IMM_TY_MA
 #undef IMM_TY_BLA
@@ -613,6 +604,8 @@ OPCODES
 #undef IMM_TY_I64A
 #undef IMM_TY_LA
 #undef IMM_TY_IA
+#undef IMM_TY_CAR
+#undef IMM_TY_CAW
 #undef IMM_TY_DA
 #undef IMM_TY_SA
 #undef IMM_TY_RATA
@@ -632,6 +625,8 @@ OPCODES
 // #undef IMM_NAME_I64A
 // #undef IMM_NAME_LA
 // #undef IMM_NAME_IA
+// #undef IMM_NAME_CAR
+// #undef IMM_NAME_CAW
 // #undef IMM_NAME_DA
 // #undef IMM_NAME_SA
 // #undef IMM_NAME_RATA
@@ -648,6 +643,8 @@ OPCODES
 #undef IMM_EXTRA_I64A
 #undef IMM_EXTRA_LA
 #undef IMM_EXTRA_IA
+#undef IMM_EXTRA_CAR
+#undef IMM_EXTRA_CAW
 #undef IMM_EXTRA_DA
 #undef IMM_EXTRA_SA
 #undef IMM_EXTRA_RATA
@@ -864,6 +861,14 @@ template<class T> Bytecode bc_with_loc(int32_t loc, const T& t) {
  * called result_type that indicates the return type of the call.
  */
 template<class Visit>
+typename Visit::result_type visit(Bytecode& b, Visit v) {
+#define O(opcode, ...) case Op::opcode: return v(b.opcode);
+  switch (b.op) { OPCODES }
+#undef O
+  not_reached();
+}
+
+template<class Visit>
 typename Visit::result_type visit(const Bytecode& b, Visit v) {
 #define O(opcode, ...) case Op::opcode: return v(b.opcode);
   switch (b.op) { OPCODES }
@@ -874,6 +879,30 @@ typename Visit::result_type visit(const Bytecode& b, Visit v) {
 //////////////////////////////////////////////////////////////////////
 
 BOOST_MPL_HAS_XXX_TRAIT_NAMED_DEF(has_target, has_target_flag, false);
+BOOST_MPL_HAS_XXX_TRAIT_NAMED_DEF(has_car, has_car_flag, false);
+BOOST_MPL_HAS_XXX_TRAIT_NAMED_DEF(has_caw, has_caw_flag, false);
+
+//////////////////////////////////////////////////////////////////////
+
+struct ReadClsRefSlotVisitor : boost::static_visitor<ClsRefSlotId> {
+  template<class T>
+  typename std::enable_if<!has_car<T>::value,ClsRefSlotId>::type
+  operator()(T const& t) const { return NoClsRefSlotId; }
+
+  template<class T>
+  typename std::enable_if<has_car<T>::value,ClsRefSlotId>::type
+  operator()(T const& t) const { return t.slot; }
+};
+
+struct WriteClsRefSlotVisitor : boost::static_visitor<ClsRefSlotId> {
+  template<class T>
+  typename std::enable_if<!has_caw<T>::value,ClsRefSlotId>::type
+  operator()(T const& t) const { return NoClsRefSlotId; }
+
+  template<class T>
+  typename std::enable_if<has_caw<T>::value,ClsRefSlotId>::type
+  operator()(T const& t) const { return t.slot; }
+};
 
 //////////////////////////////////////////////////////////////////////
 

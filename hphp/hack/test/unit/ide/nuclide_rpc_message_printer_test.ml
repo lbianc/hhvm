@@ -16,6 +16,8 @@ open Ide_rpc_protocol_parser_types
 (* Test suite for Nuclide-rpc version of the API responses  *)
 
 let test_response = test_response Nuclide_rpc V0
+let test_request = test_request Nuclide_rpc V0
+let test_notification = test_notification Nuclide_rpc V0
 
 let test_autocomplete_response () =
   let response = Autocomplete_response [{
@@ -100,12 +102,12 @@ let test_coverage_levels_response () =
   }|}
 
 let test_diagnostics_notification () =
-  let response = Diagnostics_notification {
+  let notification = Diagnostics_notification {
     subscription_id = 4;
     diagnostics_notification_filename = "foo.php";
     diagnostics = []
   } in
-  test_response response
+  test_notification notification
   {|{
     "protocol": "service_framework3_rpc",
     "type": "next",

@@ -401,8 +401,9 @@ void setLocalForBase(ISS& env, Type ty) {
 // to produce the array type that incorporates the effects of any
 // intermediate defining dims.
 Type currentChainType(ISS& env, Type val) {
-  auto it = env.state.arrayChain.rbegin();
-  for (; it != env.state.arrayChain.rend(); ++it) {
+  auto it = env.state.arrayChain.end();
+  while (it != env.state.arrayChain.begin()) {
+    --it;
     if (it->first.subtypeOf(TArr)) {
       val = array_set(it->first, it->second, val);
     } else if (it->first.subtypeOf(TVec)) {
@@ -1413,15 +1414,6 @@ void miFinalSetWithRef(ISS& env) {
 
 //////////////////////////////////////////////////////////////////////
 
-void miBaseSImpl(ISS& env, bool hasRhs, Type prop) {
-  auto rhs = hasRhs ? popT(env) : TTop;
-  auto const cls = popA(env);
-  env.state.base = miBaseSProp(env, cls, prop);
-  if (hasRhs) push(env, rhs);
-}
-
-//////////////////////////////////////////////////////////////////////
-
 template<typename A, typename B>
 void mergePaths(ISS& env, A a, B b) {
   auto const start = env.state;
@@ -1522,14 +1514,16 @@ void in(ISS& env, const bc::BaseGL& op) {
 
 void in(ISS& env, const bc::BaseSC& op) {
   assert(env.state.arrayChain.empty());
-  auto const prop = topC(env, op.arg1);
-  miBaseSImpl(env, op.arg2 == 1, prop);
+  auto prop = topC(env, op.arg1);
+  auto cls = takeClsRefSlot(env, op.slot);
+  env.state.base = miBaseSProp(env, std::move(cls), std::move(prop));
 }
 
 void in(ISS& env, const bc::BaseSL& op) {
   assert(env.state.arrayChain.empty());
-  auto const prop = locAsCell(env, op.loc1);
-  miBaseSImpl(env, op.arg2 == 1, prop);
+  auto prop = locAsCell(env, op.loc1);
+  auto cls = takeClsRefSlot(env, op.slot);
+  env.state.base = miBaseSProp(env, std::move(cls), std::move(prop));
 }
 
 void in(ISS& env, const bc::BaseL& op) {

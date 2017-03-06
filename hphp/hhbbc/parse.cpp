@@ -453,6 +453,16 @@ void populate_block(ParseUnitState& puState,
                          always_assert(id < func.numIters);      \
                          return id;                              \
                        }();
+#define IMM_CAR(n)     auto slot = [&] {                                \
+                         ClsRefSlotId id = decode_iva(pc);              \
+                         always_assert(id >= 0 && id < func.numClsRefSlots); \
+                         return id;                                     \
+                       }();
+#define IMM_CAW(n)     auto slot = [&] {                                \
+                         ClsRefSlotId id = decode_iva(pc);              \
+                         always_assert(id >= 0 && id < func.numClsRefSlots); \
+                         return id;                                     \
+                       }();
 #define IMM_DA(n)      auto dbl##n = decode<double>(pc);
 #define IMM_SA(n)      auto str##n = ue.lookupLitstr(decode<Id>(pc));
 #define IMM_RATA(n)    auto rat = decodeRAT(ue, pc);
@@ -592,6 +602,8 @@ void populate_block(ParseUnitState& puState,
 #undef IMM_I64A
 #undef IMM_LA
 #undef IMM_IA
+#undef IMM_CAR
+#undef IMM_CAW
 #undef IMM_DA
 #undef IMM_SA
 #undef IMM_RATA
@@ -687,7 +699,7 @@ void build_cfg(ParseUnitState& puState,
     auto const bcStart = bc + *it;
     auto const bcStop  = bc + *std::next(it);
 
-    if (auto const eh = findEH(fe.ehtab, *it)) {
+    if (auto const eh = Func::findEH(fe.ehtab, *it)) {
       auto it = exnTreeInfo.ehMap.find(eh);
       assert(it != end(exnTreeInfo.ehMap));
       block->exnNode = it->second;
@@ -734,6 +746,7 @@ void add_frame_variables(php::Func& func, const FuncEmitter& fe) {
   }
 
   func.numIters = fe.numIterators();
+  func.numClsRefSlots = fe.numClsRefSlots();
 
   func.staticLocals.reserve(fe.staticVars.size());
   for (auto& sv : fe.staticVars) {

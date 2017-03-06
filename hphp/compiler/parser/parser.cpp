@@ -586,7 +586,6 @@ void Parser::onCall(Token &out, bool dynamic, Token &name, Token &params,
            stripped == "objprof_get_strings" ||
            stripped == "objprof_get_data" ||
            stripped == "objprof_get_paths" ||
-           stripped == "objprof_start" ||
            stripped == "heapgraph_create" ||
            stripped == "heapgraph_stats" ||
            stripped == "heapgraph_foreach_node" ||
@@ -2380,6 +2379,13 @@ void Parser::onTypeSpecialization(Token& type, char specialization) {
       type.typeAnnotation->setTypeAccess();
       break;
     }
+  }
+}
+
+void Parser::onShapeFieldSpecialization(
+    Token& shapeField, char specialization) {
+  if (specialization == '?') {
+    shapeField.typeAnnotation->setOptionalShapeField();
   }
 }
 

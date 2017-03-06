@@ -281,11 +281,10 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
       } else if (dest_hk == HeaderKind::Dict) {
         ad->m_used = i;
         ad->m_size = i;
-        SCOPE_EXIT {
-          if (ad->isRefCounted()) Release(ad);
-          else if (ad->isUncounted()) ReleaseUncounted(ad);
-        };
-        throwRefInvalidArrayValueException(ad);
+        ad->m_pos = 0;
+        if (ad->isRefCounted()) Release(ad);
+        else if (ad->isUncounted()) ReleaseUncounted(ad);
+        throwRefInvalidArrayValueException(staticEmptyDictArray());
       }
     }
     tvRefcountedIncRef(&e.data);
@@ -416,7 +415,6 @@ Variant MixedArray::CreateVarForUncountedArray(const Variant& source) {
     case KindOfObject:
     case KindOfResource:
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();

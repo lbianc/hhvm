@@ -442,7 +442,9 @@ MixedArray* reqAllocArray(uint32_t scale) {
 ALWAYS_INLINE
 MixedArray* staticAllocArray(uint32_t scale) {
   auto const allocBytes = computeAllocBytes(scale);
-  return static_cast<MixedArray*>(low_malloc_data(allocBytes));
+  return static_cast<MixedArray*>(RuntimeOption::EvalLowStaticArrays ?
+                                  low_malloc_data(allocBytes) :
+                                  malloc(allocBytes));
 }
 
 ALWAYS_INLINE
@@ -538,7 +540,6 @@ void ConvertTvToUncounted(TypedValue* source) {
     case KindOfDouble: {
       break;
     }
-    case KindOfClass:
     case KindOfObject:
     case KindOfResource:
     case KindOfRef:

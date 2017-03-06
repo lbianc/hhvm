@@ -232,8 +232,9 @@ void specialFunctionEffects(ISS& env, ActRec ar) {
 
 Type popT(ISS& env) {
   assert(!env.state.stack.empty());
-  auto const ret = env.state.stack.back().type;
+  auto const ret = std::move(env.state.stack.back().type);
   FTRACE(2, "    pop:  {}\n", show(ret));
+  assert(ret.subtypeOf(TGen));
   env.state.stack.pop_back();
   return ret;
 }
@@ -247,12 +248,6 @@ Type popC(ISS& env) {
 Type popV(ISS& env) {
   auto const v = popT(env);
   assert(v.subtypeOf(TRef));
-  return v;
-}
-
-Type popA(ISS& env) {
-  auto const v = popT(env);
-  assert(v.subtypeOf(TCls));
   return v;
 }
 
@@ -278,24 +273,19 @@ void discard(ISS& env, int n) {
   }
 }
 
-Type topT(ISS& env, uint32_t idx = 0) {
+Type& topT(ISS& env, uint32_t idx = 0) {
   assert(idx < env.state.stack.size());
   return env.state.stack[env.state.stack.size() - idx - 1].type;
 }
 
-Type topA(ISS& env, uint32_t i = 0) {
-  assert(topT(env, i).subtypeOf(TCls));
-  return topT(env, i);
-}
-
-Type topC(ISS& env, uint32_t i = 0) {
+Type& topC(ISS& env, uint32_t i = 0) {
   assert(topT(env, i).subtypeOf(TInitCell));
   return topT(env, i);
 }
 
-Type topR(ISS& env, uint32_t i = 0) { return topT(env, i); }
+Type& topR(ISS& env, uint32_t i = 0) { return topT(env, i); }
 
-Type topV(ISS& env, uint32_t i = 0) {
+Type& topV(ISS& env, uint32_t i = 0) {
   assert(topT(env, i).subtypeOf(TRef));
   return topT(env, i);
 }
@@ -303,7 +293,7 @@ Type topV(ISS& env, uint32_t i = 0) {
 void push(ISS& env, Type t, LocalId l = NoLocalId) {
   FTRACE(2, "    push: {}\n", show(t));
   always_assert(l == NoLocalId || !is_volatile_local(env.ctx.func, l));
-  env.state.stack.push_back(StackElem {t, l});
+  env.state.stack.push_back(StackElem {std::move(t), l});
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -498,6 +488,35 @@ void unsetUnknownLocal(ISS& env) {
   for (auto& l : env.state.locals) l = union_of(l, TUninit);
   killAllLocEquiv(env);
   killAllStkEquiv(env);
+}
+
+//////////////////////////////////////////////////////////////////////
+// class-ref slots
+
+// Read the specified class-ref slot without discarding the stored value.
+const Type& peekClsRefSlot(ISS& env, ClsRefSlotId slot) {
+  assert(slot >= 0);
+  always_assert_flog(env.state.clsRefSlots[slot].subtypeOf(TCls),
+                     "class-ref slot contained non-TCls");
+  return env.state.clsRefSlots[slot];
+}
+
+// Read the specified class-ref slot and discard the stored value.
+Type takeClsRefSlot(ISS& env, ClsRefSlotId slot) {
+  assert(slot >= 0);
+  auto ret = std::move(env.state.clsRefSlots[slot]);
+  FTRACE(2, "    read class-ref: {} -> {}\n", slot, show(ret));
+  always_assert_flog(ret.subtypeOf(TCls), "class-ref slot contained non-TCls");
+  env.state.clsRefSlots[slot] = TCls;
+  return ret;
+}
+
+void putClsRefSlot(ISS& env, ClsRefSlotId slot, Type ty) {
+  assert(slot >= 0);
+  always_assert_flog(ty.subtypeOf(TCls),
+                     "attempted to set class-ref slot to non-TCls");
+  FTRACE(2, "    write class-ref: {} -> {}\n", slot, show(ty));
+  env.state.clsRefSlots[slot] = std::move(ty);
 }
 
 //////////////////////////////////////////////////////////////////////

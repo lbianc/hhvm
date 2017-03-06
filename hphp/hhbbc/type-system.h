@@ -297,26 +297,31 @@ enum trep : uint32_t {
   BTop      = static_cast<uint32_t>(-1),
 };
 
+#define DATATAGS                                        \
+  DT(Str, SString, sval)                                \
+  DT(Int, int64_t, ival)                                \
+  DT(Dbl, double, dval)                                 \
+  DT(ArrVal, SArray, aval)                              \
+  DT(Obj, DObj, dobj)                                   \
+  DT(Cls, DCls, dcls)                                   \
+  DT(RefInner, copy_ptr<Type>, inner)                   \
+  DT(ArrPacked, copy_ptr<DArrPacked>, apacked)          \
+  DT(ArrPackedN, copy_ptr<DArrPackedN>, apackedn)       \
+  DT(ArrStruct, copy_ptr<DArrStruct>, astruct)          \
+  DT(ArrMapN, copy_ptr<DArrMapN>, amapn)                \
+  DT(Vec, copy_ptr<DVec>, vec)                          \
+  DT(Dict, copy_ptr<DDict>, dict)                       \
+  DT(Keyset, copy_ptr<DKeyset>, keyset)                 \
+  DT(VecVal, SArray, vecval)                            \
+  DT(DictVal, SArray, dictval)                          \
+  DT(KeysetVal, SArray, keysetval)
+
 // Tag for what kind of specialized data a Type object has.
 enum class DataTag : uint8_t {
   None,
-  Str,
-  Obj,
-  Int,
-  Dbl,
-  Cls,
-  RefInner,
-  ArrVal,
-  ArrPacked,
-  ArrPackedN,
-  ArrStruct,
-  ArrMapN,
-  VecVal,
-  Vec,
-  DictVal,
-  Dict,
-  KeysetVal,
-  Keyset,
+#define DT(name,...) name,
+  DATATAGS
+#undef DT
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -326,7 +331,14 @@ enum class DataTag : uint8_t {
  * subtype of the supplied class.
  */
 struct DCls {
-  enum { Exact, Sub } type;
+  enum Tag { Exact, Sub };
+
+  DCls(Tag type, res::Class cls)
+    : type(type)
+    , cls(cls)
+  {}
+
+  Tag type;
   res::Class cls;
 };
 
@@ -340,7 +352,7 @@ struct DCls {
 struct DObj {
   enum Tag { Exact, Sub };
 
-  explicit DObj(Tag type, res::Class cls)
+  DObj(Tag type, res::Class cls)
     : type(type)
     , cls(cls)
   {}
@@ -387,14 +399,14 @@ struct Type {
    * subtype of `o' at runtime.  If this function returns false, this may
    * still be a subtype of `o' at runtime, it just may not be known.
    */
-  bool subtypeOf(Type o) const;
-  bool strictSubtypeOf(Type o) const;
+  bool subtypeOf(const Type& o) const;
+  bool strictSubtypeOf(const Type& o) const;
 
   /*
    * Subtype of any of the list of types.
    */
   template<class... Types>
-  bool subtypeOfAny(Type t, Types... ts) const {
+  bool subtypeOfAny(const Type& t, Types... ts) const {
     return subtypeOf(t) || subtypeOfAny(ts...);
   }
   bool subtypeOfAny() const { return false; }
@@ -409,7 +421,7 @@ struct Type {
    * Essentially this function can conservatively return true but must be
    * precise when returning false.
    */
-  bool couldBe(Type o) const;
+  bool couldBe(const Type& o) const;
 
 private:
   friend Type wait_handle(const Index&, Type);
@@ -447,9 +459,9 @@ private:
   friend Type promote_emptyish(Type, Type);
   friend Type opt(Type);
   friend Type unopt(Type);
-  friend bool is_opt(Type);
-  friend folly::Optional<Cell> tv(Type);
-  friend std::string show(Type);
+  friend bool is_opt(const Type&);
+  friend folly::Optional<Cell> tv(const Type&);
+  friend std::string show(const Type&);
   friend struct ArrKey disect_array_key(const Type&);
   friend Type array_elem(const Type&, const Type&);
   friend Type arrayN_set(Type, const Type&, const Type&);
@@ -494,20 +506,9 @@ private:
     Data() {}
     ~Data() {}
 
-    SString sval;
-    int64_t ival;
-    double dval;
-    SArray aval;
-    DObj dobj;
-    DCls dcls;
-    copy_ptr<Type> inner;
-    copy_ptr<DArrPacked> apacked;
-    copy_ptr<DArrPackedN> apackedn;
-    copy_ptr<DArrStruct> astruct;
-    copy_ptr<DArrMapN> amapn;
-    copy_ptr<DVec> vec;
-    copy_ptr<DDict> dict;
-    copy_ptr<DKeyset> keyset;
+#define DT(tag_name,type,name) type name;
+  DATATAGS
+#undef DT
   };
 
   template<class Ret, class T, class Function>
@@ -846,7 +847,7 @@ Type unopt(Type t);
  * optional types.  (Note that this does not include types like
  * TInitUnc---it's only the TOpt* types.)
  */
-bool is_opt(Type t);
+bool is_opt(const Type& t);
 
 /*
  * Returns true if type 't' represents a "specialized" object, that is an
@@ -888,7 +889,7 @@ Type objcls(const Type& t);
  *
  * The returned Cell can only contain non-reference-counted types.
  */
-folly::Optional<Cell> tv(Type t);
+folly::Optional<Cell> tv(const Type& t);
 
 /*
  * Get the type in our typesystem that corresponds to an hhbc

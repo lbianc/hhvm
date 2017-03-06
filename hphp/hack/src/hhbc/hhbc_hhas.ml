@@ -10,6 +10,7 @@
 
 module B = Buffer
 module H = Hhbc_ast
+module A = Ast
 open H
 
 (* Naming convention for functions below:
@@ -34,6 +35,9 @@ let string_of_basic instruction =
 
 let quote_str s = "\"" ^ Php_escaping.escape s ^ "\""
 
+let string_of_list_of_shape_fields sl =
+  String.concat " " @@ List.map quote_str sl
+
 let string_of_lit_const instruction =
   match instruction with
     | Null        -> "Null"
@@ -41,13 +45,26 @@ let string_of_lit_const instruction =
     | String str  -> "String \"" ^ str ^ "\""
     | True        -> "True"
     | False       -> "False"
-    | Double d    -> "Double " ^ string_of_float d
-    | Array (i,_, _) -> "Array @A_" ^ string_of_int i
-    | NewMixedArray i -> "NewMixedArray " ^ string_of_int i
-    | NewPackedArray i -> "NewPackedArray " ^ string_of_int i
-    | AddElemC -> "AddElemC"
-    | AddNewElemC -> "AddNewElemC"
-    | _ -> failwith "unexpected literal kind in string_of_lit_const"
+    | Double d    -> "Double " ^ d
+    | AddElemC          -> "AddElemC"
+    | AddNewElemC       -> "AddNewElemC"
+    | Array (i, _)      -> "Array @A_" ^ string_of_int i
+    | ColAddNewElemC    -> "ColAddNewElemC"
+    | ColFromArray i    -> "ColFromArray " ^ string_of_int i
+    | Dict (i, _)       -> "Dict @A_" ^ string_of_int i
+    | Keyset (i, _)     -> "Keyset @A_" ^ string_of_int i
+    | NewCol i          -> "NewCol " ^ string_of_int i
+    | NewDictArray i    -> "NewDictArray " ^ string_of_int i
+    | NewKeysetArray i  -> "NewKeysetArray " ^ string_of_int i
+    | NewVecArray i     -> "NewVecArray " ^ string_of_int i
+    | NewMixedArray i   -> "NewMixedArray " ^ string_of_int i
+    | NewPackedArray i  -> "NewPackedArray " ^ string_of_int i
+    | NewStructArray l  ->
+      "NewStructArray <" ^ string_of_list_of_shape_fields l ^ ">"
+    | Vec (i, _)        -> "Vec @A_" ^ string_of_int i
+
+    (* TODO *)
+    | _ -> "\r# NYI: unexpected literal kind in string_of_lit_const"
 
 let string_of_operator instruction =
   match instruction with
@@ -96,18 +113,20 @@ let string_of_operator instruction =
     | Print -> "Print"
     | Clone -> "Clone"
     | H.Exit -> "Exit"
-    | Fatal -> "Fatal"
+    | Fatal -> "Fatal Runtime"
 
 let string_of_param_id x =
   match x with
   | Param_unnamed i -> string_of_int i
   | Param_named s -> s
 
+let string_of_param_num i = string_of_int i
+
 let string_of_local_id x =
   match x with
-  | Local_unnamed i -> string_of_int i
-  | Local_named s -> s
-  | Local_pipe -> failwith "$$ should not have survived to codegen"
+  | Local.Unnamed i -> "_" ^ (string_of_int i)
+  | Local.Named s -> s
+  | Local.Pipe -> failwith "$$ should not have survived to codegen"
 
 let string_of_get x =
   match x with
@@ -127,6 +146,21 @@ let string_of_get x =
   | VGetS -> "VGetS"
   | AGetC -> "AGetC"
   | AGetL id -> "AGetL " ^ string_of_local_id id
+
+let string_of_member_key mk =
+  let open MemberKey in
+  match mk with
+  | EC -> "EC:0"
+  (* hhas doesn't yet support this syntax *)
+  | EL id -> "EL:" ^ string_of_local_id id
+  | ET str -> "ET:" ^ quote_str str
+  | EI i -> "EI:" ^ Int64.to_string i
+  | PC -> "PC"
+  (* hhas doesn't yet support this syntax *)
+  | PL id -> "PL:" ^ string_of_local_id id
+  | PT str -> "PT:" ^ quote_str str
+  | QT _ -> "QT"
+  | W -> "W"
 
 let string_of_eq_op op =
   match op with
@@ -194,14 +228,22 @@ let string_of_mutator x =
   | CheckProp _ -> failwith "NYI"
   | InitProp _ -> failwith "NYI"
 
-let string_of_label id = "L" ^ (string_of_int id)
+let string_of_label label =
+  match label with
+    | Label.Regular id -> "L" ^ (string_of_int id)
+    | Label.Catch id -> "C" ^ (string_of_int id)
+    | Label.Fault id -> "F" ^ (string_of_int id)
+    | Label.DefaultArg id -> "DV" ^ (string_of_int id)
 
-let string_of_exception_label id t =
-  let prefix = match t with
-    | CatchL -> "C"
-    | FaultL -> "F"
-  in
-  prefix ^ (string_of_int id)
+let string_of_switch_kind kind =
+  match kind with
+  | Unbounded -> "Unbounded"
+  | Bounded -> "Bounded"
+
+let string_of_switch kind base labels =
+  let kind = string_of_switch_kind kind in
+  let labels = String.concat " " @@ List.map string_of_label labels in
+  Printf.sprintf "Switch %s %d <%s>" kind base labels
 
 let string_of_control_flow instruction =
   match instruction with
@@ -213,9 +255,10 @@ let string_of_control_flow instruction =
   | RetV -> "RetV"
   | Throw -> "Throw"
   | Unwind -> "Unwind"
+  | Switch (kind, base, labels) -> string_of_switch kind base labels
   | _ -> failwith "instruction_control_flow Not Implemented"
 
-let string_of_iterator_id i = string_of_int i
+let string_of_iterator_id i = Iterator.to_string i
 let string_of_class_id id = quote_str id
 let string_of_function_id id = quote_str id
 let string_of_null_flavor nf =
@@ -237,6 +280,63 @@ let string_of_isset instruction =
   | IsTypeC op -> "IsTypeC " ^ string_of_istype_op op
   | IsTypeL (id, op) ->
     "IsTypeL " ^ string_of_local_id id ^ " " ^ string_of_istype_op op
+
+let string_of_stack_index si = string_of_int si
+
+let string_of_base x =
+  match x with
+  | BaseNC (si, m) ->
+    "BaseNC " ^ string_of_stack_index si ^ " " ^ MemberOpMode.to_string m
+  | BaseNL (id, m) ->
+    "BaseNL " ^ string_of_local_id id ^ " " ^ MemberOpMode.to_string m
+  | FPassBaseNC (i, si) ->
+    "FBaseBaseNC " ^ string_of_param_num i ^ " " ^ string_of_stack_index si
+  | FPassBaseNL (i, lid) ->
+    "FPassBaseNL " ^ string_of_param_num i ^ " " ^ string_of_local_id lid
+  | BaseGC (si, m) ->
+    "BaseGC " ^ string_of_stack_index si ^ " " ^ MemberOpMode.to_string m
+  | BaseGL (id, m) ->
+    "BaseGL " ^ string_of_local_id id ^ " " ^ MemberOpMode.to_string m
+  | FPassBaseGC (i, si) ->
+    "FPassBaseGC " ^ string_of_param_num i ^ " " ^ string_of_stack_index si
+  | FPassBaseGL (i, lid) ->
+    "FPassBaseGL " ^ string_of_param_num i ^ " " ^ string_of_local_id lid
+  | BaseSC (si1, si2) ->
+    "BaseSC " ^ string_of_stack_index si1 ^ " " ^ string_of_stack_index si2
+  | BaseSL (lid, si) ->
+    "BaseSL " ^ string_of_local_id lid ^ " " ^ string_of_stack_index si
+  | BaseL (lid, m) ->
+    "BaseL " ^ string_of_local_id lid ^ " " ^ MemberOpMode.to_string m
+  | FPassBaseL (i, lid) ->
+    "FPassBaseL " ^ string_of_param_num i ^ " " ^ string_of_local_id lid
+  | BaseC si ->
+    "BaseC " ^ string_of_stack_index si
+  | BaseR si ->
+    "BaseR " ^ string_of_stack_index si
+  | BaseH ->
+    "BaseH"
+
+let string_of_final instruction =
+  match instruction with
+  | QueryM (n, op, mk) ->
+    "QueryM " ^ string_of_int n ^ " " ^ QueryOp.to_string op ^ " " ^
+    string_of_member_key mk
+  | VGetM (n, mk) ->
+    "VGetM " ^ string_of_int n ^ " " ^ string_of_member_key mk
+  | FPassM (i, n, mk) ->
+    "FPassM " ^ string_of_param_num i ^ " " ^ string_of_int n
+    ^ " " ^ string_of_member_key mk
+  | _ ->
+    "# string_of_final NYI"
+(*
+| SetM of num_params * MemberKey.t
+| IncDecM of num_params * incdec_op * MemberKey.t
+| SetOpM of num_params  * eq_op * MemberKey.t
+| BindM of num_params * MemberKey.t
+| UnsetM of num_params * MemberKey.t
+| SetWithRefLML of local_id * local_id
+| SetWithRefRML of local_id
+*)
 
 let string_of_call instruction =
   match instruction with
@@ -264,17 +364,17 @@ let string_of_call instruction =
   | FPushCufSafe n -> "FPushCufSafe " ^ string_of_int n
   | CufSafeArray -> "CufSafeArray"
   | CufSafeReturn -> "CufSafeReturn"
-  | FPassC id -> "FPassC " ^ string_of_param_id id
-  | FPassCW id -> "FPassCW " ^ string_of_param_id id
-  | FPassCE id -> "FPassCE " ^ string_of_param_id id
-  | FPassV id -> "FPassV " ^ string_of_param_id id
-  | FPassVNop id -> "FPassVNop " ^ string_of_param_id id
-  | FPassR id -> "FPassR " ^ string_of_param_id id
-  | FPassL (id, lid) ->
-    "FPassL " ^ string_of_param_id id ^ " " ^ string_of_local_id lid
-  | FPassN id -> "FPassN " ^ string_of_param_id id
-  | FPassG id -> "FPassG " ^ string_of_param_id id
-  | FPassS id -> "FPassS " ^ string_of_param_id id
+  | FPassC i -> "FPassC " ^ string_of_param_num i
+  | FPassCW i -> "FPassCW " ^ string_of_param_num i
+  | FPassCE i -> "FPassCE " ^ string_of_param_num i
+  | FPassV i -> "FPassV " ^ string_of_param_num i
+  | FPassVNop i -> "FPassVNop " ^ string_of_param_num i
+  | FPassR i -> "FPassR " ^ string_of_param_num i
+  | FPassL (i, lid) ->
+    "FPassL " ^ string_of_param_num i ^ " " ^ string_of_local_id lid
+  | FPassN i -> "FPassN " ^ string_of_param_num i
+  | FPassG i -> "FPassG " ^ string_of_param_num i
+  | FPassS i -> "FPassS " ^ string_of_param_num i
   | FCall n -> "FCall " ^ string_of_int n
   | FCallD (n, c, f) ->
     "FCallD " ^ string_of_int n ^ " " ^
@@ -297,6 +397,7 @@ let string_of_misc instruction =
     | VerifyParamType id -> "VerifyParamType " ^ string_of_param_id id
     | VerifyRetTypeC -> "VerifyRetTypeC"
     | Catch -> "Catch"
+    | CheckThis -> "CheckThis"
     | _ -> failwith "instruct_misc Not Implemented"
 
 let string_of_iterator instruction =
@@ -327,8 +428,17 @@ let string_of_iterator instruction =
     "IterFree " ^ (string_of_iterator_id id)
   | _ -> "### string_of_iterator instruction not implemented"
 
-let string_of_instruction instruction =
+let string_of_try instruction =
   match instruction with
+  | TryFaultBegin label ->
+    ".try_fault " ^ (string_of_label label) ^ " {"
+  | TryCatchBegin label ->
+    ".try_catch " ^ (string_of_label label) ^ " {"
+  | TryFaultEnd
+  | TryCatchEnd -> "}"
+
+let string_of_instruction instruction =
+  let s = match instruction with
   | IIterator            i -> string_of_iterator i
   | IBasic               i -> string_of_basic i
   | ILitConst            i -> string_of_lit_const i
@@ -339,47 +449,42 @@ let string_of_instruction instruction =
   | IGet                 i -> string_of_get i
   | IMutator             i -> string_of_mutator i
   | ILabel               l -> string_of_label l ^ ":"
-  | IExceptionLabel (l, t) -> string_of_exception_label l t ^ ":"
   | IIsset               i -> string_of_isset i
+  | IBase                i -> string_of_base i
+  | IFinal               i -> string_of_final i
+  | ITry                 i -> string_of_try i
   | IComment             s -> "# " ^ s
-  | _ -> failwith "invalid instruction"
+  | _ -> failwith "invalid instruction" in
+  s ^ "\n"
 
-let string_of_catch label =
-  string_of_exception_label label CatchL
+let adjusted_indent instruction indent =
+  match instruction with
+  | IComment _ -> 0
+  | ILabel _
+  | ITry TryFaultEnd
+  | ITry TryCatchEnd -> indent - 2
+  | _ -> indent
 
-let rec add_try_fault_block buffer indent label instructions =
-  B.add_string buffer ".try_fault ";
-  B.add_string buffer @@ string_of_exception_label label FaultL;
-  B.add_string buffer " {\n";
-  add_instruction_list buffer (indent + 2) instructions;
-  B.add_string buffer (String.make indent ' ');
-  B.add_string buffer "}"
+let new_indent instruction indent =
+  match instruction with
+  | ITry (TryFaultBegin _)
+  | ITry (TryCatchBegin _) -> indent + 2
+  | ITry TryFaultEnd
+  | ITry TryCatchEnd -> indent - 2
+  | _ -> indent
 
-and add_try_catch_block buffer indent label try_block =
-  B.add_string buffer ".try_catch ";
-  B.add_string buffer (string_of_catch label);
-  B.add_string buffer " {\n";
-  add_instruction_list buffer (indent + 2) try_block;
-  B.add_string buffer (String.make indent ' ');
-  B.add_string buffer "}"
-
-and add_instruction_list buffer indent instructions =
-  let process_instr instr =
-    let actual_indent =
-      match instr with
-      | IComment _ -> 0
-      | ILabel _
-      | IExceptionLabel _ -> indent - 2
-      | _ -> indent
-    in
-    B.add_string buffer (String.make actual_indent ' ');
-    begin match instr with
-      | ITryFault (l, il, _) -> add_try_fault_block buffer actual_indent l il
-      | ITryCatch (l, il) -> add_try_catch_block buffer actual_indent l il
-      | _ -> B.add_string buffer (string_of_instruction instr)
-    end;
-    B.add_string buffer "\n" in
-  List.iter process_instr instructions
+let add_instruction_list buffer indent instructions =
+  let rec aux instructions indent =
+    match instructions with
+    | [] -> ()
+    | instruction :: t ->
+      begin
+      let actual_indent = adjusted_indent instruction indent in
+      B.add_string buffer (String.make actual_indent ' ');
+      B.add_string buffer (string_of_instruction instruction);
+      aux t (new_indent instruction indent)
+      end in
+  aux instructions indent
 
 (* HHVM uses `N` to denote absence of type information. Otherwise the type
  * is a quoted string *)
@@ -415,10 +520,33 @@ let string_of_type_info_option tio =
   | None -> ""
   | Some ti -> string_of_type_info ti ^ " "
 
+let string_of_param_default_value expr =
+  match snd expr with
+  | A.Float (_, litstr)
+  | A.Int (_, litstr) -> litstr
+  | A.String (_, litstr) -> "\\\"" ^ litstr ^ "\\\""
+  | A.Null -> "NULL"
+  | A.True -> "true"
+  | A.False -> "false"
+  (* TODO: printing for other expressions e.g. arrays, vecs, shapes.. *)
+  | _ -> "string_of_param_default_value - NYI"
+
+let string_of_param_default_value_option = function
+  | None -> ""
+  | Some (label, expr) ->
+    " = DV"
+    ^ (string_of_int (Label.id label))
+    ^ "(\"\"\""
+    ^ (string_of_param_default_value expr)
+    ^ "\"\"\")"
+
 let string_of_param p =
   let param_type_info = Hhas_param.type_info p in
   let param_name = Hhas_param.name p in
-  string_of_type_info_option param_type_info ^ param_name
+  let param_default_value = Hhas_param.default_value p in
+  string_of_type_info_option param_type_info
+  ^ param_name
+  ^ string_of_param_default_value_option param_default_value
 
 let string_of_params ps =
   "(" ^ String.concat ", " (List.map string_of_param ps) ^ ")"
@@ -457,10 +585,9 @@ let add_fun_def buf fun_def =
 let attribute_argument_to_string argument =
   let value = match argument with
   | Null -> "N"
-  | Double f -> Printf.sprintf "d:%f" f
-  (* TODO: This double formatting isn't quite right. *)
-  | String s -> Printf.sprintf "s:%d:%s" (String.length s) (quote_str s)
-  (* TODO: This escaping isn't quite right. *)
+  | Double f -> Printf.sprintf "d:%s" f
+  | String s ->
+    Printf.sprintf "s:%d:%s" (String.length s) ("\\" ^ quote_str s ^ "\\")
   | False -> "i:0"
   | True -> "i:1"
   | Int i -> "i:" ^ (Int64.to_string i)
@@ -606,19 +733,26 @@ let add_defcls buf classes =
     (fun count _ -> B.add_string buf (Printf.sprintf "  DefCls %n\n" count))
     classes
 
+let add_data_region_element buf name num arguments =
+  B.add_string buf ".adata A_";
+  B.add_string buf @@ string_of_int num;
+  B.add_string buf " = ";
+  B.add_string buf
+    @@ attribute_to_string_helper ~if_class_attribute:false name arguments;
+  B.add_string buf ";\n"
+
 let add_data_region buf functions =
   let rec add_data_region_list buf instr =
     List.iter (add_data_region_aux buf) instr
   and add_data_region_aux buf = function
-    | ILitConst (Array (num, name, arguments)) ->
-      B.add_string buf ".adata A_";
-      B.add_string buf @@ string_of_int num;
-      B.add_string buf " = ";
-      B.add_string buf
-        @@ attribute_to_string_helper ~if_class_attribute:false name arguments;
-      B.add_string buf ";\n"
-    | ITryFault (_, il, _)
-    | ITryCatch (_, il) -> add_data_region_list buf il
+    | ILitConst (Array (num, arguments)) ->
+      add_data_region_element buf "a" num arguments
+    | ILitConst (Dict (num, arguments)) ->
+      add_data_region_element buf "D" num arguments
+    | ILitConst (Vec (num, arguments)) ->
+      add_data_region_element buf "v" num arguments
+    | ILitConst (Keyset (num, arguments)) ->
+      add_data_region_element buf "k" num arguments
     | _ -> ()
   and iter_aux buf fun_def =
     let function_body = Hhas_function.body fun_def in

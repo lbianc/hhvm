@@ -707,7 +707,8 @@ struct AsmState {
 
     fe->maxStackCells +=
       fe->numLocals() +
-      fe->numIterators() * kNumIterCells;
+      fe->numIterators() * kNumIterCells +
+      clsRefCountToCells(fe->numClsRefSlots());
 
     fe->finish(ue->bcPos(), false);
     ue->recordFunction(fe);
@@ -716,6 +717,7 @@ struct AsmState {
     fpiRegs.clear();
     labelMap.clear();
     numItersSet = false;
+    numClsRefSlotsSet = false;
     initStackDepth = StackDepth();
     initStackDepth.setBase(*this, 0);
     currentStackDepth = &initStackDepth;
@@ -747,6 +749,14 @@ struct AsmState {
     return id;
   }
 
+  int getClsRefSlot(int32_t slot) {
+    if (slot >= fe->numClsRefSlots()) {
+      error("class-ref slot id exceeded number of class-ref "
+            "slots in the function");
+    }
+    return slot;
+  }
+
   UnitEmitter* ue;
   Input in;
   bool emittedPseudoMain{false};
@@ -761,6 +771,7 @@ struct AsmState {
   std::vector<FPIReg> fpiRegs;
   std::map<std::string,Label> labelMap;
   bool numItersSet{false};
+  bool numClsRefSlotsSet{false};
   bool enumTySet{false};
   StackDepth initStackDepth;
   StackDepth* currentStackDepth{&initStackDepth};
@@ -1219,6 +1230,10 @@ std::map<std::string,ParserFunc> opcode_parsers;
                      read_opcode_arg<std::string>(as)))
 #define IMM_IA     as.ue->emitIVA(as.getIterId( \
                      read_opcode_arg<int32_t>(as)))
+#define IMM_CAR    as.ue->emitIVA(as.getClsRefSlot( \
+                     read_opcode_arg<int32_t>(as)))
+#define IMM_CAW    as.ue->emitIVA(as.getClsRefSlot( \
+                     read_opcode_arg<int32_t>(as)))
 #define IMM_OA(ty) as.ue->emitByte(read_subop<ty>(as));
 #define IMM_AA     as.ue->emitInt32(as.ue->mergeArray(read_litarray(as)))
 #define IMM_LAR    encodeLocalRange(*as.ue, read_local_range(as))
@@ -1271,8 +1286,6 @@ std::map<std::string,ParserFunc> opcode_parsers;
 #define NUM_PUSH_TWO(a,b) 2
 #define NUM_PUSH_THREE(a,b,c) 3
 #define NUM_PUSH_INS_1(a) 1
-#define NUM_PUSH_INS_2(a) 1
-#define NUM_PUSH_IDX_A immIVA[1]
 #define NUM_POP_NOV 0
 #define NUM_POP_ONE(a) 1
 #define NUM_POP_TWO(a,b) 2
@@ -1285,7 +1298,6 @@ std::map<std::string,ParserFunc> opcode_parsers;
 #define NUM_POP_CVUMANY immIVA[0] /* number of arguments */
 #define NUM_POP_CMANY immIVA[0] /* number of arguments */
 #define NUM_POP_SMANY vecImmStackValues
-#define NUM_POP_IDX_A (immIVA[1] + 1)
 
 #define O(name, imm, pop, push, flags)                                 \
   void parse_opcode_##name(AsmState& as) {                             \
@@ -1349,6 +1361,8 @@ OPCODES
 #undef IMM_DA
 #undef IMM_IVA
 #undef IMM_LA
+#undef IMM_CAR
+#undef IMM_CAW
 #undef IMM_BA
 #undef IMM_BLA
 #undef IMM_SLA
@@ -1365,7 +1379,6 @@ OPCODES
 #undef NUM_PUSH_THREE
 #undef NUM_PUSH_POS_N
 #undef NUM_PUSH_INS_1
-#undef NUM_PUSH_IDX_A
 #undef NUM_POP_NOV
 #undef NUM_POP_ONE
 #undef NUM_POP_TWO
@@ -1379,7 +1392,6 @@ OPCODES
 #undef NUM_POP_CVUMANY
 #undef NUM_POP_CMANY
 #undef NUM_POP_SMANY
-#undef NUM_POP_IDX_A
 
 void initialize_opcode_map() {
 #define O(name, imm, pop, push, flags) \
@@ -1442,6 +1454,21 @@ void parse_numiters(AsmState& as) {
   int32_t count = read_opcode_arg<int32_t>(as);
   as.numItersSet = true;
   as.fe->setNumIterators(count);
+  as.in.expectWs(';');
+}
+
+/*
+ * directive-numclsrefslots : integer ';'
+ *                          ;
+ */
+void parse_numclsrefslots(AsmState& as) {
+  if (as.numClsRefSlotsSet) {
+    as.error("only one .numclsrefslots directive may appear "
+             "in a given function");
+  }
+  int32_t count = read_opcode_arg<int32_t>(as);
+  as.numClsRefSlotsSet = true;
+  as.fe->setNumClsRefSlots(count);
   as.in.expectWs(';');
 }
 
@@ -1524,6 +1551,7 @@ void parse_catch(AsmState& as, int nestLevel) {
  *               ;
  *
  * fbody-line :  ".numiters" directive-numiters
+              |  ".numclsrefslots" directive-numclsrefslots
  *            |  ".declvars" directive-declvars
  *            |  ".try_fault" directive-fault
  *            |  ".try_catch" directive-catch
@@ -1555,6 +1583,7 @@ void parse_function_body(AsmState& as, int nestLevel /* = 0 */) {
     if (word[0] == '.') {
       if (word == ".numiters")  { parse_numiters(as); continue; }
       if (word == ".declvars")  { parse_declvars(as); continue; }
+      if (word == ".numclsrefslots") { parse_numclsrefslots(as); continue; }
       if (word == ".try_fault") { parse_fault(as, nestLevel); continue; }
       if (word == ".try_catch") { parse_catch(as, nestLevel); continue; }
       as.error("unrecognized directive `" + word + "' in function");

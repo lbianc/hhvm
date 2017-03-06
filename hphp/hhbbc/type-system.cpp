@@ -424,6 +424,20 @@ trep combine_keyset_bits(trep a, trep b) {
 
 //////////////////////////////////////////////////////////////////////
 
+template <typename T, typename... Args>
+void construct(T& dest, Args&&... src) {
+  new (&dest) T { std::forward<Args>(src)... };
+}
+
+template <typename T>
+void destroy(T& t) { t.~T(); }
+
+template <typename T, typename... Args>
+void construct_inner(T& dest, Args&&... args) {
+  construct(dest);
+  dest.emplace(std::forward<Args>(args)...);
+}
+
 /*
  * The following functions make DArr* structs out of static arrays, to
  * simplify implementing some of the type system operations on them.
@@ -969,40 +983,13 @@ Type::Type(const Type& o) noexcept
 {
   SCOPE_EXIT { assert(checkInvariants()); };
   switch (m_dataTag) {
-  case DataTag::None:   return;
-  case DataTag::Str:    m_data.sval = o.m_data.sval; return;
-  case DataTag::VecVal:
-  case DataTag::DictVal:
-  case DataTag::KeysetVal:
-  case DataTag::ArrVal: m_data.aval = o.m_data.aval; return;
-  case DataTag::Int:    m_data.ival = o.m_data.ival; return;
-  case DataTag::Dbl:    m_data.dval = o.m_data.dval; return;
-  case DataTag::Obj:    new (&m_data.dobj) DObj(o.m_data.dobj); return;
-  case DataTag::Cls:    new (&m_data.dcls) DCls(o.m_data.dcls); return;
-  case DataTag::RefInner:
-    new (&m_data.inner) copy_ptr<Type>(o.m_data.inner);
-    return;
-  case DataTag::ArrPacked:
-    new (&m_data.apacked) copy_ptr<DArrPacked>(o.m_data.apacked);
-    return;
-  case DataTag::ArrPackedN:
-    new (&m_data.apackedn) copy_ptr<DArrPackedN>(o.m_data.apackedn);
-    return;
-  case DataTag::ArrStruct:
-    new (&m_data.astruct) copy_ptr<DArrStruct>(o.m_data.astruct);
-    return;
-  case DataTag::ArrMapN:
-    new (&m_data.amapn) copy_ptr<DArrMapN>(o.m_data.amapn);
-    return;
-  case DataTag::Vec:
-    new (&m_data.vec) copy_ptr<DVec>(o.m_data.vec);
-    return;
-  case DataTag::Dict:
-    new (&m_data.dict) copy_ptr<DDict>(o.m_data.dict);
-    return;
-  case DataTag::Keyset:
-    new (&m_data.keyset) copy_ptr<DKeyset>(o.m_data.keyset);
-    return;
+    case DataTag::None:   return;
+    #define DT(tag_name,type,name)              \
+      case DataTag::tag_name:                   \
+        construct(m_data.name, o.m_data.name);  \
+        return;
+    DATATAGS
+    #undef DT
   }
   not_reached();
 }
@@ -1013,59 +1000,31 @@ Type::Type(Type&& o) noexcept
 {
   SCOPE_EXIT { assert(checkInvariants());
                assert(o.checkInvariants()); };
-  using std::move;
   o.m_dataTag = DataTag::None;
   switch (m_dataTag) {
-  case DataTag::None:   return;
-  case DataTag::Str:    m_data.sval = o.m_data.sval; return;
-  case DataTag::VecVal:
-  case DataTag::DictVal:
-  case DataTag::KeysetVal:
-  case DataTag::ArrVal: m_data.aval = o.m_data.aval; return;
-  case DataTag::Int:    m_data.ival = o.m_data.ival; return;
-  case DataTag::Dbl:    m_data.dval = o.m_data.dval; return;
-  case DataTag::Obj:    new (&m_data.dobj) DObj(move(o.m_data.dobj)); return;
-  case DataTag::Cls:    new (&m_data.dcls) DCls(move(o.m_data.dcls)); return;
-  case DataTag::RefInner:
-    new (&m_data.inner) copy_ptr<Type>(move(o.m_data.inner));
-    return;
-  case DataTag::ArrPacked:
-    new (&m_data.apacked) copy_ptr<DArrPacked>(move(o.m_data.apacked));
-    return;
-  case DataTag::ArrPackedN:
-    new (&m_data.apackedn) copy_ptr<DArrPackedN>(move(o.m_data.apackedn));
-    return;
-  case DataTag::ArrStruct:
-    new (&m_data.astruct) copy_ptr<DArrStruct>(move(o.m_data.astruct));
-    return;
-  case DataTag::ArrMapN:
-    new (&m_data.amapn) copy_ptr<DArrMapN>(move(o.m_data.amapn));
-    return;
-  case DataTag::Vec:
-    new (&m_data.vec) copy_ptr<DVec>(move(o.m_data.vec));
-    return;
-  case DataTag::Dict:
-    new (&m_data.dict) copy_ptr<DDict>(move(o.m_data.dict));
-    return;
-  case DataTag::Keyset:
-    new (&m_data.keyset) copy_ptr<DKeyset>(move(o.m_data.keyset));
-    return;
+    case DataTag::None:   return;
+    #define DT(tag_name,type,name)                              \
+      case DataTag::tag_name:                                   \
+        construct(m_data.name, std::move(o.m_data.name));       \
+        return;
+    DATATAGS
+    #undef DT
   }
   not_reached();
 }
 
 Type& Type::operator=(const Type& o) noexcept {
   SCOPE_EXIT { assert(checkInvariants()); };
-  this->~Type();
-  new (this) Type(o);
+  destroy(*this);
+  construct(*this, o);
   return *this;
 }
 
 Type& Type::operator=(Type&& o) noexcept {
   SCOPE_EXIT { assert(checkInvariants());
                assert(o.checkInvariants()); };
-  this->~Type();
-  new (this) Type(std::move(o));
+  destroy(*this);
+  construct(*this, std::move(o));
   return *this;
 }
 
@@ -1073,45 +1032,13 @@ Type::~Type() noexcept {
   assert(checkInvariants());
 
   switch (m_dataTag) {
-  case DataTag::None:
-  case DataTag::Str:
-  case DataTag::VecVal:
-  case DataTag::DictVal:
-  case DataTag::KeysetVal:
-  case DataTag::ArrVal:
-  case DataTag::Int:
-  case DataTag::Dbl:
-    return;
-  case DataTag::RefInner:
-    m_data.inner.~copy_ptr<Type>();
-    return;
-  case DataTag::Obj:
-    m_data.dobj.~DObj();
-    return;
-  case DataTag::Cls:
-    m_data.dcls.~DCls();
-    return;
-  case DataTag::ArrPacked:
-    m_data.apacked.~copy_ptr<DArrPacked>();
-    return;
-  case DataTag::ArrPackedN:
-    m_data.apackedn.~copy_ptr<DArrPackedN>();
-    return;
-  case DataTag::ArrStruct:
-    m_data.astruct.~copy_ptr<DArrStruct>();
-    return;
-  case DataTag::ArrMapN:
-    m_data.amapn.~copy_ptr<DArrMapN>();
-    return;
-  case DataTag::Vec:
-    m_data.vec.~copy_ptr<DVec>();
-    return;
-  case DataTag::Dict:
-    m_data.dict.~copy_ptr<DDict>();
-    return;
-  case DataTag::Keyset:
-    m_data.keyset.~copy_ptr<DKeyset>();
-    return;
+    case DataTag::None: return;
+    #define DT(tag_name,type,name)              \
+      case DataTag::tag_name:                   \
+        destroy(m_data.name);                   \
+        return;
+    DATATAGS
+    #undef DT
   }
   not_reached();
 }
@@ -1403,7 +1330,7 @@ size_t Type::hash() const {
   return folly::hash::hash_combine(rawBits, rawTag);
 }
 
-bool Type::subtypeOf(Type o) const {
+bool Type::subtypeOf(const Type& o) const {
   assert(checkInvariants());
   assert(o.checkInvariants());
 
@@ -1435,13 +1362,13 @@ bool Type::subtypeOf(Type o) const {
   return hasData() && subtypeData(o);
 }
 
-bool Type::strictSubtypeOf(Type o) const {
+bool Type::strictSubtypeOf(const Type& o) const {
   assert(checkInvariants());
   assert(o.checkInvariants());
   return *this != o && subtypeOf(o);
 }
 
-bool Type::couldBe(Type o) const {
+bool Type::couldBe(const Type& o) const {
   assert(checkInvariants());
   assert(o.checkInvariants());
 
@@ -1563,7 +1490,7 @@ bool Type::checkInvariants() const {
 Type wait_handle(const Index& index, Type inner) {
   auto const rwh = index.builtin_class(s_WaitHandle.get());
   auto t = subObj(rwh);
-  t.m_data.dobj.whType = make_copy_ptr<Type>(std::move(inner));
+  t.m_data.dobj.whType.emplace(std::move(inner));
   return t;
 }
 
@@ -1581,7 +1508,7 @@ Type wait_handle_inner(const Type& t) {
 Type Type::wait_handle_outer(const Type& wh) {
   auto ret      = Type{wh.m_bits};
   ret.m_dataTag = DataTag::Obj;
-  new (&ret.m_data.dobj) DObj(wh.m_data.dobj.type, wh.m_data.dobj.cls);
+  construct(ret.m_data.dobj, wh.m_data.dobj.type, wh.m_data.dobj.cls);
   return ret;
 }
 
@@ -1640,9 +1567,7 @@ template<trep t>
 Type vec_n_impl(Type ty, folly::Optional<int64_t> count) {
   if (count && !*count) return vec_empty();
   auto ret = Type { t };
-  new (&ret.m_data.vec) copy_ptr<DVec>(
-    make_copy_ptr<DVec>(std::move(ty), count)
-  );
+  construct_inner(ret.m_data.vec, std::move(ty), count);
   ret.m_dataTag = DataTag::Vec;
   return ret;
 }
@@ -1676,9 +1601,7 @@ Type some_dict_empty()    { return Type { BDictE }; }
 template<trep t>
 Type dict_n_impl(Type k, Type v) {
   auto ret = Type { t };
-  new (&ret.m_data.dict) copy_ptr<DDict>(
-    make_copy_ptr<DDict>(std::move(k), std::move(v))
-  );
+  construct_inner(ret.m_data.dict, std::move(k), std::move(v));
   ret.m_dataTag = DataTag::Dict;
   return ret;
 }
@@ -1720,9 +1643,7 @@ Type keyset_n_impl(Type kv) {
   kv = disect_strict_key(kv).type;
   if (kv == TBottom) return TKeyset;
   auto ret = Type { t };
-  new (&ret.m_data.keyset) copy_ptr<DKeyset>(
-    make_copy_ptr<DKeyset>(std::move(kv))
-  );
+  construct_inner(ret.m_data.keyset, std::move(kv));
   ret.m_dataTag = DataTag::Keyset;
   return ret;
 }
@@ -1765,34 +1686,32 @@ Type toDKeysetType(Type ty) {
 
 Type subObj(res::Class val) {
   auto r = Type { BObj };
-  new (&r.m_data.dobj) DObj(
-    val.couldBeOverriden() ? DObj::Sub : DObj::Exact,
-    val
-  );
+  construct(r.m_data.dobj,
+            val.couldBeOverriden() ? DObj::Sub : DObj::Exact,
+            val);
   r.m_dataTag = DataTag::Obj;
   return r;
 }
 
 Type objExact(res::Class val) {
   auto r = Type { BObj };
-  new (&r.m_data.dobj) DObj(DObj::Exact, val);
+  construct(r.m_data.dobj, DObj::Exact, val);
   r.m_dataTag = DataTag::Obj;
   return r;
 }
 
 Type subCls(res::Class val) {
   auto r        = Type { BCls };
-  new (&r.m_data.dcls) DCls {
-    val.couldBeOverriden() ? DCls::Sub : DCls::Exact,
-    val
-  };
+  construct(r.m_data.dcls,
+            val.couldBeOverriden() ? DCls::Sub : DCls::Exact,
+            val);
   r.m_dataTag = DataTag::Cls;
   return r;
 }
 
 Type clsExact(res::Class val) {
   auto r        = Type { BCls };
-  new (&r.m_data.dcls) DCls { DCls::Exact, val };
+  construct(r.m_data.dcls, DCls::Exact, val);
   r.m_dataTag   = DataTag::Cls;
   return r;
 }
@@ -1801,7 +1720,7 @@ Type clsExact(res::Class val) {
 Type ref_to(Type t) {
   assert(t.subtypeOf(TInitCell));
   auto r = Type{BRef};
-  new (&r.m_data.inner) copy_ptr<Type> {make_copy_ptr<Type>(std::move(t))};
+  construct_inner(r.m_data.inner, std::move(t));
   r.m_dataTag = DataTag::RefInner;
   return r;
 }
@@ -1873,8 +1792,9 @@ Type spec_vec_union(Type specVecA, Type vecB) {
   assert(specVecA.m_dataTag == DataTag::Vec);
   assert(vecB.m_dataTag == DataTag::Vec);
 
-  auto& lenA = specVecA.m_data.vec->len;
-  auto& valA = specVecA.m_data.vec->val;
+  auto vec = specVecA.m_data.vec.mutate();
+  auto& lenA = vec->len;
+  auto& valA = vec->val;
   if (!lenA || !vecB.m_data.vec->len || *lenA != *vecB.m_data.vec->len) {
     lenA = folly::none;
   }
@@ -1909,8 +1829,9 @@ Type spec_dict_union(Type specDictA, Type dictB) {
   assert(specDictA.m_dataTag == DataTag::Dict);
   assert(dictB.m_dataTag == DataTag::Dict);
 
-  auto& keyA = specDictA.m_data.dict->key;
-  auto& valA = specDictA.m_data.dict->val;
+  auto dict = specDictA.m_data.dict.mutate();
+  auto& keyA = dict->key;
+  auto& valA = dict->val;
   keyA = union_of(keyA, dictB.m_data.dict->key);
   valA = union_of(valA, dictB.m_data.dict->val);
   specDictA.m_bits = bits;
@@ -1943,7 +1864,7 @@ Type spec_keyset_union(Type specKeysetA, Type keysetB) {
   assert(specKeysetA.m_dataTag == DataTag::Keyset);
   assert(keysetB.m_dataTag == DataTag::Keyset);
 
-  auto& kvA = specKeysetA.m_data.keyset->keyval;
+  auto& kvA = specKeysetA.m_data.keyset.mutate()->keyval;
   kvA = union_of(kvA, keysetB.m_data.keyset->keyval);
   specKeysetA.m_bits = bits;
 
@@ -1953,9 +1874,7 @@ Type spec_keyset_union(Type specKeysetA, Type keysetB) {
 Type arr_packed(std::vector<Type> elems) {
   assert(!elems.empty());
   auto r = Type { BArrN };
-  new (&r.m_data.apacked) copy_ptr<DArrPacked>(
-    make_copy_ptr<DArrPacked>(std::move(elems))
-  );
+  construct_inner(r.m_data.apacked, std::move(elems));
   r.m_dataTag = DataTag::ArrPacked;
   return r;
 }
@@ -1974,9 +1893,7 @@ Type carr_packed(std::vector<Type> elems) {
 
 Type arr_packedn(Type t) {
   auto r = Type { BArrN };
-  new (&r.m_data.apackedn) copy_ptr<DArrPackedN>(
-    make_copy_ptr<DArrPackedN>(std::move(t))
-  );
+  construct_inner(r.m_data.apackedn, std::move(t));
   r.m_dataTag = DataTag::ArrPackedN;
   return r;
 }
@@ -1996,9 +1913,7 @@ Type carr_packedn(Type t) {
 Type arr_struct(StructMap m) {
   assert(!m.empty());
   auto r = Type { BArrN };
-  new (&r.m_data.astruct) copy_ptr<DArrStruct>(
-    make_copy_ptr<DArrStruct>(std::move(m))
-  );
+  construct_inner(r.m_data.astruct, std::move(m));
   r.m_dataTag = DataTag::ArrStruct;
   return r;
 }
@@ -2017,9 +1932,7 @@ Type carr_struct(StructMap m) {
 
 Type arr_mapn(Type k, Type v) {
   auto r = Type { BArrN };
-  new (&r.m_data.amapn) copy_ptr<DArrMapN>(
-    make_copy_ptr<DArrMapN>(std::move(k), std::move(v))
-  );
+  construct_inner(r.m_data.amapn, std::move(k), std::move(v));
   r.m_dataTag = DataTag::ArrMapN;
   return r;
 }
@@ -2050,7 +1963,7 @@ Type unopt(Type t) {
   return t;
 }
 
-bool is_opt(Type t) {
+bool is_opt(const Type& t) {
   if (t.m_bits == BInitNull) return false;
   if (!t.couldBe(TInitNull)) return false;
   auto const nonNullBits = static_cast<trep>(t.m_bits & ~BInitNull);
@@ -2075,7 +1988,7 @@ Type objcls(const Type& t) {
 
 //////////////////////////////////////////////////////////////////////
 
-folly::Optional<Cell> tv(Type t) {
+folly::Optional<Cell> tv(const Type& t) {
   assert(t.checkInvariants());
 
   switch (t.m_bits) {
@@ -2215,7 +2128,6 @@ Type from_cell(Cell cell) {
     always_assert(cell.m_data.parr->isPHPArray());
     return aval(cell.m_data.parr);
 
-  case KindOfClass:
   case KindOfRef:
   case KindOfObject:
   case KindOfResource:
@@ -2244,7 +2156,6 @@ Type from_DataType(DataType dt) {
   case KindOfRef:      return TRef;
   case KindOfObject:   return TObj;
   case KindOfResource: return TRes;
-  case KindOfClass:
     break;
   }
   always_assert(0 && "dt in from_DataType didn't satisfy preconditions");
@@ -2323,8 +2234,8 @@ Type Type::unionArr(const Type& a, const Type& b) {
     {
       ret = a;
       ret.m_bits = newBits;
-      ret.m_data.apackedn->type = union_of(a.m_data.apackedn->type,
-                                           b.m_data.apackedn->type);
+      auto apackedn = ret.m_data.apackedn.mutate();
+      apackedn->type = union_of(apackedn->type, b.m_data.apackedn->type);
       return ret;
     }
   case DataTag::ArrStruct:
@@ -2355,7 +2266,7 @@ Type union_of(Type a, Type b) {
    */
   if (is_specialized_wait_handle(a)) {
     if (is_specialized_wait_handle(b)) {
-      *a.m_data.dobj.whType = union_of(
+      *a.m_data.dobj.whType.mutate() = union_of(
         *a.m_data.dobj.whType,
         *b.m_data.dobj.whType
       );
@@ -2555,7 +2466,6 @@ Type stack_flav(Type a) {
   if (a.subtypeOf(TInitCell)) return TInitCell;
   if (a.subtypeOf(TRef))      return TRef;
   if (a.subtypeOf(TGen))      return TGen;
-  if (a.subtypeOf(TCls))      return TCls;
   always_assert(0 && "stack_flav passed invalid type");
 }
 
@@ -2837,14 +2747,14 @@ Type arrayN_set(Type arr, const Type& undisectedKey, const Type& val) {
     ensure_counted();
     if (key.i) {
       if (*key.i >= 0 && *key.i < arr.m_data.apacked->elems.size()) {
-        auto& current = arr.m_data.apacked->elems[*key.i];
+        auto& current = arr.m_data.apacked.mutate()->elems[*key.i];
         if (current.subtypeOf(TInitCell)) {
           current = val;
         }
         return arr;
       }
       if (*key.i == arr.m_data.apacked->elems.size()) {
-        arr.m_data.apacked->elems.push_back(val);
+        arr.m_data.apacked.mutate()->elems.push_back(val);
         return arr;
       }
     }
@@ -2859,8 +2769,8 @@ Type arrayN_set(Type arr, const Type& undisectedKey, const Type& val) {
   case DataTag::ArrStruct:
     ensure_counted();
     {
-      auto& map = arr.m_data.astruct->map;
       if (key.s) {
+        auto& map = arr.m_data.astruct.mutate()->map;
         auto it = map.find(*key.s);
         if (it == end(map)) {
           map[*key.s] = val;
@@ -3159,7 +3069,7 @@ vec_set(Type vec, const Type& undisectedKey, const Type& val) {
     /* fallthrough */
   }
   case DataTag::Vec:
-    auto& ty = vec.m_data.vec->val;
+    auto& ty = vec.m_data.vec.mutate()->val;
     // If we don't know for sure if the value is a cell or not, we don't know
     // for sure if we'll throw or not.
     ty = union_of(std::move(ty), val.subtypeOf(TInitCell) ? val : TInitCell);
@@ -3203,9 +3113,10 @@ Type vec_newelem(Type vec, const Type& val) {
     /* fallthrough */
   }
   case DataTag::Vec:
-    auto& ty = vec.m_data.vec->val;
+    auto v = vec.m_data.vec.mutate();
+    auto& ty = v->val;
     ty = union_of(std::move(ty), val.subtypeOf(TInitCell) ? val : TInitCell);
-    if (vec.m_data.vec->len) (*vec.m_data.vec->len)++;
+    if (v->len) (*v->len)++;
     return vec;
   }
   not_reached();
@@ -3327,8 +3238,9 @@ dict_set(Type dict, const Type& undisectedKey, const Type& val) {
     /* fallthrough */
   }
   case DataTag::Dict:
-    auto& kt = dict.m_data.dict->key;
-    auto& vt = dict.m_data.dict->val;
+    auto d = dict.m_data.dict.mutate();
+    auto& kt = d->key;
+    auto& vt = d->val;
     kt = union_of(std::move(kt), key.type);
     vt = union_of(std::move(vt), validVal ? val : TInitCell);
     return {std::move(dict), validKey && validVal};
@@ -3367,11 +3279,14 @@ Type dict_newelem(Type dict, const Type& val) {
     /* fallthrough */
   }
   case DataTag::Dict:
-    auto& kt = dict.m_data.dict->key;
-    auto& vt = dict.m_data.dict->val;
-    kt = union_of(std::move(kt), TInt);
-    vt = union_of(std::move(vt), val.subtypeOf(TInitCell) ? val : TInitCell);
-    return dict;
+    {
+      auto d = dict.m_data.dict.mutate();
+      auto& kt = d->key;
+      auto& vt = d->val;
+      kt = union_of(std::move(kt), TInt);
+      vt = union_of(std::move(vt), val.subtypeOf(TInitCell) ? val : TInitCell);
+      return dict;
+    }
   }
   not_reached();
 }
@@ -3471,7 +3386,7 @@ Type keyset_newelem(Type keyset, const Type& val) {
     /* fallthrough */
   }
   case DataTag::Keyset:
-    auto& ty = keyset.m_data.keyset->keyval;
+    auto& ty = keyset.m_data.keyset.mutate()->keyval;
     ty = union_of(std::move(ty), val.subtypeOf(TInitCell) ? val : TInitCell);
     return keyset;
   }

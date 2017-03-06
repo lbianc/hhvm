@@ -69,7 +69,9 @@ SetArray* keysetReqAllocSet(uint32_t scale) {
 
 SetArray* keysetStaticAllocSet(uint32_t scale) {
   auto const allocBytes = SetArray::ComputeAllocBytes(scale);
-  return static_cast<SetArray*>(low_malloc_data(allocBytes));
+  return static_cast<SetArray*>(RuntimeOption::EvalLowStaticArrays ?
+                                low_malloc_data(allocBytes) :
+                                malloc(allocBytes));
 }
 
 } // namespace
@@ -957,33 +959,9 @@ ArrayData* SetArray::AppendRef(ArrayData* ad, Variant&, bool) {
   throwRefInvalidArrayValueException(ad);
 }
 
-ArrayData* SetArray::PlusEq(ArrayData* ad, const ArrayData* others) {
-  for (ArrayIter it(others); !it.end(); it.next()) {
-    Variant key = it.first();
-    auto tv = key.asTypedValue();
-    if (!isIntType(tv->m_type) && !isStringType(tv->m_type)) {
-      throwInvalidArrayKeyException(tv, ad);
-    }
-  }
-  auto a = asSet(ad);
-  auto const neededSize = a->size() + others->size();
-  if (a->cowCheck()) {
-    a = CopyReserve(a, neededSize);
-  }
-  for (ArrayIter it(others); !it.end(); it.next()) {
-    if (UNLIKELY(a->isFull())) {
-      assert(a == ad);
-      a = CopyReserve(a, neededSize);
-    }
-    Variant key = it.first();
-    auto tv = key.asTypedValue();
-    if (isIntType(tv->m_type)) {
-      a->insert(tv->m_data.num);
-    } else {
-      a->insert(tv->m_data.pstr);
-    }
-  }
-  return a;
+ArrayData* SetArray::PlusEq(ArrayData* ad, const ArrayData*) {
+  assertx(asSet(ad)->checkInvariants());
+  throwInvalidAdditionException(ad);
 }
 
 ArrayData* SetArray::Merge(ArrayData*, const ArrayData*) {

@@ -265,6 +265,23 @@ struct intva_t {
   intva_t& operator=(int32_t v) { n = v; return *this; }
 };
 
+// wrapper for class-ref slot CA(R|W) operand
+struct clsref_slot {
+  LowPtr<Class>* ptr;
+  uint32_t index;
+
+  Class* take() const {
+    auto ret = *ptr;
+    if (debug) {
+      ret->validate();
+      memset(ptr, kTrashClsRef, sizeof(*ptr));
+    }
+    return ret.get();
+  }
+
+  void put(Class* cls) { *ptr = cls; }
+};
+
 // wrapper to handle unaligned access to variadic immediates
 template<class T> struct imm_array {
   explicit imm_array(PC pc) : ptr(pc) {}
@@ -289,6 +306,12 @@ ALWAYS_INLINE Iter* decode_iter(PC& pc) {
 
 ALWAYS_INLINE intva_t decode_intva(PC& pc) {
   return intva_t{decode_iva(pc)};
+}
+
+ALWAYS_INLINE clsref_slot decode_clsref_slot(PC& pc) {
+  uint32_t ca = decode_iva(pc);
+  assertx(ca < vmfp()->m_func->numClsRefSlots());
+  return clsref_slot{frame_clsref_slot(vmfp(), ca), ca};
 }
 
 //=============================================================================
@@ -713,9 +736,6 @@ static std::string toStringElm(const TypedValue* tv) {
     os << toStringElm(tv->m_data.pref->tv());
     os << ")";
     return os.str();
-  case KindOfClass:
-    os << "A:";
-    break;
   case KindOfUninit:
   case KindOfNull:
   case KindOfBoolean:
@@ -820,10 +840,6 @@ static std::string toStringElm(const TypedValue* tv) {
       continue;
     case KindOfRef:
       break;
-    case KindOfClass:
-      os << tv->m_data.pcls
-         << ":" << tv->m_data.pcls->name()->data();
-      continue;
     }
     not_reached();
   } while (0);
@@ -914,7 +930,6 @@ static void toStringFrame(std::ostream& os, const ActRec* fp,
     }
   }
 
-  assert(func->numIterators() == 0);
   if (func->numIterators() > 0) {
     os << "|";
     Iter* it = &((Iter*)&tv[1])[-1];
@@ -931,6 +946,9 @@ static void toStringFrame(std::ostream& os, const ActRec* fp,
     }
     os << "|";
   }
+
+  // Ideally we'd like to display the contents of the class-ref slots here, but
+  // we have no metadata to tell us which ones are currently occupied and valid.
 
   std::vector<std::string> stackElems;
   visitStackElems(
@@ -1459,7 +1477,7 @@ static void prepareFuncEntry(ActRec *ar, PC& pc, StackArgsState stk) {
     func = ar->m_func;
   }
 
-  pushLocalsAndIterators(func, nlocals);
+  pushFrameSlots(func, nlocals);
 
   vmfp() = ar;
   if (firstDVInitializer != InvalidAbsoluteOffset) {
@@ -1506,7 +1524,7 @@ void enterVMAtFunc(ActRec* enterFnAr, StackArgsState stk, VarEnv* varEnv) {
   if (UNLIKELY(varEnv != nullptr)) {
     enterFnAr->setVarEnv(varEnv);
     assert(enterFnAr->func()->isPseudoMain());
-    pushLocalsAndIterators(enterFnAr->func());
+    pushFrameSlots(enterFnAr->func());
     varEnv->enterFP(varEnv->getFP(), enterFnAr);
     vmfp() = enterFnAr;
     vmpc() = enterFnAr->func()->getEntry();
@@ -1541,7 +1559,7 @@ void enterVMAtCurPC() {
 /*
  * Helper for function entry, including pseudo-main entry.
  */
-void pushLocalsAndIterators(const Func* func, int nparams /*= 0*/) {
+void pushFrameSlots(const Func* func, int nparams /*= 0*/) {
   // Push locals.
   for (int i = nparams; i < func->numLocals(); i++) {
     vmStack().pushUninit();
@@ -1550,6 +1568,7 @@ void pushLocalsAndIterators(const Func* func, int nparams /*= 0*/) {
   for (int i = 0; i < func->numIterators(); i++) {
     vmStack().allocI();
   }
+  vmStack().allocClsRefSlots(func->numClsRefSlots());
 }
 
 void unwindPreventReturnToTC(ActRec* ar) {
@@ -1682,44 +1701,35 @@ static inline void lookupd_gbl(ActRec* fp,
 }
 
 static inline void lookup_sprop(ActRec* fp,
-                                TypedValue* clsRef,
+                                Class* cls,
                                 StringData*& name,
                                 TypedValue* key,
                                 TypedValue*& val,
                                 bool& visible,
                                 bool& accessible) {
-  assert(clsRef->m_type == KindOfClass);
   name = lookup_name(key);
   auto const ctx = arGetContextClass(fp);
 
-  auto const lookup = clsRef->m_data.pcls->getSProp(ctx, name);
+  auto const lookup = cls->getSProp(ctx, name);
 
   val = lookup.prop;
   visible = lookup.prop != nullptr;
   accessible = lookup.accessible;
 }
 
-static inline void lookupClsRef(TypedValue* input,
-                                TypedValue* output,
-                                bool decRef = false) {
-  const Class* class_ = nullptr;
+static inline Class* lookupClsRef(Cell* input) {
+  Class* class_ = nullptr;
   if (isStringType(input->m_type)) {
     class_ = Unit::loadClass(input->m_data.pstr);
     if (class_ == nullptr) {
-      output->m_type = KindOfNull;
       raise_error(Strings::UNKNOWN_CLASS, input->m_data.pstr->data());
     }
   } else if (input->m_type == KindOfObject) {
     class_ = input->m_data.pobj->getVMClass();
   } else {
-    output->m_type = KindOfNull;
     raise_error("Cls: Expected string or object");
   }
-  if (decRef) {
-    tvRefcountedDecRef(input);
-  }
-  output->m_data.pcls = const_cast<Class*>(class_);
-  output->m_type = KindOfClass;
+  return class_;
 }
 
 static UNUSED int innerCount(const TypedValue* tv) {
@@ -1791,8 +1801,8 @@ OPTBLD_INLINE void iopNop() {
 OPTBLD_INLINE void iopEntryNop() {
 }
 
-OPTBLD_INLINE void iopPopA() {
-  vmStack().popA();
+OPTBLD_INLINE void iopDiscardClsRef(clsref_slot slot) {
+  slot.take();
 }
 
 OPTBLD_INLINE void iopPopC() {
@@ -1888,10 +1898,9 @@ OPTBLD_INLINE void iopMethod() {
   vmStack().pushStaticString(s);
 }
 
-OPTBLD_INLINE void iopNameA() {
-  auto const cls  = vmStack().topA();
+OPTBLD_INLINE void iopClsRefName(clsref_slot slot) {
+  auto const cls  = slot.take();
   auto const name = cls->name();
-  vmStack().popA();
   vmStack().pushStaticString(name);
 }
 
@@ -2135,8 +2144,8 @@ OPTBLD_INLINE void iopDefCns(const StringData* s) {
   vmStack().replaceTV<KindOfBoolean>(result);
 }
 
-OPTBLD_INLINE void iopClsCns(const StringData* clsCnsName) {
-  auto const cls    = vmStack().topA();
+OPTBLD_INLINE void iopClsCns(const StringData* clsCnsName, clsref_slot slot) {
+  auto const cls    = slot.take();
   auto const clsCns = cls->clsCnsGet(clsCnsName);
 
   if (clsCns.m_type == KindOfUninit) {
@@ -2144,7 +2153,7 @@ OPTBLD_INLINE void iopClsCns(const StringData* clsCnsName) {
                 cls->name()->data(), clsCnsName->data());
   }
 
-  cellDup(clsCns, *vmStack().topTV());
+  cellDup(clsCns, *vmStack().allocTV());
 }
 
 OPTBLD_INLINE void iopClsCnsD(const StringData* clsCnsName, Id classId) {
@@ -2441,7 +2450,6 @@ OPTBLD_INLINE bool cellInstanceOf(TypedValue* tv, const NamedEntity* ne) {
       return cls && tv->m_data.pobj->instanceof(cls);
 
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();
@@ -2696,7 +2704,6 @@ void iopSwitch(PC origpc, PC& pc, SwitchKind kind, int64_t base, int veclen,
             case KindOfObject:
             case KindOfResource:
             case KindOfRef:
-            case KindOfClass:
               not_reached();
           }
           tvRefcountedDecRef(val);
@@ -2738,7 +2745,6 @@ void iopSwitch(PC origpc, PC& pc, SwitchKind kind, int64_t base, int veclen,
           return;
 
         case KindOfRef:
-        case KindOfClass:
           break;
       }
       not_reached();
@@ -2996,14 +3002,15 @@ OPTBLD_INLINE void iopThrow() {
   throw req::root<Object>(std::move(obj));
 }
 
-OPTBLD_INLINE void iopAGetC() {
-  TypedValue* tv = vmStack().topTV();
-  lookupClsRef(tv, tv, true);
+OPTBLD_INLINE void iopClsRefGetC(clsref_slot slot) {
+  auto const cell = vmStack().topC();
+  auto const cls  = lookupClsRef(cell);
+  slot.put(cls);
+  vmStack().popC();
 }
 
-OPTBLD_INLINE void iopAGetL(local_var fr) {
-  vmStack().pushUninit();
-  lookupClsRef(tvToCell(fr.ptr), vmStack().top());
+OPTBLD_INLINE void iopClsRefGetL(local_var fr, clsref_slot slot) {
+  slot.put(lookupClsRef(tvToCell(fr.ptr)));
 }
 
 static void raise_undefined_local(ActRec* fp, Id pind) {
@@ -3052,15 +3059,6 @@ OPTBLD_INLINE void iopCGetL2(local_var fr) {
   TypedValue* newTop = vmStack().allocTV();
   memcpy(newTop, oldTop, sizeof *newTop);
   Cell* to = oldTop;
-  cgetl_body(vmfp(), fr.ptr, to, fr.index, true);
-}
-
-OPTBLD_INLINE void iopCGetL3(local_var fr) {
-  TypedValue* oldTop = vmStack().topTV();
-  TypedValue* oldSubTop = vmStack().indTV(1);
-  TypedValue* newTop = vmStack().allocTV();
-  memmove(newTop, oldTop, sizeof *oldTop * 2);
-  Cell* to = oldSubTop;
   cgetl_body(vmfp(), fr.ptr, to, fr.index, true);
 }
 
@@ -3117,10 +3115,10 @@ OPTBLD_INLINE void iopCGetG() { cgetg_body(true); }
 OPTBLD_INLINE void iopCGetQuietG() { cgetg_body(false); }
 
 struct SpropState {
-  explicit SpropState(Stack&);
+  SpropState(Stack&, clsref_slot slot);
   ~SpropState();
   StringData* name;
-  TypedValue* clsref;
+  Class* cls;
   TypedValue* output;
   TypedValue* val;
   TypedValue oldNameCell;
@@ -3128,10 +3126,10 @@ struct SpropState {
   bool accessible;
 };
 
-SpropState::SpropState(Stack& vmstack) {
-  clsref = vmstack.topTV();
-  auto nameCell = output = vmstack.indTV(1);
-  lookup_sprop(vmfp(), clsref, name, nameCell, val, visible, accessible);
+SpropState::SpropState(Stack& vmstack, clsref_slot slot) {
+  cls = slot.take();
+  auto nameCell = output = vmstack.topTV();
+  lookup_sprop(vmfp(), cls, name, nameCell, val, visible, accessible);
   oldNameCell = *nameCell;
 }
 
@@ -3140,11 +3138,11 @@ SpropState::~SpropState() {
   tvRefcountedDecRef(oldNameCell);
 }
 
-template<bool box> void getS() {
-  SpropState ss(vmStack());
+template<bool box> void getS(clsref_slot slot) {
+  SpropState ss(vmStack(), slot);
   if (!(ss.visible && ss.accessible)) {
     raise_error("Invalid static property access: %s::%s",
-                ss.clsref->m_data.pcls->name()->data(),
+                ss.cls->name()->data(),
                 ss.name->data());
   }
   if (box) {
@@ -3155,11 +3153,10 @@ template<bool box> void getS() {
   } else {
     cellDup(*tvToCell(ss.val), *ss.output);
   }
-  vmStack().popA();
 }
 
-OPTBLD_INLINE void iopCGetS() {
-  getS<false>();
+OPTBLD_INLINE void iopCGetS(clsref_slot slot) {
+  getS<false>(slot);
 }
 
 static inline MInstrState& initMState() {
@@ -3238,16 +3235,9 @@ OPTBLD_INLINE void iopFPassBaseGL(ActRec* ar, intva_t paramId, local_var loc) {
   baseGImpl(tvToCell(loc.ptr), mode);
 }
 
-static inline TypedValue* baseSImpl(int32_t clsIdx, TypedValue* key) {
-  auto& stack = vmStack();
-  auto const class_ = stack.indTV(clsIdx)->m_data.pcls;
-  // Discard the class, preserving the RHS value if it's there.
-  if (clsIdx == 1) {
-    tvCopy(*stack.indTV(0), *stack.indTV(1));
-    stack.discard();
-  } else {
-    stack.popA();
-  }
+static inline TypedValue* baseSImpl(TypedValue* key,
+                                    clsref_slot slot) {
+  auto const class_ = slot.take();
 
   auto const name = lookup_name(key);
   SCOPE_EXIT { decRefStr(name); };
@@ -3261,14 +3251,14 @@ static inline TypedValue* baseSImpl(int32_t clsIdx, TypedValue* key) {
   return lookup.prop;
 }
 
-OPTBLD_INLINE void iopBaseSC(intva_t keyIdx, intva_t clsIdx) {
+OPTBLD_INLINE void iopBaseSC(intva_t keyIdx, clsref_slot slot) {
   auto& mstate = initMState();
-  mstate.base = baseSImpl(clsIdx, vmStack().indTV(keyIdx));
+  mstate.base = baseSImpl(vmStack().indTV(keyIdx), slot);
 }
 
-OPTBLD_INLINE void iopBaseSL(local_var keyLoc, intva_t clsIdx) {
+OPTBLD_INLINE void iopBaseSL(local_var keyLoc, clsref_slot slot) {
   auto& mstate = initMState();
-  mstate.base = baseSImpl(clsIdx, tvToCell(keyLoc.ptr));
+  mstate.base = baseSImpl(tvToCell(keyLoc.ptr), slot);
 }
 
 OPTBLD_INLINE void baseLImpl(local_var loc, MOpMode mode) {
@@ -3675,8 +3665,8 @@ OPTBLD_INLINE void iopVGetG() {
   vgetl_body(fr, to);
 }
 
-OPTBLD_INLINE void iopVGetS() {
-  getS<true>();
+OPTBLD_INLINE void iopVGetS(clsref_slot slot) {
+  getS<true>(slot);
 }
 
 OPTBLD_INLINE void iopIssetN() {
@@ -3709,15 +3699,14 @@ OPTBLD_INLINE void iopIssetG() {
   vmStack().replaceC<KindOfBoolean>(e);
 }
 
-OPTBLD_INLINE void iopIssetS() {
-  SpropState ss(vmStack());
+OPTBLD_INLINE void iopIssetS(clsref_slot slot) {
+  SpropState ss(vmStack(), slot);
   bool e;
   if (!(ss.visible && ss.accessible)) {
     e = false;
   } else {
     e = !cellIsNull(tvToCell(ss.val));
   }
-  vmStack().popA();
   ss.output->m_data.num = e;
   ss.output->m_type = KindOfBoolean;
 }
@@ -3854,15 +3843,14 @@ OPTBLD_INLINE void iopEmptyG() {
   vmStack().replaceC<KindOfBoolean>(e);
 }
 
-OPTBLD_INLINE void iopEmptyS() {
-  SpropState ss(vmStack());
+OPTBLD_INLINE void iopEmptyS(clsref_slot slot) {
+  SpropState ss(vmStack(), slot);
   bool e;
   if (!(ss.visible && ss.accessible)) {
     e = true;
   } else {
     e = !cellToBool(*tvToCell(ss.val));
   }
-  vmStack().popA();
   ss.output->m_data.num = e;
   ss.output->m_type = KindOfBoolean;
 }
@@ -4033,25 +4021,25 @@ OPTBLD_INLINE void iopSetG() {
   vmStack().discard();
 }
 
-OPTBLD_INLINE void iopSetS() {
+OPTBLD_INLINE void iopSetS(clsref_slot slot) {
   TypedValue* tv1 = vmStack().topTV();
-  TypedValue* classref = vmStack().indTV(1);
-  TypedValue* propn = vmStack().indTV(2);
+  Class* cls = slot.take();
+  TypedValue* propn = vmStack().indTV(1);
   TypedValue* output = propn;
   StringData* name;
   TypedValue* val;
   bool visible, accessible;
-  lookup_sprop(vmfp(), classref, name, propn, val, visible, accessible);
+  lookup_sprop(vmfp(), cls, name, propn, val, visible, accessible);
   SCOPE_EXIT { decRefStr(name); };
   if (!(visible && accessible)) {
     raise_error("Invalid static property access: %s::%s",
-                classref->m_data.pcls->name()->data(),
+                cls->name()->data(),
                 name->data());
   }
   tvSet(*tv1, *val);
   tvRefcountedDecRef(propn);
   memcpy(output, tv1, sizeof(TypedValue));
-  vmStack().ndiscard(2);
+  vmStack().ndiscard(1);
 }
 
 OPTBLD_INLINE void iopSetOpL(local_var loc, SetOpOp op) {
@@ -4094,26 +4082,26 @@ OPTBLD_INLINE void iopSetOpG(SetOpOp op) {
   vmStack().discard();
 }
 
-OPTBLD_INLINE void iopSetOpS(SetOpOp op) {
+OPTBLD_INLINE void iopSetOpS(SetOpOp op, clsref_slot slot) {
   Cell* fr = vmStack().topC();
-  TypedValue* classref = vmStack().indTV(1);
-  TypedValue* propn = vmStack().indTV(2);
+  Class* cls = slot.take();
+  TypedValue* propn = vmStack().indTV(1);
   TypedValue* output = propn;
   StringData* name;
   TypedValue* val;
   bool visible, accessible;
-  lookup_sprop(vmfp(), classref, name, propn, val, visible, accessible);
+  lookup_sprop(vmfp(), cls, name, propn, val, visible, accessible);
   SCOPE_EXIT { decRefStr(name); };
   if (!(visible && accessible)) {
     raise_error("Invalid static property access: %s::%s",
-                classref->m_data.pcls->name()->data(),
+                cls->name()->data(),
                 name->data());
   }
   setopBody(tvToCell(val), op, fr);
   tvRefcountedDecRef(propn);
   tvRefcountedDecRef(fr);
   cellDup(*tvToCell(val), *output);
-  vmStack().ndiscard(2);
+  vmStack().ndiscard(1);
 }
 
 OPTBLD_INLINE void iopIncDecL(local_var fr, IncDecOp op) {
@@ -4156,15 +4144,14 @@ OPTBLD_INLINE void iopIncDecG(IncDecOp op) {
   cellCopy(IncDecBody(op, tvToCell(gbl)), *nameCell);
 }
 
-OPTBLD_INLINE void iopIncDecS(IncDecOp op) {
-  SpropState ss(vmStack());
+OPTBLD_INLINE void iopIncDecS(IncDecOp op, clsref_slot slot) {
+  SpropState ss(vmStack(), slot);
   if (!(ss.visible && ss.accessible)) {
     raise_error("Invalid static property access: %s::%s",
-                ss.clsref->m_data.pcls->name()->data(),
+                ss.cls->name()->data(),
                 ss.name->data());
   }
   cellCopy(IncDecBody(op, tvToCell(ss.val)), *ss.output);
-  vmStack().discard();
 }
 
 OPTBLD_INLINE void iopBindL(local_var to) {
@@ -4198,25 +4185,25 @@ OPTBLD_INLINE void iopBindG() {
   vmStack().discard();
 }
 
-OPTBLD_INLINE void iopBindS() {
+OPTBLD_INLINE void iopBindS(clsref_slot slot) {
   TypedValue* fr = vmStack().topTV();
-  TypedValue* classref = vmStack().indTV(1);
-  TypedValue* propn = vmStack().indTV(2);
+  Class* cls = slot.take();
+  TypedValue* propn = vmStack().indTV(1);
   TypedValue* output = propn;
   StringData* name;
   TypedValue* val;
   bool visible, accessible;
-  lookup_sprop(vmfp(), classref, name, propn, val, visible, accessible);
+  lookup_sprop(vmfp(), cls, name, propn, val, visible, accessible);
   SCOPE_EXIT { decRefStr(name); };
   if (!(visible && accessible)) {
     raise_error("Invalid static property access: %s::%s",
-                classref->m_data.pcls->name()->data(),
+                cls->name()->data(),
                 name->data());
   }
   tvBind(fr, val);
   tvRefcountedDecRef(propn);
   memcpy(output, fr, sizeof(TypedValue));
-  vmStack().ndiscard(2);
+  vmStack().ndiscard(1);
 }
 
 OPTBLD_INLINE void iopUnsetL(local_var loc) {
@@ -4505,17 +4492,15 @@ void pushClsMethodImpl(Class* cls, StringData* name, int numArgs) {
   setTypesFlag(vmfp(), ar);
 }
 
-OPTBLD_INLINE void iopFPushClsMethod(intva_t numArgs) {
-  Cell* c1 = vmStack().indC(1); // Method name.
+OPTBLD_INLINE void iopFPushClsMethod(intva_t numArgs, clsref_slot slot) {
+  Cell* c1 = vmStack().topC(); // Method name.
   if (!isStringType(c1->m_type)) {
     raise_error(Strings::FUNCTION_NAME_MUST_BE_STRING);
   }
-  TypedValue* tv = vmStack().top();
-  assert(tv->m_type == KindOfClass);
-  Class* cls = tv->m_data.pcls;
+  Class* cls = slot.take();
   StringData* name = c1->m_data.pstr;
   // pushClsMethodImpl will take care of decReffing name
-  vmStack().ndiscard(2);
+  vmStack().ndiscard(1);
   assert(cls && name);
   pushClsMethodImpl<false>(cls, name, numArgs);
 }
@@ -4531,26 +4516,20 @@ void iopFPushClsMethodD(intva_t numArgs, const StringData* name, Id classId) {
   pushClsMethodImpl<false>(cls, const_cast<StringData*>(name), numArgs);
 }
 
-OPTBLD_INLINE void iopFPushClsMethodF(intva_t numArgs) {
-  Cell* c1 = vmStack().indC(1); // Method name.
+OPTBLD_INLINE void iopFPushClsMethodF(intva_t numArgs, clsref_slot slot) {
+  Cell* c1 = vmStack().topC(); // Method name.
   if (!isStringType(c1->m_type)) {
     raise_error(Strings::FUNCTION_NAME_MUST_BE_STRING);
   }
-  TypedValue* tv = vmStack().top();
-  assert(tv->m_type == KindOfClass);
-  Class* cls = tv->m_data.pcls;
-  assert(cls);
+  Class* cls = slot.take();
   StringData* name = c1->m_data.pstr;
   // pushClsMethodImpl will take care of decReffing name
-  vmStack().ndiscard(2);
+  vmStack().ndiscard(1);
   pushClsMethodImpl<true>(cls, name, numArgs);
 }
 
-OPTBLD_INLINE void iopFPushCtor(intva_t numArgs) {
-  TypedValue* tv = vmStack().topTV();
-  assert(tv->m_type == KindOfClass);
-  Class* cls = tv->m_data.pcls;
-  assert(cls != nullptr);
+OPTBLD_INLINE void iopFPushCtor(intva_t numArgs, clsref_slot slot) {
+  Class* cls = slot.take();
   // Lookup the ctor
   const Func* f;
   auto res UNUSED = lookupCtorMethod(f, cls, arGetContextClass(vmfp()), true);
@@ -4559,9 +4538,7 @@ OPTBLD_INLINE void iopFPushCtor(intva_t numArgs) {
   ObjectData* this_ = newInstance(cls);
   TRACE(2, "FPushCtor: just new'ed an instance of class %s: %p\n",
         cls->name()->data(), this_);
-  this_->incRefCount();
-  tv->m_type = KindOfObject;
-  tv->m_data.pobj = this_;
+  vmStack().pushObject(this_);
   // Push new activation record.
   ActRec* ar = vmStack().allocA();
   ar->m_func = f;
@@ -4810,12 +4787,12 @@ OPTBLD_INLINE void iopFPassG(ActRec* ar, intva_t paramId) {
   }
 }
 
-OPTBLD_INLINE void iopFPassS(ActRec* ar, intva_t paramId) {
+OPTBLD_INLINE void iopFPassS(ActRec* ar, intva_t paramId, clsref_slot slot) {
   assert(paramId < ar->numArgs());
   if (!ar->m_func->byRef(paramId)) {
-    iopCGetS();
+    iopCGetS(slot);
   } else {
-    iopVGetS();
+    iopVGetS(slot);
   }
 }
 
@@ -5384,12 +5361,12 @@ OPTBLD_INLINE void iopCatch() {
   vmStack().pushObjectNoRc(fault.m_userException);
 }
 
-OPTBLD_INLINE void iopLateBoundCls() {
+OPTBLD_INLINE void iopLateBoundCls(clsref_slot slot) {
   Class* cls = frameStaticClass(vmfp());
   if (!cls) {
     raise_error(HPHP::Strings::CANT_ACCESS_STATIC);
   }
-  vmStack().pushClass(cls);
+  slot.put(cls);
 }
 
 OPTBLD_INLINE void iopVerifyParamType(local_var param) {
@@ -5453,15 +5430,15 @@ OPTBLD_INLINE TCA iopNativeImpl(PC& pc) {
   return jitReturnPost(jitReturn);
 }
 
-OPTBLD_INLINE void iopSelf() {
+OPTBLD_INLINE void iopSelf(clsref_slot slot) {
   Class* clss = arGetContextClass(vmfp());
   if (!clss) {
     raise_error(HPHP::Strings::CANT_ACCESS_SELF);
   }
-  vmStack().pushClass(clss);
+  slot.put(clss);
 }
 
-OPTBLD_INLINE void iopParent() {
+OPTBLD_INLINE void iopParent(clsref_slot slot) {
   Class* clss = arGetContextClass(vmfp());
   if (!clss) {
     raise_error(HPHP::Strings::CANT_ACCESS_PARENT_WHEN_NO_CLASS);
@@ -5470,7 +5447,7 @@ OPTBLD_INLINE void iopParent() {
   if (!parent) {
     raise_error(HPHP::Strings::CANT_ACCESS_PARENT_WHEN_NO_PARENT);
   }
-  vmStack().pushClass(parent);
+  slot.put(parent);
 }
 
 OPTBLD_INLINE void iopCreateCl(intva_t numArgs, intva_t clsIx) {
@@ -6267,6 +6244,14 @@ TCA iopWrapper(Op, void(*fn)(const StringData*,const StringData*), PC& pc) {
 }
 
 OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(const StringData*,clsref_slot), PC& pc) {
+  auto s1 = decode_litstr(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(s1, s);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
 TCA iopWrapper(Op, void(*fn)(local_var), PC& pc) {
   auto var = decode_local(pc);
   fn(var);
@@ -6278,6 +6263,14 @@ TCA iopWrapper(Op, void(*fn)(local_var,local_var), PC& pc) {
   auto var1 = decode_local(pc);
   auto var2 = decode_local(pc);
   fn(var1, var2);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(local_var,clsref_slot), PC& pc) {
+  auto var1 = decode_local(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(var1, s);
   return nullptr;
 }
 
@@ -6297,10 +6290,25 @@ TCA iopWrapper(Op, void(*fn)(intva_t,intva_t), PC& pc) {
 }
 
 OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(intva_t,clsref_slot), PC& pc) {
+  auto n1 = decode_intva(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(n1, s);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
 TCA iopWrapper(Op, void(*fn)(intva_t,LocalRange), PC& pc) {
   auto n1 = decode_intva(pc);
   auto n2 = decodeLocalRange(pc);
   fn(n1, n2);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(clsref_slot), PC& pc) {
+  auto s = decode_clsref_slot(pc);
+  fn(s);
   return nullptr;
 }
 
@@ -6343,6 +6351,15 @@ TCA iopWrapper(Op op, void(*fn)(ActRec*,intva_t,local_var), PC& pc) {
   auto n = decode_intva(pc);
   auto var = decode_local(pc);
   fn(ar, n, var);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
+TCA iopWrapper(Op op, void(*fn)(ActRec*,intva_t,clsref_slot), PC& pc) {
+  auto ar = arFromInstr(pc - encoded_op_size(op));
+  auto n = decode_intva(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(ar, n, s);
   return nullptr;
 }
 
@@ -6407,6 +6424,14 @@ TCA iopWrapper(Op, void(*fn)(SetOpOp), PC& pc) {
 }
 
 OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(SetOpOp,clsref_slot), PC& pc) {
+  auto subop = decode_oa<SetOpOp>(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(subop, s);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
 TCA iopWrapper(Op, void(*fn)(local_var,SetOpOp), PC& pc) {
   auto var = decode_local(pc);
   auto subop = decode_oa<SetOpOp>(pc);
@@ -6418,6 +6443,14 @@ OPTBLD_INLINE static
 TCA iopWrapper(Op, void(*fn)(IncDecOp), PC& pc) {
   auto subop = decode_oa<IncDecOp>(pc);
   fn(subop);
+  return nullptr;
+}
+
+OPTBLD_INLINE static
+TCA iopWrapper(Op, void(*fn)(IncDecOp,clsref_slot), PC& pc) {
+  auto subop = decode_oa<IncDecOp>(pc);
+  auto s = decode_clsref_slot(pc);
+  fn(subop, s);
   return nullptr;
 }
 

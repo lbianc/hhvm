@@ -60,10 +60,6 @@ struct RuntimeOption {
     return ServerMode;
   }
 
-  static bool ClientExecutionMode() {
-    return !ServerMode;
-  }
-
   static bool GcSamplingEnabled() {
     return EvalGCSampleRate > 0;
   }
@@ -602,6 +598,7 @@ struct RuntimeOption {
   F(bool, MapTgtCacheHuge,             false)                           \
   F(uint32_t, MaxHotTextHugePages,     hugePagesSoundNice() ? 1 : 0)    \
   F(int32_t, MaxLowMemHugePages,       hugePagesSoundNice() ? 8 : 0)    \
+  F(bool, LowStaticArrays,             true)                            \
   F(bool, RandomHotFuncs,              false)                           \
   F(bool, EnableGC,                    eagerGcDefault())                \
   /* Run GC eagerly at each surprise point. */                          \
@@ -640,6 +637,17 @@ struct RuntimeOption {
    * compatibility issues with Hack arrays. */                          \
   F(bool, HackArrCompatNotices, false)                                  \
   F(std::vector<std::string>, IniGetHide, std::vector<std::string>())   \
+  F(std::string, UseRemoteUnixServer, "no")                             \
+  F(std::string, UnixServerPath, "")                                    \
+  F(uint32_t, UnixServerWorkers, Process::GetCPUCount())                \
+  F(bool, UnixServerQuarantineApc, false)                               \
+  F(bool, UnixServerQuarantineUnits, false)                             \
+  F(bool, UnixServerVerifyExeAccess, false)                             \
+  F(bool, UnixServerFailWhenBusy, false)                                \
+  F(std::vector<std::string>, UnixServerAllowedUsers,                   \
+                                            std::vector<std::string>()) \
+  F(std::vector<std::string>, UnixServerAllowedGroups,                  \
+                                            std::vector<std::string>()) \
   /******************                                                   \
    | PPC64 Options. |                                                   \
    *****************/                                                   \

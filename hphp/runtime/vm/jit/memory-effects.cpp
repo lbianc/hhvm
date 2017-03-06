@@ -397,6 +397,15 @@ GeneralEffects interp_one_effects(const IRInstruction& inst) {
     }
   }
 
+  for (auto i = uint32_t{0}; i < extra->nChangedClsRefSlots; ++i) {
+    auto const& slot = extra->changedClsRefSlots[i];
+    if (slot.write) {
+      stores = stores | AClsRefSlot { inst.src(1), slot.id };
+    } else {
+      loads = loads | AClsRefSlot { inst.src(1), slot.id };
+    }
+  }
+
   auto kills = AEmpty;
   if (isMemberBaseOp(extra->opcode)) {
     stores = stores | AMIStateAny;
@@ -509,7 +518,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
       return UnknownEffects {};
     }
     return ReturnEffects {
-      AStackAny | AFrameAny | AMIStateAny
+      AStackAny | AFrameAny | AClsRefSlotAny | AMIStateAny
     };
 
   case AsyncRetCtrl:
@@ -587,9 +596,9 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
        * stores must not be sunk past DefInlineFP where they could clobber a
        * local.
        */
-      AFrameAny | stack_below(inst.dst(), FPRelOffset{0}) |
+      AFrameAny | AClsRefSlotAny | stack_below(inst.dst(), FPRelOffset{0}) |
                   inline_fp_frame(&inst),
-      AFrameAny | stack_below(inst.dst(), FPRelOffset{0})
+      AFrameAny | AClsRefSlotAny | stack_below(inst.dst(), FPRelOffset{0})
     );
 
   /*
@@ -625,7 +634,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   case InlineReturn: {
     auto const callee = stack_below(inst.src(0), FPRelOffset{2}) |
-                        AMIStateAny | AFrameAny;
+                        AMIStateAny | AFrameAny | AClsRefSlotAny;
     return may_load_store_kill(AEmpty, callee, callee);
   }
 
@@ -746,7 +755,11 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CreateAFWH:
   case CreateAFWHNoVV:
   case CreateCont:
-    return may_load_store_move(AFrameAny, AHeapAny, AFrameAny);
+    return may_load_store_move(
+      AFrameAny | AClsRefSlotAny,
+      AHeapAny,
+      AFrameAny | AClsRefSlotAny
+    );
 
   // This re-enters to call extension-defined instance constructors.
   case ConstructInstance:
@@ -837,6 +850,26 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   case LdClosureStaticLoc:
     return may_load_store(AFrameAny, AFrameAny);
+
+  //////////////////////////////////////////////////////////////////////
+  // Instructions that manipulate class-ref slots
+
+  case LdClsRef:
+    return PureLoad {
+      AClsRefSlot { inst.src(0), inst.extra<LdClsRef>()->slot }
+    };
+
+  case StClsRef:
+    return PureStore {
+      AClsRefSlot { inst.src(0), inst.extra<StClsRef>()->slot },
+      inst.src(1)
+    };
+
+  case KillClsRef:
+    return may_load_store_kill(
+      AEmpty, AEmpty,
+      AClsRefSlot { inst.src(0), inst.extra<KillClsRef>()->slot }
+    );
 
   //////////////////////////////////////////////////////////////////////
   // Pointer-based loads and stores
@@ -1241,14 +1274,15 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     }
 
   case LdARFuncPtr:
-    // This instruction is essentially a PureLoad, but we don't handle non-TV's
-    // in PureLoad so we have to treat it as may_load_store.  We also treat it
-    // as loading an entire ActRec-sized part of the stack, although it only
-    // loads the slot containing the Func.
+  case LdARCtx:
+    // These instructions are essentially PureLoads, but we don't handle
+    // non-TV's in PureLoad so we have to treat it as may_load_store.  We also
+    // treat it as loading an entire ActRec-sized part of the stack, although it
+    // only loads a single value from it.
     return may_load_store(
       AStack {
         inst.src(0),
-        inst.extra<LdARFuncPtr>()->offset + int32_t{kNumActRecCells} - 1,
+        inst.extra<IRSPRelOffsetData>()->offset + int32_t{kNumActRecCells} - 1,
         int32_t{kNumActRecCells}
       },
       AEmpty
@@ -1834,6 +1868,7 @@ DEBUG_ONLY bool check_effects(const IRInstruction& inst, MemEffects me) {
 
   auto check = [&] (AliasClass a) {
     if (auto const fr = a.frame()) check_fp(fr->fp);
+    if (auto const sl = a.clsRefSlot()) check_fp(sl->fp);
     if (auto const pr = a.prop())  check_obj(pr->obj);
   };
 

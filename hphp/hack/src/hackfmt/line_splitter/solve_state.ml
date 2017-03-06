@@ -19,6 +19,11 @@ type t = {
   nesting_set: ISet.t;
   cost: int;
   overflow: int;
+  candidate_rules: ISet.t;
+
+  (* Expensive calculation cache *)
+  unprocessed_overflow: int Lazy.t;
+  rules_on_partially_bound_lines: ISet.t Lazy.t;
 }
 
 let has_split_before_chunk c rvm =
@@ -31,6 +36,8 @@ let has_comma_after_chunk c rvm =
     let value = IMap.get rule_id rvm in
     Rule.is_split rule_id value
   )
+
+let get_bound_ruleset rvm = ISet.of_list @@ IMap.keys rvm
 
 let get_overflow len = max (len - _LINE_WIDTH) 0
 
@@ -73,8 +80,59 @@ let build_lines chunk_group rvm nesting_set =
   in
   aux chunks (0, ISet.empty)
 
+let build_candidate_rules_and_update_rvm rvm lines rule_dependency_map =
+  let bound_rules = get_bound_ruleset rvm in
+  let rec get_candidate_and_dead_rules lines dead_rules =
+    match lines with
+      | [] -> ISet.empty, dead_rules
+      | hd :: tl ->
+          let (overflow, rules) = hd in
+          let unbound_rules = ISet.diff rules bound_rules in
+          if overflow = 0 || ISet.is_empty unbound_rules
+          then get_candidate_and_dead_rules tl @@
+            ISet.union dead_rules unbound_rules
+          else rules, dead_rules
+  in
+  let base_candidate_rules, dead_rules =
+    get_candidate_and_dead_rules lines ISet.empty in
+
+  (* Also add parent rules *)
+  let deps = rule_dependency_map in
+  let candidate_rules = ISet.fold (fun id acc ->
+    ISet.union acc @@
+      try ISet.of_list @@ IMap.find_unsafe id deps with Not_found -> ISet.empty
+  ) base_candidate_rules base_candidate_rules in
+
+  let dead_rules = ISet.diff dead_rules candidate_rules in
+  let rvm = ISet.fold (fun r acc ->
+    if not (IMap.mem r rvm)
+    then IMap.add r 0 acc
+    else acc
+  ) dead_rules rvm in
+  candidate_rules, rvm
+
+let calculate_unprocessed_overflow lines bound_ruleset =
+  List.fold lines ~init:0 ~f:(fun acc (overflow, rules) ->
+    if ISet.is_empty @@ ISet.diff rules bound_ruleset
+    then acc
+    else acc + overflow
+  )
+
+let calculate_rules_on_partially_bound_lines lines bound_ruleset =
+  let rules_per_line = List.map lines ~f:snd in
+  List.fold rules_per_line ~init:ISet.empty ~f:(
+    fun acc set ->
+      let diff = ISet.diff set bound_ruleset in
+      if ISet.cardinal diff <> 0 (* Fully bound line *)
+      (* Add rules for partially bound lines *)
+      then ISet.union acc @@ ISet.inter set bound_ruleset
+      else acc
+  )
+
+
 let make chunk_group rvm =
-  let { Chunk_group.chunks; block_indentation; _ } = chunk_group in
+  let { Chunk_group.chunks; block_indentation; rule_dependency_map; _ } =
+    chunk_group in
 
   let nesting_set, _ =
     List.fold_left chunks ~init:(ISet.empty, ISet.empty)
@@ -117,36 +175,49 @@ let make chunk_group rvm =
         acc
     ) rvm 0
   ) in
-
   let cost = span_cost + rule_cost in
-  { chunk_group; lines; rvm; cost; overflow; nesting_set; }
+
+  (* Precompute candidate_rules and update the rvm by binding unbound rules on
+    lines with 0 overflow to 0 **)
+  let candidate_rules, rvm =
+    build_candidate_rules_and_update_rvm rvm lines rule_dependency_map in
+
+  let bound_ruleset = get_bound_ruleset rvm in
+  let unprocessed_overflow =
+    lazy (calculate_unprocessed_overflow lines bound_ruleset) in
+  let rules_on_partially_bound_lines =
+    lazy (calculate_rules_on_partially_bound_lines lines bound_ruleset) in
+
+  { chunk_group; lines; rvm; cost; overflow; nesting_set; candidate_rules;
+    unprocessed_overflow; rules_on_partially_bound_lines; }
 
 let is_rule_bound t rule_id =
   IMap.mem rule_id t.rvm
 
-let get_bound_ruleset t =
-  ISet.of_list @@ List.map (IMap.bindings t.rvm) ~f:fst
+let get_candidate_rules t = t.candidate_rules
 
-let get_candidate_rules t =
-  let bound_rules = get_bound_ruleset t in
-  let rec get_canditate_rules lines =
-    match lines with
-      | [] -> ISet.empty
-      | hd :: tl ->
-          let (overflow, rules) = hd in
-          if overflow = 0 || ISet.is_empty @@ ISet.diff rules bound_rules
-          then get_canditate_rules tl
-          else rules
-  in
-  let candidate_rules = get_canditate_rules t.lines in
-  (* Also add parent rules *)
-  let deps = t.chunk_group.Chunk_group.rule_dependency_map in
-  let rules = ISet.fold (fun id acc ->
-    ISet.union acc @@
-      try ISet.of_list @@ IMap.find_unsafe id deps with Not_found -> ISet.empty
-  ) candidate_rules candidate_rules in
-  ISet.elements rules
+let get_unprocessed_overflow t = Lazy.force t.unprocessed_overflow
 
+let get_rules_on_partially_bound_lines t =
+  Lazy.force t.rules_on_partially_bound_lines
+
+(**
+ * The idea behind overlapping states, is that sometimes we have two states in
+ * the queue where all expansions of one will be strictly worse than all
+ * expansions of the other. In this case we want to only keep one of the states
+ * in order to reduce branching.
+ *
+ * The implementation here is meant to target list-like structures where
+ * we come up with different solutions for a particular list item.
+ *)
+let is_overlapping s1 s2 =
+  get_unprocessed_overflow s1 = get_unprocessed_overflow s2 &&
+    let s1_rules = get_rules_on_partially_bound_lines s1 in
+    let s2_rules = get_rules_on_partially_bound_lines s2 in
+    ISet.cardinal s1_rules = ISet.cardinal s2_rules &&
+    ISet.for_all (fun s1_key ->
+      IMap.find_unsafe s1_key s1.rvm =
+        try IMap.find_unsafe s1_key s2.rvm with Not_found -> -1) s1_rules
 
 let compare_rule_sets s1 s2 =
   let bound_rule_ids = List.sort_uniq ~cmp:Pervasives.compare @@
@@ -171,6 +242,11 @@ let pick_best_state s1 s2 =
   if s1.overflow <> s2.overflow then begin
     if s1.overflow < s2.overflow then s1 else s2
   end else if compare s1 s2 < 0 then s1 else s2
+
+let compare_overlap s1 s2 =
+  if not (is_overlapping s1 s2)
+  then None
+  else Some (pick_best_state s1 s2)
 
 let __debug t =
   (* TODO: make a new rule strings string *)

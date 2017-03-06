@@ -90,7 +90,6 @@ TypedNum numericConvHelper(Cell cell) {
     case KindOfInt64:
     case KindOfDouble:
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();
@@ -156,6 +155,8 @@ struct Add {
   Cell operator()(int64_t a, int64_t b) const { return make_int(a + b); }
 
   ArrayData* operator()(ArrayData* a1, ArrayData* a2) const {
+    if (UNLIKELY(a1->isHackArray())) throwInvalidAdditionException(a1);
+    if (UNLIKELY(a2->isHackArray())) throwInvalidAdditionException(a2);
     if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
     a1->incRefCount(); // force COW
     SCOPE_EXIT { a1->decRefCount(); };
@@ -303,6 +304,8 @@ struct AddEq {
   double  operator()(double  a, double  b) const { return a + b; }
 
   ArrayData* operator()(ArrayData* ad1, ArrayData* ad2) const {
+    if (UNLIKELY(ad1->isHackArray())) throwInvalidAdditionException(ad1);
+    if (UNLIKELY(ad2->isHackArray())) throwInvalidAdditionException(ad2);
     if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
     if (ad2->empty() || ad1 == ad2) return ad1;
     if (ad1->empty()) {
@@ -460,7 +463,6 @@ void cellIncDecOp(Op op, Cell& cell) {
       return;
 
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();
@@ -757,7 +759,6 @@ void cellBitNot(Cell& cell) {
     case KindOfObject:
     case KindOfResource:
     case KindOfRef:
-    case KindOfClass:
       raise_error("Unsupported operand type for ~");
   }
 }

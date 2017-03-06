@@ -907,7 +907,6 @@ bool StringData::isNumeric() const {
     case KindOfObject:
     case KindOfResource:
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();
@@ -938,7 +937,6 @@ bool StringData::isInteger() const {
     case KindOfObject:
     case KindOfResource:
     case KindOfRef:
-    case KindOfClass:
       break;
   }
   not_reached();
@@ -1063,6 +1061,7 @@ bool StringData::checkSane() const {
   static_assert(offsetof(StringData, m_len) == SD_LEN, "");
   static_assert(offsetof(StringData, m_hash) == SD_HASH, "");
 #endif
+  assert(kindIsValid());
   assert(uint32_t(size()) <= MaxSize);
   assert(capacity() <= MaxSize);
   assert(size() >= 0);
