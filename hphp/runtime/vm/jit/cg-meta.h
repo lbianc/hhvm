@@ -42,6 +42,8 @@ namespace HPHP { namespace jit {
 struct CGMeta {
   void process(GrowableVector<IncomingBranch>* inProgressTailBranches);
   void process_only(GrowableVector<IncomingBranch>* inProgressTailBranches);
+  void process_literals();
+
   bool empty() const;
   void clear();
 

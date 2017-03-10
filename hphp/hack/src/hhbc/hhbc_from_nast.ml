@@ -18,18 +18,18 @@ module TC = Hhas_type_constraint
 module SN = Naming_special_names
 module CBR = Continue_break_rewriter
 
-(* These are the three flavors of value that can live on the stack:
- *   C = cell
- *   R = ref
- *   A = classref
- *)
-module Flavor = struct
-  type t = C | R | A
-end
-
 (* When using the PassX instructions we need to emit the right kind *)
 module PassByRefKind = struct
   type t = AllowCell | WarnOnCell | ErrorOnCell
+end
+
+(* Locals, array elements, and properties all support the same range of l-value
+ * operations. *)
+module LValOp = struct
+  type t =
+  | Set
+  | SetOp of eq_op
+  | IncDec of incdec_op
 end
 
 (* Emit a comment in lieu of instructions for not-yet-implemented features *)
@@ -88,25 +88,6 @@ let unop_to_incdec_op op =
   | A.Updecr -> Some PostDecO
   | _ -> None
 
-(* TODO: there are lots of ways of specifying the same type in a cast.
- * Sort this out!
- *)
-let emit_cast (_, hint_) =
-  match hint_ with
-  | A.Happly((_, id), []) when id = SN.Typehints.int ->
-    instr (IOp CastInt)
-  | A.Happly((_, id), []) when id = SN.Typehints.bool ->
-    instr (IOp CastBool)
-  | A.Happly((_, id), []) when id = SN.Typehints.string ->
-    instr (IOp CastString)
-  | A.Happly((_, id), []) when id = SN.Typehints.object_cast ->
-    instr (IOp CastObject)
-  | A.Happly((_, id), []) when id = SN.Typehints.array ->
-    instr (IOp CastArray)
-  | A.Happly((_, id), []) when id = SN.Typehints.float ->
-    instr (IOp CastDouble)
-  | _ -> emit_nyi "cast type"
-
 let collection_type = function
   | "Vector"    -> 17
   | "Map"       -> 18
@@ -145,59 +126,83 @@ let rec expr_and_newc instr_to_add_new instr_to_add = function
   | A.AFkvalue (k, v) ->
     gather [from_expr k; from_expr v; instr_to_add]
 
-and from_expr expr =
-  (* Note that this takes an Ast.expr, not a Nast.expr. *)
-  match snd expr with
-  | A.Float (_, litstr) ->
-    instr (ILitConst (Double litstr))
-  | A.String (_, litstr) ->
-    instr (ILitConst (String litstr))
-  | A.Int (_, litstr) ->
-    (* TODO deal with integer out of range *)
-    instr (ILitConst (Int (Int64.of_string litstr)))
-  | A.Null -> instr (ILitConst Null)
-  | A.False -> instr (ILitConst False)
-  | A.True -> instr (ILitConst True)
-  | A.Lvar (_, x) when x = SN.SpecialIdents.this -> instr (IMisc This)
-  | A.Lvar (_, x) -> instr_cgetl (Local.Named x)
-  | A.Class_const ((_, cid), (_, id)) when id = SN.Members.mClass ->
-    instr (ILitConst (String cid))
-  | A.Unop (op, e) ->
-    emit_unop op e
-  | A.Binop (A.AMpamp, e1, e2) ->
-    emit_logical_and e1 e2
-  | A.Binop (A.BArbar, e1, e2) ->
-    emit_logical_or e1 e2
-  | A.Binop (A.Eq obop, e1, e2) ->
-    emit_assignment obop e1 e2
+and from_local x =
+  if x = SN.SpecialIdents.this then instr_this
+  else instr_cgetl (Local.Named x)
+
+and emit_binop op e1 e2 =
+  match (op, e1, e2) with
+  | (A.AMpamp, e1, e2) ->  emit_logical_and e1 e2
+  | (A.BArbar, e1, e2) -> emit_logical_or e1 e2
+  | (A.Eq None, e1, e2) -> emit_lval_op LValOp.Set e1 (Some e2)
+  | (A.Eq (Some obop), e1, e2) ->
+    begin match binop_to_eqop obop with
+    | None -> emit_nyi "illegal eq op"
+    | Some op -> emit_lval_op (LValOp.SetOp op) e1 (Some e2)
+    end
   (* Special case to make use of CGetL2 *)
-  | A.Binop (op, (_, A.Lvar (_, x)), e) ->
-    gather [from_expr e; instr_cgetl2 (Local.Named x); from_binop op]
-  | A.Binop (op, e1, e2) ->
-    gather [from_expr e2; from_expr e1; from_binop op]
-  | A.Pipe (e1, e2) ->
-    emit_pipe e1 e2
-  | A.Dollardollar ->
-    instr_cgetl2_pipe (* This will get rewritten into a temp local *)
-  | A.InstanceOf (e1, (_, A.Id (_, id))) ->
-    gather [from_expr e1; instr (IOp (InstanceOfD id))]
-  | A.InstanceOf (e1, e2) ->
-    gather [from_expr e1; from_expr e2; instr (IOp InstanceOf)]
-  | A.NullCoalesce(e1, e2) ->
-    let end_label = Label.next_regular () in
+  | (op, (_, A.Lvar (_, local)), e2) ->
     gather [
-      emit_quiet_expr e1;
-      instr (IBasic Dup);
-      instr (IIsset (IsTypeC OpNull));
-      instr (IOp Not);
-      instr_jmpnz end_label;
-      instr (IBasic PopC);
       from_expr e2;
-      instr_label end_label;
-    ]
-  | A.Cast(hint, e) ->
-    gather [from_expr e; emit_cast hint]
-  | A.Eif (etest, Some etrue, efalse) ->
+      instr_cgetl2 (Local.Named local);
+      from_binop op ]
+  | (op, e1, e2) ->
+    gather [
+      from_expr e1;
+      from_expr e2;
+      from_binop op ]
+
+and emit_instanceof e1 e2 =
+  match (e1, e2) with
+  | (_, (_, A.Id (_, id))) ->
+    gather [
+      from_expr e1;
+      instr_instanceofd id ]
+  | _ ->
+    gather [
+      from_expr e1;
+      from_expr e2;
+      instr_instanceof ]
+
+and emit_null_coalesce e1 e2 =
+  let end_label = Label.next_regular () in
+  gather [
+    emit_quiet_expr e1;
+    instr_dup;
+    instr_istypec OpNull;
+    instr_not;
+    instr_jmpnz end_label;
+    instr_popc;
+    from_expr e2;
+    instr_label end_label;
+  ]
+
+(* TODO: there are lots of ways of specifying the same type in a cast.
+ * Sort this out!
+ *)
+and emit_cast hint expr =
+  let op = match hint with
+  | A.Happly((_, id), []) when id = SN.Typehints.int ->
+    instr (IOp CastInt)
+  | A.Happly((_, id), []) when id = SN.Typehints.bool ->
+    instr (IOp CastBool)
+  | A.Happly((_, id), []) when id = SN.Typehints.string ->
+    instr (IOp CastString)
+  | A.Happly((_, id), []) when id = SN.Typehints.object_cast ->
+    instr (IOp CastObject)
+  | A.Happly((_, id), []) when id = SN.Typehints.array ->
+    instr (IOp CastArray)
+  | A.Happly((_, id), []) when id = SN.Typehints.float ->
+    instr (IOp CastDouble)
+  | _ -> emit_nyi "cast type" in
+  gather [
+    from_expr expr;
+    op;
+  ]
+
+and emit_conditional_expression etest etrue efalse =
+  match etrue with
+  | Some etrue ->
     let false_label = Label.next_regular () in
     let end_label = Label.next_regular () in
     gather [
@@ -209,100 +214,137 @@ and from_expr expr =
       from_expr efalse;
       instr_label end_label;
     ]
-  | A.Eif (etest, None, efalse) ->
+  | None ->
     let end_label = Label.next_regular () in
     gather [
       from_expr etest;
-      instr (IBasic Dup);
+      instr_dup;
       instr_jmpnz end_label;
-      instr (IBasic PopC);
+      instr_popc;
       from_expr efalse;
       instr_label end_label;
     ]
-  | A.Expr_list es -> gather @@ List.map es ~f:from_expr
-  | A.Call ((p, A.Id (_, "tuple")), es, _) ->
-    (* Did you know that tuples are functions? *)
-    let af_list = List.map es ~f:(fun e -> A.AFvalue e) in
-    from_expr (p, A.Array af_list)
-  | A.Call _ ->
-    let instrs, flavor = emit_flavored_expr expr in
+
+and emit_new_id id args uargs =
+  let nargs = List.length args + List.length uargs in
+  gather [
+    instr_fpushctord nargs id;
+    emit_args_and_call args uargs;
+    instr_popr;
+  ]
+
+and emit_new typename args uargs =
+  match typename with
+  | A.Id (_, id) -> emit_new_id id args uargs
+  | _ -> emit_nyi "new" (* TODO *)
+
+and emit_clone expr =
+  gather [
+    from_expr expr;
+    instr_clone;
+  ]
+
+and emit_shape expr fl =
+  let are_values_all_literals =
+    List.for_all fl ~f:(fun (_, e) -> is_literal e)
+  in
+  let p = fst expr in
+  if are_values_all_literals then
+    let fl =
+      List.map fl
+        ~f:(fun (fn, e) ->
+              A.AFkvalue ((p,
+                A.String (extract_shape_field_name_pstring fn)), e))
+    in
+    from_expr (fst expr, A.Array fl)
+  else
+    let es = List.map fl ~f:(fun (_, e) -> from_expr e) in
+    let keys = List.map fl ~f:(fun (fn, _) -> extract_shape_field_name fn) in
     gather [
-      instrs;
-      (* If the instruction has produced a ref then unbox it *)
-      if flavor = Flavor.R then instr (IBasic UnboxR) else empty
+      gather es;
+      instr_newstructarray keys;
     ]
-  | A.New ((_, A.Id (_, id)), args, uargs) ->
-      let nargs = List.length args + List.length uargs in
-      gather [
-        instr (ICall (FPushCtorD (nargs, id)));
-        emit_args_and_call args uargs;
-        instr (IBasic PopR)
-      ]
-  | A.Array es
-  | A.Collection ((_, "dict"), es)
-  | A.Collection ((_, "vec"), es)
-  | A.Collection ((_, "keyset"), es) -> emit_collection expr es
-  | A.Collection ((pos, "Set"), fields)  -> begin
+
+and emit_named_collection expr pos name fields =
+  match name with
+  | "dict" | "vec" | "keyset" -> emit_collection expr fields
+  | "Set" -> begin
     let collection_type = collection_type "Set" in
     match fields with
-    | [] -> instr @@ ILitConst (NewCol collection_type)
-    | _ -> gather
-      [ from_expr (pos, A.Array fields)
-      ; instr @@ ILitConst (ColFromArray collection_type)
-      ]
-  end
-  | A.Collection ((_, "Pair"), fields) -> begin
+    | [] -> instr_newcol collection_type
+    | _ -> gather [
+      from_expr (pos, A.Array fields);
+      instr_colfromarray collection_type ]
+    end
+  | "Pair" -> begin
     let collection_type = collection_type "Pair" in
-    let values = List.fold_right
+    let values = gather @@ List.fold_right
       fields
       ~f:(fun x acc ->
         expr_and_newc instr_col_add_new_elemc instr_col_add_new_elemc x::acc)
       ~init:[] in
-    let newCol = instr @@ ILitConst (NewCol collection_type) in
-    gather (newCol::values)
-  end
-  | A.Array_get(e1, Some e2) ->
-    emit_array_get None e1 e2
-  | A.Clone e ->
     gather [
-      from_expr e;
-      instr (IOp Clone)
-    ]
-  | A.Shape fl ->
-    let are_values_all_literals =
-      List.for_all fl ~f:(fun (_, e) -> is_literal e)
-    in
-    let p = fst expr in
-    if are_values_all_literals then
-      let fl =
-        List.map fl
-          ~f:(fun (fn, e) ->
-                A.AFkvalue ((p,
-                  A.String (extract_shape_field_name_pstring fn)), e))
-      in
-      from_expr (fst expr, A.Array fl)
-    else
-      let es = List.map fl ~f:(fun (_, e) -> from_expr e) in
-      let keys = List.map fl ~f:(fun (fn, _) -> extract_shape_field_name fn) in
-      gather [
-        gather es;
-        instr @@ ILitConst (NewStructArray keys);
-      ]
+      instr_newcol collection_type;
+      values ]
+  end
+  | _ -> emit_nyi @@ "collection: " ^ name (* TODO: Are there more? *)
 
-  | A.Obj_get (expr, prop, nullflavor)  ->
-    emit_obj_get expr prop nullflavor
+and emit_tuple p es =
+  (* Did you know that tuples are functions? *)
+  let af_list = List.map es ~f:(fun e -> A.AFvalue e) in
+  from_expr (p, A.Array af_list)
 
+and emit_call_expr expr =
+  let instrs, flavor = emit_flavored_expr expr in
+  gather [
+    instrs;
+    (* If the instruction has produced a ref then unbox it *)
+    if flavor = Flavor.Ref then instr_unboxr else empty
+  ]
+
+and emit_class_const cid id =
+  if id = SN.Members.mClass then instr_string cid
+  else emit_nyi "class_const" (* TODO *)
+
+and from_expr expr =
+  (* Note that this takes an Ast.expr, not a Nast.expr. *)
+  match snd expr with
+  | A.Float (_, litstr) -> instr_double litstr
+  | A.String (_, litstr) -> instr_string litstr
+  (* TODO deal with integer out of range *)
+  | A.Int (_, litstr) -> instr_int_of_string litstr
+  | A.Null -> instr_null
+  | A.False -> instr_false
+  | A.True -> instr_true
+  | A.Lvar (_, x) -> from_local x
+  | A.Class_const ((_, cid), (_, id)) -> emit_class_const cid id
+  | A.Unop (op, e) -> emit_unop op e
+  | A.Binop (op, e1, e2) -> emit_binop op e1 e2
+  | A.Pipe (e1, e2) -> emit_pipe e1 e2
+  | A.Dollardollar -> instr_cgetl2 Local.Pipe
+  | A.InstanceOf (e1, e2) -> emit_instanceof e1 e2
+  | A.NullCoalesce (e1, e2) -> emit_null_coalesce e1 e2
+  | A.Cast((_, hint), e) -> emit_cast hint e
+  | A.Eif (etest, etrue, efalse) ->
+    emit_conditional_expression etest etrue efalse
+  | A.Expr_list es -> gather @@ List.map es ~f:from_expr
+  | A.Call ((p, A.Id (_, "tuple")), es, _) -> emit_tuple p es
+  | A.Call _ -> emit_call_expr expr
+  | A.New ((_, typename), args, uargs) -> emit_new typename args uargs
+  | A.Array es -> emit_collection expr es
+  | A.Collection ((pos, name), fields) ->
+    emit_named_collection expr pos name fields
+  | A.Array_get(base_expr, opt_elem_expr) ->
+    emit_array_get None base_expr opt_elem_expr
+  | A.Clone e -> emit_clone e
+  | A.Shape fl -> emit_shape expr fl
+  | A.Obj_get (expr, prop, nullflavor) -> emit_obj_get None expr prop nullflavor
   (* TODO *)
-  | A.Collection ((_, type_str), _) ->
-    emit_nyi @@ "collection: " ^ type_str
-  | A.New _                     -> emit_nyi "new"
   | A.Yield_break               -> emit_nyi "yield_break"
   | A.Id _                      -> emit_nyi "id"
   | A.Id_type_arguments (_, _)  -> emit_nyi "id_type_arguments"
   | A.Lvarvar (_, _)            -> emit_nyi "lvarvar"
-  | A.Array_get (_, _)          -> emit_nyi "array_get"
   | A.Class_get (_, _)          -> emit_nyi "class_get"
-  | A.Class_const (_, _)        -> emit_nyi "class_const"
   | A.String2 _                 -> emit_nyi "string2"
   | A.Yield _                   -> emit_nyi "yield"
   | A.Await _                   -> emit_nyi "await"
@@ -450,80 +492,185 @@ and emit_quiet_expr (_, expr_ as expr) =
  * If param_num_opt = Some i
  * then this is the i'th parameter to a function
  *)
-and emit_array_get param_num_opt e1 e2 =
-  let base_instrs, n = emit_base param_num_opt e1 in
-  let mk, stack_size =
-    match snd e2 with
-      (* Special case for local index *)
-    | A.Lvar (_, x) -> MemberKey.EL (Local.Named x), n
-      (* Special case for literal integer index *)
-    | A.Int (_, litstr) -> MemberKey.EI (Int64.of_string litstr), n
-      (* Special case for literal string index *)
-    | A.String (_, litstr) -> MemberKey.ET litstr, n
-      (* General case *)
-    | _ -> MemberKey.EC, n+1 in
+and emit_array_get param_num_opt base_expr opt_elem_expr =
+  let elem_expr_instrs, elem_stack_size = emit_elem_instrs opt_elem_expr in
+  let base_expr_instrs, base_setup_instrs, base_stack_size =
+    emit_base MemberOpMode.Warn elem_stack_size param_num_opt base_expr in
+  let mk = get_elem_member_key 0 opt_elem_expr in
+  let total_stack_size = elem_stack_size + base_stack_size in
   let final_instr =
     instr (IFinal (
       match param_num_opt with
-      | None -> QueryM (stack_size, QueryOp.CGet, mk)
-      | Some i -> FPassM (i, stack_size, mk)
+      | None -> QueryM (total_stack_size, QueryOp.CGet, mk)
+      | Some i -> FPassM (i, total_stack_size, mk)
     )) in
-  match mk with
-  | MemberKey.EC ->
-    gather [
-      from_expr e2;
-      base_instrs;
-      final_instr
-    ]
-  | _ ->
-    gather [
-      base_instrs;
-      final_instr
-    ]
+  gather [
+    base_expr_instrs;
+    elem_expr_instrs;
+    base_setup_instrs;
+    final_instr
+  ]
 
-(* TODO: Nullflavor is currently being ignored, start using it *)
-and emit_obj_get expr prop _ =
-  let base_instrs, n = emit_base None expr in
-  let mk, stack_size =
-    match snd prop with
-    | A.Id (_, litstr) -> MemberKey.PT litstr, n
-    | A.Lvar (_, x) -> MemberKey.PL (Local.Named x), n
-      (* TODO: Work out when to use MemberKey.QT  *)
-    | _ -> MemberKey.PC, n+1 in
-    let final_instr =
-      instr (IFinal (
-        (* TODO: Work out when this should be FPassM *)
-        match None with
-        | None -> QueryM (stack_size, QueryOp.CGet, mk)
-        | Some id -> FPassM (id, stack_size, mk)
-      )) in
-      gather [
-        if mk = MemberKey.PC then from_expr prop else empty;
-        base_instrs;
-        final_instr
-      ]
-
-(* Emit instructions to construct base for `expr`, and also return
- * the stack size for subsequent query operations *)
-and emit_base param_num_opt (_, expr_ as expr) =
-  match expr_ with
-  | A.Lvar (_, x) when x = SN.SpecialIdents.this ->
-    gather [
-     instr (IMisc CheckThis);
-     instr (IBase BaseH)
-    ], 0
-  | A.Lvar (_, x) ->
-    instr (IBase (
+(* Emit code for e1->e2 or e1?->e2.
+ * If param_num_opt = Some i
+ * then this is the i'th parameter to a function
+ *)
+and emit_obj_get param_num_opt expr prop null_flavor =
+  let prop_expr_instrs, prop_stack_size = emit_prop_instrs prop in
+  let base_expr_instrs, base_setup_instrs, base_stack_size =
+    emit_base MemberOpMode.Warn prop_stack_size param_num_opt expr in
+  let mk = get_prop_member_key null_flavor 0 prop in
+  let total_stack_size = prop_stack_size + base_stack_size in
+  let final_instr =
+    instr (IFinal (
       match param_num_opt with
-      | None -> BaseL (Local.Named x, MemberOpMode.Warn)
-      | Some i -> FPassBaseL (i, Local.Named x)
-      )), 0
-  | _ ->
-    let instrs, flavor = emit_flavored_expr expr in
-    gather [
-      instrs;
-      instr (IBase (if flavor = Flavor.R then BaseR 0 else BaseC 0))
-    ], 1
+      | None -> QueryM (total_stack_size, QueryOp.CGet, mk)
+      | Some i -> FPassM (i, total_stack_size, mk)
+    )) in
+  gather [
+    base_expr_instrs;
+    prop_expr_instrs;
+    base_setup_instrs;
+    final_instr
+  ]
+
+and emit_elem_instrs opt_elem_expr =
+  match opt_elem_expr with
+  (* These all have special inline versions of member keys *)
+  | Some (_, (A.Lvar _ | A.Int _ | A.String _)) -> empty, 0
+  | Some expr -> from_expr expr, 1
+  | None -> empty, 0
+
+and emit_prop_instrs (_, expr_ as expr) =
+  match expr_ with
+  (* These all have special inline versions of member keys *)
+  | A.Lvar _ | A.Id _ -> empty, 0
+  | _ -> from_expr expr, 1
+
+(* Get the member key for an array element expression: the `elem` in
+ * expressions of the form `base[elem]`.
+ * If the array element is missing, use the special key `W`.
+ *)
+and get_elem_member_key stack_index opt_expr =
+  match opt_expr with
+  (* Special case for local *)
+  | Some (_, A.Lvar (_, x)) -> MemberKey.EL (Local.Named x)
+  (* Special case for literal integer *)
+  | Some (_, A.Int (_, str)) -> MemberKey.EI (Int64.of_string str)
+  (* Special case for literal string *)
+  | Some (_, A.String (_, str)) -> MemberKey.ET str
+  (* General case *)
+  | Some _ -> MemberKey.EC stack_index
+  (* ELement missing (so it's array append) *)
+  | None -> MemberKey.W
+
+(* Get the member key for a property *)
+and get_prop_member_key null_flavor stack_index prop_expr =
+  match prop_expr with
+  (* Special case for known property name *)
+  | (_, A.Id (_, str)) ->
+    begin match null_flavor with
+    | Ast.OG_nullthrows -> MemberKey.PT str
+    | Ast.OG_nullsafe -> MemberKey.QT str
+    end
+  (* Special case for local *)
+  | (_, A.Lvar (_, x)) -> MemberKey.PL (Local.Named x)
+  (* General case *)
+  | _ -> MemberKey.PC stack_index
+
+(* Emit code for a base expression `expr` that forms part of
+ * an element access `expr[elem]` or field access `expr->fld`.
+ * The instructions are divided into three sections:
+ *   1. base and element/property expression instructions:
+ *      push non-trivial base and key values on the stack
+ *   2. base selector instructions: a sequence of Base/Dim instructions that
+ *      actually constructs the base address from "member keys" that are inlined
+ *      in the instructions, or pulled from the key values that
+ *      were pushed on the stack in section 1.
+ *   3. (constructed by the caller) a final accessor e.g. QueryM or setter
+ *      e.g. SetOpM instruction that has the final key inlined in the
+ *      instruction, or pulled from the key values that were pushed on the
+ *      stack in section 1.
+ * The function returns a triple (base_instrs, base_setup_instrs, stack_size)
+ * where base_instrs is section 1 above, base_setup_instrs is section 2, and
+ * stack_size is the number of values pushed onto the stack by section 1.
+ *
+ * For example, the r-value expression $arr[3][$ix+2]
+ * will compile to
+ *   # Section 1, pushing the value of $ix+2 on the stack
+ *   Int 2
+ *   CGetL2 $ix
+ *   AddO
+ *   # Section 2, constructing the base address of $arr[3]
+ *   BaseL $arr Warn
+ *   Dim Warn EI:3
+ *   # Section 3, indexing the array using the value at stack position 0 (EC:0)
+ *   QueryM 1 CGet EC:0
+ *)
+and emit_base mode base_offset param_num_opt (_, expr_ as expr) =
+   match expr_ with
+   | A.Lvar (_, x) when x = SN.SpecialIdents.this ->
+     instr (IMisc CheckThis),
+     instr (IBase BaseH),
+     0
+
+   | A.Lvar (_, x) ->
+     empty,
+     instr (IBase (
+       match param_num_opt with
+       | None -> BaseL (Local.Named x, mode)
+       | Some i -> FPassBaseL (i, Local.Named x)
+       )),
+     0
+
+   | A.Array_get(base_expr, opt_elem_expr) ->
+     let elem_expr_instrs, elem_stack_size = emit_elem_instrs opt_elem_expr in
+     let base_expr_instrs, base_setup_instrs, base_stack_size =
+       emit_base mode (base_offset + elem_stack_size) param_num_opt base_expr in
+     let mk = get_elem_member_key base_offset opt_elem_expr in
+     let total_stack_size = base_stack_size + elem_stack_size in
+     gather [
+       base_expr_instrs;
+       elem_expr_instrs;
+     ],
+     gather [
+       base_setup_instrs;
+       instr (IBase (
+         match param_num_opt with
+         | None -> Dim (mode, mk)
+         | Some i -> FPassDim (i, mk)
+       ))
+     ],
+     total_stack_size
+
+   | A.Obj_get(base_expr, prop_expr, null_flavor) ->
+     let prop_expr_instrs, prop_stack_size = emit_prop_instrs prop_expr in
+     let base_expr_instrs, base_setup_instrs, base_stack_size =
+       emit_base mode (base_offset + prop_stack_size) param_num_opt base_expr in
+     let mk = get_prop_member_key null_flavor base_offset prop_expr in
+     let total_stack_size = prop_stack_size + base_stack_size in
+     let final_instr =
+       instr (IBase (
+         match param_num_opt with
+         | None -> Dim (mode, mk)
+         | Some i -> FPassDim (i, mk)
+       )) in
+     gather [
+       base_expr_instrs;
+       prop_expr_instrs;
+     ],
+     gather [
+       base_setup_instrs;
+       final_instr
+     ],
+     total_stack_size
+
+   | _ ->
+     let base_expr_instrs, flavor = emit_flavored_expr expr in
+     base_expr_instrs,
+     instr (IBase (if flavor = Flavor.Ref
+                   then BaseR base_offset else BaseC base_offset)),
+     1
 
 and instr_fpass kind i =
   match kind with
@@ -537,29 +684,26 @@ and emit_arg i ((_, expr_) as e) =
   match expr_ with
   | A.Lvar (_, x) -> instr_fpassl i (Local.Named x)
 
-  | A.Array_get(e1, Some e2) ->
-    emit_array_get (Some i) e1 e2
+  | A.Array_get(base_expr, opt_elem_expr) ->
+    emit_array_get (Some i) base_expr opt_elem_expr
+
+  | A.Obj_get(e1, e2, nullflavor) ->
+    emit_obj_get (Some i) e1 e2 nullflavor
 
   | _ ->
     let instrs, flavor = emit_flavored_expr e in
     gather [
       instrs;
-      if flavor = Flavor.R
+      if flavor = Flavor.Ref
       then instr_fpassr i
       else instr_fpass (get_passByRefKind e) i
     ]
-
-and emit_pop flavor =
-  match flavor with
-  | Flavor.R -> instr (IBasic PopR)
-  | Flavor.C -> instr (IBasic PopC)
-  | Flavor.A -> instr (IBasic PopA)
 
 and emit_ignored_expr e =
   let instrs, flavor = emit_flavored_expr e in
   gather [
     instrs;
-    emit_pop flavor;
+    instr_pop flavor;
   ]
 
 (* Emit code to construct the argument frame and then make the call *)
@@ -605,18 +749,18 @@ and emit_call (_, expr_ as expr) args uargs =
          gather [
            from_expr arg;
            instr (IOp Print);
-           if i = nargs-1 then empty else emit_pop Flavor.C
+           if i = nargs-1 then empty else instr_popc
          ] end in
-    instrs, Flavor.C
+    instrs, Flavor.Cell
 
   | A.Obj_get _ | A.Class_const _ | A.Id _ ->
     gather [
       emit_call_lhs expr nargs;
       emit_args_and_call args uargs;
-    ], Flavor.R
+    ], Flavor.Ref
 
   | _ ->
-    emit_nyi "call expression", Flavor.C
+    emit_nyi "call expression", Flavor.Cell
 
 (* Emit code for an expression that might leave a cell or reference on the
  * stack. Return which flavor it left.
@@ -626,7 +770,7 @@ and emit_flavored_expr (_, expr_ as expr) =
   | A.Call (e, args, uargs) ->
     emit_call e args uargs
   | _ ->
-    from_expr expr, Flavor.C
+    from_expr expr, Flavor.Cell
 
 and is_literal expr =
   match snd expr with
@@ -660,23 +804,126 @@ and literals_from_exprs_with_index exprs =
     ~f:(fun (index, l) e ->
       (index + 1, literal_from_expr e :: Int (Int64.of_int index) :: l))
 
-(* Emit code for an l-value, returning instructions and the location that
- * must be set. For now, this is just a local. *)
-and emit_lval (_, expr_) =
-  match expr_ with
-  | A.Lvar (_, id) -> empty, Local.Named id
-  | _ -> emit_nyi "lval expression", Local.Unnamed 0
+and emit_final_member_op stack_index op mk =
+  match op with
+  | LValOp.Set -> instr (IFinal (SetM (stack_index, mk)))
+  | LValOp.SetOp op -> instr (IFinal (SetOpM (stack_index, op, mk)))
+  | LValOp.IncDec op -> instr (IFinal (IncDecM (stack_index, op, mk)))
 
-and emit_assignment obop e1 e2 =
-  let instrs1, lval = emit_lval e1 in
-  let instrs2 = from_expr e2 in
-  gather [instrs1; instrs2;
-    match obop with
-    | None -> instr (IMutator (SetL lval))
-    | Some bop ->
-      match binop_to_eqop bop with
-      | None -> emit_nyi "op-assignment"
-      | Some eqop -> instr (IMutator (SetOpL (lval, eqop)))
+and emit_final_local_op op lid =
+  match op with
+  | LValOp.Set -> instr (IMutator (SetL lid))
+  | LValOp.SetOp op -> instr (IMutator (SetOpL (lid, op)))
+  | LValOp.IncDec op -> instr (IMutator (IncDecL (lid, op)))
+
+(* Given a local $local and a list of integer array indices i_1, ..., i_n,
+ * generate code to extract the value of $local[i_n]...[i_1]:
+ *   BaseL $local Warn
+ *   Dim Warn EI:i_n ...
+ *   Dim Warn EI:i_2
+ *   QueryM 0 CGet EI:i_1
+ *)
+and emit_array_get_fixed local indices =
+  gather (
+    instr (IBase (BaseL (local, MemberOpMode.Warn))) ::
+    List.rev_mapi indices (fun i ix ->
+      let mk = MemberKey.EI (Int64.of_int ix) in
+      if i = 0
+      then instr (IFinal (QueryM (0, QueryOp.CGet, mk)))
+      else instr (IBase (Dim (MemberOpMode.Warn, mk))))
+      )
+
+(* Generate code for each lvalue assignment in a list destructuring expression.
+ * Lvalues are assigned right-to-left, regardless of the nesting structure. So
+ *     list($a, list($b, $c)) = $d
+ * and list(list($a, $b), $c) = $d
+ * will both assign to $c, $b and $a in that order.
+ *)
+ and emit_lval_op_list local indices expr =
+  match expr with
+  | (_, A.List exprs) ->
+    gather @@
+    List.rev @@
+    List.mapi exprs (fun i expr -> emit_lval_op_list local (i::indices) expr)
+  | _ ->
+    (* Generate code to access the element from the array *)
+    let access_instrs = emit_array_get_fixed local indices in
+    (* Generate code to assign to the lvalue *)
+    let assign_instrs = emit_lval_op_nonlist LValOp.Set expr access_instrs 1 in
+    gather [
+      assign_instrs;
+      instr_popc
+    ]
+
+(* Emit code for an l-value operation *)
+and emit_lval_op op expr1 opt_expr2 =
+  let rhs_instrs, rhs_stack_size =
+    match opt_expr2 with
+    | None -> empty, 0
+    | Some e -> from_expr e, 1 in
+  match op, expr1 with
+    (* Special case for list destructuring, only on assignment *)
+    | LValOp.Set, (_, A.List _) ->
+      (* Potential optimization: if we know the type (e.g. a tuple) we
+       * can avoid wrapping a fault handler *)
+      let temp_local = Local.get_unnamed_local () in
+      let fault_label = Label.next_fault () in
+      let fault_body = gather [instr_unsetl temp_local; instr_unwind] in
+      let try_body = emit_lval_op_list temp_local [] expr1 in
+      gather [
+        rhs_instrs;
+        instr (IMutator (SetL temp_local));
+        instr_popc;
+        instr_try_fault fault_label try_body fault_body;
+        instr (IGet (PushL temp_local));
+      ]
+    | _ ->
+      emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size
+
+and emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size =
+  match expr1 with
+  | (_, A.Lvar (_, id)) ->
+    gather [
+      rhs_instrs;
+      emit_final_local_op op (Local.Named id)
+    ]
+
+  | (_, A.Array_get(base_expr, opt_elem_expr)) ->
+    let elem_expr_instrs, elem_stack_size = emit_elem_instrs opt_elem_expr in
+    let base_offset = elem_stack_size + rhs_stack_size in
+    let base_expr_instrs, base_setup_instrs, base_stack_size =
+      emit_base MemberOpMode.Define base_offset None base_expr in
+    let mk = get_elem_member_key rhs_stack_size opt_elem_expr in
+    let total_stack_size = elem_stack_size + base_stack_size in
+    let final_instr = emit_final_member_op total_stack_size op mk in
+    gather [
+      base_expr_instrs;
+      elem_expr_instrs;
+      rhs_instrs;
+      base_setup_instrs;
+      final_instr
+    ]
+
+  | (_, A.Obj_get(e1, e2, null_flavor)) ->
+    let prop_expr_instrs, prop_stack_size = emit_prop_instrs e2 in
+    let base_offset = prop_stack_size + rhs_stack_size in
+    let base_expr_instrs, base_setup_instrs, base_stack_size =
+      emit_base MemberOpMode.Define base_offset None e1 in
+    let mk = get_prop_member_key null_flavor rhs_stack_size e2 in
+    let total_stack_size = prop_stack_size + base_stack_size in
+    let final_instr = emit_final_member_op total_stack_size op mk in
+    gather [
+      base_expr_instrs;
+      prop_expr_instrs;
+      rhs_instrs;
+      base_setup_instrs;
+      final_instr
+    ]
+
+  | _ ->
+    gather [
+      emit_nyi "lval expression";
+      rhs_instrs;
     ]
 
 and emit_unop op e =
@@ -692,11 +939,11 @@ and emit_unop op e =
     from_expr e;
     instr (IOp SubO)]
   | A.Uincr | A.Udecr | A.Upincr | A.Updecr ->
-    let instrs, lval = emit_lval e in
-    gather [instrs;
-      match unop_to_incdec_op op with
-      | None -> emit_nyi "incdec"
-      | Some incdec_op -> instr (IMutator (IncDecL (lval, incdec_op)))]
+    begin match unop_to_incdec_op op with
+    | None -> emit_nyi "incdec"
+    | Some incdec_op ->
+      emit_lval_op (LValOp.IncDec incdec_op) e None
+    end
   | A.Uref ->
     emit_nyi "references"
 
@@ -1064,577 +1311,3 @@ and from_case c =
     | _ -> None
   in
   (e, l), gather [instr_label l; b]
-
-(* TODO *)
-let fmt_name s = s
-
-let fmt_name_or_prim x =
-  match x with
-  | "void" -> "HH\\void"
-  | "int" -> "HH\\int"
-  | "bool" -> "HH\\bool"
-  | "float" -> "HH\\float"
-  | "string" -> "HH\\string"
-  | "num" -> "HH\\num"
-  | "resource" -> "HH\\resource"
-  | "arraykey" -> "HH\\arraykey"
-  | "noreturn" -> "HH\\noreturn"
-  | "mixed" -> "HH\\mixed"
-  | "this" -> "HH\\this"
-  | _ -> fmt_name x
-
-(* Produce the "userType" bit of the annotation *)
-let rec fmt_hint (_, h) =
-  match h with
-  | A.Happly ((_, s), []) -> fmt_name_or_prim s
-  | A.Happly ((_, s), args) ->
-    fmt_name_or_prim s ^ "<" ^ String.concat ", " (List.map args fmt_hint) ^ ">"
-
-  | A.Hfun (args, _, ret) ->
-    "(function (" ^ String.concat ", " (List.map args fmt_hint) ^ "): " ^
-      fmt_hint ret ^ ")"
-
-  | A.Htuple hs ->
-    "(" ^ String.concat ", " (List.map hs fmt_hint) ^ ")"
-
-  | A.Haccess (h1, h2, accesses) ->
-    String.concat "::" (List.map (h1::h2::accesses) snd)
-
-  | A.Hoption t -> "?" ^ fmt_hint t
-
-  | A.Hshape smap ->
-    let fmt_field = function
-      | A.SFlit (_, s) -> "'" ^ s ^ "'"
-      | A.SFclass_const ((_, s1), (_, s2)) -> fmt_name s1 ^ "::" ^ s2
-    in
-    let format_shape_field ({ A.sf_name; A.sf_hint; _ }) =
-      fmt_field sf_name ^ "=>" ^ fmt_hint sf_hint in
-    let shape_fields =
-      List.map ~f:format_shape_field smap in
-    "HH\\shape(" ^ String.concat ", " shape_fields ^ ")"
-
-let rec hint_to_type_constraint tparams (_, h) =
-match h with
-| A.Happly ((_, ("mixed" | "this" | "void")), []) ->
-  TC.make None []
-
-| A.Hfun (_, _, _) ->
-  TC.make None []
-
-| A.Haccess _ ->
-  let tc_name = Some "" in
-  let tc_flags = [TC.HHType; TC.ExtendedHint; TC.TypeConstant] in
-  TC.make tc_name tc_flags
-
-(* Need to differentiate between type params and classes *)
-| A.Happly ((_, s), _) ->
-  if List.mem tparams s then
-    let tc_name = Some "" in
-    let tc_flags = [TC.HHType; TC.ExtendedHint; TC.TypeVar] in
-    TC.make tc_name tc_flags
-  else
-    let tc_name = Some (fmt_name_or_prim s) in
-    let tc_flags = [TC.HHType] in
-    TC.make tc_name tc_flags
-
-(* Shapes and tuples are just arrays *)
-| A.Hshape _ |  A.Htuple _ ->
-  let tc_name = Some "array" in
-  let tc_flags = [TC.HHType] in
-  TC.make tc_name tc_flags
-
-| A.Hoption t ->
-  let tc = hint_to_type_constraint tparams t in
-  let tc_name = TC.name tc in
-  let tc_flags = TC.flags tc in
-  let tc_flags = List.dedup
-    ([TC.Nullable; TC.HHType; TC.ExtendedHint] @ tc_flags) in
-  TC.make tc_name tc_flags
-
-let hint_to_type_info ~always_extended tparams h =
-  let tc = hint_to_type_constraint tparams h in
-  let tc_name = TC.name tc in
-  let tc_flags = TC.flags tc in
-  let tc_flags =
-    if always_extended && tc_name != None
-    then List.dedup (TC.ExtendedHint :: tc_flags)
-    else tc_flags in
-  let type_info_user_type = Some (fmt_hint h) in
-  let type_info_type_constraint = TC.make tc_name tc_flags in
-  Hhas_type_info.make type_info_user_type type_info_type_constraint
-
-let hints_to_type_infos ~always_extended tparams hints =
-  let mapper hint = hint_to_type_info always_extended tparams hint in
-  List.map hints mapper
-
-let from_param tparams p =
-  let param_name = snd p.A.param_id in
-  let param_type_info = Option.map p.A.param_hint
-    (hint_to_type_info ~always_extended:false tparams) in
-  let param_default_value = Option.map p.A.param_expr
-    ~f:(fun e -> Label.next_default_arg (), e)
-  in
-  Hhas_param.make param_name param_type_info param_default_value
-
-let has_type_constraint ti =
-  match ti with
-  | Some ti when (Hhas_type_info.has_type_constraint ti) -> true
-  | _ -> false
-
-let emit_method_prolog params =
-  gather (List.filter_map params (fun p ->
-    let param_type_info = Hhas_param.type_info p in
-    let param_name = Hhas_param.name p in
-    if has_type_constraint param_type_info
-    then Some (instr (IMisc (VerifyParamType (Param_named param_name))))
-    else None))
-
-let emit_param_default_value_setter params =
-  let setters = List.filter_map params (fun p ->
-    let param_name = Hhas_param.name p in
-    let dvo = Hhas_param.default_value p in
-    Option.map dvo (fun (l, e) ->
-      gather [
-        instr_label l;
-        from_expr e;
-        instr_setl (Local.Named param_name);
-        instr_popc;
-      ]) )
-  in
-  if List.length setters = 0
-  then empty, empty
-  else
-    let l = Label.next_regular () in
-    instr_label l, gather [gather setters; instr_jmpns l]
-
-let tparams_to_strings tparams =
-  List.map tparams (fun (_, (_, s), _) -> s)
-
-(*  Note that at this time we do NOT want to recurse on the instruction
-    sequence in the fault block. Why not?  Consider:
-    try { x } finally { try { y } finally { z } }
-    We make a copy of the code generated for "try { y } finally { z }" in
-    both the "finally" code which follows try-fault F1 { x }, and in
-    the fault block for the outer try. Which means that now there are two
-    places in the code where there is a TryFaultBegin instruction for the
-    *inner*  try. We don't want to detect it twice and generate fault blocks
-    twice.
-
-    This means that if we ever synthesize a fault-only try-fault, without
-    a finally block copying its contents, and that fault block itself
-    contains a try-fault or try-finally, then the fault block of the inner
-    try-fault will never be detected here. Right now we never do that; we
-    only generate synthetic try-faults for simple cleanup operations. If we
-    ever do generate nested try-faults then we'll need a more sophisticated
-    algorithm here to ensure that each fault block is emitted once.
- *)
-let emit_fault_instructions instrseq =
-  let rec aux instrseq acc =
-    match instrseq with
-    | Instr_try_fault (try_body, fault_body) ->
-      aux try_body (fault_body :: acc)
-    | Instr_list _ -> acc
-    | Instr_concat ([]) -> acc
-    | Instr_concat (h :: t) -> aux (Instr_concat t) (aux h acc) in
-  gather (aux instrseq [])
-
-let verify_returns body =
-  let rewriter i =
-    match i with
-    | IContFlow RetC ->
-      [ (IMisc VerifyRetTypeC); (IContFlow RetC) ]
-    | _ -> [ i ] in
-  InstrSeq.flat_map body ~f:rewriter
-
-let from_body tparams params ret b =
-  Label.reset_label ();
-  Local.reset_local ();
-  Iterator.reset_iterator ();
-  let params = List.map params (from_param tparams) in
-  let return_type_info = Option.map ret
-    (hint_to_type_info ~always_extended:true tparams) in
-  let stmt_instrs = from_stmts b in
-  let stmt_instrs =
-    if has_type_constraint return_type_info then
-      verify_returns stmt_instrs
-    else
-      stmt_instrs in
-  let ret_instrs =
-    match List.last b with Some (A.Return _) -> empty | _ ->
-    gather [instr_null; instr_retc]
-  in
-  let fault_instrs = emit_fault_instructions stmt_instrs in
-  let begin_label, default_value_setters =
-    emit_param_default_value_setter params
-  in
-  let body_instrs = gather [
-    begin_label;
-    emit_method_prolog params;
-    stmt_instrs;
-    ret_instrs;
-    default_value_setters;
-    fault_instrs;
-  ] in
-  body_instrs, params, return_type_info
-
-let extract_decl_vars instrseq =
-  let module ULS = Unique_list_string in
-  (* TODO: Both reads and writes need to go into decl vars *)
-  (* TODO: Default arguments should not be in declvars *)
-  let folder uniq_list instruction =
-    match instruction with
-    | IMutator (SetL (Local.Named s)) -> ULS.add uniq_list s
-    | _ -> uniq_list in
-  let decl_vars = InstrSeq.fold_left instrseq ~init:ULS.empty ~f:folder in
-  List.rev (ULS.items decl_vars)
-
-(* Create a map from defined labels to instruction offset *)
-let create_label_to_offset_map instrseq =
-  snd @@
-  InstrSeq.fold_left instrseq ~init:(0, IMap.empty) ~f:(fun (i, m) instr ->
-    begin match instr with
-    | ILabel (Label.Regular l) -> (i, IMap.add l i m)
-    | _        -> (i + 1, m)
-    end)
-
-let lookup_def l defs =
-  match IMap.get l defs with
-  | None -> failwith "lookup_def: label missing"
-  | Some ix -> ix
-
-(* Generate new labels for all labels referenced in instructions, in the
- * order that the instructions appear. Also record which labels are
- *)
-let create_label_ref_map defs instrseq =
-  snd @@
-  InstrSeq.fold_left instrseq ~init:(0, (ISet.empty, IMap.empty))
-    ~f:(fun acc instr ->
-    let process_ref (n, (used, refs) as acc) l =
-      let l = Label.id l in
-      let ix = lookup_def l defs in
-      match IMap.get ix refs with
-      (* This is the first time we've seen a reference to a label for
-       * this instruction offset, so generate a new label *)
-      | None -> (n + 1, (ISet.add l used, IMap.add ix n refs))
-      (* We already have a label for this instruction offset *)
-      | Some _ -> acc in
-    match instr with
-    | IIterator (IterInit (_, l, _))
-    | IIterator (IterInitK (_, l, _, _))
-    | IIterator (WIterInit (_, l, _))
-    | IIterator (WIterInitK (_, l, _, _))
-    | IIterator (MIterInit (_, l, _))
-    | IIterator (MIterInitK (_, l, _, _))
-    | IIterator (IterNext (_, l, _))
-    | IIterator (IterNextK (_, l, _, _))
-    | IIterator (WIterNext (_, l, _))
-    | IIterator (WIterNextK (_, l, _, _))
-    | IIterator (MIterNext (_, l, _))
-    | IIterator (MIterNextK (_, l, _, _))
-    | IContFlow (Jmp l | JmpNS l | JmpZ l | JmpNZ l) ->
-      process_ref acc l
-    | IContFlow (Switch (_, _, ls)) ->
-      List.fold_left ls ~f:process_ref ~init:acc
-    | IContFlow (SSwitch pairs) ->
-      List.fold_left pairs ~f:(fun acc (_,l) -> process_ref acc l) ~init:acc
-    (* TODO: other uses of Label.t in instructions:
-      DecodeCufIter
-      IterBreak
-     *)
-    | _ -> acc)
-
-(* Relabel the instruction sequence so that
- *   1. No instruction is preceded by more than one label
- *   2. No label is unreferenced
- *   3. References to labels occur in strict label number order, starting at 0
- *)
-let relabel_instrseq instrseq =
-  let defs = create_label_to_offset_map instrseq in
-  let used, refs = create_label_ref_map defs instrseq in
-  let relabel l =
-    let l = Label.id l in
-    let ix = lookup_def l defs in
-    match IMap.get ix refs with
-    | None -> failwith "relabel_instrseq: offset not in refs"
-    | Some l' -> Label.Regular l' in
-  InstrSeq.filter_map instrseq ~f:(fun instr ->
-    match instr with
-    | IIterator (IterInit (id, l, v)) ->
-      Some (IIterator (IterInit (id, relabel l, v)))
-    | IIterator (IterInitK (id, l, k, v)) ->
-      Some (IIterator (IterInitK (id, relabel l, k, v)))
-    | IIterator (WIterInit (id, l, v)) ->
-      Some (IIterator (WIterInit (id, relabel l, v)))
-    | IIterator (WIterInitK (id, l, k, v)) ->
-      Some (IIterator (WIterInitK (id, relabel l, k, v)))
-    | IIterator (MIterInit (id, l, v)) ->
-      Some (IIterator (MIterInit (id, relabel l, v)))
-    | IIterator (MIterInitK (id, l, k, v)) ->
-      Some (IIterator (MIterInitK (id, relabel l, k, v)))
-    | IIterator (IterNext (id, l, v)) ->
-      Some (IIterator (IterNext (id, relabel l, v)))
-    | IIterator (IterNextK (id, l, k, v)) ->
-      Some (IIterator (IterNextK (id, relabel l, k, v)))
-    | IIterator (WIterNext (id, l, v)) ->
-      Some (IIterator (WIterNext (id, relabel l, v)))
-    | IIterator (WIterNextK (id, l, k, v)) ->
-      Some (IIterator (WIterNextK (id, relabel l, k, v)))
-    | IIterator (MIterNext (id, l, v)) ->
-      Some (IIterator (MIterNext (id, relabel l, v)))
-    | IIterator (MIterNextK (id, l, k, v)) ->
-      Some (IIterator (MIterNextK (id, relabel l, k, v)))
-    | IContFlow (Jmp l)   -> Some (IContFlow (Jmp (relabel l)))
-    | IContFlow (JmpNS l) -> Some (IContFlow (JmpNS (relabel l)))
-    | IContFlow (JmpZ l)  -> Some (IContFlow (JmpZ (relabel l)))
-    | IContFlow (JmpNZ l) -> Some (IContFlow (JmpNZ (relabel l)))
-    | IContFlow (Switch (k, n, ll)) ->
-      Some (IContFlow (Switch (k, n, List.map ll relabel)))
-    | IContFlow (SSwitch pairs) ->
-      Some (IContFlow (SSwitch
-        (List.map pairs (fun (id,l) -> (id, relabel l)))))
-    (* TODO: other uses of Label.t in instructions:
-      DecodeCufIter
-      IterBreak
-     *)
-    | ILabel (Label.Regular l) ->
-      (* TODO: Write test cases for things like catch and fault labels followed
-      by loop start labels. *)
-      if ISet.mem l used then
-        let ix = lookup_def l defs in
-        begin match IMap.get ix refs with
-        | Some l' -> Some (ILabel (Label.Regular l'))
-        | None -> None
-        end
-      else None
-    | _ -> Some instr)
-
-let from_fun_ : A.fun_ -> Hhas_function.t option =
-  fun ast_fun ->
-  let function_name = Litstr.to_string @@ snd ast_fun.A.f_name in
-  match ast_fun.A.f_body with
-  | b ->
-    let tparams = tparams_to_strings ast_fun.A.f_tparams in
-    let body_instrs, function_params, function_return_type =
-      from_body tparams ast_fun.A.f_params ast_fun.A.f_ret b in
-    let body_instrs = relabel_instrseq body_instrs in
-    let function_decl_vars = extract_decl_vars body_instrs in
-    let function_body = instr_seq_to_list body_instrs in
-    Some (Hhas_function.make
-      function_name
-      function_params
-      function_return_type
-      function_body
-      function_decl_vars)
-
-let from_functions ast_functions =
-  List.filter_map ast_functions from_fun_
-
-let from_attribute_base attribute_name arguments =
-  let attribute_arguments = literals_from_exprs_with_index arguments in
-  Hhas_attribute.make attribute_name attribute_arguments
-
-let from_attribute : A.user_attribute -> Hhas_attribute.t =
-  fun ast_attr ->
-  let attribute_name = Litstr.to_string @@ snd ast_attr.A.ua_name in
-  from_attribute_base attribute_name ast_attr.A.ua_params
-
-let from_attributes ast_attributes =
-  (* The list of attributes is reversed in the A. *)
-  List.map (List.rev ast_attributes) from_attribute
-
-let from_method : A.class_ -> A.method_ -> Hhas_method.t option =
-  fun ast_class ast_method ->
-  let class_tparams = tparams_to_strings ast_class.A.c_tparams in
-  let method_name = Litstr.to_string @@ snd ast_method.A.m_name in
-  let method_is_abstract = List.mem ast_method.A.m_kind A.Abstract in
-  let method_is_final = List.mem ast_method.A.m_kind A.Final in
-  let method_is_private = List.mem ast_method.A.m_kind A.Private in
-  let method_is_protected = List.mem ast_method.A.m_kind A.Protected in
-  let method_is_public = List.mem ast_method.A.m_kind A.Public in
-  let method_is_static = List.mem ast_method.A.m_kind A.Static in
-  let method_attributes = from_attributes ast_method.A.m_user_attributes in
-  match ast_method.A.m_body with
-  | b ->
-    let method_tparams = tparams_to_strings ast_method.A.m_tparams in
-    let tparams = class_tparams @ method_tparams in
-    let body_instrs, method_params, method_return_type =
-      from_body tparams ast_method.A.m_params ast_method.A.m_ret b in
-    let method_body = instr_seq_to_list body_instrs in
-    let m = Hhas_method.make
-      method_attributes
-      method_is_protected
-      method_is_public
-      method_is_private
-      method_is_static
-      method_is_final
-      method_is_abstract
-      method_name
-      method_params
-      method_return_type
-      method_body in
-    Some m
-
-let from_methods ast_class ast_methods =
-  List.filter_map ast_methods (from_method ast_class)
-
-let is_interface ast_class =
-  ast_class.A.c_kind = Ast.Cinterface
-
-let default_constructor ast_class =
-  let method_attributes = [] in
-  let method_name = "86ctor" in
-  let method_body = instr_seq_to_list (gather [
-    instr (ILitConst Null);
-    instr (IContFlow RetC)
-  ]) in
-  let method_is_abstract = is_interface ast_class in
-  let method_is_final = false in
-  let method_is_private = false in
-  let method_is_protected = false in
-  let method_is_public = true in
-  let method_is_static = false in
-  let method_params = [] in
-  let method_return_type = None in
-  Hhas_method.make
-    method_attributes
-    method_is_protected
-    method_is_public
-    method_is_private
-    method_is_static
-    method_is_final
-    method_is_abstract
-    method_name
-    method_params
-    method_return_type
-    method_body
-
-
-let from_extends tparams extends =
-  (* TODO: This prints out "extends <"\\Mammal" "\\Mammal" hh_type >"
-  instead of "extends Mammal" -- figure out how to have it produce the
-  simpler form in this clause.
-  *)
-  match extends with
-  | [] -> None
-  | h :: _ -> Some (hint_to_type_info ~always_extended:false tparams h)
-
-let from_implements tparams implements =
-  (* TODO: This prints out "implements <"\\IFoo" "\\IFoo" hh_type >"
-  instead of "implements IFoo" -- figure out how to have it produce the
-  simpler form in this clause.
-  *)
-  hints_to_type_infos ~always_extended:false tparams implements
-
-let from_class_var cv_kind_list class_var =
-  let (_, (_, cv_name), _) = class_var in
-  (* TODO: xhp, type, initializer *)
-  (* TODO: Hack allows a property to be marked final, which is nonsensical.
-  HHVM does not allow this.  Fix this in the Hack parser? *)
-  let property_name = Litstr.to_string @@ cv_name in
-  let property_is_private = List.mem cv_kind_list A.Private in
-  let property_is_protected = List.mem cv_kind_list A.Protected in
-  let property_is_public = List.mem cv_kind_list A.Public in
-  let property_is_static = List.mem cv_kind_list A.Static in
-  Hhas_property.make
-    property_is_private
-    property_is_protected
-    property_is_public
-    property_is_static
-    property_name
-
-let from_constant (_hint, name, const_init) =
-  (* The type hint is omitted. *)
-  match const_init with
-  | None -> None (* Abstract constants are omitted *)
-  | Some _init ->
-    (* TODO: Deal with the initializer *)
-    let constant_name = Litstr.to_string @@ snd name in
-    Some (Hhas_constant.make constant_name)
-
-let from_constants ast_constants =
-  List.filter_map ast_constants from_constant
-
-let from_type_constant ast_type_constant =
-  match ast_type_constant.A.tconst_type with
-  | None -> None (* Abstract type constants are omitted *)
-  | Some _init ->
-    (* TODO: Deal with the initializer *)
-    let type_constant_name = Litstr.to_string @@
-      snd ast_type_constant.A.tconst_name in
-    Some (Hhas_type_constant.make type_constant_name)
-
-let from_type_constants ast_type_constants =
-  List.filter_map ast_type_constants from_type_constant
-
-let from_class_elt_method ast_class elt =
-  match elt with
-  | A.Method m -> from_method ast_class m
-  | _ -> None
-
-let from_class_elt_classvars elt =
-  match elt with
-  | A.ClassVars (kind_list, _, cvl) ->
-    List.map cvl (from_class_var kind_list)
-  | _ -> []
-
-let from_class_elt_constants elt =
-  match elt with
-  | A.Const(hint_opt, l) ->
-    List.filter_map l (fun (id, e) -> from_constant (hint_opt, id, Some e))
-  | _ -> []
-
-let from_class_elt_typeconsts elt =
-  match elt with
-  | A.TypeConst tc -> from_type_constant tc
-  | _ -> None
-
-let from_class : A.class_ -> Hhas_class.t =
-  fun ast_class ->
-  let class_attributes = from_attributes ast_class.A.c_user_attributes in
-  let class_name = Litstr.to_string @@ snd ast_class.A.c_name in
-  let class_is_trait = ast_class.A.c_kind = Ast.Ctrait in
-  let class_is_enum = ast_class.A.c_kind = Ast.Cenum in
-  let class_is_interface = is_interface ast_class in
-  let class_is_abstract = ast_class.A.c_kind = Ast.Cabstract in
-  let class_is_final =
-    ast_class.A.c_final || class_is_trait || class_is_enum in
-  let tparams = tparams_to_strings ast_class.A.c_tparams in
-  let class_base =
-    if class_is_interface then None
-    else from_extends tparams ast_class.A.c_extends in
-  let implements =
-    if class_is_interface then ast_class.A.c_extends
-    else ast_class.A.c_implements in
-  let class_implements = from_implements tparams implements in
-  let class_body = ast_class.A.c_body in
-  let has_constructor = List.exists class_body
-    (fun elt -> match elt with
-                | A.Method { A.m_name; _} -> snd m_name = SN.Members.__construct
-                | _ -> false) in
-  let class_methods =
-    if has_constructor then [] else [default_constructor ast_class] in
-  let class_methods =
-    List.filter_map class_body (from_class_elt_method ast_class)
-    @ class_methods in
-  let class_properties = List.concat_map class_body from_class_elt_classvars in
-  let class_constants = List.concat_map class_body from_class_elt_constants in
-  let class_type_constants =
-    List.filter_map class_body from_class_elt_typeconsts in
-  (* TODO: uses, xhp attr uses, xhp category *)
-  Hhas_class.make
-    class_attributes
-    class_base
-    class_implements
-    class_name
-    class_is_final
-    class_is_abstract
-    class_is_interface
-    class_is_trait
-    class_is_enum
-    class_methods
-    class_properties
-    class_constants
-    class_type_constants
-
-let from_classes ast_classes =
-  List.map ast_classes from_class

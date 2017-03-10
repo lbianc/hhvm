@@ -15,6 +15,26 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   set(WINDOWS TRUE)
 endif()
 
+# Do this until cmake has a define for ARMv8
+INCLUDE(CheckCXXSourceCompiles)
+CHECK_CXX_SOURCE_COMPILES("
+#ifndef __x86_64__
+#error Not x64
+#endif
+int main() { return 0; }" IS_X64)
+
+CHECK_CXX_SOURCE_COMPILES("
+#ifndef __AARCH64EL__
+#error Not ARMv8
+#endif
+int main() { return 0; }" IS_AARCH64)
+
+CHECK_CXX_SOURCE_COMPILES("
+#ifndef __powerpc64__
+#error Not PPC64
+#endif
+int main() { return 0; }" IS_PPC64)
+
 # using Clang or GCC
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
   # Warnings to disable by name, -Wno-${name}
@@ -73,15 +93,18 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
   endif()
 
   if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang") # using Clang
-    list(APPEND GENERAL_OPTIONS
-      # For unclear reasons, our detection for what crc32 intrinsics you have
-      # will cause clang to ICE. Specifying a baseline here works around the
-      # issue. (SSE4.2 has been available on processors for quite some time now.)
-      "msse4.2"
-    )
-    # Also need to pass the right option to ASM files to avoid inconsistencies 
-    # in CRC hash function handling
-    set(CMAKE_ASM_FLAGS  "${CMAKE_ASM_FLAGS} -msse4.2")
+    if (IS_X64)
+      list(APPEND GENERAL_OPTIONS
+        # For unclear reasons, our detection for what crc32 intrinsics you have
+        # will cause clang to ICE. Specifying a baseline here works around the
+        # issue. (SSE4.2 has been available on processors for quite some time now.)
+        "msse4.2"
+      )
+      # Also need to pass the right option to ASM files to avoid inconsistencies
+      # in CRC hash function handling
+      set(CMAKE_ASM_FLAGS  "${CMAKE_ASM_FLAGS} -msse4.2")
+    endif()
+
     list(APPEND GENERAL_CXX_OPTIONS
       "Qunused-arguments"
     )
@@ -127,7 +150,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       "-param=inline-unit-growth=200"
       "-param=large-unit-insns=10000"
     )
-    # The params bellow causes problem on GCC 4.8 4.8 and 5.4 on PPC64
+    # The params bellow causes problem on GCC 4.9 and 5.4 on PPC64
     # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=72855
     if(NOT IS_PPC64)
       list(APPEND RELEASE_CXX_OPTIONS
@@ -162,9 +185,9 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       list(APPEND GENERAL_OPTIONS "fno-delete-null-pointer-checks")
     endif()
 
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0 OR
-       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 5.0)
-      message(WARNING "HHVM is primarily tested on GCC 4.8 and GCC 4.9. Using other versions may produce unexpected results, or may not even build at all.")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 6.0 OR
+       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 6.0)
+     message(WARNING "HHVM is primarily tested on GCC 4.9 and 5. Using other versions may produce unexpected results, or may not even build at all.")
     endif()
 
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.1 OR

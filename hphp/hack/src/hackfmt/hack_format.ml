@@ -598,14 +598,57 @@ let rec transform node =
     t name;
     t prop_initializer;
     ()
-  | NamespaceDeclaration _
-  | NamespaceBody _
-  | NamespaceUseDeclaration _
-  | NamespaceGroupUseDeclaration _
-  | NamespaceUseClause _ ->
-    let error = Printf.sprintf "%s not supported - exiting \n"
-      (SyntaxKind.to_string (kind node)) in
-    raise (Hackfmt_error.UnsupportedSyntax error);
+  | NamespaceDeclaration x ->
+    let (kw, name, body) = get_namespace_declaration_children x in
+    t kw;
+    pending_space ();
+    t name;
+    t body;
+    builder#end_chunks ();
+    ()
+  | NamespaceBody x ->
+    let (left_b, decls, right_b) = get_namespace_body_children x in
+    pending_space ();
+    t left_b;
+    builder#end_chunks ();
+    builder#start_block_nest ();
+    tl_with ~f:(fun () -> handle_possible_list decls) ();
+    transform_and_unnest_closing_brace right_b;
+    ()
+  | NamespaceUseDeclaration x ->
+    let (kw, use_kind, clauses, semi) =
+      get_namespace_use_declaration_children x in
+    t kw;
+    pending_space ();
+    t use_kind;
+    if not (is_missing use_kind) then pending_space ();
+    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+      handle_possible_list clauses ~after_each:after_each_argument;
+    ) ();
+    t semi;
+    builder#end_chunks ();
+    ()
+  | NamespaceGroupUseDeclaration x ->
+    let (kw, use_kind, prefix, left_b, clauses, right_b, semi) =
+      get_namespace_group_use_declaration_children x in
+    t kw;
+    pending_space ();
+    t use_kind;
+    if not (is_missing use_kind) then pending_space ();
+    t prefix;
+    transform_argish left_b clauses right_b;
+    t semi;
+    builder#end_chunks ();
+    ()
+  | NamespaceUseClause x ->
+    let (use_kind, name, as_kw, alias) = get_namespace_use_clause_children x in
+    t use_kind;
+    t name;
+    if not (is_missing as_kw) then pending_space ();
+    t as_kw;
+    if not (is_missing alias) then pending_space ();
+    t alias;
+    ()
   | FunctionDeclaration x ->
     let (attr, header, body) = get_function_declaration_children x in
     t attr;
@@ -1095,8 +1138,10 @@ let rec transform node =
   | ConditionalExpression x ->
     let (test_expr, q_kw, true_expr, c_kw, false_expr) =
       get_conditional_expression_children x in
+    let lazy_argument_rule = builder#create_lazy_rule
+      ~rule_kind:(Rule.Argument) () in
     t test_expr;
-    tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+    tl_with ~nest ~rule:(LazyRuleID lazy_argument_rule) ~f:(fun () ->
       split ~space ();
       t q_kw;
       if not (is_missing true_expr) then begin
@@ -1112,13 +1157,13 @@ let rec transform node =
   | FunctionCallExpression x ->
     handle_function_call_expression x
   | EvalExpression x ->
-    let (kw, left_p, args, right_p) = get_eval_expression_children x in
+    let (kw, left_p, arg, right_p) = get_eval_expression_children x in
     t kw;
-    transform_argish left_p args right_p;
+    transform_braced_item left_p arg right_p;
   | EmptyExpression x ->
-    let (kw, left_p, args, right_p) = get_empty_expression_children x in
+    let (kw, left_p, arg, right_p) = get_empty_expression_children x in
     t kw;
-    transform_argish left_p args right_p;
+    transform_braced_item left_p arg right_p;
   | IssetExpression x ->
     let (kw, left_p, args, right_p) = get_isset_expression_children x in
     t kw;
@@ -1223,7 +1268,7 @@ let rec transform node =
   | SubscriptExpression x ->
     let (receiver, lb, expr, rb) = get_subscript_expression_children x in
     t receiver;
-    transform_argish lb expr rb;
+    transform_braced_item lb expr rb;
     ()
   | AwaitableCreationExpression x ->
     let (kw, body) = get_awaitable_creation_expression_children x in
@@ -1393,19 +1438,19 @@ let rec transform node =
     let (kw, left_a, vec_type, right_a) =
       get_vector_array_type_specifier_children x in
     t kw;
-    transform_argish left_a vec_type right_a;
+    transform_braced_item left_a vec_type right_a;
     ()
   | VectorTypeSpecifier x ->
     let (kw, left_a, vec_type, right_a) =
       get_vector_type_specifier_children x in
     t kw;
-    transform_argish left_a vec_type right_a;
+    transform_braced_item left_a vec_type right_a;
     ()
   | KeysetTypeSpecifier x ->
-    let (kw, left_a, vec_type, right_a) =
+    let (kw, left_a, ks_type, right_a) =
       get_keyset_type_specifier_children x in
     t kw;
-    transform_argish left_a vec_type right_a;
+    transform_braced_item left_a ks_type right_a;
     ()
   | TypeParameter x ->
     let (variance, name, constraints) = get_type_parameter_children x in
@@ -1426,7 +1471,7 @@ let rec transform node =
     let key_list_item = make_list_item key comma_kw in
     let val_list_item = make_list_item value (make_missing ()) in
     let args = make_list [key_list_item; val_list_item] in
-    transform_argish left_a args right_a;
+    transform_argish ~allow_trailing:false left_a args right_a;
   | DictionaryTypeSpecifier x ->
     let (kw, left_a, members, right_a) =
       get_dictionary_type_specifier_children x
@@ -1445,7 +1490,7 @@ let rec transform node =
     let (kw, left_a, class_type, right_a) =
       get_classname_type_specifier_children x in
     t kw;
-    transform_argish left_a class_type right_a;
+    transform_braced_item left_a class_type right_a;
   | FieldSpecifier x ->
     let (name, arrow_kw, field_type) = get_field_specifier_children x in
     transform_mapish_entry name arrow_kw field_type;
@@ -1755,7 +1800,8 @@ and transform_argish_with_return_type ~in_span left_p params right_p colon
   tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
     tl_with ~nest:true ~f:(fun () ->
       handle_possible_list
-        ~after_each:after_each_argument ~handle_last:transform_last_arg params
+      ~after_each:after_each_argument
+      ~handle_last:(transform_last_arg ~allow_trailing:true) params
     ) ();
     transform right_p;
     transform colon;
@@ -1764,7 +1810,7 @@ and transform_argish_with_return_type ~in_span left_p params right_p colon
   ) ();
   ()
 
-and transform_argish left_p arg_list right_p =
+and transform_argish ?(allow_trailing=true) left_p arg_list right_p =
   transform left_p;
   if not (is_missing arg_list) then begin
     split ();
@@ -1772,13 +1818,22 @@ and transform_argish left_p arg_list right_p =
       tl_with ~nest:true ~f:(fun () ->
         handle_possible_list
           ~after_each:after_each_argument
-          ~handle_last:transform_last_arg arg_list
+          ~handle_last:(transform_last_arg ~allow_trailing) arg_list
       ) ();
       split ();
       transform right_p;
     ) ();
   end else transform right_p;
   ()
+
+and transform_braced_item left_p item right_p =
+  transform left_p;
+  split ();
+  tl_with ~span:(Some Cost.Base) ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
+    tl_with ~nest:true ~f:(fun () -> transform item) ();
+    split ();
+    transform right_p;
+  ) ();
 
 and remove_trailing_trivia node =
   let trailing_token = match Syntax.trailing_token node with
@@ -1794,25 +1849,26 @@ and remove_trailing_trivia node =
   if not changed then failwith "Trailing token not rewritten";
   rewritten_node, EditableToken.trailing trailing_token
 
-and transform_last_arg node =
+and transform_last_arg ~allow_trailing node =
+  let set_pending_comma () =
+    if allow_trailing then builder#set_pending_comma () in
   match syntax node with
     | ListItem x ->
       let (item, separator) = get_list_item_children x in
       (match syntax separator with
         | Token x ->
           transform item;
-          builder#set_pending_comma ();
+          set_pending_comma ();
           builder#token_trivia_only x;
         | Missing ->
           let item, trailing_trivia = remove_trailing_trivia item in
           transform item;
-          builder#set_pending_comma ();
+          set_pending_comma ();
           builder#handle_trivia ~is_leading:false trailing_trivia;
         | _ -> raise (Failure "Expected separator to be a token");
       );
     | _ ->
-      transform node;
-      builder#set_pending_comma ();
+      failwith "Expected ListItem"
 
 and transform_mapish_entry key arrow value =
   transform key;

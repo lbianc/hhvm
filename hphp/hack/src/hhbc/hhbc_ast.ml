@@ -28,6 +28,15 @@ type num_params = int
 
 type collection_type = int
 
+(* These are the three flavors of value that can live on the stack:
+ *   C = cell
+ *   R = ref
+ *   A = classref
+ *)
+module Flavor = struct
+  type t = Cell | Ref | Classref
+end
+
 module MemberOpMode = struct
 
   type t =
@@ -61,11 +70,11 @@ end (* of QueryOp *)
 
 module MemberKey = struct
   type t =
-  | EC
+  | EC of stack_index
   | EL of local_id
   | ET of Litstr.id
   | EI of int64
-  | PC
+  | PC of stack_index
   | PL of local_id
   | PT of Litstr.id
   | QT of Litstr.id
@@ -79,6 +88,7 @@ type instruct_basic =
   | PopC
   | PopV
   | PopR
+  | PopU
   | Dup
   | Box
   | Unbox
@@ -406,6 +416,8 @@ type instruct_base =
   | BaseC of stack_index
   | BaseR of stack_index
   | BaseH
+  | Dim of MemberOpMode.t * MemberKey.t
+  | FPassDim of param_num * MemberKey.t
 
 type instruct_final =
   | QueryM of num_params * QueryOp.t * MemberKey.t
@@ -490,6 +502,11 @@ type instruct_misc =
   | Silence of local_id * op_silence
   | GetMemoKey
   | VarEnvDynCall
+  | IsUninit
+  | CGetCUNop
+  | UGetCUNop
+  | MemoSet of int * local_id * int
+  | MemoGet of int * local_id * int
 
 type gen_creation_execution =
   | CreateCont
@@ -536,76 +553,3 @@ and instruct =
   | ILabel of Label.t
   | ITry of instruct_try
   | IComment of string
-
-type type_constraint_flag =
-  | Nullable
-  | HHType
-  | ExtendedHint
-  | TypeVar
-  | Soft
-  | TypeConstant
-
-(* A type constraint is just a name and flags *)
-type type_constraint = {
-  tc_flags : type_constraint_flag list;
-  tc_name : string option;
-}
-
-(* Type info has additional optional user type *)
-type type_info = {
-  ti_user_type : string option;
-  ti_type_constraint : type_constraint;
-}
-
-type param = {
-  param_name      : Litstr.id;
-  param_type_info : type_info option;
-}
-
-type fun_def = {
-  f_name          : Litstr.id;
-  f_body          : instruct list;
-  f_params        : param list;
-  f_return_type   : type_info option;
-}
-
-type method_def = {
-  (* TODO: attributes *)
-  (* TODO: generic type parameters *)
-  (* TODO: where clause *)
-  (* TODO: is constructor / destructor / etc *)
-  method_is_protected  : bool;
-  method_is_public     : bool;
-  method_is_private    : bool;
-  method_is_static     : bool;
-  method_is_final      : bool;
-  method_is_abstract   : bool;
-  method_name          : Litstr.id;
-  (* TODO: formal parameters *)
-  (* TODO: return type *)
-  method_body          : instruct list;
-}
-
-type class_def = {
-  (* TODO attributes *)
-  (* TODO generic type parameters *)
-  (* TODO extends *)
-  (* TODO implements *)
-  class_name         : Litstr.id;
-  class_is_final     : bool;
-  class_is_abstract  : bool;
-  class_is_interface : bool;
-  class_is_trait     : bool;
-  class_is_enum      : bool;
-  class_methods      : method_def list;
-  (* TODO other members *)
-  (* TODO XHP stuff *)
-}
-
-type hhas_prog = {
-  hhas_fun     : fun_def list;
-  hhas_classes : class_def list;
-}
-
-let make hhas_fun hhas_classes =
-  { hhas_fun; hhas_classes }

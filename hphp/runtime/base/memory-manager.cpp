@@ -190,7 +190,6 @@ MemoryManager::MemoryManager() {
 }
 
 MemoryManager::~MemoryManager() {
-  dropRootMaps();
   if (debug) {
     // Check that every allocation in heap has been freed before destruction.
     forEachHeader([&](Header* h, size_t) {
@@ -200,29 +199,8 @@ MemoryManager::~MemoryManager() {
   // ~BigHeap releases its slabs/bigs.
 }
 
-void MemoryManager::dropRootMaps() {
-  m_objectRoots = nullptr;
-  m_resourceRoots = nullptr;
-  for (auto r : m_root_handles) r->invalidate();
-  m_root_handles.clear();
-}
-
-void MemoryManager::deleteRootMaps() {
-  if (m_objectRoots) {
-    req::destroy_raw(m_objectRoots);
-    m_objectRoots = nullptr;
-  }
-  if (m_resourceRoots) {
-    req::destroy_raw(m_resourceRoots);
-    m_resourceRoots = nullptr;
-  }
-  for (auto r : m_root_handles) r->invalidate();
-  m_root_handles.clear();
-}
-
 void MemoryManager::resetRuntimeOptions() {
   if (debug) {
-    deleteRootMaps();
     checkHeap("resetRuntimeOptions");
     // check that every allocation in heap has been freed before reset
     iterate([&](Header* h, size_t) {
@@ -500,9 +478,6 @@ void MemoryManager::resetAllocator() {
   // decref apc strings referenced by this request
   DEBUG_ONLY auto nstrings = StringData::sweepAll();
 
-  // cleanup root maps
-  dropRootMaps();
-
   // free the heap
   m_heap.reset();
 
@@ -573,7 +548,7 @@ void MemoryManager::flush() {
  * case c and combine the lists eventually.
  */
 
-const std::array<char*,NumHeaderKinds> header_names = {
+const std::array<char*,NumHeaderKinds> header_names = {{
   "PackedArray", "MixedArray", "EmptyArray", "ApcArray",
   "GlobalsArray", "ProxyArray", "DictArray", "VecArray", "KeysetArray",
   "String", "Resource", "Ref",
@@ -582,7 +557,7 @@ const std::array<char*,NumHeaderKinds> header_names = {
   "AsyncFuncFrame", "NativeData", "ClosureHdr",
   "SmallMalloc", "BigMalloc", "BigObj",
   "Free", "Hole"
-};
+}};
 
 // initialize a Hole header in the unused memory between m_front and m_limit
 void MemoryManager::initHole(void* ptr, uint32_t size) {

@@ -113,11 +113,9 @@ function_call
   , $number_with_long_identifier3 // num3
   );
 
-/* TODO: handle commas being added to array subscripts
 $arr[
   "idx" // some idx
 ] = $val;
-*/
 
 function f(
   int $a, // arg1
@@ -173,6 +171,21 @@ function getArray(
         , string // strings
         > {
   return array("foo" => "bar");
+}
+
+function getDict(
+): dict<
+  string, // strings
+  string // strings
+> {
+  return dict["foo" => "bar"];
+}
+
+function getDict(
+): dict< string // strings
+        , string // strings
+        > {
+  return dict["foo" => "bar"];
 }
 
 function swap<

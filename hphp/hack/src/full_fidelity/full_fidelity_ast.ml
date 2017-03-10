@@ -19,6 +19,7 @@ module TK = Full_fidelity_token_kind
 module PT = Full_fidelity_positioned_token
 
 
+
 let drop_pstr : int -> pstring -> pstring = fun cnt (pos, str) ->
   let len = String.length str in
   pos, if cnt >= len then "" else String.sub str cnt (len - cnt)
@@ -37,7 +38,10 @@ let lowerer_state =
   }
 
 (* "Local" context. *)
-type env = { saw_yield : bool ref }
+type env =
+  { saw_yield : bool ref
+  ; errors    : (Pos.t * string) list ref
+  }
 
 type +'a parser = node -> env -> 'a
 type ('a, 'b) metaparser = 'a parser -> 'b parser
@@ -94,9 +98,9 @@ let mpStripNoop pThing node env = match pThing node env with
 
 let mpOptional : ('a, 'a option) metaparser = fun p -> fun node env ->
   Option.try_with (fun () -> p node env)
-let mpYielding : ('a, ('a * bool)) metaparser = fun p node _env ->
+let mpYielding : ('a, ('a * bool)) metaparser = fun p node env ->
   let local_ptr = ref false in
-  let result = p node { saw_yield = local_ptr } in
+  let result = p node { env with saw_yield = local_ptr } in
   result, !local_ptr
 
 
@@ -199,6 +203,7 @@ let pBop : (expr -> expr -> expr_) parser = fun node env lhs rhs ->
   | Some TK.PlusEqual                   -> Binop (Eq (Some Plus),    lhs, rhs)
   | Some TK.MinusEqual                  -> Binop (Eq (Some Minus),   lhs, rhs)
   | Some TK.StarEqual                   -> Binop (Eq (Some Star),    lhs, rhs)
+  | Some TK.StarStarEqual               -> Binop (Eq (Some Starstar),lhs, rhs)
   | Some TK.SlashEqual                  -> Binop (Eq (Some Slash),   lhs, rhs)
   | Some TK.DotEqual                    -> Binop (Eq (Some Dot),     lhs, rhs)
   | Some TK.PercentEqual                -> Binop (Eq (Some Percent), lhs, rhs)
@@ -223,6 +228,8 @@ let pBop : (expr -> expr -> expr_) parser = fun node env lhs rhs ->
    *)
   | Some TK.BarGreaterThan              -> Pipe         (lhs, rhs)
   | Some TK.QuestionQuestion            -> NullCoalesce (lhs, rhs)
+  (* TODO: Figure out why this fails silently when used in a pBlock; probably
+     just caught somewhere *)
   | _ -> missing_syntax "binary operator" node env
 
 let pImportFlavor : import_flavor parser = fun node env ->
@@ -949,7 +956,6 @@ and pStmt : stmt parser = fun node env ->
   | ContinueStatement _ -> Continue (get_pos node)
   | _ -> missing_syntax "statement" node env
 
-
 let pTConstraintTy : hint parser = fun node ->
   match syntax node with
   | TypeConstraint { constraint_type; _ } -> pHint constraint_type
@@ -1467,44 +1473,137 @@ let pProgram : program parser = fun node env ->
       ) :: aux env nodel
   | node :: nodel -> pDefStmt node env :: aux env nodel
   in
-  Namespaces.elaborate_defs ParserOptions.default @@ post_process @@
-    aux env (as_list node)
+  post_process @@ aux env (as_list node)
 
 let pScript node env =
   match syntax node with
   | Script { script_declarations; _ } -> pProgram script_declarations env
   | _ -> missing_syntax "script" node env
 
+(* The full fidelity parser considers all comments "simply" trivia. Some
+ * comments have meaning, though. This meaning can either be relevant for the
+ * type checker (like UNSAFE, HH_FIXME, etc.), but also for other uses, like
+ * Codex, where comments are used for documentation generation.
+ *
+ * Inlining the scrape for comments in the lowering code would be prohibitively
+ * complicated, but a separate pass is fine.
+ *)
+let rec scour_line_comments (node : node)
+  : (Pos.t * string) list * Pos.t IMap.t IMap.t =
+    let comments, fixmes =
+      List.split @@ List.map scour_line_comments (children node)
+    in
+    (* TODO: Actually add comments for 'this' node. *)
+    ( List.concat comments
+    , IMap.empty (* TODO: Correctly combine fixmes-s *)
+    )
+
+(*****************************************************************************(
+ * Front-end matter
+)*****************************************************************************)
+
 exception Unknown_hh_mode of string
 let unknown_hh_mode s = raise (Unknown_hh_mode s)
 
-let from_text_with_legacy
-  (path : Relative_path.t)
+type result =
+  { fi_mode  : FileInfo.mode
+  ; ast      : Ast.program
+  ; content  : string
+  ; file     : Relative_path.t
+  ; comments : (Pos.t * string) list
+  }
+
+let from_text
+  ?(elaborate_namespaces  = true)
+  ?(include_line_comments = false)
+  ?(keep_errors           = true)
+  ?(parser_options        = ParserOptions.default)
+  (file        : Relative_path.t)
   (source_text : Full_fidelity_source_text.t)
-  : Parser_hack.parser_return =
+  : result =
     let open Full_fidelity_syntax_tree in
     let tree   = make source_text in
     let script = Full_fidelity_positioned_syntax.from_tree tree in
-    lowerer_state.language := language tree;
-    lowerer_state.filePath := Relative_path.suffix path;
-    lowerer_state.mode     :=
+    let fi_mode =
       (match mode tree with
       | _ when is_php tree -> FileInfo.Mdecl
       | "decl"             -> FileInfo.Mdecl
       | "strict"           -> FileInfo.Mstrict
       | "partial" | ""     -> FileInfo.Mpartial
       | s                  -> unknown_hh_mode s
-      );
-    Parser_hack.(
-      { file_mode = Some !(lowerer_state.mode)
-      ; comments  = []
-      ; ast       = runP pScript script { saw_yield = ref false }
-      ; content   = source_text.Full_fidelity_source_text.text
-      })
+      )
+    in
+    lowerer_state.language := language tree;
+    lowerer_state.filePath := Relative_path.suffix file;
+    lowerer_state.mode     := fi_mode;
+    let errors = ref [] in (* The top-level error list. *)
+    let ast = runP pScript script { saw_yield = ref false; errors } in
+    let ast =
+      if elaborate_namespaces
+      then Namespaces.elaborate_defs parser_options ast
+      else ast
+    in
+    let content = Full_fidelity_source_text.text source_text in
+    let comments, fixmes = scour_line_comments script in
+    let comments = if include_line_comments then comments else [] in
+    if keep_errors then begin
+      Fixmes.HH_FIXMES.add file fixmes;
+      Option.iter (Core.List.last !errors) Errors.parsing_error
+    end;
+    { fi_mode; ast; content; comments; file }
 
-let from_file_with_legacy (file : Relative_path.t) : Parser_hack.parser_return =
-  let text = Full_fidelity_source_text.from_file file in
-  from_text_with_legacy file text
+let from_file
+  ?(elaborate_namespaces  = true)
+  ?(include_line_comments = false)
+  ?(keep_errors           = true)
+  ?(parser_options        = ParserOptions.default)
+  (path : Relative_path.t)
+  : result =
+    from_text
+      ~elaborate_namespaces
+      ~include_line_comments
+      ~keep_errors
+      ~parser_options
+      path
+      (Full_fidelity_source_text.from_file path)
 
-let from_file : Relative_path.t -> Ast.program = fun file ->
-  (from_file_with_legacy file).Parser_hack.ast
+(*****************************************************************************(
+ * Backward compatibility matter (should be short-lived)
+)*****************************************************************************)
+
+let legacy (x : result) : Parser_hack.parser_return =
+  { Parser_hack.file_mode = Some x.fi_mode
+  ; Parser_hack.comments  = x.comments
+  ; Parser_hack.ast       = x.ast
+  ; Parser_hack.content   = x.content
+  }
+
+let from_text_with_legacy
+  ?(elaborate_namespaces  = true)
+  ?(include_line_comments = false)
+  ?(keep_errors           = true)
+  ?(parser_options        = ParserOptions.default)
+  (file    : Relative_path.t)
+  (content : string)
+  : Parser_hack.parser_return =
+    legacy @@ from_text
+      ~elaborate_namespaces
+      ~include_line_comments
+      ~keep_errors
+      ~parser_options
+      file
+      (Full_fidelity_source_text.make content)
+
+let from_file_with_legacy
+  ?(elaborate_namespaces  = true)
+  ?(include_line_comments = false)
+  ?(keep_errors           = true)
+  ?(parser_options        = ParserOptions.default)
+  (file : Relative_path.t)
+  : Parser_hack.parser_return =
+    legacy @@ from_file
+      ~elaborate_namespaces
+      ~include_line_comments
+      ~keep_errors
+      ~parser_options
+      file

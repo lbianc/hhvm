@@ -56,23 +56,60 @@ let instr_null = instr (ILitConst Null)
 let instr_catch = instr (IMisc Catch)
 let instr_dup = instr (IBasic Dup)
 let instr_instanceofd s = instr (IOp (InstanceOfD s))
+let instr_instanceof = instr (IOp InstanceOf)
 let instr_int i = instr (ILitConst (Int (Int64.of_int i)))
-
+let instr_int_of_string litstr =
+  instr (ILitConst (Int (Int64.of_string litstr)))
+let instr_double litstr = instr (ILitConst (Double litstr))
+let instr_string litstr = instr (ILitConst (String litstr))
+let instr_this = instr (IMisc This)
+let instr_istypec op = instr (IIsset (IsTypeC op))
+let instr_not = instr (IOp Not)
 let instr_setl local = instr (IMutator (SetL local))
 let instr_unsetl local = instr (IMutator (UnsetL local))
 let instr_issetl local = instr (IIsset (IssetL local))
 let instr_cgetl local = instr (IGet (CGetL local))
 let instr_cgetl2 local = instr (IGet (CGetL2 local))
 let instr_cgetquietl local = instr (IGet (CGetQuietL local))
-let instr_cgetl2_pipe = instr_cgetl2 Local.Pipe
 let instr_fpassl param local = instr (ICall (FPassL (param, local)))
+let instr_popu = instr (IBasic PopU)
+let instr_popr = instr (IBasic PopR)
 let instr_popc = instr (IBasic PopC)
+let instr_popa = instr (IBasic PopA)
+let instr_pop flavor =
+  match flavor with
+  | Flavor.Ref -> instr_popr
+  | Flavor.Cell -> instr_popc
+  | Flavor.Classref -> instr_popa
+
 let instr_throw = instr (IContFlow Throw)
 
 let instr_add_elemc = instr (ILitConst (AddElemC))
 let instr_add_new_elemc = instr (ILitConst (AddNewElemC))
 let instr_col_add_new_elemc = instr (ILitConst (ColAddNewElemC))
 let instr_switch labels = instr (IContFlow (Switch (Unbounded, 0, labels)))
+let instr_fpushctord nargs id = instr (ICall (FPushCtorD (nargs, id)))
+let instr_clone = instr (IOp Clone)
+let instr_newstructarray keys = instr (ILitConst (NewStructArray keys))
+let instr_newcol collection_type = instr (ILitConst (NewCol collection_type))
+let instr_colfromarray collection_type =
+  instr (ILitConst (ColFromArray collection_type))
+let instr_unboxr = instr (IBasic UnboxR)
+let instr_entrynop = instr (IBasic EntryNop)
+let instr_dict x xs = instr (ILitConst (Dict(x, xs)))
+let instr_staticlocinit local text = instr (IMisc (StaticLocInit(local, text)))
+let instr_basel local mode = instr (IBase(BaseL(local, mode)))
+let instr_fpushfuncd count text = instr (ICall(FPushFuncD(count, text)))
+let instr_fcall count = instr (ICall(FCall count))
+let instr_isuninit = instr (IMisc IsUninit)
+let instr_cgetcunop = instr (IMisc CGetCUNop)
+let instr_ugetcunop = instr (IMisc UGetCUNop)
+let instr_memoget count local local_count =
+  instr (IMisc (MemoSet(count, local, local_count)))
+let instr_memoset count local local_count =
+  instr (IMisc (MemoSet(count, local, local_count)))
+
+(* TODO: GetMemoKeyL $n *)
 
 (* Functions on instr_seq that correspond to existing Core.List functions *)
 module InstrSeq = struct
@@ -156,3 +193,42 @@ let instr_try_fault fault_label try_body fault_body =
 
 let instr_try_catch_begin catch_label = instr (ITry (TryCatchBegin catch_label))
 let instr_try_catch_end = instr (ITry TryCatchEnd)
+
+let extract_decl_vars instrseq =
+  let module ULS = Unique_list_string in
+  (* TODO: Both reads and writes need to go into decl vars *)
+  (* TODO: Default arguments should not be in declvars *)
+  let folder uniq_list instruction =
+    match instruction with
+    | IMutator (SetL (Local.Named s)) -> ULS.add uniq_list s
+    | _ -> uniq_list in
+  let decl_vars = InstrSeq.fold_left instrseq ~init:ULS.empty ~f:folder in
+  List.rev (ULS.items decl_vars)
+
+(*  Note that at this time we do NOT want to recurse on the instruction
+    sequence in the fault block. Why not?  Consider:
+    try { x } finally { try { y } finally { z } }
+    We make a copy of the code generated for "try { y } finally { z }" in
+    both the "finally" code which follows try-fault F1 { x }, and in
+    the fault block for the outer try. Which means that now there are two
+    places in the code where there is a TryFaultBegin instruction for the
+    *inner*  try. We don't want to detect it twice and generate fault blocks
+    twice.
+
+    This means that if we ever synthesize a fault-only try-fault, without
+    a finally block copying its contents, and that fault block itself
+    contains a try-fault or try-finally, then the fault block of the inner
+    try-fault will never be detected here. Right now we never do that; we
+    only generate synthetic try-faults for simple cleanup operations. If we
+    ever do generate nested try-faults then we'll need a more sophisticated
+    algorithm here to ensure that each fault block is emitted once.
+ *)
+let extract_fault_instructions instrseq =
+  let rec aux instrseq acc =
+    match instrseq with
+    | Instr_try_fault (try_body, fault_body) ->
+      aux try_body (fault_body :: acc)
+    | Instr_list _ -> acc
+    | Instr_concat ([]) -> acc
+    | Instr_concat (h :: t) -> aux (Instr_concat t) (aux h acc) in
+  gather (aux instrseq [])
