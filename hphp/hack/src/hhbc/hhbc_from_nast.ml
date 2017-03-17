@@ -32,16 +32,27 @@ module LValOp = struct
   | IncDec of incdec_op
 end
 
+let self_name = ref (None : string option)
+let set_self n = self_name := n
+
+let compiler_options = ref Hhbc_options.default
+let set_compiler_options o = compiler_options := o
+
 (* Emit a comment in lieu of instructions for not-yet-implemented features *)
 let emit_nyi description =
   instr (IComment ("NYI: " ^ description))
 
+let strip_dollar id =
+  String.sub id 1 (String.length id - 1)
+
 (* Strict binary operations; assumes that operands are already on stack *)
 let from_binop op =
+  let ints_overflow_to_ints =
+    Hhbc_options.ints_overflow_to_ints !compiler_options in
   match op with
-  | A.Plus -> instr (IOp AddO)
-  | A.Minus -> instr (IOp SubO)
-  | A.Star -> instr (IOp MulO)
+  | A.Plus -> instr (IOp (if ints_overflow_to_ints then Add else AddO))
+  | A.Minus -> instr (IOp (if ints_overflow_to_ints then Sub else  SubO))
+  | A.Star -> instr (IOp (if ints_overflow_to_ints then Mul else MulO))
   | A.Slash -> instr (IOp Div)
   | A.Eqeq -> instr (IOp Eq)
   | A.EQeqeq -> instr (IOp Same)
@@ -65,10 +76,12 @@ let from_binop op =
     failwith "short-circuiting operator cannot be generated as a simple binop"
 
 let binop_to_eqop op =
+  let ints_overflow_to_ints =
+    Hhbc_options.ints_overflow_to_ints !compiler_options in
   match op with
-  | A.Plus -> Some PlusEqualO
-  | A.Minus -> Some MinusEqualO
-  | A.Star -> Some MulEqualO
+  | A.Plus -> Some (if ints_overflow_to_ints then PlusEqual else PlusEqualO)
+  | A.Minus -> Some (if ints_overflow_to_ints then MinusEqual else MinusEqualO)
+  | A.Star -> Some (if ints_overflow_to_ints then MulEqual else MulEqualO)
   | A.Slash -> Some DivEqual
   | A.Starstar -> Some PowEqual
   | A.Amp -> Some AndEqual
@@ -81,11 +94,13 @@ let binop_to_eqop op =
   | _ -> None
 
 let unop_to_incdec_op op =
+  let ints_overflow_to_ints =
+    Hhbc_options.ints_overflow_to_ints !compiler_options in
   match op with
-  | A.Uincr -> Some PreIncO
-  | A.Udecr -> Some PreDecO
-  | A.Upincr -> Some PostIncO
-  | A.Updecr -> Some PostDecO
+  | A.Uincr -> Some (if ints_overflow_to_ints then PreInc else PreIncO)
+  | A.Udecr -> Some (if ints_overflow_to_ints then PreDec else PreDecO)
+  | A.Upincr -> Some (if ints_overflow_to_ints then PostInc else PostIncO)
+  | A.Updecr -> Some (if ints_overflow_to_ints then PostDec else PostDecO)
   | _ -> None
 
 let collection_type = function
@@ -124,33 +139,44 @@ let rec expr_and_newc instr_to_add_new instr_to_add = function
   | A.AFvalue e ->
     gather [from_expr e; instr_to_add_new]
   | A.AFkvalue (k, v) ->
-    gather [from_expr k; from_expr v; instr_to_add]
+    gather [
+      emit_two_exprs k v;
+      instr_to_add
+    ]
 
 and from_local x =
   if x = SN.SpecialIdents.this then instr_this
   else instr_cgetl (Local.Named x)
 
+and emit_two_exprs e1 e2 =
+  (* Special case to make use of CGetL2 *)
+  match e1 with
+  | (_, A.Lvar (_, local)) ->
+    gather [
+      from_expr e2;
+      instr_cgetl2 (Local.Named local);
+    ]
+  | _ ->
+    gather [
+      from_expr e1;
+      from_expr e2;
+    ]
+
 and emit_binop op e1 e2 =
-  match (op, e1, e2) with
-  | (A.AMpamp, e1, e2) ->  emit_logical_and e1 e2
-  | (A.BArbar, e1, e2) -> emit_logical_or e1 e2
-  | (A.Eq None, e1, e2) -> emit_lval_op LValOp.Set e1 (Some e2)
-  | (A.Eq (Some obop), e1, e2) ->
+  match op with
+  | A.AMpamp -> emit_logical_and e1 e2
+  | A.BArbar -> emit_logical_or e1 e2
+  | A.Eq None -> emit_lval_op LValOp.Set e1 (Some e2)
+  | A.Eq (Some obop) ->
     begin match binop_to_eqop obop with
     | None -> emit_nyi "illegal eq op"
     | Some op -> emit_lval_op (LValOp.SetOp op) e1 (Some e2)
     end
-  (* Special case to make use of CGetL2 *)
-  | (op, (_, A.Lvar (_, local)), e2) ->
+  | _ ->
     gather [
-      from_expr e2;
-      instr_cgetl2 (Local.Named local);
-      from_binop op ]
-  | (op, e1, e2) ->
-    gather [
-      from_expr e1;
-      from_expr e2;
-      from_binop op ]
+      emit_two_exprs e1 e2;
+      from_binop op
+    ]
 
 and emit_instanceof e1 e2 =
   match (e1, e2) with
@@ -177,24 +203,35 @@ and emit_null_coalesce e1 e2 =
     instr_label end_label;
   ]
 
-(* TODO: there are lots of ways of specifying the same type in a cast.
- * Sort this out!
- *)
 and emit_cast hint expr =
-  let op = match hint with
-  | A.Happly((_, id), []) when id = SN.Typehints.int ->
-    instr (IOp CastInt)
-  | A.Happly((_, id), []) when id = SN.Typehints.bool ->
-    instr (IOp CastBool)
-  | A.Happly((_, id), []) when id = SN.Typehints.string ->
-    instr (IOp CastString)
-  | A.Happly((_, id), []) when id = SN.Typehints.object_cast ->
-    instr (IOp CastObject)
-  | A.Happly((_, id), []) when id = SN.Typehints.array ->
-    instr (IOp CastArray)
-  | A.Happly((_, id), []) when id = SN.Typehints.float ->
-    instr (IOp CastDouble)
-  | _ -> emit_nyi "cast type" in
+  let op =
+    begin match hint with
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.int
+        || id = SN.Typehints.integer ->
+      instr (IOp CastInt)
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.bool
+        || id = SN.Typehints.boolean ->
+      instr (IOp CastBool)
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.string ->
+      instr (IOp CastString)
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.object_cast ->
+      instr (IOp CastObject)
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.array ->
+      instr (IOp CastArray)
+    | A.Happly((_, id), [])
+      when id = SN.Typehints.real
+        || id = SN.Typehints.double
+        || id = SN.Typehints.float ->
+      instr (IOp CastDouble)
+      (* TODO: unset *)
+    | _ ->
+      emit_nyi "cast type"
+    end in
   gather [
     from_expr expr;
     op;
@@ -302,9 +339,86 @@ and emit_call_expr expr =
     if flavor = Flavor.Ref then instr_unboxr else empty
   ]
 
+and emit_known_class_id cid =
+  gather [
+    instr_string (Utils.strip_ns cid);
+    instr (IGet AGetC)
+  ]
+
+and emit_class_id cid =
+  if cid = SN.Classes.cStatic
+  then instr (IMisc LateBoundCls)
+  else
+  if cid = SN.Classes.cSelf
+  then match !self_name with
+  | None -> instr (IMisc Self)
+  | Some cid -> emit_known_class_id cid
+  else emit_known_class_id cid
+
+and emit_class_get param_num_opt cid id =
+    gather [
+      (* We need to strip off the initial dollar *)
+      instr_string (strip_dollar id);
+      emit_class_id cid;
+      match param_num_opt with
+      | None -> instr (IGet CGetS)
+      | Some i -> instr (ICall (FPassS i))
+    ]
+
 and emit_class_const cid id =
   if id = SN.Members.mClass then instr_string cid
-  else emit_nyi "class_const" (* TODO *)
+  else if cid = SN.Classes.cStatic
+  then
+    instrs [
+      IMisc LateBoundCls;
+      ILitConst (ClsCns id);
+    ]
+  else if cid = SN.Classes.cSelf
+  then
+    match !self_name with
+    | None ->
+      instrs [
+        IMisc Self;
+        ILitConst (ClsCns id);
+      ]
+    | Some cid -> instr (ILitConst (ClsCnsD (id, cid)))
+  else
+    instr (ILitConst (ClsCnsD (id, cid)))
+
+and emit_await e =
+  let after_await = Label.next_regular () in
+  gather [
+    from_expr e;
+    instr_dup;
+    instr_istypec OpNull;
+    instr_jmpnz after_await;
+    instr_await;
+    instr_label after_await;
+  ]
+
+and emit_yield = function
+  | A.AFvalue e ->
+    gather [
+      from_expr e;
+      instr_yield;
+    ]
+  | A.AFkvalue (e1, e2) ->
+    gather [
+      from_expr e1;
+      from_expr e2;
+      instr_yieldk;
+    ]
+
+and emit_lambda fundef ids =
+  (* Closure conversion puts the class number used for CreateCl in the "name"
+   * of the function definition *)
+  let class_num = int_of_string (snd fundef.A.f_name) in
+  gather [
+    (* TODO: deal with explicit use (...) capture variables *)
+    gather @@ List.map ids
+      (fun (x, _isref) -> instr (IGet (CUGetL (Local.Named (snd x)))));
+    instr (IMisc (CreateCl (List.length ids, class_num)))
+  ]
 
 and from_expr expr =
   (* Note that this takes an Ast.expr, not a Nast.expr. *)
@@ -339,18 +453,19 @@ and from_expr expr =
   | A.Clone e -> emit_clone e
   | A.Shape fl -> emit_shape expr fl
   | A.Obj_get (expr, prop, nullflavor) -> emit_obj_get None expr prop nullflavor
+  | A.Await e -> emit_await e
+  | A.Yield e -> emit_yield e
+  | A.Lfun _ ->
+    failwith "expected Lfun to be converted to Efun during closure conversion"
+  | A.Efun (fundef, ids) -> emit_lambda fundef ids
   (* TODO *)
   | A.Yield_break               -> emit_nyi "yield_break"
   | A.Id _                      -> emit_nyi "id"
   | A.Id_type_arguments (_, _)  -> emit_nyi "id_type_arguments"
   | A.Lvarvar (_, _)            -> emit_nyi "lvarvar"
-  | A.Class_get (_, _)          -> emit_nyi "class_get"
+  | A.Class_get ((_, cid), (_, id))  -> emit_class_get None cid id
   | A.String2 _                 -> emit_nyi "string2"
-  | A.Yield _                   -> emit_nyi "yield"
-  | A.Await _                   -> emit_nyi "await"
   | A.List _                    -> emit_nyi "list"
-  | A.Efun (_, _)               -> emit_nyi "efun"
-  | A.Lfun _                    -> emit_nyi "lfun"
   | A.Xml (_, _, _)             -> emit_nyi "xml"
   | A.Unsafeexpr _              -> emit_nyi "unsafexpr"
   | A.Import (_, _)             -> emit_nyi "import"
@@ -427,8 +542,8 @@ and emit_collection expr es =
     emit_dynamic_collection expr es
 
 and emit_pipe e1 e2 =
-  let temp = Local.get_unnamed_local () in
-  let fault_label = Label.next_fault () in
+  stash_in_local e1
+  begin fun temp _break_label ->
   let rewrite_dollardollar e =
     let rewriter i =
       match i with
@@ -436,20 +551,8 @@ and emit_pipe e1 e2 =
         IGet (CGetL2 temp)
       | _ -> i in
     InstrSeq.map e ~f:rewriter in
-  gather [
-    from_expr e1;
-    instr_setl temp;
-    instr_popc;
-    instr_try_fault
-      fault_label
-      (* try block *)
-      (rewrite_dollardollar (from_expr e2))
-      (* fault block *)
-      (gather [
-        instr_unsetl temp;
-        instr_unwind ]);
-    instr_unsetl temp
-  ]
+  rewrite_dollardollar (from_expr e2)
+  end
 
 and emit_logical_and e1 e2 =
   let left_is_false = Label.next_regular () in
@@ -665,7 +768,18 @@ and emit_base mode base_offset param_num_opt (_, expr_ as expr) =
      ],
      total_stack_size
 
-   | _ ->
+   | A.Class_get((_, cid), (_, id)) ->
+     let prop_expr_instrs = instr_string (strip_dollar id) in
+     gather [
+       prop_expr_instrs;
+       emit_class_id cid
+     ],
+     gather [
+       instr (IBase (BaseSC (base_offset + 1, base_offset)))
+     ],
+     1
+
+    | _ ->
      let base_expr_instrs, flavor = emit_flavored_expr expr in
      base_expr_instrs,
      instr (IBase (if flavor = Flavor.Ref
@@ -689,6 +803,9 @@ and emit_arg i ((_, expr_) as e) =
 
   | A.Obj_get(e1, e2, nullflavor) ->
     emit_obj_get (Some i) e1 e2 nullflavor
+
+  | A.Class_get((_, cid), (_, id)) ->
+    emit_class_get (Some i) cid id
 
   | _ ->
     let instrs, flavor = emit_flavored_expr e in
@@ -717,7 +834,7 @@ and emit_args_and_call args uargs =
     else instr (ICall (FCallUnpack nargs))
   ]
 
-and emit_call_lhs (_, expr_) nargs =
+and emit_call_lhs (_, expr_ as expr) nargs =
   match expr_ with
   | A.Obj_get (obj, (_, A.Id (_, id)), null_flavor) ->
     gather [
@@ -726,10 +843,10 @@ and emit_call_lhs (_, expr_) nargs =
     ]
 
   | A.Class_const ((_, cid), (_, id)) when cid = SN.Classes.cStatic ->
-    instrs [
-      ILitConst (String id);
-      IMisc LateBoundCls;
-      ICall (FPushClsMethod nargs);
+    gather [
+      instr_string id;
+      instr (IMisc LateBoundCls);
+      instr (ICall (FPushClsMethod nargs));
     ]
 
   | A.Class_const ((_, cid), (_, id)) ->
@@ -739,7 +856,10 @@ and emit_call_lhs (_, expr_) nargs =
     instr (ICall (FPushFuncD (nargs, id)))
 
   | _ ->
-    emit_nyi "call lhs expression"
+    gather [
+      from_expr expr;
+      instr (ICall (FPushFunc nargs))
+    ]
 
 and emit_call (_, expr_ as expr) args uargs =
   let nargs = List.length args + List.length uargs in
@@ -753,14 +873,11 @@ and emit_call (_, expr_ as expr) args uargs =
          ] end in
     instrs, Flavor.Cell
 
-  | A.Obj_get _ | A.Class_const _ | A.Id _ ->
+  | A.Obj_get _ | A.Class_const _ | A.Id _ | _ ->
     gather [
       emit_call_lhs expr nargs;
       emit_args_and_call args uargs;
     ], Flavor.Ref
-
-  | _ ->
-    emit_nyi "call expression", Flavor.Cell
 
 (* Emit code for an expression that might leave a cell or reference on the
  * stack. Return which flavor it left.
@@ -816,6 +933,12 @@ and emit_final_local_op op lid =
   | LValOp.SetOp op -> instr (IMutator (SetOpL (lid, op)))
   | LValOp.IncDec op -> instr (IMutator (IncDecL (lid, op)))
 
+and emit_final_static_op op =
+  match op with
+  | LValOp.Set -> instr (IMutator SetS)
+  | LValOp.SetOp op -> instr (IMutator (SetOpS op))
+  | LValOp.IncDec op -> instr (IMutator (IncDecS op))
+
 (* Given a local $local and a list of integer array indices i_1, ..., i_n,
  * generate code to extract the value of $local[i_n]...[i_1]:
  *   BaseL $local Warn
@@ -857,27 +980,18 @@ and emit_array_get_fixed local indices =
 
 (* Emit code for an l-value operation *)
 and emit_lval_op op expr1 opt_expr2 =
-  let rhs_instrs, rhs_stack_size =
-    match opt_expr2 with
-    | None -> empty, 0
-    | Some e -> from_expr e, 1 in
-  match op, expr1 with
+  match op, expr1, opt_expr2 with
     (* Special case for list destructuring, only on assignment *)
-    | LValOp.Set, (_, A.List _) ->
-      (* Potential optimization: if we know the type (e.g. a tuple) we
-       * can avoid wrapping a fault handler *)
-      let temp_local = Local.get_unnamed_local () in
-      let fault_label = Label.next_fault () in
-      let fault_body = gather [instr_unsetl temp_local; instr_unwind] in
-      let try_body = emit_lval_op_list temp_local [] expr1 in
-      gather [
-        rhs_instrs;
-        instr (IMutator (SetL temp_local));
-        instr_popc;
-        instr_try_fault fault_label try_body fault_body;
-        instr (IGet (PushL temp_local));
-      ]
+    | LValOp.Set, (_, A.List _), Some expr2 ->
+      stash_in_local ~leave_on_stack:true expr2
+      begin fun local _break_label ->
+        emit_lval_op_list local [] expr1
+      end
     | _ ->
+      let rhs_instrs, rhs_stack_size =
+        match opt_expr2 with
+        | None -> empty, 0
+      | Some e -> from_expr e, 1 in
       emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size
 
 and emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size =
@@ -920,6 +1034,16 @@ and emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size =
       final_instr
     ]
 
+  | (_, A.Class_get((_, cid), (_, id))) ->
+    let prop_expr_instrs = instr_string (strip_dollar id) in
+    let final_instr = emit_final_static_op op in
+    gather [
+      prop_expr_instrs;
+      emit_class_id cid;
+      rhs_instrs;
+      final_instr
+    ]
+
   | _ ->
     gather [
       emit_nyi "lval expression";
@@ -927,17 +1051,19 @@ and emit_lval_op_nonlist op expr1 rhs_instrs rhs_stack_size =
     ]
 
 and emit_unop op e =
+  let ints_overflow_to_ints =
+    Hhbc_options.ints_overflow_to_ints !compiler_options in
   match op with
   | A.Utild -> gather [from_expr e; instr (IOp BitNot)]
   | A.Unot -> gather [from_expr e; instr (IOp Not)]
   | A.Uplus -> gather
     [instr (ILitConst (Int (Int64.zero)));
     from_expr e;
-    instr (IOp AddO)]
+    instr (IOp (if ints_overflow_to_ints then Add else AddO))]
   | A.Uminus -> gather
     [instr (ILitConst (Int (Int64.zero)));
     from_expr e;
-    instr (IOp SubO)]
+    instr (IOp (if ints_overflow_to_ints then Sub else SubO))]
   | A.Uincr | A.Udecr | A.Upincr | A.Updecr ->
     begin match unop_to_incdec_op op with
     | None -> emit_nyi "incdec"
@@ -1086,9 +1212,36 @@ and from_for e1 e2 e3 b =
   ] in
   CBR.rewrite_in_loop instrs cont_label break_label
 
-and from_switch e cl =
-  let switched = from_expr e in
-  let end_label = Label.next_regular () in
+and stash_in_local ?(leave_on_stack=false) e f =
+  let break_label = Label.next_regular () in
+  match e with
+  | (_, A.Lvar (_, id)) ->
+    gather [
+      f (Local.Named id) break_label;
+      instr_label break_label;
+    ]
+  | _ ->
+    let temp = Local.get_unnamed_local () in
+    let fault_label = Label.next_fault () in
+    gather [
+      from_expr e;
+      instr_setl temp;
+      instr_popc;
+      instr_try_fault
+        fault_label
+        (* try block *)
+        (f temp break_label)
+        (* fault block *)
+        (gather [
+          instr_unsetl temp;
+          instr_unwind ]);
+      instr_label break_label;
+      if leave_on_stack then instr_pushl temp else instr_unsetl temp
+    ]
+
+and from_switch scrutinee_expr cl =
+  stash_in_local scrutinee_expr
+  begin fun local break_label ->
   (* "continue" in a switch in PHP has the same semantics as break! *)
   let cl = List.map cl ~f:from_case in
   let bodies = gather @@ List.map cl ~f:snd in
@@ -1096,17 +1249,23 @@ and from_switch e cl =
     ~f: begin fun x ->
           let (e_opt, l) = fst x in
           match e_opt with
-          | None -> instr_jmp l
+          | None ->
+            instr_jmp l
           | Some e ->
-            gather [from_expr e; switched; instr_eq; instr_jmpnz l]
+            (* Special case for simple scrutinee *)
+            match scrutinee_expr with
+            | (_, A.Lvar _) ->
+              gather [from_expr e; instr_cgetl2 local; instr_eq; instr_jmpnz l]
+            | _ ->
+              gather [instr_cgetl local; from_expr e; instr_eq; instr_jmpnz l]
         end
   in
   let instrs = gather [
     init;
     bodies;
-    instr_label end_label;
   ] in
-  CBR.rewrite_in_switch instrs end_label
+  CBR.rewrite_in_switch instrs break_label
+  end
 
 and from_catch end_label ((_, catch_type), (_, catch_local), b) =
     (* Note that this is a "regular" label; we're not going to branch to

@@ -4624,7 +4624,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                            end);
       }
 
-      if (catch_count > 0) {
+      if (catch_count > 0 && start != end) {
         newCatchRegion(start, end, new Label(e));
         e.Catch();
 
@@ -4660,13 +4660,15 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       region->m_finallyLabel.set(e);
       visit(f);
       emitFinallyEpilogue(e, region.get());
-      auto func = getFunclet(f);
-      if (func == nullptr) {
-        auto thunklet =
-          new FinallyThunklet(f, m_curFunc->numLiveIterators());
-        func = addFunclet(f, thunklet);
+      if (start != end_catches) {
+        auto func = getFunclet(f);
+        if (func == nullptr) {
+          auto thunklet =
+            new FinallyThunklet(f, m_curFunc->numLiveIterators());
+          func = addFunclet(f, thunklet);
+        }
+        newFaultRegion(start, end_catches, &func->m_entry);
       }
-      newFaultRegion(start, end_catches, &func->m_entry);
     }
 
     return false;
@@ -5375,6 +5377,29 @@ bool EmitterVisitor::visit(ConstructPtr node) {
           visit((*params)[1]);
           emitConvertToCell(e);
           e.DefCns(cname);
+          return true;
+        }
+      }
+    } else if (call->isCallToFunction("class_alias")) {
+      if (params &&
+          (params->getCount() == 2 ||
+           params->getCount() == 3)) {
+        ExpressionPtr p0 = (*params)[0];
+        ExpressionPtr p1 = (*params)[1];
+        Variant v0, v1;
+        if (p0->getScalarValue(v0) && v0.isString() &&
+            p1->getScalarValue(v1) && v1.isString()) {
+          const StringData* orig_name =
+            makeStaticString(v0.toString());
+          const StringData* alias_name =
+            makeStaticString(v1.toString());
+          if (params->getCount() == 3) {
+            visit((*params)[1]);
+            emitConvertToCell(e);
+          } else {
+            e.True();
+          }
+          e.AliasCls(orig_name, alias_name);
           return true;
         }
       }
@@ -7892,29 +7917,15 @@ static Attr buildMethodAttrs(MethodStatementPtr meth, FuncEmitter* fe,
     attrs = attrs | AttrHot;
   }
 
-  if (!SystemLib::s_inited) {
+  if (!SystemLib::s_inited || funcScope->isSystem()) {
     // we're building systemlib. everything is unique
-    attrs = attrs | AttrBuiltin | AttrUnique | AttrPersistent;
-  } else if (Option::WholeProgram) {
-    if (!funcScope->isRedeclaring()) {
-      attrs = attrs | AttrUnique;
-      if (top &&
-          (!funcScope->isVolatile() ||
-           funcScope->isPersistent())) {
-        attrs = attrs | AttrPersistent;
-      }
-    }
-    if (meth->getClassScope() &&
-        !funcScope->hasOverride() &&
-        !meth->getClassScope()->isRedeclaring()) {
-      attrs = attrs | AttrNoOverride;
-    }
+    if (!meth->getClassScope()) attrs |= AttrUnique | AttrPersistent;
+    attrs |= AttrBuiltin;
+  }
+
+  if (Option::WholeProgram) {
     if (funcScope->isFromTrait()) {
       attrs = attrs | AttrTrait;
-    }
-    if (funcScope->isSystem()) {
-      assert((attrs & AttrPersistent) || meth->getClassScope());
-      attrs = attrs | AttrBuiltin;
     }
   }
 
@@ -9577,27 +9588,16 @@ Id EmitterVisitor::emitClass(Emitter& e,
   if (cNode->isFinal()) {
     attr = attr | AttrFinal;
   }
+
   if (Option::WholeProgram) {
-    if (!cNode->isRedeclaring() &&
-        cNode->derivesFromRedeclaring() == Derivation::Normal) {
-      attr = attr | AttrUnique;
-      if (!cNode->isVolatile()) {
-        attr = attr | AttrPersistent;
-      }
-    }
-    if (cNode->isSystem()) {
-      assert(attr & AttrPersistent);
-      attr = attr | AttrBuiltin;
-    }
-    if (!cNode->getAttribute(ClassScope::NotFinal)) {
-      attr = attr | AttrNoOverride;
-    }
     if (cNode->getUsedTraitNames().size()) {
       attr = attr | AttrNoExpandTrait;
     }
-  } else if (!SystemLib::s_inited) {
+  }
+
+  if (!SystemLib::s_inited || cNode->isSystem()) {
     // we're building systemlib. everything is unique
-    attr = attr | AttrBuiltin | AttrUnique | AttrPersistent;
+    attr |= AttrBuiltin | AttrUnique | AttrPersistent;
   }
 
   const std::vector<std::string>& bases(cNode->getBases());
@@ -10255,6 +10255,7 @@ void EmitterVisitor::newCatchRegion(Offset start,
                                     Offset end,
                                     Label* entry,
                                     FaultIterInfo iter) {
+  assert(start < end);
   auto r = new CatchRegion(start, end, entry, iter.iterId, iter.kind);
   m_catchRegions.push_back(r);
 }
@@ -10263,6 +10264,7 @@ void EmitterVisitor::newFaultRegion(Offset start,
                                     Offset end,
                                     Label* entry,
                                     FaultIterInfo iter) {
+  assert(start < end);
   auto r = new FaultRegion(start, end, entry, iter.iterId, iter.kind);
   m_faultRegions.push_back(r);
 }
@@ -10271,6 +10273,10 @@ void EmitterVisitor::newFaultRegionAndFunclet(Offset start,
                                               Offset end,
                                               Thunklet* t,
                                               FaultIterInfo iter) {
+  if (start == end) {
+    delete t;
+    return;
+  }
   Funclet* f = addFunclet(t);
   newFaultRegion(start, end, &f->m_entry, iter);
 }
@@ -10280,6 +10286,10 @@ void EmitterVisitor::newFaultRegionAndFunclet(StatementPtr stmt,
                                               Offset end,
                                               Thunklet* t,
                                               FaultIterInfo iter) {
+  if (start == end) {
+    delete t;
+    return;
+  }
   Funclet* f = addFunclet(stmt, t);
   newFaultRegion(start, end, &f->m_entry, iter);
 }

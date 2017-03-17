@@ -283,6 +283,11 @@ struct Func {
    */
   bool isFoldable() const;
 
+  /*
+   * Returns whether this resolved function could possibly be skipped when
+   * looking for a caller's frame.
+   */
+  bool mightBeSkipFrame() const;
 private:
   friend struct ::HPHP::HHBBC::Index;
   struct FuncName {
@@ -627,6 +632,12 @@ struct Index {
   void refine_constants(const FuncAnalysis& fa, ContextSet& deps);
 
   /*
+   * Refine the types of the local statics owned by the function.
+   */
+  void refine_local_static_types(borrowed_ptr<const php::Func> func,
+                                 const CompactVector<Type>& localStaticTypes);
+
+  /*
    * Refine the return type for a function, based on a round of
    * analysis.
    *
@@ -679,6 +690,11 @@ struct Index {
    * provided PublicSPropIndexer when this function is called.
    */
   void refine_public_statics(const PublicSPropIndexer&);
+
+  /*
+   * Identify the persistent classes, functions and typeAliases.
+   */
+  void mark_persistent_classes_and_functions(php::Program& program);
 
   /*
    * Return true if the resolved function is an async

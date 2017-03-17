@@ -65,9 +65,11 @@ let instr_string litstr = instr (ILitConst (String litstr))
 let instr_this = instr (IMisc This)
 let instr_istypec op = instr (IIsset (IsTypeC op))
 let instr_not = instr (IOp Not)
+let instr_sets = instr (IMutator SetS)
 let instr_setl local = instr (IMutator (SetL local))
 let instr_unsetl local = instr (IMutator (UnsetL local))
 let instr_issetl local = instr (IIsset (IssetL local))
+let instr_cgets = instr (IGet CGetS)
 let instr_cgetl local = instr (IGet (CGetL local))
 let instr_cgetl2 local = instr (IGet (CGetL2 local))
 let instr_cgetquietl local = instr (IGet (CGetQuietL local))
@@ -82,6 +84,8 @@ let instr_pop flavor =
   | Flavor.Cell -> instr_popc
   | Flavor.Classref -> instr_popa
 
+let instr_pushl local = instr (IGet (PushL local))
+let instr_agetc = instr (IGet AGetC)
 let instr_throw = instr (IContFlow Throw)
 
 let instr_add_elemc = instr (ILitConst (AddElemC))
@@ -99,6 +103,8 @@ let instr_entrynop = instr (IBasic EntryNop)
 let instr_dict x xs = instr (ILitConst (Dict(x, xs)))
 let instr_staticlocinit local text = instr (IMisc (StaticLocInit(local, text)))
 let instr_basel local mode = instr (IBase(BaseL(local, mode)))
+let instr_basesc x y = instr (IBase(BaseSC(x, y)))
+let instr_baseh = instr (IBase BaseH)
 let instr_fpushfuncd count text = instr (ICall(FPushFuncD(count, text)))
 let instr_fcall count = instr (ICall(FCall count))
 let instr_isuninit = instr (IMisc IsUninit)
@@ -108,8 +114,30 @@ let instr_memoget count local local_count =
   instr (IMisc (MemoSet(count, local, local_count)))
 let instr_memoset count local local_count =
   instr (IMisc (MemoSet(count, local, local_count)))
+let instr_getmemokeyl local = instr (IMisc (GetMemoKeyL local))
+let instr_ismemotype = instr (IMisc IsMemoType)
+let instr_maybememotype = instr (IMisc MaybeMemoType)
+let instr_checkthis = instr (IMisc CheckThis)
+let instr_dim op key = instr (IBase (Dim (op, key)))
+let instr_dim_warn_pt key = instr_dim MemberOpMode.Warn (MemberKey.PT key)
+let instr_dim_define_pt key = instr_dim MemberOpMode.Define (MemberKey.PT key)
+let instr_fpushobjmethodd num_params method_ flavor =
+  instr (ICall (FPushObjMethodD (num_params, method_, flavor)))
+let instr_fpushclsmethodd num_params class_name method_name =
+  instr (ICall (FPushClsMethodD (num_params, class_name, method_name)))
+let instr_fpushobjmethodd_nullthrows num_params method_ =
+  instr_fpushobjmethodd num_params method_ Ast.OG_nullthrows
+let instr_querym num_params op key =
+  instr (IFinal (QueryM (num_params, op, key)))
+let instr_querym_cget_pt num_params key =
+  instr_querym num_params QueryOp.CGet (MemberKey.PT key)
+let instr_setm num_params key = instr (IFinal (SetM (num_params, key)))
+let instr_setm_pt num_params key = instr_setm num_params (MemberKey.PT key)
 
-(* TODO: GetMemoKeyL $n *)
+let instr_await = instr (IAsync Await)
+let instr_yield = instr (IGenerator Yield)
+let instr_yieldk = instr (IGenerator YieldK)
+let instr_createcont = instr (IGenerator CreateCont)
 
 (* Functions on instr_seq that correspond to existing Core.List functions *)
 module InstrSeq = struct
@@ -232,3 +260,12 @@ let extract_fault_instructions instrseq =
     | Instr_concat ([]) -> acc
     | Instr_concat (h :: t) -> aux (Instr_concat t) (aux h acc) in
   gather (aux instrseq [])
+
+(* Returns a tuple of is_generator and is_pair_generator *)
+let is_function_generator instrseq =
+  InstrSeq.fold_left
+    instrseq
+    ~init:(false, false)
+    ~f:(fun (b, b_p) i ->
+      ((b || i = IGenerator Yield || i = IGenerator YieldK),
+      b_p || i = IGenerator YieldK))

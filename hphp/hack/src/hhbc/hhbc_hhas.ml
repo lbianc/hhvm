@@ -18,6 +18,9 @@ let sep pieces = String.concat " " pieces
 
 let quote_str s = "\"" ^ Php_escaping.escape s ^ "\""
 
+let string_of_class_id id = quote_str (Utils.strip_ns id)
+let string_of_function_id id = quote_str id
+
 (* Naming convention for functions below:
  *   string_of_X converts an X to a string
  *   add_X takes a buffer and an X, and appends to the buffer
@@ -68,6 +71,9 @@ let string_of_lit_const instruction =
     | NewStructArray l  ->
       "NewStructArray <" ^ string_of_list_of_shape_fields l ^ ">"
     | Vec (i, _)        -> "Vec @A_" ^ string_of_int i
+    | ClsCns name -> "ClsCns " ^ quote_str name
+    | ClsCnsD (name, class_name) -> "ClsCnsD " ^ quote_str name ^ " "
+      ^ string_of_class_id class_name
 
     (* TODO *)
     | _ -> "\r# NYI: unexpected literal kind in string_of_lit_const"
@@ -265,8 +271,6 @@ let string_of_control_flow instruction =
   | _ -> failwith "instruction_control_flow Not Implemented"
 
 let string_of_iterator_id i = Iterator.to_string i
-let string_of_class_id id = quote_str id
-let string_of_function_id id = quote_str id
 let string_of_null_flavor nf =
   match nf with
   | Ast.OG_nullthrows -> "NullThrows"
@@ -332,6 +336,12 @@ let string_of_final instruction =
   | VGetM (n, mk) ->
     sep ["VGetM";
       string_of_int n; string_of_member_key mk]
+  | UnsetM (n, mk) ->
+    sep ["SetM";
+      string_of_int n; string_of_member_key mk]
+  | BindM (n, mk) ->
+    sep ["BindM";
+      string_of_int n; string_of_member_key mk]
   | FPassM (i, n, mk) ->
     sep ["FPassM";
       string_of_param_num i; string_of_int n; string_of_member_key mk]
@@ -347,11 +357,8 @@ let string_of_final instruction =
   | _ ->
     "# string_of_final NYI"
 (*
-| SetM of num_params * MemberKey.t
 | IncDecM of num_params * incdec_op * MemberKey.t
 | SetOpM of num_params  * eq_op * MemberKey.t
-| BindM of num_params * MemberKey.t
-| UnsetM of num_params * MemberKey.t
 | SetWithRefLML of local_id * local_id
 | SetWithRefRML of local_id
 *)
@@ -431,6 +438,11 @@ let string_of_misc instruction =
       Printf.sprintf "MemoSet %s L:%d+%d"
         (string_of_int count) first (local_count - 1)
     | MemoSet _ -> failwith "MemoSet needs an unnamed local"
+    | GetMemoKeyL local -> "GetMemoKeyL " ^ (string_of_local_id local)
+    | IsMemoType -> "IsMemoType"
+    | MaybeMemoType -> "MaybeMemoType"
+    | CreateCl (n, cid) ->
+      sep ["CreateCl"; string_of_int n; string_of_int cid]
     | _ -> failwith "instruct_misc Not Implemented"
 
 let string_of_iterator instruction =
@@ -470,6 +482,16 @@ let string_of_try instruction =
   | TryFaultEnd
   | TryCatchEnd -> "}"
 
+let string_of_async = function
+  | Await -> "Await"
+  | WHResult -> "# string of WHResult - NYI"
+
+let string_of_generator = function
+  | CreateCont -> "CreateCont"
+  | Yield -> "Yield"
+  | YieldK -> "YieldK"
+  | _ -> "### string_of_generator - NYI"
+
 let string_of_instruction instruction =
   let s = match instruction with
   | IIterator            i -> string_of_iterator i
@@ -487,6 +509,8 @@ let string_of_instruction instruction =
   | IFinal               i -> string_of_final i
   | ITry                 i -> string_of_try i
   | IComment             s -> "# " ^ s
+  | IAsync               i -> string_of_async i
+  | IGenerator           i -> string_of_generator i
   | _ -> failwith "invalid instruction" in
   s ^ "\n"
 
@@ -553,22 +577,53 @@ let string_of_type_info_option tio =
   | None -> ""
   | Some ti -> string_of_type_info ti ^ " "
 
-let string_of_param_default_value expr =
+let rec string_of_afield = function
+  | A.AFvalue e -> string_of_param_default_value e
+  | A.AFkvalue (k, v) ->
+    string_of_param_default_value k ^ " => " ^ string_of_param_default_value v
+
+and string_of_afield_list afl =
+  if List.length afl = 0
+  then "\\n"
+  else String.concat ", " @@ List.map string_of_afield afl
+
+and shape_field_name_to_expr = function
+  | A.SFlit (pos, s)
+  | A.SFclass_const (_, (pos, s)) -> (pos, A.String (pos, s))
+
+and string_of_param_default_value expr =
   match snd expr with
+  | A.Lvar (_, litstr)
   | A.Float (_, litstr)
   | A.Int (_, litstr) -> litstr
   | A.String (_, litstr) -> "\\\"" ^ litstr ^ "\\\""
   | A.Null -> "NULL"
   | A.True -> "true"
   | A.False -> "false"
-  (* TODO: printing for other expressions e.g. arrays, vecs, shapes.. *)
+  (* For empty array there is a space between array and left paren? a bug ? *)
+  | A.Array afl -> "array(" ^ string_of_afield_list afl ^ ")"
+  | A.Collection ((_, name), afl) when
+    name = "vec" || name = "dict" || name = "keyset" ->
+    name ^ "[" ^ string_of_afield_list afl ^ "]"
+  | A.Collection ((_, name), afl) when
+    name = "Set" || name = "Pair" ->
+    "HH\\\\" ^ name ^ "{" ^ string_of_afield_list afl ^ "}"
+  | A.Shape fl ->
+    let fl =
+      List.map
+        (fun (f_name, e) ->
+          A.AFkvalue (shape_field_name_to_expr f_name, e))
+        fl
+    in
+    string_of_param_default_value (fst expr, A.Array fl)
+  (* TODO: printing for other expressions *)
   | _ -> "string_of_param_default_value - NYI"
 
 let string_of_param_default_value_option = function
   | None -> ""
   | Some (label, expr) ->
-    " = DV"
-    ^ (string_of_int (Label.id label))
+    " = "
+    ^ (string_of_label label)
     ^ "(\"\"\""
     ^ (string_of_param_default_value expr)
     ^ "\"\"\")"
@@ -594,8 +649,9 @@ let fix_xhp_name s =
 
 let fmt_name s = fix_xhp_name (Utils.strip_ns s)
 
-let add_decl_vars buf decl_vars = if decl_vars = [] then () else begin
-  B.add_string buf "  .declvars ";
+let add_decl_vars buf indent decl_vars = if decl_vars = [] then () else begin
+  B.add_string buf (String.make indent ' ');
+  B.add_string buf ".declvars ";
   B.add_string buf @@ String.concat " " decl_vars;
   B.add_string buf ";\n"
   end
@@ -650,13 +706,19 @@ let add_fun_def buf fun_def =
   let function_params = Hhas_function.params fun_def in
   let function_body = Hhas_function.body fun_def in
   let function_decl_vars = Hhas_function.decl_vars fun_def in
+  let function_is_async = Hhas_function.is_async fun_def in
+  let function_is_generator = Hhas_function.is_generator fun_def in
+  let function_is_pair_generator = Hhas_function.is_pair_generator fun_def in
   B.add_string buf "\n.function ";
   B.add_string buf (function_attributes fun_def);
   B.add_string buf (string_of_type_info_option function_return_type);
   B.add_string buf function_name;
   B.add_string buf (string_of_params function_params);
+  if function_is_generator then B.add_string buf " isGenerator";
+  if function_is_async then B.add_string buf " isAsync";
+  if function_is_pair_generator then B.add_string buf " isPairGenerator";
   B.add_string buf " {\n";
-  add_decl_vars buf function_decl_vars;
+  add_decl_vars buf 2 function_decl_vars;
   add_instruction_list buf 2 function_body;
   B.add_string buf "}\n"
 
@@ -681,18 +743,31 @@ let add_method_def buf method_def =
   let method_return_type = Hhas_method.return_type method_def in
   let method_params = Hhas_method.params method_def in
   let method_body = Hhas_method.body method_def in
+  let method_decl_vars = Hhas_method.decl_vars method_def in
+  let method_is_async = Hhas_method.is_async method_def in
+  let method_is_generator = Hhas_method.is_generator method_def in
+  let method_is_pair_generator = Hhas_method.is_pair_generator method_def in
+  let method_is_closure_body = Hhas_method.is_closure_body method_def in
   B.add_string buf "\n  .method ";
   B.add_string buf (method_attributes method_def);
   B.add_string buf (string_of_type_info_option method_return_type);
   B.add_string buf method_name;
   B.add_string buf (string_of_params method_params);
+  if method_is_generator then B.add_string buf " isGenerator";
+  if method_is_async then B.add_string buf " isAsync";
+  if method_is_pair_generator then B.add_string buf " isPairGenerator";
+  if method_is_closure_body then B.add_string buf " isClosureBody";
   B.add_string buf " {\n";
+  add_decl_vars buf 4 method_decl_vars;
   add_instruction_list buf 4 method_body;
-  B.add_string buf "  }\n"
+  B.add_string buf "  }"
 
 let class_special_attributes c =
   let user_attrs = Hhas_class.attributes c in
   let attrs = List.map attribute_to_string user_attrs in
+  let attrs = if Hhas_class.is_closure_class c
+              then "no_override" :: "unique" :: attrs
+              else attrs in
   let attrs = if Hhas_class.is_trait c then "trait" :: attrs else attrs in
   let attrs = if Hhas_class.is_interface c then "interface" :: attrs else attrs in
   let attrs = if Hhas_class.is_final c then "final" :: attrs else attrs in
@@ -705,10 +780,10 @@ let class_special_attributes c =
 let add_extends buf class_base =
   match class_base with
   | None -> ()
-  | Some type_info ->
+  | Some name ->
     begin
       B.add_string buf " extends ";
-      add_type_info buf type_info;
+      B.add_string buf (fmt_name name);
     end
 
 let add_implements buf class_implements =
@@ -717,8 +792,8 @@ let add_implements buf class_implements =
   | _ ->
   begin
     B.add_string buf " implements (";
-    add_type_infos buf class_implements;
-    B.add_string buf ") ";
+    B.add_string buf (String.concat " " (List.map fmt_name class_implements));
+    B.add_string buf ")";
   end
 
 let property_attributes p =
@@ -732,25 +807,27 @@ let property_attributes p =
   let text = if text = "" then "" else "[" ^ text ^ "] " in
   text
 
-let add_property buf property =
+let add_property class_def buf property =
   B.add_string buf "\n  .property ";
   B.add_string buf (property_attributes property);
   B.add_string buf (Hhas_property.name property);
   (* TODO: Get the actual initializer when we can codegen it. Properties
   that lack an initializer get a null. *)
-  B.add_string buf " =\n    \"\"\"N;\"\"\";\n"
+  if Hhas_class.is_closure_class class_def
+  then B.add_string buf " =\n    uninit;"
+  else B.add_string buf " =\n    \"\"\"N;\"\"\";"
 
 let add_constant buf c =
   B.add_string buf "\n  .const ";
   B.add_string buf (Hhas_constant.name c);
   (* TODO: Get the actual initializer when we can codegen it. *)
-  B.add_string buf " = \"\"\"N;\"\"\";\n"
+  B.add_string buf " = \"\"\"N;\"\"\";"
 
 let add_type_constant buf c =
   B.add_string buf "\n  .const ";
   B.add_string buf (Hhas_type_constant.name c);
   (* TODO: Get the actual initializer when we can codegen it. *)
-  B.add_string buf " isType = \"\"\"N;\"\"\";\n"
+  B.add_string buf " isType = \"\"\"N;\"\"\";"
 
 let add_class_def buf class_def =
   let class_name = fmt_name (Hhas_class.name class_def) in
@@ -760,13 +837,13 @@ let add_class_def buf class_def =
   B.add_string buf class_name;
   add_extends buf (Hhas_class.base class_def);
   add_implements buf (Hhas_class.implements class_def);
-  B.add_string buf " {\n";
+  B.add_string buf " {";
   List.iter (add_constant buf) (Hhas_class.constants class_def);
   List.iter (add_type_constant buf) (Hhas_class.type_constants class_def);
-  List.iter (add_property buf) (Hhas_class.properties class_def);
+  List.iter (add_property class_def buf) (Hhas_class.properties class_def);
   List.iter (add_method_def buf) (Hhas_class.methods class_def);
   (* TODO: other members *)
-  B.add_string buf "}\n"
+  B.add_string buf "\n}\n"
 
 let add_defcls buf classes =
   List.iteri
@@ -802,13 +879,16 @@ let add_data_region buf functions =
   B.add_string buf "\n"
 
 let add_top_level buf hhas_prog =
+  let non_closure_classes =
+    List.filter (fun c -> not (Hhas_class.is_closure_class c))
+    (Hhas_program.classes hhas_prog) in
   let main_stmts =
     [ ILitConst (Int Int64.one)
     ; IContFlow RetC
     ] in
   let fun_name = ".main {\n" in
   B.add_string buf fun_name;
-  add_defcls buf (Hhas_program.classes hhas_prog);
+  add_defcls buf non_closure_classes;
   add_instruction_list buf 2 main_stmts;
   B.add_string buf "}\n"
 

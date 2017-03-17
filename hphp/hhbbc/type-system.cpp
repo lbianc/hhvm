@@ -1958,9 +1958,10 @@ folly::Optional<Cell> tv(const Type& t) {
         return fromTypeVec<VecArrayInit>(t.m_data.packed->elems);
       } else if ((t.m_bits & BDictN) == t.m_bits) {
         return fromTypeVec<DictInit>(t.m_data.packed->elems);
-      } else {
+      } else if ((t.m_bits & BArrN) == t.m_bits) {
         return fromTypeVec<PackedArrayInit>(t.m_data.packed->elems);
       }
+      break;
     case DataTag::RefInner:
     case DataTag::ArrLikePackedN:
     case DataTag::ArrLikeMapN:
@@ -2300,16 +2301,17 @@ Type promote_emptyish(Type a, Type b) {
 Type widening_union(const Type& a, const Type& b) {
   if (a == b) return a;
 
+  auto const u = union_of(a, b);
+
   // Currently the only types in our typesystem that have infinitely
   // growing chains of union_of are specialized arrays.
-  if (!is_specialized_array(a) || !is_specialized_array(b)) {
-    return union_of(a, b);
+  if (!is_specialized_array_like(a) || !is_specialized_array_like(b)) {
+    return u;
   }
 
   // This (throwing away the data) is overly conservative, but works
   // for now.
-  auto const newBits = combine_arr_bits(a.m_bits, b.m_bits);
-  return Type { newBits };
+  return is_specialized_array_like(u) ? Type { u.m_bits } : u;
 }
 
 Type stack_flav(Type a) {
@@ -2801,6 +2803,8 @@ std::pair<Type,bool> array_like_set(Type arr,
                        union_of(inVal, val)), validKey };
   };
 
+  arr.m_bits = bits;
+
   switch (arr.m_dataTag) {
   case DataTag::Str:
   case DataTag::Obj:
@@ -2811,7 +2815,6 @@ std::pair<Type,bool> array_like_set(Type arr,
     not_reached();
 
   case DataTag::None:
-    arr.m_bits = bits;
     return { std::move(arr), false };
 
   case DataTag::ArrLikeVal:
@@ -2859,6 +2862,7 @@ std::pair<Type,bool> array_like_set(Type arr,
     if (maybeEmpty) {
       return emptyHelper(arr.m_data.mapn->key, arr.m_data.mapn->val);
     } else {
+      arr.m_bits = bits;
       auto const inRange = arr_mapn_set(arr, key, val);
       return { std::move(arr), inRange };
     }
@@ -2941,7 +2945,6 @@ std::pair<Type,Type> array_like_newelem(Type arr, const Type& val) {
 
   case DataTag::ArrLikePacked:
     if (maybeEmpty) {
-      auto ty = packed_values(*arr.m_data.packed);
       return emptyHelper(TInt, packed_values(*arr.m_data.packed));
     } else {
       arr.m_bits = bits;
@@ -2967,6 +2970,7 @@ std::pair<Type,Type> array_like_newelem(Type arr, const Type& val) {
       auto mkv = map_key_values(*arr.m_data.map);
       return emptyHelper(mkv.first, mkv.second);
     } else {
+      arr.m_bits = bits;
       auto const idx = arr_map_newelem(arr, val);
       return { std::move(arr), idx };
     }

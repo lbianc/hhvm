@@ -7,10 +7,6 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  *
 *)
-open Core
-open Instruction_sequence
-
-module A = Ast
 
 type t = {
   method_attributes    : Hhas_attribute.t list;
@@ -24,6 +20,11 @@ type t = {
   method_params        : Hhas_param.t list;
   method_return_type   : Hhas_type_info.t option;
   method_body          : Hhbc_ast.instruct list;
+  method_decl_vars     : string list; (* Actually local_id list *)
+  method_is_async      : bool;
+  method_is_generator  : bool;
+  method_is_pair_generator  : bool;
+  method_is_closure_body : bool;
 }
 
 let make
@@ -37,7 +38,12 @@ let make
   method_name
   method_params
   method_return_type
-  method_body = {
+  method_body
+  method_decl_vars
+  method_is_async
+  method_is_generator
+  method_is_pair_generator
+  method_is_closure_body = {
     method_attributes;
     method_is_protected;
     method_is_public;
@@ -48,7 +54,12 @@ let make
     method_name;
     method_params;
     method_return_type;
-    method_body
+    method_body;
+    method_decl_vars;
+    method_is_async;
+    method_is_generator;
+    method_is_pair_generator;
+    method_is_closure_body;
   }
 
 let attributes method_def = method_def.method_attributes
@@ -59,40 +70,18 @@ let is_static method_def = method_def.method_is_static
 let is_final method_def = method_def.method_is_final
 let is_abstract method_def = method_def.method_is_abstract
 let name method_def = method_def.method_name
+let with_name method_def method_name = { method_def with method_name }
+let make_private method_def =
+  { method_def with
+    method_is_protected = false;
+    method_is_public = false;
+    method_is_private = true }
 let params method_def = method_def.method_params
 let return_type method_def = method_def.method_return_type
 let body method_def = method_def.method_body
-
-let from_ast : A.class_ -> A.method_ -> t option =
-  fun ast_class ast_method ->
-  let method_name = Litstr.to_string @@ snd ast_method.A.m_name in
-  let method_is_abstract = List.mem ast_method.A.m_kind A.Abstract in
-  let method_is_final = List.mem ast_method.A.m_kind A.Final in
-  let method_is_private = List.mem ast_method.A.m_kind A.Private in
-  let method_is_protected = List.mem ast_method.A.m_kind A.Protected in
-  let method_is_public = List.mem ast_method.A.m_kind A.Public in
-  let method_is_static = List.mem ast_method.A.m_kind A.Static in
-  let method_attributes =
-    Emit_attribute.from_asts ast_method.A.m_user_attributes in
-  match ast_method.A.m_body with
-  | b ->
-    let tparams = ast_class.A.c_tparams @ ast_method.A.m_tparams in
-    let body_instrs, method_params, method_return_type =
-      Emit_body.from_ast tparams ast_method.A.m_params ast_method.A.m_ret b in
-    let method_body = instr_seq_to_list body_instrs in
-    let m = make
-      method_attributes
-      method_is_protected
-      method_is_public
-      method_is_private
-      method_is_static
-      method_is_final
-      method_is_abstract
-      method_name
-      method_params
-      method_return_type
-      method_body in
-    Some m
-
-let from_asts ast_class ast_methods =
-  List.filter_map ast_methods (from_ast ast_class)
+let decl_vars method_def = method_def.method_decl_vars
+let is_async method_def = method_def.method_is_async
+let is_generator method_def = method_def.method_is_generator
+let is_pair_generator method_def = method_def.method_is_pair_generator
+let is_closure_body method_def = method_def.method_is_closure_body
+let with_body method_def method_body = { method_def with method_body }

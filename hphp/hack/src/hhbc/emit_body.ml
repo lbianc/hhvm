@@ -36,14 +36,18 @@ let verify_returns body =
     | _ -> [ i ] in
   InstrSeq.flat_map body ~f:rewriter
 
-let from_ast tparams params ret b =
+let from_ast ~self tparams params ret b =
   let tparams = tparams_to_strings tparams in
   Label.reset_label ();
   Local.reset_local ();
   Iterator.reset_iterator ();
+  Hhbc_from_nast.set_self self;
   let params = Emit_param.from_asts tparams params in
-  let return_type_info = Option.map ret
-    (hint_to_type_info ~always_extended:true tparams) in
+  let return_type_info =
+    match ret with
+    | None ->
+      Some (Hhas_type_info.make (Some "") (Hhas_type_constraint.make None []))
+    | Some h -> Some (hint_to_type_info ~always_extended:true tparams h) in
   let stmt_instrs = Hhbc_from_nast.from_stmts b in
   let stmt_instrs =
     if has_type_constraint return_type_info then
@@ -58,12 +62,27 @@ let from_ast tparams params ret b =
   let begin_label, default_value_setters =
     Emit_param.emit_param_default_value_setter params
   in
+  let (is_generator, is_pair_generator) = is_function_generator stmt_instrs in
+  let generator_instr = if is_generator then instr_createcont else empty in
   let body_instrs = gather [
     begin_label;
     emit_method_prolog params;
+    generator_instr;
     stmt_instrs;
     ret_instrs;
     default_value_setters;
     fault_instrs;
   ] in
-  body_instrs, params, return_type_info
+  let params, body_instrs =
+    Label_rewriter.relabel_function params body_instrs in
+  let function_decl_vars = extract_decl_vars body_instrs in
+  let body_instrs = Local_id_rewriter.unname_instrseq
+    (List.map params Hhas_param.name @ function_decl_vars)
+    body_instrs
+  in
+  body_instrs,
+  function_decl_vars,
+  params,
+  return_type_info,
+  is_generator,
+  is_pair_generator

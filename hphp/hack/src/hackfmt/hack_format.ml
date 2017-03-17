@@ -364,14 +364,12 @@ let builder = object (this)
       List.split_while rev_leading_trivia ~f:is_not_end_of_line in
 
     this#handle_trivia ~is_leading:true @@
-      this#break_out_delimited @@ List.rev rev_rest_including_last_newline;
+      List.rev rev_rest_including_last_newline;
     this#end_chunks();
     this#end_block_nest ();
-    this#handle_trivia ~is_leading:true @@
-      this#break_out_delimited @@ List.rev rev_after_last_newline;
+    this#handle_trivia ~is_leading:true @@ List.rev rev_after_last_newline;
     this#handle_token x;
-    this#handle_trivia ~is_leading:false @@
-      this#break_out_delimited (EditableToken.trailing x);
+    this#handle_trivia ~is_leading:false @@ EditableToken.trailing x;
     ()
 
   (* TODO: Handle (aka remove) excess whitespace inside of an ast node *)
@@ -388,13 +386,12 @@ let builder = object (this)
       in
 
       this#check_range ();
+      let trivia_list = this#break_out_delimited ~is_leading trivia_list in
       let newlines, only_whitespace  = List.fold trivia_list ~init:(0, true)
         ~f:(fun (newlines, only_whitespace) t ->
           this#advance (Trivia.width t);
           (match Trivia.kind t with
             | TriviaKind.WhiteSpace ->
-              (* Needed for the XHP whitespace hack, see XHPExpression *)
-              this#check_range ();
               newlines, only_whitespace
             | TriviaKind.EndOfLine ->
               if only_whitespace && is_leading then
@@ -407,6 +404,7 @@ let builder = object (this)
             | TriviaKind.FixMe
             | TriviaKind.IgnoreError
             | TriviaKind.SingleLineComment
+            | TriviaKind.Markup
             | TriviaKind.DelimitedComment ->
               handle_newlines ~is_trivia:true newlines;
               this#add_string ~is_trivia:true @@ Trivia.text t;
@@ -430,30 +428,30 @@ let builder = object (this)
     this#advance (EditableToken.width t);
 
   method token x =
-    this#handle_trivia
-      ~is_leading:true (this#break_out_delimited @@ EditableToken.leading x);
+    this#handle_trivia ~is_leading:true @@ EditableToken.leading x;
     this#handle_token x;
-    this#handle_trivia
-      ~is_leading:false (this#break_out_delimited @@ EditableToken.trailing x);
+    this#handle_trivia ~is_leading:false @@ EditableToken.trailing x;
     ()
 
   method token_trivia_only x =
-    this#handle_trivia
-      ~is_leading:true (this#break_out_delimited @@ EditableToken.leading x);
+    this#handle_trivia ~is_leading:true @@ EditableToken.leading x;
     this#check_range ();
     this#advance (EditableToken.width x);
-    this#handle_trivia
-      ~is_leading:false (this#break_out_delimited @@ EditableToken.trailing x);
+    this#handle_trivia ~is_leading:false @@ EditableToken.trailing x;
     ()
 
-  method break_out_delimited trivia =
+  method private break_out_delimited ~is_leading trivia =
     let new_line_regex = Str.regexp "\n" in
+    let indent = ref 0 in
+    let currently_leading = ref is_leading in
     List.concat_map trivia ~f:(fun triv ->
       match Trivia.kind triv with
         | TriviaKind.UnsafeExpression
         | TriviaKind.FixMe
         | TriviaKind.IgnoreError
+        | TriviaKind.Markup
         | TriviaKind.DelimitedComment ->
+          currently_leading := false;
           let delimited_lines =
             Str.split new_line_regex @@ Trivia.text triv in
           let map_tail str =
@@ -466,7 +464,14 @@ let builder = object (this)
               in
               aux 0
             in
-            let start_index = min block_indent (prefix_space_count str) in
+            (* If we're dealing with trailing trivia, then we don't have a good
+               signal for the indent level, so we just cut all leading spaces.
+               Otherwise, we cut a number of spaces equal to the indent before
+               the delimited comment opener. *)
+            let start_index = if is_leading
+              then min !indent (prefix_space_count str)
+              else prefix_space_count str
+            in
             let len = String.length str - start_index in
             let dc = Trivia.make_delimited_comment @@
               String.sub str start_index len in
@@ -478,7 +483,15 @@ let builder = object (this)
 
           Trivia.make_delimited_comment (List.hd_exn delimited_lines) ::
             List.concat_map (List.tl_exn delimited_lines) ~f:map_tail
+        | TriviaKind.EndOfLine ->
+          indent := 0;
+          currently_leading := true;
+          [triv]
+        | TriviaKind.WhiteSpace ->
+          if !currently_leading then indent := Trivia.width triv;
+          [triv]
         | _ ->
+          currently_leading := false;
           [triv]
     )
 
@@ -523,7 +536,6 @@ let rec transform node =
     let (header, declarations) = get_script_children x in
     t header;
     handle_possible_list declarations;
-  | ScriptFooter x -> t @@ get_script_footer_children x
   | SimpleTypeSpecifier x -> t @@ get_simple_type_specifier_children x
   | LiteralExpression x ->
     (* Double quoted string literals can create a list *)
@@ -857,6 +869,7 @@ let rec transform node =
     t kw;
     transform_argish left_p args right_p;
     t semi;
+    builder#end_chunks ();
   | WhileStatement x ->
     t x.while_keyword;
     add_space ();
@@ -1050,8 +1063,7 @@ let rec transform node =
     transform_argish_with_return_type ~in_span:false lp params rp colon
       ret_type;
     t use;
-    handle_possible_compound_statement body;
-    builder#end_chunks ();
+    handle_possible_compound_statement ~space:false body;
     ()
   | AnonymousFunctionUseClause x ->
     (* TODO: Revisit *)
@@ -1099,6 +1111,12 @@ let rec transform node =
     handle_possible_chaining
       (get_safe_member_selection_expression_children x)
       None
+  | EmbeddedMemberSelectionExpression x ->
+    let (obj, op, name) = get_embedded_member_selection_expression_children x in
+    t obj;
+    t op;
+    t name;
+    ()
   | YieldExpression x ->
     let (kw, operand) = get_yield_expression_children x in
     t kw;
@@ -1197,6 +1215,18 @@ let rec transform node =
       t right_b
     ) ();
     ()
+  | EmbeddedBracedExpression x ->
+    (* TODO: Consider finding a way to avoid treating these expressions as
+    opportunities for line breaks in long strings:
+
+    $sql = "DELETE FROM `foo` WHERE `left` BETWEEN {$res->left} AND {$res
+      ->right} ORDER BY `level` DESC";
+    *)
+    let (left_b, expr, right_b) = get_embedded_braced_expression_children x in
+    t left_b;
+    t_with ~nest expr;
+    t right_b;
+    ()
   | ListExpression x ->
     let (kw, lp, members, rp) = get_list_expression_children x in
     t kw;
@@ -1270,6 +1300,14 @@ let rec transform node =
     t receiver;
     transform_braced_item lb expr rb;
     ()
+  | EmbeddedSubscriptExpression x ->
+    let (receiver, lb, expr, rb) =
+      get_embedded_subscript_expression_children x in
+    t receiver;
+    t lb;
+    t expr;
+    t rb;
+    ()
   | AwaitableCreationExpression x ->
     let (kw, body) = get_awaitable_creation_expression_children x in
     t kw;
@@ -1334,17 +1372,21 @@ let rec transform node =
     ) ();
     ()
   | XHPOpen x ->
-    let (name, attrs, right_a) = get_xhp_open_children x in
+    let (left_a, name, attrs, right_a) = get_xhp_open_children x in
+    t left_a;
     t name;
     if not (is_missing attrs) then begin
       split ~space ();
-      tl_with ~nest ~rule:(RuleKind Rule.Argument) ~f:(fun () ->
-        handle_possible_list ~after_each:(fun is_last ->
-          if not is_last then split ~space (); ()
-        ) attrs;
-      ) ();
-    end;
-    handle_xhp_open_right_angle_token right_a;
+      tl_with ~rule:(RuleKind Rule.Argument) ~f:(fun () -> begin
+        tl_with ~nest ~f:(fun () ->
+          handle_possible_list ~after_each:(fun is_last ->
+            if not is_last then split ~space (); ()
+          ) attrs;
+        ) ();
+        handle_xhp_open_right_angle_token right_a;
+      end) ();
+    end else
+      handle_xhp_open_right_angle_token right_a;
     ()
   | XHPExpression x ->
     (**
@@ -1352,54 +1394,39 @@ let rec transform node =
      * XHPOpen tag then it becomes leading trivia for the first token in the
      * XHPBody instead of trailing trivia for the open tag.
      *
-     * To deal with this we map these newlines to whitespace. We do this instead
-     * of removing the trivia in order to maintain an accurate character
-     * processed count for partial formatting.
+     * To deal with this we remove the body's leading trivia, split it after the
+     * first newline, and treat the first half as trailing trivia.
      *)
-    let token_has_trailing_trivia_kind trivia_kind node =
-      List.exists (Syntax.trailing_trivia node)
-        ~f:(fun trivia -> Trivia.kind trivia = trivia_kind)
-    in
-    let token_has_trailing_newline =
-      token_has_trailing_trivia_kind TriviaKind.EndOfLine in
-    let token_has_trailing_whitespace =
-      token_has_trailing_trivia_kind TriviaKind.WhiteSpace in
-    let remove_leading_trivia node =
-      let found = ref false in
-      let rewritten_node, _ = Rewriter.rewrite_pre (fun rewrite_node ->
-        match syntax rewrite_node with
-          | Token t when not !found ->
-            found := true;
-            let new_triv = List.map (EditableToken.leading t) ~f:(fun triv ->
-              match Trivia.kind triv with
-                | TriviaKind.EndOfLine -> Trivia.make_whitespace @@
-                  (String.make (Trivia.width triv) ' ')
-                | _ -> triv
-            ) in
-            Some (
-              Syntax.make_token {t with EditableToken.leading = new_triv},
-              true
-            )
-          | _  -> Some (rewrite_node, false)
-      ) node in
-      rewritten_node
-    in
-
     let handle_xhp_body body =
-      let body_with_stripped_hd = remove_leading_trivia body in
-      let after_each_with_node node is_last =
-        if token_has_trailing_whitespace node then pending_space ();
-        if not is_last && token_has_trailing_newline node
-          then builder#hard_split ();
-      in
-      let rec aux l = match l with
-        | hd :: tl -> t hd; after_each_with_node hd (List.is_empty tl); aux tl;
-        | [] -> ()
-      in
-      match syntax body_with_stripped_hd with
+      match syntax body with
         | Missing -> ()
-        | SyntaxList sl -> split (); aux sl
-        | _ -> split (); aux [body]
+        | SyntaxList (hd :: tl) ->
+          split ();
+
+          let leading, hd = remove_leading_trivia hd in
+          let (up_to_first_newline, after_newline, _) =
+            List.fold leading
+              ~init:([], [], false)
+              ~f:(fun (upto, after, seen) t ->
+                if seen then upto, t :: after, true
+                else t :: upto, after, Trivia.kind t = TriviaKind.EndOfLine
+              )
+          in
+          builder#handle_trivia ~is_leading:false up_to_first_newline;
+          builder#simple_split_if_unsplit ();
+          builder#handle_trivia ~is_leading:true after_newline;
+
+          List.iter (hd :: tl) ~f:(fun node -> begin
+            t node;
+            let has_trailing_whitespace =
+              List.exists (Syntax.trailing_trivia node)
+                ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.WhiteSpace)
+            in
+            match syntax node with
+              | XHPExpression _ -> split ~space:has_trailing_whitespace ()
+              | _ -> if has_trailing_whitespace then pending_space ();
+          end)
+        | _ -> failwith "Expected SyntaxList"
     in
 
     let (xhp_open, body, close) = get_xhp_expression_children x in
@@ -1407,8 +1434,13 @@ let rec transform node =
       tl_with ~nest ~f:(fun () ->
         handle_xhp_body body
       ) ();
-      if not (is_missing close) then split ();
-      t (remove_leading_trivia close);
+      if not (is_missing close) then begin
+        split ();
+        let leading, close = remove_leading_trivia close in
+        (* Ignore extra newlines by treating this as trailing trivia *)
+        builder#handle_trivia ~is_leading:false leading;
+        t close;
+      end;
       ()
     ) in
 
@@ -1589,11 +1621,11 @@ and handle_lambda_body node =
         t_with ~nest:true node;
       ) ()
 
-and handle_possible_compound_statement node =
+and handle_possible_compound_statement ?space:(space=true) node =
   match syntax node with
     | CompoundStatement x ->
       handle_compound_statement x;
-      pending_space ();
+      if space then pending_space ();
       ()
     | _ ->
       builder#end_chunks ();
@@ -1640,7 +1672,7 @@ and handle_possible_list
 and handle_xhp_open_right_angle_token t =
   match syntax t with
     | Token token ->
-      if EditableToken.text token = "/>" then add_space ();
+      if EditableToken.text token = "/>" then split ~space:true ();
       transform t
     | _ -> raise (Failure "expected xhp_open right_angle token")
 
@@ -1835,6 +1867,20 @@ and transform_braced_item left_p item right_p =
     transform right_p;
   ) ();
 
+and remove_leading_trivia node =
+  let leading_token = match Syntax.leading_token node with
+    | Some t -> t
+    | None -> failwith "Expected leading token"
+  in
+  let rewritten_node, changed = Rewriter.rewrite_pre (fun rewrite_node ->
+    match syntax rewrite_node with
+      | Token t when t == leading_token ->
+        Some (Syntax.make_token {t with EditableToken.leading = []}, true)
+      | _  -> Some (rewrite_node, false)
+  ) node in
+  if not changed then failwith "Leading token not rewritten";
+  EditableToken.leading leading_token, rewritten_node
+
 and remove_trailing_trivia node =
   let trailing_token = match Syntax.trailing_token node with
     | Some t -> t
@@ -1921,6 +1967,14 @@ and transform_binary_expression ~is_nested expr =
           | Full_fidelity_operator.ConcatenationOperator -> false
           | _ -> true
   in
+  let operator_is_leading op =
+    match op with
+      | None -> failwith "operator_is_leading: Operator expected"
+      | Some op ->
+        match get_operator_type op with
+          | Full_fidelity_operator.PipeOperator -> true
+          | _ -> false
+  in
 
   let (left, operator, right) = get_binary_expression_children expr in
   let operator_t = get_operator_type operator in
@@ -1976,14 +2030,20 @@ and transform_binary_expression ~is_nested expr =
               if (i mod 2) = 0 then begin
                 let op = x in
                 let op_has_spaces = operator_has_surrounding_spaces (Some op) in
-                if op_has_spaces then pending_space ();
+                if operator_is_leading (Some op) then
+                  split ~space:op_has_spaces ()
+                else
+                  if op_has_spaces then pending_space ();
                 transform op;
                 Some op
               end
               else begin
                 let operand = x in
                 let op_has_spaces = operator_has_surrounding_spaces last_op in
-                split ~space:op_has_spaces ();
+                if operator_is_leading last_op then
+                  (if op_has_spaces then pending_space ())
+                else
+                  split ~space:op_has_spaces ();
                 transform_operand operand;
                 None
               end

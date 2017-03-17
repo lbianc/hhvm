@@ -32,6 +32,7 @@
 
 #include "hphp/hhbbc/hhbbc.h"
 #include "hphp/hhbbc/analyze.h"
+#include "hphp/hhbbc/cfg-opts.h"
 #include "hphp/hhbbc/dce.h"
 #include "hphp/hhbbc/func-util.h"
 #include "hphp/hhbbc/interp.h"
@@ -187,8 +188,8 @@ void insert_assertions_step(ArrayTypeTable::Builder& arrTable,
  * bools or objects, etc.  We might consider making stack flavors have
  * subtypes and adding this to the opcode table.
  */
-bool hasObviousStackOutput(Op op) {
-  switch (op) {
+bool hasObviousStackOutput(const Bytecode& op, const State& state) {
+  switch (op.op) {
   case Op::Box:
   case Op::BoxR:
   case Op::Null:
@@ -253,6 +254,7 @@ bool hasObviousStackOutput(Op op) {
   case Op::IsTypeL:
   case Op::IsUninit:
   case Op::OODeclExists:
+  case Op::AliasCls:
     return true;
 
   // Consider CGetL obvious because if we knew the type of the local,
@@ -260,6 +262,13 @@ bool hasObviousStackOutput(Op op) {
   // of SetL is obvious if you know what its input is (which we'll
   // assert if we know).
   case Op::CGetL:
+    if (state.locals[op.CGetL.loc1].couldBe(TRef) &&
+        state.stack.back().type.strictSubtypeOf(TInitCell)) {
+      // In certain cases (local static, for example) we can have
+      // information about the unboxed value of the local which isn't
+      // obvious from the local itself (which will be TRef or TGen).
+      return false;
+    }
   case Op::SetL:
     return true;
 
@@ -280,7 +289,7 @@ void insert_assertions(const Index& index,
 
   auto lastStackOutputObvious = false;
 
-  CollectedInfo collect { index, ctx, nullptr, nullptr, true };
+  CollectedInfo collect { index, ctx, nullptr, nullptr, true, &ainfo };
   auto interp = Interp { index, ctx, collect, blk, state };
   for (auto& op : blk->hhbcs) {
     FTRACE(2, "  == {}\n", show(ctx.func, op));
@@ -291,7 +300,7 @@ void insert_assertions(const Index& index,
       FTRACE(2, "   + {}\n", show(ctx.func, newBCs.back()));
 
       lastStackOutputObvious =
-        newb.numPush() != 0 && hasObviousStackOutput(newb.op);
+        newb.numPush() != 0 && hasObviousStackOutput(newb, state);
     };
 
     auto const preState = state;
@@ -311,6 +320,39 @@ void insert_assertions(const Index& index,
   }
 
   blk->hhbcs = std::move(newBCs);
+}
+
+bool persistence_check(borrowed_ptr<php::Block> const blk) {
+  for (auto& op : blk->hhbcs) {
+    switch (op.op) {
+      case Op::Nop:
+      case Op::DefCls:
+      case Op::DefClsNop:
+      case Op::DefCns:
+      case Op::DefTypeAlias:
+      case Op::Null:
+      case Op::True:
+      case Op::False:
+      case Op::Int:
+      case Op::Double:
+      case Op::String:
+      case Op::Vec:
+      case Op::Dict:
+      case Op::Keyset:
+      case Op::Array:
+        continue;
+      case Op::PopC:
+        // Not strictly no-side effects, but as long as the rest of
+        // the unit is limited to the above, we're fine (and we expect
+        // one following a DefCns).
+        continue;
+      case Op::RetC:
+        continue;
+      default:
+        return false;
+    }
+  }
+  return true;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -419,7 +461,7 @@ void first_pass(const Index& index,
   std::vector<Bytecode> newBCs;
   newBCs.reserve(blk->hhbcs.size());
 
-  CollectedInfo collect { index, ctx, nullptr, nullptr, true };
+  CollectedInfo collect { index, ctx, nullptr, nullptr, true, &ainfo };
   auto interp = Interp { index, ctx, collect, blk, state };
 
   auto peephole = make_peephole(newBCs, index, ctx);
@@ -599,7 +641,7 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
     }
     if (options.GlobalDCE) {
       global_dce(index, ainfo);
-      again = merge_blocks(ainfo);
+      again = control_flow_opts(ainfo);
       assert(check(*ainfo.ctx.func));
       /*
        * Global DCE can change types of locals across blocks.  See
@@ -631,14 +673,28 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
     }
   }
 
-  func->attrs = (is_pseudomain(ainfo.ctx.func) ||
-                 ainfo.ctx.func->attrs & AttrInterceptable ||
+  auto pseudomain = is_pseudomain(func);
+  func->attrs = (pseudomain ||
+                 func->attrs & AttrInterceptable ||
                  ainfo.mayUseVV) ?
     Attr(func->attrs | AttrMayUseVV) : Attr(func->attrs & ~AttrMayUseVV);
+
+  if (pseudomain) {
+    auto persistent = true;
+    visit_blocks("persistence check", index, ainfo,
+                 [&] (const Index&,
+                      const FuncAnalysis&,
+                      borrowed_ptr<php::Block> const blk,
+                      const State&) {
+                   if (!persistence_check(blk)) persistent = false;
+                 });
+    func->unit->persistent = persistent;
+  }
 
   if (options.InsertAssertions) {
     visit_blocks("insert assertions", index, ainfo, insert_assertions);
   }
+
 }
 
 //////////////////////////////////////////////////////////////////////

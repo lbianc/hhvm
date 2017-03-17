@@ -295,7 +295,7 @@ module WithStatementAndDeclAndTypeParser
         (parser1, make_token token)
       else
         (with_error parser SyntaxError.error1006, (make_missing())) in
-    let node = make_braced_expression left_brace expr right_brace in
+    let node = make_embedded_braced_expression left_brace expr right_brace in
     (parser, node)
 
   and parse_string_literal parser head name =
@@ -411,24 +411,27 @@ module WithStatementAndDeclAndTypeParser
       let (parser3, token3) = next_token_in_string parser2 name in
       match (Token.kind token1, Token.kind token2, Token.kind token3) with
       | (MinusGreaterThan, Name, _) ->
-        let expr = make_member_selection_expression var_expr
+        let expr = make_embedded_member_selection_expression var_expr
           (make_token token1) (make_token token2) in
         (parser2, expr)
       | (LeftBracket, Name, RightBracket) ->
-        let expr = make_subscript_expression var_expr (make_token token1)
+        let expr = make_embedded_subscript_expression var_expr
+          (make_token token1)
           (make_qualified_name_expression (make_token token2))
           (make_token token3) in
         (parser3, expr)
       | (LeftBracket, Variable, RightBracket) ->
-        let expr = make_subscript_expression var_expr (make_token token1)
-          (make_variable_expression (make_token token2)) (make_token token3) in
+        let expr = make_embedded_subscript_expression var_expr
+          (make_token token1) (make_variable_expression (make_token token2))
+          (make_token token3) in
         (parser3, expr)
       | (LeftBracket, DecimalLiteral, RightBracket)
       | (LeftBracket, OctalLiteral, RightBracket)
       | (LeftBracket, HexadecimalLiteral, RightBracket)
       | (LeftBracket, BinaryLiteral, RightBracket) ->
-        let expr = make_subscript_expression var_expr (make_token token1)
-          (make_literal_expression (make_token token2)) (make_token token3) in
+        let expr = make_embedded_subscript_expression var_expr
+          (make_token token1) (make_literal_expression (make_token token2))
+          (make_token token3) in
         (parser3, expr)
       | _ -> (parser, var_expr) in
 
@@ -996,7 +999,6 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | MinusEqual
     | MinusGreaterThan
     | Question
-    | QuestionGreaterThan
     | QuestionMinusGreaterThan
     | QuestionQuestion
     | RightBrace
@@ -1779,7 +1781,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
       to be a mis-edit, so we'll keep it as a right-brace token so that
       tooling can flag it as suspicious. *)
       (parser1, Some (make_token token))
-    | XHPElementName ->
+    | LessThan ->
       let (parser, expr) = parse_possible_xhp_expression parser in
       (parser, Some expr)
     | _ -> (parser, None)
@@ -1812,17 +1814,17 @@ TODO: This will need to be fixed to allow situations where the qualified name
       (parser, make_xhp_close
         (make_token less_than_slash) (make_missing()) (make_missing()))
 
-  and parse_xhp_expression parser name name_text =
+  and parse_xhp_expression parser left_angle name name_text =
     let (parser, attrs) = parse_list_until_none parser parse_xhp_attribute in
-    let (parser1, token, _) = next_xhp_element_token parser in
+    let (parser1, token, _) = next_xhp_element_token ~no_trailing:true parser in
     match (Token.kind token) with
     | SlashGreaterThan ->
-      let xhp_open = make_xhp_open name attrs (make_token token) in
+      let xhp_open = make_xhp_open left_angle name attrs (make_token token) in
       let xhp = make_xhp_expression
         xhp_open (make_missing()) (make_missing()) in
       (parser1, xhp)
     | GreaterThan ->
-      let xhp_open = make_xhp_open name attrs (make_token token) in
+      let xhp_open = make_xhp_open left_angle name attrs (make_token token) in
       let (parser, xhp_body) =
         parse_list_until_none parser1 parse_xhp_body_element in
       let (parser, xhp_close) = parse_xhp_close parser name_text in
@@ -1831,7 +1833,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | _ ->
       (* ERROR RECOVERY: Assume the unexpected token belongs to whatever
          comes next. *)
-      let xhp_open = make_xhp_open name attrs (make_missing()) in
+      let xhp_open = make_xhp_open left_angle name attrs (make_missing()) in
       let xhp = make_xhp_expression
         xhp_open (make_missing()) (make_missing()) in
       let parser = with_error parser SyntaxError.error1013 in
@@ -1839,9 +1841,10 @@ TODO: This will need to be fixed to allow situations where the qualified name
 
   and parse_possible_xhp_expression parser =
     (* We got a < token where an expression was expected. *)
-    let (parser, token, text) = next_xhp_element_token parser in
-    if (Token.kind token) = XHPElementName then
-      parse_xhp_expression parser (make_token token) text
+    let (parser, less_than) = assert_token parser LessThan in
+    let (parser1, name, text) = next_xhp_element_token parser in
+    if (Token.kind name) = XHPElementName then
+      parse_xhp_expression parser1 less_than (make_token name) text
     else
       (* ERROR RECOVERY
       Hard to say what to do here. We are expecting an expression;
@@ -1849,7 +1852,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
       expression. Or we could assume the the left side of an inequality is
       missing, give a missing node for the left side, and parse the
       remainder as the right side. We'll go for the former for now. *)
-      (with_error parser SyntaxError.error1015, (make_token token))
+      (with_error parser SyntaxError.error1015, less_than)
 
   and parse_scope_resolution_or_name parser =
     (* parent, self and static are legal identifiers.  If the next

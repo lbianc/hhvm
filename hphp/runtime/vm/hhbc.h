@@ -50,9 +50,9 @@ std::string show(const LocalRange&);
 /*
  * Variable-size immediates are implemented as follows: To determine which size
  * the immediate is, examine the first byte where the immediate is expected,
- * and examine its low-order bit.  If it is zero, it's a 1-byte immediate;
- * otherwise, it's 4 bytes.  The immediate has to be logical-shifted to the
- * right by one to get rid of the flag bit.
+ * and examine its high-order bit.  If it is zero, it's a 1-byte immediate
+ * and the byte is the value. Otherwise, it's 4 bytes, and bits 8..31 must be
+ * logical-shifted to the right by one to get rid of the flag bit.
  *
  * The types in this macro for BLA and SLA are meaningless since they are never
  * read out of ArgUnion (they use ImmVector and ImmVectorO).
@@ -555,6 +555,7 @@ constexpr int32_t kMaxConcatN = 4;
   O(DefFunc,         ONE(IVA),         NOV,             NOV,        NF) \
   O(DefCls,          ONE(IVA),         NOV,             NOV,        NF) \
   O(DefClsNop,       ONE(IVA),         NOV,             NOV,        NF) \
+  O(AliasCls,        TWO(SA,SA),       ONE(CV),         ONE(CV),    NF) \
   O(DefCns,          ONE(SA),          ONE(CV),         ONE(CV),    NF) \
   O(DefTypeAlias,    ONE(IVA),         NOV,             NOV,        NF) \
   O(This,            NA,               NOV,             ONE(CV),    NF) \

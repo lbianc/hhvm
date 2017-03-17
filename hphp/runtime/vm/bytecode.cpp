@@ -424,13 +424,14 @@ void VarEnv::enterFP(ActRec* oldFP, ActRec* newFP) {
   if (oldFP == nullptr) {
     assert(isGlobalScope() && m_depth == 0);
   } else {
-    assert(m_depth >= 1);
+    assertx(m_depth >= 1);
+    assertx(g_context->getPrevVMStateSkipFrame(newFP) == oldFP);
     if (debug) {
       auto prev = newFP;
       while (true) {
         prev = g_context->getPrevVMState(prev);
         if (prev == oldFP) break;
-        assert(!(prev->m_func->attrs() & AttrMayUseVV) || !prev->m_varEnv);
+        assertx(!(prev->m_func->attrs() & AttrMayUseVV) || !prev->hasVarEnv());
       }
     }
     m_nvTable.detach(oldFP);
@@ -1533,7 +1534,11 @@ void enterVMAtFunc(ActRec* enterFnAr, StackArgsState stk, VarEnv* varEnv) {
     enterFnAr->setVarEnv(varEnv);
     assert(enterFnAr->func()->isPseudoMain());
     pushFrameSlots(enterFnAr->func());
-    varEnv->enterFP(varEnv->getFP(), enterFnAr);
+    auto oldFp = vmfp();
+    if (UNLIKELY(oldFp && oldFp->skipFrame())) {
+      oldFp = g_context->getPrevVMStateSkipFrame(oldFp);
+    }
+    varEnv->enterFP(oldFp, enterFnAr);
     vmfp() = enterFnAr;
     vmpc() = enterFnAr->func()->getEntry();
   } else {
@@ -5278,6 +5283,17 @@ OPTBLD_INLINE void iopDefCls(intva_t cid) {
   Unit::defClass(c);
 }
 
+OPTBLD_INLINE void iopAliasCls(const StringData* original,
+                               const StringData* alias) {
+  TypedValue* aloadTV = vmStack().topTV();
+  tvCastToBooleanInPlace(aloadTV);
+  assert(aloadTV->m_type == KindOfBoolean);
+  bool autoload = aloadTV->m_data.num;
+  vmStack().popX();
+
+  vmStack().pushBool(Unit::aliasClass(original, alias, autoload));
+}
+
 OPTBLD_INLINE void iopDefClsNop(intva_t cid) {
 }
 
@@ -5339,13 +5355,13 @@ static inline RefData* lookupStatic(const StringData* name,
       frame_local(fp, func->numParams())->m_data.pobj, name, inited);
   }
 
-  auto const refData = rds::bindStaticLocal(func, name);
-  inited = refData.isInit();
+  auto const staticLocalData = rds::bindStaticLocal(func, name);
+  inited = staticLocalData.isInit();
   if (!inited) {
-    refData->initInRDS();
-    refData.markInit();
+    staticLocalData->ref.initInRDS();
+    staticLocalData.markInit();
   }
-  return refData.get();
+  return &staticLocalData.get()->ref;
 }
 
 OPTBLD_INLINE void iopStaticLoc(local_var loc, const StringData* var) {

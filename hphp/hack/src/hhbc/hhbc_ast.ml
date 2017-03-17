@@ -23,6 +23,7 @@ type param_id =
 type param_num = int
 type stack_index = int
 type class_id = string
+type class_num = int
 type function_id = string
 type num_params = int
 
@@ -131,7 +132,7 @@ type instruct_lit_const =
   | CnsE of Litstr.id
   | CnsU of int * Litstr.id (* litstr fallback *)
   | ClsCns of Litstr.id
-  | ClsCnssD of Litstr.id * Litstr.id
+  | ClsCnsD of Litstr.id * Litstr.id
   | File
   | Dir
   | Method
@@ -493,20 +494,22 @@ type instruct_misc =
   | NativeImpl
   | IncStat of int * int (* counter id, value *)
   | AKExists
-  | CreateCl of num_params * class_id
+  | CreateCl of num_params * class_num
   | Idx
   | ArrayIdx
   | AssertRATL of local_id * repo_auth_type
   | AssertRATStk of stack_index * repo_auth_type
   | BreakTraceHint
   | Silence of local_id * op_silence
-  | GetMemoKey
+  | GetMemoKeyL of local_id
   | VarEnvDynCall
   | IsUninit
   | CGetCUNop
   | UGetCUNop
   | MemoSet of int * local_id * int
   | MemoGet of int * local_id * int
+  | IsMemoType
+  | MaybeMemoType
 
 type gen_creation_execution =
   | CreateCont
@@ -536,7 +539,7 @@ type instruct_try =
   | TryFaultBegin of Label.t
   | TryFaultEnd
 
-and instruct =
+type instruct =
   | IBasic of instruct_basic
   | IIterator of instruct_iterator
   | ILitConst of instruct_lit_const
@@ -553,3 +556,5 @@ and instruct =
   | ILabel of Label.t
   | ITry of instruct_try
   | IComment of string
+  | IAsync of async_functions
+  | IGenerator of gen_creation_execution

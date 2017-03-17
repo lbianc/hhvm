@@ -113,11 +113,13 @@ namespace Trace {
       TM(hfsort)        \
       TM(hhas)          \
       TM(hhbbc)         \
+      TM(hhbbc_cfg)     \
       TM(hhbbc_dce)     \
       TM(hhbbc_dump)    \
       TM(hhbbc_emit)    \
       TM(hhbbc_iface)   \
       TM(hhbbc_index)   \
+      TM(hhbbc_stats)   \
       TM(hhbbc_time)    \
       TM(hhbc)          \
       TM(hhir)          \

@@ -106,9 +106,6 @@ module WithToken(Token: TokenType) = struct
       script_header: t;
       script_declarations: t;
     }
-    and script_footer = {
-      footer_question_greater_than: t;
-    }
     and simple_type_specifier = {
       simple_type_specifier: t;
     }
@@ -522,6 +519,11 @@ module WithToken(Token: TokenType) = struct
       safe_member_operator: t;
       safe_member_name: t;
     }
+    and embedded_member_selection_expression = {
+      embedded_member_object: t;
+      embedded_member_operator: t;
+      embedded_member_name: t;
+    }
     and yield_expression = {
       yield_keyword: t;
       yield_operand: t;
@@ -595,6 +597,11 @@ module WithToken(Token: TokenType) = struct
       braced_expression_expression: t;
       braced_expression_right_brace: t;
     }
+    and embedded_braced_expression = {
+      embedded_braced_expression_left_brace: t;
+      embedded_braced_expression_expression: t;
+      embedded_braced_expression_right_brace: t;
+    }
     and list_expression = {
       list_keyword: t;
       list_left_paren: t;
@@ -654,6 +661,12 @@ module WithToken(Token: TokenType) = struct
       subscript_index: t;
       subscript_right_bracket: t;
     }
+    and embedded_subscript_expression = {
+      embedded_subscript_receiver: t;
+      embedded_subscript_left_bracket: t;
+      embedded_subscript_index: t;
+      embedded_subscript_right_bracket: t;
+    }
     and awaitable_creation_expression = {
       awaitable_async: t;
       awaitable_compound_statement: t;
@@ -698,6 +711,7 @@ module WithToken(Token: TokenType) = struct
       xhp_attribute_expression: t;
     }
     and xhp_open = {
+      xhp_open_left_angle: t;
       xhp_open_name: t;
       xhp_open_attributes: t;
       xhp_open_right_angle: t;
@@ -844,7 +858,6 @@ module WithToken(Token: TokenType) = struct
     | EndOfFile of end_of_file
     | ScriptHeader of script_header
     | Script of script
-    | ScriptFooter of script_footer
     | SimpleTypeSpecifier of simple_type_specifier
     | LiteralExpression of literal_expression
     | VariableExpression of variable_expression
@@ -914,6 +927,7 @@ module WithToken(Token: TokenType) = struct
     | ScopeResolutionExpression of scope_resolution_expression
     | MemberSelectionExpression of member_selection_expression
     | SafeMemberSelectionExpression of safe_member_selection_expression
+    | EmbeddedMemberSelectionExpression of embedded_member_selection_expression
     | YieldExpression of yield_expression
     | PrintExpression of print_expression
     | PrefixUnaryExpression of prefix_unary_expression
@@ -928,6 +942,7 @@ module WithToken(Token: TokenType) = struct
     | FunctionCallExpression of function_call_expression
     | ParenthesizedExpression of parenthesized_expression
     | BracedExpression of braced_expression
+    | EmbeddedBracedExpression of embedded_braced_expression
     | ListExpression of list_expression
     | CollectionLiteralExpression of collection_literal_expression
     | ObjectCreationExpression of object_creation_expression
@@ -938,6 +953,7 @@ module WithToken(Token: TokenType) = struct
     | VectorIntrinsicExpression of vector_intrinsic_expression
     | ElementInitializer of element_initializer
     | SubscriptExpression of subscript_expression
+    | EmbeddedSubscriptExpression of embedded_subscript_expression
     | AwaitableCreationExpression of awaitable_creation_expression
     | XHPChildrenDeclaration of xhp_children_declaration
     | XHPCategoryDeclaration of xhp_category_declaration
@@ -1001,8 +1017,6 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.ScriptHeader
       | Script _ ->
         SyntaxKind.Script
-      | ScriptFooter _ ->
-        SyntaxKind.ScriptFooter
       | SimpleTypeSpecifier _ ->
         SyntaxKind.SimpleTypeSpecifier
       | LiteralExpression _ ->
@@ -1141,6 +1155,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.MemberSelectionExpression
       | SafeMemberSelectionExpression _ ->
         SyntaxKind.SafeMemberSelectionExpression
+      | EmbeddedMemberSelectionExpression _ ->
+        SyntaxKind.EmbeddedMemberSelectionExpression
       | YieldExpression _ ->
         SyntaxKind.YieldExpression
       | PrintExpression _ ->
@@ -1169,6 +1185,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.ParenthesizedExpression
       | BracedExpression _ ->
         SyntaxKind.BracedExpression
+      | EmbeddedBracedExpression _ ->
+        SyntaxKind.EmbeddedBracedExpression
       | ListExpression _ ->
         SyntaxKind.ListExpression
       | CollectionLiteralExpression _ ->
@@ -1189,6 +1207,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.ElementInitializer
       | SubscriptExpression _ ->
         SyntaxKind.SubscriptExpression
+      | EmbeddedSubscriptExpression _ ->
+        SyntaxKind.EmbeddedSubscriptExpression
       | AwaitableCreationExpression _ ->
         SyntaxKind.AwaitableCreationExpression
       | XHPChildrenDeclaration _ ->
@@ -1276,8 +1296,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ScriptHeader
     let is_script node =
       kind node = SyntaxKind.Script
-    let is_script_footer node =
-      kind node = SyntaxKind.ScriptFooter
     let is_simple_type_specifier node =
       kind node = SyntaxKind.SimpleTypeSpecifier
     let is_literal_expression node =
@@ -1416,6 +1434,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.MemberSelectionExpression
     let is_safe_member_selection_expression node =
       kind node = SyntaxKind.SafeMemberSelectionExpression
+    let is_embedded_member_selection_expression node =
+      kind node = SyntaxKind.EmbeddedMemberSelectionExpression
     let is_yield_expression node =
       kind node = SyntaxKind.YieldExpression
     let is_print_expression node =
@@ -1444,6 +1464,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ParenthesizedExpression
     let is_braced_expression node =
       kind node = SyntaxKind.BracedExpression
+    let is_embedded_braced_expression node =
+      kind node = SyntaxKind.EmbeddedBracedExpression
     let is_list_expression node =
       kind node = SyntaxKind.ListExpression
     let is_collection_literal_expression node =
@@ -1464,6 +1486,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.ElementInitializer
     let is_subscript_expression node =
       kind node = SyntaxKind.SubscriptExpression
+    let is_embedded_subscript_expression node =
+      kind node = SyntaxKind.EmbeddedSubscriptExpression
     let is_awaitable_creation_expression node =
       kind node = SyntaxKind.AwaitableCreationExpression
     let is_xhp_children_declaration node =
@@ -1594,12 +1618,6 @@ module WithToken(Token: TokenType) = struct
     } = (
       script_header,
       script_declarations
-    )
-
-    let get_script_footer_children {
-      footer_question_greater_than;
-    } = (
-      footer_question_greater_than
     )
 
     let get_simple_type_specifier_children {
@@ -2428,6 +2446,16 @@ module WithToken(Token: TokenType) = struct
       safe_member_name
     )
 
+    let get_embedded_member_selection_expression_children {
+      embedded_member_object;
+      embedded_member_operator;
+      embedded_member_name;
+    } = (
+      embedded_member_object,
+      embedded_member_operator,
+      embedded_member_name
+    )
+
     let get_yield_expression_children {
       yield_keyword;
       yield_operand;
@@ -2574,6 +2602,16 @@ module WithToken(Token: TokenType) = struct
       braced_expression_right_brace
     )
 
+    let get_embedded_braced_expression_children {
+      embedded_braced_expression_left_brace;
+      embedded_braced_expression_expression;
+      embedded_braced_expression_right_brace;
+    } = (
+      embedded_braced_expression_left_brace,
+      embedded_braced_expression_expression,
+      embedded_braced_expression_right_brace
+    )
+
     let get_list_expression_children {
       list_keyword;
       list_left_paren;
@@ -2692,6 +2730,18 @@ module WithToken(Token: TokenType) = struct
       subscript_right_bracket
     )
 
+    let get_embedded_subscript_expression_children {
+      embedded_subscript_receiver;
+      embedded_subscript_left_bracket;
+      embedded_subscript_index;
+      embedded_subscript_right_bracket;
+    } = (
+      embedded_subscript_receiver,
+      embedded_subscript_left_bracket,
+      embedded_subscript_index,
+      embedded_subscript_right_bracket
+    )
+
     let get_awaitable_creation_expression_children {
       awaitable_async;
       awaitable_compound_statement;
@@ -2779,10 +2829,12 @@ module WithToken(Token: TokenType) = struct
     )
 
     let get_xhp_open_children {
+      xhp_open_left_angle;
       xhp_open_name;
       xhp_open_attributes;
       xhp_open_right_angle;
     } = (
+      xhp_open_left_angle,
       xhp_open_name,
       xhp_open_attributes,
       xhp_open_right_angle
@@ -3083,11 +3135,6 @@ module WithToken(Token: TokenType) = struct
       } -> [
         script_header;
         script_declarations;
-      ]
-      | ScriptFooter {
-        footer_question_greater_than;
-      } -> [
-        footer_question_greater_than;
       ]
       | SimpleTypeSpecifier {
         simple_type_specifier;
@@ -3846,6 +3893,15 @@ module WithToken(Token: TokenType) = struct
         safe_member_operator;
         safe_member_name;
       ]
+      | EmbeddedMemberSelectionExpression {
+        embedded_member_object;
+        embedded_member_operator;
+        embedded_member_name;
+      } -> [
+        embedded_member_object;
+        embedded_member_operator;
+        embedded_member_name;
+      ]
       | YieldExpression {
         yield_keyword;
         yield_operand;
@@ -3978,6 +4034,15 @@ module WithToken(Token: TokenType) = struct
         braced_expression_expression;
         braced_expression_right_brace;
       ]
+      | EmbeddedBracedExpression {
+        embedded_braced_expression_left_brace;
+        embedded_braced_expression_expression;
+        embedded_braced_expression_right_brace;
+      } -> [
+        embedded_braced_expression_left_brace;
+        embedded_braced_expression_expression;
+        embedded_braced_expression_right_brace;
+      ]
       | ListExpression {
         list_keyword;
         list_left_paren;
@@ -4086,6 +4151,17 @@ module WithToken(Token: TokenType) = struct
         subscript_index;
         subscript_right_bracket;
       ]
+      | EmbeddedSubscriptExpression {
+        embedded_subscript_receiver;
+        embedded_subscript_left_bracket;
+        embedded_subscript_index;
+        embedded_subscript_right_bracket;
+      } -> [
+        embedded_subscript_receiver;
+        embedded_subscript_left_bracket;
+        embedded_subscript_index;
+        embedded_subscript_right_bracket;
+      ]
       | AwaitableCreationExpression {
         awaitable_async;
         awaitable_compound_statement;
@@ -4164,10 +4240,12 @@ module WithToken(Token: TokenType) = struct
         xhp_attribute_expression;
       ]
       | XHPOpen {
+        xhp_open_left_angle;
         xhp_open_name;
         xhp_open_attributes;
         xhp_open_right_angle;
       } -> [
+        xhp_open_left_angle;
         xhp_open_name;
         xhp_open_attributes;
         xhp_open_right_angle;
@@ -4442,11 +4520,6 @@ module WithToken(Token: TokenType) = struct
       } -> [
         "script_header";
         "script_declarations";
-      ]
-      | ScriptFooter {
-        footer_question_greater_than;
-      } -> [
-        "footer_question_greater_than";
       ]
       | SimpleTypeSpecifier {
         simple_type_specifier;
@@ -5205,6 +5278,15 @@ module WithToken(Token: TokenType) = struct
         "safe_member_operator";
         "safe_member_name";
       ]
+      | EmbeddedMemberSelectionExpression {
+        embedded_member_object;
+        embedded_member_operator;
+        embedded_member_name;
+      } -> [
+        "embedded_member_object";
+        "embedded_member_operator";
+        "embedded_member_name";
+      ]
       | YieldExpression {
         yield_keyword;
         yield_operand;
@@ -5337,6 +5419,15 @@ module WithToken(Token: TokenType) = struct
         "braced_expression_expression";
         "braced_expression_right_brace";
       ]
+      | EmbeddedBracedExpression {
+        embedded_braced_expression_left_brace;
+        embedded_braced_expression_expression;
+        embedded_braced_expression_right_brace;
+      } -> [
+        "embedded_braced_expression_left_brace";
+        "embedded_braced_expression_expression";
+        "embedded_braced_expression_right_brace";
+      ]
       | ListExpression {
         list_keyword;
         list_left_paren;
@@ -5445,6 +5536,17 @@ module WithToken(Token: TokenType) = struct
         "subscript_index";
         "subscript_right_bracket";
       ]
+      | EmbeddedSubscriptExpression {
+        embedded_subscript_receiver;
+        embedded_subscript_left_bracket;
+        embedded_subscript_index;
+        embedded_subscript_right_bracket;
+      } -> [
+        "embedded_subscript_receiver";
+        "embedded_subscript_left_bracket";
+        "embedded_subscript_index";
+        "embedded_subscript_right_bracket";
+      ]
       | AwaitableCreationExpression {
         awaitable_async;
         awaitable_compound_statement;
@@ -5523,10 +5625,12 @@ module WithToken(Token: TokenType) = struct
         "xhp_attribute_expression";
       ]
       | XHPOpen {
+        xhp_open_left_angle;
         xhp_open_name;
         xhp_open_attributes;
         xhp_open_right_angle;
       } -> [
+        "xhp_open_left_angle";
         "xhp_open_name";
         "xhp_open_attributes";
         "xhp_open_right_angle";
@@ -5858,12 +5962,6 @@ module WithToken(Token: TokenType) = struct
         Script {
           script_header;
           script_declarations;
-        }
-      | (SyntaxKind.ScriptFooter, [
-          footer_question_greater_than;
-        ]) ->
-        ScriptFooter {
-          footer_question_greater_than;
         }
       | (SyntaxKind.SimpleTypeSpecifier, [
           simple_type_specifier;
@@ -6691,6 +6789,16 @@ module WithToken(Token: TokenType) = struct
           safe_member_operator;
           safe_member_name;
         }
+      | (SyntaxKind.EmbeddedMemberSelectionExpression, [
+          embedded_member_object;
+          embedded_member_operator;
+          embedded_member_name;
+        ]) ->
+        EmbeddedMemberSelectionExpression {
+          embedded_member_object;
+          embedded_member_operator;
+          embedded_member_name;
+        }
       | (SyntaxKind.YieldExpression, [
           yield_keyword;
           yield_operand;
@@ -6837,6 +6945,16 @@ module WithToken(Token: TokenType) = struct
           braced_expression_expression;
           braced_expression_right_brace;
         }
+      | (SyntaxKind.EmbeddedBracedExpression, [
+          embedded_braced_expression_left_brace;
+          embedded_braced_expression_expression;
+          embedded_braced_expression_right_brace;
+        ]) ->
+        EmbeddedBracedExpression {
+          embedded_braced_expression_left_brace;
+          embedded_braced_expression_expression;
+          embedded_braced_expression_right_brace;
+        }
       | (SyntaxKind.ListExpression, [
           list_keyword;
           list_left_paren;
@@ -6955,6 +7073,18 @@ module WithToken(Token: TokenType) = struct
           subscript_index;
           subscript_right_bracket;
         }
+      | (SyntaxKind.EmbeddedSubscriptExpression, [
+          embedded_subscript_receiver;
+          embedded_subscript_left_bracket;
+          embedded_subscript_index;
+          embedded_subscript_right_bracket;
+        ]) ->
+        EmbeddedSubscriptExpression {
+          embedded_subscript_receiver;
+          embedded_subscript_left_bracket;
+          embedded_subscript_index;
+          embedded_subscript_right_bracket;
+        }
       | (SyntaxKind.AwaitableCreationExpression, [
           awaitable_async;
           awaitable_compound_statement;
@@ -7042,11 +7172,13 @@ module WithToken(Token: TokenType) = struct
           xhp_attribute_expression;
         }
       | (SyntaxKind.XHPOpen, [
+          xhp_open_left_angle;
           xhp_open_name;
           xhp_open_attributes;
           xhp_open_right_angle;
         ]) ->
         XHPOpen {
+          xhp_open_left_angle;
           xhp_open_name;
           xhp_open_attributes;
           xhp_open_right_angle;
@@ -7388,13 +7520,6 @@ module WithToken(Token: TokenType) = struct
       from_children SyntaxKind.Script [
         script_header;
         script_declarations;
-      ]
-
-    let make_script_footer
-      footer_question_greater_than
-    =
-      from_children SyntaxKind.ScriptFooter [
-        footer_question_greater_than;
       ]
 
     let make_simple_type_specifier
@@ -8292,6 +8417,17 @@ module WithToken(Token: TokenType) = struct
         safe_member_name;
       ]
 
+    let make_embedded_member_selection_expression
+      embedded_member_object
+      embedded_member_operator
+      embedded_member_name
+    =
+      from_children SyntaxKind.EmbeddedMemberSelectionExpression [
+        embedded_member_object;
+        embedded_member_operator;
+        embedded_member_name;
+      ]
+
     let make_yield_expression
       yield_keyword
       yield_operand
@@ -8452,6 +8588,17 @@ module WithToken(Token: TokenType) = struct
         braced_expression_right_brace;
       ]
 
+    let make_embedded_braced_expression
+      embedded_braced_expression_left_brace
+      embedded_braced_expression_expression
+      embedded_braced_expression_right_brace
+    =
+      from_children SyntaxKind.EmbeddedBracedExpression [
+        embedded_braced_expression_left_brace;
+        embedded_braced_expression_expression;
+        embedded_braced_expression_right_brace;
+      ]
+
     let make_list_expression
       list_keyword
       list_left_paren
@@ -8580,6 +8727,19 @@ module WithToken(Token: TokenType) = struct
         subscript_right_bracket;
       ]
 
+    let make_embedded_subscript_expression
+      embedded_subscript_receiver
+      embedded_subscript_left_bracket
+      embedded_subscript_index
+      embedded_subscript_right_bracket
+    =
+      from_children SyntaxKind.EmbeddedSubscriptExpression [
+        embedded_subscript_receiver;
+        embedded_subscript_left_bracket;
+        embedded_subscript_index;
+        embedded_subscript_right_bracket;
+      ]
+
     let make_awaitable_creation_expression
       awaitable_async
       awaitable_compound_statement
@@ -8676,11 +8836,13 @@ module WithToken(Token: TokenType) = struct
       ]
 
     let make_xhp_open
+      xhp_open_left_angle
       xhp_open_name
       xhp_open_attributes
       xhp_open_right_angle
     =
       from_children SyntaxKind.XHPOpen [
+        xhp_open_left_angle;
         xhp_open_name;
         xhp_open_attributes;
         xhp_open_right_angle;

@@ -187,6 +187,7 @@ let pBop : (expr -> expr -> expr_) parser = fun node env lhs rhs ->
   | Some TK.Minus                       -> Binop (Minus,             lhs, rhs)
   | Some TK.Star                        -> Binop (Star,              lhs, rhs)
   | Some TK.Or                          -> Binop (BArbar,            lhs, rhs)
+  | Some TK.And                         -> Binop (AMpamp,            lhs, rhs)
   | Some TK.Xor                         -> Binop (Xor,               lhs, rhs)
   | Some TK.Carat                       -> Binop (Xor,               lhs, rhs)
   | Some TK.Slash                       -> Binop (Slash,             lhs, rhs)
@@ -522,6 +523,8 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       { (fun_template yield node is_sync) with f_ret; f_params; f_body }
 
     | BracedExpression        { braced_expression_expression        = expr; _ }
+    | EmbeddedBracedExpression
+      { embedded_braced_expression_expression = expr; _ }
     | ParenthesizedExpression { parenthesized_expression_expression = expr; _ }
     | DecoratedExpression     { decorated_expression_expression     = expr; _ }
       -> pExpr_ expr env
@@ -600,6 +603,15 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       , pExpr safe_member_name   env
       , pNullFlavor safe_member_operator env
       )
+    | EmbeddedMemberSelectionExpression
+      { embedded_member_object;
+        embedded_member_operator;
+        embedded_member_name } ->
+      Obj_get
+      ( pExpr embedded_member_object env
+      , pExpr embedded_member_name   env
+      , pNullFlavor embedded_member_operator env
+      )
 
     | PrefixUnaryExpression
       { prefix_unary_operator = operator
@@ -651,6 +663,12 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       Array_get
       ( pExpr subscript_receiver env
       , mpOptional pExpr subscript_index env
+      )
+    | EmbeddedSubscriptExpression
+      { embedded_subscript_receiver; embedded_subscript_index; _ } ->
+      Array_get
+      ( pExpr embedded_subscript_receiver env
+      , mpOptional pExpr embedded_subscript_index env
       )
     | ShapeExpression { shape_expression_fields; _ } ->
       Shape (couldMap ~f:(mpShapeField pExpr) shape_expression_fields env)
@@ -755,7 +773,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       ; xhp_body = body
       ; _ } ->
       let name =
-        let pos, name = drop_pstr 1 (pos_name xhp_open_name) in
+        let pos, name = pos_name xhp_open_name in
         (pos, ":" ^ name)
       in
       let combine b e =

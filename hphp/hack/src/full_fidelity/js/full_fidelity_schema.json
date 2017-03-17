@@ -1,6 +1,6 @@
 { "description" :
   "Auto-generated JSON schema of the Hack Full Fidelity Parser AST",
-  "version" : "2017-02-09-0001",
+  "version" : "2017-03-06-0002",
   "trivia" : [
     { "trivia_kind_name" : "WhiteSpace",
       "trivia_type_name" : "whitespace" },
@@ -19,7 +19,9 @@
     { "trivia_kind_name" : "IgnoreError",
       "trivia_type_name" : "ignore_error" },
     { "trivia_kind_name" : "FallThrough",
-      "trivia_type_name" : "fall_through" } ],
+      "trivia_type_name" : "fall_through" },
+    { "trivia_kind_name" : "Markup",
+      "trivia_type_name" : "markup" } ],
   "tokens" : [
     { "token_kind" : "Abstract",
       "token_text" : "abstract" },
@@ -217,8 +219,6 @@
       "token_text" : "}" },
     { "token_kind" : "Dot",
       "token_text" : "." },
-    { "token_kind" : "QuestionGreaterThan",
-      "token_text" : "?>" },
     { "token_kind" : "MinusGreaterThan",
       "token_text" : "->" },
     { "token_kind" : "PlusPlus",
@@ -417,13 +417,6 @@
       "fields" : [
         { "field_name" : "header" },
         { "field_name" : "declarations" }
-      ] },
-    { "kind_name" : "ScriptFooter",
-      "type_name" : "script_footer",
-      "description" : "footer",
-      "prefix" : "footer",
-      "fields" : [
-        { "field_name" : "question_greater_than" }
       ] },
     { "kind_name" : "SimpleTypeSpecifier",
       "type_name" : "simple_type_specifier",
@@ -1114,6 +1107,15 @@
         { "field_name" : "operator" },
         { "field_name" : "name" }
       ] },
+    { "kind_name" : "EmbeddedMemberSelectionExpression",
+      "type_name" : "embedded_member_selection_expression",
+      "description" : "embedded_member_selection_expression",
+      "prefix" : "embedded_member",
+      "fields" : [
+        { "field_name" : "object" },
+        { "field_name" : "operator" },
+        { "field_name" : "name" }
+      ] },
     { "kind_name" : "YieldExpression",
       "type_name" : "yield_expression",
       "description" : "yield_expression",
@@ -1243,6 +1245,15 @@
         { "field_name" : "expression" },
         { "field_name" : "right_brace" }
       ] },
+    { "kind_name" : "EmbeddedBracedExpression",
+      "type_name" : "embedded_braced_expression",
+      "description" : "embedded_braced_expression",
+      "prefix" : "embedded_braced_expression",
+      "fields" : [
+        { "field_name" : "left_brace" },
+        { "field_name" : "expression" },
+        { "field_name" : "right_brace" }
+      ] },
     { "kind_name" : "ListExpression",
       "type_name" : "list_expression",
       "description" : "list_expression",
@@ -1342,6 +1353,16 @@
         { "field_name" : "index" },
         { "field_name" : "right_bracket" }
       ] },
+    { "kind_name" : "EmbeddedSubscriptExpression",
+      "type_name" : "embedded_subscript_expression",
+      "description" : "embedded_subscript_expression",
+      "prefix" : "embedded_subscript",
+      "fields" : [
+        { "field_name" : "receiver" },
+        { "field_name" : "left_bracket" },
+        { "field_name" : "index" },
+        { "field_name" : "right_bracket" }
+      ] },
     { "kind_name" : "AwaitableCreationExpression",
       "type_name" : "awaitable_creation_expression",
       "description" : "awaitable_creation_expression",
@@ -1426,6 +1447,7 @@
       "description" : "xhp_open",
       "prefix" : "xhp_open",
       "fields" : [
+        { "field_name" : "left_angle" },
         { "field_name" : "name" },
         { "field_name" : "attributes" },
         { "field_name" : "right_angle" }

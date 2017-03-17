@@ -546,11 +546,13 @@ struct Unit {
   LSString filename;
   bool isHHFile{false};
   bool useStrictTypes{false};
+  bool persistent{false};
   int preloadPriority{0};
   std::unique_ptr<Func> pseudomain;
   CompactVector<std::unique_ptr<Func>> funcs;
   CompactVector<std::unique_ptr<Class>> classes;
   CompactVector<std::unique_ptr<TypeAlias>> typeAliases;
+  CompactVector<std::pair<SString,SString>> classAliases;
   CompactVector<SrcLoc> srcLocs;
 };
 
