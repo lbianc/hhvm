@@ -72,14 +72,15 @@ const StaticString s_trigger_error("trigger_error");
 //////////////////////////////////////////////////////////////////////
 
 void impl_vec(ISS& env, bool reduce, std::vector<Bytecode>&& bcs) {
-  folly::Optional<std::vector<Bytecode>> currentReduction;
-  if (reduce) currentReduction.emplace();
+  std::vector<Bytecode> currentReduction;
+  if (!options.StrengthReduce) reduce = false;
 
   for (auto it = begin(bcs); it != end(bcs); ++it) {
     assert(env.flags.jmpFlag == StepFlags::JmpFlags::Either &&
            "you can't use impl with branching opcodes before last position");
 
     auto const wasPEI = env.flags.wasPEI;
+    auto const canConstProp = env.flags.canConstProp;
 
     FTRACE(3, "    (impl {}\n", show(env.ctx.func, *it));
     env.flags.wasPEI          = true;
@@ -88,32 +89,42 @@ void impl_vec(ISS& env, bool reduce, std::vector<Bytecode>&& bcs) {
     default_dispatch(env, *it);
 
     if (env.flags.strengthReduced) {
-      if (!currentReduction) {
-        currentReduction.emplace();
-        std::move(begin(bcs), it, std::back_inserter(*currentReduction));
-      }
-      std::move(begin(*env.flags.strengthReduced),
-                end(*env.flags.strengthReduced),
-                std::back_inserter(*currentReduction));
-      if (instrFlags(currentReduction->back().op) & TF) {
+      if (instrFlags(env.flags.strengthReduced->back().op) & TF) {
         unreachable(env);
+      }
+      if (reduce) {
+        std::move(begin(*env.flags.strengthReduced),
+                  end(*env.flags.strengthReduced),
+                  std::back_inserter(currentReduction));
       }
     } else {
       if (instrFlags(it->op) & TF) {
         unreachable(env);
       }
-      if (currentReduction) {
-        currentReduction->push_back(std::move(*it));
+      if (reduce) {
+        if (env.flags.canConstProp &&
+            env.collect.propagate_constants &&
+            env.collect.propagate_constants(*it, env.state, currentReduction)) {
+          env.flags.canConstProp = false;
+          env.flags.wasPEI = false;
+        } else {
+          currentReduction.push_back(std::move(*it));
+        }
       }
     }
 
     // If any of the opcodes in the impl list said they could throw,
     // then the whole thing could throw.
     env.flags.wasPEI = env.flags.wasPEI || wasPEI;
+    env.flags.canConstProp = env.flags.canConstProp && canConstProp;
     if (env.state.unreachable) break;
   }
 
-  env.flags.strengthReduced = std::move(currentReduction);
+  if (reduce) {
+    env.flags.strengthReduced = std::move(currentReduction);
+  } else {
+    env.flags.strengthReduced = folly::none;
+  }
 }
 
 namespace interp_step {
@@ -144,8 +155,15 @@ void in(ISS& env, const bc::Dup& op) {
   push(env, std::move(val));
 }
 
-void in(ISS& env, const bc::AssertRATL&)     { nothrow(env); }
-void in(ISS& env, const bc::AssertRATStk&)   { nothrow(env); }
+void in(ISS& env, const bc::AssertRATL& op) {
+  mayReadLocal(env, op.loc1);
+  nothrow(env);
+}
+
+void in(ISS& env, const bc::AssertRATStk&) {
+  nothrow(env);
+}
+
 void in(ISS& env, const bc::BreakTraceHint&) { nothrow(env); }
 
 void in(ISS& env, const bc::Box&) {
@@ -727,22 +745,46 @@ void in(ISS& env, const bc::CastInt&) {
   push(env, TInt);
 }
 
-void castImpl(ISS& env, Type target) {
+void castImpl(ISS& env, Type target, void(*fn)(TypedValue*)) {
   auto const t = topC(env);
   if (t.subtypeOf(target)) return reduce(env, bc::Nop {});
-  constprop(env);
-  // TODO(#3875556): constant evaluate conversions when we can.
   popC(env);
+  if (fn) {
+    if (auto val = tv(t)) {
+      if (auto result = eval_cell([&] { fn(&*val); return *val; })) {
+        constprop(env);
+        target = *result;
+      }
+    }
+  }
   push(env, std::move(target));
 }
 
-void in(ISS& env, const bc::CastDouble&) { castImpl(env, TDbl); }
-void in(ISS& env, const bc::CastString&) { castImpl(env, TStr); }
-void in(ISS& env, const bc::CastArray&)  { castImpl(env, TArr); }
-void in(ISS& env, const bc::CastObject&) { castImpl(env, TObj); }
-void in(ISS& env, const bc::CastDict&)   { castImpl(env, TDict); }
-void in(ISS& env, const bc::CastVec&)    { castImpl(env, TVec); }
-void in(ISS& env, const bc::CastKeyset&) { castImpl(env, TKeyset); }
+void in(ISS& env, const bc::CastDouble&) {
+  castImpl(env, TDbl, tvCastToDoubleInPlace);
+}
+
+void in(ISS& env, const bc::CastString&) {
+  castImpl(env, TStr, tvCastToStringInPlace);
+}
+
+void in(ISS& env, const bc::CastArray&)  {
+  castImpl(env, TArr, tvCastToArrayInPlace);
+}
+
+void in(ISS& env, const bc::CastObject&) { castImpl(env, TObj, nullptr); }
+
+void in(ISS& env, const bc::CastDict&)   {
+  castImpl(env, TDict, tvCastToDictInPlace);
+}
+
+void in(ISS& env, const bc::CastVec&)    {
+  castImpl(env, TVec, tvCastToVecInPlace);
+}
+
+void in(ISS& env, const bc::CastKeyset&) {
+  castImpl(env, TKeyset, tvCastToKeysetInPlace);
+}
 
 void in(ISS& env, const bc::Print& op) { popC(env); push(env, ival(1)); }
 
@@ -780,18 +822,8 @@ void jmpImpl(ISS& env, const JmpOp& op) {
     }
     return;
   }
-  auto follow = [&] (BlockId id) {
-    auto& blks = env.ctx.func->blocks;
-    while (is_single_nop(*blks[id]) && blks[id]->fallthrough > id) {
-      id = blks[id]->fallthrough;
-      // If we've determined that the block is unreachable, we could
-      // have replaced it with a nop block with no fallthrough. But in
-      // that case, we should know that the jmp was taken above.
-      always_assert(id != NoBlockId);
-    }
-    return id;
-  };
-  if (follow(env.blk.fallthrough) == follow(op.target)) {
+  if (next_real_block(*env.ctx.func, env.blk.fallthrough) ==
+      next_real_block(*env.ctx.func, op.target)) {
     jmp_nevertaken(env);
     return;
   }
@@ -831,9 +863,9 @@ void group(ISS& env, const bc::IsTypeL& istype, const JmpOp& jmp) {
     return loc;
   }();
 
-  setLoc(env, istype.loc1, negate ? was_true : was_false);
+  refineLoc(env, istype.loc1, negate ? was_true : was_false);
   env.propagate(jmp.target, env.state);
-  setLoc(env, istype.loc1, negate ? was_false : was_true);
+  refineLoc(env, istype.loc1, negate ? was_false : was_true);
 }
 
 namespace {
@@ -988,9 +1020,9 @@ void group(ISS& env, const bc::CGetL& cgetl, const JmpOp& jmp) {
     return loc;
   }();
 
-  setLoc(env, cgetl.loc1, negate ? converted_true : converted_false);
+  refineLoc(env, cgetl.loc1, negate ? converted_true : converted_false);
   env.propagate(jmp.target, env.state);
-  setLoc(env, cgetl.loc1, negate ? converted_false : converted_true);
+  refineLoc(env, cgetl.loc1, negate ? converted_false : converted_true);
 }
 
 template<class JmpOp>
@@ -1013,9 +1045,9 @@ void group(ISS& env,
   auto const negate    = jmp.op == Op::JmpNZ;
   auto const was_true  = instTy;
   auto const was_false = loc;
-  setLoc(env, cgetl.loc1, negate ? was_true : was_false);
+  refineLoc(env, cgetl.loc1, negate ? was_true : was_false);
   env.propagate(jmp.target, env.state);
-  setLoc(env, cgetl.loc1, negate ? was_false : was_true);
+  refineLoc(env, cgetl.loc1, negate ? was_false : was_true);
 }
 
 void group(ISS& env,
@@ -1024,10 +1056,10 @@ void group(ISS& env,
   auto const obj = locAsCell(env, cgetl.loc1);
   impl(env, cgetl, fpush);
   if (!is_specialized_obj(obj)) {
-    setLoc(env, cgetl.loc1,
-           fpush.subop3 == ObjMethodOp::NullThrows ? TObj : TOptObj);
+    refineLoc(env, cgetl.loc1,
+              fpush.subop3 == ObjMethodOp::NullThrows ? TObj : TOptObj);
   } else if (is_opt(obj) && fpush.subop3 == ObjMethodOp::NullThrows) {
-    setLoc(env, cgetl.loc1, unopt(obj));
+    refineLoc(env, cgetl.loc1, unopt(obj));
   }
 }
 
@@ -1546,14 +1578,23 @@ void in(ISS& env, const bc::InstanceOf& op) {
 
 void in(ISS& env, const bc::SetL& op) {
   nothrow(env);
-  auto const equivLoc = topStkEquiv(env);
-  auto val = popC(env);
-  setLoc(env, op.loc1, val);
+  auto equivLoc = topStkEquiv(env);
   // If the local could be a Ref, don't record equality because the stack
   // element and the local won't actually have the same type.
-  if (equivLoc != NoLocalId &&
-      !locCouldBeRef(env, op.loc1) &&
+  if (!locCouldBeRef(env, op.loc1) &&
       !is_volatile_local(env.ctx.func, op.loc1)) {
+    if (equivLoc != NoLocalId) {
+      if (equivLoc == op.loc1 ||
+          locsAreEquiv(env, equivLoc, op.loc1)) {
+        return reduce(env, bc::Nop {});
+      }
+    } else {
+      equivLoc = op.loc1;
+    }
+  }
+  auto val = popC(env);
+  setLoc(env, op.loc1, val);
+  if (equivLoc != op.loc1 && equivLoc != NoLocalId) {
     addLocEquiv(env, op.loc1, equivLoc);
   }
   push(env, std::move(val), equivLoc);
@@ -3019,22 +3060,31 @@ StepFlags interpOps(Interp& interp,
 
   auto const numPushed   = iter->numPush();
   interpStep(env, iter, stop);
-  if (flags.wasPEI) {
-    auto outputs_constant = [&] {
-      auto const size = interp.state.stack.size();
-      for (auto i = size_t{0}; i < numPushed; ++i) {
-        if (!tv(interp.state.stack[size - i - 1].type)) return false;
-      }
-      return true;
-    };
 
-    if (flags.canConstProp && outputs_constant()) {
+  auto outputs_constant = [&] {
+    auto elems = &interp.state.stack.back();
+    for (auto i = size_t{0}; i < numPushed; ++i, --elems) {
+      if (!tv(elems->type)) return false;
+    }
+    return true;
+  };
+
+  if (options.ConstantProp && flags.canConstProp && outputs_constant()) {
+    auto elems = &interp.state.stack.back();
+    for (auto i = size_t{0}; i < numPushed; ++i, --elems) {
+      auto& ty = elems->type;
+      ty = from_cell(*tv(ty));
+    }
+    if (flags.wasPEI) {
       FTRACE(2, "   nothrow (due to constprop)\n");
-    } else {
-      FTRACE(2, "   PEI.\n");
-      for (auto factored : interp.blk->factoredExits) {
-        propagate(factored, stateBefore);
-      }
+      flags.wasPEI = false;
+    }
+  }
+
+  if (flags.wasPEI) {
+    FTRACE(2, "   PEI.\n");
+    for (auto factored : interp.blk->factoredExits) {
+      propagate(factored, stateBefore);
     }
   }
   return flags;

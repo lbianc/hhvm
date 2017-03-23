@@ -374,6 +374,7 @@ function get_options($argv) {
     'include:' => 'i:',
     'include-pattern:' => 'I:',
     'repo' => 'r',
+    'hhbbc2' => '',
     'mode:' => 'm:',
     'server' => 's',
     'cli-server' => 'S',
@@ -454,6 +455,8 @@ function get_options($argv) {
     echo "relocate and recycle-tc are mutually exclusive options\n";
     exit(1);
   }
+
+  if (isset($options['hhbbc2'])) $options['repo'] = true;
 
   return array($options, $files);
 }
@@ -614,7 +617,9 @@ function list_tests($files, $options) {
       throw new Exception("Unsupported mode for listing tests: ".$mode);
   }
 
-  if (isset($options['repo'])) {
+  if (isset($options['hhbbc2'])) {
+    $args[] = '--hhbbc2';
+  } else if (isset($options['repo'])) {
     $args[] = '-r';
   }
 
@@ -814,7 +819,7 @@ function hhvm_cmd($options, $test, $test_run = null) {
   // Command line arguments
   $cli_args = find_test_ext($test, 'cli_args');
   if ($cli_args !== null) {
-    $cmd .= " " . file_get_contents($cli_args);
+    $cmd .= " -- " . trim(file_get_contents($cli_args));
   }
 
   $env = $_ENV;
@@ -1237,7 +1242,8 @@ function clean_intermediate_files($test, $options) {
   if (isset($options['no-clean'])) {
     return;
   }
-  $exts = array('out', 'diff', 'repo');
+  $exts = array('out', 'diff', 'repo',
+                'after.round_trip.hhas', 'before.round_trip.hhas');
   foreach ($exts as $ext) {
     $file = "$test.$ext";
     if (file_exists($file)) {
@@ -1484,8 +1490,10 @@ function generate_diff($wanted, $wanted_re, $output)
 
 function dump_hhas_to_temp($hhvm_cmd, $test) {
   $tmp_file = $test . '.round_trip.hhas';
-  system("$hhvm_cmd -vEval.DumpHhas=1 > $tmp_file", $ret);
-  if ($ret) { echo "system failed\n"; exit(1); }
+  $cmd = str_replace(' -- ', ' -vEval.DumpHhas=1 -- ', $hhvm_cmd);
+  if ($cmd == $hhvm_cmd) $cmd .= " -vEval.DumpHhas=1";
+  system("$cmd  > $tmp_file 2> /dev/null", $ret);
+  if ($ret) return false;
   return $tmp_file;
 }
 
@@ -1789,6 +1797,24 @@ function run_test($options, $test) {
     $hhbbc = hhbbc_cmd($options, $test);
     shell_exec("$hphp 2>&1");
     shell_exec("$hhbbc 2>&1");
+    if (isset($options['hhbbc2'])) {
+      $hhas_temp1 = dump_hhas_to_temp($hhvm, "$test.before");
+      shell_exec("mv $hhbbc_repo $hphp_repo");
+      shell_exec("$hhbbc 2>&1");
+      $hhas_temp2 = dump_hhas_to_temp($hhvm, "$test.after");
+      if ($hhas_temp1 === false || $hhas_temp2 === false) {
+        if ($hhas_temp1 != $hhas_temp2)  {
+          shell_exec("cat $hhas_temp1$hhas_temp2 > $test.diff");
+          return false;
+        }
+      } else {
+        $diff = shell_exec("diff $hhas_temp1 $hhas_temp2 | wc -l");
+        if (trim($diff) != '0') {
+          shell_exec("diff $hhas_temp1 $hhas_temp2 > $test.diff");
+          return false;
+        }
+      }
+    }
 
     return run_one_config($options, $test, $hhvm, $hhvm_env);
   }
@@ -1798,6 +1824,10 @@ function run_test($options, $test) {
   }
   if (isset($options['hhas-round-trip'])) {
     $hhas_temp = dump_hhas_to_temp($hhvm, $test);
+    if ($hhas_temp === false) {
+      echo "system failed\n";
+      exit(1);
+    }
     list($hhvm, $hhvm_env) = hhvm_cmd($options, $hhas_temp);
   }
 
@@ -1849,7 +1879,20 @@ function print_commands($tests, $options) {
 
     // How to run it with hhbbc:
     $hhbbc_cmds = hphp_cmd($options, $test)."\n";
-    $hhbbc_cmds .= hhbbc_cmd($options, $test)."\n";
+    $hhbbc_cmd  = hhbbc_cmd($options, $test)."\n";
+    $hhbbc_cmds .= $hhbbc_cmd;
+    if (isset($options['hhbbc2'])) {
+      foreach ((array)$command as $c) {
+        $hhbbc_cmds .= $c." -vEval.DumpHhas=1 > $test.before.round_trip.hhas\n";
+      }
+      $hhbbc_cmds .= "mv $test.repo/hhvm.hhbbc $test.repo/hhvm.hhbc\n";
+      $hhbbc_cmds .= $hhbbc_cmd;
+      foreach ((array)$command as $c) {
+        $hhbbc_cmds .= $c." -vEval.DumpHhas=1 > $test.after.round_trip.hhas\n";
+      }
+      $hhbbc_cmds .=
+        "diff $test.before.round_trip.hhas $test.after.round_trip.hhas\n";
+    }
     foreach ((array)$command as $c) {
       $hhbbc_cmds .= $c."\n";
     }

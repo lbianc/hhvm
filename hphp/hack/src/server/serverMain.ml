@@ -19,18 +19,19 @@ open String_utils
 
 module MainInit : sig
   val go:
+    genv ->
     ServerArgs.options ->
     string ->
     (unit -> env) ->    (* init function to run while we have init lock *)
     env
 end = struct
   (* This code is only executed when the options --check is NOT present *)
-  let go options init_id init_fun =
+  let go genv options init_id init_fun =
     let root = ServerArgs.root options in
     let t = Unix.gettimeofday () in
     Hh_logger.log "Initializing Server (This might take some time)";
     (* note: we only run periodical tasks on the root, not extras *)
-    ServerIdle.init root;
+    ServerIdle.init genv root;
     Hh_logger.log "Init id: %s" init_id;
     let env = HackEventLogger.with_id ~stage:`Init init_id init_fun in
     Hh_logger.log "Server is READY";
@@ -45,7 +46,6 @@ module Program =
       (* Warning: Global references inited in this function, should
          be 'restored' in the workers, because they are not 'forked'
          anymore. See `ServerWorker.{save/restore}_state`. *)
-      HackSearchService.attach_hooks ();
 
       Sys_utils.set_signal Sys.sigusr1
         (Sys.Signal_handle Typing.debug_print_last_pos);
@@ -300,7 +300,8 @@ let serve_one_iteration genv env client_provider =
       ~default:env
       ~f:begin fun sub ->
 
-    let sub, errors = Diagnostic_subscription.pop_errors sub env.edited_files in
+    let sub, errors =
+      Diagnostic_subscription.pop_errors sub env.editor_open_files in
 
     if not @@ SMap.is_empty errors then begin
       let id = Diagnostic_subscription.get_id sub in
@@ -418,6 +419,7 @@ let setup_server options handle =
     enable_on_nfs;
     lazy_parse;
     lazy_init;
+    search_chunk_size;
     load_script_config;
     _
   } as local_config = local_config in
@@ -434,7 +436,8 @@ let setup_server options handle =
     lazy_parse
     lazy_init
     saved_state_load_type
-    use_sql;
+    use_sql
+    search_chunk_size;
   let root_s = Path.to_string root in
   if Sys_utils.is_nfs root_s && not enable_on_nfs then begin
     Hh_logger.log "Refusing to run on %s: root is on NFS!" root_s;
@@ -479,7 +482,7 @@ let daemon_main_exn options (ic, oc) =
   if ServerArgs.check_mode genv.options then
     (Hh_logger.log "Invalid program args - can't run daemon in check mode.";
     Exit_status.(exit Input_error));
-  let env = MainInit.go options init_id (fun () -> program_init genv) in
+  let env = MainInit.go genv options init_id (fun () -> program_init genv) in
   serve genv env in_fd out_fd
 
 let daemon_main (state, options) (ic, oc) =

@@ -108,7 +108,7 @@ let config_user_attributes config =
       Some (List.fold_left custom_attrs ~f:SSet.add ~init:SSet.empty)
 
 let process_experimental sl =
-  match List.map sl String.lowercase with
+  match List.map sl String.lowercase_ascii with
     | ["false"] -> SSet.empty
     | ["true"] -> TypecheckerOptions.experimental_all
     | features ->
@@ -172,6 +172,7 @@ let load config_filename options =
     (bool_ "assume_php" ~default:true config)
     (bool_ "unsafe_xhp" ~default:false config)
     (bool_ "safe_array" ~default:false config)
+    (bool_ "safe_vector_array" ~default:false config)
     (config_user_attributes config)
     (config_experimental_tc_features config)
     (prepare_auto_namespace_map config)

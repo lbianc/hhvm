@@ -425,7 +425,7 @@ constexpr int32_t kMaxConcatN = 4;
   O(InstanceOfD,     ONE(SA),          ONE(CV),         ONE(CV),    NF) \
   O(Print,           NA,               ONE(CV),         ONE(CV),    NF) \
   O(Clone,           NA,               ONE(CV),         ONE(CV),    NF) \
-  O(Exit,            NA,               ONE(CV),         ONE(CV),    NF) \
+  O(Exit,            NA,               ONE(CV),         ONE(CV),    TF) \
   O(Fatal,           ONE(OA(FatalOp)), ONE(CV),         NOV,        TF) \
   O(Jmp,             ONE(BA),          NOV,             NOV,        CF_TF) \
   O(JmpNS,           ONE(BA),          NOV,             NOV,        CF_TF) \
@@ -805,10 +805,6 @@ ArgUnion getImm(PC opcode, int idx, const Unit* u = nullptr);
 
 // Don't use this with variable-sized immediates!
 ArgUnion* getImmPtr(PC opcode, int idx);
-
-// Encodes a variable sized immediate for `val' into `buf'.  Returns
-// the number of bytes used taken.  At most 4 bytes can be used.
-size_t encodeVariableSizeImm(int32_t val, unsigned char* buf);
 
 void staticStreamer(const TypedValue* tv, std::stringstream& out);
 

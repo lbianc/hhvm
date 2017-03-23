@@ -38,6 +38,7 @@
 #include "hphp/hhbbc/interp.h"
 #include "hphp/hhbbc/interp-state.h"
 #include "hphp/hhbbc/misc.h"
+#include "hphp/hhbbc/options-util.h"
 #include "hphp/hhbbc/peephole.h"
 #include "hphp/hhbbc/representation.h"
 #include "hphp/hhbbc/type-system.h"
@@ -424,6 +425,13 @@ bool propagate_constants(const Bytecode& op, const State& state, Gen gen) {
   return true;
 }
 
+bool propagate_constants(const Bytecode& bc, const State& state,
+                         std::vector<Bytecode>& out) {
+  return propagate_constants(bc, state, [&] (const Bytecode& bc) {
+      out.push_back(bc);
+    });
+}
+
 //////////////////////////////////////////////////////////////////////
 
 /*
@@ -464,6 +472,8 @@ void first_pass(const Index& index,
   CollectedInfo collect { index, ctx, nullptr, nullptr, true, &ainfo };
   auto interp = Interp { index, ctx, collect, blk, state };
 
+  if (options.ConstantProp) collect.propagate_constants = propagate_constants;
+
   auto peephole = make_peephole(newBCs, index, ctx);
   std::vector<Op> srcStack(state.stack.size(), Op::LowInvalid);
 
@@ -496,15 +506,18 @@ void first_pass(const Index& index,
     }
 
     auto genOut = [&] (const Bytecode* op) -> Op {
-      if (options.StrengthReduce && flags.strengthReduced) {
-        for (auto i = 0; i < flags.strengthReduced->size() - 1; i++) {
-          gen(flags.strengthReduced.value()[i]);
+      if (options.ConstantProp && flags.canConstProp) {
+        if (propagate_constants(*op, state, gen)) {
+          assert(!flags.strengthReduced);
+          return Op::Nop;
         }
-        op = &flags.strengthReduced->back();
       }
 
-      if (options.ConstantProp && flags.canConstProp) {
-        if (propagate_constants(*op, state, gen)) return Op::Nop;
+      if (flags.strengthReduced) {
+        for (auto const& bc : *flags.strengthReduced) {
+          gen(bc);
+        }
+        return flags.strengthReduced->back().op;
       }
 
       gen(*op);
@@ -634,7 +647,7 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
      * Note: it's useful to do dead block removal before DCE, so it can remove
      * code relating to the branch to the dead block.
      */
-    remove_unreachable_blocks(index, ainfo);
+    remove_unreachable_blocks(ainfo);
 
     if (options.LocalDCE) {
       visit_blocks("local DCE", index, ainfo, local_dce);
@@ -663,6 +676,7 @@ void do_optimize(const Index& index, FuncAnalysis&& ainfo) {
     if (blk.hhbcs.size() == 2 &&
         blk.hhbcs[0].op == Op::Null &&
         blk.hhbcs[1].op == Op::RetC) {
+      FTRACE(2, "Erasing {}::{}\n", func->cls->name, func->name);
       func->cls->methods.erase(
         std::find_if(func->cls->methods.begin(),
                      func->cls->methods.end(),
@@ -753,8 +767,13 @@ Bytecode gen_constant(const Cell& cell) {
 }
 
 void optimize_func(const Index& index, FuncAnalysis&& ainfo) {
-  Trace::Bump bumper{Trace::hhbbc, kSystemLibBump,
-    is_systemlib_part(*ainfo.ctx.unit)};
+  auto const bump =
+    (is_systemlib_part(*ainfo.ctx.unit) ? kSystemLibBump : 0) +
+    (is_trace_function(ainfo.ctx.cls, ainfo.ctx.func) ? kTraceFuncBump : 0);
+
+  Trace::Bump bumper1{Trace::hhbbc, bump};
+  Trace::Bump bumper2{Trace::hhbbc_cfg, bump};
+  Trace::Bump bumper3{Trace::hhbbc_dce, bump};
   do_optimize(index, std::move(ainfo));
 }
 

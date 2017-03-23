@@ -101,9 +101,9 @@ namespace {
  * (i.e. the bytecode can be replaced by some other bytecode as an
  * optimization).
  *
- * The chained-to bytecodes should not take branches.  Also, constprop with
- * impl() will only occur on the last thing in the impl list---earlier opcodes
- * may set the canConstProp flag, but it will have no effect.
+ * The chained-to bytecodes should not take branches.  For impl, the
+ * canConstProp flag will only be set if it was set for all the
+ * bytecodes.
  */
 
 template<class... Ts>
@@ -116,6 +116,10 @@ void impl(ISS& env, Ts&&... ts) {
  * a given bytecode could be replaced by some other bytecode
  * sequence.  Ensure that if you call reduce(), it is before any
  * state-affecting operations (like popC()).
+ *
+ * If env.collect.propagate_constants is set, the reduced bytecodes
+ * will have been constant-propagated, and the canConstProp flag will
+ * be clear; otherwise canConstProp will be set as for impl.
  */
 void reduce(ISS& env, std::vector<Bytecode>&& bcs) {
   impl_vec(env, true, std::move(bcs));
@@ -146,6 +150,7 @@ void readAllLocals(ISS& env)     { env.flags.mayReadLocalSet.set(); }
 
 void modifyLocalStatic(ISS& env, LocalId id, const Type& t) {
   auto modifyOne = [&] (LocalId lid) {
+    if (is_volatile_local(env.ctx.func, lid)) return;
     if (env.state.localStaticBindings.size() <= lid) return;
     if (env.state.localStaticBindings[lid] == LocalStaticBinding::None) return;
     if (t.subtypeOf(TUninit) && !t.subtypeOf(TBottom)) {
@@ -412,29 +417,66 @@ LocalId findLocEquiv(ISS& env, LocalId l) {
   return env.state.equivLocals[l];
 }
 
-// Record an equivalency between two locals.
+// Determine whether two locals are equivalent
+bool locsAreEquiv(ISS& env, LocalId l1, LocalId l2) {
+  if (l1 >= env.state.equivLocals.size() ||
+      l2 >= env.state.equivLocals.size() ||
+      env.state.equivLocals[l1] == NoLocalId ||
+      env.state.equivLocals[l2] == NoLocalId) {
+    return false;
+  }
+
+  auto l = l1;
+  while ((l = env.state.equivLocals[l]) != l1) {
+    if (l == l2) return true;
+  }
+  return false;
+}
+
+void killLocEquiv(State& state, LocalId l) {
+  if (l >= state.equivLocals.size()) return;
+  if (state.equivLocals[l] == NoLocalId) return;
+  auto loc = l;
+  do {
+    loc = state.equivLocals[loc];
+  } while (state.equivLocals[loc] != l);
+  assert(loc != l);
+  if (state.equivLocals[l] == loc) {
+    state.equivLocals[loc] = NoLocalId;
+  } else {
+    state.equivLocals[loc] = state.equivLocals[l];
+  }
+  state.equivLocals[l] = NoLocalId;
+}
+
+void killLocEquiv(ISS& env, LocalId l) {
+  killLocEquiv(env.state, l);
+}
+
+void killAllLocEquiv(ISS& env) {
+  env.state.equivLocals.clear();
+}
+
+// Add from to to's equivalency set.
 void addLocEquiv(ISS& env,
                  LocalId from,
                  LocalId to) {
   always_assert(!is_volatile_local(env.ctx.func, from));
   always_assert(!is_volatile_local(env.ctx.func, to));
-  if (env.state.equivLocals.size() <= from) {
-    env.state.equivLocals.resize(from + 1, NoLocalId);
-  }
-  env.state.equivLocals[from] = to;
-}
+  always_assert(from != to && findLocEquiv(env, from) == NoLocalId);
 
-// Kill all equivalencies involving the given local to other locals
-void killLocEquiv(ISS& env, LocalId l) {
-  for (auto& to : env.state.equivLocals) {
-    if (to == l) to = NoLocalId;
+  auto m = std::max(to, from);
+  if (env.state.equivLocals.size() <= m) {
+    env.state.equivLocals.resize(m + 1, NoLocalId);
   }
-  if (l >= env.state.equivLocals.size()) return;
-  env.state.equivLocals[l] = NoLocalId;
-}
 
-void killAllLocEquiv(ISS& env) {
-  env.state.equivLocals.clear();
+  if (env.state.equivLocals[to] == NoLocalId) {
+    env.state.equivLocals[from] = to;
+    env.state.equivLocals[to] = from;
+  } else {
+    env.state.equivLocals[from] = env.state.equivLocals[to];
+    env.state.equivLocals[to] = from;
+  }
 }
 
 // Obtain a local which is equivalent to the given stack value
@@ -524,6 +566,20 @@ bool locCouldBeRef(ISS& env, LocalId l) {
 }
 
 /*
+ * Update the known type of a local, based on assertions
+ * (VerifyParamType; or IsType/JmpCC), rather than an actual
+ * modification to the local.
+ */
+void refineLoc(ISS& env, LocalId l, Type t) {
+  auto v = locRaw(env, l);
+  if (is_volatile_local(env.ctx.func, l)) {
+    always_assert_flog(v == TGen, "volatile local was not TGen");
+    return;
+  }
+  if (v.subtypeOf(TCell)) env.state.locals[l] = std::move(t);
+}
+
+/*
  * Set a local type in the sense of tvSet.  If the local is boxed or
  * not known to be not boxed, we can't change the type.  May be used
  * to set locals to types that include Uninit.
@@ -531,13 +587,8 @@ bool locCouldBeRef(ISS& env, LocalId l) {
 void setLoc(ISS& env, LocalId l, Type t) {
   killLocEquiv(env, l);
   killStkEquiv(env, l);
-  auto v = locRaw(env, l);
-  if (is_volatile_local(env.ctx.func, l)) {
-    always_assert_flog(v == TGen, "volatile local was not TGen");
-    return;
-  }
   modifyLocalStatic(env, l, t);
-  if (v.subtypeOf(TCell)) env.state.locals[l] = t;
+  refineLoc(env, l, std::move(t));
 }
 
 LocalId findLocal(ISS& env, SString name) {

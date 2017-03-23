@@ -277,7 +277,7 @@ struct FuncInfoValue {
    * to know what we determined the last time we were alloewd to do
    * that so we can return it again.
    */
-  ContextRetTyMap contextualReturnTypes;
+  ContextRetTyMap contextualReturnTypes{};
 
   /*
    * Type info for local statics.
@@ -2661,7 +2661,7 @@ Index::lookup_private_statics(borrowed_ptr<const php::Class> cls) const {
   );
 }
 
-Type Index::lookup_public_static(Type cls, Type name) const {
+Type Index::lookup_public_static(const Type& cls, const Type& name) const {
   auto const cinfo = [&] () -> borrowed_ptr<const ClassInfo> {
     if (!is_specialized_cls(cls)) {
       return nullptr;

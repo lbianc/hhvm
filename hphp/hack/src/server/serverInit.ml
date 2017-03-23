@@ -14,6 +14,7 @@ open ServerCheckUtils
 open Reordered_argument_collections
 open Utils
 open String_utils
+open SearchServiceRunner
 
 open Result.Export
 open Result.Monad_infix
@@ -459,6 +460,7 @@ module ServerEagerInit : InitKind = struct
     let get_next, t = indexing genv in
     let lazy_parse = lazy_level = Parse in
     let env, t = parsing ~lazy_parse genv env ~get_next t in
+    SearchServiceRunner.update_fileinfo_map env.files_info;
 
     let timeout = genv.local_config.SLC.load_mini_script_timeout in
     let state_future = state_future >>=
@@ -557,7 +559,7 @@ module ServerLazyInit : InitKind = struct
    * parsing hooks. During lazy init, need to do it manually from the fast
    * instead since we aren't parsing the codebase.
    *)
-  let update_search genv saved t =
+  let update_search saved t =
     (* Only look at Hack files *)
     let fast = FileInfo.saved_to_hack_files saved in
     (* Filter out non php files *)
@@ -567,21 +569,10 @@ module ServerLazyInit : InitKind = struct
           not (FilesToIgnore.should_ignore fn)
           && FindUtils.is_php fn) in
 
-    let update_single_search _ fast_list =
-      List.iter fast_list
-      (fun (fn, fast) ->
-         HackSearchService.WorkerApi.update_from_fast fn fast
-      ) in
-    let next_fast_files =
-      MultiWorker.next genv.workers (Relative_path.Map.elements fast) in
-    MultiWorker.call
-        genv.workers
-        ~job:update_single_search
-        ~neutral:()
-        ~merge:(fun _ _ -> ())
-        ~next:next_fast_files;
-    HackSearchService.MasterApi.update_search_index
-      ~fuzzy:false (Relative_path.Map.keys fast);
+    Relative_path.Map.iter fast
+    ~f: (fun fn names ->
+      SearchServiceRunner.update (fn, (SearchServiceRunner.Fast names));
+    );
     HackEventLogger.update_search_end t;
     Hh_logger.log_duration "Updating search indices" t
 
@@ -642,6 +633,8 @@ module ServerLazyInit : InitKind = struct
       (* Parse dirty files only *)
       let next = MultiWorker.next genv.workers parsing_files_list in
       let env, t = parsing genv env ~lazy_parse:true ~get_next:next t in
+      SearchServiceRunner.update_fileinfo_map env.files_info;
+
       let t = update_files genv env.files_info t in
       (* Name all the files from the old fast (except the new ones we parsed) *)
       let old_hack_names = Relative_path.Map.filter old_hack_files (fun k _v ->
@@ -667,7 +660,7 @@ module ServerLazyInit : InitKind = struct
       (* Update the fileinfo object's dependencies now that we have full fast *)
       let t = update_files genv env.files_info t in
 
-      let t = update_search genv old_saved t in
+      let t = update_search old_saved t in
       type_check_dirty genv env old_fast fast dirty_files t, state
     | Error err ->
       (* Fall back to type-checking everything *)
@@ -678,6 +671,7 @@ module ServerLazyInit : InitKind = struct
       end;
       let get_next, t = indexing genv in
       let env, t = parsing ~lazy_parse:true genv env ~get_next t in
+      SearchServiceRunner.update_fileinfo_map env.files_info;
       let t = update_files genv env.files_info t in
       let env, t = naming env t in
       let fast = FileInfo.simplify_fast env.files_info in
@@ -750,6 +744,8 @@ let init ?load_mini_approach genv =
       ServerEagerInit.init ~load_mini_approach genv lazy_lev env root
   in
   let env, _t = ai_check genv env.files_info env t in
+  if SearchServiceRunner.should_run_completely genv
+    then SearchServiceRunner.run_completely genv;
   SharedMem.init_done ();
   ServerUtils.print_hash_stats ();
   env, Result.is_ok state

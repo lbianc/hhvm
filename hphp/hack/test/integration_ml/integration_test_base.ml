@@ -12,6 +12,7 @@ open Core
 open Integration_test_base_types
 open Reordered_argument_collections
 open ServerCommandTypes
+open SearchServiceRunner
 
 let root = "/"
 let server_config = ServerEnvBuild.default_genv.ServerEnv.config
@@ -19,6 +20,7 @@ let global_opts = GlobalOptions.make
   ~tco_assume_php: false
   ~tco_unsafe_xhp: false
   ~tco_safe_array: false
+  ~tco_safe_vector_array: false
   ~tco_user_attrs: None
   ~tco_experimental_features: GlobalOptions.tco_experimental_all
   ~po_auto_namespace_map: []
@@ -35,7 +37,6 @@ let setup_server ?custom_config ()  =
   Printexc.record_backtrace true;
   EventLogger.init EventLogger.Event_logger_fake 0.0;
   Relative_path.set_path_prefix Relative_path.Root (Path.make root);
-  HackSearchService.attach_hooks ();
   let _ = SharedMem.init GlobalConfig.default_sharedmem_config in
   match custom_config with
   | Some config -> ServerEnvBuild.make_env config
@@ -89,6 +90,7 @@ let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
   let env = ServerEnv.({ env with last_notifier_check_time = 0.0 }) in
 
   let env = ServerMain.serve_one_iteration genv env client_provider in
+  SearchServiceRunner.run_completely genv;
   env, {
     did_read_disk_changes = !did_read_disk_changes_ref;
     rechecked_count =

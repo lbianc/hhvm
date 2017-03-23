@@ -45,6 +45,10 @@ let emit_nyi description =
 let strip_dollar id =
   String.sub id 1 (String.length id - 1)
 
+let make_varray p es = p, A.Array (List.map es ~f:(fun e -> A.AFvalue e))
+let make_kvarray p kvs =
+  p, A.Array (List.map kvs ~f:(fun (k, v) -> A.AFkvalue (k, v)))
+
 (* Strict binary operations; assumes that operands are already on stack *)
 let from_binop op =
   let ints_overflow_to_ints =
@@ -302,30 +306,6 @@ and emit_shape expr fl =
       instr_newstructarray keys;
     ]
 
-and emit_named_collection expr pos name fields =
-  match name with
-  | "dict" | "vec" | "keyset" -> emit_collection expr fields
-  | "Set" -> begin
-    let collection_type = collection_type "Set" in
-    match fields with
-    | [] -> instr_newcol collection_type
-    | _ -> gather [
-      from_expr (pos, A.Array fields);
-      instr_colfromarray collection_type ]
-    end
-  | "Pair" -> begin
-    let collection_type = collection_type "Pair" in
-    let values = gather @@ List.fold_right
-      fields
-      ~f:(fun x acc ->
-        expr_and_newc instr_col_add_new_elemc instr_col_add_new_elemc x::acc)
-      ~init:[] in
-    gather [
-      instr_newcol collection_type;
-      values ]
-  end
-  | _ -> emit_nyi @@ "collection: " ^ name (* TODO: Are there more? *)
-
 and emit_tuple p es =
   (* Did you know that tuples are functions? *)
   let af_list = List.map es ~f:(fun e -> A.AFvalue e) in
@@ -409,6 +389,28 @@ and emit_yield = function
       instr_yieldk;
     ]
 
+and emit_yield_break () =
+  gather [
+    instr_null;
+    instr_retc;
+  ]
+
+and emit_string2 exprs =
+  match exprs with
+  | [e] ->
+    gather [
+      from_expr e;
+      instr (IOp CastString)
+    ]
+  | e1::e2::es ->
+    gather @@ [
+      emit_two_exprs e1 e2;
+      instr (IOp Concat);
+      gather (List.map es (fun e -> gather [from_expr e; instr (IOp Concat)]))
+    ]
+
+  | [] -> failwith "String2 with zero arguments is impossible"
+
 and emit_lambda fundef ids =
   (* Closure conversion puts the class number used for CreateCl in the "name"
    * of the function definition *)
@@ -419,6 +421,42 @@ and emit_lambda fundef ids =
       (fun (x, _isref) -> instr (IGet (CUGetL (Local.Named (snd x)))));
     instr (IMisc (CreateCl (List.length ids, class_num)))
   ]
+
+and emit_id (p, s) =
+  match s with
+  | "__FILE__" -> instr (ILitConst File)
+  | "__DIR__" -> instr (ILitConst Dir)
+  | "__LINE__" ->
+    (* If the expression goes on multi lines, we return the last line *)
+    let _, line, _, _ = Pos.info_pos_extended p in
+    instr_int line
+  | _ -> emit_nyi ("emit_id: " ^ s)
+
+and rename_xhp (p, s) =
+  (* Translates given :name to xhp_name *)
+  if String_utils.string_starts_with s ":"
+  then (p, "xhp_" ^ (String_utils.lstrip s ":"))
+  else failwith "Incorrectly named xhp element"
+
+and emit_xhp p id attributes children =
+  (* Translate into a constructor call. The arguments are:
+   *  1) map-like array of attributes
+   *  2) vec-like array of children
+   *  3) filename, for debugging
+   *  4) line number, for debugging
+   *)
+  let convert_xml_attr ((pos, _) as name, v) = ((pos, A.String name), v) in
+  let attributes = List.map ~f:convert_xml_attr attributes in
+  let attribute_map = make_kvarray p attributes in
+  (* TODO: More AST transtormations to match HHVM *)
+  let children_vec = make_varray p children in
+  let filename = (p, A.Id (p, "__FILE__")) in
+  let line = (p, A.Id (p, "__LINE__")) in
+  from_expr @@
+    (p, A.New (
+      (p, A.Id (rename_xhp id)),
+      [attribute_map ; children_vec ; filename ; line],
+      []))
 
 and from_expr expr =
   (* Note that this takes an Ast.expr, not a Nast.expr. *)
@@ -446,6 +484,14 @@ and from_expr expr =
   | A.Call _ -> emit_call_expr expr
   | A.New ((_, typename), args, uargs) -> emit_new typename args uargs
   | A.Array es -> emit_collection expr es
+  | A.Darray es ->
+    es
+      |> List.map ~f:(fun (e1, e2) -> A.AFkvalue (e1, e2))
+      |> emit_collection expr
+  | A.Varray es ->
+    es
+      |> List.map ~f:(fun e -> A.AFvalue e)
+      |> emit_collection expr
   | A.Collection ((pos, name), fields) ->
     emit_named_collection expr pos name fields
   | A.Array_get(base_expr, opt_elem_expr) ->
@@ -455,22 +501,23 @@ and from_expr expr =
   | A.Obj_get (expr, prop, nullflavor) -> emit_obj_get None expr prop nullflavor
   | A.Await e -> emit_await e
   | A.Yield e -> emit_yield e
+  | A.Yield_break -> emit_yield_break ()
   | A.Lfun _ ->
     failwith "expected Lfun to be converted to Efun during closure conversion"
   | A.Efun (fundef, ids) -> emit_lambda fundef ids
+  | A.Class_get ((_, cid), (_, id))  -> emit_class_get None cid id
+  | A.String2 es -> emit_string2 es
+  | A.Unsafeexpr e -> from_expr e
+  | A.Id id -> emit_id id
+  | A.Xml (id, attributes, children) ->
+    emit_xhp (fst expr) id attributes children
   (* TODO *)
-  | A.Yield_break               -> emit_nyi "yield_break"
-  | A.Id _                      -> emit_nyi "id"
   | A.Id_type_arguments (_, _)  -> emit_nyi "id_type_arguments"
   | A.Lvarvar (_, _)            -> emit_nyi "lvarvar"
-  | A.Class_get ((_, cid), (_, id))  -> emit_class_get None cid id
-  | A.String2 _                 -> emit_nyi "string2"
   | A.List _                    -> emit_nyi "list"
-  | A.Xml (_, _, _)             -> emit_nyi "xml"
-  | A.Unsafeexpr _              -> emit_nyi "unsafexpr"
   | A.Import (_, _)             -> emit_nyi "import"
 
-and emit_static_collection expr es =
+and emit_static_collection ~transform_to_collection expr es =
   let a_label = Label.get_next_data_label () in
   (* Arrays can either contains values or key/value pairs *)
   let need_index = match snd expr with
@@ -500,14 +547,24 @@ and emit_static_collection expr es =
     | A.Collection ((_, "keyset"), _) -> Keyset (a_label, es)
     | _ -> failwith "impossible"
   in
-  instr (ILitConst lit_constructor)
+  let transform_instr =
+    match transform_to_collection with
+    | Some n -> instr_colfromarray n
+    | None -> empty
+  in
+  gather [
+    instr (ILitConst lit_constructor);
+    transform_instr;
+  ]
 
-and emit_dynamic_collection expr es =
+(* transform_to_collection argument keeps track of
+ * what collection to transform to *)
+and emit_dynamic_collection ~transform_to_collection expr es =
   let is_only_values =
     List.for_all es ~f:(function A.AFkvalue _ -> false | _ -> true)
   in
   let count = List.length es in
-  if is_only_values then begin
+  if is_only_values && transform_to_collection = None then begin
     let lit_constructor = match snd expr with
       | A.Array _ -> NewPackedArray count
       | A.Collection ((_, "vec"), _) -> NewVecArray count
@@ -526,20 +583,61 @@ and emit_dynamic_collection expr es =
       | A.Collection ((_, "dict"), _) -> NewDictArray count
       | _ -> failwith "impossible"
     in
+    let transform_instr =
+      match transform_to_collection with
+      | Some n -> instr_colfromarray n
+      | None -> empty
+    in
+    let add_elem_instr =
+      if transform_to_collection = None
+      then instr_add_new_elemc
+      else instr_col_add_new_elemc
+    in
     gather @@
-      (instr @@ ILitConst lit_constructor) ::
-      (List.map es ~f:(expr_and_newc instr_add_new_elemc instr_add_elemc))
+      (instr @@ ILitConst lit_constructor) :: transform_instr ::
+      (List.map es ~f:(expr_and_newc add_elem_instr instr_add_elemc))
   end
 
-and emit_collection expr es =
+and emit_named_collection expr pos name fields =
+  match name with
+  | "dict" | "vec" | "keyset" -> emit_collection expr fields
+  | "Vector" | "ImmVector" ->
+    let collection_type = collection_type name in
+    gather [
+      emit_collection (pos, A.Collection ((pos, "vec"), fields)) fields;
+      instr_colfromarray collection_type;
+    ]
+  | "Set" | "ImmSet" | "Map" | "ImmMap" ->
+    let collection_type = collection_type name in
+    if fields = []
+    then instr_newcol collection_type
+    else
+      emit_collection
+        ~transform_to_collection:collection_type
+        (pos, A.Array fields)
+        fields
+  | "Pair" ->
+    let collection_type = collection_type name in
+    let values = gather @@ List.map
+      fields
+      ~f:(fun x ->
+        expr_and_newc instr_col_add_new_elemc instr_col_add_new_elemc x)
+    in
+    gather [
+      instr_newcol collection_type;
+      values;
+    ]
+  | _ -> emit_nyi @@ "collection: " ^ name (* TODO: Are there more? *)
+
+and emit_collection ?(transform_to_collection) expr es =
   let all_literal = List.for_all es
     ~f:(function A.AFvalue e -> is_literal e
                | A.AFkvalue (k,v) -> is_literal k && is_literal v)
   in
   if all_literal then
-    emit_static_collection expr es
+    emit_static_collection ~transform_to_collection expr es
   else
-    emit_dynamic_collection expr es
+    emit_dynamic_collection ~transform_to_collection expr es
 
 and emit_pipe e1 e2 =
   stash_in_local e1
@@ -899,6 +997,26 @@ and is_literal expr =
   | A.True -> true
   | _ -> false
 
+and collection_literal_fields fields =
+  let folder (index, consts) field =
+    match field with
+    | A.AFvalue v ->
+      (index + 1, literal_from_expr v :: Int (Int64.of_int index) :: consts)
+    | A.AFkvalue (k, v) ->
+      (index, literal_from_expr k :: literal_from_expr v :: consts )
+  in
+  List.rev @@ snd @@ List.fold_left fields ~init:(0, []) ~f:folder
+
+and dictionary_literal fields =
+  let num = List.length fields in
+  let fields = collection_literal_fields fields in
+  Dict (num, fields)
+
+and array_literal fields =
+  let num = List.length fields in
+  let fields = collection_literal_fields fields in
+  Array (num, fields)
+
 and literal_from_expr expr =
   match snd expr with
   | A.Float (_, litstr) -> Double litstr
@@ -907,6 +1025,9 @@ and literal_from_expr expr =
   | A.Null -> Null
   | A.False -> False
   | A.True -> True
+  | A.Array fields -> array_literal fields
+  | A.Collection ((_, "dict"), fields) -> dictionary_literal fields
+  (* TODO: Vec, Keyset, etc. *)
   (* TODO: HHVM does not allow <<F(2+2)>> in an attribute, but Hack does, and
    this seems reasonable to allow. Right now this will crash if given an
    expression rather than a literal in here.  In particular, see what unary
