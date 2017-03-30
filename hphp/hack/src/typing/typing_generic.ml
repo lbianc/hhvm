@@ -36,7 +36,9 @@ end = struct
       begin match akind with
         | AKany -> ()
         | AKempty -> ()
+        | AKvarray tv
         | AKvec tv -> ty tv
+        | AKdarray (tk, tv)
         | AKmap (tk, tv) -> ty tk; ty tv
         | AKshape fdm ->
             ShapeMap.iter (fun _ (tk, tv) -> ty tk; ty tv) fdm
@@ -58,7 +60,7 @@ end = struct
     | Tunresolved tyl -> List.iter tyl ty
     | Tobject -> ()
     | Tshape (_, fdm) ->
-        ShapeMap.iter (fun _ v -> ty v) fdm
+        ShapeFieldMap.iter (fun _ v -> ty v) fdm
 
   and ty_opt = function None -> () | Some x -> ty x
 

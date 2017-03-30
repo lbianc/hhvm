@@ -84,7 +84,10 @@ let rec decompose_subtype env ty_sub ty_super fail =
        *          and map<_,tv> <: Traversable<tv_super>
        *          and map<_,tv> <: Container<tv_super>
        *)
-      | AKvec tv | AKmap(_, tv) -> decompose_subtype env tv tv_super fail
+      | AKvarray tv
+      | AKvec tv
+      | AKdarray (_, tv)
+      | AKmap (_, tv) -> decompose_subtype env tv tv_super fail
       | AKshape fdm ->
         Typing_arrays.fold_akshape_as_akmap again env r fdm
       | AKtuple fields ->
@@ -98,9 +101,11 @@ let rec decompose_subtype env ty_sub ty_super fail =
       (match akind with
       | AKany -> env
       | AKempty -> env
+      | AKvarray tv
       | AKvec tv ->
         let env' = decompose_subtype env (r, Tprim Nast.Tint) tk_super fail in
         decompose_subtype env' tv tv_super fail
+      | AKdarray (tk, tv)
       | AKmap (tk, tv) ->
         let env' = decompose_subtype env tk tk_super fail in
         decompose_subtype env' tv tv_super fail
@@ -700,7 +705,10 @@ and sub_type_with_uenv env (uenv_sub, ty_sub) (uenv_super, ty_super) =
       (match akind with
       | AKany -> env
       | AKempty -> env
-      | AKvec tv | AKmap (_, tv) ->
+      | AKvarray tv
+      | AKvec tv
+      | AKdarray (_, tv)
+      | AKmap (_, tv) ->
           sub_type env tv tv_super
       | AKshape fdm ->
           Typing_arrays.fold_akshape_as_akmap begin fun env ty_sub ->
@@ -718,9 +726,11 @@ and sub_type_with_uenv env (uenv_sub, ty_sub) (uenv_super, ty_super) =
       (match akind with
       | AKany -> env
       | AKempty -> env
+      | AKvarray tv
       | AKvec tv ->
         let env = sub_type env (r, Tprim Nast.Tint) tk_super in
         sub_type env tv tv_super
+      | AKdarray (tk, tv)
       | AKmap (tk, tv) ->
         let env = sub_type env tk tk_super in
         sub_type env tv tv_super
@@ -742,12 +752,16 @@ and sub_type_with_uenv env (uenv_sub, ty_sub) (uenv_super, ty_super) =
   | (_, (Tarraykind _)), (_, (Tarraykind AKany)) ->
       (* An array of any kind is a subtype of an array of Tany. *)
       env
-  | (_, (Tarraykind (AKvec ty_sub))), (_, (Tarraykind (AKvec ty_super))) ->
+  | (_, Tarraykind (AKvarray ty_sub | AKvec ty_sub)),
+    (_, Tarraykind (AKvarray ty_super | AKvec ty_super)) ->
       sub_type env ty_sub ty_super
-  | (_, Tarraykind AKmap (tk_sub, tv_sub)), (_, (Tarraykind (AKmap (tk_super, tv_super)))) ->
+  | (_, Tarraykind (AKdarray (tk_sub, tv_sub) | AKmap (tk_sub, tv_sub))),
+    (_, Tarraykind (AKdarray (tk_super, tv_super) | AKmap (tk_super, tv_super)))
+    ->
       let env = sub_type env tk_sub tk_super in
       sub_type env tv_sub tv_super
-  | (reason, Tarraykind (AKvec elt_ty)), (_, Tarraykind AKmap _)
+  | (reason, Tarraykind (AKvarray elt_ty | AKvec elt_ty)),
+    (_, Tarraykind (AKdarray _ | AKmap _))
     when not (TypecheckerOptions.safe_vector_array (Env.get_options env)) ->
       let int_reason = Reason.Ridx (Reason.to_pos reason, Reason.Rnone) in
       let int_type = int_reason, Tprim Nast.Tint in
@@ -813,8 +827,27 @@ and sub_type_with_uenv env (uenv_sub, ty_sub) (uenv_super, ty_super) =
       )
   | (r_sub, Tshape (fields_known_sub, fdm_sub)),
     (r_super, Tshape (fields_known_super, fdm_super)) ->
+      (**
+       * shape_field_type A <: shape_field_type B iff:
+       *   1. A is no more optional than B
+       *   2. A's type <: B.type
+       *)
+      let on_common_field
+          (env, acc)
+          name
+          { sft_optional = optional_super; sft_ty = ty_super }
+          { sft_optional = optional_sub; sft_ty = ty_sub } =
+        match optional_super, optional_sub with
+          | true, _ | false, false ->
+            sub_type env ty_sub ty_super, acc
+          | false, true ->
+            Errors.required_field_is_optional
+              (Reason.to_pos r_sub)
+              (Reason.to_pos r_super)
+              (Env.get_shape_field_name name);
+            env, acc in
       fst (TUtils.apply_shape
-        ~on_common_field:(fun (env, acc) _ x y -> sub_type env y x, acc)
+        ~on_common_field
         ~on_missing_optional_field:(fun acc _ _ -> acc)
         (env, None)
         (r_super, fields_known_super, fdm_super)

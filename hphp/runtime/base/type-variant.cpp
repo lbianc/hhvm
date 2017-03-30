@@ -335,6 +335,7 @@ bool Variant::isAllowedAsConstantValue() const {
     case KindOfPersistentKeyset:
     case KindOfKeyset:
     case KindOfPersistentArray:
+    case KindOfResource:
       return true;
 
     case KindOfVec:
@@ -355,7 +356,6 @@ bool Variant::isAllowedAsConstantValue() const {
 
     case KindOfUninit:
     case KindOfObject:
-    case KindOfResource:
     case KindOfRef:
       return false;
   }
@@ -517,6 +517,33 @@ Array Variant::toArrayHelper() const {
     case KindOfDict:
     case KindOfPersistentKeyset:
     case KindOfKeyset:
+    case KindOfPersistentArray:
+    case KindOfArray:         return Array(m_data.parr);
+    case KindOfObject:        return m_data.pobj->toArray();
+    case KindOfResource:      return m_data.pres->data()->o_toArray();
+    case KindOfRef:           return m_data.pref->var()->toArray();
+  }
+  not_reached();
+}
+
+
+Array Variant::toPHPArrayHelper() const {
+  switch (m_type) {
+    case KindOfUninit:
+    case KindOfNull:          return empty_array();
+    case KindOfBoolean:       return Array::Create(*this);
+    case KindOfInt64:         return Array::Create(m_data.num);
+    case KindOfDouble:        return Array::Create(*this);
+    case KindOfPersistentString:
+      return Array::Create(Variant{m_data.pstr, PersistentStrInit{}});
+    case KindOfString:
+      return Array::Create(Variant{m_data.pstr});
+    case KindOfPersistentVec:
+    case KindOfVec:
+    case KindOfPersistentDict:
+    case KindOfDict:
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:        return ArrNR{m_data.parr}.asArray().toPHPArray();
     case KindOfPersistentArray:
     case KindOfArray:         return Array(m_data.parr);
     case KindOfObject:        return m_data.pobj->toArray();

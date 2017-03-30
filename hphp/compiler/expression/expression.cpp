@@ -168,54 +168,6 @@ void Expression::insertElement(ExpressionPtr exp, int index /* = 0 */) {
   assert(false);
 }
 
-ExpressionPtr Expression::unneededHelper() {
-  ExpressionListPtr elist = ExpressionListPtr
-    (new ExpressionList(getScope(), getRange(),
-                        ExpressionList::ListKindWrapped));
-
-  bool change = false;
-  for (int i=0, n = getKidCount(); i < n; i++) {
-    ExpressionPtr kid = getNthExpr(i);
-    if (kid && kid->getContainedEffects()) {
-      ExpressionPtr rep = kid->unneeded();
-      if (rep != kid) change = true;
-      if (rep->is(Expression::KindOfExpressionList)) {
-        for (int j=0, m = rep->getKidCount(); j < m; j++) {
-          elist->addElement(rep->getNthExpr(j));
-        }
-      } else {
-        elist->addElement(rep);
-      }
-    }
-  }
-
-  if (change) {
-    getScope()->addUpdates(BlockScope::UseKindCaller);
-  }
-
-  int n = elist->getCount();
-  assert(n);
-  if (n == 1) {
-    return elist->getNthExpr(0);
-  } else {
-    return elist;
-  }
-}
-
-ExpressionPtr Expression::unneeded() {
-  if (getLocalEffects() || is(KindOfScalarExpression)) {
-    return static_pointer_cast<Expression>(shared_from_this());
-  }
-  if (!getContainedEffects()) {
-    getScope()->addUpdates(BlockScope::UseKindCaller);
-    return ScalarExpressionPtr
-      (new ScalarExpression(getScope(), getRange(),
-                            T_LNUMBER, std::string("0")));
-  }
-
-  return unneededHelper();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 bool Expression::IsIdentifier(const std::string &value) {
@@ -309,15 +261,32 @@ ExpressionPtr Expression::MakeScalarExpression(AnalysisResultConstPtr ar,
     auto el = std::make_shared<ExpressionList>(
       scope, r, ExpressionList::ListKindParam);
 
-    for (ArrayIter iter(value.toArray()); iter; ++iter) {
-      ExpressionPtr k(MakeScalarExpression(ar, scope, r, iter.first()));
-      ExpressionPtr v(MakeScalarExpression(ar, scope, r, iter.second()));
-      if (!k || !v) return ExpressionPtr();
-      auto ap = std::make_shared<ArrayPairExpression>(scope, r, k, v, false);
-      el->addElement(ap);
+    if (value.isVecArray() || value.isKeyset()) {
+      for (ArrayIter iter(value.toArray()); iter; ++iter) {
+        ExpressionPtr v(MakeScalarExpression(ar, scope, r, iter.second()));
+        if (!v) return ExpressionPtr();
+        el->addElement(v);
+      }
+    } else {
+      for (ArrayIter iter(value.toArray()); iter; ++iter) {
+        ExpressionPtr k(MakeScalarExpression(ar, scope, r, iter.first()));
+        ExpressionPtr v(MakeScalarExpression(ar, scope, r, iter.second()));
+        if (!k || !v) return ExpressionPtr();
+        auto ap = std::make_shared<ArrayPairExpression>(scope, r, k, v, false);
+        el->addElement(ap);
+      }
     }
+
     if (!el->getCount()) el.reset();
-    return std::make_shared<UnaryOpExpression>(scope, r, el, T_ARRAY, true);
+
+    auto const token = [&]{
+      if (value.isPHPArray()) return T_ARRAY;
+      if (value.isVecArray()) return T_VEC;
+      if (value.isDict()) return T_DICT;
+      if (value.isKeyset()) return T_KEYSET;
+      always_assert(false);
+    }();
+    return std::make_shared<UnaryOpExpression>(scope, r, el, token, true);
   } else if (value.isNull()) {
     return MakeConstant(ar, scope, r, "null");
   } else if (value.isBoolean()) {

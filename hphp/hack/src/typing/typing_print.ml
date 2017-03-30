@@ -42,15 +42,24 @@ module ErrorString = struct
     | Nast.Tarraykey   -> "an array key (int/string)"
     | Nast.Tnoreturn   -> "noreturn (throws or exits)"
 
+  let varray = "a varray"
+  let darray = "a darray"
+
   let rec type_: type a. a ty_ -> _ = function
     | Tany               -> "an untyped value"
     | Terr               -> "a type error"
     | Tunresolved l      -> unresolved l
     | Tarray (x, y)      -> array (x, y)
+    | Tdarray (_, _)     -> darray
+    | Tvarray _          -> varray
     | Tarraykind AKempty -> "an empty array"
     | Tarraykind AKany   -> array (None, None)
+    | Tarraykind AKvarray _
+                         -> varray
     | Tarraykind (AKvec x)
                          -> array (Some x, None)
+    | Tarraykind AKdarray (_, _)
+                         -> darray
     | Tarraykind (AKmap (x, y))
                          -> array (Some x, Some y)
     | Tarraykind (AKshape _)
@@ -153,6 +162,11 @@ module Suggest = struct
   let rec type_: type a. a ty -> string = fun (_, ty) ->
     match ty with
     | Tarray _               -> "array"
+    | Tdarray _              -> "darray"
+    | Tvarray _              -> "varray"
+    | Tarraykind AKdarray (_, _)
+                             -> "darray"
+    | Tarraykind AKvarray _  -> "varray"
     | Tarraykind _           -> "array"
     | Tthis                  -> SN.Typehints.this
     | Tunresolved _          -> "..."
@@ -231,13 +245,10 @@ module Full = struct
     | [x] -> f x
     | x :: rl -> f x; o s; list_sep o s f rl
 
-  let shape_map o fdm f =
+  let shape_map o fdm o_field =
   let cmp = (fun (k1, _) (k2, _) ->
      compare (Env.get_shape_field_name k1) (Env.get_shape_field_name k2)) in
   let fields = List.sort ~cmp (Nast.ShapeMap.elements fdm) in
-  let o_field = (fun (k, v) ->
-     o (Env.get_shape_field_name k); o " => "; f v;)
-  in
   (match fields with
   | [] -> ()
   | f::l ->
@@ -258,15 +269,25 @@ module Full = struct
     | Terr -> o "_"
     | Tthis -> o SN.Typehints.this
     | Tmixed -> o "mixed"
+    | Tdarray (x, y) -> o "darray<"; k x; o ", "; k y; o ">"
+    | Tvarray x -> o "varray<"; k x; o ">"
     | Tarraykind AKany -> o "array"
     | Tarraykind AKempty -> o "array (empty)"
     | Tarray (None, None) -> o "array"
+    | Tarraykind AKvarray x -> o "varray<"; k x; o ">"
     | Tarraykind (AKvec x) -> o "array<"; k x; o ">"
     | Tarray (Some x, None) -> o "array<"; k x; o ">"
     | Tarray (Some x, Some y) -> o "array<"; k x; o ", "; k y; o ">"
+    | Tarraykind AKdarray (x, y) -> o "darray<"; k x; o ", "; k y; o ">"
     | Tarraykind (AKmap (x, y)) -> o "array<"; k x; o ", "; k y; o ">"
-    | Tarraykind (AKshape fdm) -> o "shape-like-array(";
-      shape_map o fdm (fun (_tk, tv) -> k tv); o ")"
+    | Tarraykind (AKshape fdm) ->
+      let o_field (shape_map_key, (_tk, tv)) =
+        o (Env.get_shape_field_name shape_map_key);
+        o " => ";
+        k tv in
+      o "shape-like-array(";
+      shape_map o fdm o_field;
+      o ")"
     | Tarraykind (AKtuple fields) ->
       o "tuple-like-array("; list k (List.rev (IMap.values fields)); o ")"
     | Tarray (None, Some _) -> assert false
@@ -324,7 +345,27 @@ module Full = struct
         end
       end;
       o "(";
-      shape_map o fdm (fun t -> k t);
+      let optional_shape_field_enabled =
+        TypecheckerOptions.experimental_feature_enabled
+          (Env.get_options env)
+          TypecheckerOptions.experimental_optional_shape_field in
+      let o_field (shape_map_key, { sft_optional; sft_ty }) =
+        if optional_shape_field_enabled then
+          begin
+            o (Env.get_shape_field_name shape_map_key);
+            o " => shape(";
+            if sft_optional then o "optional => true, ";
+            o "type => ";
+            k sft_ty;
+            o ")"
+          end
+        else
+          begin
+            o (Env.get_shape_field_name shape_map_key);
+            o " => ";
+            k sft_ty
+          end in
+      shape_map o fdm o_field;
       o ")"
 
   and prim o x =

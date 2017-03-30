@@ -455,6 +455,10 @@ and type_ tcopt root variance env (reason, ty) =
     let env = type_option tcopt root variance env ty1 in
     let env = type_option tcopt root variance env ty2 in
     env
+  | Tdarray (ty1, ty2) ->
+    type_ tcopt root variance env (reason, Tarray (Some ty1, Some ty2))
+  | Tvarray ty ->
+    type_ tcopt root variance env (reason, Tarray (Some ty, None))
   | Tthis ->
     (* Check that 'this' isn't being improperly referenced in a contravariant
      * position.
@@ -522,8 +526,8 @@ and type_ tcopt root variance env (reason, ty) =
   (* when we add type params to type consts might need to change *)
   | Taccess _ -> env
   | Tshape (_, ty_map) ->
-      Nast.ShapeMap.fold begin fun _field_name ty env ->
-        type_ tcopt root variance env ty
+      Nast.ShapeMap.fold begin fun _ { sft_ty; _ } env ->
+        type_ tcopt root variance env sft_ty
       end ty_map env
 
 (* `as` constraints on method type parameters must be contravariant

@@ -31,7 +31,11 @@ class type ['a] type_visitor_type = object
   method on_tunresolved : 'a -> Reason.t -> locl ty list -> 'a
   method on_tobject : 'a -> Reason.t -> 'a
   method on_tshape :
-    'a -> Reason.t -> shape_fields_known -> 'b ty Nast.ShapeMap.t -> 'a
+    'a
+      -> Reason.t
+      -> shape_fields_known
+      -> 'b shape_field_type Nast.ShapeMap.t
+      -> 'a
   method on_taccess : 'a -> Reason.t -> taccess_type -> 'a
   method on_tclass : 'a -> Reason.t -> Nast.sid -> locl ty list -> 'a
   method on_tarraykind : 'a -> Reason.t -> array_kind -> 'a
@@ -77,9 +81,9 @@ class virtual ['a] type_visitor : ['a] type_visitor_type = object(this)
   method on_tunresolved acc _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
   method on_tobject acc _ = acc
   method on_tshape: type a. _ -> Reason.t -> shape_fields_known
-    -> a ty Nast.ShapeMap.t -> _ =
+    -> a shape_field_type Nast.ShapeMap.t -> _ =
     fun acc _ _ fdm ->
-    let f _ v acc = this#on_type acc v in
+    let f _ { sft_ty; _ } acc = this#on_type acc sft_ty in
     Nast.ShapeMap.fold f fdm acc
   method on_tclass acc _ _ tyl =
     List.fold_left tyl ~f:this#on_type ~init:acc
@@ -87,7 +91,9 @@ class virtual ['a] type_visitor : ['a] type_visitor_type = object(this)
     match array_kind with
     | AKany -> acc
     | AKempty -> acc
+    | AKvarray ty
     | AKvec ty -> this#on_type acc ty
+    | AKdarray (tk, tv)
     | AKmap (tk, tv) ->
       let acc = this#on_type acc tk in
       this#on_type acc tv
@@ -108,6 +114,10 @@ class virtual ['a] type_visitor : ['a] type_visitor_type = object(this)
     | Tthis -> this#on_tthis acc r
     | Tarray (ty1_opt, ty2_opt) ->
       this#on_tarray acc r ty1_opt ty2_opt
+    | Tdarray (ty1, ty2) ->
+      this#on_type acc (r, Tarray (Some ty1, Some ty2))
+    | Tvarray ty ->
+      this#on_type acc (r, Tarray (Some ty, None))
     | Tgeneric s -> this#on_tgeneric acc r s
     | Toption ty -> this#on_toption acc r ty
     | Tprim prim -> this#on_tprim acc r prim

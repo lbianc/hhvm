@@ -64,15 +64,18 @@ let instr_double litstr = instr (ILitConst (Double litstr))
 let instr_string litstr = instr (ILitConst (String litstr))
 let instr_this = instr (IMisc This)
 let instr_istypec op = instr (IIsset (IsTypeC op))
+let instr_istypel id op = instr (IIsset (IsTypeL (id, op)))
 let instr_not = instr (IOp Not)
-let instr_sets = instr (IMutator SetS)
+let instr_sets id = instr (IMutator (SetS id))
 let instr_setl local = instr (IMutator (SetL local))
 let instr_unsetl local = instr (IMutator (UnsetL local))
 let instr_issetl local = instr (IIsset (IssetL local))
-let instr_cgets = instr (IGet CGetS)
+let instr_cgets id = instr (IGet (CGetS id))
+let instr_cgetn = instr (IGet CGetN)
 let instr_cgetl local = instr (IGet (CGetL local))
 let instr_cgetl2 local = instr (IGet (CGetL2 local))
 let instr_cgetquietl local = instr (IGet (CGetQuietL local))
+let instr_clsrefgetc id = instr (IGet (ClsRefGetC id))
 let instr_fpassl param local = instr (ICall (FPassL (param, local)))
 let instr_popu = instr (IBasic PopU)
 let instr_popr = instr (IBasic PopR)
@@ -93,6 +96,7 @@ let instr_add_new_elemc = instr (ILitConst (AddNewElemC))
 let instr_col_add_new_elemc = instr (ILitConst (ColAddNewElemC))
 let instr_switch labels = instr (IContFlow (Switch (Unbounded, 0, labels)))
 let instr_fpushctord nargs id = instr (ICall (FPushCtorD (nargs, id)))
+let instr_fpushctor nargs id = instr (ICall (FPushCtor (nargs, id)))
 let instr_clone = instr (IOp Clone)
 let instr_newstructarray keys = instr (ILitConst (NewStructArray keys))
 let instr_newcol collection_type = instr (ILitConst (NewCol collection_type))
@@ -111,13 +115,14 @@ let instr_isuninit = instr (IMisc IsUninit)
 let instr_cgetcunop = instr (IMisc CGetCUNop)
 let instr_ugetcunop = instr (IMisc UGetCUNop)
 let instr_memoget count local local_count =
-  instr (IMisc (MemoSet(count, local, local_count)))
+  instr (IMisc (MemoGet(count, local, local_count)))
 let instr_memoset count local local_count =
   instr (IMisc (MemoSet(count, local, local_count)))
 let instr_getmemokeyl local = instr (IMisc (GetMemoKeyL local))
 let instr_ismemotype = instr (IMisc IsMemoType)
 let instr_maybememotype = instr (IMisc MaybeMemoType)
 let instr_checkthis = instr (IMisc CheckThis)
+let instr_verifyRetTypeC = instr (IMisc VerifyRetTypeC)
 let instr_dim op key = instr (IBase (Dim (op, key)))
 let instr_dim_warn_pt key = instr_dim MemberOpMode.Warn (MemberKey.PT key)
 let instr_dim_define_pt key = instr_dim MemberOpMode.Define (MemberKey.PT key)
@@ -222,15 +227,26 @@ let instr_try_fault fault_label try_body fault_body =
 let instr_try_catch_begin catch_label = instr (ITry (TryCatchBegin catch_label))
 let instr_try_catch_end = instr (ITry TryCatchEnd)
 
-let extract_decl_vars instrseq =
+let extract_decl_vars params instrseq =
   let module ULS = Unique_list_string in
-  (* TODO: Both reads and writes need to go into decl vars *)
-  (* TODO: Default arguments should not be in declvars *)
+  (* TODO: This needs to happen at the AST level since
+   * $x = $y needs to go on the list in this order: $x $y *)
   let folder uniq_list instruction =
     match instruction with
-    | IMutator (SetL (Local.Named s)) -> ULS.add uniq_list s
+    | IMutator (SetL (Local.Named s))
+    | IGet (CGetL (Local.Named s))
+    | IGet (CGetQuietL (Local.Named s))
+    | IGet (CGetL2 (Local.Named s))
+    | IGet (CGetL3 (Local.Named s)) -> ULS.add uniq_list s
     | _ -> uniq_list in
   let decl_vars = InstrSeq.fold_left instrseq ~init:ULS.empty ~f:folder in
+  let param_names =
+    List.fold_left
+      params
+        ~init:ULS.empty
+        ~f:(fun l p -> ULS.add l @@ Hhas_param.name p)
+  in
+  let decl_vars = ULS.diff decl_vars param_names in
   List.rev (ULS.items decl_vars)
 
 (*  Note that at this time we do NOT want to recurse on the instruction

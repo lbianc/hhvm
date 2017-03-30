@@ -57,6 +57,17 @@ let rec is_option env ty =
       List.exists tyl (is_option env)
   | _ -> false
 
+let is_shape_field_optional env { sft_optional; sft_ty } =
+  let optional_shape_field_enabled =
+    TypecheckerOptions.experimental_feature_enabled
+      (Env.get_options env)
+      TypecheckerOptions.experimental_optional_shape_field in
+
+  if optional_shape_field_enabled then
+    sft_optional
+  else
+    is_option env sft_ty
+
 let is_class ty = match snd ty with
   | Tclass _ -> true
   | _ -> false
@@ -204,15 +215,15 @@ let apply_shape ~on_common_field ~on_missing_optional_field (env, acc)
         end unset_fields1
     | _ -> ()
   end;
-  ShapeMap.fold begin fun name ty1 (env, acc) ->
+  ShapeMap.fold begin fun name shape_field_type_1 (env, acc) ->
     match ShapeMap.get name fdm2 with
-    | None when is_option env ty1 ->
+    | None when is_shape_field_optional env shape_field_type_1 ->
         let can_omit = match fields_known2 with
           | FieldsFullyKnown -> true
           | FieldsPartiallyKnown unset_fields ->
               ShapeMap.mem name unset_fields in
         if can_omit then
-          on_missing_optional_field (env, acc) name ty1
+          on_missing_optional_field (env, acc) name shape_field_type_1
         else
           let pos1 = Reason.to_pos r1 in
           let pos2 = Reason.to_pos r2 in
@@ -224,8 +235,8 @@ let apply_shape ~on_common_field ~on_missing_optional_field (env, acc)
         let pos2 = Reason.to_pos r2 in
         Errors.missing_field pos2 pos1 (get_printable_shape_field_name name);
         (env, acc)
-    | Some ty2 ->
-        on_common_field (env, acc) name ty1 ty2
+    | Some shape_field_type_2 ->
+        on_common_field (env, acc) name shape_field_type_1 shape_field_type_2
   end fdm1 (env, acc)
 
 let shape_field_name_ env field =
@@ -358,9 +369,24 @@ let unwrap_class_hint = function
 
 let unwrap_class_type = function
   | r, Tapply (name, tparaml) -> r, name, tparaml
-  | _, (Terr | Tany | Tmixed | Tarray (_, _) | Tgeneric _ | Toption _ | Tprim _
-  | Tfun _ | Ttuple _ | Tshape _ | Taccess (_, _) | Tthis) ->
-    raise @@ Invalid_argument "unwrap_class_type got non-class"
+  | _,
+    (
+      Terr
+      | Tany
+      | Tmixed
+      | Tarray (_, _)
+      | Tdarray (_, _)
+      | Tvarray _
+      | Tgeneric _
+      | Toption _
+      | Tprim _
+      | Tfun _
+      | Ttuple _
+      | Tshape _
+      | Taccess (_, _)
+      | Tthis
+    ) ->
+      raise @@ Invalid_argument "unwrap_class_type got non-class"
 
 let try_unwrap_class_type x = Option.try_with (fun () -> unwrap_class_type x)
 
@@ -399,7 +425,9 @@ end = struct
         match akind with
         | AKany -> Some r
         | AKempty -> acc
+        | AKvarray ty
         | AKvec ty -> this#on_type acc ty
+        | AKdarray (tk, tv)
         | AKmap (tk, tv) -> merge
             (this#on_type acc tk)
             (this#on_type acc tv)

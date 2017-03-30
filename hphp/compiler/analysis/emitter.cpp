@@ -3538,7 +3538,7 @@ struct UnsetGeneratorDelegateThunklet final : Thunklet {
   explicit UnsetGeneratorDelegateThunklet(Id iterId)
     : m_id(iterId) {}
   void emit(Emitter& e) override {
-    e.ContUnsetDelegate(true, m_id);
+    e.ContUnsetDelegate(CudOp::FreeIter, m_id);
     e.Unwind();
   }
 private:
@@ -5521,6 +5521,22 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       emitConvertToCell(e);
       e.CastKeyset();
       return true;
+    } else if (((call->isCallToFunction("varray") &&
+                 (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\varray")) &&
+               params && params->getCount() == 1) {
+      visit((*params)[0]);
+      emitConvertToCell(e);
+      e.CastArray();
+      return true;
+    } else if (((call->isCallToFunction("darray") &&
+                 (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\darray")) &&
+               params && params->getCount() == 1) {
+      visit((*params)[0]);
+      emitConvertToCell(e);
+      e.CastArray();
+      return true;
     } else if (((call->isCallToFunction("is_vec") &&
                  (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
                 call->isCallToFunction("HH\\is_vec")) &&
@@ -5541,6 +5557,13 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                params && params->getCount() == 1) {
       visit((*call->getParams())[0]);
       emitIsType(e, IsTypeOp::Keyset);
+      return true;
+    } else if (((call->isCallToFunction("is_varray_or_darray") &&
+                 (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
+                call->isCallToFunction("HH\\is_varray_or_darray")) &&
+               params && params->getCount() == 1) {
+      visit((*call->getParams())[0]);
+      emitIsType(e, IsTypeOp::Arr);
       return true;
     }
   #define TYPE_CONVERT_INSTR(what, What)                             \
@@ -10193,7 +10216,7 @@ void EmitterVisitor::emitYieldFrom(Emitter& e, ExpressionPtr exp) {
 
   // Now that we're done with it, remove the delegate. This lets us enforce
   // the invariant that if we have a delegate set, we should be using it.
-  e.ContUnsetDelegate(false, itId);
+  e.ContUnsetDelegate(CudOp::IgnoreIter, itId);
 }
 
 /**
@@ -10979,7 +11002,7 @@ static int32_t emitGeneratorMethod(UnitEmitter& ue,
 
     // If it hasn't started, perform one "next" operation before
     // the actual operation (auto-priming)
-    e.ContCheck(false);
+    e.ContCheck(ContCheckOp::IgnoreStarted);
     e.Null();
     e.ContEnter();
     e.PopC();
@@ -11004,7 +11027,10 @@ static int32_t emitGeneratorMethod(UnitEmitter& ue,
 
       // check generator status; send()/raise() also checks started
       ue.emitOp(OpContCheck);
-      ue.emitIVA(m == METH_SEND || m == METH_RAISE);
+      ue.emitByte(static_cast<uint8_t>(
+          m == METH_SEND || m == METH_RAISE ? ContCheckOp::CheckStarted :
+          ContCheckOp::IgnoreStarted
+      ));
 
       switch (m) {
         case METH_NEXT:

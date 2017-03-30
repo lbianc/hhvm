@@ -22,13 +22,14 @@ let fmt_name_or_prim x =
   | "int" -> "HH\\int"
   | "bool" -> "HH\\bool"
   | "float" -> "HH\\float"
-  | "string" -> "HH\\string"
+  | "string" | "classname"-> "HH\\string"
   | "num" -> "HH\\num"
   | "resource" -> "HH\\resource"
   | "arraykey" -> "HH\\arraykey"
   | "noreturn" -> "HH\\noreturn"
   | "mixed" -> "HH\\mixed"
   | "this" -> "HH\\this"
+  | "Awaitable" -> "HH\\Awaitable"
   | _ -> fmt_name x
 
 (* Produce the "userType" bit of the annotation *)
@@ -73,6 +74,10 @@ match h with
   let tc_name = Some "" in
   let tc_flags = [TC.HHType; TC.ExtendedHint; TC.TypeConstant] in
   TC.make tc_name tc_flags
+
+  (* Elide the Awaitable class for Awaitable<void> only *)
+| A.Happly ((_, "Awaitable"), [(_, A.Happly((_, "void"), []))]) ->
+  TC.make None []
 
 (* Need to differentiate between type params and classes *)
 | A.Happly ((_, s), _) ->
