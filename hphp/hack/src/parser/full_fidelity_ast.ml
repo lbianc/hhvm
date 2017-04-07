@@ -27,16 +27,22 @@ let drop_pstr : int -> pstring -> pstring = fun cnt (pos, str) ->
 
 (* Context of the file being parsed, as global state. *)
 type state_variables =
-  { language : string ref
-  ; filePath : string ref
-  ; mode     : FileInfo.mode ref
+  { language  : string ref
+  ; filePath  : string ref
+  ; mode      : FileInfo.mode ref
+  ; popt      : ParserOptions.t ref
+  ; ignorePos : bool ref
   }
 
 let lowerer_state =
-  { language = ref "UNINITIALIZED"
-  ; filePath = ref "UNINITIALIZED"
-  ; mode     = ref FileInfo.Mstrict
+  { language  = ref "UNINITIALIZED"
+  ; filePath  = ref "UNINITIALIZED"
+  ; mode      = ref FileInfo.Mstrict
+  ; popt      = ref ParserOptions.default
+  ; ignorePos = ref false
   }
+
+let php_file () = !(lowerer_state.mode) == FileInfo.Mphp
 
 (* "Local" context. *)
 type env =
@@ -47,29 +53,30 @@ type env =
 type +'a parser = node -> env -> 'a
 type ('a, 'b) metaparser = 'a parser -> 'b parser
 
-let mk_pos pos_file text start_offset end_offset =
-  let s_line, s_column = SourceText.offset_to_position text start_offset in
-  let e_line, e_column = SourceText.offset_to_position text end_offset in
-  let pos_start =
-    File_pos.of_line_column_offset
-      ~line:s_line
-      ~column:s_column
-      ~offset:start_offset
-  in
-  let pos_end =
-    File_pos.of_line_column_offset
-      ~line:e_line
-      ~column:e_column
-      ~offset:end_offset
-  in
-  Pos.make_from_file_pos ~pos_file ~pos_start ~pos_end
-
 let get_pos : node -> Pos.t = fun node ->
-  mk_pos
-    Relative_path.(create Dummy !(lowerer_state.filePath))
-    (source_text node)
-    (start_offset node)
-    (end_offset node)
+  if !(lowerer_state.ignorePos)
+  then Pos.none
+  else begin
+    let pos_file = Relative_path.(create Dummy !(lowerer_state.filePath)) in
+    let text = source_text node in
+    let start_offset = start_offset node in
+    let end_offset = end_offset node in
+    let s_line, s_column = SourceText.offset_to_position text start_offset in
+    let e_line, e_column = SourceText.offset_to_position text end_offset in
+    let pos_start =
+      File_pos.of_line_column_offset
+        ~line:s_line
+        ~column:s_column
+        ~offset:start_offset
+    in
+    let pos_end =
+      File_pos.of_line_column_offset
+        ~line:e_line
+        ~column:e_column
+        ~offset:end_offset
+    in
+    Pos.make_from_file_pos ~pos_file ~pos_start ~pos_end
+  end
 
 exception Lowerer_invariant_failure of string * string
 let invariant_failure where what =
@@ -118,7 +125,14 @@ let mpYielding : ('a, ('a * bool)) metaparser = fun p node env ->
 
 
 
-let pos_name node = get_pos node, text node
+let pos_name node =
+  let name = text node in
+  let local_ignore_pos = !(lowerer_state.ignorePos) in
+  (* Special case for __LINE__; never ignore position for that special name *)
+  if name = "__LINE__" then lowerer_state.ignorePos := false;
+  let p = get_pos node in
+  lowerer_state.ignorePos := local_ignore_pos;
+  p, name
 
 let couldMap : 'a . f:'a parser -> 'a list parser = fun ~f -> fun node env ->
   let rec synmap : 'a . 'a parser -> 'a list parser = fun f node env ->
@@ -347,7 +361,7 @@ let fun_template yielding node is_sync =
   ; f_body            = []
   ; f_user_attributes = []
   ; f_fun_kind        = mk_fun_kind is_sync yielding
-  ; f_namespace       = Namespace_env.empty_with_default_popt
+  ; f_namespace       = Namespace_env.empty !(lowerer_state.popt)
   ; f_span            = p
   }
 
@@ -389,11 +403,18 @@ let rec pHint : hint parser = fun node env ->
     | SimpleTypeSpecifier _
       -> Happly (pos_name node, [])
     | ShapeTypeSpecifier { shape_type_fields; _ } ->
+      (* TODO(tingley): There is neither a mapping here for optional shape
+         fields nor for unknown shape fields. These will need to be written
+         before optional shape fields can be supported. They both default to
+         false for now. *)
       let pShapeField node env =
         let sf_name, sf_hint = mpShapeField pHint node env in
         { sf_optional = false; sf_name; sf_hint }
       in
-      Hshape (couldMap ~f:pShapeField shape_type_fields env)
+      let si_shape_field_list = couldMap ~f:pShapeField shape_type_fields env in
+      let shape_info =
+        { si_allows_unknown_fields=false; si_shape_field_list } in
+      Hshape shape_info
     | TupleTypeSpecifier { tuple_types; _ } ->
       Htuple (couldMap ~f:pHint tuple_types env)
 
@@ -429,7 +450,8 @@ let rec pHint : hint parser = fun node env ->
       )
     | NullableTypeSpecifier { nullable_type; _ } ->
       Hoption (pHint nullable_type env)
-    | SoftTypeSpecifier { soft_type; _ } -> pHint_ soft_type env
+    | SoftTypeSpecifier { soft_type; _ } ->
+      Hsoft (pHint soft_type env)
     | ClosureTypeSpecifier { closure_parameter_types; closure_return_type; _ }
       -> Hfun
       ( couldMap ~f:pHint closure_parameter_types env
@@ -784,6 +806,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
         { syntax = XHPOpen { xhp_open_name; xhp_open_attributes; _ }; _ }
       ; xhp_body = body
       ; _ } ->
+      lowerer_state.ignorePos := false;
       let name =
         let pos, name = pos_name xhp_open_name in
         (pos, ":" ^ name)
@@ -828,7 +851,18 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
     (* FIXME; should this include Missing? ; "| Missing -> Null" *)
     | _ -> missing_syntax "expression" node env
   in
-  get_pos node, pExpr_ node env
+  (* Since we need positions in XHP, regardless of the ignorePos flag, we
+   * parenthesise the call to pExpr_ so that the XHP expression case can flip
+   * the switch. The key part is that `get_pos node` happens before the old
+   * setting is restored.
+   *
+   * Evaluation order matters here!
+   *)
+  let local_ignore_pos = !(lowerer_state.ignorePos) in
+  let expr_ = pExpr_ node env in
+  let p = get_pos node in
+  lowerer_state.ignorePos := local_ignore_pos;
+  p, expr_
 and pBlock : block parser = fun node env ->
    match pStmt node env with
    | Block block -> List.filter (fun x -> x <> Noop) block
@@ -967,6 +1001,12 @@ and pStmt : stmt parser = fun node env ->
       ( get_pos return_expression
       , mpOptional pExpr return_expression env
       )
+  | Full_fidelity_positioned_syntax.GotoLabel { goto_label_name; _ } ->
+    let pos = get_pos goto_label_name in
+    let label_name = text goto_label_name in
+    Ast.GotoLabel (pos, label_name)
+  | GotoStatement { goto_statement_label_name; _ } ->
+    Goto  (pos_name goto_statement_label_name)
   | EchoStatement  { echo_keyword  = kw; echo_expressions = exprs; _ }
   | UnsetStatement { unset_keyword = kw; unset_variables  = exprs; _ }
     -> Expr
@@ -1300,7 +1340,7 @@ and pDef : def parser = fun node env ->
       ; c_extends         = couldMap ~f:pHint exts env
       ; c_implements      = couldMap ~f:pHint impls env
       ; c_body            = List.concat (couldMap ~f:pClassElt elts env)
-      ; c_namespace       = Namespace_env.empty_with_default_popt
+      ; c_namespace       = Namespace_env.empty !(lowerer_state.popt)
       ; c_enum            = None
       ; c_span            = get_pos node
       ; c_kind            =
@@ -1328,7 +1368,7 @@ and pDef : def parser = fun node env ->
           ; cst_name      = pos_name name
           ; cst_type      = mpOptional pHint ty env
           ; cst_value     = pSimpleInitializer init env
-          ; cst_namespace = Namespace_env.empty_with_default_popt
+          ; cst_namespace = Namespace_env.empty !(lowerer_state.popt)
           }
       | _ -> missing_syntax "constant declaration" decls env
       )
@@ -1346,7 +1386,7 @@ and pDef : def parser = fun node env ->
           mpOptional pTConstraint constr env
       ; t_user_attributes = List.flatten @@
           List.map (fun x -> pUserAttribute x env) (as_list attr)
-      ; t_namespace       = Namespace_env.empty_with_default_popt
+      ; t_namespace       = Namespace_env.empty !(lowerer_state.popt)
       ; t_mode            = !(lowerer_state.mode)
       ; t_kind            =
         match token_kind kw with
@@ -1378,7 +1418,7 @@ and pDef : def parser = fun node env ->
       ; c_extends         = []
       ; c_implements      = []
       ; c_body            = couldMap enums env ~f:pEnumerator
-      ; c_namespace       = Namespace_env.empty_with_default_popt
+      ; c_namespace       = Namespace_env.empty !(lowerer_state.popt)
       ; c_span            = get_pos node
       ; c_enum            = Some
         { e_base       = pHint base env
@@ -1404,6 +1444,8 @@ and pDef : def parser = fun node env ->
       ( pos_name name
       , List.map (fun x -> pDefStmt x env) (as_list decls)
       )
+  | NamespaceDeclaration { namespace_name = name; _ } ->
+    Namespace (pos_name name, [])
   | NamespaceUseDeclaration
     { namespace_use_kind    = kind
     ; namespace_use_clauses = clauses
@@ -1437,6 +1479,12 @@ and pDef : def parser = fun node env ->
    * so we have to "step back" and look at node.
    *)
   | ExpressionStatement _ -> Stmt (pStmt node env)
+  (* For PHP support; top-level statements are allowed for scripts. In
+   * particular, there is the case of "if(defined(Foo))". However, the AST does
+   * not have facilities for these. Therefore, do not reject the input, just
+   * drop that top-level if.
+   *)
+  | IfStatement _ when php_file () -> Stmt Noop
   | _ -> missing_syntax "definition" node env
 let pProgram : program parser = fun node env ->
   let rec post_process program =
@@ -1471,7 +1519,7 @@ let pProgram : program parser = fun node env ->
         ; cst_name      = name
         ; cst_type      = None
         ; cst_value     = value
-        ; cst_namespace = Namespace_env.empty_with_default_popt
+        ; cst_namespace = Namespace_env.empty !(lowerer_state.popt)
         } :: post_process el
     | (e::el) -> e :: post_process el
   in
@@ -1497,7 +1545,7 @@ let pProgram : program parser = fun node env ->
         ; cst_name      = name
         ; cst_type      = None
         ; cst_value     = e
-        ; cst_namespace = Namespace_env.empty_with_default_popt
+        ; cst_namespace = Namespace_env.empty !(lowerer_state.popt)
         }
       | _ -> missing_syntax "DefineExpression:inner" args env
       ) :: aux env nodel
@@ -1626,6 +1674,7 @@ let from_text
   ?(elaborate_namespaces  = true)
   ?(include_line_comments = false)
   ?(keep_errors           = true)
+  ?(ignore_pos            = false)
   ?(parser_options        = ParserOptions.default)
   (file        : Relative_path.t)
   (source_text : Full_fidelity_source_text.t)
@@ -1633,18 +1682,24 @@ let from_text
     let open Full_fidelity_syntax_tree in
     let tree   = make source_text in
     let script = Full_fidelity_positioned_syntax.from_tree tree in
-    let fi_mode =
-      (match mode tree with
-      | _ when is_php tree -> FileInfo.Mdecl
-      | "decl"             -> FileInfo.Mdecl
-      | "strict"           -> FileInfo.Mstrict
-      | "partial" | ""     -> FileInfo.Mpartial
-      | s                  -> unknown_hh_mode s
+    let fi_mode = if is_php tree then FileInfo.Mphp else
+      let mode_string = String.trim (mode tree) in
+      let mode_word =
+        try Some (List.hd (Str.split (Str.regexp " +") mode_string)) with
+        | _ -> None
+      in
+      Option.value_map mode_word ~default:FileInfo.Mpartial ~f:(function
+        | "decl"           -> FileInfo.Mdecl
+        | "strict"         -> FileInfo.Mstrict
+        | ("partial" | "") -> FileInfo.Mpartial
+        | s                -> unknown_hh_mode s
       )
     in
-    lowerer_state.language := language tree;
-    lowerer_state.filePath := Relative_path.suffix file;
-    lowerer_state.mode     := fi_mode;
+    lowerer_state.language  := language tree;
+    lowerer_state.filePath  := Relative_path.suffix file;
+    lowerer_state.mode      := fi_mode;
+    lowerer_state.popt      := parser_options;
+    lowerer_state.ignorePos := ignore_pos;
     let errors = ref [] in (* The top-level error list. *)
     let ast = runP pScript script { saw_yield = ref false; errors } in
     let ast =
@@ -1671,6 +1726,7 @@ let from_file
   ?(elaborate_namespaces  = true)
   ?(include_line_comments = false)
   ?(keep_errors           = true)
+  ?(ignore_pos            = false)
   ?(parser_options        = ParserOptions.default)
   (path : Relative_path.t)
   : result =
@@ -1678,6 +1734,7 @@ let from_file
       ~elaborate_namespaces
       ~include_line_comments
       ~keep_errors
+      ~ignore_pos
       ~parser_options
       path
       (Full_fidelity_source_text.from_file path)
@@ -1697,6 +1754,7 @@ let from_text_with_legacy
   ?(elaborate_namespaces  = true)
   ?(include_line_comments = false)
   ?(keep_errors           = true)
+  ?(ignore_pos            = false)
   ?(parser_options        = ParserOptions.default)
   (file    : Relative_path.t)
   (content : string)
@@ -1705,6 +1763,7 @@ let from_text_with_legacy
       ~elaborate_namespaces
       ~include_line_comments
       ~keep_errors
+      ~ignore_pos
       ~parser_options
       file
       (Full_fidelity_source_text.make content)
@@ -1713,6 +1772,7 @@ let from_file_with_legacy
   ?(elaborate_namespaces  = true)
   ?(include_line_comments = false)
   ?(keep_errors           = true)
+  ?(ignore_pos            = false)
   ?(parser_options        = ParserOptions.default)
   (file : Relative_path.t)
   : Parser_hack.parser_return =
@@ -1720,5 +1780,6 @@ let from_file_with_legacy
       ~elaborate_namespaces
       ~include_line_comments
       ~keep_errors
+      ~ignore_pos
       ~parser_options
       file

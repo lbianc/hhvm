@@ -21,6 +21,8 @@ module CBR = Continue_break_rewriter
 
 let rec from_stmt st =
   match st with
+  | A.Expr (_, A.Call ((_, A.Id (_, "unset")), exprl, [])) ->
+    gather (List.map exprl emit_unset_expr)
   | A.Expr expr ->
     emit_ignored_expr expr
   | A.Return (_, None) ->
@@ -33,6 +35,12 @@ let rec from_stmt st =
       from_expr expr;
       instr_retc;
     ]
+  | A.GotoLabel _ ->
+    (* TODO(t17085086): Implement goto labels. *)
+    emit_nyi "goto label"
+  | A.Goto _ ->
+    (* TODO(t17085086): Implement goto. *)
+    emit_nyi "goto"
   | A.Block b -> from_stmts b
   | A.If (condition, consequence, alternative) ->
     emit_if condition (A.Block consequence) (A.Block alternative)
@@ -119,7 +127,7 @@ and from_while e b =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  CBR.rewrite_in_loop instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label None
 
 and from_do b e =
   let cont_label = Label.next_regular () in
@@ -133,7 +141,7 @@ and from_do b e =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  CBR.rewrite_in_loop instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label None
 
 and from_for e1 e2 e3 b =
   let break_label = Label.next_regular () in
@@ -164,7 +172,7 @@ and from_for e1 e2 e3 b =
     instr_jmpnz start_label;
     instr_label break_label;
   ] in
-  CBR.rewrite_in_loop instrs cont_label break_label
+  CBR.rewrite_in_loop instrs cont_label break_label None
 
 and from_switch scrutinee_expr cl =
   stash_in_local scrutinee_expr
@@ -346,19 +354,20 @@ and from_foreach _has_await collection iterator block =
      case. For now we just support locals. *)
   let iterator_number = Iterator.get_iterator () in
   let fault_label = Label.next_fault () in
-  let loop_continue_label = Label.next_regular () in
   let loop_break_label = Label.next_regular () in
+  let loop_continue_label = Label.next_regular () in
+  let loop_head_label = Label.next_regular () in
   match get_foreach_key_value iterator with
   | None -> emit_nyi "foreach codegen does not support arbitrary lvalues yet"
   | Some (k, v) ->
     let init, next = match k with
     | Some k ->
-      let init = instr_iterinitk iterator_number loop_break_label k v in
-      let cont = instr_iternextk iterator_number loop_continue_label k v in
+      let init = instr_iterinitk iterator_number loop_break_label v k in
+      let cont = instr_iternextk iterator_number loop_head_label v k in
       init, cont
     | None ->
       let init = instr_iterinit iterator_number loop_break_label v in
-      let cont = instr_iternext iterator_number loop_continue_label v in
+      let cont = instr_iternext iterator_number loop_head_label v in
       init, cont in
     let body = from_stmt block in
     let result = gather [
@@ -368,8 +377,9 @@ and from_foreach _has_await collection iterator block =
         fault_label
         (* try body *)
         (gather [
-          instr_label loop_continue_label;
+          instr_label loop_head_label;
           body;
+          instr_label loop_continue_label;
           next
         ])
         (* fault body *)
@@ -378,8 +388,9 @@ and from_foreach _has_await collection iterator block =
           instr_unwind ]);
       instr_label loop_break_label
     ] in
+    Iterator.free_iterator ();
     CBR.rewrite_in_loop
-      result loop_continue_label loop_break_label
+      result loop_continue_label loop_break_label (Some iterator_number)
 
 and from_stmts stl =
   let results = List.map stl from_stmt in

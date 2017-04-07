@@ -10,7 +10,7 @@
 
 (* If you make changes to the schema that cause it to serialize / deserialize
 differently, please update this version number *)
-let full_fidelity_schema_version_number = "2017-03-20-0002"
+let full_fidelity_schema_version_number = "2017-04-06-0002"
 (* TODO: Consider basing the version number on an auto-generated
 hash of a file rather than relying on people remembering to update it. *)
 (* TODO: It may be worthwhile to investigate how Thrift describes data types
@@ -531,6 +531,19 @@ let schema = List.map from_list [
     "keyword";
     "expression";
     "semicolon" ];
+  [ "GotoLabel";
+    "goto_label";
+    "goto_label";
+    "goto_label";
+    "name";
+    "colon" ];
+  [ "GotoStatement";
+    "goto_statement";
+    "goto_statement";
+    "goto_statement";
+    "keyword";
+    "label_name";
+    "semicolon" ];
   [ "ThrowStatement";
     "throw_statement";
     "throw_statement";
@@ -883,6 +896,13 @@ let schema = List.map from_list [
     "keyword";
     "expression";
     "semicolon" ];
+  [ "XHPChildrenParenthesizedList";
+    "xhp_children_parenthesized_list";
+    "xhp_children_parenthesized_list";
+    "xhp_children_list";
+    "left_paren";
+    "xhp_children";
+    "right_paren"];
   [ "XHPCategoryDeclaration";
     "xhp_category_declaration";
     "xhp_category_declaration";
@@ -1077,6 +1097,7 @@ let schema = List.map from_list [
     "keyword";
     "left_paren";
     "fields";
+    "ellipsis";
     "right_paren" ];
   [ "ShapeExpression";
     "shape_expression";
@@ -1220,6 +1241,7 @@ let given_text_tokens = List.map token_node_from_list [
   [ "Foreach"; "foreach" ];
   [ "Function"; "function" ];
   [ "Global"; "global" ];
+  [ "Goto"; "goto" ];
   [ "If"; "if" ];
   [ "Implements"; "implements" ];
   [ "Include"; "include" ];
@@ -1463,7 +1485,7 @@ AST_NODES
 
   let full_fidelity_json_schema =
   {
-    filename = "hphp/hack/src/full_fidelity/js/full_fidelity_schema.json";
+    filename = "hphp/hack/src/parser/js/full_fidelity_schema.json";
     template = full_fidelity_json_schema_template;
     transformations = [
       { pattern = "AST_NODES"; func = to_json_ast_nodes }

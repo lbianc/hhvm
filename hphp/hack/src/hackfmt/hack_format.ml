@@ -25,14 +25,29 @@ let rec transform node =
   | Missing ->
     Nothing
   | Token x ->
-    let leading = EditableToken.leading x in
-    let trailing = EditableToken.trailing x in
-    let text = EditableToken.text x in
-    let width = EditableToken.width x in
+    let open EditableToken in
     Fmt [
-      transform_leading_trivia leading;
-      Text (text, width);
-      transform_trailing_trivia trailing;
+      transform_leading_trivia (leading x);
+      begin
+        let open TokenKind in
+        match kind x with
+        | SingleQuotedStringLiteral
+        | DoubleQuotedStringLiteral
+        | DoubleQuotedStringLiteralHead
+        | StringLiteralBody
+        | DoubleQuotedStringLiteralTail
+        | HeredocStringLiteral
+        | HeredocStringLiteralHead
+        | HeredocStringLiteralTail
+        | NowdocStringLiteral ->
+          let split_text = (Str.split_delim (Str.regexp "\n") (text x)) in
+          begin match split_text with
+            | [s] -> Text (text x, width x)
+            | _ -> MultilineString (split_text, width x)
+          end
+        | _ -> Text (text x, width x)
+      end;
+      transform_trailing_trivia (trailing x);
     ]
   | SyntaxList _ ->
     failwith (Printf.sprintf
@@ -162,9 +177,22 @@ let rec transform node =
     Fmt [
       handle_possible_list ~after_each:space modifiers;
       t prop_type;
-      WithRule (Rule.Argument, Nest [
-        handle_possible_list ~before_each:space_split declarators;
-      ]);
+      begin match syntax declarators with
+        | Missing -> Nothing
+        | SyntaxList [declarator] ->
+          Nest [
+            Space;
+            SplitWith Cost.Assignment;
+            t declarator;
+          ];
+        | SyntaxList xs ->
+          WithRule (Rule.Argument, Nest (List.map xs (fun declarator -> Fmt [
+            Space;
+            Split;
+            t declarator;
+          ])));
+        | _ -> failwith "SyntaxList expected"
+      end;
       t semi;
       Newline;
     ]
@@ -450,7 +478,7 @@ let rec transform node =
     let (kw, left_p, args, right_p, semi) = get_unset_statement_children x in
     Fmt [
       t kw;
-      transform_argish left_p args right_p;
+      transform_argish ~allow_trailing:false left_p args right_p;
       t semi;
       Newline;
     ]
@@ -622,6 +650,23 @@ let rec transform node =
   | ReturnStatement x ->
     let (kw, expr, semi) = get_return_statement_children x in
     transform_keyword_expression_statement kw expr semi
+  | GotoLabel { goto_label_name; goto_label_colon } ->
+    Fmt [
+      t goto_label_name;
+      t goto_label_colon;
+      Newline;
+    ]
+  | GotoStatement {
+      goto_statement_keyword;
+      goto_statement_label_name;
+      goto_statement_semicolon; } ->
+    Fmt [
+      t goto_statement_keyword;
+      Space;
+      t goto_statement_label_name;
+      t goto_statement_semicolon;
+      Newline;
+    ]
   | ThrowStatement x ->
     let (kw, expr, semi) = get_throw_statement_children x in
     transform_keyword_expression_statement kw expr semi
@@ -772,7 +817,7 @@ let rec transform node =
     let (kw, left_p, args, right_p) = get_isset_expression_children x in
     Fmt [
       t kw;
-      transform_argish left_p args right_p;
+      transform_argish ~allow_trailing:false left_p args right_p;
     ]
   | DefineExpression x ->
     let (kw, left_p, args, right_p) = get_define_expression_children x in
@@ -786,12 +831,8 @@ let rec transform node =
       t left_p;
       Split;
       WithRule (Rule.Argument, Fmt [
-        Nest [
-          (* TODO t14945172: remove this
-            This is required due to the xhp children declaration split, th
-          *)
-          handle_possible_list ~after_each:after_each_argument expr;
-        ];
+        Nest [ t expr; ];
+        Split;
         t right_p
       ]);
     ]
@@ -932,6 +973,12 @@ let rec transform node =
       t semi;
       Newline;
     ]
+  | XHPChildrenParenthesizedList x ->
+    let (left_p, expressions, right_p) =
+      get_xhp_children_parenthesized_list_children x in
+    Fmt [
+      transform_argish ~allow_trailing:false left_p expressions right_p;
+    ]
   | XHPCategoryDeclaration x ->
     let (kw, categories, semi) = get_xhp_category_declaration_children x in
     Fmt [
@@ -987,7 +1034,7 @@ let rec transform node =
       t left_a;
       t name;
       match syntax attrs with
-      | Missing -> handle_xhp_open_right_angle_token right_a
+      | Missing -> handle_xhp_open_right_angle_token attrs right_a
       | _ ->
         Fmt [
           Space;
@@ -998,7 +1045,7 @@ let rec transform node =
                 if not is_last then space_split () else Nothing
               ) attrs;
             ];
-            handle_xhp_open_right_angle_token right_a;
+            handle_xhp_open_right_angle_token attrs right_a;
           ])
         ]
     ]
@@ -1029,21 +1076,24 @@ let rec transform node =
           transform_trailing_trivia up_to_first_newline;
           Split;
           transform_leading_trivia after_newline;
-          let last_node_was_xhp_expression = ref false in
+          let prev_token_had_trailing_trivia = ref false in
           Fmt (List.map (hd :: tl) ~f:(fun node -> Fmt [
             begin
               let leading, node = remove_leading_trivia node in
               let result = Fmt [
-                if !last_node_was_xhp_expression
+                if !prev_token_had_trailing_trivia
                   then transform_leading_trivia leading
                   else transform_xhp_leading_trivia leading;
                 t node;
               ] in
               begin match syntax node with
                 | XHPExpression _ ->
-                  last_node_was_xhp_expression := true
+                  prev_token_had_trailing_trivia := true
+                | Token t ->
+                  prev_token_had_trailing_trivia :=
+                    EditableToken.kind t = EditableToken.TokenKind.XHPBody
                 | _ ->
-                  last_node_was_xhp_expression := false
+                  prev_token_had_trailing_trivia := false
               end;
               result
             end;
@@ -1051,11 +1101,18 @@ let rec transform node =
               List.exists (Syntax.trailing_trivia node)
                 ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.WhiteSpace)
             in
+            let has_trailing_newline =
+              List.exists (Syntax.trailing_trivia node)
+                ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.EndOfLine)
+            in
             match syntax node with
             | XHPExpression _ ->
               if has_trailing_whitespace then space_split () else Split
+            | Token _ ->
+              if has_trailing_newline then Newline
+              else if has_trailing_whitespace then Space else Nothing
             | _ ->
-              if has_trailing_whitespace then Space else Nothing;
+              if has_trailing_whitespace then Space else Nothing
           ]))
         ]
       | _ -> failwith "Expected SyntaxList"
@@ -1174,11 +1231,21 @@ let rec transform node =
     let (name, arrow_kw, value) = get_field_initializer_children x in
     transform_mapish_entry name arrow_kw value
   | ShapeTypeSpecifier x ->
-    let (shape_kw, left_p, type_fields, right_p) =
+    let (shape_kw, left_p, type_fields, ellipsis, right_p) =
       get_shape_type_specifier_children x in
+    let fields = if is_missing ellipsis
+      then type_fields
+      else
+        let missing_separator = make_missing () in
+        let ellipsis_list = [make_list_item ellipsis missing_separator] in
+        make_list (children type_fields @ ellipsis_list) in
     Fmt [
       t shape_kw;
-      transform_argish left_p type_fields right_p;
+      transform_argish
+        ~allow_trailing:(is_missing ellipsis)
+        left_p
+        fields
+        right_p;
     ]
   | ShapeExpression x ->
     let (shape_kw, left_p, fields, right_p) = get_shape_expression_children x in
@@ -1305,12 +1372,12 @@ and handle_possible_list
   | SyntaxList x -> aux x
   | _ -> aux [node]
 
-and handle_xhp_open_right_angle_token t =
+and handle_xhp_open_right_angle_token attrs t =
   match syntax t with
   | Token token ->
     Fmt [
       if EditableToken.text token = "/>"
-        then space_split ()
+        then Fmt [Space; when_present attrs split]
         else Nothing;
       transform t
     ]
@@ -1715,7 +1782,9 @@ and transform_binary_expression ~is_nested expr =
                 let operand = x in
                 let op_has_spaces = operator_has_surrounding_spaces !last_op in
                 Fmt [
-                  if op_has_spaces then Space else Nothing;
+                  if op_has_spaces
+                    then Fmt [Space; SplitWith Cost.Assignment]
+                    else SplitWith Cost.Assignment;
                   transform_operand operand;
                 ]
               end
@@ -1896,16 +1965,3 @@ and transform_xhp_leading_trivia triv =
       ]
     | _ -> ignored;
   ))
-
-let format_node ?(debug=false) node start_char end_char =
-  let open Chunk_builder in
-  builder#build_chunk_groups (transform node) start_char end_char
-
-let format_content content =
-  let module SourceText = Full_fidelity_source_text in
-  let source_text = SourceText.make content in
-  let syntax_tree = SyntaxTree.make source_text in
-  if not @@ List.is_empty @@ SyntaxTree.errors syntax_tree
-    then raise Hackfmt_error.InvalidSyntax;
-  let editable = Full_fidelity_editable_syntax.from_tree syntax_tree in
-  format_node editable

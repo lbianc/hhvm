@@ -295,11 +295,14 @@ class virtual ['self] iter =
     method on_Happly env c0 c1 =
       self#on_id env c0;
       self#on_list self#on_hint env c1;
-    method on_Hshape = self#on_list self#on_shape_field
+    method on_Hshape env c0 =
+      self#on_bool env c0.si_allows_unknown_fields;
+      self#on_list self#on_shape_field env c0.si_shape_field_list
     method on_Haccess env c0 c1 c2 =
       self#on_id env c0;
       self#on_id env c1;
       self#on_list self#on_id env c2;
+    method on_Hsoft = self#on_hint
     method on_hint_ env = function
       | Hoption c0 -> self#on_Hoption env c0
       | Hfun (c0, c1, c2) -> self#on_Hfun env c0 c1 c2
@@ -307,6 +310,7 @@ class virtual ['self] iter =
       | Happly (c0, c1) -> self#on_Happly env c0 c1
       | Hshape c0 -> self#on_Hshape env c0
       | Haccess (c0, c1, c2) -> self#on_Haccess env c0 c1 c2
+      | Hsoft c0 -> self#on_Hsoft env c0
     method on_SFlit = self#on_pstring
     method on_SFclass_const env c0 c1 =
       self#on_id env c0;
@@ -366,6 +370,8 @@ class virtual ['self] iter =
       | Continue c0 -> self#on_Continue env c0
       | Throw c0 -> self#on_Throw env c0
       | Return (c0, c1) -> self#on_Return env c0 c1
+      | GotoLabel c0 -> self#on_GotoLabel env c0
+      | Goto c0 -> self#on_Goto env c0
       | Static_var c0 -> self#on_Static_var env c0
       | If (c0, c1, c2) -> self#on_If env c0 c1 c2
       | Do (c0, c1) -> self#on_Do env c0 c1
@@ -493,6 +499,8 @@ class virtual ['self] iter =
     method on_Import env c0 c1 =
       self#on_import_flavor env c0;
       self#on_expr env c1;
+    method on_GotoLabel = self#on_pstring
+    method on_Goto = self#on_pstring
     method on_expr_ env = function
       | Array c0 -> self#on_Array env c0
       | Darray c0 -> self#on_Darray env c0

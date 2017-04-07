@@ -164,6 +164,38 @@ module Document_selector = struct
   type t = Document_filter.t list
 end
 
+
+(* Represents information about programming constructs like variables etc. *)
+module Symbol_information = struct
+  type t = {
+    name: string;
+    kind: symbol_kind;
+    location: Location.t;  (* the location of the symbol token itself *)
+    container_name: string option;  (* the symbol containing this symbol *)
+  }
+
+  and symbol_kind =
+    | File  (* 1 *)
+    | Module  (* 2 *)
+    | Namespace  (* 3 *)
+    | Package  (* 4 *)
+    | Class  (* 5 *)
+    | Method  (* 6 *)
+    | Property  (* 7 *)
+    | Field  (* 8 *)
+    | Constructor  (* 9 *)
+    | Enum  (* 10 *)
+    | Interface  (* 11 *)
+    | Function  (* 12 *)
+    | Variable  (* 13 *)
+    | Constant  (* 14 *)
+    | String  (* 15 *)
+    | Number  (* 16 *)
+    | Boolean  (* 17 *)
+    | Array  (* 18 *)
+end
+
+
 (* Cancellation notification, method="$/cancelRequest" *)
 module CancelRequest = struct
   type params = cancel_params
@@ -256,6 +288,7 @@ module Initialize = struct
     rename_provider: bool;
     document_link_provider: document_link_options option;
     execute_command_provider: execute_command_options option;
+    type_coverage_provider: bool;  (* Nuclide-specific feature *)
     (* omitted: experimental *)
   }
 
@@ -449,6 +482,138 @@ module Completion_item_resolve = struct
 end
 
 
+(* Workspace Symbols request, method="workspace/symbol" *)
+module Workspace_symbol = struct
+  type params = workspace_symbol_params
+
+  and result = Symbol_information.t list
+
+  and workspace_symbol_params = {
+    query: string;  (* a non-empty query string *)
+  }
+end
+
+
+(* Document Symbols request, method="textDocument/documentSymbols" *)
+module Document_symbol = struct
+  type params = document_symbol_params
+
+  and result = Symbol_information.t list
+
+  and document_symbol_params = {
+    text_document: Text_document_identifier.t;
+  }
+end
+
+
+(* Find References request, method="textDocument/references" *)
+module Find_references = struct
+  type params = reference_params
+
+  and result = Location.t list
+
+  (* Following structure is an extension of Text_document_position_params.t *)
+  (* but we don't have nice inherantice in OCaml so we duplicate fields *)
+  and reference_params = {
+    text_document: Text_document_identifier.t;  (* the text document *)
+    position: position;  (* the position inside the text document *)
+    context: reference_context;
+  }
+
+  and reference_context = {
+    include_declaration: bool;  (* include declaration of current symbol *)
+  }
+end
+
+
+(* Document Highlights request, method="textDocument/documentHighlight" *)
+module Document_highlights = struct
+  type params = Text_document_position_params.t
+
+  and result = document_highlight list
+
+  and document_highlight = {
+    range: range;  (* the range this highlight applies to *)
+    kind: document_highlight_kind option;
+  }
+
+  and document_highlight_kind =
+    | Text (* 1 *)  (* a textual occurrence *)
+    | Read (* 2 *)  (* read-access of a symbol, like reading a variable *)
+    | Write (* 3 *)  (* write-access of a symbol, like writing a variable *)
+end
+
+
+(* Type Coverage request, method="textDocument/typeCoverage" *)
+(* THIS IS A NUCLIDE-SPECIFIC EXTENSION TO LSP.              *)
+module Type_coverage = struct
+  type params = type_coverage_params
+
+  and result = {
+    covered_percent: int;
+    uncovered_ranges: uncovered_range list;
+  }
+
+  and type_coverage_params = {
+    text_document: Text_document_identifier.t;
+  }
+
+  and uncovered_range = {
+    range: range;
+    message: string;
+  }
+end
+
+
+(* Document Formatting request, method="textDocument/formatting" *)
+module Document_formatting = struct
+  type params = document_formatting_params
+
+  and result = Text_edit.t list
+
+  and document_formatting_params = {
+    text_document: Text_document_identifier.t;
+    options: formatting_options;
+  }
+
+  and formatting_options = {
+    tab_size: int;  (* size of a tab in spaces *)
+    insert_spaces: bool;  (* prefer spaces over tabs *)
+    (* omitted: signature for further properties *)
+  }
+end
+
+
+(* Document Range Formatting request, method="textDocument/rangeFormatting" *)
+module Document_range_formatting = struct
+  type params = document_range_formatting_params
+
+  and result = Text_edit.t list
+
+  and document_range_formatting_params = {
+    text_document: Text_document_identifier.t;
+    range: range;
+    options: Document_formatting.formatting_options;
+  }
+end
+
+
+(* Document On Type Formatting req., method="textDocument/onTypeFormatting" *)
+module Document_on_type_formatting = struct
+  type params = document_on_type_formatting_params
+
+  and result = Text_edit.t list
+
+  and document_on_type_formatting_params = {
+    text_document: Text_document_identifier.t;
+    position: position;  (* the position at which this request was sent *)
+    ch: string;  (* the character that has been typed *)
+    options: Document_formatting.formatting_options;
+  }
+end
+
+
+(* ErrorResponse *)
 module Error = struct
   exception Parse of string (* -32700 *)
   exception Invalid_request of string (* -32600 *)

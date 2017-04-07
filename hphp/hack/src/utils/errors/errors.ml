@@ -404,6 +404,8 @@ let error_code_to_string = Common.error_code_to_string
 module Temporary = struct
   let darray_not_supported = 1
   let varray_not_supported = 2
+  let unknown_fields_not_supported = 3
+  let goto_not_supported = 4
 end
 
 module Parsing = struct
@@ -691,6 +693,7 @@ module Typing                               = struct
   let instanceof_generic_classname          = 4162 (* DONT MODIFY!!!! *)
   let required_field_is_optional            = 4163 (* DONT MODIFY!!!! *)
   let final_property                        = 4164 (* DONT MODIFY!!!! *)
+  let array_get_with_optional_field         = 4165 (* DONT MODIFY!!!! *)
   (* EXTEND HERE WITH NEW VALUES IF NEEDED *)
 end
 
@@ -712,6 +715,13 @@ let darray_not_supported pos =
 
 let varray_not_supported pos =
   add Temporary.varray_not_supported pos "varray is not supported."
+
+let unknown_fields_not_supported pos =
+  add Temporary.unknown_fields_not_supported pos
+    "The Unknown shape fields feature (i.e., \"shape(...)\") is not supported."
+
+let goto_not_supported pos =
+  add Temporary.goto_not_supported pos "goto is not supported."
 
 (*****************************************************************************)
 (* Parsing errors. *)
@@ -2070,6 +2080,17 @@ let required_field_is_optional pos1 pos2 name =
     [
       pos1, "The field '"^name^"' is optional";
       pos2, "The field '"^name^"' is defined as required"
+    ]
+
+let array_get_with_optional_field pos1 pos2 name =
+  add_list
+    Typing.array_get_with_optional_field
+    [
+      pos1,
+      "Invalid index operation: '" ^ name ^ "' is marked as an optional shape \
+      field. It may not be present in the shape. Use Shapes::idx instead.";
+      pos2,
+      "This is where the field was declared as optional."
     ]
 
 (*****************************************************************************)

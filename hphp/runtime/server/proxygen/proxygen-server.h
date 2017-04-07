@@ -122,7 +122,7 @@ struct ProxygenServer : Server,
     return m_eventBaseManager.getEventBase();
   }
 
-  void messageAvailable(ResponseMessage&& message) override {
+  void messageAvailable(ResponseMessage&& message) noexcept override {
     auto m_transport = message.m_transport;
     m_transport->messageAvailable(std::move(message));
   }
@@ -150,6 +150,11 @@ struct ProxygenServer : Server,
   virtual void onRequestError(Transport* transport);
 
   void addPendingTransport(ProxygenTransport& transport) {
+    if (partialPostEchoEnabled()) {
+      const auto status = getStatus();
+      transport.setShouldRepost(status == RunStatus::STOPPING
+                                || status == RunStatus::STOPPED);
+    }
     m_pendingTransports.push_back(transport);
   }
 
@@ -179,6 +184,8 @@ struct ProxygenServer : Server,
 
   // These functions can only be called from the m_worker thread
   void stopListening(bool hard = false);
+
+  virtual bool partialPostEchoEnabled() { return false; }
 
   void returnPartialPosts();
 

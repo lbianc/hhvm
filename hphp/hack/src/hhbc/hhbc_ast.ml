@@ -11,7 +11,6 @@
 (**
  * TODO (hgo): see within HHVM codebase what those types actually are *)
 type property_name = string
-type iter_vec = int
 type check_started =
   | IgnoreStarted
   | CheckStarted
@@ -225,7 +224,7 @@ type instruct_control_flow =
 
 type instruct_special_flow =
   | Continue of int * int  (* This will be rewritten *)
-  | Break of int * int  (* This will be rewritten *)
+  | Break of int * int * Iterator.t list (* This will be rewritten *)
 
 type instruct_get =
   | CGetL of local_id
@@ -239,6 +238,7 @@ type instruct_get =
   | CGetG
   | CGetQuietG
   | CGetS of classref_id
+  | VGetL of local_id
   | VGetN
   | VGetG
   | VGetS of classref_id
@@ -328,7 +328,7 @@ type instruct_call =
   | FPushFunc of num_params
   | FPushFuncD of num_params * Litstr.id
   | FPushFuncU of num_params * Litstr.id * Litstr.id
-  | FPushObjMethod of num_params
+  | FPushObjMethod of num_params * Ast.og_null_flavor
   | FPushObjMethodD of num_params * Litstr.id * Ast.og_null_flavor
   | FPushClsMethod of num_params * classref_id
   | FPushClsMethodF of num_params * classref_id
@@ -469,7 +469,7 @@ type instruct_iterator =
   | IterFree of Iterator.t
   | MIterFree of Iterator.t
   | CIterFree of Iterator.t
-  | IterBreak of Label.t * iter_vec
+  | IterBreak of Label.t * Iterator.t list
 
 type instruct_include_eval_define =
   | Incl
@@ -486,7 +486,7 @@ type instruct_include_eval_define =
 
 type bare_this_op =
   | Notice
-  | NeverNull
+  | NoNotice
 
 type class_kind =
   | KClass

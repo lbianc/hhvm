@@ -430,6 +430,15 @@ module WithToken(Token: TokenType) = struct
       return_expression: t;
       return_semicolon: t;
     }
+    and goto_label = {
+      goto_label_name: t;
+      goto_label_colon: t;
+    }
+    and goto_statement = {
+      goto_statement_keyword: t;
+      goto_statement_label_name: t;
+      goto_statement_semicolon: t;
+    }
     and throw_statement = {
       throw_keyword: t;
       throw_expression: t;
@@ -688,6 +697,11 @@ module WithToken(Token: TokenType) = struct
       xhp_children_expression: t;
       xhp_children_semicolon: t;
     }
+    and xhp_children_parenthesized_list = {
+      xhp_children_list_left_paren: t;
+      xhp_children_list_xhp_children: t;
+      xhp_children_list_right_paren: t;
+    }
     and xhp_category_declaration = {
       xhp_category_keyword: t;
       xhp_category_categories: t;
@@ -831,6 +845,7 @@ module WithToken(Token: TokenType) = struct
       shape_type_keyword: t;
       shape_type_left_paren: t;
       shape_type_fields: t;
+      shape_type_ellipsis: t;
       shape_type_right_paren: t;
     }
     and shape_expression = {
@@ -940,6 +955,8 @@ module WithToken(Token: TokenType) = struct
     | CaseLabel of case_label
     | DefaultLabel of default_label
     | ReturnStatement of return_statement
+    | GotoLabel of goto_label
+    | GotoStatement of goto_statement
     | ThrowStatement of throw_statement
     | BreakStatement of break_statement
     | ContinueStatement of continue_statement
@@ -987,6 +1004,7 @@ module WithToken(Token: TokenType) = struct
     | EmbeddedSubscriptExpression of embedded_subscript_expression
     | AwaitableCreationExpression of awaitable_creation_expression
     | XHPChildrenDeclaration of xhp_children_declaration
+    | XHPChildrenParenthesizedList of xhp_children_parenthesized_list
     | XHPCategoryDeclaration of xhp_category_declaration
     | XHPEnumType of xhp_enum_type
     | XHPRequired of xhp_required
@@ -1156,6 +1174,10 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.DefaultLabel
       | ReturnStatement _ ->
         SyntaxKind.ReturnStatement
+      | GotoLabel _ ->
+        SyntaxKind.GotoLabel
+      | GotoStatement _ ->
+        SyntaxKind.GotoStatement
       | ThrowStatement _ ->
         SyntaxKind.ThrowStatement
       | BreakStatement _ ->
@@ -1250,6 +1272,8 @@ module WithToken(Token: TokenType) = struct
         SyntaxKind.AwaitableCreationExpression
       | XHPChildrenDeclaration _ ->
         SyntaxKind.XHPChildrenDeclaration
+      | XHPChildrenParenthesizedList _ ->
+        SyntaxKind.XHPChildrenParenthesizedList
       | XHPCategoryDeclaration _ ->
         SyntaxKind.XHPCategoryDeclaration
       | XHPEnumType _ ->
@@ -1443,6 +1467,10 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.DefaultLabel
     let is_return_statement node =
       kind node = SyntaxKind.ReturnStatement
+    let is_goto_label node =
+      kind node = SyntaxKind.GotoLabel
+    let is_goto_statement node =
+      kind node = SyntaxKind.GotoStatement
     let is_throw_statement node =
       kind node = SyntaxKind.ThrowStatement
     let is_break_statement node =
@@ -1537,6 +1565,8 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.AwaitableCreationExpression
     let is_xhp_children_declaration node =
       kind node = SyntaxKind.XHPChildrenDeclaration
+    let is_xhp_children_parenthesized_list node =
+      kind node = SyntaxKind.XHPChildrenParenthesizedList
     let is_xhp_category_declaration node =
       kind node = SyntaxKind.XHPCategoryDeclaration
     let is_xhp_enum_type node =
@@ -2317,6 +2347,24 @@ module WithToken(Token: TokenType) = struct
       return_semicolon
     )
 
+    let get_goto_label_children {
+      goto_label_name;
+      goto_label_colon;
+    } = (
+      goto_label_name,
+      goto_label_colon
+    )
+
+    let get_goto_statement_children {
+      goto_statement_keyword;
+      goto_statement_label_name;
+      goto_statement_semicolon;
+    } = (
+      goto_statement_keyword,
+      goto_statement_label_name,
+      goto_statement_semicolon
+    )
+
     let get_throw_statement_children {
       throw_keyword;
       throw_expression;
@@ -2833,6 +2881,16 @@ module WithToken(Token: TokenType) = struct
       xhp_children_semicolon
     )
 
+    let get_xhp_children_parenthesized_list_children {
+      xhp_children_list_left_paren;
+      xhp_children_list_xhp_children;
+      xhp_children_list_right_paren;
+    } = (
+      xhp_children_list_left_paren,
+      xhp_children_list_xhp_children,
+      xhp_children_list_right_paren
+    )
+
     let get_xhp_category_declaration_children {
       xhp_category_keyword;
       xhp_category_categories;
@@ -3115,11 +3173,13 @@ module WithToken(Token: TokenType) = struct
       shape_type_keyword;
       shape_type_left_paren;
       shape_type_fields;
+      shape_type_ellipsis;
       shape_type_right_paren;
     } = (
       shape_type_keyword,
       shape_type_left_paren,
       shape_type_fields,
+      shape_type_ellipsis,
       shape_type_right_paren
     )
 
@@ -3838,6 +3898,22 @@ module WithToken(Token: TokenType) = struct
         return_expression;
         return_semicolon;
       ]
+      | GotoLabel {
+        goto_label_name;
+        goto_label_colon;
+      } -> [
+        goto_label_name;
+        goto_label_colon;
+      ]
+      | GotoStatement {
+        goto_statement_keyword;
+        goto_statement_label_name;
+        goto_statement_semicolon;
+      } -> [
+        goto_statement_keyword;
+        goto_statement_label_name;
+        goto_statement_semicolon;
+      ]
       | ThrowStatement {
         throw_keyword;
         throw_expression;
@@ -4307,6 +4383,15 @@ module WithToken(Token: TokenType) = struct
         xhp_children_expression;
         xhp_children_semicolon;
       ]
+      | XHPChildrenParenthesizedList {
+        xhp_children_list_left_paren;
+        xhp_children_list_xhp_children;
+        xhp_children_list_right_paren;
+      } -> [
+        xhp_children_list_left_paren;
+        xhp_children_list_xhp_children;
+        xhp_children_list_right_paren;
+      ]
       | XHPCategoryDeclaration {
         xhp_category_keyword;
         xhp_category_categories;
@@ -4565,11 +4650,13 @@ module WithToken(Token: TokenType) = struct
         shape_type_keyword;
         shape_type_left_paren;
         shape_type_fields;
+        shape_type_ellipsis;
         shape_type_right_paren;
       } -> [
         shape_type_keyword;
         shape_type_left_paren;
         shape_type_fields;
+        shape_type_ellipsis;
         shape_type_right_paren;
       ]
       | ShapeExpression {
@@ -5277,6 +5364,22 @@ module WithToken(Token: TokenType) = struct
         "return_expression";
         "return_semicolon";
       ]
+      | GotoLabel {
+        goto_label_name;
+        goto_label_colon;
+      } -> [
+        "goto_label_name";
+        "goto_label_colon";
+      ]
+      | GotoStatement {
+        goto_statement_keyword;
+        goto_statement_label_name;
+        goto_statement_semicolon;
+      } -> [
+        "goto_statement_keyword";
+        "goto_statement_label_name";
+        "goto_statement_semicolon";
+      ]
       | ThrowStatement {
         throw_keyword;
         throw_expression;
@@ -5746,6 +5849,15 @@ module WithToken(Token: TokenType) = struct
         "xhp_children_expression";
         "xhp_children_semicolon";
       ]
+      | XHPChildrenParenthesizedList {
+        xhp_children_list_left_paren;
+        xhp_children_list_xhp_children;
+        xhp_children_list_right_paren;
+      } -> [
+        "xhp_children_list_left_paren";
+        "xhp_children_list_xhp_children";
+        "xhp_children_list_right_paren";
+      ]
       | XHPCategoryDeclaration {
         xhp_category_keyword;
         xhp_category_categories;
@@ -6004,11 +6116,13 @@ module WithToken(Token: TokenType) = struct
         shape_type_keyword;
         shape_type_left_paren;
         shape_type_fields;
+        shape_type_ellipsis;
         shape_type_right_paren;
       } -> [
         "shape_type_keyword";
         "shape_type_left_paren";
         "shape_type_fields";
+        "shape_type_ellipsis";
         "shape_type_right_paren";
       ]
       | ShapeExpression {
@@ -6826,6 +6940,24 @@ module WithToken(Token: TokenType) = struct
           return_expression;
           return_semicolon;
         }
+      | (SyntaxKind.GotoLabel, [
+          goto_label_name;
+          goto_label_colon;
+        ]) ->
+        GotoLabel {
+          goto_label_name;
+          goto_label_colon;
+        }
+      | (SyntaxKind.GotoStatement, [
+          goto_statement_keyword;
+          goto_statement_label_name;
+          goto_statement_semicolon;
+        ]) ->
+        GotoStatement {
+          goto_statement_keyword;
+          goto_statement_label_name;
+          goto_statement_semicolon;
+        }
       | (SyntaxKind.ThrowStatement, [
           throw_keyword;
           throw_expression;
@@ -7342,6 +7474,16 @@ module WithToken(Token: TokenType) = struct
           xhp_children_expression;
           xhp_children_semicolon;
         }
+      | (SyntaxKind.XHPChildrenParenthesizedList, [
+          xhp_children_list_left_paren;
+          xhp_children_list_xhp_children;
+          xhp_children_list_right_paren;
+        ]) ->
+        XHPChildrenParenthesizedList {
+          xhp_children_list_left_paren;
+          xhp_children_list_xhp_children;
+          xhp_children_list_right_paren;
+        }
       | (SyntaxKind.XHPCategoryDeclaration, [
           xhp_category_keyword;
           xhp_category_categories;
@@ -7624,12 +7766,14 @@ module WithToken(Token: TokenType) = struct
           shape_type_keyword;
           shape_type_left_paren;
           shape_type_fields;
+          shape_type_ellipsis;
           shape_type_right_paren;
         ]) ->
         ShapeTypeSpecifier {
           shape_type_keyword;
           shape_type_left_paren;
           shape_type_fields;
+          shape_type_ellipsis;
           shape_type_right_paren;
         }
       | (SyntaxKind.ShapeExpression, [
@@ -8496,6 +8640,26 @@ module WithToken(Token: TokenType) = struct
         return_semicolon;
       ]
 
+    let make_goto_label
+      goto_label_name
+      goto_label_colon
+    =
+      from_children SyntaxKind.GotoLabel [
+        goto_label_name;
+        goto_label_colon;
+      ]
+
+    let make_goto_statement
+      goto_statement_keyword
+      goto_statement_label_name
+      goto_statement_semicolon
+    =
+      from_children SyntaxKind.GotoStatement [
+        goto_statement_keyword;
+        goto_statement_label_name;
+        goto_statement_semicolon;
+      ]
+
     let make_throw_statement
       throw_keyword
       throw_expression
@@ -9059,6 +9223,17 @@ module WithToken(Token: TokenType) = struct
         xhp_children_semicolon;
       ]
 
+    let make_xhp_children_parenthesized_list
+      xhp_children_list_left_paren
+      xhp_children_list_xhp_children
+      xhp_children_list_right_paren
+    =
+      from_children SyntaxKind.XHPChildrenParenthesizedList [
+        xhp_children_list_left_paren;
+        xhp_children_list_xhp_children;
+        xhp_children_list_right_paren;
+      ]
+
     let make_xhp_category_declaration
       xhp_category_keyword
       xhp_category_categories
@@ -9365,12 +9540,14 @@ module WithToken(Token: TokenType) = struct
       shape_type_keyword
       shape_type_left_paren
       shape_type_fields
+      shape_type_ellipsis
       shape_type_right_paren
     =
       from_children SyntaxKind.ShapeTypeSpecifier [
         shape_type_keyword;
         shape_type_left_paren;
         shape_type_fields;
+        shape_type_ellipsis;
         shape_type_right_paren;
       ]
 

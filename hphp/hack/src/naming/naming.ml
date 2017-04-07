@@ -275,7 +275,7 @@ end = struct
         | FileInfo.Mpartial | FileInfo.Mdecl when not
             (TypecheckerOptions.assume_php genv.tcopt) ->
           Errors.unbound_name p x `const
-        | FileInfo.Mdecl | FileInfo.Mpartial -> ()
+        | FileInfo.Mphp | FileInfo.Mdecl | FileInfo.Mpartial -> ()
       )
     | _ -> ()
 
@@ -301,6 +301,7 @@ end = struct
           | FileInfo.Mpartial | FileInfo.Mdecl
               when TypecheckerOptions.assume_php genv.tcopt
               || name = SN.Classes.cUnknown -> ()
+          | FileInfo.Mphp -> ()
           | FileInfo.Mstrict -> Errors.unbound_name p name kind
           | FileInfo.Mpartial | FileInfo.Mdecl ->
               Errors.unbound_name p name kind
@@ -692,6 +693,22 @@ module Make (GetLocals : GetLocals) = struct
       sfi_hint=hint env sf_hint;
     }
 
+  and ast_shape_info_to_nast_shape_info
+      env
+      { si_allows_unknown_fields; si_shape_field_list } =
+    let f fdm shape_field =
+      let pos, name = convert_shape_name env shape_field.sf_name in
+      if ShapeMap.mem name fdm
+      then Errors.fd_name_already_bound pos;
+      ShapeMap.add
+        name (shape_field_to_shape_field_info env shape_field) fdm in
+    let nsi_field_map =
+      List.fold_left si_shape_field_list ~init:ShapeMap.empty ~f in
+    N.{
+      nsi_allows_unknown_fields=si_allows_unknown_fields;
+      nsi_field_map
+    }
+
   and hint_ ~forbid_this ~allow_retonly ~allow_typedef ~allow_wildcard
         is_static_var env x =
     let hint =
@@ -702,6 +719,9 @@ module Make (GetLocals : GetLocals) = struct
     | Hoption h ->
       (* void/noreturn are permitted for Typing.option_return_only_typehint *)
       N.Hoption (hint ~allow_retonly env h)
+    | Hsoft h ->
+      let h = hint ~allow_retonly env h
+      in snd h
     | Hfun (hl, opt, h) ->
       N.Hfun (List.map hl (hint env), opt,
               hint ~allow_retonly:true env h)
@@ -739,16 +759,8 @@ module Make (GetLocals : GetLocals) = struct
           )
       in
       N.Haccess ((pos, root_ty), id :: ids)
-    | Hshape fdl -> N.Hshape
-      begin
-        List.fold_left fdl ~init:ShapeMap.empty ~f:begin fun fdm shape_field ->
-          let pos, name = convert_shape_name env shape_field.sf_name in
-          if ShapeMap.mem name fdm
-          then Errors.fd_name_already_bound pos;
-          ShapeMap.add
-            name (shape_field_to_shape_field_info env shape_field) fdm
-        end
-    end
+    | Hshape ast_shape_info ->
+      N.Hshape (ast_shape_info_to_nast_shape_info env ast_shape_info)
 
   and hint_id ~forbid_this ~allow_retonly ~allow_typedef ~allow_wildcard
     env is_static_var (p, x as id) hl =
@@ -1431,7 +1443,7 @@ module Make (GetLocals : GetLocals) = struct
     let ret = Option.map m.m_ret (hint ~allow_retonly:true env) in
     let f_kind = m.m_fun_kind in
     let body = (match genv.in_mode with
-      | FileInfo.Mdecl ->
+      | FileInfo.Mdecl | FileInfo.Mphp ->
         N.NamedBody {
           N.fnb_nast = [];
           fnb_unsafe = true;
@@ -1524,7 +1536,7 @@ module Make (GetLocals : GetLocals) = struct
     let f_tparams = type_paraml env f.f_tparams in
     let f_kind = f.f_fun_kind in
     let body = match genv.in_mode with
-      | FileInfo.Mdecl ->
+      | FileInfo.Mdecl | FileInfo.Mphp ->
         N.NamedBody {
           N.fnb_nast = [];
           fnb_unsafe = true;
@@ -1569,6 +1581,10 @@ module Make (GetLocals : GetLocals) = struct
     | Throw e              -> let terminal = not (fst env).in_try in
                               N.Throw (terminal, expr env e)
     | Return (p, e)        -> N.Return (p, oexpr env e)
+    | GotoLabel _
+    | Goto _ ->
+      (* TODO(t17085086): Name the goto's label *)
+      N.Noop
     | Static_var el        -> N.Static_var (static_varl env el)
     | If (e, b1, b2)       -> if_stmt env st e b1 b2
     | Do (b, e)            -> do_stmt env b e
@@ -1738,7 +1754,7 @@ module Make (GetLocals : GetLocals) = struct
         (match (fst env).in_mode with
           | FileInfo.Mstrict ->
               Errors.dynamic_method_call p
-          | FileInfo.Mpartial | FileInfo.Mdecl ->
+          | FileInfo.Mpartial | FileInfo.Mdecl | FileInfo.Mphp ->
               ()
         );
         expr env (p, e)
@@ -1891,7 +1907,7 @@ module Make (GetLocals : GetLocals) = struct
                * It's sufficient for typechecking purposes (we require
                * subclass to be compatible with the trait member/method
                * declarations).
-               * It *is* a problem for hh_emitter, though. *)
+               *)
               (match (fst env).current_cls with
                 | Some (cid, _) -> N.Smethod_id (cid, meth)
                 | None -> Errors.illegal_class_meth p; N.Any)

@@ -76,6 +76,8 @@ type t =
 | CaseLabel
 | DefaultLabel
 | ReturnStatement
+| GotoLabel
+| GotoStatement
 | ThrowStatement
 | BreakStatement
 | ContinueStatement
@@ -123,6 +125,7 @@ type t =
 | EmbeddedSubscriptExpression
 | AwaitableCreationExpression
 | XHPChildrenDeclaration
+| XHPChildrenParenthesizedList
 | XHPCategoryDeclaration
 | XHPEnumType
 | XHPRequired
@@ -221,6 +224,8 @@ let to_string kind =
   | CaseLabel -> "case_label"
   | DefaultLabel -> "default_label"
   | ReturnStatement -> "return_statement"
+  | GotoLabel -> "goto_label"
+  | GotoStatement -> "goto_statement"
   | ThrowStatement -> "throw_statement"
   | BreakStatement -> "break_statement"
   | ContinueStatement -> "continue_statement"
@@ -268,6 +273,7 @@ let to_string kind =
   | EmbeddedSubscriptExpression -> "embedded_subscript_expression"
   | AwaitableCreationExpression -> "awaitable_creation_expression"
   | XHPChildrenDeclaration -> "xhp_children_declaration"
+  | XHPChildrenParenthesizedList -> "xhp_children_parenthesized_list"
   | XHPCategoryDeclaration -> "xhp_category_declaration"
   | XHPEnumType -> "xhp_enum_type"
   | XHPRequired -> "xhp_required"

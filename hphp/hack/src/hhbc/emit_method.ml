@@ -14,7 +14,6 @@ open Hhbc_ast
 
 let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
   fun ast_class ast_method ->
-  let method_name = Litstr.to_string @@ snd ast_method.Ast.m_name in
   let method_is_abstract =
     List.mem ast_method.Ast.m_kind Ast.Abstract ||
     ast_class.Ast.c_kind = Ast.Cinterface in
@@ -28,15 +27,16 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
   let method_attributes =
     Emit_attribute.from_asts ast_method.Ast.m_user_attributes in
   let tparams = ast_class.Ast.c_tparams @ ast_method.Ast.m_tparams in
-  let (_,name) = ast_class.Ast.c_name in
+  let (_,class_name) = ast_class.Ast.c_name in
+  let (_,method_name) = ast_method.Ast.m_name in
   let ret =
     if method_name = Naming_special_names.Members.__construct
     then None else ast_method.Ast.m_ret in
   let default_instrs return_type =
       if List.mem ast_method.Ast.m_kind Ast.Abstract
       then gather [
-        instr_string ("Cannot call abstract method " ^ Utils.strip_ns name
-          ^ "::" ^ snd (ast_method.Ast.m_name) ^ "()");
+        instr_string ("Cannot call abstract method " ^ Utils.strip_ns class_name
+          ^ "::" ^ method_name ^ "()");
         instr (IOp (Fatal FatalOp.RuntimeOmitFrame))
       ]
       else let default_seq =
@@ -57,12 +57,15 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
           ] in
   let body_instrs,
       method_decl_vars,
+      method_num_iters,
       method_params,
       method_return_type,
       method_is_generator,
       method_is_pair_generator =
     Emit_body.from_ast
-      ~self:(Some name)
+      ~class_name:(Some class_name)
+      ~method_name:(Some method_name)
+      ~has_this:(not method_is_static)
       tparams
       ast_method.Ast.m_params
       ret
@@ -71,9 +74,14 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
   in
   let method_is_async =
     ast_method.Ast.m_fun_kind = Ast_defs.FAsync
-    || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator
-  in
+    || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator in
   let method_is_closure_body = snd ast_method.Ast.m_name = "__invoke" in
+  let method_decl_vars =
+    if method_is_closure_body
+    then
+      let vars = "$0Closure" :: method_decl_vars in
+      if method_is_static then vars else vars @ ["$this"]
+    else method_decl_vars in
   let method_body = instr_seq_to_list body_instrs in
   Hhas_method.make
     method_attributes
@@ -88,6 +96,7 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
     method_return_type
     method_body
     method_decl_vars
+    method_num_iters
     method_is_async
     method_is_generator
     method_is_pair_generator

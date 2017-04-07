@@ -2120,6 +2120,11 @@ void hphp_process_init() {
 
   HHProf::Init();
 
+  {
+    (void)type_scan::getIndexForMalloc<MArrayIter>();
+    MIterTable::TlsWrapper tls;
+  }
+
   // initialize the tzinfo cache.
   timezone_init();
   BootStats::mark("timezone_init");
@@ -2491,6 +2496,7 @@ void hphp_process_exit() noexcept {
   LOG_AND_IGNORE(teardown_cli_server())
   LOG_AND_IGNORE(Xenon::getInstance().stop())
   LOG_AND_IGNORE(jit::mcgen::joinWorkerThreads())
+  LOG_AND_IGNORE(jit::tc::processExit())
   LOG_AND_IGNORE(PageletServer::Stop())
   LOG_AND_IGNORE(XboxServer::Stop())
   // Debugger::Stop() needs an execution context

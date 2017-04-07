@@ -194,6 +194,10 @@ class EditableSyntax
       return DefaultLabel.from_json(json, position, source);
     case 'return_statement':
       return ReturnStatement.from_json(json, position, source);
+    case 'goto_label':
+      return GotoLabel.from_json(json, position, source);
+    case 'goto_statement':
+      return GotoStatement.from_json(json, position, source);
     case 'throw_statement':
       return ThrowStatement.from_json(json, position, source);
     case 'break_statement':
@@ -288,6 +292,8 @@ class EditableSyntax
       return AwaitableCreationExpression.from_json(json, position, source);
     case 'xhp_children_declaration':
       return XHPChildrenDeclaration.from_json(json, position, source);
+    case 'xhp_children_parenthesized_list':
+      return XHPChildrenParenthesizedList.from_json(json, position, source);
     case 'xhp_category_declaration':
       return XHPCategoryDeclaration.from_json(json, position, source);
     case 'xhp_enum_type':
@@ -731,6 +737,8 @@ class EditableToken extends EditableSyntax
        return new FunctionToken(leading, trailing);
     case 'global':
        return new GlobalToken(leading, trailing);
+    case 'goto':
+       return new GotoToken(leading, trailing);
     case 'if':
        return new IfToken(leading, trailing);
     case 'implements':
@@ -1374,6 +1382,13 @@ class GlobalToken extends EditableToken
   constructor(leading, trailing)
   {
     super('global', leading, trailing, 'global');
+  }
+}
+class GotoToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('goto', leading, trailing, 'goto');
   }
 }
 class IfToken extends EditableToken
@@ -8878,6 +8893,153 @@ class ReturnStatement extends EditableSyntax
     return ReturnStatement._children_keys;
   }
 }
+class GotoLabel extends EditableSyntax
+{
+  constructor(
+    name,
+    colon)
+  {
+    super('goto_label', {
+      name: name,
+      colon: colon });
+  }
+  get name() { return this.children.name; }
+  get colon() { return this.children.colon; }
+  with_name(name){
+    return new GotoLabel(
+      name,
+      this.colon);
+  }
+  with_colon(colon){
+    return new GotoLabel(
+      this.name,
+      colon);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var name = this.name.rewrite(rewriter, new_parents);
+    var colon = this.colon.rewrite(rewriter, new_parents);
+    if (
+      name === this.name &&
+      colon === this.colon)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new GotoLabel(
+        name,
+        colon), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let name = EditableSyntax.from_json(
+      json.goto_label_name, position, source);
+    position += name.width;
+    let colon = EditableSyntax.from_json(
+      json.goto_label_colon, position, source);
+    position += colon.width;
+    return new GotoLabel(
+        name,
+        colon);
+  }
+  get children_keys()
+  {
+    if (GotoLabel._children_keys == null)
+      GotoLabel._children_keys = [
+        'name',
+        'colon'];
+    return GotoLabel._children_keys;
+  }
+}
+class GotoStatement extends EditableSyntax
+{
+  constructor(
+    keyword,
+    label_name,
+    semicolon)
+  {
+    super('goto_statement', {
+      keyword: keyword,
+      label_name: label_name,
+      semicolon: semicolon });
+  }
+  get keyword() { return this.children.keyword; }
+  get label_name() { return this.children.label_name; }
+  get semicolon() { return this.children.semicolon; }
+  with_keyword(keyword){
+    return new GotoStatement(
+      keyword,
+      this.label_name,
+      this.semicolon);
+  }
+  with_label_name(label_name){
+    return new GotoStatement(
+      this.keyword,
+      label_name,
+      this.semicolon);
+  }
+  with_semicolon(semicolon){
+    return new GotoStatement(
+      this.keyword,
+      this.label_name,
+      semicolon);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var label_name = this.label_name.rewrite(rewriter, new_parents);
+    var semicolon = this.semicolon.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      label_name === this.label_name &&
+      semicolon === this.semicolon)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new GotoStatement(
+        keyword,
+        label_name,
+        semicolon), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.goto_statement_keyword, position, source);
+    position += keyword.width;
+    let label_name = EditableSyntax.from_json(
+      json.goto_statement_label_name, position, source);
+    position += label_name.width;
+    let semicolon = EditableSyntax.from_json(
+      json.goto_statement_semicolon, position, source);
+    position += semicolon.width;
+    return new GotoStatement(
+        keyword,
+        label_name,
+        semicolon);
+  }
+  get children_keys()
+  {
+    if (GotoStatement._children_keys == null)
+      GotoStatement._children_keys = [
+        'keyword',
+        'label_name',
+        'semicolon'];
+    return GotoStatement._children_keys;
+  }
+}
 class ThrowStatement extends EditableSyntax
 {
   constructor(
@@ -13312,6 +13474,89 @@ class XHPChildrenDeclaration extends EditableSyntax
     return XHPChildrenDeclaration._children_keys;
   }
 }
+class XHPChildrenParenthesizedList extends EditableSyntax
+{
+  constructor(
+    left_paren,
+    xhp_children,
+    right_paren)
+  {
+    super('xhp_children_parenthesized_list', {
+      left_paren: left_paren,
+      xhp_children: xhp_children,
+      right_paren: right_paren });
+  }
+  get left_paren() { return this.children.left_paren; }
+  get xhp_children() { return this.children.xhp_children; }
+  get right_paren() { return this.children.right_paren; }
+  with_left_paren(left_paren){
+    return new XHPChildrenParenthesizedList(
+      left_paren,
+      this.xhp_children,
+      this.right_paren);
+  }
+  with_xhp_children(xhp_children){
+    return new XHPChildrenParenthesizedList(
+      this.left_paren,
+      xhp_children,
+      this.right_paren);
+  }
+  with_right_paren(right_paren){
+    return new XHPChildrenParenthesizedList(
+      this.left_paren,
+      this.xhp_children,
+      right_paren);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var left_paren = this.left_paren.rewrite(rewriter, new_parents);
+    var xhp_children = this.xhp_children.rewrite(rewriter, new_parents);
+    var right_paren = this.right_paren.rewrite(rewriter, new_parents);
+    if (
+      left_paren === this.left_paren &&
+      xhp_children === this.xhp_children &&
+      right_paren === this.right_paren)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new XHPChildrenParenthesizedList(
+        left_paren,
+        xhp_children,
+        right_paren), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let left_paren = EditableSyntax.from_json(
+      json.xhp_children_list_left_paren, position, source);
+    position += left_paren.width;
+    let xhp_children = EditableSyntax.from_json(
+      json.xhp_children_list_xhp_children, position, source);
+    position += xhp_children.width;
+    let right_paren = EditableSyntax.from_json(
+      json.xhp_children_list_right_paren, position, source);
+    position += right_paren.width;
+    return new XHPChildrenParenthesizedList(
+        left_paren,
+        xhp_children,
+        right_paren);
+  }
+  get children_keys()
+  {
+    if (XHPChildrenParenthesizedList._children_keys == null)
+      XHPChildrenParenthesizedList._children_keys = [
+        'left_paren',
+        'xhp_children',
+        'right_paren'];
+    return XHPChildrenParenthesizedList._children_keys;
+  }
+}
 class XHPCategoryDeclaration extends EditableSyntax
 {
   constructor(
@@ -15759,23 +16004,27 @@ class ShapeTypeSpecifier extends EditableSyntax
     keyword,
     left_paren,
     fields,
+    ellipsis,
     right_paren)
   {
     super('shape_type_specifier', {
       keyword: keyword,
       left_paren: left_paren,
       fields: fields,
+      ellipsis: ellipsis,
       right_paren: right_paren });
   }
   get keyword() { return this.children.keyword; }
   get left_paren() { return this.children.left_paren; }
   get fields() { return this.children.fields; }
+  get ellipsis() { return this.children.ellipsis; }
   get right_paren() { return this.children.right_paren; }
   with_keyword(keyword){
     return new ShapeTypeSpecifier(
       keyword,
       this.left_paren,
       this.fields,
+      this.ellipsis,
       this.right_paren);
   }
   with_left_paren(left_paren){
@@ -15783,6 +16032,7 @@ class ShapeTypeSpecifier extends EditableSyntax
       this.keyword,
       left_paren,
       this.fields,
+      this.ellipsis,
       this.right_paren);
   }
   with_fields(fields){
@@ -15790,6 +16040,15 @@ class ShapeTypeSpecifier extends EditableSyntax
       this.keyword,
       this.left_paren,
       fields,
+      this.ellipsis,
+      this.right_paren);
+  }
+  with_ellipsis(ellipsis){
+    return new ShapeTypeSpecifier(
+      this.keyword,
+      this.left_paren,
+      this.fields,
+      ellipsis,
       this.right_paren);
   }
   with_right_paren(right_paren){
@@ -15797,6 +16056,7 @@ class ShapeTypeSpecifier extends EditableSyntax
       this.keyword,
       this.left_paren,
       this.fields,
+      this.ellipsis,
       right_paren);
   }
   rewrite(rewriter, parents)
@@ -15808,11 +16068,13 @@ class ShapeTypeSpecifier extends EditableSyntax
     var keyword = this.keyword.rewrite(rewriter, new_parents);
     var left_paren = this.left_paren.rewrite(rewriter, new_parents);
     var fields = this.fields.rewrite(rewriter, new_parents);
+    var ellipsis = this.ellipsis.rewrite(rewriter, new_parents);
     var right_paren = this.right_paren.rewrite(rewriter, new_parents);
     if (
       keyword === this.keyword &&
       left_paren === this.left_paren &&
       fields === this.fields &&
+      ellipsis === this.ellipsis &&
       right_paren === this.right_paren)
     {
       return rewriter(this, parents);
@@ -15823,6 +16085,7 @@ class ShapeTypeSpecifier extends EditableSyntax
         keyword,
         left_paren,
         fields,
+        ellipsis,
         right_paren), parents);
     }
   }
@@ -15837,6 +16100,9 @@ class ShapeTypeSpecifier extends EditableSyntax
     let fields = EditableSyntax.from_json(
       json.shape_type_fields, position, source);
     position += fields.width;
+    let ellipsis = EditableSyntax.from_json(
+      json.shape_type_ellipsis, position, source);
+    position += ellipsis.width;
     let right_paren = EditableSyntax.from_json(
       json.shape_type_right_paren, position, source);
     position += right_paren.width;
@@ -15844,6 +16110,7 @@ class ShapeTypeSpecifier extends EditableSyntax
         keyword,
         left_paren,
         fields,
+        ellipsis,
         right_paren);
   }
   get children_keys()
@@ -15853,6 +16120,7 @@ class ShapeTypeSpecifier extends EditableSyntax
         'keyword',
         'left_paren',
         'fields',
+        'ellipsis',
         'right_paren'];
     return ShapeTypeSpecifier._children_keys;
   }
@@ -16672,6 +16940,7 @@ exports.ForToken = ForToken;
 exports.ForeachToken = ForeachToken;
 exports.FunctionToken = FunctionToken;
 exports.GlobalToken = GlobalToken;
+exports.GotoToken = GotoToken;
 exports.IfToken = IfToken;
 exports.ImplementsToken = ImplementsToken;
 exports.IncludeToken = IncludeToken;
@@ -16885,6 +17154,8 @@ exports.SwitchFallthrough = SwitchFallthrough;
 exports.CaseLabel = CaseLabel;
 exports.DefaultLabel = DefaultLabel;
 exports.ReturnStatement = ReturnStatement;
+exports.GotoLabel = GotoLabel;
+exports.GotoStatement = GotoStatement;
 exports.ThrowStatement = ThrowStatement;
 exports.BreakStatement = BreakStatement;
 exports.ContinueStatement = ContinueStatement;
@@ -16932,6 +17203,7 @@ exports.SubscriptExpression = SubscriptExpression;
 exports.EmbeddedSubscriptExpression = EmbeddedSubscriptExpression;
 exports.AwaitableCreationExpression = AwaitableCreationExpression;
 exports.XHPChildrenDeclaration = XHPChildrenDeclaration;
+exports.XHPChildrenParenthesizedList = XHPChildrenParenthesizedList;
 exports.XHPCategoryDeclaration = XHPCategoryDeclaration;
 exports.XHPEnumType = XHPEnumType;
 exports.XHPRequired = XHPRequired;

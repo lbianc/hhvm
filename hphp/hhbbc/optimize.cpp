@@ -212,6 +212,8 @@ bool hasObviousStackOutput(const Bytecode& op, const State& state) {
   case Op::NewKeysetArray:
   case Op::AddNewElemC:
   case Op::AddNewElemV:
+  case Op::NewCol:
+  case Op::NewPair:
   case Op::ClsRefName:
   case Op::File:
   case Op::Dir:
@@ -475,7 +477,7 @@ void first_pass(const Index& index,
   if (options.ConstantProp) collect.propagate_constants = propagate_constants;
 
   auto peephole = make_peephole(newBCs, index, ctx);
-  std::vector<Op> srcStack(state.stack.size(), Op::LowInvalid);
+  std::vector<Op> srcStack(state.stack.size(), Op::Nop);
 
   for (auto& op : blk->hhbcs) {
     FTRACE(2, "  == {}\n", show(ctx.func, op));
@@ -769,9 +771,7 @@ Bytecode gen_constant(const Cell& cell) {
 }
 
 void optimize_func(const Index& index, FuncAnalysis&& ainfo) {
-  auto const bump =
-    (is_systemlib_part(*ainfo.ctx.unit) ? kSystemLibBump : 0) +
-    (is_trace_function(ainfo.ctx.cls, ainfo.ctx.func) ? kTraceFuncBump : 0);
+  auto const bump = trace_bump_for(ainfo.ctx.cls, ainfo.ctx.func);
 
   Trace::Bump bumper1{Trace::hhbbc, bump};
   Trace::Bump bumper2{Trace::hhbbc_cfg, bump};

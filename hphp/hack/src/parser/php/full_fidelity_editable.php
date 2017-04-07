@@ -257,6 +257,10 @@ abstract class EditableSyntax implements ArrayAccess {
       return DefaultLabel::from_json($json, $position, $source);
     case 'return_statement':
       return ReturnStatement::from_json($json, $position, $source);
+    case 'goto_label':
+      return GotoLabel::from_json($json, $position, $source);
+    case 'goto_statement':
+      return GotoStatement::from_json($json, $position, $source);
     case 'throw_statement':
       return ThrowStatement::from_json($json, $position, $source);
     case 'break_statement':
@@ -351,6 +355,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return AwaitableCreationExpression::from_json($json, $position, $source);
     case 'xhp_children_declaration':
       return XHPChildrenDeclaration::from_json($json, $position, $source);
+    case 'xhp_children_parenthesized_list':
+      return XHPChildrenParenthesizedList::from_json($json, $position, $source);
     case 'xhp_category_declaration':
       return XHPCategoryDeclaration::from_json($json, $position, $source);
     case 'xhp_enum_type':
@@ -836,6 +842,8 @@ abstract class EditableToken extends EditableSyntax {
        return new FunctionToken($leading, $trailing);
     case 'global':
        return new GlobalToken($leading, $trailing);
+    case 'goto':
+       return new GotoToken($leading, $trailing);
     case 'if':
        return new IfToken($leading, $trailing);
     case 'implements':
@@ -1829,6 +1837,21 @@ final class GlobalToken extends EditableToken {
 
   public function with_trailing(EditableSyntax $trailing): GlobalToken {
     return new GlobalToken($this->leading(), $trailing);
+  }
+}
+final class GotoToken extends EditableToken {
+  public function __construct(
+    EditableSyntax $leading,
+    EditableSyntax $trailing) {
+    parent::__construct('goto', $leading, $trailing, 'goto');
+  }
+
+  public function with_leading(EditableSyntax $leading): GotoToken {
+    return new GotoToken($leading, $this->trailing());
+  }
+
+  public function with_trailing(EditableSyntax $trailing): GotoToken {
+    return new GotoToken($this->leading(), $trailing);
   }
 }
 final class IfToken extends EditableToken {
@@ -10794,6 +10817,154 @@ final class ReturnStatement extends EditableSyntax {
     yield break;
   }
 }
+final class GotoLabel extends EditableSyntax {
+  private EditableSyntax $_name;
+  private EditableSyntax $_colon;
+  public function __construct(
+    EditableSyntax $name,
+    EditableSyntax $colon) {
+    parent::__construct('goto_label');
+    $this->_name = $name;
+    $this->_colon = $colon;
+  }
+  public function name(): EditableSyntax {
+    return $this->_name;
+  }
+  public function colon(): EditableSyntax {
+    return $this->_colon;
+  }
+  public function with_name(EditableSyntax $name): GotoLabel {
+    return new GotoLabel(
+      $name,
+      $this->_colon);
+  }
+  public function with_colon(EditableSyntax $colon): GotoLabel {
+    return new GotoLabel(
+      $this->_name,
+      $colon);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $name = $this->name()->rewrite($rewriter, $new_parents);
+    $colon = $this->colon()->rewrite($rewriter, $new_parents);
+    if (
+      $name === $this->name() &&
+      $colon === $this->colon()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new GotoLabel(
+        $name,
+        $colon), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $name = EditableSyntax::from_json(
+      $json->goto_label_name, $position, $source);
+    $position += $name->width();
+    $colon = EditableSyntax::from_json(
+      $json->goto_label_colon, $position, $source);
+    $position += $colon->width();
+    return new GotoLabel(
+        $name,
+        $colon);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_name;
+    yield $this->_colon;
+    yield break;
+  }
+}
+final class GotoStatement extends EditableSyntax {
+  private EditableSyntax $_keyword;
+  private EditableSyntax $_label_name;
+  private EditableSyntax $_semicolon;
+  public function __construct(
+    EditableSyntax $keyword,
+    EditableSyntax $label_name,
+    EditableSyntax $semicolon) {
+    parent::__construct('goto_statement');
+    $this->_keyword = $keyword;
+    $this->_label_name = $label_name;
+    $this->_semicolon = $semicolon;
+  }
+  public function keyword(): EditableSyntax {
+    return $this->_keyword;
+  }
+  public function label_name(): EditableSyntax {
+    return $this->_label_name;
+  }
+  public function semicolon(): EditableSyntax {
+    return $this->_semicolon;
+  }
+  public function with_keyword(EditableSyntax $keyword): GotoStatement {
+    return new GotoStatement(
+      $keyword,
+      $this->_label_name,
+      $this->_semicolon);
+  }
+  public function with_label_name(EditableSyntax $label_name): GotoStatement {
+    return new GotoStatement(
+      $this->_keyword,
+      $label_name,
+      $this->_semicolon);
+  }
+  public function with_semicolon(EditableSyntax $semicolon): GotoStatement {
+    return new GotoStatement(
+      $this->_keyword,
+      $this->_label_name,
+      $semicolon);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $keyword = $this->keyword()->rewrite($rewriter, $new_parents);
+    $label_name = $this->label_name()->rewrite($rewriter, $new_parents);
+    $semicolon = $this->semicolon()->rewrite($rewriter, $new_parents);
+    if (
+      $keyword === $this->keyword() &&
+      $label_name === $this->label_name() &&
+      $semicolon === $this->semicolon()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new GotoStatement(
+        $keyword,
+        $label_name,
+        $semicolon), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $keyword = EditableSyntax::from_json(
+      $json->goto_statement_keyword, $position, $source);
+    $position += $keyword->width();
+    $label_name = EditableSyntax::from_json(
+      $json->goto_statement_label_name, $position, $source);
+    $position += $label_name->width();
+    $semicolon = EditableSyntax::from_json(
+      $json->goto_statement_semicolon, $position, $source);
+    $position += $semicolon->width();
+    return new GotoStatement(
+        $keyword,
+        $label_name,
+        $semicolon);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_keyword;
+    yield $this->_label_name;
+    yield $this->_semicolon;
+    yield break;
+  }
+}
 final class ThrowStatement extends EditableSyntax {
   private EditableSyntax $_keyword;
   private EditableSyntax $_expression;
@@ -15391,6 +15562,91 @@ final class XHPChildrenDeclaration extends EditableSyntax {
     yield break;
   }
 }
+final class XHPChildrenParenthesizedList extends EditableSyntax {
+  private EditableSyntax $_left_paren;
+  private EditableSyntax $_xhp_children;
+  private EditableSyntax $_right_paren;
+  public function __construct(
+    EditableSyntax $left_paren,
+    EditableSyntax $xhp_children,
+    EditableSyntax $right_paren) {
+    parent::__construct('xhp_children_parenthesized_list');
+    $this->_left_paren = $left_paren;
+    $this->_xhp_children = $xhp_children;
+    $this->_right_paren = $right_paren;
+  }
+  public function left_paren(): EditableSyntax {
+    return $this->_left_paren;
+  }
+  public function xhp_children(): EditableSyntax {
+    return $this->_xhp_children;
+  }
+  public function right_paren(): EditableSyntax {
+    return $this->_right_paren;
+  }
+  public function with_left_paren(EditableSyntax $left_paren): XHPChildrenParenthesizedList {
+    return new XHPChildrenParenthesizedList(
+      $left_paren,
+      $this->_xhp_children,
+      $this->_right_paren);
+  }
+  public function with_xhp_children(EditableSyntax $xhp_children): XHPChildrenParenthesizedList {
+    return new XHPChildrenParenthesizedList(
+      $this->_left_paren,
+      $xhp_children,
+      $this->_right_paren);
+  }
+  public function with_right_paren(EditableSyntax $right_paren): XHPChildrenParenthesizedList {
+    return new XHPChildrenParenthesizedList(
+      $this->_left_paren,
+      $this->_xhp_children,
+      $right_paren);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $left_paren = $this->left_paren()->rewrite($rewriter, $new_parents);
+    $xhp_children = $this->xhp_children()->rewrite($rewriter, $new_parents);
+    $right_paren = $this->right_paren()->rewrite($rewriter, $new_parents);
+    if (
+      $left_paren === $this->left_paren() &&
+      $xhp_children === $this->xhp_children() &&
+      $right_paren === $this->right_paren()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new XHPChildrenParenthesizedList(
+        $left_paren,
+        $xhp_children,
+        $right_paren), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $left_paren = EditableSyntax::from_json(
+      $json->xhp_children_list_left_paren, $position, $source);
+    $position += $left_paren->width();
+    $xhp_children = EditableSyntax::from_json(
+      $json->xhp_children_list_xhp_children, $position, $source);
+    $position += $xhp_children->width();
+    $right_paren = EditableSyntax::from_json(
+      $json->xhp_children_list_right_paren, $position, $source);
+    $position += $right_paren->width();
+    return new XHPChildrenParenthesizedList(
+        $left_paren,
+        $xhp_children,
+        $right_paren);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_left_paren;
+    yield $this->_xhp_children;
+    yield $this->_right_paren;
+    yield break;
+  }
+}
 final class XHPCategoryDeclaration extends EditableSyntax {
   private EditableSyntax $_keyword;
   private EditableSyntax $_categories;
@@ -17941,16 +18197,19 @@ final class ShapeTypeSpecifier extends EditableSyntax {
   private EditableSyntax $_keyword;
   private EditableSyntax $_left_paren;
   private EditableSyntax $_fields;
+  private EditableSyntax $_ellipsis;
   private EditableSyntax $_right_paren;
   public function __construct(
     EditableSyntax $keyword,
     EditableSyntax $left_paren,
     EditableSyntax $fields,
+    EditableSyntax $ellipsis,
     EditableSyntax $right_paren) {
     parent::__construct('shape_type_specifier');
     $this->_keyword = $keyword;
     $this->_left_paren = $left_paren;
     $this->_fields = $fields;
+    $this->_ellipsis = $ellipsis;
     $this->_right_paren = $right_paren;
   }
   public function keyword(): EditableSyntax {
@@ -17962,6 +18221,9 @@ final class ShapeTypeSpecifier extends EditableSyntax {
   public function fields(): EditableSyntax {
     return $this->_fields;
   }
+  public function ellipsis(): EditableSyntax {
+    return $this->_ellipsis;
+  }
   public function right_paren(): EditableSyntax {
     return $this->_right_paren;
   }
@@ -17970,6 +18232,7 @@ final class ShapeTypeSpecifier extends EditableSyntax {
       $keyword,
       $this->_left_paren,
       $this->_fields,
+      $this->_ellipsis,
       $this->_right_paren);
   }
   public function with_left_paren(EditableSyntax $left_paren): ShapeTypeSpecifier {
@@ -17977,6 +18240,7 @@ final class ShapeTypeSpecifier extends EditableSyntax {
       $this->_keyword,
       $left_paren,
       $this->_fields,
+      $this->_ellipsis,
       $this->_right_paren);
   }
   public function with_fields(EditableSyntax $fields): ShapeTypeSpecifier {
@@ -17984,6 +18248,15 @@ final class ShapeTypeSpecifier extends EditableSyntax {
       $this->_keyword,
       $this->_left_paren,
       $fields,
+      $this->_ellipsis,
+      $this->_right_paren);
+  }
+  public function with_ellipsis(EditableSyntax $ellipsis): ShapeTypeSpecifier {
+    return new ShapeTypeSpecifier(
+      $this->_keyword,
+      $this->_left_paren,
+      $this->_fields,
+      $ellipsis,
       $this->_right_paren);
   }
   public function with_right_paren(EditableSyntax $right_paren): ShapeTypeSpecifier {
@@ -17991,6 +18264,7 @@ final class ShapeTypeSpecifier extends EditableSyntax {
       $this->_keyword,
       $this->_left_paren,
       $this->_fields,
+      $this->_ellipsis,
       $right_paren);
   }
 
@@ -18003,11 +18277,13 @@ final class ShapeTypeSpecifier extends EditableSyntax {
     $keyword = $this->keyword()->rewrite($rewriter, $new_parents);
     $left_paren = $this->left_paren()->rewrite($rewriter, $new_parents);
     $fields = $this->fields()->rewrite($rewriter, $new_parents);
+    $ellipsis = $this->ellipsis()->rewrite($rewriter, $new_parents);
     $right_paren = $this->right_paren()->rewrite($rewriter, $new_parents);
     if (
       $keyword === $this->keyword() &&
       $left_paren === $this->left_paren() &&
       $fields === $this->fields() &&
+      $ellipsis === $this->ellipsis() &&
       $right_paren === $this->right_paren()) {
       return $rewriter($this, $parents ?? []);
     } else {
@@ -18015,6 +18291,7 @@ final class ShapeTypeSpecifier extends EditableSyntax {
         $keyword,
         $left_paren,
         $fields,
+        $ellipsis,
         $right_paren), $parents ?? []);
     }
   }
@@ -18029,6 +18306,9 @@ final class ShapeTypeSpecifier extends EditableSyntax {
     $fields = EditableSyntax::from_json(
       $json->shape_type_fields, $position, $source);
     $position += $fields->width();
+    $ellipsis = EditableSyntax::from_json(
+      $json->shape_type_ellipsis, $position, $source);
+    $position += $ellipsis->width();
     $right_paren = EditableSyntax::from_json(
       $json->shape_type_right_paren, $position, $source);
     $position += $right_paren->width();
@@ -18036,12 +18316,14 @@ final class ShapeTypeSpecifier extends EditableSyntax {
         $keyword,
         $left_paren,
         $fields,
+        $ellipsis,
         $right_paren);
   }
   public function children(): Generator<string, EditableSyntax, void> {
     yield $this->_keyword;
     yield $this->_left_paren;
     yield $this->_fields;
+    yield $this->_ellipsis;
     yield $this->_right_paren;
     yield break;
   }

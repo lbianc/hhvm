@@ -120,6 +120,8 @@ class virtual ['b] reduce :
                      Ast_visitors_ancestors.as_expr ->
                      Ast_visitors_ancestors.block -> 'd;
         on_Fun : 'c -> Ast_visitors_ancestors.fun_ -> 'd; on_Gt : 'c -> 'd;
+        on_GotoLabel : 'c -> Ast_visitors_ancestors.pstring -> 'd;
+        on_Goto : 'c -> Ast_visitors_ancestors.pstring -> 'd;
         on_Gte : 'c -> 'd; on_Gtgt : 'c -> 'd;
         on_Haccess : 'c ->
                      Ast_visitors_ancestors.id ->
@@ -133,8 +135,9 @@ class virtual ['b] reduce :
                   Ast_visitors_ancestors.is_reference ->
                   Ast_visitors_ancestors.hint -> 'd;
         on_Hoption : 'c -> Ast_visitors_ancestors.hint -> 'd;
-        on_Hshape : 'c -> Ast_visitors_ancestors.shape_field list -> 'd;
+        on_Hshape : 'c -> Ast_visitors_ancestors.shape_info -> 'd;
         on_Htuple : 'c -> Ast_visitors_ancestors.hint list -> 'd;
+        on_Hsoft : 'c -> Ast_visitors_ancestors.hint -> 'd;
         on_Id : 'c -> Ast_visitors_ancestors.id -> 'd;
         on_Id_type_arguments : 'c ->
                                Ast_visitors_ancestors.id ->
@@ -432,6 +435,8 @@ class virtual ['b] reduce :
       Ast_visitors_ancestors.pos_t option ->
       Ast_visitors_ancestors.as_expr -> Ast_visitors_ancestors.block -> 'd
     method on_Fun : 'c -> Ast_visitors_ancestors.fun_ -> 'd
+    method on_GotoLabel : 'c -> Ast_visitors_ancestors.pstring -> 'd
+    method on_Goto : 'c -> Ast_visitors_ancestors.pstring -> 'd
     method on_Gt : 'c -> 'd
     method on_Gte : 'c -> 'd
     method on_Gtgt : 'c -> 'd
@@ -448,8 +453,9 @@ class virtual ['b] reduce :
       Ast_visitors_ancestors.is_reference ->
       Ast_visitors_ancestors.hint -> 'd
     method on_Hoption : 'c -> Ast_visitors_ancestors.hint -> 'd
-    method on_Hshape : 'c -> Ast_visitors_ancestors.shape_field list -> 'd
+    method on_Hshape : 'c -> Ast_visitors_ancestors.shape_info -> 'd
     method on_Htuple : 'c -> Ast_visitors_ancestors.hint list -> 'd
+    method on_Hsoft : 'c -> Ast_visitors_ancestors.hint -> 'd
     method on_Id : 'c -> Ast_visitors_ancestors.id -> 'd
     method on_Id_type_arguments :
       'c ->
@@ -645,5 +651,4 @@ class virtual ['b] reduce :
     method on_user_attribute :
       'c -> Ast_visitors_ancestors.user_attribute -> 'd
     method on_variance : 'c -> Ast_visitors_ancestors.variance -> 'd
-    method private sum : 'd list -> 'd
   end

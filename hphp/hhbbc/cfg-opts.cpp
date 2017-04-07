@@ -31,15 +31,11 @@ TRACE_SET_MOD(hhbbc_cfg);
 //////////////////////////////////////////////////////////////////////
 
 void remove_unreachable_blocks(const FuncAnalysis& ainfo) {
-  auto& func = *ainfo.ctx.func;
-  Trace::Bump bumper{
-    Trace::hhbbc_cfg, kSystemLibBump, is_systemlib_part(*func.unit)
-  };
   auto done_header = false;
   auto header = [&] {
     if (done_header) return;
     done_header = true;
-    FTRACE(2, "Remove unreachable blocks: {}\n", func.name);
+    FTRACE(2, "Remove unreachable blocks: {}\n", ainfo.ctx.func->name);
   };
 
   auto make_unreachable = [&](borrowed_ptr<php::Block> blk) {
@@ -76,14 +72,14 @@ void remove_unreachable_blocks(const FuncAnalysis& ainfo) {
     if (!reachable(blk->id)) continue;
     auto reachableTarget = NoBlockId;
     auto hasUnreachableTargets = false;
-    forEachTakenEdge(blk->hhbcs.back(), [&] (BlockId id) {
+    forEachNormalSuccessor(*blk, [&] (BlockId id) {
         if (reachable(id)) {
           reachableTarget = id;
         } else {
           hasUnreachableTargets = true;
         }
       });
-    if (!hasUnreachableTargets) continue;
+    if (!hasUnreachableTargets || reachableTarget == NoBlockId) continue;
     header();
     switch (blk->hhbcs.back().op) {
       case Op::JmpNZ:
@@ -94,7 +90,7 @@ void remove_unreachable_blocks(const FuncAnalysis& ainfo) {
         break;
       default:
         FTRACE(2, "blk: {} -", blk->id, reachableTarget);
-        forEachTakenEdge(blk->hhbcs.back(), [&] (const BlockId& id) {
+        forEachNormalSuccessor(*blk, [&] (const BlockId& id) {
             if (!reachable(id)) {
               FTRACE(2, " {}->{}", id, reachableTarget);
               const_cast<BlockId&>(id) = reachableTarget;
@@ -455,9 +451,6 @@ bool rebuild_exn_tree(const FuncAnalysis& ainfo) {
 
 bool control_flow_opts(const FuncAnalysis& ainfo) {
   auto& func = *ainfo.ctx.func;
-  Trace::Bump bumper{
-    Trace::hhbbc_cfg, kSystemLibBump, is_systemlib_part(*func.unit)
-  };
   FTRACE(2, "control_flow_opts: {}\n", func.name);
 
   std::vector<MergeBlockInfo> blockInfo(func.blocks.size(), MergeBlockInfo {});

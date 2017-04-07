@@ -106,9 +106,9 @@ let string_of_lit_const instruction =
     | NewMSArray n -> sep ["NewMSArray"; string_of_int n]
     | NewLikeArrayL (id, n) ->
       sep ["NewLikeArrayL"; string_of_local_id id; string_of_int n]
-    | Cns s -> sep ["Cns"; s]
-    | CnsE s -> sep ["CnsE"; s]
-    | CnsU (s1, s2) -> sep ["CnsU"; s1; s2]
+    | Cns s -> sep ["Cns"; quote_str s]
+    | CnsE s -> sep ["CnsE"; quote_str s]
+    | CnsU (s1, s2) -> sep ["CnsU"; quote_str s1; quote_str s2]
 
 let string_of_operator instruction =
   match instruction with
@@ -175,6 +175,7 @@ let string_of_get x =
   | VGetN -> "VGetN"
   | VGetG -> "VGetG"
   | VGetS id -> sep ["VGetS"; string_of_classref id]
+  | VGetL id -> sep ["VGetL"; string_of_local_id id]
   | AGetC -> "AGetC"
   | AGetL id -> sep ["AGetL"; string_of_local_id id]
   | ClsRefGetL (id, cr) ->
@@ -186,12 +187,10 @@ let string_of_member_key mk =
   let open MemberKey in
   match mk with
   | EC i -> "EC:" ^ string_of_stack_index i
-  (* hhas doesn't yet support this syntax *)
   | EL id -> "EL:" ^ string_of_local_id id
   | ET str -> "ET:" ^ quote_str str
   | EI i -> "EI:" ^ Int64.to_string i
   | PC i -> "PC:" ^ string_of_stack_index i
-  (* hhas doesn't yet support this syntax *)
   | PL id -> "PL:" ^ string_of_local_id id
   | PT str -> "PT:" ^ quote_str str
   | QT str -> "QT:" ^ quote_str str
@@ -361,7 +360,7 @@ let string_of_final instruction =
     sep ["VGetM";
       string_of_int n; string_of_member_key mk]
   | UnsetM (n, mk) ->
-    sep ["SetM";
+    sep ["UnsetM";
       string_of_int n; string_of_member_key mk]
   | BindM (n, mk) ->
     sep ["BindM";
@@ -395,8 +394,8 @@ let string_of_call instruction =
     sep ["FPushFuncD"; string_of_int n; quote_str id]
   | FPushFuncU (n, id1, id2) ->
     sep ["FPushFuncU"; string_of_int n; quote_str id1; quote_str id2]
-  | FPushObjMethod n ->
-    sep ["FPushObjMethod"; string_of_int n]
+  | FPushObjMethod (n, nf) ->
+    sep ["FPushObjMethod"; string_of_int n; string_of_null_flavor nf]
   | FPushObjMethodD (n, id, nf) ->
     sep ["FPushObjMethodD";
       string_of_int n; quote_str id; string_of_null_flavor nf]
@@ -459,9 +458,15 @@ let string_of_call instruction =
   | FCallBuiltin (n1, n2, id) ->
     sep ["FCallBuiltin"; string_of_int n1; string_of_int n2; quote_str id]
 
+let string_of_barethis_op i =
+  match i with
+  | Notice -> "Notice"
+  | NoNotice -> "NoNotice"
+
 let string_of_misc instruction =
   match instruction with
     | This -> "This"
+    | BareThis op -> sep ["BareThis"; string_of_barethis_op op]
     | Self -> "Self"
     | Parent id -> sep ["Parent"; string_of_classref id]
     | LateBoundCls id -> sep ["LateBoundCls"; string_of_classref id]
@@ -518,6 +523,14 @@ let string_of_iterator instruction =
     (string_of_local_id value)
   | IterFree id ->
     "IterFree " ^ (string_of_iterator_id id)
+  | IterBreak (label, iterlist) ->
+      "IterBreak " ^
+      (string_of_label label) ^
+      "<" ^
+      (let list_item = (fun id -> "(Iter) " ^ (string_of_iterator_id id)) in
+      let mapped_list = List.map list_item iterlist in
+        String.concat ", " mapped_list) ^
+      ">"
   | _ -> "### string_of_iterator instruction not implemented"
 
 let string_of_try instruction =
@@ -688,6 +701,7 @@ let string_of_param p =
   let param_name = Hhas_param.name p in
   let param_default_value = Hhas_param.default_value p in
   string_of_type_info_option param_type_info
+  ^ (if Hhas_param.is_reference p then "&" else "")
   ^ param_name
   ^ string_of_param_default_value_option param_default_value
 
@@ -711,6 +725,13 @@ let add_decl_vars buf indent decl_vars = if decl_vars = [] then () else begin
   B.add_string buf ";\n"
   end
 
+let add_num_iters buf indent num_iters = if num_iters = 0 then () else begin
+  B.add_string buf (String.make indent ' ');
+  B.add_string buf ".numiters ";
+  B.add_string buf (Printf.sprintf "%d" num_iters);
+  B.add_string buf ";\n"
+  end
+
 let rec attribute_argument_to_string argument =
   match argument with
   | Null -> SS.str "N;"
@@ -718,8 +739,8 @@ let rec attribute_argument_to_string argument =
   | String s -> SS.str @@
     Printf.sprintf "s:%d:%s;" (String.length s) (quote_str_with_escape s)
   (* TODO: The False case seems to sometimes be b:0 and sometimes i:0.  Why? *)
-  | False -> SS.str "i:0;"
-  | True -> SS.str "i:1;"
+  | False -> SS.str "b:0;"
+  | True -> SS.str "b:1;"
   | Int i -> SS.str @@ "i:" ^ (Int64.to_string i) ^ ";"
   | Array (num, fields) ->
     attribute_collection_argument_to_string "a" num fields
@@ -795,6 +816,7 @@ let add_fun_def buf fun_def =
   let function_params = Hhas_function.params fun_def in
   let function_body = Hhas_function.body fun_def in
   let function_decl_vars = Hhas_function.decl_vars fun_def in
+  let function_num_iters = Hhas_function.num_iters fun_def in
   let function_is_async = Hhas_function.is_async fun_def in
   let function_is_generator = Hhas_function.is_generator fun_def in
   let function_is_pair_generator = Hhas_function.is_pair_generator fun_def in
@@ -808,6 +830,7 @@ let add_fun_def buf fun_def =
   if function_is_pair_generator then B.add_string buf " isPairGenerator";
   B.add_string buf " {\n";
   add_decl_vars buf 2 function_decl_vars;
+  add_num_iters buf 2 function_num_iters;
   add_instruction_list buf 2 function_body;
   B.add_string buf "}\n"
 
@@ -833,6 +856,7 @@ let add_method_def buf method_def =
   let method_params = Hhas_method.params method_def in
   let method_body = Hhas_method.body method_def in
   let method_decl_vars = Hhas_method.decl_vars method_def in
+  let method_num_iters = Hhas_method.num_iters method_def in
   let method_is_async = Hhas_method.is_async method_def in
   let method_is_generator = Hhas_method.is_generator method_def in
   let method_is_pair_generator = Hhas_method.is_pair_generator method_def in
@@ -848,6 +872,7 @@ let add_method_def buf method_def =
   if method_is_closure_body then B.add_string buf " isClosureBody";
   B.add_string buf " {\n";
   add_decl_vars buf 4 method_decl_vars;
+  add_num_iters buf 4 method_num_iters;
   add_instruction_list buf 4 method_body;
   B.add_string buf "  }"
 
@@ -1012,9 +1037,11 @@ let add_top_level buf hhas_prog =
   let main = Hhas_program.main hhas_prog in
   let main_stmts = Hhas_main.body main in
   let main_decl_vars = Hhas_main.decl_vars main in
+  let main_num_iters = Hhas_main.num_iters main in
   let fun_name = ".main {\n" in
   B.add_string buf fun_name;
   add_decl_vars buf 2 main_decl_vars;
+  add_num_iters buf 2 main_num_iters;
   add_defcls buf non_closure_classes;
   add_instruction_list buf 2 main_stmts;
   B.add_string buf "}\n"

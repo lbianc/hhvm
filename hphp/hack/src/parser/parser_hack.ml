@@ -1073,7 +1073,7 @@ and hint env =
   (* A<_> *)(* :XHPNAME *)
   | Tword when Lexing.lexeme env.lb = "shape" ->
       let pos = Pos.make env.file env.lb in
-      pos, Hshape (hint_shape_field_list env pos)
+      pos, Hshape (hint_shape_info env pos)
   | Tword | Tcolon when Lexing.lexeme env.lb <> "function" ->
       L.back env.lb;
       hint_apply_or_access env []
@@ -1089,7 +1089,7 @@ and hint env =
   | Tat ->
       let start = Pos.make env.file env.lb in
       let h = hint env in
-      Pos.btw start (fst h), snd h
+      Pos.btw start (fst h), Hsoft h
   | _ ->
       error_expect env "type";
       let pos = Pos.make env.file env.lb in
@@ -2035,12 +2035,15 @@ and statement_word env = function
   | "switch"   -> statement_switch env
   | "foreach"  -> statement_foreach env
   | "try"      -> statement_try env
+  | "goto"     -> statement_goto env
   | "function" | "class" | "trait" | "interface" | "const"
   | "async" | "abstract" | "final" ->
       error env
           "Parse error: declarations are not supported outside global scope";
       ignore (ignore_toplevel None ~attr:[] [] env (fun _ -> true));
       Noop
+  | x when peek env = Tcolon ->
+      statement_goto_label env x
   | x ->
       L.back env.lb;
       let e = expr env in
@@ -2097,6 +2100,36 @@ and return_value env =
       let e = expr env in
       expect env Tsc;
       Some e
+
+(*****************************************************************************)
+(* Goto statement *)
+(*****************************************************************************)
+
+and statement_goto_label env label =
+  let pos = Pos.make env.file env.lb in
+  let goto_allowed =
+    TypecheckerOptions.experimental_feature_enabled
+      env.popt
+      TypecheckerOptions.experimental_goto in
+  if not goto_allowed then Errors.goto_not_supported pos;
+  expect env Tcolon;
+  GotoLabel (pos, label)
+
+and statement_goto env =
+  let pos = Pos.make env.file env.lb in
+  let goto_allowed =
+    TypecheckerOptions.experimental_feature_enabled
+      env.popt
+      TypecheckerOptions.experimental_goto in
+  if not goto_allowed then Errors.goto_not_supported pos;
+  match L.token env.file env.lb with
+    | Tword ->
+      let word = Lexing.lexeme env.lb in
+      expect env Tsc;
+      Goto (pos, word)
+    | _ ->
+      error env "goto must use a label.";
+      Noop
 
 (*****************************************************************************)
 (* Static variables *)
@@ -4132,32 +4165,39 @@ and typedef_constraint env =
       L.back env.lb;
       None
 
-and hint_shape_field_list env shape_keyword_pos =
+and hint_shape_info env shape_keyword_pos =
   match L.token env.file env.lb with
-  | Tlp -> hint_shape_field_list_remain env
+  | Tlp -> hint_shape_info_remain env
   | _ ->
     L.back env.lb;
     error_at env shape_keyword_pos "\"shape\" is an invalid type; you need to \
     declare and use a specific shape type.";
-    []
+    { si_allows_unknown_fields=false; si_shape_field_list=[]; }
 
-and hint_shape_field_list_remain env =
+and hint_shape_info_remain env =
   match L.token env.file env.lb with
-  | Trp -> []
+  | Trp -> { si_allows_unknown_fields=false; si_shape_field_list=[] }
+  | Tellipsis ->
+      expect env Trp;
+      { si_allows_unknown_fields=true; si_shape_field_list=[] }
   | _ ->
       L.back env.lb;
       let error_state = !(env.errors) in
       let fd = hint_shape_field env in
       match L.token env.file env.lb with
       | Trp ->
-          [fd]
+          { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
       | Tcomma ->
           if !(env.errors) != error_state
-          then [fd]
-          else fd :: hint_shape_field_list_remain env
+          then { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
+          else
+            let { si_shape_field_list; _ } as shape_info =
+              hint_shape_info_remain env in
+            let si_shape_field_list = fd :: si_shape_field_list in
+            { shape_info with si_shape_field_list }
       | _ ->
           error_expect env ")";
-          [fd]
+          { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
 
 and hint_shape_field env =
   (* Consume the next token to determine if we're creating an optional field. *)

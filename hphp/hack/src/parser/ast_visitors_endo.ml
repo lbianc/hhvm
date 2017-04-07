@@ -557,8 +557,16 @@ class virtual ['self] endo =
       then this
       else Happly (r0, r1)
     method on_Hshape env this c0 =
-      let r0 = self#on_list self#on_shape_field env c0 in
-      if c0 == r0 then this else Hshape r0
+      let r0 = self#on_bool env c0.si_allows_unknown_fields in
+      let r1 = self#on_list self#on_shape_field env c0.si_shape_field_list in
+      if   c0.si_allows_unknown_fields == r0
+        && c0.si_shape_field_list == r1
+      then this
+      else
+        Hshape {
+          si_allows_unknown_fields = r0;
+          si_shape_field_list = r1
+        }
     method on_Haccess env this c0 c1 c2 =
       let r0 = self#on_id env c0 in
       let r1 = self#on_id env c1 in
@@ -566,8 +574,11 @@ class virtual ['self] endo =
       if c0 == r0 && c1 == r1 && c2 == r2
       then this
       else Haccess (r0, r1, r2)
+    method on_Hsoft env this c0 =
+      let r0 = self#on_hint env c0 in
+      if c0 == r0 then this else Hsoft r0
     method on_hint_ env this =
-      match this with
+    match this with
       | Hoption c0 -> self#on_Hoption env this c0
       | Hfun (c0, c1, c2) -> self#on_Hfun env this c0 c1 c2
       | Htuple c0 -> self#on_Htuple env this c0
@@ -575,6 +586,7 @@ class virtual ['self] endo =
       | Hshape c0 -> self#on_Hshape env this c0
       | Haccess (c0, c1, c2) as this ->
           self#on_Haccess env this c0 c1 c2
+      | Hsoft c0 -> self#on_Hsoft env this c0
     method on_SFlit env this c0 =
       let r0 = self#on_pstring env c0 in
       if c0 == r0 then this else SFlit r0
@@ -683,6 +695,8 @@ class virtual ['self] endo =
       | Continue c0 -> self#on_Continue env this c0
       | Throw c0 -> self#on_Throw env this c0
       | Return (c0, c1) -> self#on_Return env this c0 c1
+      | GotoLabel c0 -> self#on_GotoLabel env this c0
+      | Goto c0 -> self#on_Goto env this c0
       | Static_var c0 -> self#on_Static_var env this c0
       | If (c0, c1, c2) -> self#on_If env this c0 c1 c2
       | Do (c0, c1) -> self#on_Do env this c0 c1
@@ -907,6 +921,12 @@ class virtual ['self] endo =
       let r1 = self#on_expr env c1 in if c0 == r0 && c1 == r1
       then this
       else Import (r0, r1)
+    method on_GotoLabel env this c0 =
+      let r0 = self#on_pstring env c0 in
+      if c0 == r0 then this else GotoLabel r0
+    method on_Goto env this c0 =
+      let r0 = self#on_pstring env c0 in
+      if c0 == r0 then this else Goto r0
     method on_expr_ env this =
       match this with
       | Array c0 -> self#on_Array env this c0

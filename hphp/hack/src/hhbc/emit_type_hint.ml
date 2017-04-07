@@ -51,7 +51,9 @@ let rec fmt_hint (_, h) =
 
   | A.Hoption t -> "?" ^ fmt_hint t
 
-  | A.Hshape smap ->
+  | A.Hsoft h -> "@" ^ fmt_hint h
+
+  | A.Hshape { A.si_allows_unknown_fields; si_shape_field_list } ->
     let fmt_field = function
       | A.SFlit (_, s) -> "'" ^ s ^ "'"
       | A.SFclass_const ((_, s1), (_, s2)) -> fmt_name s1 ^ "::" ^ s2
@@ -59,8 +61,10 @@ let rec fmt_hint (_, h) =
     let format_shape_field ({ A.sf_name; A.sf_hint; _ }) =
       fmt_field sf_name ^ "=>" ^ fmt_hint sf_hint in
     let shape_fields =
-      List.map ~f:format_shape_field smap in
-    "HH\\shape(" ^ String.concat ", " shape_fields ^ ")"
+      List.map ~f:format_shape_field si_shape_field_list in
+    let shape_suffix = if si_allows_unknown_fields then ["..."] else [] in
+    let formatted_shape_entries = shape_fields @ shape_suffix in
+    "HH\\shape(" ^ String.concat ", " formatted_shape_entries ^ ")"
 
 let rec hint_to_type_constraint tparams (_, h) =
 match h with
@@ -102,6 +106,14 @@ match h with
   let tc_flags = TC.flags tc in
   let tc_flags = List.dedup
     ([TC.Nullable; TC.HHType; TC.ExtendedHint] @ tc_flags) in
+  TC.make tc_name tc_flags
+
+| A.Hsoft t ->
+  let tc = hint_to_type_constraint tparams t in
+  let tc_name = TC.name tc in
+  let tc_flags = TC.flags tc in
+  let tc_flags = List.dedup
+    ([TC.Soft; TC.HHType; TC.ExtendedHint] @ tc_flags) in
   TC.make tc_name tc_flags
 
 let hint_to_type_info ~always_extended tparams h =

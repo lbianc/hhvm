@@ -43,15 +43,30 @@ let lsp_file_position_to_hack (params: Lsp.Text_document_position_params.t)
   in
   (filename, line, column)
 
-let hack_pos_to_lsp_location_singleline (pos: string Pos.pos) : Lsp.Location.t =
+let hack_pos_to_lsp_range (pos: 'a Pos.pos) : Lsp.range =
+  let line1, col1, line2, col2 = Pos.destruct_range pos in
+  {
+    start = {line = line1 - 1; character = col1 - 1;};
+    end_ = {line = line2 - 1; character = col2 - 1;};
+  }
+
+let hack_pos_to_lsp_location (pos: string Pos.pos) : Lsp.Location.t =
   let open Lsp.Location in
-  let line, start, end_ = Pos.info_pos pos in
   {
     uri = Pos.filename pos;
-    range = {
-      start = {line = line - 1; character = start - 1;};
-      end_ = {line = line - 1; character = end_ - 1;};
-    }
+    range = hack_pos_to_lsp_range pos;
+  }
+
+let ide_range_to_lsp (range: Ide_api_types.range) : Lsp.range =
+  { Lsp.
+    start = { Lsp.
+      line = range.Ide_api_types.st.Ide_api_types.line - 1;
+      character = range.Ide_api_types.st.Ide_api_types.column - 1;
+    };
+    end_ = { Lsp.
+      line = range.Ide_api_types.ed.Ide_api_types.line - 1;
+      character = range.Ide_api_types.ed.Ide_api_types.column - 1;
+    };
   }
 
 let lsp_range_to_ide (range: Lsp.range) : Ide_api_types.range =
@@ -65,7 +80,7 @@ let hack_symbol_definition_to_lsp_location
   (symbol: string SymbolDefinition.t)
   : Lsp.Location.t =
   let open SymbolDefinition in
-  hack_pos_to_lsp_location_singleline symbol.pos
+  hack_pos_to_lsp_location symbol.pos
 
 let hack_errors_to_lsp_diagnostic (filename: string)
   (errors: Pos.absolute Errors.error_ list)
@@ -76,7 +91,7 @@ let hack_errors_to_lsp_diagnostic (filename: string)
     let pos, message = List.hd_exn all_locations in
     (* TODO: investigate whether Hack ever gives multiline locations *)
     (* TODO: add to LSP protocol for multiple error locations *)
-    let {uri = _; range;} = hack_pos_to_lsp_location_singleline pos in
+    let {uri = _; range;} = hack_pos_to_lsp_location pos in
     { Lsp.Publish_diagnostics.
       range = range;
       severity = Some Publish_diagnostics.Error;
@@ -147,7 +162,7 @@ let do_hover (conn: conn option) (params: Hover.params) : Hover.result =
       contents = [Marked_string "nothing found"];
       range = None;
     }
-  | Some s -> { Hover.
+  | Some (s, _) -> { Hover.
       contents = [Marked_string s];
       range = None;
     }
@@ -206,6 +221,209 @@ let do_completion (conn: conn option) (params: Completion.params)
     items = List.map results ~f:hack_completion_to_lsp;
   }
 
+let do_workspace_symbol (conn: conn option) (params: Workspace_symbol.params)
+  : Workspace_symbol.result =
+  let open Workspace_symbol in
+  let open SearchUtils in
+
+  let query = params.query in
+  let query_type = "" in
+  let command = ServerCommandTypes.SEARCH (query, query_type) in
+  let results = rpc conn command in
+
+  let hack_to_lsp_kind = function
+    | HackSearchService.Class (Some Ast.Cabstract) -> Symbol_information.Class
+    | HackSearchService.Class (Some Ast.Cnormal) -> Symbol_information.Class
+    | HackSearchService.Class (Some Ast.Cinterface) ->
+        Symbol_information.Interface
+    | HackSearchService.Class (Some Ast.Ctrait) -> Symbol_information.Interface
+        (* LSP doesn't have traits, so we approximate with interface *)
+    | HackSearchService.Class (Some Ast.Cenum) -> Symbol_information.Enum
+    | HackSearchService.Class (None) -> assert false (* should never happen *)
+    | HackSearchService.Method _ -> Symbol_information.Method
+    | HackSearchService.ClassVar _ -> Symbol_information.Property
+    | HackSearchService.Function -> Symbol_information.Function
+    | HackSearchService.Typedef -> Symbol_information.Class
+        (* LSP doesn't have typedef, so we approximate with class *)
+    | HackSearchService.Constant -> Symbol_information.Constant
+  in
+  let hack_to_lsp_container = function
+    | HackSearchService.Method (_, scope) -> Some scope
+    | HackSearchService.ClassVar (_, scope) -> Some scope
+    | _ -> None
+  in
+  let hack_symbol_to_lsp (symbol: HackSearchService.symbol) =
+    { Symbol_information.
+      name = (Utils.strip_ns symbol.name);
+      kind = hack_to_lsp_kind symbol.result_type;
+      location = hack_pos_to_lsp_location symbol.pos;
+      container_name = hack_to_lsp_container symbol.result_type;
+    }
+  in
+  List.map results ~f:hack_symbol_to_lsp
+
+let do_document_symbol (conn: conn option) (params: Document_symbol.params)
+  : Document_symbol.result =
+  let open Document_symbol in
+  let open Text_document_identifier in
+  let open SymbolDefinition in
+
+  let filename = params.text_document.uri in
+  let command = ServerCommandTypes.OUTLINE filename in
+  let results = rpc conn command in
+
+  let hack_to_lsp_kind = function
+    | SymbolDefinition.Function -> Symbol_information.Function
+    | SymbolDefinition.Class -> Symbol_information.Class
+    | SymbolDefinition.Method -> Symbol_information.Method
+    | SymbolDefinition.Property -> Symbol_information.Property
+    | SymbolDefinition.Const -> Symbol_information.Constant
+    | SymbolDefinition.Enum -> Symbol_information.Enum
+    | SymbolDefinition.Interface -> Symbol_information.Interface
+    | SymbolDefinition.Trait -> Symbol_information.Interface
+        (* LSP doesn't have traits, so we approximate with interface *)
+    | SymbolDefinition.LocalVar -> Symbol_information.Variable
+    | SymbolDefinition.Typeconst -> Symbol_information.Class
+        (* e.g. "const type Ta = string;" -- absent from LSP *)
+    | SymbolDefinition.Param -> Symbol_information.Variable
+        (* We never return a param from a document-symbol-search *)
+  in
+  let hack_symbol_to_lsp def container_name =
+    { Symbol_information.
+      name = def.name;
+      kind = hack_to_lsp_kind def.kind;
+      location = hack_symbol_definition_to_lsp_location def;
+      container_name;
+    }
+  in
+  let rec hack_symbol_tree_to_lsp ~accu ~container_name = function
+    (* Flattens the recursive list of symbols *)
+    | [] -> List.rev accu
+    | def :: defs ->
+        let children = Option.value def.children ~default:[] in
+        let accu = (hack_symbol_to_lsp def container_name) :: accu in
+        let accu = hack_symbol_tree_to_lsp accu (Some def.name) children in
+        hack_symbol_tree_to_lsp accu container_name defs
+  in
+  hack_symbol_tree_to_lsp ~accu:[] ~container_name:None results
+
+let do_find_references (conn: conn option) (params: Find_references.params)
+  : Find_references.result =
+  let open Find_references in
+
+  let {Ide_api_types.line; column;} = lsp_position_to_ide params.position in
+  let filename = lsp_text_document_identifier_to_hack params.text_document in
+  let include_defs = params.context.include_declaration in
+  let command = ServerCommandTypes.IDE_FIND_REFS
+    (filename, line, column, include_defs) in
+  let results = rpc conn command in
+  (* TODO: respect params.context.include_declaration *)
+  match results with
+  | None -> []
+  | Some (_name, positions) -> List.map positions ~f:hack_pos_to_lsp_location
+
+
+let do_document_highlights
+  (conn: conn option)
+  (params: Document_highlights.params)
+  : Document_highlights.result =
+  let open Document_highlights in
+
+  let (file, line, column) = lsp_file_position_to_hack params in
+  let command = ServerCommandTypes.IDE_HIGHLIGHT_REFS (file, line, column) in
+  let results = rpc conn command in
+
+  let hack_range_to_lsp_highlight range =
+    {
+      range = ide_range_to_lsp range;
+      kind = None;
+    }
+  in
+  List.map results ~f:hack_range_to_lsp_highlight
+
+
+let do_type_coverage (conn: conn option) (params: Type_coverage.params)
+  : Type_coverage.result =
+  let open Type_coverage in
+
+  let filename = lsp_text_document_identifier_to_hack params.text_document in
+  let command = ServerCommandTypes.COVERAGE_LEVELS filename in
+  let results: Coverage_level.result = rpc conn command in
+  let results = Coverage_level.merge_adjacent_results results in
+
+  (* We want to get a percentage-covered number. We could do that with an *)
+  (* additional server round trip to ServerCommandTypes.COVERAGE_COUNTS. *)
+  (* But to avoid that, we'll instead use this rough approximation: *)
+  (* Count how many checked/unchecked/partial "regions" there are, where *)
+  (* a "region" is like results_merged, but counting each line separately. *)
+  let count_region (nchecked, nunchecked, npartial) (pos, level) =
+    let nlines = (Pos.end_line pos) - (Pos.line pos) + 1 in
+    match level with
+    | Ide_api_types.Checked -> (nchecked + nlines, nunchecked, npartial)
+    | Ide_api_types.Unchecked -> (nchecked, nunchecked + nlines, npartial)
+    | Ide_api_types.Partial -> (nchecked, nunchecked, npartial + nlines)
+  in
+  let (nchecked, nunchecked, npartial) =
+    List.fold results ~init:(0,0,0) ~f:count_region in
+
+  let ntotal = nchecked + nunchecked + npartial in
+  let covered_percent = if ntotal = 0 then 100
+    else ((nchecked * 100) + (npartial * 50)) / ntotal in
+
+  let hack_coverage_to_lsp (pos, level) =
+    let range = hack_pos_to_lsp_range pos in
+    match level with
+    | Ide_api_types.Checked -> None
+    | Ide_api_types.Unchecked -> Some {range; message =
+        "Un-type checked code. Consider adding type annotations.";}
+    | Ide_api_types.Partial -> Some {range; message =
+        "Partially type checked code. Consider adding type annotations.";}
+  in
+  {
+    covered_percent;
+    uncovered_ranges = List.filter_map results ~f:hack_coverage_to_lsp;
+  }
+
+
+let do_formatting_common
+  (conn: conn option)
+  (args: ServerFormatTypes.ide_action)
+  : Text_edit.t list =
+  let open ServerFormatTypes in
+  let command = ServerCommandTypes.IDE_FORMAT args in
+  let response: ServerFormatTypes.ide_result = rpc conn command in
+  match response with
+  | Result.Error message ->
+      raise (Error.Internal_error message)
+  | Result.Ok r ->
+      let range = ide_range_to_lsp r.range in
+      let new_text = r.new_text in
+      [{Text_edit.range; new_text;}]
+
+
+let do_document_range_formatting
+  (conn: conn option)
+  (params: Document_range_formatting.params)
+  : Document_range_formatting.result =
+  let open Document_range_formatting in
+  let open Text_document_identifier in
+  let action = ServerFormatTypes.Range { Ide_api_types.
+    range_filename = params.text_document.uri;
+    file_range = lsp_range_to_ide params.range;
+  }
+  in
+  do_formatting_common conn action
+
+
+let do_document_formatting
+  (conn: conn option)
+  (params: Document_formatting.params)
+  : Document_formatting.result =
+  let open Document_formatting in
+  let open Text_document_identifier in
+  let action = ServerFormatTypes.Document params.text_document.uri in
+  do_formatting_common conn action
+
 
 let do_initialize (params: Initialize.params)
   : (conn option * Initialize.result) =
@@ -231,25 +449,26 @@ let do_initialize (params: Initialize.params)
         completion_provider = None;
         signature_help_provider = None;
         definition_provider = false;
-        references_provider = false;
-        document_highlight_provider = false;
-        document_symbol_provider = false;
-        workspace_symbol_provider = false;
+        references_provider = true;
+        document_highlight_provider = true;
+        document_symbol_provider = true;
+        workspace_symbol_provider = true;
         code_action_provider = false;
         code_lens_provider = None;
-        document_formatting_provider = false;
-        document_range_formatting_provider = false;
+        document_formatting_provider = true;
+        document_range_formatting_provider = true;
         document_on_type_formatting_provider = None;
         rename_provider = false;
         document_link_provider = None;
         execute_command_provider = None;
+        type_coverage_provider = true;
       }
     }
     in
     (Some conn, result)
   with
   | e ->
-    let message = (Printexc.to_string e) ^ ": " ^ (Printexc.get_backtrace ()) in
+    let message = Printexc.to_string e in
     raise (Error.Server_error_start (message, {retry = false;}))
 
 
@@ -381,6 +600,42 @@ let main () : unit =
       | Main_loop, Client c when c.method_ = "textDocument/completion" ->
         parse_completion c.params |> do_completion !conn |> print_completion
           |> respond stdout c
+
+      (* workspace/symbol request *)
+      | Main_loop, Client c when c.method_ = "workspace/symbol" ->
+        parse_workspace_symbol c.params |> do_workspace_symbol !conn
+          |> print_workspace_symbol |> respond stdout c
+
+      (* textDocument/documentSymbol request *)
+      | Main_loop, Client c when c.method_ = "textDocument/documentSymbol" ->
+        parse_document_symbol c.params |> do_document_symbol !conn
+          |> print_document_symbol |> respond stdout c
+
+      (* textDocument/references requeset *)
+      | Main_loop, Client c when c.method_ = "textDocument/references" ->
+        parse_find_references c.params |> do_find_references !conn
+          |> print_find_references |> respond stdout c
+
+      (* textDocument/documentHighlight *)
+      | Main_loop, Client c when c.method_ = "textDocument/documentHighlight" ->
+        parse_document_highlights c.params |> do_document_highlights !conn
+          |> print_document_highlights |> respond stdout c
+
+      (* textDocument/typeCoverage *)
+      | Main_loop, Client c when c.method_ = "textDocument/typeCoverage" ->
+        parse_type_coverage c.params |> do_type_coverage !conn
+          |> print_type_coverage |> respond stdout c
+
+      (* textDocument/formatting *)
+      | Main_loop, Client c when c.method_ = "textDocument/formatting" ->
+        parse_document_formatting c.params |> do_document_formatting !conn
+          |> print_document_formatting |> respond stdout c
+
+      (* textDocument/formatting *)
+      | Main_loop, Client c when c.method_ = "textDocument/rangeFormatting" ->
+        parse_document_range_formatting c.params
+          |> do_document_range_formatting !conn
+          |> print_document_range_formatting |> respond stdout c
 
       (* textDocument/didOpen notification *)
       | Main_loop, Client c when c.method_ = "textDocument/didOpen" ->

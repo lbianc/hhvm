@@ -144,7 +144,7 @@ bool checkLimit(const TransMetaInfo& info, const SrcRec* srcRec) {
     ? RuntimeOption::EvalJitMaxProfileTranslations
     : RuntimeOption::EvalJitMaxTranslations;
 
-  auto const numTrans = srcRec->translations().size();
+  auto const numTrans = srcRec->numTrans();
 
   // Once numTrans has reached limit + 1 we know that an interp translation
   // has already been emitted. Prior to that if numTrans == limit only allow
@@ -315,11 +315,6 @@ void publishOptFunctionInternal(FuncMetaInfo info,
                                 size_t* failedBytes = nullptr) {
   auto const func = info.func;
 
-  if (!checkTCLimits()) {
-    if (failedBytes) *failedBytes += infoSize(info);
-    return;
-  }
-
   for (auto const rec : info.prologues) {
     emitFuncPrologueOptInternal(rec);
   }
@@ -394,12 +389,10 @@ void createSrcRec(SrcKey sk, FPInvOffset spOff) {
 
   auto metaLock = lockMetadata();
   always_assert(srcDB().find(sk) == nullptr);
-  auto const sr = srcDB().insert(sk);
+  auto const sr = srcDB().insert(sk, req);
   if (RuntimeOption::EvalEnableReusableTC) {
     recordFuncSrcRec(sk.func(), sr);
   }
-  sr->setFuncInfo(sk.func());
-  sr->setAnchorTranslation(req);
 
   if (srcRecSPOff) always_assert(sr->nonResumedSPOff() == *srcRecSPOff);
 
@@ -526,13 +519,21 @@ void publishSortedOptFunctions(std::vector<FuncMetaInfo> infos) {
   auto metaLock = lockMetadata();
 
   size_t failedBytes = 0;
+  bool hasSpace = checkTCLimits();
   ProfData::Session pds;
 
   for (auto& finfo : infos) {
     if (!Func::isFuncIdValid(finfo.fid)) {
       continue;
     }
+
+    if (!hasSpace) {
+      failedBytes += infoSize(finfo);
+      continue;
+    }
+
     publishOptFunctionInternal(std::move(finfo), &failedBytes);
+    hasSpace = checkTCLimits();
   }
 
   if (failedBytes) {

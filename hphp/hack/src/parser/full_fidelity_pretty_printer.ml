@@ -200,6 +200,7 @@ let comma = make_simple (text ",")
 let l_square = make_simple (text "[")
 let r_square = make_simple (text "]")
 let question = make_simple (text "?")
+let ellipsis = make_simple (text "...")
 
 let rec get_doc node =
   match syntax node with
@@ -285,6 +286,14 @@ let rec get_doc node =
     let e = get_doc xhp_children_expression in
     let s = get_doc xhp_children_semicolon in
     c ^| e ^^^ s
+  | XHPChildrenParenthesizedList {
+      xhp_children_list_left_paren;
+      xhp_children_list_xhp_children;
+      xhp_children_list_right_paren } ->
+    let l = get_doc xhp_children_list_left_paren in
+    let c = get_doc xhp_children_list_xhp_children in
+    let r = get_doc xhp_children_list_right_paren in
+    l ^| c ^| r
   | XHPCategoryDeclaration {
     xhp_category_keyword;
     xhp_category_categories;
@@ -1271,12 +1280,13 @@ let rec get_doc node =
     q ^| n ^| a ^| t
   | ShapeTypeSpecifier
     { shape_type_keyword; shape_type_left_paren;
-      shape_type_fields; shape_type_right_paren } ->
+      shape_type_fields; shape_type_ellipsis; shape_type_right_paren } ->
     let sh = get_doc shape_type_keyword in
     let lp = get_doc shape_type_left_paren in
     let fs = get_doc shape_type_fields in
+    let ellipsis = get_doc shape_type_ellipsis in
     let rp = get_doc shape_type_right_paren in
-    sh ^| lp ^^^ fs ^^^ rp
+    sh ^| lp ^^^ fs ^| ellipsis ^^^ rp
   | TypeArguments {
     type_arguments_left_angle;
     type_arguments_types;
@@ -1319,6 +1329,20 @@ let rec get_doc node =
     let semicolon = get_doc x.return_semicolon in
     let back_part = expr ^^^ semicolon in
     group_doc (indent_doc keyword back_part indt)
+  | GotoLabel {
+      goto_label_name;
+      goto_label_colon; } ->
+    let goto_label_name = get_doc goto_label_name in
+    let goto_label_colon = get_doc goto_label_colon in
+    goto_label_name ^^^ goto_label_colon
+  | GotoStatement {
+      goto_statement_keyword;
+      goto_statement_label_name;
+      goto_statement_semicolon; } ->
+    let keyword = get_doc goto_statement_keyword in
+    let label_name = get_doc goto_statement_label_name in
+    let semicolon = get_doc goto_statement_semicolon in
+    keyword ^| label_name ^^^ semicolon
   | ThrowStatement x ->
     let keyword = get_doc x.throw_keyword in
     let expr = get_doc x.throw_expression in

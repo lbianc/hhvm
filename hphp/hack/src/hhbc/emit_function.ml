@@ -16,12 +16,15 @@ let from_ast : Ast.fun_ -> Hhas_function.t =
   let default_instrs _ = gather [instr_null; instr_retc] in
   let body_instrs,
       function_decl_vars,
+      function_num_iters,
       function_params,
       function_return_type,
       function_is_generator,
       function_is_pair_generator =
     Emit_body.from_ast
-      ~self:None
+      ~class_name:None
+      ~method_name:(Some (snd ast_fun.Ast.f_name))
+      ~has_this:false
       ast_fun.Ast.f_tparams
       ast_fun.Ast.f_params
       ast_fun.Ast.f_ret
@@ -41,6 +44,7 @@ let from_ast : Ast.fun_ -> Hhas_function.t =
     function_return_type
     function_body
     function_decl_vars
+    function_num_iters
     function_is_async
     function_is_generator
     function_is_pair_generator

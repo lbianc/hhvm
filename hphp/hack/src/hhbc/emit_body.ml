@@ -36,12 +36,15 @@ let verify_returns body =
     | _ -> [ i ] in
   InstrSeq.flat_map body ~f:rewriter
 
-let from_ast ~self tparams params ret body default_instrs =
+let from_ast ~class_name ~method_name ~has_this
+  tparams params ret body default_instrs =
   let tparams = tparams_to_strings tparams in
   Label.reset_label ();
   Local.reset_local ();
   Iterator.reset_iterator ();
-  Emit_expression.set_self self;
+  Emit_expression.set_class_name class_name;
+  Emit_expression.set_method_name method_name;
+  Emit_expression.set_method_has_this has_this;
   let params = Emit_param.from_asts tparams params in
   let return_type_info =
     match ret with
@@ -56,7 +59,7 @@ let from_ast ~self tparams params ret body default_instrs =
       stmt_instrs in
   let ret_instrs =
     match List.last body with
-    | Some (A.Return _) -> empty
+    | Some (A.Return _) | Some (A.Throw _) -> empty
     | Some _ -> gather [instr_null; instr_retc]
     | None -> default_instrs return_type_info in
   let fault_instrs = extract_fault_instructions stmt_instrs in
@@ -79,12 +82,10 @@ let from_ast ~self tparams params ret body default_instrs =
   let params, body_instrs =
     Label_rewriter.relabel_function params body_instrs in
   let function_decl_vars = extract_decl_vars params body_instrs in
-  let body_instrs = Local_id_rewriter.unname_instrseq
-    (List.map params Hhas_param.name @ function_decl_vars)
-    body_instrs
-  in
+  let num_iters = !Iterator.num_iterators in
   body_instrs,
   function_decl_vars,
+  num_iters,
   params,
   return_type_info,
   is_generator,

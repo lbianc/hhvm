@@ -196,6 +196,12 @@ class virtual ['c] map :
                      Ast_visitors_ancestors.stmt;
         on_Fun : 'd ->
                  Ast_visitors_ancestors.fun_ -> Ast_visitors_ancestors.def;
+        on_GotoLabel : 'd ->
+                       Ast_visitors_ancestors.pstring ->
+                       Ast_visitors_ancestors.stmt;
+        on_Goto : 'd ->
+                  Ast_visitors_ancestors.pstring ->
+                  Ast_visitors_ancestors.stmt;
         on_Gt : 'd -> Ast_visitors_ancestors.bop;
         on_Gte : 'd -> Ast_visitors_ancestors.bop;
         on_Gtgt : 'd -> Ast_visitors_ancestors.bop;
@@ -216,13 +222,16 @@ class virtual ['c] map :
                      Ast_visitors_ancestors.hint ->
                      Ast_visitors_ancestors.hint_;
         on_Hshape : 'd ->
-                    Ast_visitors_ancestors.shape_field list ->
+                    Ast_visitors_ancestors.shape_info ->
                     Ast_visitors_ancestors.hint_;
         on_Htuple : 'd ->
                     Ast_visitors_ancestors.hint list ->
                     Ast_visitors_ancestors.hint_;
+        on_Hsoft : 'd ->
+                     Ast_visitors_ancestors.hint ->
+                     Ast_visitors_ancestors.hint_;
         on_Id : 'd ->
-                Ast_visitors_ancestors.id -> Ast_visitors_ancestors.expr_;
+                     Ast_visitors_ancestors.id -> Ast_visitors_ancestors.expr_;
         on_Id_type_arguments : 'd ->
                                Ast_visitors_ancestors.id ->
                                Ast_visitors_ancestors.hint list ->
@@ -761,9 +770,11 @@ class virtual ['c] map :
       'd -> Ast_visitors_ancestors.hint -> Ast_visitors_ancestors.hint_
     method on_Hshape :
       'd ->
-      Ast_visitors_ancestors.shape_field list -> Ast_visitors_ancestors.hint_
+      Ast_visitors_ancestors.shape_info -> Ast_visitors_ancestors.hint_
     method on_Htuple :
       'd -> Ast_visitors_ancestors.hint list -> Ast_visitors_ancestors.hint_
+    method on_Hsoft :
+      'd -> Ast_visitors_ancestors.hint -> Ast_visitors_ancestors.hint_
     method on_Id :
       'd -> Ast_visitors_ancestors.id -> Ast_visitors_ancestors.expr_
     method on_Id_type_arguments :

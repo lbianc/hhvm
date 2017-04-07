@@ -147,32 +147,34 @@ let get_char_ranges lines =
     line_start, line_end
   end)
 
-let format_chunk_groups ?range ?ranges (source_text, syntax_tree, editable) =
-  let start_char, end_char =
-    match range with
-    | None -> (0, SourceText.length source_text)
-    | Some (start_char, end_char) ->
-      (* Ensure that 0 <= start_char <= end_char <= source_text length *)
-      let start_char = max start_char 0 in
-      let end_char = max start_char end_char in
-      let end_char = min end_char (SourceText.length source_text) in
-      let start_char = min start_char end_char in
-      (* Ensure that start_char and end_char fall on line boundaries *)
-      let ranges = match ranges with
-        | Some ranges -> ranges
-        | None -> get_char_ranges
-          (SourceText.text source_text |> String_utils.split_on_newlines)
-      in
-      Array.fold_left (fun (st, ed) (line_start, line_end) ->
-        let st = if st > line_start && st < line_end then line_start else st in
-        let ed = if ed > line_start && ed < line_end then line_end else ed in
-        st, ed
-      ) (start_char, end_char) ranges
+let expand_to_line_boundaries ?ranges source_text range =
+  let start_char, end_char = range in
+  (* Ensure that 0 <= start_char <= end_char <= source_text length *)
+  let start_char = max start_char 0 in
+  let end_char = max start_char end_char in
+  let end_char = min end_char (SourceText.length source_text) in
+  let start_char = min start_char end_char in
+  (* Ensure that start_char and end_char fall on line boundaries *)
+  let ranges = match ranges with
+    | Some ranges -> ranges
+    | None -> get_char_ranges
+      (SourceText.text source_text |> String_utils.split_on_newlines)
   in
-  Hack_format.format_node editable start_char end_char
+  Array.fold_left (fun (st, ed) (line_start, line_end) ->
+    let st = if st > line_start && st < line_end then line_start else st in
+    let ed = if ed > line_start && ed < line_end then line_end else ed in
+    st, ed
+  ) (start_char, end_char) ranges
 
 let format ?range ?ranges parsed_file =
-  Line_splitter.solve @@ format_chunk_groups ?range ?ranges parsed_file
+  let source_text, _, editable = parsed_file in
+  let range =
+    Option.map range (expand_to_line_boundaries ?ranges source_text)
+  in
+  editable
+  |> Hack_format.transform
+  |> Chunk_builder.build
+  |> Line_splitter.solve ?range
 
 let output ?filename str =
   let out_channel =
@@ -216,26 +218,29 @@ let line_interval_to_char_range char_ranges (start_line, end_line) =
   start_char, end_char
 
 let format_intervals intervals parsed_file =
-  let source_text, _, _ = parsed_file in
-  let lines = SourceText.text source_text |> String_utils.split_on_newlines in
-  let ranges = get_char_ranges lines in
-  let formatted_intervals = ref (List.map intervals (fun interval ->
-    let range = line_interval_to_char_range ranges interval in
-    interval, format ~range ~ranges parsed_file
-  )) in
-  let buf = Buffer.create @@ SourceText.length source_text + 256 in
-  let add_line line = Buffer.add_string buf line; Buffer.add_char buf '\n' in
-  List.iteri lines (fun idx line ->
-    match !formatted_intervals with
-    | [] -> add_line line
-    | ((st, ed), str) :: tl ->
-      if idx < st - 1 then
-        add_line line
-      else if idx = ed - 1 then begin
-        formatted_intervals := tl;
-        Buffer.add_string buf str
-      end
+  let source_text, _, editable = parsed_file in
+  let text = SourceText.text source_text in
+  let lines = String_utils.split_on_newlines text in
+  let chunk_groups = Hack_format.transform editable |> Chunk_builder.build in
+  let line_ranges = get_char_ranges lines in
+  let ranges = intervals
+    |> List.map ~f:(line_interval_to_char_range line_ranges)
+    |> List.map ~f:(expand_to_line_boundaries ~ranges:line_ranges source_text)
+    |> Interval.union_list
+    |> List.sort ~cmp:Interval.comparator
+  in
+  let formatted_intervals = List.map ranges (fun range ->
+    range, Line_splitter.solve ~range chunk_groups
+  ) in
+  let length = SourceText.length source_text in
+  let buf = Buffer.create (length + 256) in
+  let chars_seen = ref 0 in
+  List.iter formatted_intervals (fun ((st, ed), formatted) ->
+    Buffer.add_string buf (String.sub text !chars_seen (st - !chars_seen));
+    Buffer.add_string buf formatted;
+    chars_seen := ed;
   );
+  Buffer.add_string buf (String.sub text !chars_seen (length - !chars_seen));
   Buffer.contents buf
 
 let format_diff_intervals intervals parsed_file =
@@ -245,10 +250,10 @@ let format_diff_intervals intervals parsed_file =
 let main = function
   | Print (filename, range, debug) ->
     if debug then
-      let parsed_file = parse filename in
-      let source_text, syntax_tree, _ = parsed_file in
-      let chunk_groups = format_chunk_groups ?range parsed_file in
-      Hackfmt_debug.debug source_text syntax_tree chunk_groups
+      let source_text, syntax_tree, editable = parse filename in
+      let fmt_node = Hack_format.transform editable in
+      let chunk_groups = Chunk_builder.build fmt_node in
+      Hackfmt_debug.debug ~range source_text syntax_tree chunk_groups
     else
       parse filename
       |> format ?range
