@@ -994,10 +994,6 @@ using DualDispatchCouldBe = Commute<DualDispatchCouldBeImpl>;
 using DualDispatchUnion   = Commute<DualDispatchUnionImpl>;
 
 //////////////////////////////////////////////////////////////////////
-
-}
-
-//////////////////////////////////////////////////////////////////////
 // Helpers for creating literal array-like types
 
 template<typename AInit>
@@ -1013,13 +1009,6 @@ folly::Optional<Cell> fromTypeVec(const std::vector<Type> &elems) {
   return *var.asTypedValue();
 }
 
-template folly::Optional<Cell>
-fromTypeVec<PackedArrayInit>(const std::vector<Type> &elems);
-
-template folly::Optional<Cell>
-fromTypeVec<VecArrayInit>(const std::vector<Type> &elems);
-
-namespace {
 Variant keyHelper(SString key) {
   return Variant{ key, Variant::PersistentStrInit{} };
 }
@@ -1033,7 +1022,6 @@ void add(AInit& ai, const Variant& key, const Variant& value) {
 void add(KeysetInit& ai, const Variant& key, const Variant& value) {
   assert(cellSame(*key.asTypedValue(), *value.asTypedValue()));
   ai.add(key);
-}
 }
 
 template<typename AInit, typename Key>
@@ -1051,6 +1039,10 @@ folly::Optional<Cell> fromTypeMap(const ArrayLikeMap<Key> &elems) {
   });
   if (val && val->m_type == KindOfUninit) val.clear();
   return val;
+}
+
+//////////////////////////////////////////////////////////////////////
+
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1894,6 +1886,128 @@ Type objcls(const Type& t) {
 }
 
 //////////////////////////////////////////////////////////////////////
+
+folly::Optional<int64_t> arr_size(const Type& t) {
+  switch (t.m_dataTag) {
+    case DataTag::ArrLikeVal:
+      return t.m_data.aval->size();
+
+    case DataTag::ArrLikeMap:
+      return t.m_data.map->map.size();
+
+    case DataTag::ArrLikePacked:
+      return t.m_data.packed->elems.size();
+
+    case DataTag::ArrLikePackedN:
+      return t.m_data.packedn->len;
+
+    case DataTag::None:
+    case DataTag::Int:
+    case DataTag::Dbl:
+    case DataTag::Str:
+    case DataTag::RefInner:
+    case DataTag::ArrLikeMapN:
+    case DataTag::Obj:
+    case DataTag::Cls:
+      return folly::none;
+  }
+  not_reached();
+}
+
+Type::ArrayCat categorize_array(const Type& t) {
+  auto hasInts = false;
+  auto hasStrs = false;
+  auto isPacked = true;
+  auto val = true;
+  size_t idx = 0;
+  auto checkKey = [&] (const Cell& key) {
+    if (isStringType(key.m_type)) {
+      hasStrs = true;
+      isPacked = false;
+      return hasInts;
+    } else {
+      hasInts = true;
+      if (key.m_data.num != idx++) isPacked = false;
+      return hasStrs && !isPacked;
+    }
+  };
+
+  switch (t.m_dataTag) {
+    case DataTag::ArrLikeVal:
+      IterateKV(t.m_data.aval,
+                [&] (const Cell* key, const TypedValue*) {
+                  return checkKey(*key);
+                });
+      break;
+
+    case DataTag::ArrLikeMap:
+      for (auto const& elem : t.m_data.map->map) {
+        if (checkKey(elem.first) && !val) break;
+        val = val && tv(elem.second);
+      }
+      break;
+
+    case DataTag::ArrLikePacked:
+      for (auto const& elem : t.m_data.packed->elems) {
+        hasInts = true;
+        val = val && tv(elem);
+        if (!val) break;
+      }
+      break;
+
+    case DataTag::None:
+    case DataTag::Int:
+    case DataTag::Dbl:
+    case DataTag::Str:
+    case DataTag::RefInner:
+    case DataTag::ArrLikePackedN:
+    case DataTag::ArrLikeMapN:
+    case DataTag::Obj:
+    case DataTag::Cls:
+      return {};
+  }
+
+  auto cat =
+    hasInts ? (isPacked ? Type::ArrayCat::Packed : Type::ArrayCat::Mixed) :
+    hasStrs ? Type::ArrayCat::Struct : Type::ArrayCat::Empty;
+
+  return { cat , val };
+}
+
+CompactVector<LSString> get_string_keys(const Type& t) {
+  CompactVector<LSString> strs;
+
+  switch (t.m_dataTag) {
+    case DataTag::ArrLikeVal:
+      IterateKV(t.m_data.aval,
+                [&] (const Cell* key, const TypedValue*) {
+                  assert(isStringType(key->m_type));
+                  strs.push_back(key->m_data.pstr);
+                });
+      break;
+
+    case DataTag::ArrLikeMap:
+      for (auto const& elem : t.m_data.map->map) {
+        assert(isStringType(elem.first.m_type));
+        strs.push_back(elem.first.m_data.pstr);
+      }
+      break;
+
+    case DataTag::ArrLikePacked:
+    case DataTag::None:
+    case DataTag::Int:
+    case DataTag::Dbl:
+    case DataTag::Str:
+    case DataTag::RefInner:
+    case DataTag::ArrLikePackedN:
+    case DataTag::ArrLikeMapN:
+    case DataTag::Obj:
+    case DataTag::Cls:
+      always_assert(false);
+  }
+
+  return strs;
+}
 
 folly::Optional<Cell> tv(const Type& t) {
   assert(t.checkInvariants());
@@ -2795,37 +2909,42 @@ Type array_elem(const Type& arr, const Type& undisectedKey) {
 
 std::pair<Type,bool> array_like_set(Type arr,
                                     const ArrKey& key,
-                                    const Type& val) {
+                                    const Type& valIn) {
 
   const bool maybeEmpty = arr.m_bits & BArrLikeE;
-  const bool isVector = arr.m_bits & BOptVec;
-  const bool isKeyset = arr.m_bits & BOptKeyset;
-  const bool validKey =
+  const bool isVector   = arr.m_bits & BOptVec;
+  const bool isKeyset   = arr.m_bits & BOptKeyset;
+  const bool isPhpArray = arr.m_bits & BOptArr;
+  const bool validKey   =
     key.type.subtypeOf(TInt) ||
     (!isVector && key.type.subtypeOf(TStr));
 
   trep bits = combine_arr_like_bits(arr.m_bits, BArrLikeN);
   if (validKey) bits = static_cast<trep>(bits & ~BArrLikeE);
 
+  auto const fixRef  = !isPhpArray && valIn.couldBe(TRef);
+  auto const noThrow = !fixRef && validKey;
+  auto const& val    = fixRef ? TInitCell : valIn;
+
   if (!(arr.m_bits & BArrLikeN)) {
     assert(maybeEmpty);
     if (isVector) return { TBottom, false };
     if (key.i && !*key.i && !isKeyset) {
-      return { packed_impl(bits, { val }), validKey };
+      return { packed_impl(bits, { val }), noThrow };
     }
     if (auto const k = key.tv()) {
       MapElems m;
       m.emplace_back(*k, val);
-      return { map_impl(bits, std::move(m)), validKey };
+      return { map_impl(bits, std::move(m)), noThrow };
     }
-    return { mapn_impl(bits, key.type, val), validKey };
+    return { mapn_impl(bits, key.type, val), noThrow };
   }
 
   auto emptyHelper = [&] (const Type& inKey,
                           const Type& inVal) -> std::pair<Type,bool> {
     return { mapn_impl(bits,
                        union_of(inKey, key.type),
-                       union_of(inVal, val)), validKey };
+                       union_of(inVal, val)), noThrow };
   };
 
   arr.m_bits = bits;
@@ -2848,11 +2967,13 @@ std::pair<Type,bool> array_like_set(Type arr,
       return emptyHelper(mapn.key, mapn.val);
     } else {
       if (auto d = toDArrLikePacked(arr.m_data.aval)) {
-        return array_like_set(packed_impl(bits, std::move(d->elems)), key, val);
+        return array_like_set(packed_impl(bits, std::move(d->elems)),
+                              key, valIn);
       }
       assert(!isVector);
       auto d = toDArrLikeMap(arr.m_data.aval);
-      return array_like_set(map_impl(bits, std::move(d.map)), key, val);
+      return array_like_set(map_impl(bits, std::move(d.map)),
+                            key, valIn);
     }
 
   case DataTag::ArrLikePacked:
@@ -2861,7 +2982,7 @@ std::pair<Type,bool> array_like_set(Type arr,
       return emptyHelper(TInt, packed_values(*arr.m_data.packed));
     } else {
       auto const inRange = arr_packed_set(arr, key, val);
-      return { std::move(arr), inRange };
+      return { std::move(arr), inRange && noThrow };
     }
 
   case DataTag::ArrLikePackedN:
@@ -2869,7 +2990,7 @@ std::pair<Type,bool> array_like_set(Type arr,
       return emptyHelper(TInt, arr.m_data.packedn->type);
     } else {
       auto const inRange = arr_packedn_set(arr, key, val, false);
-      return { std::move(arr), inRange };
+      return { std::move(arr), inRange && noThrow };
     }
 
   case DataTag::ArrLikeMap:
@@ -2879,7 +3000,7 @@ std::pair<Type,bool> array_like_set(Type arr,
       return emptyHelper(std::move(mkv.first), std::move(mkv.second));
     } else {
       auto const inRange = arr_map_set(arr, key, val);
-      return { std::move(arr), inRange };
+      return { std::move(arr), inRange && noThrow };
     }
 
   case DataTag::ArrLikeMapN:
@@ -2888,7 +3009,7 @@ std::pair<Type,bool> array_like_set(Type arr,
       return emptyHelper(arr.m_data.mapn->key, arr.m_data.mapn->val);
     } else {
       auto const inRange = arr_mapn_set(arr, key, val);
-      return { std::move(arr), inRange };
+      return { std::move(arr), inRange && noThrow };
     }
   }
 
@@ -2972,8 +3093,9 @@ std::pair<Type,Type> array_like_newelem(Type arr, const Type& val) {
       return emptyHelper(TInt, packed_values(*arr.m_data.packed));
     } else {
       arr.m_bits = bits;
+      auto len = arr.m_data.packed->elems.size();
       arr.m_data.packed.mutate()->elems.push_back(val);
-      return { std::move(arr), ival(arr.m_data.packed->elems.size() - 1) };
+      return { std::move(arr), ival(len) };
     }
 
   case DataTag::ArrLikePackedN:
@@ -3096,8 +3218,7 @@ vec_set(Type vec, const Type& undisectedKey, const Type& val) {
   auto const key = disect_vec_key(undisectedKey);
   if (key.type == TBottom) return {TBottom, false};
 
-  return array_like_set(std::move(vec), key,
-                        val.subtypeOf(TInitCell) ? val : TInitCell);
+  return array_like_set(std::move(vec), key, val);
 }
 
 std::pair<Type,Type> vec_newelem(Type vec, const Type& val) {
@@ -3147,8 +3268,7 @@ dict_set(Type dict, const Type& undisectedKey, const Type& val) {
   auto const key = disect_strict_key(undisectedKey);
   if (key.type == TBottom) return {TBottom, false};
 
-  return array_like_set(std::move(dict), key,
-                        val.subtypeOf(TInitCell) ? val : TInitCell);
+  return array_like_set(std::move(dict), key, val);
 }
 
 std::pair<Type,Type> dict_newelem(Type dict, const Type& val) {

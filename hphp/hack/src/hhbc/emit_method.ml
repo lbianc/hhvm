@@ -31,7 +31,9 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
   let (_,method_name) = ast_method.Ast.m_name in
   let ret =
     if method_name = Naming_special_names.Members.__construct
-    then None else ast_method.Ast.m_ret in
+    || method_name = Naming_special_names.Members.__destruct
+    then None
+    else ast_method.Ast.m_ret in
   let default_instrs return_type =
       if List.mem ast_method.Ast.m_kind Ast.Abstract
       then gather [
@@ -55,33 +57,57 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
             instr_verifyRetTypeC;
             instr_retc
           ] in
-  let body_instrs,
+    let method_is_async =
+      ast_method.Ast.m_fun_kind = Ast_defs.FAsync
+      || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator in
+    let body_instrs,
       method_decl_vars,
       method_num_iters,
+      method_num_cls_ref_slots,
       method_params,
       method_return_type,
       method_is_generator,
       method_is_pair_generator =
     Emit_body.from_ast
-      ~class_name:(Some class_name)
-      ~method_name:(Some method_name)
       ~has_this:(not method_is_static)
+      ~skipawaitable:(ast_method.Ast.m_fun_kind = Ast_defs.FAsync)
       tparams
       ast_method.Ast.m_params
       ret
       ast_method.Ast.m_body
       default_instrs
   in
-  let method_is_async =
-    ast_method.Ast.m_fun_kind = Ast_defs.FAsync
-    || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator in
-  let method_is_closure_body = snd ast_method.Ast.m_name = "__invoke" in
+  (* TODO: use something that can't be faked in user code *)
+  let method_is_closure_body =
+    snd ast_method.Ast.m_name = "__invoke"
+    && String_utils.string_starts_with (snd ast_class.Ast.c_name) "Closure$" in
+  (* Horrible hack to get decl_vars in the same order as HHVM *)
+  let captured_vars =
+    if method_is_closure_body
+    then List.concat_map ast_class.Ast.c_body (fun item ->
+      match item with
+      | Ast.ClassVars(_, _, cvl) ->
+        List.map cvl (fun (_, (_,id), _) -> "$" ^ id)
+      | _ -> []
+      )
+    else [] in
+  let remove_this vars =
+    List.filter vars (fun s -> s <> "$this") in
+  let move_this vars =
+    if List.mem vars "$this"
+    then remove_this vars @ ["$this"]
+    else vars in
   let method_decl_vars =
     if method_is_closure_body
     then
-      let vars = "$0Closure" :: method_decl_vars in
-      if method_is_static then vars else vars @ ["$this"]
-    else method_decl_vars in
+      let method_decl_vars = move_this method_decl_vars in
+      "$0Closure" :: captured_vars @
+      List.filter method_decl_vars (fun v -> not (List.mem captured_vars v))
+    else
+      if method_is_static
+      then move_this method_decl_vars
+      else remove_this method_decl_vars
+  in
   let method_body = instr_seq_to_list body_instrs in
   Hhas_method.make
     method_attributes
@@ -97,6 +123,7 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
     method_body
     method_decl_vars
     method_num_iters
+    method_num_cls_ref_slots
     method_is_async
     method_is_generator
     method_is_pair_generator

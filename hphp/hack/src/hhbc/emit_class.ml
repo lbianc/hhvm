@@ -33,6 +33,7 @@ let default_constructor ast_class =
   let method_return_type = None in
   let method_decl_vars = [] in
   let method_num_iters = 0 in
+  let method_num_cls_ref_slots = 0 in
   let method_is_async = false in
   let method_is_generator = false in
   let method_is_pair_generator = false in
@@ -51,6 +52,7 @@ let default_constructor ast_class =
     method_body
     method_decl_vars
     method_num_iters
+    method_num_cls_ref_slots
     method_is_async
     method_is_generator
     method_is_pair_generator
@@ -80,11 +82,15 @@ let from_constants ast_constants =
 let from_type_constant ast_type_constant =
   match ast_type_constant.A.tconst_type with
   | None -> None (* Abstract type constants are omitted *)
-  | Some _init ->
-    (* TODO: Deal with the initializer *)
+  | Some init ->
+    (* TODO: Deal with the constraint *)
     let type_constant_name = Litstr.to_string @@
-      snd ast_type_constant.A.tconst_name in
-    Some (Hhas_type_constant.make type_constant_name)
+      snd ast_type_constant.A.tconst_name
+    in
+    let type_constant_initializer =
+      Emit_type_constant.hint_to_type_constant init
+    in
+    Some (Hhas_type_constant.make type_constant_name type_constant_initializer)
 
 let from_type_constants ast_type_constants =
   List.filter_map ast_type_constants from_type_constant
@@ -161,14 +167,19 @@ let from_ast : A.class_ -> Hhas_class.t =
     else ast_class.A.c_implements in
   let class_implements = from_implements tparams implements in
   let class_body = ast_class.A.c_body in
+  (* TODO: communicate this without looking at the name *)
+  let is_closure_class =
+    String_utils.string_starts_with (snd ast_class.A.c_name) "Closure$" in
   let has_constructor_or_invoke = List.exists class_body
     (fun elt -> match elt with
                 | A.Method { A.m_name; _} ->
                   snd m_name = SN.Members.__construct ||
-                  snd m_name = "__invoke"
+                  snd m_name = "__invoke" && is_closure_class
                 | _ -> false) in
   let additional_methods =
-    if has_constructor_or_invoke then [] else [default_constructor ast_class] in
+    if has_constructor_or_invoke
+    then []
+    else [default_constructor ast_class] in
   let class_methods =
     Emit_method.from_asts ast_class (ast_methods class_body) in
   let class_methods = class_methods @ additional_methods in

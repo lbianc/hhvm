@@ -36,21 +36,53 @@ let verify_returns body =
     | _ -> [ i ] in
   InstrSeq.flat_map body ~f:rewriter
 
-let from_ast ~class_name ~method_name ~has_this
+module ULS = Unique_list_string
+
+let add_local locals (_, name) =
+  if name = "$GLOBALS" then locals else ULS.add locals name
+
+class declvar_visitor = object(_this)
+  inherit [ULS.t] Ast_visitor.ast_visitor as _super
+
+  method! on_lvar locals id = add_local locals id
+  method! on_efun locals _fn use_list =
+    List.fold_left use_list ~init:locals
+      ~f:(fun locals (x, _isref) -> add_local locals x)
+  method! on_catch locals (_, x, _) = add_local locals x
+end
+
+
+(* Given an AST for a statement sequence, compute the local variables that
+ * are referenced or defined in the block, in the order in which they appear.
+ * Do not include function parameters or $GLOBALS, but *do* include $this
+ *)
+let decl_vars_from_ast params b =
+  let visitor = new declvar_visitor in
+  let decl_vars = visitor#on_block ULS.empty b in
+  let param_names =
+    List.fold_left
+      params
+        ~init:ULS.empty
+        ~f:(fun l p -> ULS.add l @@ Hhas_param.name p)
+  in
+  let decl_vars = ULS.diff decl_vars param_names in
+  List.rev (ULS.items decl_vars)
+
+let from_ast ~has_this ~skipawaitable
   tparams params ret body default_instrs =
   let tparams = tparams_to_strings tparams in
   Label.reset_label ();
   Local.reset_local ();
   Iterator.reset_iterator ();
-  Emit_expression.set_class_name class_name;
-  Emit_expression.set_method_name method_name;
   Emit_expression.set_method_has_this has_this;
   let params = Emit_param.from_asts tparams params in
   let return_type_info =
     match ret with
     | None ->
       Some (Hhas_type_info.make (Some "") (Hhas_type_constraint.make None []))
-    | Some h -> Some (hint_to_type_info ~always_extended:true tparams h) in
+    | Some h ->
+      Some (hint_to_type_info
+        ~skipawaitable ~always_extended:true ~tparams h) in
   let stmt_instrs = Emit_statement.from_stmts body in
   let stmt_instrs =
     if has_type_constraint return_type_info then
@@ -79,13 +111,16 @@ let from_ast ~class_name ~method_name ~has_this
     default_value_setters;
     fault_instrs;
   ] in
+  let body_instrs = rewrite_class_refs body_instrs in
   let params, body_instrs =
     Label_rewriter.relabel_function params body_instrs in
-  let function_decl_vars = extract_decl_vars params body_instrs in
+  let function_decl_vars = decl_vars_from_ast params body in
   let num_iters = !Iterator.num_iterators in
+  let num_cls_ref_slots = get_num_cls_ref_slots body_instrs in
   body_instrs,
   function_decl_vars,
   num_iters,
+  num_cls_ref_slots,
   params,
   return_type_info,
   is_generator,

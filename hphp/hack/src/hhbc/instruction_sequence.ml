@@ -29,6 +29,8 @@ let instrs x = Instr_list x
 let gather x = Instr_concat x
 let empty = Instr_list []
 
+let class_ref_rewrite_sentinel = -100
+
 let instr_iterinit iter_id label value =
   instr (IIterator (IterInit (iter_id, label, value)))
 let instr_iterinitk id label key value =
@@ -66,16 +68,19 @@ let instr_this = instr (IMisc This)
 let instr_istypec op = instr (IIsset (IsTypeC op))
 let instr_istypel id op = instr (IIsset (IsTypeL (id, op)))
 let instr_not = instr (IOp Not)
-let instr_sets id = instr (IMutator (SetS id))
+let instr_sets =
+  instr (IMutator (SetS class_ref_rewrite_sentinel))
 let instr_setl local = instr (IMutator (SetL local))
 let instr_unsetl local = instr (IMutator (UnsetL local))
 let instr_issetl local = instr (IIsset (IssetL local))
-let instr_cgets id = instr (IGet (CGetS id))
+let instr_cgets =
+  instr (IGet (CGetS class_ref_rewrite_sentinel))
 let instr_cgetn = instr (IGet CGetN)
 let instr_cgetl local = instr (IGet (CGetL local))
 let instr_cgetl2 local = instr (IGet (CGetL2 local))
 let instr_cgetquietl local = instr (IGet (CGetQuietL local))
-let instr_clsrefgetc id = instr (IGet (ClsRefGetC id))
+let instr_clsrefgetc =
+  instr (IGet (ClsRefGetC class_ref_rewrite_sentinel))
 let instr_fpassl param local = instr (ICall (FPassL (param, local)))
 let instr_popu = instr (IBasic PopU)
 let instr_popr = instr (IBasic PopR)
@@ -88,7 +93,6 @@ let instr_pop flavor =
   | Flavor.Classref -> instr_popa
 
 let instr_pushl local = instr (IGet (PushL local))
-let instr_agetc = instr (IGet AGetC)
 let instr_throw = instr (IContFlow Throw)
 
 let instr_add_elemc = instr (ILitConst (AddElemC))
@@ -112,7 +116,8 @@ let instr_entrynop = instr (IBasic EntryNop)
 let instr_dict x xs = instr (ILitConst (Dict(x, xs)))
 let instr_staticlocinit local text = instr (IMisc (StaticLocInit(local, text)))
 let instr_basel local mode = instr (IBase(BaseL(local, mode)))
-let instr_basesc x y = instr (IBase(BaseSC(x, y)))
+let instr_basesc y =
+  instr (IBase(BaseSC(class_ref_rewrite_sentinel, y)))
 let instr_baseh = instr (IBase BaseH)
 let instr_fpushfuncd count text = instr (ICall(FPushFuncD(count, text)))
 let instr_fcall count = instr (ICall(FCall count))
@@ -148,6 +153,15 @@ let instr_await = instr (IAsync Await)
 let instr_yield = instr (IGenerator Yield)
 let instr_yieldk = instr (IGenerator YieldK)
 let instr_createcont = instr (IGenerator CreateCont)
+
+let strip_dollar id =
+  String.sub id 1 (String.length id - 1)
+
+let instr_static_loc name =
+  instr (IMisc (StaticLoc (Local.Named name, strip_dollar name)))
+
+let instr_static_loc_init name =
+  instr (IMisc (StaticLocInit (Local.Named name, strip_dollar name)))
 
 let instr_exit = instr (IOp Hhbc_ast.Exit)
 
@@ -234,29 +248,6 @@ let instr_try_fault fault_label try_body fault_body =
 let instr_try_catch_begin catch_label = instr (ITry (TryCatchBegin catch_label))
 let instr_try_catch_end = instr (ITry TryCatchEnd)
 
-let extract_decl_vars params instrseq =
-  let module ULS = Unique_list_string in
-  (* TODO: This needs to happen at the AST level since
-   * $x = $y needs to go on the list in this order: $x $y *)
-  let folder uniq_list instruction =
-    match instruction with
-    | IMutator (SetL (Local.Named s))
-    | IBase (BaseL (Local.Named s, MemberOpMode.Define))
-    | IGet (CGetL (Local.Named s))
-    | IGet (CGetQuietL (Local.Named s))
-    | IGet (CGetL2 (Local.Named s))
-    | IGet (CGetL3 (Local.Named s)) -> ULS.add uniq_list s
-    | _ -> uniq_list in
-  let decl_vars = InstrSeq.fold_left instrseq ~init:ULS.empty ~f:folder in
-  let param_names =
-    List.fold_left
-      params
-        ~init:ULS.empty
-        ~f:(fun l p -> ULS.add l @@ Hhas_param.name p)
-  in
-  let decl_vars = ULS.diff decl_vars param_names in
-  List.rev (ULS.items decl_vars)
-
 (*  Note that at this time we do NOT want to recurse on the instruction
     sequence in the fault block. Why not?  Consider:
     try { x } finally { try { y } finally { z } }
@@ -293,3 +284,62 @@ let is_function_generator instrseq =
     ~f:(fun (b, b_p) i ->
       ((b || i = IGenerator Yield || i = IGenerator YieldK),
       b_p || i = IGenerator YieldK))
+
+let get_num_cls_ref_slots instrseq =
+  InstrSeq.fold_left
+    instrseq
+    ~init:0
+    ~f:(fun num i ->
+        match i with
+        | ILitConst (ClsCns (_, id))
+        | IMisc (Parent id)
+        | IMisc (LateBoundCls id)
+        | IGet (ClsRefGetL (_, id))
+        | IGet (ClsRefGetC id) -> if id + 1 > num then id + 1 else num
+        | _ -> num)
+
+(* TODO: What other instructions manipulate the class ref stack *)
+let rewrite_class_refs_instr num = function
+| ILitConst (ClsCns (id, _)) -> (num + 1, ILitConst (ClsCns (id, num + 1)))
+| IGet (ClsRefGetL (lid, _)) -> (num + 1, IGet (ClsRefGetL (lid, num + 1)))
+| IGet (ClsRefGetC _) -> (num + 1, IGet (ClsRefGetC (num + 1)))
+| IMisc (Parent _) -> (num + 1, IMisc (Parent (num + 1)))
+| IMisc (LateBoundCls _) -> (num + 1, IMisc (LateBoundCls (num + 1)))
+| IGet (CGetS _) -> (num - 1, IGet (CGetS num))
+| IGet (VGetS _) -> (num - 1, IGet (VGetS num))
+| IMutator (SetS _) -> (num - 1, IMutator (SetS num))
+| IMutator (SetOpS (o, _)) -> (num - 1, IMutator (SetOpS (o, num)))
+| IMutator (IncDecS (o, _)) -> (num - 1, IMutator (IncDecS (o, num)))
+| IMutator (BindS _) -> (num - 1, IMutator (BindS num))
+| IBase (BaseSC (_, si)) -> (num - 1, IBase (BaseSC (num, si)))
+| ICall (FPassS (np, _)) -> (num - 1, ICall (FPassS (np, num)))
+| ICall (FPushCtor (np, _)) -> (num - 1, ICall (FPushCtor (np, num)))
+| ICall (FPushClsMethod (np, _)) -> (num - 1, ICall (FPushClsMethod (np, num)))
+| ICall (FPushClsMethodF (np, _)) ->
+  (num - 1, ICall (FPushClsMethodF (np, num)))
+| i -> (num, i)
+
+(* Cannot use InstrSeq.fold_left since we want to maintain the exact
+ * placement of try blocks *)
+let rewrite_class_refs instrseq =
+  let rec aux instrseq num =
+    match instrseq with
+    | Instr_try_fault (try_body, fault_body) ->
+      let try_body, num = aux try_body num in
+      let fault_body, num = aux fault_body num in
+      Instr_try_fault (try_body, fault_body), num
+    | Instr_concat l ->
+      let l, num = List.fold_left l
+        ~f:(fun (acc, n) s -> let l, n = aux s n in l :: acc, n)
+        ~init:([], num)
+      in
+      Instr_concat (List.rev l), num
+    | Instr_list l ->
+      let l, num = List.fold_left l
+        ~f:(fun (acc, n) i ->
+            let n, i = rewrite_class_refs_instr n i in i :: acc, n)
+        ~init:([], num)
+      in
+      Instr_list (List.rev l), num
+  in
+  fst @@ aux instrseq (-1)

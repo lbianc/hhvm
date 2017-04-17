@@ -18,6 +18,9 @@ open Core
 open Syntax
 open Fmt_node
 
+(* TODO: move this to a config file *)
+let __INDENT_WIDTH = 2
+
 let rec transform node =
   let t = transform in
 
@@ -791,13 +794,17 @@ let rec transform node =
         t q_kw;
         when_present true_expr (fun () -> Fmt [
           Space;
-          t true_expr;
+          if __INDENT_WIDTH = 2
+            then Nest [t true_expr]
+            else t true_expr;
           Space;
           Split;
         ]);
         t c_kw;
         Space;
-        t false_expr;
+        if not (is_missing true_expr) && __INDENT_WIDTH = 2
+          then Nest [t false_expr]
+          else t false_expr;
       ])
   | FunctionCallExpression x ->
     handle_function_call_expression x
@@ -962,7 +969,7 @@ let rec transform node =
       Space;
       (* TODO: rethink possible one line bodies *)
       (* TODO: correctly handle spacing after the closing brace *)
-      handle_possible_compound_statement body;
+      handle_possible_compound_statement ~space:false body;
     ]
   | XHPChildrenDeclaration x ->
     let (kw, expr, semi) = get_xhp_children_declaration_children x in
@@ -1711,6 +1718,8 @@ and transform_binary_expression ~is_nested expr =
   let is_concat op =
     get_operator_type op = Full_fidelity_operator.ConcatenationOperator in
   let operator_has_surrounding_spaces op = not (is_concat op) in
+  let operator_is_leading op =
+    get_operator_type op = Full_fidelity_operator.PipeOperator in
 
   let (left, operator, right) = get_binary_expression_children expr in
   let operator_t = get_operator_type operator in
@@ -1771,8 +1780,11 @@ and transform_binary_expression ~is_nested expr =
                 let op = x in
                 last_op := op;
                 let op_has_spaces = operator_has_surrounding_spaces op in
+                let op_is_leading = operator_is_leading op in
                 Fmt [
-                  if op_has_spaces then space_split () else Split;
+                  if op_is_leading
+                    then (if op_has_spaces then space_split () else Split)
+                    else (if op_has_spaces then Space else Nothing);
                   if is_concat op
                     then ConcatOperator (transform op)
                     else transform op;
@@ -1781,10 +1793,18 @@ and transform_binary_expression ~is_nested expr =
               else begin
                 let operand = x in
                 let op_has_spaces = operator_has_surrounding_spaces !last_op in
+                let op_is_leading = operator_is_leading !last_op in
                 Fmt [
-                  if op_has_spaces
-                    then Fmt [Space; SplitWith Cost.Assignment]
-                    else SplitWith Cost.Assignment;
+                  if op_is_leading then begin
+                    (* TODO: We only have this split to ensure that range
+                     * formatting works when it starts or ends here. We should
+                     * remove it once we can return an expanded formatting
+                     * range. *)
+                    if op_has_spaces
+                      then Fmt [Space; SplitWith Cost.Assignment]
+                      else SplitWith Cost.Assignment
+                  end
+                  else (if op_has_spaces then space_split () else Split);
                   transform_operand operand;
                 ]
               end

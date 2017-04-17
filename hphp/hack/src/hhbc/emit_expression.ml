@@ -34,14 +34,9 @@ module LValOp = struct
 end
 
 (* Context for a complete method body. It would be more elegant to pass this
- * around in an environment parameter *)
-let class_name = ref (None : string option)
-let method_name = ref (None : string option)
+ * around in an environment parameter. Alternatively, transform the AST before
+ * codegen in order to resolve $this properly. *)
 let method_has_this = ref false
-let set_class_name n = class_name := n
-let get_class_name () = !class_name
-let set_method_name n = method_name := n
-let get_method_name () = !method_name
 let set_method_has_this b = method_has_this := b
 let get_method_has_this () = !method_has_this
 
@@ -129,7 +124,7 @@ let collection_type = function
 
 let istype_op id =
   match id with
-  | "is_int" | "is_integer" -> Some OpInt
+  | "is_int" | "is_integer" | "is_long" -> Some OpInt
   | "is_bool" -> Some OpBool
   | "is_float" | "is_real" | "is_double" -> Some OpDbl
   | "is_string" -> Some OpStr
@@ -168,8 +163,8 @@ let is_local_this id =
   id = SN.SpecialIdents.this && get_method_has_this ()
 
 let extract_shape_field_name_pstring = function
-  | A.SFlit p
-  | A.SFclass_const (_, p) ->  p
+  | A.SFlit p -> A.String p
+  | A.SFclass_const (id, p) -> A.Class_const (id, p)
 
 let extract_shape_field_name = function
   | A.SFlit (_, s)
@@ -187,6 +182,12 @@ let rec expr_and_newc instr_to_add_new instr_to_add = function
 and emit_local x =
   if x = SN.SpecialIdents.this && get_method_has_this ()
   then instr (IMisc (BareThis Notice))
+  else
+  if x = SN.Superglobals.globals
+  then gather [
+    instr_string (strip_dollar x);
+    instr (IGet CGetG)
+  ]
   else instr_cgetl (Local.Named x)
 
 and emit_two_exprs e1 e2 =
@@ -335,12 +336,19 @@ and emit_aget class_expr =
   | _ ->
     gather [
       from_expr class_expr;
-      instr (IGet (ClsRefGetC 0))
+      instr_clsrefgetc;
     ]
 
 and emit_new class_expr args uargs =
   let nargs = List.length args + List.length uargs in
   match class_expr with
+  | _, A.Id (_, id) when id = SN.Classes.cStatic ->
+    gather [
+      emit_class_id id;
+      instr_fpushctor nargs 0;
+      emit_args_and_call args uargs;
+      instr_popr
+    ]
   | _, A.Id (_, id) ->
     gather [
       instr_fpushctord nargs id;
@@ -362,25 +370,13 @@ and emit_clone expr =
   ]
 
 and emit_shape expr fl =
-  let are_values_all_literals =
-    List.for_all fl ~f:(fun (_, e) -> is_literal e)
-  in
   let p = fst expr in
-  if are_values_all_literals then
-    let fl =
-      List.map fl
-        ~f:(fun (fn, e) ->
-              A.AFkvalue ((p,
-                A.String (extract_shape_field_name_pstring fn)), e))
-    in
-    from_expr (fst expr, A.Array fl)
-  else
-    let es = List.map fl ~f:(fun (_, e) -> from_expr e) in
-    let keys = List.map fl ~f:(fun (fn, _) -> extract_shape_field_name fn) in
-    gather [
-      gather es;
-      instr_newstructarray keys;
-    ]
+  let fl =
+    List.map fl
+      ~f:(fun (fn, e) ->
+            A.AFkvalue ((p, extract_shape_field_name_pstring fn), e))
+  in
+  from_expr (p, A.Array fl)
 
 and emit_tuple p es =
   (* Did you know that tuples are functions? *)
@@ -398,17 +394,24 @@ and emit_call_expr expr =
 and emit_known_class_id cid =
   gather [
     instr_string (Utils.strip_ns cid);
-    instr (IGet (ClsRefGetC 0))
+    instr_clsrefgetc;
   ]
 
 and emit_class_id cid =
   if cid = SN.Classes.cStatic
   then instr (IMisc (LateBoundCls 0))
   else
+  (* We assume that if these were statically resolvable then it would have
+   * been done during closure conversion
+   *)
+  if  cid = SN.Classes.cParent
+  then instr (IMisc (Parent 0))
+  else
   if cid = SN.Classes.cSelf
-  then match get_class_name () with
-  | None -> instr (IMisc Self)
-  | Some cid -> emit_known_class_id cid
+  then instr (IMisc Self)
+  else
+  if cid.[0] = '$'
+  then instr (IGet (ClsRefGetL (Local.Named cid, 0)))
   else emit_known_class_id cid
 
 and emit_class_get param_num_opt cid id =
@@ -417,7 +420,7 @@ and emit_class_get param_num_opt cid id =
       instr_string (strip_dollar id);
       emit_class_id cid;
       match param_num_opt with
-      | None -> instr (IGet (CGetS 0))
+      | None -> instr_cgets
       | Some i -> instr (ICall (FPassS (i, 0)))
     ]
 
@@ -429,15 +432,15 @@ and emit_class_const cid id =
       IMisc (LateBoundCls 0);
       ILitConst (ClsCns (id, 0));
     ]
+  (* We assume that if this was statically resolvable it would have been
+   * transformed during closure conversion
+   *)
   else if cid = SN.Classes.cSelf
   then
-    match get_class_name () with
-    | None ->
-      instrs [
-        IMisc Self;
-        ILitConst (ClsCns (id, 0));
-      ]
-    | Some cid -> instr (ILitConst (ClsCnsD (id, cid)))
+    instrs [
+      IMisc Self;
+      ILitConst (ClsCns (id, 0));
+    ]
   else
     instr (ILitConst (ClsCnsD (id, cid)))
 
@@ -464,12 +467,6 @@ and emit_yield = function
       from_expr e2;
       instr_yieldk;
     ]
-
-and emit_yield_break () =
-  gather [
-    instr_null;
-    instr_retc;
-  ]
 
 and emit_string2 exprs =
   match exprs with
@@ -510,19 +507,6 @@ and emit_id (p, s) =
   match s with
   | "__FILE__" -> instr (ILitConst File)
   | "__DIR__" -> instr (ILitConst Dir)
-  | "__CLASS__" ->
-    instr_string (
-      match get_class_name () with None -> "" | Some s -> Utils.strip_ns s
-    )
-  | "__METHOD__" ->
-    instr_string (
-      (match get_class_name () with
-      | None -> ""
-      | Some s -> Utils.strip_ns s ^ "::") ^
-      (match get_method_name () with
-      | None -> ""
-      | Some s -> Utils.strip_ns s)
-    )
   | "__LINE__" ->
     (* If the expression goes on multi lines, we return the last line *)
     let _, line, _, _ = Pos.info_pos_extended p in
@@ -704,7 +688,8 @@ and from_expr expr =
   | A.Shape fl -> emit_shape expr fl
   | A.Await e -> emit_await e
   | A.Yield e -> emit_yield e
-  | A.Yield_break -> emit_yield_break ()
+  | A.Yield_break ->
+    failwith "yield break should be in statement position"
   | A.Lfun _ ->
     failwith "expected Lfun to be converted to Efun during closure conversion"
   | A.Efun (fundef, ids) -> emit_lambda fundef ids
@@ -767,6 +752,11 @@ and emit_dynamic_collection ~transform_to_collection expr es =
   let is_only_values =
     List.for_all es ~f:(function A.AFkvalue _ -> false | _ -> true)
   in
+  let are_all_keys_strings =
+    List.for_all es ~f:(function A.AFkvalue ((_, A.String (_, _)), _) -> true
+                               | _ -> false)
+  in
+  let is_array = match snd expr with A.Array _ -> true | _ -> false in
   let count = List.length es in
   if is_only_values && transform_to_collection = None then begin
     let lit_constructor = match snd expr with
@@ -780,6 +770,16 @@ and emit_dynamic_collection ~transform_to_collection expr es =
       List.map es
         ~f:(function A.AFvalue e -> from_expr e | _ -> failwith "impossible");
       instr @@ ILitConst lit_constructor;
+    ]
+  end else if are_all_keys_strings && is_array then begin
+    let es =
+      List.map es
+        ~f:(function A.AFkvalue ((_, A.String (_, s)), v) -> s, from_expr v
+                   | _ -> failwith "impossible")
+    in
+    gather [
+      gather @@ List.map es ~f:snd;
+      instr_newstructarray @@ List.map es ~f:fst;
     ]
   end else begin
     let lit_constructor = match snd expr with
@@ -1118,6 +1118,12 @@ and instr_fpassr i = instr (ICall (FPassR i))
 
 and emit_arg i ((_, expr_) as e) =
   match expr_ with
+  | A.Lvar (_, x) when x = SN.Superglobals.globals ->
+    gather [
+      instr_string (strip_dollar x);
+      instr (ICall (FPassG i))
+    ]
+
   | A.Lvar (_, x) when not (is_local_this x) -> instr_fpassl i (Local.Named x)
 
   | A.Array_get((_, A.Lvar (_, x)), Some e) when x = SN.Superglobals.globals ->
@@ -1184,7 +1190,8 @@ and emit_call_lhs (_, expr_ as expr) nargs =
       instr (ICall (FPushObjMethod (nargs, null_flavor)));
     ]
 
-  | A.Class_const ((_, cid), (_, id)) when cid = SN.Classes.cSelf ->
+  | A.Class_const ((_, cid), (_, id))
+    when cid = SN.Classes.cSelf || cid = SN.Classes.cParent ->
     gather [
       instr_string id;
       emit_class_id cid;
@@ -1194,15 +1201,8 @@ and emit_call_lhs (_, expr_ as expr) nargs =
   | A.Class_const ((_, cid), (_, id)) when cid = SN.Classes.cStatic ->
     gather [
       instr_string id;
-      instr (IMisc (LateBoundCls 0));
+      emit_class_id cid;
       instr (ICall (FPushClsMethod (nargs, 0)));
-      ]
-
-  | A.Class_const ((_, cid), (_, id)) when cid = SN.Classes.cParent ->
-    gather [
-      instr_string id;
-      instr (IMisc (Parent 0));
-      instr (ICall (FPushClsMethodF (nargs, 0)));
       ]
 
   | A.Class_const ((_, cid), (_, id)) when cid.[0] = '$' ->
@@ -1214,6 +1214,13 @@ and emit_call_lhs (_, expr_ as expr) nargs =
 
   | A.Class_const ((_, cid),  (_, id)) ->
     instr (ICall (FPushClsMethodD (nargs, id, cid)))
+
+  | A.Class_get ((_, cid), (_, id)) when id.[0] = '$' ->
+    gather [
+      emit_local id;
+      emit_class_id cid;
+      instr (ICall (FPushClsMethod (nargs, 0)))
+    ]
 
   | A.Id (_, id) ->
     instr (ICall (FPushFuncD (nargs, id)))
@@ -1320,6 +1327,34 @@ and emit_call (_, expr_ as expr) args uargs =
   | A.Id (_, "exit") when List.length args = 1 ->
     let e = List.hd_exn args in
     emit_exit e, Flavor.Cell
+
+  | A.Id(_, "intval") when List.length args = 1 ->
+    let e = List.hd_exn args in
+    gather [
+      from_expr e;
+      instr (IOp CastInt)
+    ], Flavor.Cell
+
+  | A.Id(_, "strval") when List.length args = 1 ->
+    let e = List.hd_exn args in
+    gather [
+      from_expr e;
+      instr (IOp CastString)
+    ], Flavor.Cell
+
+  | A.Id(_, "boolval") when List.length args = 1 ->
+    let e = List.hd_exn args in
+    gather [
+      from_expr e;
+      instr (IOp CastBool)
+    ], Flavor.Cell
+
+  | A.Id(_, "floatval") when List.length args = 1 ->
+    let e = List.hd_exn args in
+    gather [
+      from_expr e;
+      instr (IOp CastDouble)
+    ], Flavor.Cell
 
   | A.Id (_, id) ->
     begin match args, istype_op id with
@@ -1549,6 +1584,15 @@ and emit_unop op e =
 and from_exprs exprs =
   gather (List.map exprs from_expr)
 
+(* Generate code to evaluate `e`, and, if necessary, store its value in a
+ * temporary local `temp` (unless it is itself a local). Then use `f` to
+ * generate code that uses this local and branches or drops through to
+ * `break_label`:
+ *    temp := e
+ *    <code generated by `f temp break_label`>
+ *  break_label:
+ *    push `temp` on stack if `leave_on_stack` is true.
+ *)
 and stash_in_local ?(leave_on_stack=false) e f =
   let break_label = Label.next_regular () in
   match e with
@@ -1556,6 +1600,7 @@ and stash_in_local ?(leave_on_stack=false) e f =
     gather [
       f (Local.Named id) break_label;
       instr_label break_label;
+      if leave_on_stack then instr_cgetl (Local.Named id) else empty;
     ]
   | _ ->
     let temp = Local.get_unnamed_local () in
