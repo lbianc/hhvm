@@ -656,11 +656,12 @@ const DecoderInfo Decoder::decode(const PPC64Instr* const ip) {
 
     // If instruction found, return it.
     if (position != -1) {
-      auto pdi = m_decoder_table[position];
-      assert(pdi->opcode() == decoded_instr);
-      pdi->instruction_image(*ip);
-      pdi->setIp(ip);
-      return *pdi;
+      DecoderInfo pdi = *m_decoder_table[position];
+      assert(pdi.opcode() == decoded_instr);
+      pdi.instruction_image(*ip);
+      pdi.setIp(ip);
+//      *m_decoder_table[position] = pdi;
+      return pdi;
     }
   }
 
