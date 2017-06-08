@@ -58,11 +58,9 @@ std::atomic<MemoryManager::ReqProfContext*>
 
 #ifdef USE_JEMALLOC
 bool MemoryManager::s_statsEnabled = false;
-size_t MemoryManager::s_cactiveLimitCeiling = 0;
 
 static size_t threadAllocatedpMib[2];
 static size_t threadDeallocatedpMib[2];
-static size_t statsCactiveMib[2];
 static pthread_once_t threadStatsOnce = PTHREAD_ONCE_INIT;
 
 void MemoryManager::threadStatsInit() {
@@ -75,45 +73,11 @@ void MemoryManager::threadStatsInit() {
   if (mallctlnametomib("thread.deallocatedp", threadDeallocatedpMib, &miblen)) {
     return;
   }
-  miblen = sizeof(statsCactiveMib) / sizeof(size_t);
-  if (mallctlnametomib("stats.cactive", statsCactiveMib, &miblen)) {
-    return;
-  }
   MemoryManager::s_statsEnabled = true;
-
-  // In threadStats() we wish to solve for cactiveLimit in:
-  //
-  //   footprint + cactiveLimit + headRoom == MemTotal
-  //
-  // However, headRoom comes from RuntimeOption::ServerMemoryHeadRoom, which
-  // isn't initialized until after the code here runs.  Therefore, compute
-  // s_cactiveLimitCeiling here in order to amortize the cost of introspecting
-  // footprint and MemTotal.
-  //
-  //   cactiveLimit == (MemTotal - footprint) - headRoom
-  //
-  //   cactiveLimit == s_cactiveLimitCeiling - headRoom
-  // where
-  //   s_cactiveLimitCeiling == MemTotal - footprint
-  size_t footprint = Process::GetCodeFootprint(getpid());
-  size_t MemTotal  = 0;
-#ifndef __APPLE__
-  size_t pageSize = size_t(sysconf(_SC_PAGESIZE));
-  MemTotal = size_t(sysconf(_SC_PHYS_PAGES)) * pageSize;
-#else
-  int mib[2] = { CTL_HW, HW_MEMSIZE };
-  u_int namelen = sizeof(mib) / sizeof(mib[0]);
-  size_t len = sizeof(MemTotal);
-  sysctl(mib, namelen, &MemTotal, &len, nullptr, 0);
-#endif
-  if (MemTotal > footprint) {
-    MemoryManager::s_cactiveLimitCeiling = MemTotal - footprint;
-  }
 }
 
 inline
-void MemoryManager::threadStats(uint64_t*& allocated, uint64_t*& deallocated,
-                                size_t*& cactive, size_t& cactiveLimit) {
+void MemoryManager::threadStats(uint64_t*& allocated, uint64_t*& deallocated) {
   pthread_once(&threadStatsOnce, threadStatsInit);
   if (!MemoryManager::s_statsEnabled) return;
 
@@ -130,32 +94,10 @@ void MemoryManager::threadStats(uint64_t*& allocated, uint64_t*& deallocated,
                    &deallocated, &len, nullptr, 0)) {
     not_reached();
   }
-
-  len = sizeof(cactive);
-  if (mallctlbymib(statsCactiveMib,
-                   sizeof(statsCactiveMib) / sizeof(size_t),
-                   &cactive, &len, nullptr, 0)) {
-    not_reached();
-  }
-
-  int64_t headRoom = RuntimeOption::ServerMemoryHeadRoom;
-  // Compute cactiveLimit based on s_cactiveLimitCeiling, as computed in
-  // threadStatsInit().
-  if (headRoom != 0 && headRoom < MemoryManager::s_cactiveLimitCeiling) {
-    cactiveLimit = MemoryManager::s_cactiveLimitCeiling - headRoom;
-  } else {
-    cactiveLimit = std::numeric_limits<size_t>::max();
-  }
 }
 #endif
 
 static void* MemoryManagerInit() {
-  // We store the free list pointers right at the start of each
-  // object (overlapping whatever it's first word holds), and we also clobber
-  // _count as a free-object flag when the object is deallocated. This
-  // assert just makes sure they don't overflow.
-  assert(FAST_REFCOUNT_OFFSET + sizeof(int) <=
-    MemoryManager::smallSizeClass(1));
   MemoryManager::TlsWrapper tls;
   return (void*)tls.getNoCheck;
 }
@@ -176,7 +118,7 @@ void MemoryManager::OnThreadExit(MemoryManager* mm) {
 
 MemoryManager::MemoryManager() {
 #ifdef USE_JEMALLOC
-  threadStats(m_allocated, m_deallocated, m_cactive, m_cactiveLimit);
+  threadStats(m_allocated, m_deallocated);
 #endif
   resetStatsImpl(true);
   setMemoryLimit(std::numeric_limits<int64_t>::max());
@@ -219,7 +161,6 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
     m_stats.peakCap);
   FTRACE(1, "total alloc: {}\nje alloc: {}\nje dealloc: {}\n",
     m_stats.totalAlloc, m_prevAllocated, m_prevDeallocated);
-  FTRACE(1, "je debt: {}\n\n", m_stats.mallocDebt);
 #else
   FTRACE(1, "resetStatsImpl({}) pre:\n"
     "usage: {}\ncapacity: {}\npeak usage: {}\npeak capacity: {}\n\n",
@@ -229,7 +170,7 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
   if (isInternalCall) {
     m_statsIntervalActive = false;
     m_stats.mmUsage = 0;
-    m_stats.auxUsage = 0;
+    m_stats.threadUsage = 0;
     m_stats.capacity = 0;
     m_stats.peakUsage = 0;
     m_stats.peakCap = 0;
@@ -258,7 +199,7 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
     // Anything that was definitively allocated by the MemoryManager allocator
     // should be counted in this number even if we're otherwise zeroing out
     // the count for each thread.
-    m_stats.totalAlloc = s_statsEnabled ? m_stats.mallocDebt : 0;
+    m_stats.totalAlloc = s_statsEnabled ? m_stats.capacity : 0;
 
     m_enableStatsSync = s_statsEnabled;
 #else
@@ -267,7 +208,6 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
   }
 #ifdef USE_JEMALLOC
   if (s_statsEnabled) {
-    m_stats.mallocDebt = 0;
     m_prevDeallocated = *m_deallocated;
     m_prevAllocated = *m_allocated;
   }
@@ -279,7 +219,6 @@ void MemoryManager::resetStatsImpl(bool isInternalCall) {
     m_stats.peakCap);
   FTRACE(1, "total alloc: {}\nje alloc: {}\nje dealloc: {}\n",
     m_stats.totalAlloc, m_prevAllocated, m_prevDeallocated);
-  FTRACE(1, "je debt: {}\n\n", m_stats.mallocDebt);
 #else
   FTRACE(1, "resetStatsImpl({}) post:\n"
     "usage: {}\ncapacity: {}\npeak usage: {}\npeak capacity: {}\n\n",
@@ -300,22 +239,13 @@ void MemoryManager::setMemThresholdCallback(size_t threshold) {
   m_memThresholdCallbackPeakUsage = threshold;
 }
 
-#ifdef USE_JEMALLOC
-void MemoryManager::refreshStatsHelperStop() {
-  HttpServer::Server->stop();
-  // Increase the limit to the maximum possible value, so that this method
-  // won't be called again.
-  m_cactiveLimit = std::numeric_limits<size_t>::max();
-}
-#endif
-
 /*
  * Refresh stats to reflect directly malloc()ed memory, and determine
  * whether the request memory limit has been exceeded.
  *
  * The stats parameter allows the updates to be applied to either
  * m_stats as in refreshStats() or to a separate MemoryUsageStats
- * struct as in getStatsSafe().
+ * struct as in getStatsCopy().
  *
  * The template variable live controls whether or not MemoryManager
  * member variables are updated and whether or not to call helper
@@ -331,60 +261,46 @@ void MemoryManager::refreshStatsImpl(MemoryUsageStats& stats) {
   //
   //   int64 musage = delta - delta0;
   //
-  // Note however, the slab allocator adds to m_stats.mallocDebt
-  // when it calls malloc(), so that this function can avoid
-  // double-counting the malloced memory. Thus musage in the example
-  // code may well substantially exceed m_stats.usage.
+  // This includes memory allocated by the request heap (BigHeap),
+  // which is recorded in m_stats.capacity, so it can be subtracted
+  // when necessary to avoid double-counting.
   if (m_enableStatsSync) {
-    uint64_t jeDeallocated = *m_deallocated;
-    uint64_t jeAllocated = *m_allocated;
-
     // We can't currently handle wrapping so make sure this isn't happening.
-    assert(jeAllocated >= 0 &&
-           jeAllocated <= std::numeric_limits<int64_t>::max());
-    assert(jeDeallocated >= 0 &&
-           jeDeallocated <= std::numeric_limits<int64_t>::max());
-
-    // This is the delta between the current and the previous jemalloc reading.
-    int64_t jeMMDeltaAllocated =
-      int64_t(jeAllocated) - int64_t(m_prevAllocated);
+    assert(*m_allocated <= uint64_t(std::numeric_limits<int64_t>::max()));
+    assert(*m_deallocated <= uint64_t(std::numeric_limits<int64_t>::max()));
+    const int64_t curAllocated = *m_allocated;
+    const int64_t curDeallocated = *m_deallocated;
 
     FTRACE(1, "Before stats sync:\n");
-    FTRACE(1, "je alloc:\ncurrent: {}\nprevious: {}\ndelta with MM: {}\n",
-      jeAllocated, m_prevAllocated, jeAllocated - m_prevAllocated);
-    FTRACE(1, "je dealloc:\ncurrent: {}\nprevious: {}\ndelta with MM: {}\n",
-      jeDeallocated, m_prevDeallocated, jeDeallocated - m_prevDeallocated);
-    FTRACE(1, "usage: {}\ntotal (je) alloc: {}\nje debt: {}\n",
-      stats.usage(), stats.totalAlloc, stats.mallocDebt);
+    FTRACE(1, "je alloc:\ncurrent: {}\nprevious: {}\nchange: {}\n",
+      curAllocated, m_prevAllocated, curAllocated - m_prevAllocated);
+    FTRACE(1, "je dealloc:\ncurrent: {}\nprevious: {}\nchange: {}\n",
+      curDeallocated, m_prevDeallocated, curDeallocated - m_prevDeallocated);
+    FTRACE(1, "usage: {}\ntotalAlloc: {}\n", stats.usage(), stats.totalAlloc);
 
     // Since these deltas potentially include memory allocated from another
     // thread but deallocated on this one, it is possible for these numbers to
     // go negative.
-    int64_t jeDeltaAllocated =
-      int64_t(jeAllocated) - int64_t(jeDeallocated);
-    int64_t mmDeltaAllocated =
-      int64_t(m_prevAllocated) - int64_t(m_prevDeallocated);
-    FTRACE(1, "je delta:\ncurrent: {}\nprevious: {}\n",
-        jeDeltaAllocated, mmDeltaAllocated);
+    int64_t curUsage = int64_t(curAllocated) - int64_t(curDeallocated);
+    int64_t prevUsage = int64_t(m_prevAllocated) - int64_t(m_prevDeallocated);
+    FTRACE(1, "je usage:\ncurrent: {}\nprevious: {}\n", curUsage, prevUsage);
 
-    // Subtract the old jemalloc adjustment (delta0) and add the current one
-    // (delta) to arrive at the new combined usage number.
-    stats.auxUsage += jeDeltaAllocated - mmDeltaAllocated;
-    // Remove the "debt" accrued from allocating the slabs so we don't double
-    // count the slab-based allocations.
-    stats.auxUsage -= stats.mallocDebt;
+    // Subtract the old usage adjustment (prevUsage) and add the current one
+    // (curUsage) to arrive at the new combined usage number.
+    stats.threadUsage += curUsage - prevUsage;
 
-    stats.mallocDebt = 0;
-    // We need to do the calculation instead of just setting it to jeAllocated
+    // Accumulate the increase in allocation volume since the last refresh.
+    // We need to do the calculation instead of just setting it to curAllocated
     // because of the MaskAlloc capability.
-    stats.totalAlloc += jeMMDeltaAllocated;
+    stats.totalAlloc += int64_t(curAllocated) - int64_t(m_prevAllocated);
+
     if (live) {
-      m_prevAllocated = jeAllocated;
-      m_prevDeallocated = jeDeallocated;
+      m_prevAllocated = curAllocated;
+      m_prevDeallocated = curDeallocated;
     }
 
     FTRACE(1, "After stats sync:\n");
-    FTRACE(1, "usage: {}\ntotal (je) alloc: {}\n\n",
+    FTRACE(1, "usage: {}\ntotalAlloc: {}\n\n",
       stats.usage(), stats.totalAlloc);
   }
 #endif
@@ -393,28 +309,10 @@ void MemoryManager::refreshStatsImpl(MemoryUsageStats& stats) {
     refreshStatsHelperExceeded();
   }
   if (stats.usage() > stats.peakUsage) {
-    // Check whether the process's active memory limit has been exceeded, and
-    // if so, stop the server.
-    //
-    // Only check whether the total memory limit was exceeded if this request
-    // is at a new high water mark.  This check could be performed regardless
-    // of this request's current memory usage (because other request threads
-    // could be to blame for the increased memory usage), but doing so would
-    // measurably increase computation for little benefit.
-#ifdef USE_JEMALLOC
-    // (*m_cactive) consistency is achieved via atomic operations.  The fact
-    // that we do not use an atomic operation here means that we could get a
-    // stale read, but in practice that poses no problems for how we are
-    // using the value.
-    if (live && s_statsEnabled && *m_cactive > m_cactiveLimit) {
-      refreshStatsHelperStop();
-    }
-#endif
     if (live && stats.usage() > m_memThresholdCallbackPeakUsage) {
       m_memThresholdCallbackPeakUsage = SIZE_MAX;
       setSurpriseFlag(MemThresholdFlag);
     }
-
     stats.peakUsage = stats.usage();
   }
   if (live && m_statsIntervalActive) {
@@ -482,9 +380,6 @@ void MemoryManager::resetAllocator() {
 
   // zero out freelists
   for (auto& list : m_freelists) list.head = nullptr;
-  if (RuntimeOption::EvalQuarantine) {
-    for (auto& list : m_quarantine) list.head = nullptr;
-  }
   m_front = m_limit = 0;
   tl_sweeping = false;
   m_exiting = false;
@@ -576,7 +471,7 @@ void MemoryManager::initHole() {
 void MemoryManager::initFree() {
   initHole();
   for (auto i = 0; i < kNumSmallSizes; i++) {
-    auto size = smallIndex2Size(i);
+    auto size = sizeIndex2Size(i);
     auto n = m_freelists[i].head;
     for (; n && n->kind() != HeaderKind::Free; n = n->next) {
       n->initHeader(HeaderKind::Free, size);
@@ -592,20 +487,26 @@ void MemoryManager::initFree() {
   m_heap.sortBigs();
 }
 
-void MemoryManager::beginQuarantine() {
-  std::swap(m_freelists, m_quarantine);
+MemoryManager::FreelistArray MemoryManager::beginQuarantine() {
+  FreelistArray list;
+  for (auto i = 0; i < kNumSmallSizes; ++i) {
+    list[i].head = m_freelists[i].head;
+    m_freelists[i].head = nullptr;
+  }
+  return list;
 }
 
 // turn free blocks into holes, restore original freelists
-void MemoryManager::endQuarantine() {
+void MemoryManager::endQuarantine(FreelistArray&& list) {
   for (auto i = 0; i < kNumSmallSizes; i++) {
-    auto size = smallIndex2Size(i);
+    auto size = sizeIndex2Size(i);
     while (auto n = m_freelists[i].maybePop()) {
       memset(n, 0x8a, size);
       initHole(n, size);
     }
+    m_freelists[i].head = list[i].head;
+    list[i].head = nullptr;
   }
-  std::swap(m_freelists, m_quarantine);
 }
 
 // test iterating objects in slabs
@@ -717,7 +618,7 @@ inline void MemoryManager::storeTail(void* tail, uint32_t tailBytes) {
     assert(fragBytes >= kSmallSizeAlign);
     assert((fragBytes & kSmallSizeAlignMask) == 0);
     unsigned fragInd = smallSize2Index(fragBytes + 1) - 1;
-    uint32_t fragUsable = smallIndex2Size(fragInd);
+    uint32_t fragUsable = sizeIndex2Size(fragInd);
     auto frag = FreeNode::InitFrom((char*)rem + remBytes - fragUsable,
                                    fragUsable, HeaderKind::Hole);
     FTRACE(4, "MemoryManager::storeTail({}, {}): rem={}, remBytes={}, "
@@ -740,7 +641,7 @@ inline void MemoryManager::splitTail(void* tail, uint32_t tailBytes,
   assert((tailBytes & kSmallSizeAlignMask) == 0);
   assert((splitUsable & kSmallSizeAlignMask) == 0);
   assert(nSplit * splitUsable <= tailBytes);
-  assert(splitUsable == smallIndex2Size(splitInd));
+  assert(splitUsable == sizeIndex2Size(splitInd));
   for (uint32_t i = nSplit; i--;) {
     auto split = FreeNode::InitFrom((char*)tail + i * splitUsable,
                                     splitUsable, HeaderKind::Hole);
@@ -769,7 +670,6 @@ NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
   storeTail(m_front, (char*)m_limit - (char*)m_front);
   auto slab = m_heap.allocSlab(kSlabSize);
   assert((uintptr_t(slab.ptr) & kSmallSizeAlignMask) == 0);
-  m_stats.mallocDebt += slab.size;
   m_stats.capacity += slab.size;
   m_stats.peakCap = std::max(m_stats.peakCap, m_stats.capacity);
   m_front = (void*)(uintptr_t(slab.ptr) + nbytes);
@@ -781,10 +681,10 @@ NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
 /*
  * Allocate `bytes' from the current slab, aligned to kSmallSizeAlign.
  */
-inline void* MemoryManager::slabAlloc(uint32_t bytes, unsigned index) {
+inline void* MemoryManager::slabAlloc(uint32_t bytes, size_t index) {
   FTRACE(3, "slabAlloc({}, {}): m_front={}, m_limit={}\n", bytes, index,
             m_front, m_limit);
-  uint32_t nbytes = smallIndex2Size(index);
+  uint32_t nbytes = sizeIndex2Size(index);
 
   assert(bytes <= nbytes);
   assert(nbytes <= kSlabSize);
@@ -823,8 +723,8 @@ inline void* MemoryManager::slabAlloc(uint32_t bytes, unsigned index) {
   return ptr;
 }
 
-void* MemoryManager::mallocSmallSizeSlow(uint32_t bytes, unsigned index) {
-  size_t nbytes = smallIndex2Size(index);
+void* MemoryManager::mallocSmallSizeSlow(size_t bytes, size_t index) {
+  size_t nbytes = sizeIndex2Size(index);
   unsigned nContig = kNContigTab[index];
   size_t contigMin = nContig * nbytes;
   unsigned contigInd = smallSize2Index(contigMin);
@@ -836,11 +736,11 @@ void* MemoryManager::mallocSmallSizeSlow(uint32_t bytes, unsigned index) {
     if (p != nullptr) {
       FTRACE(4, "MemoryManager::mallocSmallSizeSlow({}-->{}, {}): "
                 "contigMin={}, contigInd={}, use i={}, size={}, p={}\n", bytes,
-                nbytes, index, contigMin, contigInd, i, smallIndex2Size(i),
+                nbytes, index, contigMin, contigInd, i, sizeIndex2Size(i),
                 p);
       // Split tail into preallocations and store them back into freelists.
-      uint32_t availBytes = smallIndex2Size(i);
-      uint32_t tailBytes = availBytes - nbytes;
+      size_t availBytes = sizeIndex2Size(i);
+      size_t tailBytes = availBytes - nbytes;
       if (tailBytes > 0) {
         void* tail = (void*)(uintptr_t(p) + nbytes);
         splitTail(tail, tailBytes, nContig - 1, nbytes, index);
@@ -873,8 +773,6 @@ MemBlock MemoryManager::mallocBigSize(size_t bytes, HeaderKind kind,
   // NB: We don't report the SweepNode size in the stats.
   auto const delta = Mode == FreeRequested ? bytes : block.size;
   m_stats.mmUsage += delta;
-  // Adjust jemalloc otherwise we'll double count the direct allocation.
-  m_stats.mallocDebt += delta;
   m_stats.capacity += block.size + sizeof(MallocNode);
   updateBigStats();
   FTRACE(3, "mallocBigSize: {} ({} requested, {} usable)\n",
@@ -896,10 +794,11 @@ MemBlock MemoryManager::mallocBigSize<MemoryManager::ZeroFreeActual>(
 );
 
 MemBlock MemoryManager::resizeBig(MallocNode* n, size_t nbytes) {
+  assert(n->kind() == HeaderKind::BigMalloc);
+  assert(nbytes + sizeof(MallocNode) > kMaxSmallSize);
   auto old_size = n->nbytes - sizeof(MallocNode);
   auto block = m_heap.resizeBig(n + 1, nbytes);
   m_stats.mmUsage += block.size - old_size;
-  m_stats.mallocDebt += block.size - old_size;
   m_stats.capacity += block.size - old_size;
   updateBigStats();
   return block;
@@ -910,7 +809,6 @@ void MemoryManager::freeBigSize(void* vp, size_t bytes) {
   // Since we account for these direct allocations in our usage and adjust for
   // them on allocation, we also need to adjust for them negatively on free.
   m_stats.mmUsage -= bytes;
-  m_stats.mallocDebt -= bytes;
   auto actual = static_cast<MallocNode*>(vp)[-1].nbytes;
   assert(bytes <= actual);
   m_stats.capacity -= actual;
@@ -938,17 +836,27 @@ static void* allocate(size_t nbytes, type_scan::Index ty) {
 }
 
 void* malloc(size_t nbytes, type_scan::Index tyindex) {
+  assert(type_scan::isKnownType(tyindex));
   return allocate<false>(nbytes, tyindex);
 }
 
 void* calloc(size_t count, size_t nbytes, type_scan::Index tyindex) {
+  assert(type_scan::isKnownType(tyindex));
   return allocate<true>(count * nbytes, tyindex);
 }
 
-void* realloc(void* ptr, size_t nbytes, type_scan::Index tyindex) {
+void* malloc_untyped(size_t nbytes) {
+  return allocate<false>(nbytes, type_scan::kIndexUnknown);
+}
+
+void* calloc_untyped(size_t count, size_t nbytes) {
+  return allocate<true>(count * nbytes, type_scan::kIndexUnknown);
+}
+
+static void* reallocate(void* ptr, size_t nbytes, type_scan::Index tyindex) {
   // first handle corner cases that degenerate to malloc() or free()
   if (!ptr) {
-    return req::malloc(nbytes, tyindex);
+    return allocate<false>(nbytes, tyindex);
   }
   if (!nbytes) {
     req::free(ptr);
@@ -957,17 +865,27 @@ void* realloc(void* ptr, size_t nbytes, type_scan::Index tyindex) {
   FTRACE(3, "MemoryManager::realloc: {} to {} [type_index: {}]\n",
          ptr, nbytes, tyindex);
   auto const n = static_cast<MallocNode*>(ptr) - 1;
-  if (LIKELY(n->nbytes <= kMaxSmallSize)) {
-    // old block was small, cannot resize.
-    auto newmem = req::malloc(nbytes, tyindex);
+  if (LIKELY(n->nbytes <= kMaxSmallSize) ||
+      UNLIKELY(nbytes + sizeof(MallocNode) <= kMaxSmallSize)) {
+    // either the old or new block will be small; force a copy.
+    auto newmem = allocate<false>(nbytes, tyindex);
     auto copy_size = std::min(n->nbytes - sizeof(MallocNode), nbytes);
     newmem = memcpy(newmem, ptr, copy_size);
-    MM().freeSmallSize(n, n->nbytes);
+    req::free(ptr);
     return newmem;
   }
-  // Ok, it's a big allocation.
+  // it's a big allocation.
   auto block = MM().resizeBig(n, nbytes);
   return block.ptr;
+}
+
+void* realloc(void* ptr, size_t nbytes, type_scan::Index tyindex) {
+  assert(type_scan::isKnownType(tyindex));
+  return reallocate(ptr, nbytes, tyindex);
+}
+
+void* realloc_untyped(void* ptr, size_t nbytes) {
+  return reallocate(ptr, nbytes, type_scan::kIndexUnknown);
 }
 
 char* strndup(const char* str, size_t len) {
@@ -984,8 +902,10 @@ void free(void* ptr) {
   if (!ptr) return;
   auto const n = static_cast<MallocNode*>(ptr) - 1;
   if (LIKELY(n->nbytes <= kMaxSmallSize)) {
+    assert(n->kind() == HeaderKind::SmallMalloc);
     return MM().freeSmallSize(n, n->nbytes);
   }
+  assert(n->kind() == HeaderKind::BigMalloc);
   MM().freeBigSize(ptr, n->nbytes - sizeof(MallocNode));
 }
 

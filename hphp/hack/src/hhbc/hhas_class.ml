@@ -18,14 +18,17 @@
 
 type t = {
   class_attributes   : Hhas_attribute.t list;
-  class_base         : Litstr.id option;
-  class_implements   : Litstr.id list;
-  class_name         : Litstr.id;
+  class_base         : Hhbc_id.Class.t option;
+  class_implements   : Hhbc_id.Class.t list;
+  class_name         : Hhbc_id.Class.t;
   class_is_final     : bool;
   class_is_abstract  : bool;
   class_is_interface : bool;
   class_is_trait     : bool;
+  class_is_xhp       : bool;
   class_uses         : Litstr.id list;
+  class_use_aliases  :
+    (Litstr.id * Litstr.id option * Litstr.id * Ast.cu_alias_type) list;
   class_enum_type    : Hhas_type_info.t option;
   class_methods      : Hhas_method.t list;
   class_properties   : Hhas_property.t list;
@@ -42,7 +45,9 @@ let make
   class_is_abstract
   class_is_interface
   class_is_trait
+  class_is_xhp
   class_uses
+  class_use_aliases
   class_enum_type
   class_methods
   class_properties
@@ -57,7 +62,9 @@ let make
     class_is_abstract;
     class_is_interface;
     class_is_trait;
+    class_is_xhp;
     class_uses;
+    class_use_aliases;
     class_enum_type;
     class_methods;
     class_properties;
@@ -73,13 +80,15 @@ let is_final hhas_class = hhas_class.class_is_final
 let is_abstract hhas_class = hhas_class.class_is_abstract
 let is_interface hhas_class = hhas_class.class_is_interface
 let is_trait hhas_class = hhas_class.class_is_trait
+let is_xhp hhas_class = hhas_class.class_is_xhp
 let class_uses hhas_class = hhas_class.class_uses
+let class_use_aliases hhas_class = hhas_class.class_use_aliases
 let enum_type hhas_class = hhas_class.class_enum_type
 let methods hhas_class = hhas_class.class_methods
 let with_methods hhas_class class_methods = { hhas_class with class_methods }
 let properties hhas_class = hhas_class.class_properties
-let with_property hhas_class hhas_property = { hhas_class with
-  class_properties = hhas_property :: hhas_class.class_properties }
+let with_properties hhas_class properties = { hhas_class with
+  class_properties = hhas_class.class_properties @ properties }
 let constants hhas_class = hhas_class.class_constants
 let type_constants hhas_class = hhas_class.class_type_constants
 let is_closure_class hhas_class =

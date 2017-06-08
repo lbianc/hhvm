@@ -19,7 +19,6 @@
 #include "hphp/runtime/vm/jit/abi-arm.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/print.h"
-#include "hphp/runtime/vm/jit/reg-algorithms.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/smashable-instr-arm.h"
 #include "hphp/runtime/vm/jit/timer.h"
@@ -48,6 +47,9 @@ namespace arm { struct ImmFolder; }
 
 namespace {
 ///////////////////////////////////////////////////////////////////////////////
+
+static_assert(folly::kIsLittleEndian,
+  "Code contains little-endian specific optimizations.");
 
 vixl::Register X(Vreg64 r) {
   PhysReg pr(r.asReg());
@@ -244,12 +246,18 @@ struct Vgen {
   void emit(const andq& i) { a->And(X(i.d), X(i.s1), X(i.s0), UF(i.fl)); }
   void emit(const andqi& i) { a->And(X(i.d), X(i.s1), i.s0.q(), UF(i.fl)); }
   void emit(const cmovb& i) { a->Csel(W(i.d), W(i.t), W(i.f), C(i.cc)); }
+  void emit(const cmovw& i) { a->Csel(W(i.d), W(i.t), W(i.f), C(i.cc)); }
+  void emit(const cmovl& i) { a->Csel(W(i.d), W(i.t), W(i.f), C(i.cc)); }
   void emit(const cmovq& i) { a->Csel(X(i.d), X(i.t), X(i.f), C(i.cc)); }
   void emit(const cmpl& i) { a->Cmp(W(i.s1), W(i.s0)); }
   void emit(const cmpli& i) { a->Cmp(W(i.s1), i.s0.l()); }
   void emit(const cmpq& i) { a->Cmp(X(i.s1), X(i.s0)); }
   void emit(const cmpqi& i) { a->Cmp(X(i.s1), i.s0.q()); }
   void emit(const cmpsd& i);
+  void emit(const csincb& i) { a->Csinc(W(i.d), W(i.t), W(i.f), C(i.cc)); }
+  void emit(const csincw& i) { a->Csinc(W(i.d), W(i.t), W(i.f), C(i.cc)); }
+  void emit(const csincl& i) { a->Csinc(W(i.d), W(i.t), W(i.f), C(i.cc)); }
+  void emit(const csincq& i) { a->Csinc(X(i.d), X(i.t), X(i.f), C(i.cc)); }
   void emit(const cvtsi2sd& i) { a->Scvtf(D(i.d), X(i.s)); }
   void emit(const decl& i) { a->Sub(W(i.d), W(i.s), 1, UF(i.fl)); }
   void emit(const decq& i) { a->Sub(X(i.d), X(i.s), 1, UF(i.fl)); }
@@ -266,12 +274,13 @@ struct Vgen {
   void emit(const jmpi& i);
   void emit(const jmpr& i) { a->Br(X(i.target)); }
   void emit(const lea& i);
-  void emit(const leap& i) { a->Mov(X(i.d), i.s.r.disp); }
+  void emit(const leap& i);
   void emit(const lead& i) { a->Mov(X(i.d), i.s.get()); }
   void emit(const loadb& i) { a->Ldrsb(W(i.d), M(i.s)); }
   void emit(const loadl& i) { a->Ldr(W(i.d), M(i.s)); }
   void emit(const loadsd& i) { a->Ldr(D(i.d), M(i.s)); }
   void emit(const loadtqb& i) { a->Ldrsb(W(i.d), M(i.s)); }
+  void emit(const loadtql& i) { a->Ldr(W(i.d), M(i.s)); }
   void emit(const loadups& i);
   void emit(const loadw& i) { a->Ldrsh(W(i.d), M(i.s)); }
   void emit(const loadzbl& i) { a->Ldrb(W(i.d), M(i.s)); }
@@ -314,8 +323,6 @@ struct Vgen {
   void emit(const storesd& i) { emit(store{i.s, i.m}); }
   void emit(const storeups& i);
   void emit(const storew& i) { a->Strh(W(i.s), M(i.m)); }
-  void emit(const subb& i) { a->Sub(W(i.d), W(i.s1), W(i.s0), UF(i.fl)); }
-  void emit(const subbi& i) { a->Sub(W(i.d), W(i.s1), i.s0.l(), UF(i.fl)); }
   void emit(const subl& i) { a->Sub(W(i.d), W(i.s1), W(i.s0), UF(i.fl)); }
   void emit(const subli& i) { a->Sub(W(i.d), W(i.s1), i.s0.l(), UF(i.fl)); }
   void emit(const subq& i) { a->Sub(X(i.d), X(i.s1), X(i.s0), UF(i.fl)); }
@@ -339,6 +346,7 @@ struct Vgen {
   void emit(const fcvtzs& i) { a->Fcvtzs(X(i.d), D(i.s)); }
   void emit(const mrs& i) { a->Mrs(X(i.r), vixl::SystemRegister(i.s.l())); }
   void emit(const msr& i) { a->Msr(vixl::SystemRegister(i.s.l()), X(i.r)); }
+  void emit(const ubfmli& i) { a->ubfm(W(i.d), W(i.s), i.mr.w(), i.ms.w()); }
 
   void emit_nop() { a->Nop(); }
 
@@ -382,6 +390,7 @@ void Vgen::patch(Venv& env) {
 ///////////////////////////////////////////////////////////////////////////////
 
 void Vgen::emit(const copy& i) {
+  if (i.s == i.d) return;
   if (i.s.isGP() && i.d.isGP()) {
     a->Mov(X(i.d), X(i.s));
   } else if (i.s.isSIMD() && i.d.isGP()) {
@@ -395,21 +404,23 @@ void Vgen::emit(const copy& i) {
 }
 
 void Vgen::emit(const copy2& i) {
-  MovePlan moves;
-  Reg64 d0 = i.d0, d1 = i.d1, s0 = i.s0, s1 = i.s1;
-  moves[d0] = s0;
-  moves[d1] = s1;
-  auto howTo = doRegMoves(moves, rAsm); // rAsm isn't used.
-  for (auto& how : howTo) {
-    if (how.m_kind == MoveInfo::Kind::Move) {
-      a->Mov(X(how.m_dst), X(how.m_src));
+  assertx(i.s0.isValid() && i.s1.isValid() && i.d0.isValid() && i.d1.isValid());
+  auto s0 = i.s0, s1 = i.s1, d0 = i.d0, d1 = i.d1;
+  assertx(d0 != d1);
+  if (d0 == s1) {
+    if (d1 == s0) {
+      a->Eor(X(d0), X(d0), X(s0));
+      a->Eor(X(s0), X(d0), X(s0));
+      a->Eor(X(d0), X(d0), X(s0));
     } else {
-      auto const d = X(how.m_dst);
-      auto const s = X(how.m_src);
-      a->Eor(d, d, s);
-      a->Eor(s, d, s);
-      a->Eor(d, d, s);
+      // could do this in a simplify pass
+      if (s1 != d1) a->Mov(X(s1), X(d1)); // save s1 first; d1 != s0
+      if (s0 != d0) a->Mov(X(s0), X(d0));
     }
+  } else {
+    // could do this in a simplify pass
+    if (s0 != d0) a->Mov(X(s0), X(d0));
+    if (s1 != d1) a->Mov(X(s1), X(d1));
   }
 }
 
@@ -635,8 +646,7 @@ void Vgen::emit(const imul& i) {
 
       // If hi is all 0's or 1's, then check the sign, else overflow
       // (fallthrough).
-      a->Cmp(rAsm, 0);
-      a->B(&checkSign, vixl::eq);
+      a->Cbz(rAsm, &checkSign);
       a->Cmp(rAsm, -1);
       a->B(&checkSign, vixl::eq);
 
@@ -661,15 +671,19 @@ void Vgen::emit(const imul& i) {
   }
 }
 
-#define Y(vasm_opc, arm_opc)           \
-void Vgen::emit(const vasm_opc& i) {   \
-  auto adr = M(i.m);                   \
-  vixl::Label again;                   \
-  a->bind(&again);                     \
-  a->ldxr(rAsm, adr);                  \
-  a->arm_opc(rAsm, rAsm, 1, SetFlags); \
-  a->stxr(rAsm.W(), rAsm, adr);        \
-  a->Cbnz(rAsm.W(), &again);           \
+#define Y(vasm_opc, arm_opc)                             \
+void Vgen::emit(const vasm_opc& i) {                     \
+  auto adr = M(i.m);                                     \
+  /* Use VIXL's macroassembler scratch regs. */          \
+  a->SetScratchRegisters(vixl::NoReg, vixl::NoReg);      \
+  vixl::Label again;                                     \
+  a->bind(&again);                                       \
+  a->ldxr(rAsm, adr);                                    \
+  a->arm_opc(rAsm, rAsm, 1, SetFlags);                   \
+  a->stxr(rVixlScratch0, rAsm, adr);                     \
+  a->Cbnz(rVixlScratch0, &again);                        \
+  /* Restore VIXL's scratch regs. */                     \
+  a->SetScratchRegisters(rVixlScratch0, rVixlScratch1);  \
 }
 
 Y(decqmlock, Sub)
@@ -685,6 +699,8 @@ void Vgen::emit(const jcc& i) {
     jccs.push_back({a->frontier(), taken});
     vixl::Label skip, data;
 
+    // Emit a sequence similar to a smashable for easy patching later.
+    // Static relocation might be able to simplify the branch.
     a->B(&skip, vixl::InvertCondition(C(i.cc)));
     a->Ldr(rAsm, &data);
     a->Br(rAsm);
@@ -708,6 +724,9 @@ void Vgen::emit(const jmp& i) {
   if (next == i.target) return;
   jmps.push_back({a->frontier(), i.target});
   vixl::Label data;
+
+  // Emit a sequence similar to a smashable for easy patching later.
+  // Static relocation might be able to simplify the branch.
   a->Ldr(rAsm, &data);
   a->Br(rAsm);
   a->bind(&data);
@@ -723,6 +742,8 @@ void Vgen::emit(const jmpi& i) {
   if (vixl::is_int26(diff)) {
     a->b(diff);
   } else {
+    // Cannot use simple a->Mov() since such a sequence cannot be
+    // adjusted while live following a relocation.
     a->Ldr(rAsm, &data);
     a->Br(rAsm);
     a->bind(&data);
@@ -739,6 +760,19 @@ void Vgen::emit(const lea& i) {
   } else {
     a->Add(X(i.d), X(p.base), p.disp);
   }
+}
+
+void Vgen::emit(const leap& i) {
+  vixl::Label imm_data;
+  vixl::Label after_data;
+
+  // Cannot use simple a->Mov() since such a sequence cannot be
+  // adjusted while live following a relocation.
+  a->Ldr(X(i.d), &imm_data);
+  a->B(&after_data);
+  a->bind(&imm_data);
+  a->dc64(i.s.r.disp);
+  a->bind(&after_data);
 }
 
 #define Y(vasm_opc, arm_opc, src_dst, m)                             \
@@ -1175,6 +1209,7 @@ Y(loadb, s)
 Y(loadl, s)
 Y(loadsd, s)
 Y(loadtqb, s)
+Y(loadtql, s)
 Y(loadups, s)
 Y(loadw, s)
 Y(loadzbl, s)
@@ -1215,7 +1250,6 @@ Y(andqi, andq, ldimmq, ISLG(64), Immed64(value), U2(i.s1, i.d))
 Y(cmpli, cmpl, ldimml, ISAR, i.s0, i.s1)
 Y(cmpqi, cmpq, ldimmq, ISAR, Immed64(value), i.s1)
 Y(orqi, orq, ldimmq, ISLG(64), Immed64(value), U2(i.s1, i.d))
-Y(subbi, subb, ldimmb, ISAR, i.s0, U2(i.s1, i.d))
 Y(subli, subl, ldimml, ISAR, i.s0, U2(i.s1, i.d))
 Y(subqi, subq, ldimmq, ISAR, Immed64(value), U2(i.s1, i.d))
 Y(testli, testl, ldimml, ISLG(32), i.s0, i.s1)
@@ -1631,12 +1665,16 @@ void optimizeARM(Vunit& unit, const Abi& abi, bool regalloc) {
 
   assertx(checkWidths(unit));
 
+  simplify(unit);
+
   lowerForARM(unit);
+
   simplify(unit);
 
   if (!unit.constToReg.empty()) {
     foldImms<arm::ImmFolder>(unit);
   }
+  reuseImmq(unit);
 
   optimizeCopies(unit, abi);
 

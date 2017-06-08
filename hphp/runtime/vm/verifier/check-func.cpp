@@ -63,6 +63,7 @@ struct State {
   int stklen;       // length of evaluation stack.
   int fpilen;       // length of FPI stack.
   bool mbr_live;    // liveness of member base register
+  folly::Optional<MOpMode> mbr_mode; // mode of member base register
 };
 
 /**
@@ -73,7 +74,7 @@ struct BlockInfo {
 };
 
 struct FuncChecker {
-  FuncChecker(const Func* func, bool verbose);
+  FuncChecker(const Func* func, ErrorMode mode);
   bool checkOffsets();
   bool checkFlow();
 
@@ -99,7 +100,7 @@ struct FuncChecker {
   ARGTYPES
 #undef ARGTYPE
 #undef ARGTYPEVEC
-  bool checkOp(State*, PC, Op);
+  bool checkOp(State*, PC, Op, Block*);
   template<typename Subop> bool checkImmOAImpl(PC& pc, PC instr);
   bool checkInputs(State* cur, PC, Block* b);
   bool checkOutputs(State* cur, PC, Block* b);
@@ -137,11 +138,17 @@ struct FuncChecker {
  private:
   template<class... Args>
   void error(const char* fmt, Args&&... args) {
-    verify_error(unit(), m_func, fmt, std::forward<Args>(args)...);
+    verify_error(
+      unit(),
+      m_func,
+      m_errmode == kThrow,
+      fmt,
+      std::forward<Args>(args)...
+    );
   }
   template<class... Args>
   void ferror(Args&&... args) {
-    verify_error(unit(), m_func, "%s",
+    verify_error(unit(), m_func, m_errmode == kThrow, "%s",
                  folly::sformat(std::forward<Args>(args)...).c_str());
   }
 
@@ -151,11 +158,11 @@ struct FuncChecker {
   const Func* const m_func;
   Graph* m_graph;
   Bits m_instrs;
-  bool m_verbose;
+  ErrorMode m_errmode;
   FlavorDesc* m_tmp_sig;
 };
 
-bool checkNativeFunc(const Func* func, bool verbose) {
+bool checkNativeFunc(const Func* func, ErrorMode mode) {
   auto const funcname = func->displayName();
   auto const pc = func->preClass();
   auto const clsname = pc ? pc->name() : nullptr;
@@ -165,7 +172,7 @@ bool checkNativeFunc(const Func* func, bool verbose) {
   if (func->builtinFuncPtr() == Native::unimplementedWrapper) return true;
 
   if (func->isAsync()) {
-    verify_error(func->unit(), func,
+    verify_error(func->unit(), func, mode == kThrow,
       "<<__Native>> function %s%s%s is declared async; <<__Native>> functions "
       "can return Awaitable<T>, but can not be declared async.\n",
       clsname ? clsname->data() : "",
@@ -182,7 +189,7 @@ bool checkNativeFunc(const Func* func, bool verbose) {
     auto const tstr = info.sig.toString(clsname ? clsname->data() : nullptr,
                                         funcname->data());
 
-    verify_error(func->unit(), func,
+    verify_error(func->unit(), func, mode == kThrow,
       "<<__Native>> function %s%s%s does not match C++ function "
       "signature (%s): %s\n",
       clsname ? clsname->data() : "",
@@ -197,24 +204,24 @@ bool checkNativeFunc(const Func* func, bool verbose) {
   return true;
 }
 
-bool checkFunc(const Func* func, bool verbose) {
-  if (verbose) {
+bool checkFunc(const Func* func, ErrorMode mode) {
+  if (mode == kVerbose) {
     func->prettyPrint(std::cout);
     if (func->cls() || !func->preClass()) {
       printf("  FuncId %d\n", func->getFuncId());
     }
     printFPI(func);
   }
-  FuncChecker v(func, verbose);
+  FuncChecker v(func, mode);
   return v.checkOffsets() &&
          v.checkFlow();
 }
 
-FuncChecker::FuncChecker(const Func* f, bool verbose)
+FuncChecker::FuncChecker(const Func* f, ErrorMode mode)
 : m_func(f)
 , m_graph(0)
 , m_instrs(m_arena, f->past() - f->base() + 1)
-, m_verbose(verbose) {
+, m_errmode(mode) {
 }
 
 // Needs to be a sorted map so we can divide funcs into contiguous sections.
@@ -773,6 +780,31 @@ bool FuncChecker::checkInputs(State* cur, PC pc, Block* b) {
           cur->mbr_live ? "live" : "dead", opcodeToName(op));
     ok = false;
   }
+  if (cur->mbr_live && isMemberOp(op)) {
+    folly::Optional<MOpMode> op_mode;
+    if (op == Op::QueryM) {
+      auto new_pc = pc;
+      decode_op(new_pc);
+      decode_iva(new_pc);
+      op_mode = getQueryMOpMode(decode_oa<QueryMOp>(new_pc));
+    } else if (isMemberFinalOp(op)) {
+      op_mode = finalMemberOpMode(op);
+    } else if (op == Op::Dim) {
+      auto new_pc = pc;
+      decode_op(new_pc);
+      op_mode = decode_oa<MOpMode>(new_pc);
+    }
+
+    if(cur->mbr_mode && cur->mbr_mode != op_mode){
+      error("Member base register mode at %s is %s when it should be %s\n",
+            opcodeToName(op),
+            op_mode ? subopToName(op_mode.value()) : "Unknown",
+            subopToName(cur->mbr_mode.value()));
+      ok = false;
+    }
+
+    cur->mbr_mode = op_mode;
+  }
   return ok;
 }
 
@@ -938,7 +970,7 @@ bool FuncChecker::checkClsRefSlots(State* cur, PC const pc) {
   return ok;
 }
 
-bool FuncChecker::checkOp(State* cur, PC pc, Op op) {
+bool FuncChecker::checkOp(State* cur, PC pc, Op op, Block* b) {
   switch (op) {
     case Op::GetMemoKeyL:
     case Op::MemoGet:
@@ -949,7 +981,14 @@ bool FuncChecker::checkOp(State* cur, PC pc, Op op) {
         return false;
       }
       break;
-    case Op::AssertRATStk:
+    case Op::AssertRATL:
+    case Op::AssertRATStk: {
+      if (pc == b->last){
+        ferror("{} cannot appear at the end of a block\n", opcodeToName(op));
+        return false;
+      }
+      if (op == Op::AssertRATL) break;
+    }
     case Op::BaseNC:
     case Op::BaseGC:
     case Op::BaseSC:
@@ -1034,8 +1073,19 @@ bool FuncChecker::checkOutputs(State* cur, PC pc, Block* b) {
     }
   }
 
-  if (isMemberBaseOp(op))       cur->mbr_live = true;
-  else if (isMemberFinalOp(op)) cur->mbr_live = false;
+  if (isMemberBaseOp(op)) {
+    cur->mbr_live = true;
+    if (op == Op::BaseNC || op == Op::BaseNL || op == Op::BaseGC ||
+        op == Op::BaseGL || op == Op::BaseL)  {
+      auto new_pc = pc;
+      decode_op(new_pc);
+      decode_iva(new_pc);
+      cur->mbr_mode = decode_oa<MOpMode>(new_pc);
+    }
+  } else if (isMemberFinalOp(op)) {
+    cur->mbr_live = false;
+    cur->mbr_mode.clear();
+  }
 
   return ok;
 }
@@ -1103,6 +1153,7 @@ void FuncChecker::initState(State* s) {
   s->stklen = 0;
   s->fpilen = 0;
   s->mbr_live = false;
+  s->mbr_mode.clear();
 }
 
 void FuncChecker::copyState(State* to, const State* from) {
@@ -1115,6 +1166,7 @@ void FuncChecker::copyState(State* to, const State* from) {
   to->stklen = from->stklen;
   to->fpilen = from->fpilen;
   to->mbr_live = from->mbr_live;
+  to->mbr_mode = from->mbr_mode;
 }
 
 /**
@@ -1136,18 +1188,18 @@ bool FuncChecker::checkFlow() {
   }
   for (Block* b = m_graph->first_rpo; b; b = b->next_rpo) {
     copyState(&cur, &m_info[b->id].state_in);
-    if (m_verbose) {
+    if (m_errmode == kVerbose) {
       std::cout << blockToString(b, m_graph, unit()) << std::endl;
     }
     for (InstrRange i = blockInstrs(b); !i.empty(); ) {
       PC pc = i.popFront();
-      if (m_verbose) {
+      if (m_errmode == kVerbose) {
         std::cout << "  " << std::setw(5) << offset(pc) << ":" <<
                      stateToString(cur) << " " <<
                      instrToString(pc, unit()) << std::endl;
       }
       auto const op = peek_op(pc);
-      ok &= checkOp(&cur, pc, op);
+      ok &= checkOp(&cur, pc, op, b);
       ok &= checkInputs(&cur, pc, b);
       auto const flags = instrFlags(op);
       if (flags & TF) ok &= checkTerminal(&cur, pc);
@@ -1195,13 +1247,13 @@ bool FuncChecker::checkSuccEdges(Block* b, State* cur) {
        last_op == OpWIterNext || last_op == OpWIterNextK);
     bool save = cur->iters[id];
     cur->iters[id] = taken_state;
-    if (m_verbose) {
+    if (m_errmode == kVerbose) {
       std::cout << "        " << stateToString(*cur) <<
         " -> B" << b->succs[1]->id << std::endl;
     }
     ok &= checkEdge(b, *cur, b->succs[1]);
     cur->iters[id] = !taken_state;
-    if (m_verbose) {
+    if (m_errmode == kVerbose) {
       std::cout << "        " << stateToString(*cur) <<
                    " -> B" << b->succs[0]->id << std::endl;
     }
@@ -1209,7 +1261,7 @@ bool FuncChecker::checkSuccEdges(Block* b, State* cur) {
     cur->iters[id] = save;
   } else {
     // Other branch instructions send the same state to all successors.
-    if (m_verbose) {
+    if (m_errmode == kVerbose) {
       std::cout << "        " << stateToString(*cur) << std::endl;
     }
     for (BlockPtrRange i = succBlocks(b); !i.empty(); ) {

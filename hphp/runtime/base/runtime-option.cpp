@@ -33,6 +33,7 @@
 #include "hphp/util/arch.h"
 #include "hphp/util/atomic-vector.h"
 #include "hphp/util/build-info.h"
+#include "hphp/util/cpuid.h"
 #include "hphp/util/hdf.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/network.h"
@@ -67,7 +68,6 @@
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/simple-counter.h"
 #include "hphp/runtime/base/static-string-table.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/zend-url.h"
 #include "hphp/runtime/ext/extension-registry.h"
 
@@ -164,6 +164,7 @@ int RuntimeOption::ServerWarmupThrottleRequestCount = 0;
 int RuntimeOption::ServerThreadDropCacheTimeoutSeconds = 0;
 int RuntimeOption::ServerThreadJobLIFOSwitchThreshold = INT_MAX;
 int RuntimeOption::ServerThreadJobMaxQueuingMilliSeconds = -1;
+bool RuntimeOption::AlwaysDecodePostDataDefault = true;
 bool RuntimeOption::ServerThreadDropStack = false;
 bool RuntimeOption::ServerHttpSafeMode = false;
 bool RuntimeOption::ServerStatCache = false;
@@ -184,7 +185,6 @@ int RuntimeOption::RequestTimeoutSeconds = 0;
 int RuntimeOption::PspTimeoutSeconds = 0;
 int RuntimeOption::PspCpuTimeoutSeconds = 0;
 int64_t RuntimeOption::MaxRequestAgeFactor = 0;
-int64_t RuntimeOption::ServerMemoryHeadRoom = 0;
 int64_t RuntimeOption::RequestMemoryMaxBytes =
   std::numeric_limits<int64_t>::max();
 int64_t RuntimeOption::ImageMemoryMaxBytes = 0;
@@ -253,11 +253,14 @@ std::string RuntimeOption::SSLCertificateKeyFile;
 std::string RuntimeOption::SSLCertificateDir;
 bool RuntimeOption::TLSDisableTLS1_2 = false;
 std::string RuntimeOption::TLSClientCipherSpec;
+bool RuntimeOption::EnableSSLWithPlainText = false;
 
 std::vector<std::shared_ptr<VirtualHost>> RuntimeOption::VirtualHosts;
 std::shared_ptr<IpBlockMap> RuntimeOption::IpBlocks;
 std::vector<std::shared_ptr<SatelliteServerInfo>>
   RuntimeOption::SatelliteServerInfos;
+
+bool RuntimeOption::AllowRunAsRoot = false; // Allow running hhvm as root.
 
 int RuntimeOption::XboxServerThreadCount = 10;
 int RuntimeOption::XboxServerMaxQueueLength = INT_MAX;
@@ -318,6 +321,7 @@ int RuntimeOption::AdminThreadCount = 1;
 int RuntimeOption::AdminServerQueueToWorkerRatio = 1;
 std::string RuntimeOption::AdminPassword;
 std::set<std::string> RuntimeOption::AdminPasswords;
+std::set<std::string> RuntimeOption::HashedAdminPasswords;
 
 std::string RuntimeOption::ProxyOriginRaw;
 int RuntimeOption::ProxyPercentageRaw = 0;
@@ -467,6 +471,20 @@ static inline bool eagerGcDefault() {
 
 static inline uint64_t pgoThresholdDefault() {
   return debug ? 2 : 2000;
+}
+
+static inline bool alignMacroFusionPairs() {
+  switch (getProcessorFamily()) {
+    case ProcessorFamily::Intel_SandyBridge:
+    case ProcessorFamily::Intel_IvyBridge:
+    case ProcessorFamily::Intel_Haswell:
+    case ProcessorFamily::Intel_Broadwell:
+    case ProcessorFamily::Intel_Skylake:
+      return true;
+    case ProcessorFamily::Unknown:
+      return false;
+  }
+  return false;
 }
 
 static inline bool evalJitDefault() {
@@ -1326,6 +1344,9 @@ void RuntimeOption::Load(
     Config::Bind(Host, ini, config, "Server.Host");
     Config::Bind(DefaultServerNameSuffix, ini, config,
                  "Server.DefaultServerNameSuffix");
+    Config::Bind(AlwaysDecodePostDataDefault, ini, config,
+                 "Server.AlwaysDecodePostDataDefault",
+                 AlwaysDecodePostDataDefault);
     Config::Bind(ServerType, ini, config, "Server.Type", ServerType);
     Config::Bind(ServerIP, ini, config, "Server.IP");
     Config::Bind(ServerFileSocket, ini, config, "Server.FileSocket");
@@ -1381,7 +1402,6 @@ void RuntimeOption::Load(
     Config::Bind(PspTimeoutSeconds, ini, config, "Server.PspTimeoutSeconds", 0);
     Config::Bind(PspCpuTimeoutSeconds, ini, config,
                  "Server.PspCpuTimeoutSeconds", 0);
-    Config::Bind(ServerMemoryHeadRoom, ini, config, "Server.MemoryHeadRoom", 0);
     Config::Bind(RequestMemoryMaxBytes, ini, config,
                  "Server.RequestMemoryMaxBytes", (16LL << 30)); // 16GiB
     Config::Bind(ServerGracefulShutdownWait, ini,
@@ -1471,6 +1491,8 @@ void RuntimeOption::Load(
                  false);
     Config::Bind(TLSClientCipherSpec, ini, config,
                  "Server.TLSClientCipherSpec");
+    Config::Bind(EnableSSLWithPlainText, ini, config,
+                 "Server.EnableSSLWithPlainText");
 
     // SourceRoot has been default to: Process::GetCurrentDirectory() + '/'
     auto defSourceRoot = SourceRoot;
@@ -1577,6 +1599,7 @@ void RuntimeOption::Load(
                  "Server.AllowDuplicateCookies", !EnableHipHopSyntax);
     Config::Bind(PathDebug, ini, config, "Server.PathDebug", false);
     Config::Bind(ServerUser, ini, config, "Server.User", "");
+    Config::Bind(AllowRunAsRoot, ini, config, "Server.AllowRunAsRoot", false);
   }
 
   VirtualHost::SortAllowedDirectories(AllowedDirectories);
@@ -1689,6 +1712,8 @@ void RuntimeOption::Load(
                  "AdminServer.QueueToWorkerRatio", 1);
     Config::Bind(AdminPassword, ini, config, "AdminServer.Password");
     Config::Bind(AdminPasswords, ini, config, "AdminServer.Passwords");
+    Config::Bind(HashedAdminPasswords, ini, config,
+                 "AdminServer.HashedPasswords");
   }
   {
     // Proxy

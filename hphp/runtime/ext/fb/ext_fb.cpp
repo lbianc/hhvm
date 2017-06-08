@@ -44,6 +44,7 @@
 #include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/tv-type.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/fb/FBSerialize/FBSerialize.h"
 #include "hphp/runtime/ext/fb/VariantController.h"
@@ -356,7 +357,7 @@ static bool fb_compact_serialize_is_list(const Array& arr, int64_t& index_limit)
       return false;
     }
     int64_t index = key.toInt64();
-    if (index < 0) {
+    if (index < max_index) {
       return false;
     }
     if (index > max_index) {

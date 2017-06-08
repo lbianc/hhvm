@@ -1,12 +1,11 @@
 open ServerCommandTypes
 
 let debug_describe_t : type a. a t -> string = function
-  | STATUS                     -> "STATUS"
+  | STATUS                   _ -> "STATUS"
   | INFER_TYPE               _ -> "INFER_TYPE"
   | COVERAGE_LEVELS          _ -> "COVERAGE_LEVELS"
   | AUTOCOMPLETE             _ -> "AUTOCOMPLETE"
   | IDENTIFY_FUNCTION        _ -> "IDENTIFY_FUNCTION"
-  | GET_DEFINITION_BY_ID     _ -> "GET_DEFINITION_BY_ID"
   | METHOD_JUMP              _ -> "METHOD_JUMP"
   | FIND_DEPENDENT_FILES     _ -> "FIND_DEPENDENT_FILES"
   | FIND_REFS                _ -> "FIND_REFS"
@@ -39,6 +38,7 @@ let debug_describe_t : type a. a t -> string = function
   | SUBSCRIBE_DIAGNOSTIC     _ -> "SUBSCRIBE_DIAGNOSTIC"
   | UNSUBSCRIBE_DIAGNOSTIC   _ -> "UNSUBSCRIBE_DIAGNOSTIC"
   | OUTLINE                  _ -> "OUTLINE"
+  | IDE_IDLE                   -> "IDE_IDLE"
 
 let debug_describe_cmd : type a. a command -> string = function
   | Rpc rpc -> debug_describe_t rpc

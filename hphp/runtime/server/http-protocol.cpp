@@ -228,6 +228,7 @@ static void StartRequest(Array& server) {
 void HttpProtocol::PrepareSystemVariables(Transport *transport,
                                           const RequestURI &r,
                                           const SourceRootInfo &sri) {
+  SuppressHackArrCompatNotices suppress;
 
   auto const vhost = VirtualHost::GetCurrent();
   auto const g = get_global_variables()->asArrayData();
@@ -1011,7 +1012,7 @@ bool HttpProtocol::ProxyRequest(Transport *transport, bool force,
     data = (const char *)transport->getPostData(size);
   }
 
-  std::vector<String> responseHeaders;
+  req::vector<String> responseHeaders;
   HttpClient http;
   code = http.request(transport->getMethodName(),
                       url.c_str(), data, size, response, &requestHeaders,

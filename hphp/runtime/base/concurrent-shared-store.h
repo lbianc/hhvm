@@ -33,7 +33,6 @@
 #include "hphp/runtime/base/apc-stats.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/ext/apc/snapshot-loader.h"
 #include "hphp/runtime/server/server-stats.h"
 
@@ -358,7 +357,8 @@ private:
     }
     size_t hash(const char* s) const {
       assert(s);
-      return isTaggedStringData(s) ? getStringData(s)->hash() : hash_string(s);
+      return isTaggedStringData(s) ? getStringData(s)->hash() :
+             StringData::hash(s, strlen(s));
     }
   };
 

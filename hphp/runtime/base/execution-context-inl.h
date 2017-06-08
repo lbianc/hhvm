@@ -116,6 +116,12 @@ inline int ExecutionContext::getLastErrorLine() const {
   return m_lastErrorLine;
 }
 
+inline Array ExecutionContext::releaseDeferredErrors() {
+  auto ret = std::move(m_deferredErrors);
+  m_deferredErrors = Array::CreateVec();
+  return ret;
+}
+
 inline Array ExecutionContext::getEnvs() const {
   return m_envs;
 }
@@ -275,6 +281,16 @@ ExecutionContext::getPrevVMStateSkipFrame(const ActRec* fp,
     prev = getPrevVMState(prev, prevPc, prevSp, fromVMEntry);
   } while (prev && prev->skipFrame());
   return prev;
+}
+
+template<class Fn> void ExecutionContext::sweepDynPropTable(Fn fn) {
+  for (auto i = dynPropTable.begin(); i != dynPropTable.end();) {
+    if (fn(i->first)) {
+      i = dynPropTable.erase(i);
+    } else {
+      ++i;
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

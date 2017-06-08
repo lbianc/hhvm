@@ -21,7 +21,6 @@
 #include "hphp/parser/hphp.tab.hpp"
 #include "hphp/compiler/expression/scalar_expression.h"
 #include "hphp/compiler/expression/constant_expression.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/zend-string.h"
@@ -288,6 +287,8 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
   ExpressionPtr optExp;
   Variant v1;
   Variant v2;
+
+  if (RuntimeOption::EvalDisableHphpcOpts) return ExpressionPtr();
 
   if (!m_exp2->getScalarValue(v2)) {
     if ((ar->getPhase() != AnalysisResult::ParseAllFiles) &&
@@ -578,6 +579,9 @@ ExpressionPtr BinaryOpExpression::foldConst(AnalysisResultConstPtr ar) {
 ExpressionPtr
 BinaryOpExpression::foldRightAssoc(AnalysisResultConstPtr ar) {
   ExpressionPtr optExp1;
+
+  if (RuntimeOption::EvalDisableHphpcOpts) return ExpressionPtr();
+
   switch (m_op) {
   case '.':
   case '+':

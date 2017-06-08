@@ -260,6 +260,10 @@ function hh_codegen_cmd($options) {
   // get 100% test coverage this will need to be fixed
   $cmd = hh_codegen_path();
   $cmd .= ' -v Eval.EnableHipHopSyntax=1';
+  $cmd .= ' -v Hack.Compiler.ConstantFolding=0';
+  $cmd .= ' -v Hack.Compiler.OptimizeNullCheck=0';
+  $cmd .= ' -v Hack.Compiler.OptimizeCuf=0';
+  if (isset($options['hackc'])) $cmd .= ' --daemon';
   return $cmd;
 }
 
@@ -452,6 +456,7 @@ function get_options($argv) {
     'compare-hh-codegen' => '',
     'run-hh-codegen' => '',
     'record-failures:' => '',
+    'hackc' => '',
   );
   $options = array();
   $files = array();
@@ -720,15 +725,11 @@ function list_tests($files, $options) {
   }
 }
 
-function find_test_ext($test, $ext) {
+function find_test_ext($test, $ext, $configName='config') {
   if (is_file("{$test}.{$ext}")) {
     return "{$test}.{$ext}";
   }
-  return find_file_for_dir(dirname($test), "config.{$ext}");
-}
-
-function find_file($test, $name) {
-  return find_file_for_dir(dirname($test), $name);
+  return find_file_for_dir(dirname($test), "{$configName}.{$ext}");
 }
 
 function find_file_for_dir($dir, $name) {
@@ -815,6 +816,11 @@ function hhvm_cmd_impl() {
       extra_args($options),
     );
 
+    if (isset($options['hackc'])) {
+      $args[] = '-vEval.HackCompilerCommand="'.hh_codegen_cmd($options).'"';
+      $args[] = '-vEval.HackCompilerDefault=true';
+    }
+
     if (isset($options['relocate'])) {
       $args[] = '--count='.($options['relocate'] * 2);
       $args[] = '-vEval.JitAHotSize=6000000';
@@ -830,6 +836,10 @@ function hhvm_cmd_impl() {
 
     if (isset($options['run-hh-codegen'])) {
       $args[] = '-vEval.AllowHhas=1';
+    }
+
+    if (isset($options['compare-hh-codegen'])) {
+      $args[] = '-vEval.DisableHphpcOpts=1';
     }
 
     if (!isset($options['cores'])) {
@@ -952,7 +962,7 @@ function hphp_cmd($options, $test) {
     hhvm_path(),
     '--hphp',
     '--config',
-    find_file($test, 'hphp_config.ini'),
+    find_test_ext($test, 'ini', 'hphp_config'),
     read_opts_file("$test.hphp_opts"),
     "-thhbc -l0 -k1 -o \"$test.repo\" \"$test\"",
     $extra_args
@@ -1258,50 +1268,7 @@ class Status {
       return '';
     }
 
-    if (class_exists('UConverter')) {
-      return UConverter::transcode($str, 'UTF-8', 'UTF-8');
-    }
-
-    // UConverter is PHP5.5 or later.
-    // Do the equivalent using a slower user-space implementation.
-    $ret = '';
-    $len = strlen($str);
-    $pos = 0;
-    while ($pos < $len) {
-      $c = $str[$pos];
-      $co = ord($c);
-      if ($co < 0x80) {
-        // U+0000 - U+007F ASCII
-        $ret .= $c;
-        ++$pos;
-      } elseif ((($co & 0xE0) == 0xC0) &&
-                (($len - $pos) > 1) &&
-                ((ord($str[$pos+1]) & 0xC0) == 0x80)) {
-        // U+0080 - U+07FF Lower Basic Multilingual Plane
-        $ret .= substr($str, $pos, 2);
-        $pos += 2;
-      } elseif ((($co & 0xF0) == 0xE0) &&
-                (($len - $pos) > 2) &&
-                ((ord($str[$pos+1]) & 0xC0) == 0x80) &&
-                ((ord($str[$pos+2]) & 0xC0) == 0x80)) {
-        // U+0800 - U+FFFF Upper Basic Multilingual Plane
-        $ret .= substr($str, $pos, 3);
-        $pos += 3;
-      } elseif ((($co & 0xF8) == 0xF0) &&
-                (($len - $pos) > 3) &&
-                ((ord($str[$pos+1]) & 0xC0) == 0x80) &&
-                ((ord($str[$pos+2]) & 0xC0) == 0x80) &&
-                ((ord($str[$pos+3]) & 0xC0) == 0x80)) {
-        // U+010000 - U+10FFFF Supplementary Multilingual Planes
-        $ret .= substr($str, $pos, 4);
-        $pos += 4;
-      } else {
-        // Invalid UTF8
-        $ret .= "\xEF\xBF\xBD"; // U+FFFD REPLACEMENT CHARACTER
-        ++$pos;
-      }
-    }
-    return $ret;
+    return UConverter::transcode($str, 'UTF-8', 'UTF-8');
   }
 
   public static function jsonEncode($data) {
@@ -1360,6 +1327,9 @@ function run($options, $tests, $bad_test_file) {
       clean_intermediate_files($test, $options);
     } else if ($status === 'skip-norepo') {
       Status::skip($test, 'norepo', $time, $stime, $etime);
+      clean_intermediate_files($test, $options);
+    } else if ($status === 'skip-verify') {
+      Status::skip($test, 'verify', $time, $stime, $etime);
       clean_intermediate_files($test, $options);
     } else if ($status === 'skip-onlyrepo') {
       Status::skip($test, 'onlyrepo', $time, $stime, $etime);
@@ -1600,7 +1570,8 @@ function strip_hhas_file($file) {
       fclose($h);
       return false;
     }
-    if ($s === "" || $s[0] === "#" || substr($s, 0, 10) === ".filepath ") {
+    if ($s === "" || $s[0] === "#" || substr($s, 0, 10) === ".filepath "
+        || substr($s, 0, 7) === ".strict") {
       continue;
     }
     $buf .= $s;
@@ -1862,8 +1833,14 @@ function run_config_post($outputs, $test, $options) {
     return 'skip';
   }
   if (!$passed) {
-    file_put_contents("$test.diff",
-                      generate_diff($wanted_re, $wanted_re, $output));
+    $diff = generate_diff($wanted_re, $wanted_re, $output);
+    if ($passed === false && $diff === "") {
+      // the preg match failed, probably because the regex was too complex,
+      // but since the line by line diff came up empty, we're fine
+      $passed = 1;
+    } else {
+      file_put_contents("$test.diff", $diff);
+    }
   }
   return $passed;
 }
@@ -1922,6 +1899,12 @@ function run_test($options, $test) {
     return 'skip';
   }
 
+  if(file_exists($test . ".verify") && (isset($options['relocate'])   ||
+                                        isset($options['recycle-tc']) ||
+                                        isset($options['repo'])))     {
+      return 'skip-verify';
+  }
+
   if (isset($options['repo'])) {
     if (preg_grep('/-m debug/', (array)$hhvm) || file_exists($test.'.norepo')) {
       return 'skip-norepo';
@@ -1970,6 +1953,7 @@ function run_test($options, $test) {
     list($hhvm, $hhvm_env) = hhvm_cmd($options, $hhas_temp);
   }
 
+  // Run the Hack code generator
   if (isset($options['run-hh-codegen'])) {
     if (substr($test, -5) === ".hhas") return 'skip';
 
@@ -1982,6 +1966,7 @@ function run_test($options, $test) {
     list($hhvm, $hhvm_env) = hhvm_cmd($options, $hhas_temp);
   }
 
+  // Compare the output of Hack code gen with that of HHVM
   if (isset($options['compare-hh-codegen'])) {
     $diff = $test.'.diff';
 
@@ -1994,6 +1979,19 @@ function run_test($options, $test) {
       return false;
     }
     if (contains_nyi_line($hhcg) === true) return 'skip';
+    // Diff the immediate output of the Hack compiler against HHVM
+    strip_hhas_file($hhas);
+    strip_hhas_file($hhcg);
+
+    system("diff -B $hhcg $hhas > $diff", $ret);
+
+    // If identical, don't bother dropping through to roundtrip stage
+    if ($ret === 0) {
+      unlink($diff);
+      return true;
+    }
+
+    // If it failed, do a round-trip through HHVM and try again
     list($hhvm2, $hhvm2_env) = hhvm_cmd($options, $hhcg);
     $hhcg2 = dump_hhas_to_temp($hhvm2, $hhcg);
     $rv = true;
@@ -2009,7 +2007,7 @@ function run_test($options, $test) {
     strip_hhas_file($hhas);
     strip_hhas_file($hhcg2);
 
-    system("diff $hhcg2 $hhas > $diff", $ret);
+    system("diff -B $hhcg2 $hhas > $diff", $ret);
     if ($ret === 0) {
       if ($rv) unlink($diff);
       return $rv;

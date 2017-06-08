@@ -19,7 +19,7 @@
 
 #include "hphp/util/alloc.h"
 
-#ifdef USE_JEMALLOC_CHUNK_HOOKS
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
 
 #include <string>
 
@@ -61,10 +61,15 @@ struct ManagedArena {
   // Report usage.
   static std::string reportStats();
 
+#ifdef USE_JEMALLOC_CHUNK_HOOKS
  private:
   static void* chunk_alloc(void* chunk, size_t size, size_t alignment,
                            bool* zero, bool* commit, unsigned arena_ind);
-
+#else
+  static void* extent_alloc(extent_hooks_t* extent_hooks, void *new_addr,
+                            size_t size, size_t alignment, bool* zero,
+                            bool* commit, unsigned arena_ind);
+#endif
  private:
   char* const m_base{nullptr};
   size_t m_maxCapacity{0};
@@ -88,5 +93,5 @@ struct ManagedArena {
 };
 
 }
-#endif // USE_JEMALLOC_CHUNK_HOOKS
+#endif // USE_JEMALLOC_CUSTOM_HOOKS
 #endif

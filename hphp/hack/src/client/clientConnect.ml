@@ -20,9 +20,19 @@ type env = {
   retry_if_init : bool;
   expiry : float option;
   no_load : bool;
-  to_ide : bool;
   ai_mode : string option;
+  progress_callback: string option -> unit;
+  do_post_handoff_handshake: bool;
 }
+
+let tty_progress_reporter (status: string option) : unit =
+  if Tty.spinner_used () then Tty.print_clear_line stderr;
+  match status with
+  | None -> ()
+  | Some s -> Tty.eprintf "hh_server is busy: %s %s%!" s (Tty.spinner())
+
+let null_progress_reporter (_status: string option) : unit =
+  ()
 
 let running_load_script_re = Str.regexp_string "Running load script"
 
@@ -114,25 +124,21 @@ let open_and_get_tail_msg start_time tail_env =
   let tail_msg = msg_of_tail tail_env in
   load_state_not_found, tail_msg
 
-let print_wait_msg ?(first_call=false) start_time tail_env =
-  if (not first_call) && Tty.spinner_used () then
-    Tty.print_clear_line stderr;
+let print_wait_msg progress_callback start_time tail_env =
   let load_state_not_found, tail_msg =
     open_and_get_tail_msg start_time tail_env in
   if load_state_not_found then
     Printf.eprintf "%s\n%!" ClientMessages.load_state_not_found_msg;
-  Tty.eprintf "hh_server is busy: %s %s%!" tail_msg (Tty.spinner());
-  ()
+  progress_callback (Some tail_msg)
 
 (** Sleeps until the server says hello. While waiting, prints out spinner and
  * useful messages by tailing the server logs. *)
 let rec wait_for_server_hello
   ~ic
-  ~env
   ~retries
+  ~progress_callback
   ~start_time
-  ~tail_env
-  ~first_call =
+  ~tail_env =
   match retries with
   | Some n when n < 0 ->
       (if Option.is_some tail_env then
@@ -143,25 +149,26 @@ let rec wait_for_server_hello
   let readable, _, _  = Unix.select
     [Timeout.descr_of_in_channel ic] [] [Timeout.descr_of_in_channel ic] 1.0 in
   if readable = [] then (
-    Option.iter tail_env (fun t -> print_wait_msg ~first_call start_time t);
+    Option.iter tail_env
+      (fun t -> print_wait_msg progress_callback start_time t);
     wait_for_server_hello
       ~ic
-      ~env
       ~retries:(Option.map retries (fun x -> x - 1))
+      ~progress_callback
       ~start_time
       ~tail_env
-      ~first_call:false
   ) else
     try
       let fd = Timeout.descr_of_in_channel ic in
       let msg = Marshal_tools.from_fd_with_preamble fd in
       (match msg with
-      | "Hello" ->
+      | ServerCommandTypes.Hello ->
         ()
       | _ ->
-        Option.iter tail_env (fun t -> print_wait_msg ~first_call start_time t);
-        wait_for_server_hello ic env (Option.map retries (fun x -> x - 1))
-          start_time tail_env false
+        Option.iter tail_env
+          (fun t -> print_wait_msg progress_callback start_time t);
+        wait_for_server_hello ic (Option.map retries (fun x -> x - 1))
+          progress_callback start_time tail_env
       )
     with
     | End_of_file
@@ -185,8 +192,7 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
   end;
   let connect_once_start_t = Unix.time () in
 
-  let server_name = HhServerMonitorConfig.Program.
-    (if env.to_ide then ide_server else hh_server) in
+  let server_name = HhServerMonitorConfig.Program.hh_server in
   let handoff_options = {
     MonitorRpc.server_name = server_name;
     force_dormant_start = env.force_dormant_start;
@@ -196,18 +202,17 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
   let _, tail_msg = open_and_get_tail_msg start_time tail_env in
   match conn with
   | Result.Ok (ic, oc) ->
-      if env.to_ide then SMUtils.send_ide_client_type oc SMUtils.Request;
-      (try begin
-        wait_for_server_hello ic env retries start_time (Some tail_env) true;
-        if Tty.spinner_used () then
-          Tty.print_clear_line stderr
-      end
-      with
-      | Server_hung_up ->
-        (Printf.eprintf "hh_server died unexpectedly. Maybe you recently \
-        launched a different version of hh_server. Now exiting hh_client.";
-        Exit_status.exit Exit_status.No_server_running)
-      );
+      if env.do_post_handoff_handshake then begin
+        try
+          wait_for_server_hello ic retries env.progress_callback start_time
+            (Some tail_env);
+          env.progress_callback None
+        with
+        | Server_hung_up ->
+          (Printf.eprintf "hh_server died unexpectedly. Maybe you recently \
+          launched a different version of hh_server. Now exiting hh_client.";
+          Exit_status.exit Exit_status.No_server_running)
+      end;
       (ic, oc)
   | Result.Error e ->
     if first_attempt then
@@ -224,6 +229,7 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
           root = env.root;
           no_load = env.no_load;
           silent = false;
+          exit_on_failure = true;
           ai_mode = env.ai_mode;
           debug_port = None;
         };
@@ -252,15 +258,28 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
       * when the typechecker hasn't finished initializing and if one doesn't
       * exist then the client starts one and waits until the typechecker is
       * finished before attempting a connection. *)
-      if Tty.spinner_used () then Tty.print_clear_line stderr;
-      Tty.eprintf "hh_server is busy: %s %s\n%!" tail_msg
-        (Tty.spinner());
+      env.progress_callback (Some tail_msg);
       HackEventLogger.client_connect_once_busy start_time;
       connect env (Option.map retries (fun x -> x - 1)) start_time tail_env
-    | SMUtils.Build_id_mismatched ->
-      Printf.eprintf begin
-        "hh_server's version doesn't match the client's, "^^
-        "so it will exit.\n%!"
+    | SMUtils.Build_id_mismatched mismatch_info_opt ->
+      let open ServerMonitorUtils in
+      Printf.eprintf
+        "hh_server's version doesn't match the client's, so it will exit.\n";
+      begin match mismatch_info_opt with
+        | None -> ()
+        | Some mismatch_info ->
+          let secs = int_of_float
+            ((Unix.gettimeofday ()) -. mismatch_info.existing_launch_time) in
+          let time =
+            if secs > 86400 then Printf.sprintf "%n days" (secs / 86400)
+            else if secs > 3600 then Printf.sprintf "%n hours" (secs / 3600)
+            else if secs > 60 then Printf.sprintf "%n minutes" (secs / 60)
+            else Printf.sprintf "%n seconds" (secs) in
+          Printf.eprintf
+            "  hh_server '%s' was launched %s ago.\n%!"
+            (String.concat " " mismatch_info.existing_argv)
+            time;
+          ()
       end;
       if env.autostart
       then
@@ -274,7 +293,7 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
            *)
           Tail.close_env tail_env;
           connect env retries start_time tail_env
-        end else raise Exit_status.(Exit_with Build_id_mismatch)
+        end else raise Exit_status.(Exit_with Exit_status.Build_id_mismatch)
 
 let connect env =
   let link_file = ServerFiles.log_link env.root in
@@ -286,7 +305,9 @@ let connect env =
       connect ~first_attempt:true env env.retries start_time tail_env in
     Tail.close_env tail_env;
     HackEventLogger.client_established_connection start_time;
-    ServerCommand.send_connection_type oc ServerCommandTypes.Non_persistent;
+    if env.do_post_handoff_handshake then begin
+      ServerCommand.send_connection_type oc ServerCommandTypes.Non_persistent;
+    end;
     (ic, oc)
   with
   | e ->

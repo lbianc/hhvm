@@ -103,13 +103,15 @@ bool regeneratePrologue(TransID prologueTransId, tc::FuncMetaInfo& info) {
   // If we're regenerating a prologue, and we want to check shouldTranslate()
   // but ignore the code size limits.  We still want to respect the global
   // translation limit and other restrictions, though.
-  if (!tc::shouldTranslateNoSizeLimit(func)) return false;
+  if (!tc::shouldTranslateNoSizeLimit(func, TransKind::OptPrologue)) {
+    return false;
+  }
 
   // Double check the prologue array now that we have the write lease
   // in case another thread snuck in and set the prologue already.
   if (checkCachedPrologue(func, nArgs)) return false;
 
-  if (RuntimeOption::EvalEnableOptTCBuffer || retranslateAllEnabled()) {
+  if (retranslateAllEnabled()) {
     info.prologues.emplace_back(rec);
   } else {
     tc::emitFuncPrologueOpt(rec);
@@ -131,11 +133,12 @@ bool regeneratePrologue(TransID prologueTransId, tc::FuncMetaInfo& info) {
         args.kind = TransKind::Optimize;
         args.region = selectHotRegion(funcletTransId);
         auto const spOff = args.region->entry()->initialSpOffset();
-        if (translate(args, spOff, info.tcBuf.view())) {
+        if (auto res = translate(args, spOff, info.tcBuf.view())) {
           // Flag that this translation has been retranslated, so that
           // it's not retranslated again along with the function body.
           profData()->setOptimized(funcletSK);
           ret = true;
+          info.translations.emplace_back(std::move(res.value()));
         }
       };
       withThis(func, genPrologue);
@@ -234,7 +237,7 @@ TCA getFuncPrologue(Func* func, int nPassed) {
   // profileFunc() changed.
   if (!writer.checkKind(kind)) return nullptr;
 
-  if (!tc::shouldTranslate(func, TransKind::LivePrologue)) return nullptr;
+  if (!tc::shouldTranslate(func, kind)) return nullptr;
 
   // Double check the prologue array now that we have the write lease
   // in case another thread snuck in and set the prologue already.

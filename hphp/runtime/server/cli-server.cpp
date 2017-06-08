@@ -470,7 +470,7 @@ CLIServer::CLIServer(const char* path) {
 void CLIServer::start() {
   if (getState() != State::READY) return;
 
-  m_dispatcher = folly::make_unique<JobQueue>(
+  m_dispatcher = std::make_unique<JobQueue>(
     RuntimeOption::EvalUnixServerWorkers,
     RuntimeOption::ServerThreadDropCacheTimeoutSeconds,
     RuntimeOption::ServerThreadDropStack,
@@ -904,7 +904,7 @@ void CLIWorker::doJob(int client) {
     FTRACE(2, "CLIWorker::doJob({}): xhprofFlags = {}\n", client, xhprofFlags);
     FTRACE(2, "CLIWorker::doJob({}): args = \n", client);
 
-    auto buf = folly::make_unique<char*[]>(args.size());
+    auto buf = std::make_unique<char*[]>(args.size());
     for (int i = 0; i < args.size(); ++i) {
       FTRACE(2, "CLIWorker::doJob({}):          {}\n", client, args[i]);
       buf[i] = const_cast<char*>(args[i].c_str());
@@ -912,7 +912,7 @@ void CLIWorker::doJob(int client) {
 
     FTRACE(3, "CLIWorker::doJob({}): env = \n", client);
 
-    auto envp = folly::make_unique<char*[]>(env.size() + 1);
+    auto envp = std::make_unique<char*[]>(env.size() + 1);
 
     for (int i = 0; i < env.size(); ++i) {
       FTRACE(3, "CLIWorker::doJob({}):          {}\n", client, env[i]);
@@ -936,7 +936,7 @@ void CLIWorker::doJob(int client) {
         envArr.reset();
         g_context->setStdout(nullptr, nullptr);
         clearThreadLocalIO();
-        LightProcess::clearThreadLocalAfdtOverride();
+        LightProcess::setThreadLocalAfdtOverride(nullptr);
         Logger::SetThreadHook(nullptr, nullptr);
         Stream::setThreadLocalFileHandler(nullptr);
         execute_command_line_end(xhprofFlags, true, args[0].c_str());
@@ -1540,7 +1540,7 @@ void run_command_on_cli_server(const char* sock_path,
     env_vec.emplace_back(*env);
   }
 
-  int delegate = LightProcess::createCLIDelegate();
+  int delegate = LightProcess::createDelegate();
   if (delegate < 0) {
     Logger::Warning("Could not create delegate for CLI server: %s",
                     folly::errnoStr(errno).c_str());

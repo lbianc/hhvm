@@ -285,7 +285,7 @@ ProxyArray::AppendRef(ArrayData* ad, Variant& v, bool copy) {
 }
 
 ArrayData*
-ProxyArray::AppendWithRef(ArrayData* ad, const Variant& v, bool copy) {
+ProxyArray::AppendWithRef(ArrayData* ad, TypedValue v, bool copy) {
   if (copy) {
     return innerArr(ad)->appendWithRef(v, true);
   }
@@ -344,6 +344,12 @@ ArrayData* ProxyArray::ToVec(ArrayData* ad, bool copy) {
 
 ArrayData* ProxyArray::ToKeyset(ArrayData* ad, bool copy) {
   auto const r = innerArr(ad)->toKeyset(innerArr(ad)->cowCheck());
+  reseatable(ad, r);
+  return const_cast<ArrayData*>(ad);
+}
+
+ArrayData* ProxyArray::ToVArray(ArrayData* ad, bool copy) {
+  auto const r = innerArr(ad)->toVArray(innerArr(ad)->cowCheck());
   reseatable(ad, r);
   return const_cast<ArrayData*>(ad);
 }

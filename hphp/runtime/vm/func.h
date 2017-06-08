@@ -75,6 +75,7 @@ struct EHEnt {
   int m_iterId;
   int m_parentIndex;
   Offset m_handler;
+  Offset m_end;
 };
 
 /*
@@ -692,6 +693,16 @@ struct Func final {
    * Is this func a memoization wrapper?
    */
   bool isMemoizeWrapper() const;
+
+  /*
+   * Is this string the name of a memoize implementation.
+   */
+  static bool isMemoizeImplName(const StringData*);
+
+  /*
+   * Is this function a memoization implementation.
+   */
+  bool isMemoizeImpl() const;
 
   /*
    * Assuming this func is a memoization wrapper, the name of the function it is

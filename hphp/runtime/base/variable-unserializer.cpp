@@ -553,6 +553,15 @@ void VariableUnserializer::unserializeProp(ObjectData* obj,
     // when promoting kPackedKind -> kMixedKind.
     t = &obj->reserveProperties(nProp).lvalAt(realKey, AccessFlags::Key);
   } else {
+    // Ignore fields which are marked as NoSerialize
+    auto const cls = obj->getVMClass();
+    auto const propIdx = cls->getDeclPropIndex(ctx, key.get()).prop;
+    assertx(propIdx != kInvalidSlot);
+    if (UNLIKELY(cls->declProperties()[propIdx].attrs & AttrNoSerialize)) {
+      Variant temp;
+      return unserializePropertyValue(temp, nProp);
+    }
+
     t = &tvAsVariant(lookup.prop);
   }
 
@@ -767,7 +776,7 @@ void VariableUnserializer::unserializeVariant(
       int64_t id = readInt();
       Variant *v = getByVal(id);
       if (!v) throwOutOfRange(id);
-      Variant::AssignValHelper(&self, v);
+      tvSet(tvToInitCell(v->asTypedValue()), *self.asTypedValue());
     }
     break;
   case 'R':
@@ -783,7 +792,7 @@ void VariableUnserializer::unserializeVariant(
       int64_t id = readInt();
       Variant *v = getByRef(id);
       if (!v) throwOutOfRange(id);
-      self.assignRefHelper(*v);
+      self.assignRef(*v);
     }
     break;
   case 'b':
@@ -999,6 +1008,15 @@ void VariableUnserializer::unserializeVariant(
                 mismatch = true;
                 break;
               }
+
+              // Ignore NoSerialize props if present
+              if (UNLIKELY(prop.attrs & AttrNoSerialize)) {
+                ++objProps;
+                Variant temp;
+                unserializePropertyValue(temp, remainingProps--);
+                continue;
+              }
+
               // don't need to worry about overwritten list, because
               // this is definitely the first time we're setting this
               // property.
@@ -1137,8 +1155,8 @@ Array VariableUnserializer::unserializeArray() {
   if (UNLIKELY(size < 0 || size > std::numeric_limits<int>::max())) {
     throwArraySizeOutOfBounds();
   }
-  auto const scale = computeScaleFromSize(size);
-  auto const allocsz = computeAllocBytes(scale);
+  auto const scale = MixedArray::computeScaleFromSize(size);
+  auto const allocsz = MixedArray::computeAllocBytes(scale);
 
   // For large arrays, do a naive pre-check for OOM.
   if (UNLIKELY(allocsz > kMaxSmallSize && MM().preAllocOOM(allocsz))) {
@@ -1191,8 +1209,8 @@ Array VariableUnserializer::unserializeDict() {
   if (UNLIKELY(size < 0 || size > std::numeric_limits<int>::max())) {
     throwArraySizeOutOfBounds();
   }
-  auto const scale = computeScaleFromSize(size);
-  auto const allocsz = computeAllocBytes(scale);
+  auto const scale = MixedArray::computeScaleFromSize(size);
+  auto const allocsz = MixedArray::computeAllocBytes(scale);
 
   // For large arrays, do a naive pre-check for OOM.
   if (UNLIKELY(allocsz > kMaxSmallSize && MM().preAllocOOM(allocsz))) {
@@ -1249,8 +1267,8 @@ Array VariableUnserializer::unserializeVec() {
   if (UNLIKELY(size < 0 || size > std::numeric_limits<int>::max())) {
     throwArraySizeOutOfBounds();
   }
-  auto const scale = computeScaleFromSize(size);
-  auto const allocsz = computeAllocBytes(scale);
+  auto const scale = MixedArray::computeScaleFromSize(size);
+  auto const allocsz = MixedArray::computeAllocBytes(scale);
 
   // For large arrays, do a naive pre-check for OOM.
   if (UNLIKELY(allocsz > kMaxSmallSize && MM().preAllocOOM(allocsz))) {
@@ -1290,8 +1308,8 @@ Array VariableUnserializer::unserializeKeyset() {
   if (UNLIKELY(size < 0 || size > std::numeric_limits<int>::max())) {
     throwArraySizeOutOfBounds();
   }
-  auto const scale = computeScaleFromSize(size);
-  auto const allocsz = computeAllocBytes(scale);
+  auto const scale = SetArray::computeScaleFromSize(size);
+  auto const allocsz = SetArray::computeAllocBytes(scale);
 
   // For large arrays, do a naive pre-check for OOM.
   if (UNLIKELY(allocsz > kMaxSmallSize && MM().preAllocOOM(allocsz))) {
@@ -1375,7 +1393,6 @@ void VariableUnserializer::unserializeVector(ObjectData* obj, int64_t sz,
   if (type != 'V') throwBadFormat(obj, type);
   auto bvec = static_cast<BaseVector*>(obj);
   bvec->reserve(sz);
-  assert(bvec->canMutateBuffer());
   reserveForAdd(sz);
   for (int64_t i = 0; i < sz; ++i) {
     auto tv = bvec->appendForUnserialize(i);

@@ -114,6 +114,20 @@ let try_parse (env : env) (f : env -> 'a option) : 'a option =
   | Some x -> Some x
   | None   -> (restore_lexbuf_state env.lb saved; None)
 
+(* Same as try_parse, but returns None if parsing produced errors. *)
+let try_parse_with_errors (env : env) (f : env -> 'a) : 'a option =
+  let parse env =
+    let error_state = !(env.errors) in
+    let result = f env in
+    if !(env.errors) == error_state then
+        Some result
+    else
+      (
+        env.errors := error_state;
+        None
+      ) in
+  try_parse env parse
+
 (* Return the next token without updating lexer state *)
 let peek env =
   let saved = save_lexbuf_state env.lb in
@@ -236,8 +250,10 @@ let rec check_lvalue env = function
       error_at env pos "?-> syntax is not supported for lvalues"
   | pos, Obj_get (_, (_, Id (_, name)), _) when name.[0] = ':' ->
       error_at env pos "->: syntax is not supported for lvalues"
+  | pos, Array_get ((_, Class_const _), _) ->
+      error_at env pos "Array-like class consts are not valid lvalues"
   | _, (Lvar _ | Lvarvar _ | Obj_get _ | Array_get _ | Class_get _ |
-    Unsafeexpr _) -> ()
+    Unsafeexpr _ | Omitted) -> ()
   | pos, Call ((_, Id (_, "tuple")), _, _) ->
       error_at env pos
         "Tuple cannot be used as an lvalue. Maybe you meant List?"
@@ -248,7 +264,7 @@ let rec check_lvalue env = function
   | String _ | String2 _ | Yield _ | Yield_break
   | Await _ | Expr_list _ | Cast _ | Unop _
   | Binop _ | Eif _ | NullCoalesce _ | InstanceOf _ | New _ | Efun _ | Lfun _
-  | Xml _ | Import _ | Pipe _ | Dollardollar) ->
+  | Xml _ | Import _ | Pipe _) ->
       error_at env pos "Invalid lvalue"
 
 (* The bound variable of a foreach can be a reference (but not inside
@@ -291,7 +307,7 @@ let priorities = [
   (Left, [Tbar]);
   (Left, [Tamp]);
   (NonAssoc, [Teqeq; Tdiff; Teqeqeq; Tdiff2]);
-  (NonAssoc, [Tlt; Tlte; Tgt; Tgte]);
+  (NonAssoc, [Tlt; Tlte; Tgt; Tgte; Tcmp]);
   (Left, [Tltlt; Tgtgt]);
   (Left, [Tplus; Tminus; Tdot]);
   (Left, [Tstar; Tslash; Tpercent]);
@@ -706,7 +722,7 @@ and toplevel_word def_start ~attr env = function
 
 and define_or_stmt env = function
   | Expr (_, Call ((_, Id (_, "define")), [(_, String name); value], [])) ->
-      Constant {
+    Constant {
       cst_mode = env.mode;
       cst_kind = Cst_define;
       cst_name = name;
@@ -2020,6 +2036,12 @@ and ignore_statement env =
   ignore (statement env);
   env.errors := error_state
 
+and parse_expr env =
+  L.back env.lb;
+  let e = expr env in
+  expect env Tsc;
+  Expr e
+
 and statement_word env = function
   | "break"    -> statement_break env
   | "continue" -> statement_continue env
@@ -2042,21 +2064,35 @@ and statement_word env = function
           "Parse error: declarations are not supported outside global scope";
       ignore (ignore_toplevel None ~attr:[] [] env (fun _ -> true));
       Noop
-  (* TODO(t17085086): Prevent this from breaking www and uncomment it. *)
-  (* | x when peek env = Tcolon ->
-      statement_goto_label env x *)
-  | x ->
-      L.back env.lb;
-      let e = expr env in
-      expect env Tsc;
-      Expr e
+  | x when peek env = Tcolon ->
+    (* Unfortunately, some XHP elements allow for expressions to look like goto
+     * label declarations. For example,
+     *
+     *   await :intern:roadmap:project::genUpdateOnClient($project);
+     *
+     * Looks like it is declaring a label whose name is await. To preserve
+     * compatibility with PHP while working around this issue, we use the
+     * following heuristic:
+     *
+     * When we encounter a statement that is a word followed by a colon:
+     *   1) Attempt to parse it as an expression. If there are no additional
+     *      errors, the result is used as the expression.
+     *   2) If there are additional errors, then revert the error and lexer
+     *      state, and parse the statement as a goto label.
+     *)
+    (
+      match try_parse_with_errors env parse_expr with
+      | Some expr -> expr
+      | None -> statement_goto_label env x
+    )
+  | x -> parse_expr env
 
 (*****************************************************************************)
 (* Break statement *)
 (*****************************************************************************)
 
 and statement_break env =
-  let stmt = Break (Pos.make env.file env.lb) in
+  let stmt = Break (Pos.make env.file env.lb, None) in
   check_continue env;
   stmt
 
@@ -2065,7 +2101,7 @@ and statement_break env =
 (*****************************************************************************)
 
 and statement_continue env =
-  let stmt = Continue (Pos.make env.file env.lb) in
+  let stmt = Continue (Pos.make env.file env.lb, None) in
   check_continue env;
   stmt
 
@@ -2106,13 +2142,13 @@ and return_value env =
 (* Goto statement *)
 (*****************************************************************************)
 
-and _statement_goto_label env label =
+and statement_goto_label env label =
   let pos = Pos.make env.file env.lb in
   let goto_allowed =
     TypecheckerOptions.experimental_feature_enabled
       env.popt
       TypecheckerOptions.experimental_goto in
-  if not goto_allowed then Errors.goto_not_supported pos;
+  if not goto_allowed then error env "goto is not supported.";
   expect env Tcolon;
   GotoLabel (pos, label)
 
@@ -2122,7 +2158,7 @@ and statement_goto env =
     TypecheckerOptions.experimental_feature_enabled
       env.popt
       TypecheckerOptions.experimental_goto in
-  if not goto_allowed then Errors.goto_not_supported pos;
+  if not goto_allowed then error env "goto labels are not supported.";
   match L.token env.file env.lb with
     | Tword ->
       let word = Lexing.lexeme env.lb in
@@ -2682,6 +2718,8 @@ and expr_remain env e1 =
       expr_binop env Tgte Gte e1
   | Tlte ->
       expr_binop env Tlte Lte e1
+  | Tcmp ->
+      expr_binop env Tcmp Cmp e1
   | Tamp ->
       expr_binop env Tamp Amp e1
   | Tbar ->
@@ -2957,7 +2995,7 @@ and expr_atomic ~allow_class ~class_const env =
       "followed by any number of letters, numbers, or underscores");
     expr env
   | Tdollardollar ->
-      pos, Dollardollar
+      pos, Lvar (pos, "$$")
   | Tunsafeexpr ->
       (* Consume the rest of the comment. *)
       ignore (L.comment (Buffer.create 256) env.file env.lb);
@@ -2983,9 +3021,9 @@ and expr_atomic_word ~allow_class ~class_const env pos = function
       pos, Null
   | "array" ->
       expr_array env pos
-  | "darray" ->
+  | "darray" when peek env = Tlb ->
       expr_darray env pos
-  | "varray" ->
+  | "varray" when peek env = Tlb ->
       expr_varray env pos
   | "shape" ->
       expr_shape env pos
@@ -3114,9 +3152,6 @@ and expr_colcol env e1 =
     | _, Lvar cname ->
         (* ... but get_class($x) should be used instead of $x::class ... *)
         expr_colcol_remain ~allow_class:false env e1 cname
-    | pos, Dollardollar ->
-        (* ... and $$ is a special "variable" that resolves while naming. *)
-        expr_colcol_remain ~allow_class:false env e1 (pos, "$$")
     | pos, _ ->
         error_at env pos "Expected class name";
         e1
@@ -4166,6 +4201,11 @@ and typedef_constraint env =
       L.back env.lb;
       None
 
+and promote_nullable_to_optional_in_shapes env =
+  TypecheckerOptions.experimental_feature_enabled
+    env.popt
+    TypecheckerOptions.experimental_promote_nullable_to_optional_in_shapes
+
 and hint_shape_info env shape_keyword_pos =
   match L.token env.file env.lb with
   | Tlp -> hint_shape_info_remain env
@@ -4173,24 +4213,42 @@ and hint_shape_info env shape_keyword_pos =
     L.back env.lb;
     error_at env shape_keyword_pos "\"shape\" is an invalid type; you need to \
     declare and use a specific shape type.";
-    { si_allows_unknown_fields=false; si_shape_field_list=[]; }
+    {
+      si_allows_unknown_fields = promote_nullable_to_optional_in_shapes env;
+      si_shape_field_list = [];
+    }
 
 and hint_shape_info_remain env =
   match L.token env.file env.lb with
-  | Trp -> { si_allows_unknown_fields=false; si_shape_field_list=[] }
+  | Trp ->
+      {
+        si_allows_unknown_fields = promote_nullable_to_optional_in_shapes env;
+        si_shape_field_list = [];
+      }
   | Tellipsis ->
       expect env Trp;
-      { si_allows_unknown_fields=true; si_shape_field_list=[] }
+      {
+        si_allows_unknown_fields = promote_nullable_to_optional_in_shapes env;
+        si_shape_field_list = [];
+      }
   | _ ->
       L.back env.lb;
       let error_state = !(env.errors) in
       let fd = hint_shape_field env in
       match L.token env.file env.lb with
       | Trp ->
-          { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
+          {
+            si_allows_unknown_fields =
+              promote_nullable_to_optional_in_shapes env;
+            si_shape_field_list = [fd];
+          }
       | Tcomma ->
           if !(env.errors) != error_state
-          then { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
+          then {
+            si_allows_unknown_fields =
+              promote_nullable_to_optional_in_shapes env;
+            si_shape_field_list = [fd];
+          }
           else
             let { si_shape_field_list; _ } as shape_info =
               hint_shape_info_remain env in
@@ -4198,9 +4256,16 @@ and hint_shape_info_remain env =
             { shape_info with si_shape_field_list }
       | _ ->
           error_expect env ")";
-          { si_allows_unknown_fields=false; si_shape_field_list=[fd] }
+          {
+            si_allows_unknown_fields =
+              promote_nullable_to_optional_in_shapes env;
+            si_shape_field_list = [fd]
+          }
 
 and hint_shape_field env =
+  let is_nullable = function
+    | _, Hoption _ -> true
+    | _ -> false in
   (* Consume the next token to determine if we're creating an optional field. *)
   let sf_optional =
     if L.token env.file env.lb = Tqm then
@@ -4213,6 +4278,10 @@ and hint_shape_field env =
   let sf_name = shape_field_name env in
   expect env Tsarrow;
   let sf_hint = hint env in
+  (* TODO(t17492233): Remove this line once shapes use new syntax. *)
+  let sf_optional =
+    sf_optional ||
+      (promote_nullable_to_optional_in_shapes env && is_nullable sf_hint) in
   { sf_optional; sf_name; sf_hint }
 
 (*****************************************************************************)
@@ -4321,6 +4390,7 @@ and namespace_group_use env kind prefix =
 
   let allow_change_kind = (kind = NSClass) in
   let unprefixed = namespace_use_list env allow_change_kind Trcb kind [] in
+  expect env Tsc;
   List.map unprefixed begin fun (kind, (p1, s1), id2) ->
     (kind, (p1, prefix ^ s1), id2)
   end

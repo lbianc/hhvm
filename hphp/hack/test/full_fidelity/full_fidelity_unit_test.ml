@@ -115,6 +115,7 @@ let minimal_tests =
     "test_for_statements";
     "test_try_statement";
     "test_list_precedence";
+    "test_list_expression";
     "test_foreach_statements";
     "test_types_type_const";
     "test_function_call";
@@ -131,11 +132,15 @@ let minimal_tests =
     "test_type_const";
     "test_class_const";
     "test_type_alias";
+    "test_indirection";
+    "test_eval_deref";
     "test_global_constant";
     "test_closure_type";
     "test_inclusion_directive";
     "test_awaitable_creation";
     "test_literals";
+    "test_variadic_type_hint";
+    "test_tuple_type_keyword";
   ] ~f:mapper
 
 let error_tests =

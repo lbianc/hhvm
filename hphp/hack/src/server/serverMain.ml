@@ -153,6 +153,7 @@ let handle_connection_ genv env client =
 
 let handle_persistent_connection_ genv env client =
    try
+    let env = { env with ide_idle = false; } in
      ServerCommand.handle genv env client
    with
    (** TODO: Make sure the pipe exception is really about this client. *)
@@ -163,15 +164,22 @@ let handle_persistent_connection_ genv env client =
    | ServerClientProvider.Client_went_away ->
      shutdown_persistent_client env client, false
    | e ->
-     let msg = Printexc.to_string e in
+     let open Marshal_tools in
+     let stack = Printexc.get_backtrace () in
+     let message = Printexc.to_string e in
+     begin try
+       ClientProvider.send_push_message_to_client
+         client (ServerCommandTypes.FATAL_EXCEPTION { message; stack; })
+     with _ -> ()
+     end;
      EventLogger.master_exception e;
-     Printf.fprintf stderr "Error: %s\n%!" msg;
+     Printf.eprintf "Error: %s\n%!" message;
      Printexc.print_backtrace stderr;
      shutdown_persistent_client env client, false
 
-let handle_connection genv env client is_persistent =
+let handle_connection genv env client is_from_existing_persistent_client =
   ServerIdle.stamp_connection ();
-  match is_persistent with
+  match is_from_existing_persistent_client with
     | true -> handle_persistent_connection_ genv env client
     | false -> handle_connection_ genv env client
 
@@ -231,7 +239,9 @@ acc genv env new_client has_persistent_connection_request =
   let updates = Program.process_updates genv env raw_updates in
 
   let is_idle = (not has_persistent_connection_request) &&
-    t -. env.last_command_time > 0.1 in
+     (* "average person types [...] between 190 and 200 characters per minute"
+      * 60/200 = 0.3 *)
+     t -. env.last_command_time > 0.3 in
 
   let disk_recheck = not (Relative_path.Set.is_empty updates) in
   let ide_recheck =
@@ -256,8 +266,12 @@ acc genv env new_client has_persistent_connection_request =
       rechecked_count = acc.rechecked_count + rechecked;
       total_rechecked_count = acc.total_rechecked_count + total_rechecked;
     } in
-    recheck_loop ~force_flush:false
-      acc genv env new_client has_persistent_connection_request
+    (* Avoid batching ide rechecks with disk rechecks - there might be
+      * other ide edits to process first and we want to give the main loop
+      * a chance to process them first. *)
+    if ide_recheck then acc, env else
+      recheck_loop ~force_flush:false
+        acc genv env new_client has_persistent_connection_request
   end
 
 let recheck_loop ~force_flush
@@ -274,7 +288,15 @@ let serve_one_iteration ~force_flush genv env client_provider =
   let recheck_id = new_serve_iteration_id () in
   ServerMonitorUtils.exit_if_parent_dead ();
   let client, has_persistent_connection_request =
-    ClientProvider.sleep_and_check client_provider env.persistent_client in
+    ClientProvider.sleep_and_check
+      client_provider
+      env.persistent_client
+      ~ide_idle:env.ide_idle
+  in
+  (* client here is "None" if we should either handle from our existing  *)
+  (* persistent client (i.e. has_persistent_connection_request), or if   *)
+  (* there's nothing to handle. It's "Some ..." if we should handle from *)
+  (* a new client.                                                       *)
   let has_parsing_hook = !ServerTypeCheck.hook_after_parsing <> None in
   let env = if not has_persistent_connection_request &&
     client = None && not has_parsing_hook
@@ -313,13 +335,18 @@ let serve_one_iteration ~force_flush genv env client_provider =
       ~default:env
       ~f:begin fun sub ->
 
-    let sub, errors =
-      Diagnostic_subscription.pop_errors sub env.editor_open_files in
+    let client = Utils.unsafe_opt env.persistent_client in
+    (* We possibly just did a lot of work. Check the client again to see
+     * that we are still idle before proceeding to send diagnostics *)
+    if ClientProvider.client_has_message client then env else
+    (* We processed some edits but didn't recheck them yet. *)
+    if not @@ Relative_path.Set.is_empty env.ide_needs_parsing then env else
+
+    let sub, errors = Diagnostic_subscription.pop_errors sub in
 
     if not @@ SMap.is_empty errors then begin
       let id = Diagnostic_subscription.get_id sub in
       let res = ServerCommandTypes.DIAGNOSTIC (id, errors) in
-      let client = Utils.unsafe_opt env.persistent_client in
       try
         ClientProvider.send_push_message_to_client client res
       with ClientProvider.Client_went_away ->
@@ -333,6 +360,8 @@ let serve_one_iteration ~force_flush genv env client_provider =
   | None -> env, false
   | Some client -> begin
     try
+      (* client here is the new client (not the existing persistent client) *)
+      (* whose request we're going to handle.                               *)
       let env, needs_flush = handle_connection genv env client false in
       HackEventLogger.handled_connection start_t;
       env, needs_flush
@@ -344,6 +373,8 @@ let serve_one_iteration ~force_flush genv env client_provider =
   end in
   if has_persistent_connection_request then
     let client = Utils.unsafe_opt env.persistent_client in
+    (* client here is the existing persistent client *)
+    (* whose request we're going to handle.          *)
     HackEventLogger.got_persistent_client_channels start_t;
     (try
       let env, needs_flush_2 = handle_connection genv env client true in
@@ -421,9 +452,10 @@ let program_init genv =
   HackEventLogger.init_really_end init_type;
   env
 
-let setup_server options handle =
+let setup_server ~informant_managed options handle =
   let init_id = Random_id.short_string () in
   Hh_logger.log "Version: %s" Build_id.build_id_ohai;
+  Hh_logger.log "Hostname: %s" (Unix.gethostname ());
   let root = ServerArgs.root options in
   (* The OCaml default is 500, but we care about minimizing the memory
    * overhead *)
@@ -449,6 +481,7 @@ let setup_server options handle =
   else HackEventLogger.init
     root
     init_id
+    informant_managed
     (Unix.gettimeofday ())
     lazy_parse
     lazy_init
@@ -456,7 +489,8 @@ let setup_server options handle =
     use_sql
     search_chunk_size;
   let root_s = Path.to_string root in
-  if Sys_utils.is_nfs root_s && not enable_on_nfs then begin
+  let check_mode = ServerArgs.check_mode options in
+  if not check_mode && Sys_utils.is_nfs root_s && not enable_on_nfs then begin
     Hh_logger.log "Refusing to run on %s: root is on NFS!" root_s;
     HackEventLogger.nfs_root ();
     Exit_status.(exit Nfs_root);
@@ -473,7 +507,7 @@ let setup_server options handle =
   ServerEnvBuild.make_genv options config local_config handle, init_id
 
 let run_once options handle =
-  let genv, _ = setup_server options handle in
+  let genv, _ = setup_server ~informant_managed:false options handle in
   if not (ServerArgs.check_mode genv.options) then
     (Hh_logger.log "ServerMain run_once only supported in check mode.";
     Exit_status.(exit Input_error));
@@ -487,7 +521,7 @@ let run_once options handle =
  * The server monitor will pass client connections to this process
  * via ic.
  *)
-let daemon_main_exn options (ic, oc) =
+let daemon_main_exn ~informant_managed options (ic, oc) =
   Printexc.record_backtrace true;
   let in_fd = Daemon.descr_of_in_channel ic in
   let out_fd = Daemon.descr_of_out_channel oc in
@@ -495,14 +529,14 @@ let daemon_main_exn options (ic, oc) =
   let handle = SharedMem.init (ServerConfig.sharedmem_config config) in
   SharedMem.connect handle ~is_master:true;
 
-  let genv, init_id = setup_server options handle in
+  let genv, init_id = setup_server ~informant_managed options handle in
   if ServerArgs.check_mode genv.options then
     (Hh_logger.log "Invalid program args - can't run daemon in check mode.";
     Exit_status.(exit Input_error));
   let env = MainInit.go genv options init_id (fun () -> program_init genv) in
   serve genv env in_fd out_fd
 
-let daemon_main (state, options) (ic, oc) =
+let daemon_main (informant_managed, state, options) (ic, oc) =
   (* Restore the root directory and other global states from monitor *)
   ServerGlobalState.restore state;
   (* Restore hhi files every time the server restarts
@@ -510,7 +544,7 @@ let daemon_main (state, options) (ic, oc) =
   ignore (Hhi.get_hhi_root());
 
   ServerUtils.with_exit_on_exception @@ fun () ->
-  daemon_main_exn options (ic, oc)
+  daemon_main_exn ~informant_managed options (ic, oc)
 
 
 let entry =

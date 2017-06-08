@@ -46,6 +46,7 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/program-functions.h"
+#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/ext/asio/asio-external-thread-event.h"
 #include "hphp/runtime/ext/asio/socket-event.h"
@@ -365,7 +366,7 @@ struct ActiveSubscription {
         make_tv<KindOfString>(str_json_data.get()),
         make_tv<KindOfString>(str_socket_path.get())
       };
-      tvRefcountedDecRef(
+      tvDecRefGen(
           context->invokeFuncFew(func,
                                  nullptr, // thisOrCls
                                  nullptr, // invName
@@ -432,7 +433,7 @@ struct ActiveSubscription {
       m_syncPromises.clear();
     } else {
       m_callbackInProgress = true;
-      m_callbackExecThread = folly::make_unique<AsyncFunc<ActiveSubscription>>(
+      m_callbackExecThread = std::make_unique<AsyncFunc<ActiveSubscription>>(
         this,
         &ActiveSubscription::runCallback);
       m_callbackExecThread->start();
@@ -597,7 +598,7 @@ getWatchmanClientForSocket(const std::string& socket_path) {
         promise.setException(e);
       }
       s_connectPromises.erase(socket_path);
-      e.throwException();
+      e.throw_exception();
       // shouldn't actually be reached but placates the compiler
       return std::shared_ptr<watchman::WatchmanClient>();
     });
@@ -623,10 +624,7 @@ folly::Future<std::string> watchman_unsubscribe_impl(const std::string& name) {
     })
     .ensure([name] {
       // (ASYNC)
-      auto entry = s_activeSubscriptions.find(name);
-      if (entry != s_activeSubscriptions.end()) {
-        s_activeSubscriptions.erase(entry);
-      }
+      s_activeSubscriptions.erase(name);
     });
   return res_future;
 }
@@ -749,19 +747,14 @@ Object HHVM_FUNCTION(HH_watchman_subscribe,
       })
       .onError([name] (std::exception const& e) -> folly::Unit {
         // (ASNYC) delete active subscription
-        auto sub_entry = s_activeSubscriptions.find(name);
-        if (sub_entry != s_activeSubscriptions.end()) {
-          s_activeSubscriptions.erase(sub_entry);
-        }
+        s_activeSubscriptions.erase(name);
         throw std::runtime_error(e.what());
       });
     return Object{
       (new FutureEvent<folly::Unit>(std::move(res_future)))->getWaitHandle()
     };
   } catch(...) {
-    // no need to search as we hold the global lock and just added the
-    // subscription to the start of s_activeSubscriptions
-    s_activeSubscriptions.erase(s_activeSubscriptions.begin());
+    s_activeSubscriptions.erase(name);
     throw;
   }
   not_reached();
@@ -907,6 +900,7 @@ struct WatchmanExtension final : Extension {
     WatchmanThreadEventBase::Get()->drain();
     s_activeSubscriptions.clear();
     s_activeClients.clear();
+    s_allClients.clear();
     WatchmanThreadEventBase::Free();
   }
 

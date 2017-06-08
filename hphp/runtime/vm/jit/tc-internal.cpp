@@ -95,7 +95,7 @@ const StaticString
   s_php_errormsg("php_errormsg"),
   s_http_response_header("http_response_header");
 
-bool shouldTranslateNoSizeLimit(const Func* func) {
+bool shouldTranslateNoSizeLimit(const Func* func, TransKind kind) {
   // If we've hit Eval.JitGlobalTranslationLimit, then we stop translating.
   if (!canTranslate()) {
     return false;
@@ -106,12 +106,16 @@ bool shouldTranslateNoSizeLimit(const Func* func) {
     return false;
   }
 
-  /*
-   * We don't support JIT compiling functions that use some super-dynamic php
-   * variables.
-   */
+  // We don't support JIT compiling functions that use some super-dynamic php
+  // variables.
   if (func->lookupVarId(s_php_errormsg.get()) != -1 ||
       func->lookupVarId(s_http_response_header.get()) != -1) {
+    return false;
+  }
+
+  // Refuse to JIT Live translations if Eval.JitPGOOnly is enabled.
+  if (RuntimeOption::EvalJitPGOOnly &&
+      (kind == TransKind::Live || kind == TransKind::LivePrologue)) {
     return false;
   }
 
@@ -121,7 +125,26 @@ bool shouldTranslateNoSizeLimit(const Func* func) {
 static std::atomic_flag s_did_log = ATOMIC_FLAG_INIT;
 
 bool shouldTranslate(const Func* func, TransKind kind) {
-  if (!shouldTranslateNoSizeLimit(func)) return false;
+  if (!shouldTranslateNoSizeLimit(func, kind)) return false;
+
+  const auto serverMode = RuntimeOption::ServerExecutionMode();
+  const auto maxTransTime = RuntimeOption::EvalJitMaxRequestTranslationTime;
+  const auto transCounter = Timer::CounterValue(Timer::mcg_translate);
+
+  if (serverMode && maxTransTime >= 0 &&
+      transCounter.wall_time_elapsed >= maxTransTime) {
+
+    if (Trace::moduleEnabledRelease(Trace::mcg, 1)) {
+      Trace::traceRelease("Skipping translation. "
+                          "Time budget of %" PRId64 " exceeded. "
+                          "%" PRId64 "us elapsed. "
+                          "%" PRId64 " translations completed\n",
+                          maxTransTime,
+                          transCounter.wall_time_elapsed,
+                          transCounter.count);
+    }
+    return false;
+  }
 
   auto const main_under = code().main().used() < CodeCache::AMaxUsage;
   auto const cold_under = code().cold().used() < CodeCache::AColdMaxUsage;
@@ -279,6 +302,28 @@ void checkFreeProfData() {
   }
 }
 
+bool shouldProfileNewFuncs() {
+  // Don't start profiling new functions if the size of either main or
+  // prof is already above Eval.JitAMaxUsage and we already filled hot.
+  auto tcUsage = std::max(code().main().used(), code().prof().used());
+  if (tcUsage >= CodeCache::AMaxUsage && !code().hotEnabled()) {
+    return false;
+  }
+
+  // We have two knobs to control the number of functions we're allowed to
+  // profile: Eval.JitProfileRequests and Eval.JitProfileBCSize. We profile new
+  // functions until either of these limits is exceeded. In practice, we expect
+  // to hit the bytecode size limit first, but we keep the request limit around
+  // as a safety net.
+  if (RuntimeOption::EvalJitProfileBCSize > 0 &&
+      profData() &&
+      profData()->profilingBCSize() >= RuntimeOption::EvalJitProfileBCSize) {
+    return false;
+  }
+
+  return requestCount() <= RuntimeOption::EvalJitProfileRequests;
+}
+
 bool profileFunc(const Func* func) {
   if (!shouldPGOFunc(func)) return false;
 
@@ -297,36 +342,19 @@ bool profileFunc(const Func* func) {
   // other checks below.
   if (profData()->profiling(func->getFuncId())) return true;
 
-  // Don't start profiling new functions if the size of either main or
-  // prof is already above Eval.JitAMaxUsage and we already filled hot.
-  auto tcUsage = std::max(code().main().used(), code().prof().used());
-  if (tcUsage >= CodeCache::AMaxUsage && !code().hotEnabled()) {
-    return false;
-  }
-
-  // We have two knobs to control the number of functions we're allowed to
-  // profile: Eval.JitProfileRequests and Eval.JitProfileBCSize. We profile new
-  // functions until either of these limits is exceeded. In practice, we expect
-  // to hit the bytecode size limit first, but we keep the request limit around
-  // as a safety net.
-  if (RuntimeOption::EvalJitProfileBCSize > 0 &&
-      profData()->profilingBCSize() >= RuntimeOption::EvalJitProfileBCSize) {
-    return false;
-  }
-
-  return requestCount() <= RuntimeOption::EvalJitProfileRequests;
+  return shouldProfileNewFuncs();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ThreadTCBuffer::ThreadTCBuffer(TCA start) : m_start(start) {
-  if (!start) return;
-
+LocalTCBuffer::LocalTCBuffer(Address start, size_t initialSize) {
   TCA fakeStart = code().threadLocalStart();
-  size_t off = 0;
-  auto initBlock = [&] (DataBlock& block, size_t sz, const char* nm) {
-    block.init(&fakeStart[off], &start[off], sz, nm);
-    off += sz;
+  auto const sz = initialSize / 4;
+  auto initBlock = [&] (DataBlock& block, size_t mxSz, const char* nm) {
+    always_assert(sz <= mxSz);
+    block.init(fakeStart, start, sz, mxSz, nm);
+    fakeStart += mxSz;
+    start += sz;
   };
   initBlock(m_main, RuntimeOption::EvalThreadTCMainBufferSize,
             "thread local main");
@@ -336,19 +364,9 @@ ThreadTCBuffer::ThreadTCBuffer(TCA start) : m_start(start) {
             "thread local frozen");
   initBlock(m_data, RuntimeOption::EvalThreadTCDataBufferSize,
             "thread local data");
-
-#ifndef NDEBUG
-  mprotect(m_start, mcgen::localTCSize(), PROT_NONE);
-#endif
 }
 
-#ifndef NDEBUG
-ThreadTCBuffer::~ThreadTCBuffer() {
-  mprotect(m_start, mcgen::localTCSize(), PROT_READ | PROT_WRITE);
-}
-#endif
-
-OptView ThreadTCBuffer::view() {
+OptView LocalTCBuffer::view() {
   if (!valid()) return folly::none;
   return CodeCache::View(m_main, m_cold, m_frozen, m_data, true);
 }

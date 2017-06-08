@@ -36,7 +36,9 @@ struct PerfTable {
 };
 
 struct HardwareCounterImpl;
+struct StructuredLogEntry;
 
+/* If you change the public interface, remember to update the stubs below. */
 struct HardwareCounter {
   HardwareCounter();
   ~HardwareCounter();
@@ -53,7 +55,10 @@ struct HardwareCounter {
   typedef void (*PerfEventCallback)(const std::string&, int64_t, void*);
   static void GetPerfEvents(PerfEventCallback f, void* data);
   static void ClearPerfEvents();
-  static void UpdateServiceData(const timespec& begin, bool includingPsp);
+  static void UpdateServiceData(const timespec& cpu_begin,
+                                const timespec& wall_begin,
+                                StructuredLogEntry* entry,
+                                bool includingPsp);
   static void Init(bool enable,
                    const std::string& events,
                    bool subProc,
@@ -74,7 +79,7 @@ private:
   template<typename F>
   void forEachCounter(F func);
   void clearPerfEvents();
-  void updateServiceData(bool includingPsp);
+  void updateServiceData(StructuredLogEntry* entry, bool includingPsp);
 
   std::unique_ptr<HardwareCounterImpl> m_instructionCounter;
   std::unique_ptr<HardwareCounterImpl> m_loadCounter;
@@ -83,6 +88,8 @@ private:
 };
 
 #else // NO_HARDWARE_COUNTERS
+
+struct StructuredLogEntry;
 
 /* Stub implementation for platforms without hardware counters (non-linux)
  * This mock class pretends to track performance events, but just returns
@@ -104,7 +111,10 @@ struct HardwareCounter {
   typedef void (*PerfEventCallback)(const std::string&, int64_t, void*);
   static void GetPerfEvents(PerfEventCallback f, void* data) { }
   static void ClearPerfEvents() { }
-  static void UpdateServiceData(const timespec& begin, bool includingPsp) { }
+  static void UpdateServiceData(const timespec& cpu_begin,
+                                const timespec& wall_begin,
+                                StructuredLogEntry* entry,
+                                bool includingPsp) { }
   static void Init(bool enable,
                    const std::string& events,
                    bool subProc,

@@ -118,6 +118,13 @@ let rec skip_to_end_of_line lexer =
   else if ch = invalid && at_end lexer then lexer
   else skip_to_end_of_line (advance lexer 1)
 
+let rec skip_to_end_of_line_or_end_tag lexer =
+  let ch = peek_char lexer 0 in
+  if is_newline ch then lexer
+  else if ch = invalid && at_end lexer then lexer
+  else if ch = '?' && peek_char lexer 1 = '>' then lexer
+  else skip_to_end_of_line_or_end_tag (advance lexer 1)
+
 let rec skip_name_end lexer =
   if is_name_letter (peek_char lexer 0) then
     skip_name_end (advance lexer 1)
@@ -1015,7 +1022,7 @@ let scan_single_line_comment lexer =
   *)
   let lexer = advance lexer 2 in
   let lexer_ws = skip_whitespace lexer in
-  let lexer = skip_to_end_of_line lexer_ws in
+  let lexer = skip_to_end_of_line_or_end_tag lexer_ws in
   let w = width lexer in
   let remainder = lexer.offset - lexer_ws.offset in
   let c =
@@ -1036,10 +1043,10 @@ let rec skip_to_end_of_markup_comment lexer =
   if ch0 = invalid && at_end lexer then
     (* It's not an error to run off the end of one of these. *)
     lexer
-  else if ch0 = '<' && ch1 = '?' && ch2 = 'p' && ch3 = 'h' && ch4 = 'p' then
-    advance lexer 5
-  else
-    skip_to_end_of_markup_comment (advance lexer 1)
+  else match ch0, ch1, ch2, ch3, ch4 with
+  | '<', '?', 'p', 'h', 'p' -> advance lexer 5
+  | '<', '?', '=', _, _ -> advance lexer 3
+  | _ -> skip_to_end_of_markup_comment (advance lexer 1)
 
 let scan_markup_comment lexer =
   let lexer = skip_to_end_of_markup_comment lexer in

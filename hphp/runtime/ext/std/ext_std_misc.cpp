@@ -87,7 +87,7 @@ String HHVM_FUNCTION(server_warmup_status) {
     return "Warmup is still in progress.";
   }
 
-  if (requestCount() <= RuntimeOption::EvalJitProfileRequests) {
+  if (jit::tc::shouldProfileNewFuncs()) {
     return "PGO profiling translations are still enabled.";
   }
 
@@ -179,9 +179,9 @@ static int get_user_token_id(int internal_id);
 #define PHP_VERSION_ID_5 50699
 
 #define PHP_MAJOR_VERSION_7 7
-#define PHP_MINOR_VERSION_7 0
-#define PHP_VERSION_7 "7.0.99-hhvm"
-#define PHP_VERSION_ID_7 70099
+#define PHP_MINOR_VERSION_7 1
+#define PHP_VERSION_7 "7.1.99-hhvm"
+#define PHP_VERSION_ID_7 70199
 
 #define PHP_RELEASE_VERSION 99
 #define PHP_EXTRA_VERSION "hhvm"
@@ -585,6 +585,7 @@ String HHVM_FUNCTION(uniqid, const String& prefix /* = null_string */,
 }
 
 Variant HHVM_FUNCTION(unpack, const String& format, const String& data) {
+  SuppressHackArrCompatNotices suppress;
   return ZendPack().unpack(format, data);
 }
 

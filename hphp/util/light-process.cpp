@@ -216,7 +216,7 @@ void hardwareCounterWrapperHelper(pid_t (*func)(int), int afdt_fd) {
     return;
   }
 
-  auto arg = folly::make_unique<HardwareCounterWrapperArg>();
+  auto arg = std::make_unique<HardwareCounterWrapperArg>();
   arg->afdt_fd = afdt_fd;
   arg->func = func;
   if (pthread_create(&arg->thr, nullptr, hardwareCounterWrapper, arg.get())) {
@@ -880,17 +880,22 @@ void LightProcess::SetLostChildHandler(const LostChildHandler& handler) {
   s_lostChildHandler = handler;
 }
 
-void LightProcess::setThreadLocalAfdtOverride(int fd) {
+std::unique_ptr<LightProcess> LightProcess::setThreadLocalAfdtOverride(
+  std::unique_ptr<LightProcess> p
+) {
+  auto ret = std::unique_ptr<LightProcess>(tl_proc);
+  tl_proc = p.release();
+  return ret;
+}
+
+std::unique_ptr<LightProcess> LightProcess::setThreadLocalAfdtOverride(int fd) {
+  auto ret = std::unique_ptr<LightProcess>(tl_proc);
   tl_proc = new LightProcess;
   tl_proc->m_afdt_fd = fd;
+  return ret;
 }
 
-void LightProcess::clearThreadLocalAfdtOverride() {
-  delete tl_proc;
-  tl_proc = nullptr;
-}
-
-int LightProcess::createCLIDelegate() {
+int LightProcess::createDelegate() {
   int pair[2];
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair)) {
     Logger::Warning("Unable to create a unix socket pair: %s",
@@ -901,7 +906,7 @@ int LightProcess::createCLIDelegate() {
   pid_t child = fork();
 
   if (child < 0) {
-    Logger::Warning("Unable to fork CLI delegate process: %s",
+    Logger::Warning("Unable to fork delegate process: %s",
                     folly::errnoStr(errno).c_str());
     close(pair[0]);
     close(pair[1]);

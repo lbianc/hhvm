@@ -83,6 +83,7 @@ struct Vunit;
   O(phijmp, Inone, U(uses), Dn)\
   O(conjure, Inone, Un, D(c))\
   O(conjureuse, Inone, U(c), Dn)\
+  O(funcguard, Inone, Un, Dn)\
   /* native function abi */\
   O(vcall, I(call) I(destType) I(fixup), U(args), D(d))\
   O(vinvoke, I(call) I(destType) I(fixup), U(args), D(d))\
@@ -174,8 +175,6 @@ struct Vunit;
   O(shlqi, I(s0) I(fl), UH(s1,d), DH(d,s1) D(sf))\
   O(shrli, I(s0) I(fl), UH(s1,d), DH(d,s1) D(sf))\
   O(shrqi, I(s0) I(fl), UH(s1,d), DH(d,s1) D(sf))\
-  O(subb, I(fl), UA(s0) U(s1), D(d) D(sf))\
-  O(subbi, I(s0) I(fl), UH(s1,d), DH(d,s1) D(sf))\
   O(subl, I(fl), UA(s0) U(s1), D(d) D(sf))\
   O(subli, I(s0) I(fl), UH(s1,d), DH(d,s1) D(sf))\
   O(subq, I(fl), UA(s0) U(s1), D(d) D(sf))\
@@ -251,6 +250,7 @@ struct Vunit;
   O(loadzbq, Inone, U(s), D(d))\
   O(loadzlq, Inone, U(s), D(d))\
   O(loadtqb, Inone, U(s), D(d))\
+  O(loadtql, Inone, U(s), D(d))\
   O(storeb, Inone, U(s) U(m), Dn)\
   O(storebi, I(s), U(m), Dn)\
   O(storew, Inone, U(s) U(m), Dn)\
@@ -295,9 +295,14 @@ struct Vunit;
   O(sarq, I(fl), UH(s,d), DH(d,s) D(sf))\
   O(shlq, I(fl), UH(s,d), DH(d,s) D(sf))\
   /* arm instructions */\
+  O(csincb, I(cc), U(sf) U(f) U(t), D(d))\
+  O(csincw, I(cc), U(sf) U(f) U(t), D(d))\
+  O(csincl, I(cc), U(sf) U(f) U(t), D(d))\
+  O(csincq, I(cc), U(sf) U(f) U(t), D(d))\
   O(fcvtzs, Inone, U(s), D(d))\
   O(mrs, I(s), Un, D(r))\
   O(msr, I(s), U(r), Dn)\
+  O(ubfmli, I(mr) I(ms), U(s), D(d))\
   /* ppc64 instructions */\
   O(extsb, Inone, UH(s,d), DH(d,s))\
   O(extsl, Inone, UH(s,d), DH(d,s))\
@@ -505,6 +510,12 @@ struct phijcc { ConditionCode cc; VregSF sf; Vlabel targets[2]; Vtuple uses; };
  */
 struct conjure { Vreg c; };
 struct conjureuse { Vreg c; };
+
+/*
+ * Emit a function prologue guard.
+ * *watch will be set to the address following the guard.
+ */
+struct funcguard { const Func* func; TCA* watch; };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Native function ABI.
@@ -925,8 +936,6 @@ struct shlqi { Immed s0; Vreg64 s1, d; VregSF sf; Vflags fl; };
 struct shrli { Immed s0; Vreg32 s1, d; VregSF sf; Vflags fl; };
 struct shrqi { Immed s0; Vreg64 s1, d; VregSF sf; Vflags fl; };
 // sub: s1 - s0 => d, sf
-struct subb { Vreg8 s0; Vreg8 s1, d; VregSF sf; Vflags fl; };
-struct subbi { Immed s0; Vreg8 s1, d; VregSF sf; Vflags fl; };
 struct subl { Vreg32 s0, s1, d; VregSF sf; Vflags fl; };
 struct subli { Immed s0; Vreg32 s1, d; VregSF sf; Vflags fl; };
 struct subq { Vreg64 s0, s1, d; VregSF sf; Vflags fl; };
@@ -1030,6 +1039,7 @@ struct loadzbq { Vptr s; Vreg64 d; };
 struct loadzlq { Vptr s; Vreg64 d; };
 // truncated s to d
 struct loadtqb { Vptr s; Vreg8 d; };
+struct loadtql { Vptr s; Vreg32 d; };
 // stores
 struct storeb { Vreg8 s; Vptr m; };
 struct storebi { Immed s; Vptr m; };
@@ -1099,9 +1109,14 @@ struct shlq { Vreg64 s, d; VregSF sf; Vflags fl; }; // uses rcx
 /*
  * arm intrinsics.
  */
+struct csincb { ConditionCode cc; VregSF sf; Vreg8 f, t, d; };
+struct csincw { ConditionCode cc; VregSF sf; Vreg16 f, t, d; };
+struct csincl { ConditionCode cc; VregSF sf; Vreg32 f, t, d; };
+struct csincq { ConditionCode cc; VregSF sf; Vreg64 f, t, d; };
 struct fcvtzs { VregDbl s; Vreg64 d;};
 struct mrs { Immed s; Vreg64 r; };
 struct msr { Vreg64 r; Immed s; };
+struct ubfmli { Immed mr, ms; Vreg32 s, d; };
 
 /*
  * ppc64 intrinsics.
@@ -1259,6 +1274,11 @@ VASM_OPCODES
  * Whether `inst' is a block-terminating instruction.
  */
 bool isBlockEnd(const Vinstr& inst);
+
+/*
+ * Whether `inst' is a call instruction.
+ */
+bool isCall(const Vinstr& inst);
 
 /*
  * The register width specification of `op'.

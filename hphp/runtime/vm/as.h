@@ -17,6 +17,7 @@
 #ifndef incl_HPHP_HHVM_AS_H_
 #define incl_HPHP_HHVM_AS_H_
 
+#include <memory>
 #include <string>
 
 namespace HPHP {
@@ -30,10 +31,17 @@ struct MD5;
 /*
  * Assemble the contents of `filename' and return a UnitEmitter.
  *
+ * If swallowErrors is true then emit a fataling unit for any assembler errors.
+ *
  * Minimal documentation is available in as.cpp.
  */
-UnitEmitter* assemble_string(const char* code, int codeLen,
-                             const char* filename, const MD5&);
+std::unique_ptr<UnitEmitter> assemble_string(
+  const char* code,
+  int codeLen,
+  const char* filename,
+  const MD5&,
+  bool swallowErrors = true
+);
 
 enum class AsmResult {
   NoResult,

@@ -20,6 +20,17 @@ module Common_argspecs = struct
       Arg.Bool (fun x -> value_ref := x),
       " If server is dormant, force start a new one instead of waiting for"^
       " the next one to start up automatically (default: false)")
+
+  let retries value_ref =
+    ("--retries",
+      Arg.Set_int value_ref,
+      spf (" set the number of retries for connecting to server. " ^^
+        "Roughly 1 retry per second (default: %d)") !value_ref;)
+
+  let from value_ref =
+    ("--from",
+      Arg.Set_string value_ref,
+      " so we know who's calling hh_client - e.g. nuclide, vim, emacs, vscode")
 end
 
 
@@ -174,9 +185,6 @@ let parse_check_args cmd =
     "--get-method-name",
       Arg.String (fun x -> set_mode (MODE_IDENTIFY_SYMBOL3 x) ()),
       (* alias for --identify-function *) "";
-    "--get-definition-by-id",
-      Arg.String (fun x -> set_mode (MODE_GET_DEFINITION_BY_ID x) ()),
-      "";
     "--refactor", Arg.Tuple ([
         Arg.Symbol (
           ["Class"; "Function"; "Method"],
@@ -301,18 +309,14 @@ let parse_check_args cmd =
     "--json",
       Arg.Set output_json,
       " output json for machine consumption. (default: false)";
-    "--retries",
-      Arg.Set_int retries,
-      spf " set the number of retries. (default: %d)" !retries;
+    Common_argspecs.retries retries;
     "--retry-if-init",
       Arg.Bool (fun x -> retry_if_init := x),
       " retry if the server is initializing (default: true)";
     "--no-load",
       Arg.Set no_load,
       " start from a fresh state";
-    "--from",
-      Arg.Set_string from,
-      " set this so we know who is calling hh_client";
+    Common_argspecs.from from;
     "--timeout",
       Arg.Float (fun x -> timeout := Some (Unix.time() +. x)),
       " set the timeout in seconds (default: no timeout)";
@@ -421,6 +425,7 @@ let parse_start_env command =
     no_load = !no_load;
     ai_mode = !ai_mode;
     silent = false;
+    exit_on_failure = true;
     debug_port = None;
   }
 
@@ -456,6 +461,10 @@ let parse_build_args () =
       Generates build files\n"
       Sys.argv.(0) in
   let force_dormant_start = ref false in
+  (* 800s was chosen because it was above most of the historical p95 of
+   * hack server startup times as observed here:
+   * https://fburl.com/48825801, see also https://fburl.com/29184831 *)
+  let retries = ref 800 in
   let steps = ref None in
   let ignore_killswitch = ref false in
   let no_steps = ref None in
@@ -484,6 +493,7 @@ let parse_build_args () =
     " build autoload-map and arc-facts using FactsDB";
     "--no-run-scripts", Arg.Clear run_scripts,
     " don't run unported arc build scripts";
+    Common_argspecs.retries retries;
     "--serial", Arg.Set serial,
     " run without parallel worker processes";
     Common_argspecs.force_dormant_start force_dormant_start;
@@ -513,6 +523,7 @@ let parse_build_args () =
     | _ -> Printf.printf "%s\n" usage; exit 2
   in
   CBuild { ClientBuild.
+    retries = !retries;
     root = root;
     wait = !wait;
     force_dormant_start = !force_dormant_start;
@@ -553,11 +564,17 @@ let parse_ide_args () =
   }
 
 let parse_lsp_args () =
-  let usage = Printf.sprintf "Usage: %s lsp\n" Sys.argv.(0) in
-  let options = [] in
+  let usage = Printf.sprintf
+    "Usage: %s lsp [OPTION]...\n\
+    [experimental] runs a persistent language service\n"
+    Sys.argv.(0) in
+  let from = ref "" in
+  let options = [
+    Common_argspecs.from from;
+  ] in
   let args = parse_without_command options usage "lsp" in
   match args with
-  | [] -> CLsp
+  | [] -> CLsp { ClientLsp.from = !from }
   | _ -> Printf.printf "%s\n" usage; exit 2
 
 let parse_debug_args () =
@@ -594,4 +611,4 @@ let root = function
   | CStop { ClientStop.root; _ }
   | CIde { ClientIde.root; _}
   | CDebug { ClientDebug.root } -> root
-  | CLsp -> Path.dummy_path
+  | CLsp _ -> Path.dummy_path

@@ -231,7 +231,8 @@ void DebugInfo::recordPerfMap(TCRange range, SrcKey sk, const Func* func,
   if (!m_perfMap) return;
   if (RuntimeOption::EvalProfileBC) return;
   if (name.empty()) {
-    name = lookupFunction(func, exit, inPrologue, true);
+    name = lookupFunction(func, exit, inPrologue,
+                          RuntimeOption::EvalPerfPidMapIncludeFilePath);
   }
   fprintf(m_perfMap, "%lx %x %s\n",
     reinterpret_cast<uintptr_t>(range.begin()),
@@ -343,9 +344,16 @@ std::string lookupFunction(const Func* f,
     }
     return fname;
   }
-  fname += f->fullName()->data();
-  if (inPrologue)
+  if (f->isClosureBody()) {
+    fname += f->baseCls()->name()->toCppString();
+    fname = fname.substr(0, fname.find(';'));
+    fname += "::__invoke";
+  } else {
+    fname += f->fullName()->data();
+  }
+  if (inPrologue) {
     fname += "$prologue";
+  }
   return fname;
 }
 

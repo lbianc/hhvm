@@ -3,21 +3,30 @@
 
 type t
 
+type client_message_kind =
+ | Request
+ | Notification
+ | Response
+
+val kind_to_string : client_message_kind -> string
+
 type client_message = {
   (* The timestamp field is added when this message is read. It's not part of
      the JSON RPC spec. *)
   timestamp : float;
 
-  method_ : string;
-  id : Hh_json.json option;
-  params : Hh_json.json option;
-  is_request : bool;
+  kind : client_message_kind;
+  method_ : string; (* mandatory for request+notification; empty otherwise *)
+  id : Hh_json.json option; (* mandatory for request+response *)
+  params : Hh_json.json option; (* optional for request+notification *)
+  result : Hh_json.json option; (* optional for response *)
+  error: Hh_json.json option; (* optional for response *)
 }
 
 type result =
   | Message of client_message
-  | Error (* A recoverable error occurred (such as a parse error). *)
-  | Exit (* A fatal error occurred, or the client has hung up. *)
+  | Fatal_exception of Marshal_tools.remote_exception_data
+  | Recoverable_exception of Marshal_tools.remote_exception_data
 
 (* Under the hood, this uses the Daemon module, so you must be sure to have
 called `Daemon.entry_point` before trying to make a queue. *)

@@ -24,6 +24,7 @@ and def =
   | Constant of gconst
   | Namespace of id * program
   | NamespaceUse of (ns_kind * id * id) list
+  | SetNamespaceEnv of Namespace_env.env
 
 and typedef = {
   t_id: id;
@@ -84,6 +85,7 @@ and class_elt =
   | Attributes of class_attr list
   | TypeConst of typeconst
   | ClassUse of hint
+  | ClassUseAlias of (id * pstring option) * id * cu_alias_type
   | XhpAttrUse of hint
   | ClassTraitRequire of trait_req_kind * hint
   | ClassVars of kind list * hint option * class_var list
@@ -91,6 +93,19 @@ and class_elt =
                ((Pos.t * expr list) option)
   | Method of method_
   | XhpCategory of pstring list
+  | XhpChild of xhp_child
+
+and cu_alias_type =
+  | CU_as
+  | CU_insteadof
+
+and xhp_child =
+  | ChildName of id
+  | ChildList of xhp_child list
+  | ChildUnary of xhp_child * xhp_child_op
+  | ChildBinary of xhp_child * xhp_child
+
+and xhp_child_op = ChildStar | ChildPlus | ChildQuestion
 
 and class_attr =
   | CA_name of id
@@ -244,13 +259,14 @@ and stmt =
   | Fallthrough
   | Expr of expr
   | Block of block
-  | Break of Pos.t
-  | Continue of Pos.t
+  | Break of Pos.t * int option
+  | Continue of Pos.t * int option
   | Throw of expr
   | Return of Pos.t * expr option
   | GotoLabel of pstring
   | Goto of pstring
   | Static_var of expr list
+  | Global_var of expr list
   | If of expr * block * block
   | Do of block * expr
   | While of expr * block
@@ -258,6 +274,7 @@ and stmt =
   | Switch of expr * case list
   | Foreach of expr * Pos.t option (* await as *) * as_expr * block
   | Try of block * catch list * block
+  | Def_inline of def
   | Noop
 
 and as_expr =
@@ -276,8 +293,10 @@ and expr_ =
   | Null
   | True
   | False
+  | Omitted
   | Id of id
   | Id_type_arguments of id * hint list
+  (* Special case: the pipe variable $$ *)
   | Lvar of id
   (**
    * PHP's Variable variable. The int is number of variable indirections
@@ -287,7 +306,6 @@ and expr_ =
      * $$$sample has int = 2.
    * *)
   | Lvarvar of int * id
-  | Dollardollar
   | Clone of expr
   | Obj_get of expr * expr * og_null_flavor
   | Array_get of expr * expr option

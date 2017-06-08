@@ -6,57 +6,26 @@
  * LICENSE file in the "hack" directory of this source tree. An additional grant
  * of patent rights can be found in the PATENTS file in the same directory.
  *
-*)
+ *)
 
 open Core
 open Ast
+open Ast_scope
 
 module ULS = Unique_list_string
 module SN = Naming_special_names
+module SU = Hhbc_string_utils
 
-let strip_dollar id =
-  String.sub id 1 (String.length id - 1)
-
-module ScopeItem =
-struct
-  type is_static = bool
-  type t =
-  (* Named class *)
-  | Class of string * tparam list
-  (* Named function *)
-  | Function of string * is_static * tparam list
-  (* PHP-style closure *)
-  | LongLambda of is_static
-  (* Short lambda *)
-  | Lambda
-end
-
-module Scope =
-struct
-  type t = ScopeItem.t list
-  let toplevel:t = []
-  let rec get_class scope =
-    match scope with
-    | [] -> None
-    | ScopeItem.Class (c, _) :: _ -> Some c
-    | _ :: scope -> get_class scope
-  let rec get_tparams scope =
-    match scope with
-    | [] -> []
-    | ScopeItem.Class (_, tparams) :: scope -> tparams @ get_tparams scope
-    | ScopeItem.Function (_, _, tparams) :: scope -> tparams @ get_tparams scope
-    | _ :: scope -> get_tparams scope
-end
+let constant_folding () =
+  Hhbc_options.constant_folding !Hhbc_options.compiler_options
 
 type env = {
   (* What is the current context? *)
   scope : Scope.t;
-  (* Prefix used to name closure classes in form
-   *   Closure$ (top-level statements)
-   *   Closure$fun (top-level function called fun)
-   *   Closure$cls::meth (method)
-   *)
-  prefix : string;
+  (* How many existing classes are there? *)
+  defined_class_count : int;
+  (* How many existing functions are there? *)
+  defined_function_count : int;
 }
 
 type state = {
@@ -64,74 +33,83 @@ type state = {
   per_function_count : int;
   (* Free variables computed so far *)
   captured_vars : ULS.t;
+  captured_this : bool;
   (* Variables that are *defined* in current scope (e.g. lambda parameters,
    * locals) and so should not be added to capture set
    *)
   defined_vars : SSet.t;
   (* Total number of closures created *)
   total_count : int;
-  (* Closure class number, used in CreateCl instruction *)
-  class_num : int;
-  (* The closure classes themselves *)
-  closures : class_ list;
+  (* Closure classes and hoisted inline classes *)
+  hoisted_classes : class_ list;
+  (* Hoisted inline functions *)
+  hoisted_functions : fun_ list;
+  (* The current namespace environment *)
+  namespace: Namespace_env.env;
 }
 
-let initial_state initial_class_num =
+let initial_state =
 {
   per_function_count = 0;
   captured_vars = ULS.empty;
+  captured_this = false;
   defined_vars = SSet.empty;
   total_count = 0;
-  class_num = initial_class_num;
-  closures = [];
+  hoisted_classes = [];
+  hoisted_functions = [];
+  namespace = Namespace_env.empty_with_default_popt;
 }
 
 (* Add a variable to the captured variables *)
 let add_var st var =
   (* If it's bound as a parameter or definite assignment, don't add it *)
+  (* Also don't add the pipe variable *)
   if SSet.mem var st.defined_vars
+  || var = Naming_special_names.SpecialIdents.dollardollar
   then st
   else
   (* Don't bother if it's $this, as this is captured implicitly *)
   if var = Naming_special_names.SpecialIdents.this
-  then st
+  then { st with captured_this = true; }
   else { st with captured_vars = ULS.add st.captured_vars var }
 
 let env_with_lambda env =
   { env with scope = ScopeItem.Lambda :: env.scope }
 
 let env_with_longlambda env is_static =
-{ env with scope = ScopeItem.LongLambda is_static :: env.scope }
+  { env with scope = ScopeItem.LongLambda is_static :: env.scope }
+
+let strip_id id = SU.strip_global_ns (snd id)
+
+let rec make_scope_name scope =
+  match scope with
+  | [] -> ""
+  | ScopeItem.Function fd :: _ -> strip_id fd.f_name
+  | ScopeItem.Method md :: scope ->
+    make_scope_name scope ^ "::" ^ strip_id md.m_name
+  | ScopeItem.Class cd :: _ ->
+    SU.Xhp.mangle_id (strip_id cd.c_name)
+  | _ :: scope -> make_scope_name scope
 
 let env_with_function env fd =
-  let name = Utils.strip_ns (snd fd.f_name) in
-  { prefix = "Closure$" ^ name;
-    scope = ScopeItem.Function (name, true, fd.f_tparams) :: env.scope;
-  }
+  { env with scope = ScopeItem.Function fd :: env.scope; }
 
-let env_toplevel =
-  { prefix = "Closure$";
-    scope = Scope.toplevel;
-  }
+let env_toplevel class_count function_count =
+  { scope = Scope.toplevel;
+    defined_class_count = class_count;
+    defined_function_count = function_count; }
 
-let env_with_method env cd md =
-  let name = Utils.strip_ns (snd md.m_name) in
-  let class_name = Utils.strip_ns (snd cd.c_name) in
-  { prefix = "Closure$" ^ class_name ^ "::" ^ name;
-    scope = ScopeItem.Function (name, List.mem md.m_kind Static, md.m_tparams)
-      :: env.scope;
-  }
+let env_with_method env md =
+  { env with scope = ScopeItem.Method md :: env.scope; }
 
-let env_with_class cd =
-  let name = Utils.strip_ns (snd cd.c_name) in
-  { prefix = "Closure$" ^ name;
-    scope = [ScopeItem.Class (name, cd.c_tparams)];
-  }
+let env_with_class env cd =
+  { env with scope = [ScopeItem.Class cd]; }
 
 (* Clear the variables, upon entering a lambda *)
 let enter_lambda st fd =
   { st with
     captured_vars = ULS.empty;
+    captured_this = false;
     defined_vars =
       SSet.of_list (List.map fd.f_params (fun param -> snd param.param_id));
    }
@@ -139,30 +117,44 @@ let enter_lambda st fd =
 let add_defined_var st var =
   { st with defined_vars = SSet.add var st.defined_vars }
 
-(* Set the prefix name, upon entering a top-level function *)
-let reset_function_count st =
-  { st with
-    per_function_count = 0;
-  }
+let set_namespace st ns =
+  { st with namespace = ns }
 
-(* Retrieve the closure classes in the order that they were generated *)
-let get_closure_classes st =
-  List.rev st.closures
+let reset_function_count st =
+  { st with per_function_count = 0; }
+
+let add_function env st fd =
+  let n = env.defined_function_count + List.length st.hoisted_functions in
+  { st with hoisted_functions = fd :: st.hoisted_functions },
+  { fd with f_body = []; f_name = (fst fd.f_name, string_of_int n) }
+
+(* Make a stub class purely for the purpose of emitting the DefCls instruction
+ *)
+let make_defcls cd n =
+{ cd with
+  c_body = [];
+  c_name = (fst cd.c_name, string_of_int n) }
+
+let add_class env st cd =
+  let n = env.defined_class_count + List.length st.hoisted_classes in
+  { st with hoisted_classes = cd :: st.hoisted_classes },
+  make_defcls cd n
 
 let make_closure_name total_count env st =
-  let name = if st.per_function_count = 1
-               then env.prefix
-               else env.prefix ^ "#" ^ string_of_int st.per_function_count in
-  name ^ ";" ^ string_of_int total_count
+  SU.Closures.mangle_closure
+    (make_scope_name env.scope) st.per_function_count total_count
 
-let make_closure ~explicit_use
-  p total_count class_num env st lambda_vars tparams fd body =
+let make_closure ~explicit_use ~class_num
+  p total_count env st lambda_vars tparams fd body =
   let rec is_scope_static scope =
     match scope with
-    | ScopeItem.LongLambda is_static :: _ -> is_static
-    | ScopeItem.Function(_, is_static, _) :: _ -> is_static
-    | ScopeItem.Lambda :: scope -> is_scope_static scope
-    | [] -> true
+    | ScopeItem.LongLambda is_static :: scope ->
+      is_static || is_scope_static scope
+    | ScopeItem.Function _ :: _ -> false
+    | ScopeItem.Method md :: _ ->
+      List.mem md.m_kind Static
+    | ScopeItem.Lambda :: scope ->
+      not st.captured_this || is_scope_static scope
     | _ -> false in
   let md = {
     m_kind = [Public] @ (if is_scope_static env.scope then [Static] else []);
@@ -178,7 +170,8 @@ let make_closure ~explicit_use
     m_span = fd.f_span;
   } in
   let cvl =
-    List.map lambda_vars (fun name -> (p, (p, strip_dollar name), None)) in
+    List.map lambda_vars
+    (fun name -> (p, (p, Hhbc_string_utils.Locals.strip_dollar name), None)) in
   let cd = {
     c_mode = fd.f_mode;
     c_user_attributes = [];
@@ -205,37 +198,34 @@ let make_closure ~explicit_use
  * because the enclosing class will be changed. *)
 let convert_id (env:env) p (pid, str as id) =
   let return newstr = (p, String (pid, newstr)) in
+  let get_class_name () =
+    match Scope.get_class env.scope with
+    | None -> ""
+    | Some cd -> strip_id cd.c_name in
   match str with
   | "__CLASS__" ->
-    return (match Scope.get_class env.scope with None -> "" | Some s -> s)
+    return (get_class_name ())
   | "__METHOD__" ->
     let prefix =
-      match Scope.get_class env.scope with None -> "" | Some s -> s ^ "::" in
+      match Scope.get_class env.scope with
+      | None -> ""
+      | Some cd -> strip_id cd.c_name ^ "::" in
     begin match env.scope with
-      | ScopeItem.Function(name, _, _) :: _ -> return (prefix ^ name)
+      | ScopeItem.Function fd :: _ -> return (prefix ^ strip_id fd.f_name)
+      | ScopeItem.Method md :: _ -> return (prefix ^ strip_id md.m_name)
       | (ScopeItem.Lambda | ScopeItem.LongLambda _) :: _ ->
         return (prefix ^ "{closure}")
       | _ -> return ""
     end
   | "__FUNCTION__" ->
     begin match env.scope with
-    | ScopeItem.Function(name, _, _)::_ -> return name
+    | ScopeItem.Function fd :: _ -> return (strip_id fd.f_name)
+    | ScopeItem.Method md :: _ -> return (strip_id md.m_name)
     | (ScopeItem.Lambda | ScopeItem.LongLambda _) :: _ -> return "{closure}"
     | _ -> return ""
     end
   | _ ->
     (p, Id id)
-
-(* Statically resolve the `self` class identifier if the enclosing class is
- * known. After closure conversion this would be incorrect.
- * TODO: do the same for `parent` *)
-let convert_class_id env (p, str as id) =
-  match Scope.get_class env.scope with
-  | None -> id
-  | Some class_name ->
-    if str = SN.Classes.cSelf
-    then (p, class_name)
-    else id
 
 let rec convert_expr env st (p, expr_ as expr) =
   match expr_ with
@@ -335,10 +325,6 @@ let rec convert_expr env st (p, expr_ as expr) =
     st, (p, Import(flavor, e))
   | Id id ->
     st, convert_id env p id
-  | Class_get(class_id, id) ->
-    st, (p, Class_get(convert_class_id env class_id, id))
-  | Class_const(class_id, id) ->
-    st, (p, Class_const(convert_class_id env class_id, id))
   | _ ->
     st, expr
 
@@ -348,14 +334,10 @@ let rec convert_expr env st (p, expr_ as expr) =
 and convert_lambda env st p fd use_vars_opt =
   (* Remember the current capture and defined set across the lambda *)
   let captured_vars = st.captured_vars in
+  let captured_this = st.captured_this in
   let defined_vars = st.defined_vars in
   let total_count = st.total_count in
-  let class_num = st.class_num in
-  let closures_until_now = st.closures in
-  let st = { st with
-    total_count = total_count + 1;
-    closures = [];
-    class_num = st.class_num + 1 } in
+  let st = { st with total_count = total_count + 1; } in
   let st = enter_lambda st fd in
   let env = if Option.is_some use_vars_opt
             then env_with_longlambda env false
@@ -372,15 +354,19 @@ and convert_lambda env st p fd use_vars_opt =
     | Some use_vars ->
       List.map use_vars (fun ((_, var), _ref) -> var), use_vars in
   let tparams = Scope.get_tparams env.scope in
+  let class_num = List.length st.hoisted_classes + env.defined_class_count in
   let inline_fundef, cd =
-    make_closure ~explicit_use:(Option.is_some use_vars_opt)
-      p total_count class_num env st lambda_vars tparams fd block in
+      make_closure
+      ~explicit_use:(Option.is_some use_vars_opt)
+      ~class_num
+      p total_count env st lambda_vars tparams fd block in
   (* Restore capture and defined set *)
   let st = { st with captured_vars = captured_vars;
-                       defined_vars = defined_vars; } in
+                     captured_this = captured_this;
+                     defined_vars = defined_vars; } in
   (* Add lambda captured vars to current captured vars *)
   let st = List.fold_left lambda_vars ~init:st ~f:add_var in
-  let st = { st with closures = st.closures @ cd :: closures_until_now } in
+  let st = { st with hoisted_classes = cd :: st.hoisted_classes } in
   st, (p, Efun (inline_fundef, use_vars))
 
 and convert_exprs env st el =
@@ -443,6 +429,14 @@ and convert_stmt env st stmt =
     let st, cl = List.map_env st cl (convert_catch env) in
     let st, b2 = convert_block env st b2 in
     st, Try (b1, cl, b2)
+  | Def_inline (Class cd) ->
+    let st, cd = convert_class env st cd in
+    let st, stub_cd = add_class env st cd in
+    st, Def_inline (Class stub_cd)
+  | Def_inline (Fun fd) ->
+    let st, fd = convert_fun env st fd in
+    let st, stub_fd = add_function env st fd in
+    st, Def_inline (Fun stub_fd)
   | _ ->
     st, stmt
 
@@ -507,56 +501,119 @@ and convert_afield env st afield =
     let st, e2 = convert_expr env st e2 in
     st, AFkvalue (e1, e2)
 
-let convert_fun st fd =
-  let fd = Ast_constant_folder.fold_function fd in
-  let env = env_with_function env_toplevel fd in
+and convert_params env st param_list =
+  let convert_param env st param = match param.param_expr with
+    | None -> st, param
+    | Some e ->
+      let st, e = convert_expr env st e in
+      st, { param with param_expr = Some e }
+  in
+  List.map_env st param_list (convert_param env)
+
+and convert_fun env st fd =
+  let env = env_with_function env fd in
   let st = reset_function_count st in
   let st, block = convert_block env st fd.f_body in
-  st, { fd with f_body = block }
+  let st, params = convert_params env st fd.f_params in
+  st, { fd with f_body = block; f_params = params }
 
-let rec convert_class st cd =
-  let env = env_with_class cd in
+and convert_class env st cd =
+  let env = env_with_class env cd in
   let st = reset_function_count st in
-  let st, c_body = List.map_env st cd.c_body (convert_class_elt cd env) in
+  let st, c_body = List.map_env st cd.c_body (convert_class_elt env) in
   st, { cd with c_body = c_body }
 
-and convert_class_elt cd env st ce =
+and convert_class_var env st (pos, id, expr_opt) =
+  match expr_opt with
+  | None ->
+    st, (pos, id, expr_opt)
+  | Some expr ->
+    let st, expr = convert_expr env st expr in
+    st, (pos, id, Some expr)
+
+and convert_class_elt env st ce =
   match ce with
   | Method md ->
-    let md = Ast_constant_folder.fold_method md in
-    let env = env_with_method env cd md in
+    let env = env_with_method env md in
     let st = reset_function_count st in
     let st, block = convert_block env st md.m_body in
-    st, Method { md with m_body = block }
+    let st, params = convert_params env st md.m_params in
+    st, Method { md with m_body = block; m_params = params }
 
-  (* TODO Const, other elements containing expressions *)
+  | ClassVars (kinds, hint, cvl) ->
+    let st, cvl = List.map_env st cvl (convert_class_var env) in
+    st, ClassVars (kinds, hint, cvl)
+
   | _ ->
     st, ce
 
-let convert_toplevel st stmt =
-  let stmt = Ast_constant_folder.fold_stmt stmt in
-  convert_stmt env_toplevel st stmt
+and convert_gconst env st gconst =
+  let st, expr = convert_expr env st gconst.Ast.cst_value in
+  st, { gconst with Ast.cst_value = expr }
 
-let rec convert_def st d =
-  match d with
-  | Fun fd ->
-    let st, fd = convert_fun st fd in
-    st, Fun fd
-  | Class cd ->
-    let st, cd = convert_class st cd in
-    st, Class cd
-  | Stmt stmt ->
-    let st, stmt = convert_toplevel st stmt in
-    st, Stmt stmt
-  | Typedef td ->
-    st, Typedef td
-  | Constant c ->
-    st, Constant c
-  | Namespace(id, dl) ->
-    let st, dl = convert_prog st dl in
-    st, Namespace(id, dl)
-  | NamespaceUse x ->
-    st, NamespaceUse x
+and convert_defs env class_count typedef_count st dl =
+  match dl with
+  | [] -> st, []
+  | Fun fd :: dl ->
+    let st, fd = convert_fun env st fd in
+    let st, dl = convert_defs env class_count typedef_count st dl in
+    st, Fun fd :: dl
+    (* Convert a top-level class definition into a true class definition and
+     * a stub class that just corresponds to the DefCls instruction *)
+  | Class cd :: dl ->
+    let st, cd = convert_class env st cd in
+    let stub_class = make_defcls cd class_count in
+    let st, dl = convert_defs env (class_count + 1) typedef_count st dl in
+    st, Class cd :: Stmt (Def_inline (Class stub_class)) :: dl
+  | Stmt stmt :: dl ->
+    let st, stmt = convert_stmt env st stmt in
+    let st, dl = convert_defs env class_count typedef_count st dl in
+    st, Stmt stmt :: dl
+  | Typedef td :: dl ->
+    let st, dl = convert_defs env class_count (typedef_count + 1) st dl in
+    let stub_td = { td with t_id =
+      (fst td.t_id, string_of_int (typedef_count)) } in
+    st, Typedef td :: Stmt (Def_inline (Typedef stub_td)) :: dl
+  | Constant c :: dl ->
+    let st, c = convert_gconst env st c in
+    let st, dl = convert_defs env class_count typedef_count st dl in
+    st, Constant c :: dl
+  | Namespace(_id, dl) :: dl' ->
+    convert_defs env class_count typedef_count st (dl @ dl')
+  | NamespaceUse x :: dl ->
+    let st, dl = convert_defs env class_count typedef_count st dl in
+    st, NamespaceUse x :: dl
+  | SetNamespaceEnv ns :: dl ->
+    let st = set_namespace st ns in
+    let st, dl = convert_defs env class_count typedef_count st dl in
+    st, SetNamespaceEnv ns :: dl
 
-and convert_prog st dl =
-  List.map_env st dl convert_def
+let count_classes defs =
+  List.count defs ~f:(function Class _ -> true | _ -> false)
+
+let hoist_toplevel_functions all_defs =
+  let funs, nonfuns =
+    List.partition_tf all_defs ~f:(function Fun _ -> true | _ -> false) in
+  funs @ nonfuns
+
+(* For all the definitions in a file unit, convert lambdas into classes with
+ * invoke methods, and hoist inline class and function definitions to top
+ * level.
+ * The closure classes and hoisted definitions are placed after the existing
+ * definitions.
+ *)
+let convert_toplevel_prog defs =
+  let defs =
+    if constant_folding ()
+    then Ast_constant_folder.fold_program defs else defs in
+  (* Reorder the functions so that they appear first. This matches the
+   * behaviour of HHVM *)
+  let defs = hoist_toplevel_functions defs in
+  (* First compute the number of explicit classes in order to generate correct
+   * integer identifiers for the generated classes. .main counts as a top-level
+   * function and we place hoisted functions just after that *)
+  let env = env_toplevel (count_classes defs) 1 in
+  let st, p = convert_defs env 0 0 initial_state defs in
+  let fun_defs = List.rev_map st.hoisted_functions (fun fd -> Fun fd) in
+  let class_defs = List.rev_map st.hoisted_classes (fun cd -> Class cd) in
+  fun_defs @ p @ class_defs

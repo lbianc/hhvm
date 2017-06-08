@@ -27,7 +27,6 @@
 #include "hphp/compiler/parser/parser.h"
 #include "hphp/util/hash.h"
 #include "hphp/runtime/base/string-data.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/zend-strtod.h"
 #include "hphp/runtime/ext/std/ext_std_variable.h"
@@ -343,22 +342,6 @@ void ScalarExpression::outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) {
   default:
     assert(false);
   }
-}
-
-int64_t ScalarExpression::getHash() const {
-  int64_t hash = -1;
-  if (isLiteralInteger()) {
-    hash = hash_int64(getLiteralInteger());
-  } else if (isLiteralString()) {
-    auto const scs = getLiteralString();
-    int64_t res;
-    if (is_strictly_integer(scs.c_str(), scs.size(), res)) {
-      hash = hash_int64(res);
-    } else {
-      hash = hash_string_unsafe(scs.c_str(), scs.size());
-    }
-  }
-  return hash;
 }
 
 Variant ScalarExpression::getVariant() const {

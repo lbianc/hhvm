@@ -268,6 +268,9 @@ public:
   String getLastErrorPath() const;
   int getLastErrorLine() const;
 
+  // Obtain the current queued errors, resetting the queue in the process.
+  Array releaseDeferredErrors();
+
   /**
    * Misc. settings
    */
@@ -481,6 +484,8 @@ public:
 
   bool setHeaderCallback(const Variant& callback);
 
+  template<class Fn> void sweepDynPropTable(Fn);
+
 private:
   template<class FStackCheck, class FInitArgs, class FEnterVM>
   TypedValue invokeFuncImpl(const Func* f,
@@ -522,6 +527,7 @@ private:
   String m_lastError;
   int m_lastErrorNum;
   String m_errorPage;
+  Array m_deferredErrors;
 
   // misc settings
   Array m_envs;

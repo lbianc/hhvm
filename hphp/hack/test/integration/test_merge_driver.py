@@ -25,10 +25,11 @@ class MergeDriverTests(common_tests.CommonTestDriver, unittest.TestCase):
 
     def write_local_conf(self, watchman_subscribe=True):
         with open(os.path.join(self.repo_dir, 'hh.conf'), 'w') as f:
+            watchman_subscribe_str = "watchman_subscribe_v2 = "
             if watchman_subscribe:
-                watchman_subscribe_str = "watchman_subscribe = true"
+                watchman_subscribe_str += "true"
             else:
-                watchman_subscribe_str = "watchman_subscribe = false"
+                watchman_subscribe_str += "false"
             f.write(
                 r"""
 # some comment
@@ -38,6 +39,7 @@ lazy_decl = true
 lazy_parse = true
 lazy_init = true
 enable_fuzzy_search = false
+use_dummy_informant = false
 """
             )
             f.write(watchman_subscribe_str)
@@ -141,7 +143,7 @@ mergedriver = python:scripts/mergedriver.py
     # Hack is launched by the merge driver. Test setup is same as before, except
     # we don't start a Hack server.
     def test_mergedriver_finishes_quickly_hack_not_running(self):
-        self.write_local_conf(watchman_subscribe=False)
+        self.write_local_conf(watchman_subscribe=True)
         self.init_hg_repo()
         self.write_foo_1_and_commit(self.foo_1_start, "starting")
         self.write_foo_1_and_commit(

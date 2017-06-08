@@ -16,6 +16,8 @@ let user_attrs = GlobalOptions.tco_user_attrs
 let allowed_attribute = GlobalOptions.tco_allowed_attribute
 let experimental_feature_enabled =
   GlobalOptions.tco_experimental_feature_enabled
+let migration_flag_enabled =
+  GlobalOptions.tco_migration_flag_enabled
 let default = GlobalOptions.default
 let make_permissive = GlobalOptions.make_permissive
 let experimental_instanceof = GlobalOptions.tco_experimental_instanceof
@@ -26,4 +28,9 @@ let experimental_darray_and_varray =
 let experimental_goto = GlobalOptions.tco_experimental_goto
 let experimental_shape_idx_relaxed =
   GlobalOptions.tco_experimental_shape_idx_relaxed
+let experimental_disable_shape_and_tuple_arrays =
+  GlobalOptions.tco_experimental_disable_shape_and_tuple_arrays
+let experimental_promote_nullable_to_optional_in_shapes =
+  GlobalOptions.tco_experimental_promote_nullable_to_optional_in_shapes
 let experimental_all = GlobalOptions.tco_experimental_all
+let migration_flags_all = GlobalOptions.tco_migration_flags_all

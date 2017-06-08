@@ -40,6 +40,9 @@ class virtual ['self] reduce =
       let r0 = self#on_id env c0 in
       let r1 = self#on_program env c1 in
       self#add r0 r1
+    method on_SetNamespaceEnv env c0 =
+      let r0 = self#on_Namespace_env env c0 in
+      r0
     method on_NamespaceUse env c0 =
       let r0 =
         self#on_list
@@ -58,6 +61,7 @@ class virtual ['self] reduce =
       | Constant c0 -> self#on_Constant env c0
       | Namespace (c0, c1) -> self#on_Namespace env c0 c1
       | NamespaceUse c0 -> self#on_NamespaceUse env c0
+      | SetNamespaceEnv c0 -> self#on_SetNamespaceEnv env c0
     method on_typedef env this =
       let r0 = self#on_id env this.t_id in
       let r1 = self#on_list self#on_tparam env this.t_tparams in
@@ -161,6 +165,12 @@ class virtual ['self] reduce =
     method on_Attributes = self#on_list self#on_class_attr
     method on_TypeConst = self#on_typeconst
     method on_ClassUse = self#on_hint
+    method on_ClassUseAlias env (c0, c1) c2 c3 =
+      let r0 = self#on_id env c0 in
+      let r1 = self#on_option self#on_pstring env c1 in
+      let r2 = self#on_id env c2 in
+      let r3 = self#on_cu_alias_type env c3 in
+      self#sum [ r0; r1; r2; r3 ]
     method on_XhpAttrUse = self#on_hint
     method on_ClassTraitRequire env c0 c1 =
       let r0 = self#on_trait_req_kind env c0 in
@@ -185,12 +195,43 @@ class virtual ['self] reduce =
       self#sum [ r0; r1; r2; r3 ]
     method on_Method = self#on_method_
     method on_XhpCategory = self#on_list self#on_pstring
+    method on_XhpChild = self#on_xhp_child
+    method on_xhp_child env = function
+      | ChildName c0 -> self#on_ChildName env c0
+      | ChildList c0 -> self#on_ChildList env c0
+      | ChildUnary (c0, c1) -> self#on_ChildUnary env c0 c1
+      | ChildBinary (c0, c1) -> self#on_ChildBinary env c0 c1
+
+    method on_ChildName = self#on_id
+    method on_ChildList = self#on_list self#on_xhp_child
+    method on_ChildUnary env c0 c1 =
+      let r0 = self#on_xhp_child env c0 in
+      let r1 = self#on_xhp_child_op env c1 in
+      self#add r0 r1
+
+    method on_ChildBinary env c0 c1 =
+      let r0 = self#on_xhp_child env c0 in
+      let r1 = self#on_xhp_child env c1 in
+      self#add r0 r1
+
+    method on_xhp_child_op env = function
+      | ChildStar -> self#on_ChildStar env
+      | ChildPlus -> self#on_ChildPlus env
+      | ChildQuestion -> self#on_ChildQuestion env
+
+    method on_ChildStar _ = self#e
+    method on_ChildPlus _ = self#e
+    method on_ChildQuestion _ = self#e
+
+    method on_cu_alias_type _ _ = self#e
+
     method on_class_elt env = function
       | Const (c0, c1) -> self#on_Const env c0 c1
       | AbsConst (c0, c1) -> self#on_AbsConst env c0 c1
       | Attributes c0 -> self#on_Attributes env c0
       | TypeConst c0 -> self#on_TypeConst env c0
       | ClassUse c0 -> self#on_ClassUse env c0
+      | ClassUseAlias (c0, c1, c2) -> self#on_ClassUseAlias env c0 c1 c2
       | XhpAttrUse c0 -> self#on_XhpAttrUse env c0
       | ClassTraitRequire (c0, c1) ->
           self#on_ClassTraitRequire env c0 c1
@@ -198,6 +239,7 @@ class virtual ['self] reduce =
       | XhpAttr (c0, c1, c2, c3) -> self#on_XhpAttr env c0 c1 c2 c3
       | Method c0 -> self#on_Method env c0
       | XhpCategory c0 -> self#on_XhpCategory env c0
+      | XhpChild c0 -> self#on_XhpChild env c0
     method on_CA_name = self#on_id
     method on_CA_field = self#on_ca_field
     method on_class_attr env = function
@@ -354,17 +396,19 @@ class virtual ['self] reduce =
       let r2 = self#on_hint env this.sf_hint in
       self#add (self#add r0 r1) r2
     method on_Unsafe _ = self#e
+    method on_Omitted _ = self#e
     method on_Fallthrough _ = self#e
     method on_Expr = self#on_expr
     method on_Block = self#on_block
-    method on_Break = self#on_Pos_t
-    method on_Continue = self#on_Pos_t
+    method on_Break env pos level_opt = self#on_Pos_t env pos
+    method on_Continue env pos level_opt = self#on_Pos_t env pos
     method on_Throw = self#on_expr
     method on_Return env c0 c1 =
       let r0 = self#on_Pos_t env c0 in
       let r1 = self#on_option self#on_expr env c1 in
       self#add r0 r1
     method on_Static_var = self#on_list self#on_expr
+    method on_Global_var = self#on_list self#on_expr
     method on_If env c0 c1 c2 =
       let r0 = self#on_expr env c0 in
       let r1 = self#on_block env c1 in
@@ -399,19 +443,21 @@ class virtual ['self] reduce =
       let r1 = self#on_list self#on_catch env c1 in
       let r2 = self#on_block env c2 in
       self#add (self#add r0 r1) r2
+    method on_Def_inline = self#on_def
     method on_Noop _ = self#e
     method on_stmt env = function
       | Unsafe -> self#on_Unsafe env
       | Fallthrough -> self#on_Fallthrough env
       | Expr c0 -> self#on_Expr env c0
       | Block c0 -> self#on_Block env c0
-      | Break c0 -> self#on_Break env c0
-      | Continue c0 -> self#on_Continue env c0
+      | Break (c0, level_opt) -> self#on_Break env c0 level_opt
+      | Continue (c0, level_opt) -> self#on_Continue env c0 level_opt
       | Throw c0 -> self#on_Throw env c0
       | Return (c0, c1) -> self#on_Return env c0 c1
       | GotoLabel c0 -> self#on_GotoLabel env c0
       | Goto c0 -> self#on_Goto env c0
       | Static_var c0 -> self#on_Static_var env c0
+      | Global_var c0 -> self#on_Global_var env c0
       | If (c0, c1, c2) -> self#on_If env c0 c1 c2
       | Do (c0, c1) -> self#on_Do env c0 c1
       | While (c0, c1) -> self#on_While env c0 c1
@@ -419,6 +465,8 @@ class virtual ['self] reduce =
       | Switch (c0, c1) -> self#on_Switch env c0 c1
       | Foreach (c0, c1, c2, c3) -> self#on_Foreach env c0 c1 c2 c3
       | Try (c0, c1, c2) -> self#on_Try env c0 c1 c2
+      | Def_inline c0 ->
+        self#on_Def_inline env c0
       | Noop -> self#on_Noop env
     method on_As_v = self#on_expr
     method on_As_kv env c0 c1 =
@@ -470,7 +518,6 @@ class virtual ['self] reduce =
       let r0 = self#on_int env c0 in
       let r1 = self#on_id env c1 in
       self#add r0 r1
-    method on_Dollardollar _ = self#e
     method on_Clone = self#on_expr
     method on_Obj_get env c0 c1 c2 =
       let r0 = self#on_expr env c0 in
@@ -580,7 +627,6 @@ class virtual ['self] reduce =
       | Id_type_arguments (c0, c1) -> self#on_Id_type_arguments env c0 c1
       | Lvar c0 -> self#on_Lvar env c0
       | Lvarvar (c0, c1) -> self#on_Lvarvar env c0 c1
-      | Dollardollar -> self#on_Dollardollar env
       | Clone c0 -> self#on_Clone env c0
       | Obj_get (c0, c1, c2) -> self#on_Obj_get env c0 c1 c2
       | Array_get (c0, c1) -> self#on_Array_get env c0 c1
@@ -609,6 +655,7 @@ class virtual ['self] reduce =
       | Xml (c0, c1, c2) -> self#on_Xml env c0 c1 c2
       | Unsafeexpr c0 -> self#on_Unsafeexpr env c0
       | Import (c0, c1) -> self#on_Import env c0 c1
+      | Omitted         -> self#on_Omitted env
     method on_Include _ = self#e
     method on_Require _ = self#e
     method on_IncludeOnce _ = self#e
@@ -639,6 +686,7 @@ class virtual ['self] reduce =
     method on_BArbar _ = self#e
     method on_Lt _ = self#e
     method on_Lte _ = self#e
+    method on_Cmp _ = self#e
     method on_Gt _ = self#e
     method on_Gte _ = self#e
     method on_Dot _ = self#e
@@ -663,6 +711,7 @@ class virtual ['self] reduce =
       | BArbar -> self#on_BArbar env
       | Lt -> self#on_Lt env
       | Lte -> self#on_Lte env
+      | Cmp -> self#on_Cmp env
       | Gt -> self#on_Gt env
       | Gte -> self#on_Gte env
       | Dot -> self#on_Dot env
@@ -682,6 +731,8 @@ class virtual ['self] reduce =
     method on_Upincr _ = self#e
     method on_Updecr _ = self#e
     method on_Uref _ = self#e
+    method on_Usplat _ = self#e
+    method on_Usilence _ = self#e
     method on_uop env = function
       | Utild -> self#on_Utild env
       | Unot -> self#on_Unot env
@@ -692,6 +743,8 @@ class virtual ['self] reduce =
       | Upincr -> self#on_Upincr env
       | Updecr -> self#on_Updecr env
       | Uref -> self#on_Uref env
+      | Usplat -> self#on_Usplat env
+      | Usilence -> self#on_Usilence env
     method on_Default = self#on_block
     method on_Case env c0 c1 =
       let r0 = self#on_expr env c0 in

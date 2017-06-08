@@ -527,7 +527,7 @@ allocateBCRegion(const unsigned char* bc, size_t bclen) {
 
 std::unique_ptr<Unit> UnitEmitter::create() {
   INC_TPC(unit_load);
-  auto u = folly::make_unique<Unit>();
+  auto u = std::make_unique<Unit>();
   u->m_repoId = m_repoId;
   u->m_sn = m_sn;
   u->m_bc = allocateBCRegion(m_bc, m_bclen);
@@ -697,7 +697,10 @@ std::unique_ptr<Unit> UnitEmitter::create() {
     kVerify || boost::ends_with(u->filepath()->data(), "hhas");
   if (doVerify) {
     auto const verbose = isSystemLib ? kVerifyVerboseSystem : kVerifyVerbose;
-    auto const ok = Verifier::checkUnit(u.get(), verbose);
+    auto const ok = Verifier::checkUnit(
+      u.get(),
+      verbose ? Verifier::kVerbose : Verifier::kStderr
+    );
 
     if (!ok && !verbose) {
       std::cerr << folly::format(
@@ -832,7 +835,7 @@ RepoStatus UnitRepoProxy::loadHelper(UnitEmitter& ue,
 
 std::unique_ptr<UnitEmitter>
 UnitRepoProxy::loadEmitter(const std::string& name, const MD5& md5) {
-  auto ue = folly::make_unique<UnitEmitter>(md5);
+  auto ue = std::make_unique<UnitEmitter>(md5);
   if (loadHelper(*ue, name, md5) == RepoStatus::error) ue.reset();
   return ue;
 }
@@ -1201,6 +1204,27 @@ UnitRepoProxy::GetSourceLocTabStmt::get(int64_t unitSn,
     return RepoStatus::error;
   }
   return RepoStatus::success;
+}
+
+std::unique_ptr<UnitEmitter> createFatalUnit(
+  StringData* filename,
+  const MD5& md5,
+  FatalOp op,
+  StringData* err
+) {
+  auto ue = std::make_unique<UnitEmitter>(md5);
+  ue->m_filepath = filename;
+  ue->initMain(1, 1);
+  ue->emitOp(OpString);
+  ue->emitInt32(ue->mergeLitstr(err));
+  ue->emitOp(OpFatal);
+  ue->emitByte(static_cast<uint8_t>(FatalOp::Runtime));
+  FuncEmitter* fe = ue->getMain();
+  fe->maxStackCells = 1;
+  // XXX line numbers are bogus
+  fe->finish(ue->bcPos(), false);
+  ue->recordFunction(fe);
+  return ue;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

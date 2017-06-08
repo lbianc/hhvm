@@ -23,6 +23,7 @@
 
 #include <folly/Conv.h>
 #include <folly/MapUtil.h>
+#include <folly/Random.h>
 #include <folly/stats/Histogram-defs.h>
 
 #include "hphp/util/portability.h"
@@ -210,6 +211,22 @@ struct Impl {
     return getOrCreateWithArgs(m_counterMap, name);
   }
 
+  CounterHandle registerCounterCallback(CounterFunc func) {
+    auto handle = folly::Random::rand32();
+    SYNCHRONIZED(m_counterFuncs) {
+      while (m_counterFuncs.count(handle)) ++handle;
+      m_counterFuncs.emplace(handle, std::move(func));
+    }
+    return handle;
+  }
+
+  void deregisterCounterCallback(CounterHandle key) {
+    SYNCHRONIZED(m_counterFuncs) {
+      assertx(m_counterFuncs.count(key) == 1);
+      m_counterFuncs.erase(key);
+    }
+  }
+
   ExportedTimeSeries* createTimeSeries(
       const std::string& name,
       const std::vector<ServiceData::StatsType>& types,
@@ -242,14 +259,27 @@ struct Impl {
     for (auto& histogram : m_histogramMap) {
       histogram.second->exportAll(histogram.first, statsMap);
     }
+
+    SYNCHRONIZED_CONST(m_counterFuncs) {
+      for (auto& pair : m_counterFuncs) {
+        pair.second(statsMap);
+      }
+    }
   }
 
-  folly::Optional<int64_t> exportCounterByKey(std::string& key) {
-    ExportedCounterMap::const_iterator it = m_counterMap.find(key);
+  folly::Optional<int64_t> exportCounterByKey(const std::string& key) {
+    auto const it = m_counterMap.find(key);
     if (it != m_counterMap.end()) {
-      return folly::Optional<int64_t>(it->second->getValue());
+      return it->second->getValue();
     } else {
-      return folly::Optional<int64_t>();
+      std::map<std::string, int64_t> statsMap;
+      SYNCHRONIZED_CONST(m_counterFuncs) {
+        for (auto& pair : m_counterFuncs) {
+          pair.second(statsMap);
+        }
+      }
+
+      return folly::get_optional(statsMap, key);
     }
   }
 
@@ -269,12 +299,14 @@ struct Impl {
 
   typedef tbb::concurrent_unordered_map<std::string, ExportedCounter*>
     ExportedCounterMap;
+  typedef std::unordered_map<CounterHandle, CounterFunc> CounterFuncMap;
   typedef tbb::concurrent_unordered_map<std::string, ExportedTimeSeries*>
     ExportedTimeSeriesMap;
   typedef tbb::concurrent_unordered_map<std::string, ExportedHistogram*>
     ExportedHistogramMap;
 
   ExportedCounterMap m_counterMap;
+  folly::Synchronized<CounterFuncMap> m_counterFuncs;
   ExportedTimeSeriesMap m_timeseriesMap;
   ExportedHistogramMap m_histogramMap;
 };
@@ -315,6 +347,14 @@ ExportedCounter* createCounter(const std::string& name) {
   return getServiceDataInstance().createCounter(name);
 }
 
+CounterHandle registerCounterCallback(CounterFunc func) {
+  return getServiceDataInstance().registerCounterCallback(std::move(func));
+}
+
+void deregisterCounterCallback(CounterHandle key) {
+  getServiceDataInstance().deregisterCounterCallback(key);
+}
+
 ExportedTimeSeries* createTimeSeries(
     const std::string& name,
     const std::vector<ServiceData::StatsType>& types,
@@ -338,7 +378,7 @@ void exportAll(std::map<std::string, int64_t>& statsMap) {
   return getServiceDataInstance().exportAll(statsMap);
 }
 
-folly::Optional<int64_t> exportCounterByKey(std::string& key) {
+folly::Optional<int64_t> exportCounterByKey(const std::string& key) {
   return getServiceDataInstance().exportCounterByKey(key);
 }
 

@@ -72,18 +72,26 @@ let is_class ty = match snd ty with
   | Tclass _ -> true
   | _ -> false
 
-(*****************************************************************************)
-(* Get upper bounds of an abstract type *)
-(*****************************************************************************)
+(* Grab all supertypes of a given type, recursively *)
+let get_all_supertypes env ty =
+  let rec iter seen env acc tyl =
+    match tyl with
+    | [] -> env, acc
+    | ty::tyl ->
+      let env, ty = Env.expand_type env ty in
+      match snd ty with
+      | Tabstract (_, Some ty) ->
+        iter seen env (ty::acc) (ty::tyl)
 
-let get_as_constraints env ak tyopt =
-    match tyopt with
-    | Some ty -> Some ty
-    | None ->
-      (match ak with
-       | AKgeneric n ->
-         (match Env.get_upper_bounds env n with ty::_ -> Some ty | _ -> None)
-       | _ -> None)
+      | Tabstract (AKgeneric n, _) ->
+        if SSet.mem n seen
+        then iter seen env acc tyl
+        else iter (SSet.add n seen) env acc (Env.get_upper_bounds env n @ tyl)
+      | _ ->
+        iter seen env (ty::acc) tyl
+  in
+   iter SSet.empty env [] [ty]
+
 
 (*****************************************************************************
  * Get the "as" constraints from an abstract type or generic parameter, or
@@ -351,11 +359,11 @@ let unresolved_tparam env (_, (pos, _), _) =
 (*****************************************************************************)
 
 (* Try to unify all the types in a intersection *)
-let fold_unresolved env ty =
+let rec fold_unresolved env ty =
   let env, ety = Env.expand_type env ty in
   match ety with
   | r, Tunresolved [] -> env, (r, Tany)
-  | _, Tunresolved [x] -> env, x
+  | _, Tunresolved [x] -> fold_unresolved env x
   | _, Tunresolved (x :: rl) ->
       (try
         let env, acc =
@@ -403,6 +411,7 @@ let unwrap_class_type = function
       | Tarray (_, _)
       | Tdarray (_, _)
       | Tvarray _
+      | Tdarray_or_varray _
       | Tgeneric _
       | Toption _
       | Tprim _
@@ -451,6 +460,7 @@ end = struct
         match akind with
         | AKany -> Some r
         | AKempty -> acc
+        | AKdarray_or_varray ty
         | AKvarray ty
         | AKvec ty -> this#on_type acc ty
         | AKdarray (tk, tv)

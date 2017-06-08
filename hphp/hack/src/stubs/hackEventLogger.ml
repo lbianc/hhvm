@@ -16,7 +16,7 @@ let bad_exit _ _ _ ~is_oom:_ = ()
 let init_informant_prefetcher_runner _ = ()
 let informant_induced_kill _ = ()
 let informant_induced_restart _ = ()
-let init _ _ _ _ _ _ _ _ = ()
+let init _ _ _ _ _ _ _ _ _ = ()
 let informant_prefetcher_success _ = ()
 let informant_prefetcher_failed _ _ = ()
 let init_monitor _ _ _ = ()
@@ -42,6 +42,13 @@ let client_build_begin_work _ _ = ()
 let client_build_finish
   ~rev_changed:_ ~build_type:_ ~request_id:_ ~exit_status:_ = ()
 let client_check_finish _ = ()
+let client_lsp_method_handled
+ ~root:_ ~method_:_ ~kind:_ ~start_queue_t:_ ~start_handle_t:_ = ()
+let client_lsp_method_exception
+  ~root:_ ~method_:_ ~kind:_ ~start_queue_t:_ ~start_handle_t:_
+  ~message:_ ~stack:_ ~source:_ = ()
+let client_lsp_exception
+  ~root:_ ~message:_ ~stack:_ ~source:_ = ()
 let client_bad_exit _ = ()
 let monitor_dead_but_typechecker_alive () = ()
 let client_connect_to_monitor_timeout () = ()
@@ -90,3 +97,10 @@ let client_connection_sent _ = ()
 let malformed_build_id _ = ()
 let send_fd_failure _ = ()
 let typechecker_already_running _ = ()
+
+(** Watchman Event Watcher events *)
+let init_watchman_event_watcher _ _ = ()
+let init_watchman_failed _ = ()
+let restarting_watchman_subscription _ = ()
+let uncaught_exception _ = ()
+let processed_clients _ = ()

@@ -171,19 +171,27 @@ void verifyTypeImpl(IRGS& env, int32_t const id) {
   }
 
   auto genFail = [&] {
-    if (isReturnType) {
-      updateMarker(env);
-      env.irb->exceptionStackBoundary();
-      gen(env, VerifyRetFail, ldStkAddr(env, BCSPRelOffset{0}));
-      return;
-    }
-
     auto const strictTypes = RuntimeOption::EnableHipHopSyntax ||
       curUnit(env)->isHHFile() ||
       !RuntimeOption::PHP7_ScalarTypes;
 
-    if (RuntimeOption::RepoAuthoritative && Repo::global().HardTypeHints &&
-        strictTypes && !(tc.isArray() && valType.maybe(TObj)) && !tc.isSoft()) {
+    auto const failHard = strictTypes &&
+      RuntimeOption::RepoAuthoritative && !tc.isSoft();
+
+    if (isReturnType) {
+      updateMarker(env);
+      env.irb->exceptionStackBoundary();
+      if (failHard && Repo::global().HardReturnTypeHints) {
+        gen(env, VerifyRetFailHard, ldStkAddr(env, BCSPRelOffset{0}));
+      } else {
+        gen(env, VerifyRetFail, ldStkAddr(env, BCSPRelOffset{0}));
+      }
+      return;
+    }
+
+    if (failHard &&
+        Repo::global().HardTypeHints &&
+        !(tc.isArray() && valType.maybe(TObj))) {
       gen(env, VerifyParamFailHard, cns(env, id));
     } else {
       gen(env, VerifyParamFail, cns(env, id));
@@ -207,6 +215,9 @@ void verifyTypeImpl(IRGS& env, int32_t const id) {
   assertx(result == AnnotAction::ObjectCheck);
 
   if (!(valType <= TObj)) {
+    if (tc.isResolved()) {
+      return genFail();
+    }
     // For RepoAuthoritative mode, if tc is a type alias we can optimize in
     // some cases
     if (tc.isObject() && RuntimeOption::RepoAuthoritative) {
@@ -362,6 +373,10 @@ folly::Optional<Type> ratToAssertType(IRGS& env, RepoAuthType rat) {
     case T::Ref:
     case T::InitUnc:
     case T::Unc:
+    case T::OptUncArrKey:
+    case T::OptArrKey:
+    case T::UncArrKey:
+    case T::ArrKey:
       return typeFromRAT(rat, nullptr);
 
     case T::OptExactObj:

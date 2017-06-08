@@ -110,9 +110,11 @@
 #include "hphp/util/safe-cast.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/job-queue.h"
+#include "hphp/util/match.h"
 #include "hphp/parser/hphp.tab.hpp"
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/hack-compiler.h"
 #include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/runtime/vm/repo-global-data.h"
@@ -124,7 +126,6 @@
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/zend-functions.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/base/program-functions.h"
@@ -806,23 +807,19 @@ private:
 
   struct CatchRegion {
     CatchRegion(Offset start,
+                Offset handler,
                 Offset end,
-                Label* handler,
                 Id iterId,
                 IterKind kind)
       : m_start(start)
-      , m_end(end)
       , m_handler(handler)
+      , m_end(end)
       , m_iterId(iterId)
       , m_iterKind(kind) {}
 
-    ~CatchRegion() {
-      delete m_handler;
-    }
-
     Offset m_start;
+    Offset m_handler;
     Offset m_end;
-    Label* m_handler;
     Id m_iterId;
     IterKind m_iterKind;
   };
@@ -1133,10 +1130,11 @@ public:
     IterKind kind;
   };
 
-  void newCatchRegion(Offset start,
-                      Offset end,
-                      Label* entry,
-                      FaultIterInfo = FaultIterInfo { -1, KindOfIter });
+  template<class EmitCatchBodyFun>
+  void emitCatch(Emitter& e,
+                 Offset start,
+                 EmitCatchBodyFun emitCatchBody,
+                 FaultIterInfo = FaultIterInfo { -1, KindOfIter });
   void newFaultRegion(Offset start,
                       Offset end,
                       Label* entry,
@@ -4055,7 +4053,7 @@ bool checkKeys(ExpressionPtr init_expr, bool check_size, Fun fun) {
  * MixedArray::SmallSize (12).
  */
 bool isPackedInit(ExpressionPtr init_expr, int* size,
-                  bool check_size = true) {
+                  bool check_size = true, bool hack_arr_compat = true) {
   *size = 0;
   return checkKeys<MixedArray::MaxMakeSize>(init_expr, check_size,
     [&](ArrayPairExpressionPtr ap) {
@@ -4071,10 +4069,15 @@ bool isPackedInit(ExpressionPtr init_expr, int* size,
           if (key.asInt64Val() != *size) return false;
         } else if (key.isBoolean()) {
           // Bool to Int conversion
+          if (hack_arr_compat &&
+              RuntimeOption::EvalHackArrCompatNotices) return false;
           if (static_cast<int>(key.asBooleanVal()) != *size) return false;
         } else {
           // Give up if it's not a string.
           if (!key.isString()) return false;
+
+          if (hack_arr_compat &&
+              RuntimeOption::EvalHackArrCompatNotices) return false;
 
           int64_t i; double d;
           auto numtype = key.getStringData()->isNumericWithVal(i, d, false);
@@ -4606,15 +4609,8 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       };
 
       visit(ts->getBody());
-
-      StatementListPtr catches = ts->getCatches();
-      int catch_count = catches->getCount();
-      if (catch_count > 0) {
-        // include the jump out of the try-catch block in the
-        // exception handler address range
-        e.Jmp(after);
-      }
       end = m_ue.bcPos();
+
       if (!m_evalStack.empty()) {
         InvariantViolation("Emitter detected that the evaluation stack "
                            "is not empty at the end of a try region: %d",
@@ -4625,33 +4621,40 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                            "at the end of a try region: %d",
                            end);
       }
+      if (m_evalStack.fdescSize()) {
+        InvariantViolation("Emitter detected an open function call at the end "
+                           "of a try region: %d",
+                           end);
+      }
 
+      StatementListPtr catches = ts->getCatches();
+      int catch_count = catches->getCount();
       if (catch_count > 0 && start != end) {
-        newCatchRegion(start, end, new Label(e));
-        e.Catch();
+        auto const emitCatchBody = [&] {
+          std::set<StringData*, string_data_lt> seen;
 
-        std::set<StringData*, string_data_lt> seen;
+          for (int i = 0; i < catch_count; i++) {
+            auto c = static_pointer_cast<CatchStatement>((*catches)[i]);
+            StringData* eName = makeStaticString(c->getOriginalClassName());
 
-        for (int i = 0; i < catch_count; i++) {
-          auto c = static_pointer_cast<CatchStatement>((*catches)[i]);
-          StringData* eName = makeStaticString(c->getOriginalClassName());
+            if (!seen.insert(eName).second) {
+              // Already seen a catch of this class, skip.
+              continue;
+            }
 
-          if (!seen.insert(eName).second) {
-            // Already seen a catch of this class, skip.
-            continue;
+            Label nextCatch;
+            e.Dup();
+            e.InstanceOfD(eName);
+            e.JmpZ(nextCatch);
+            visit(c);
+            // Safe to jump out of the catch block, as eval stack was empty at
+            // the end of try region.
+            e.Jmp(after);
+            nextCatch.set(e);
           }
+        };
 
-          Label nextCatch;
-          e.Dup();
-          e.InstanceOfD(eName);
-          e.JmpZ(nextCatch);
-          visit(c);
-          e.Jmp(after);
-          nextCatch.set(e);
-        }
-
-        // Rethrow exception if not caught.
-        e.Throw();
+        emitCatch(e, start, emitCatchBody);
       }
     }
 
@@ -5529,7 +5532,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                params && params->getCount() == 1) {
       visit((*params)[0]);
       emitConvertToCell(e);
-      e.CastArray();
+      e.CastVArray();
       return true;
     } else if (((call->isCallToFunction("darray") &&
                  (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
@@ -5537,7 +5540,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
                params && params->getCount() == 1) {
       visit((*params)[0]);
       emitConvertToCell(e);
-      e.CastArray();
+      e.CastDArray();
       return true;
     } else if (((call->isCallToFunction("is_vec") &&
                  (m_ue.m_isHHFile || RuntimeOption::EnableHipHopSyntax)) ||
@@ -6561,7 +6564,8 @@ bool EmitterVisitor::emitInlineGen(
 ) {
   if (!m_ue.m_isHHFile || !RuntimeOption::EnableHipHopSyntax ||
       !expression->is(Expression::KindOfSimpleFunctionCall) ||
-      RuntimeOption::EvalJitEnableRenameFunction) {
+      RuntimeOption::EvalJitEnableRenameFunction ||
+      RuntimeOption::EvalDisableHphpcOpts) {
     return false;
   }
 
@@ -6686,9 +6690,7 @@ size_t EmitterVisitor::emitMOp(
     return m_evalStack.actualSize() - 1 - m_evalStack.getActualPos(i);
   };
 
-  auto const baseMode = opts.fpass ? MOpMode::None :
-                        opts.mode == MOpMode::Unset ? MOpMode::None :
-                        opts.mode;
+  auto const baseMode = opts.fpass ? MOpMode::None : opts.mode;
 
   // Emit the base location operation.
   auto sym = m_evalStack.get(iFirst);
@@ -8824,7 +8826,7 @@ void EmitterVisitor::emitMemoizeMethod(MethodStatementPtr meth,
   Emitter e(meth, m_ue, *this);
   FuncFinisher ff(this, e, m_curFunc);
 
-  Label topOfBody(e);
+  Label topOfBody(e, Label::NoEntryNopFlag{});
   Label cacheMiss;
   Label cacheMissNoClean;
 
@@ -9319,6 +9321,8 @@ bool EmitterVisitor::emitCallUserFunc(Emitter& e, SimpleFunctionCallPtr func) {
     { "fb_call_user_func_array_safe", 2, 2, CallUserFuncSafeArray },
     { "fb_call_user_func_safe_return", 2, INT_MAX, CallUserFuncSafeReturn },
   };
+
+  if (RuntimeOption::EvalDisableHphpcOpts) return false;
 
   ExpressionListPtr params = func->getParams();
   if (!params) return false;
@@ -10279,13 +10283,25 @@ void EmitterVisitor::emitFunclets(Emitter& e) {
   }
 }
 
-void EmitterVisitor::newCatchRegion(Offset start,
-                                    Offset end,
-                                    Label* entry,
-                                    FaultIterInfo iter) {
-  assert(start < end);
-  auto r = new CatchRegion(start, end, entry, iter.iterId, iter.kind);
-  m_catchRegions.push_back(r);
+template<class EmitCatchBodyFun>
+void EmitterVisitor::emitCatch(Emitter& e,
+                               Offset start,
+                               EmitCatchBodyFun emitCatchBody,
+                               FaultIterInfo iter) {
+  Label afterCatch;
+  e.Jmp(afterCatch);
+
+  Offset handler = e.getUnitEmitter().bcPos();
+
+  e.Catch();
+  emitCatchBody();
+  e.Throw();
+
+  Offset end = e.getUnitEmitter().bcPos();
+  afterCatch.set(e);
+
+  m_catchRegions.push_back(
+      new CatchRegion(start, handler, end, iter.iterId, iter.kind));
 }
 
 void EmitterVisitor::newFaultRegion(Offset start,
@@ -10332,12 +10348,13 @@ void EmitterVisitor::copyOverCatchAndFaultRegions(FuncEmitter* fe) {
     auto& e = fe->addEHEnt();
     e.m_type = EHEnt::Type::Catch;
     e.m_base = cr->m_start;
-    e.m_past = cr->m_end;
-    assert(e.m_base != kInvalidOffset);
-    assert(e.m_past != kInvalidOffset);
+    e.m_past = cr->m_handler;
     e.m_iterId = cr->m_iterId;
     e.m_itRef = cr->m_iterKind == KindOfMIter;
-    e.m_handler = cr->m_handler->getAbsoluteOffset();
+    e.m_handler = cr->m_handler;
+    e.m_end = cr->m_end;
+    assert(e.m_base != kInvalidOffset);
+    assert(e.m_past != kInvalidOffset);
     assert(e.m_handler != kInvalidOffset);
     delete cr;
   }
@@ -10352,6 +10369,7 @@ void EmitterVisitor::copyOverCatchAndFaultRegions(FuncEmitter* fe) {
     e.m_iterId = fr->m_iterId;
     e.m_itRef = fr->m_iterKind == KindOfMIter;
     e.m_handler = fr->m_func->getAbsoluteOffset();
+    e.m_end = kInvalidOffset;
     assert(e.m_handler != kInvalidOffset);
     delete fr;
   }
@@ -10623,7 +10641,9 @@ void EmitterVisitor::emitArrayInit(Emitter& e, ExpressionListPtr el,
     return;
   }
 
-  if (isPackedInit(el, &nElms, false /* ignore size */)) {
+  if (isPackedInit(el, &nElms,
+                   false /* ignore size */,
+                   false /* hack arr compat */)) {
     e.NewArray(capacityHint);
   } else {
     e.NewMixedArray(capacityHint);
@@ -10794,6 +10814,8 @@ bool EmitterVisitor::requiresDeepInit(ExpressionPtr initExpr) const {
 Thunklet::~Thunklet() {}
 
 static ConstructPtr doOptimize(ConstructPtr c, AnalysisResultConstPtr ar) {
+  if (RuntimeOption::EvalDisableHphpcOpts) return ConstructPtr();
+
   for (int i = 0, n = c->getKidCount(); i < n; i++) {
     if (ConstructPtr k = c->getNthKid(i)) {
       if (ConstructPtr rep = doOptimize(k, ar)) {
@@ -11149,21 +11171,22 @@ static void addEmitterWorker(AnalysisResultPtr ar, StatementPtr sp,
 
 static void
 commitGlobalData(std::unique_ptr<ArrayTypeTable::Builder> arrTable) {
-  auto gd                     = Repo::GlobalData{};
-  gd.EnableHipHopSyntax       = RuntimeOption::EnableHipHopSyntax;
-  gd.HardTypeHints            = HHBBC::options.HardTypeHints;
-  gd.HardReturnTypeHints      = HHBBC::options.HardReturnTypeHints;
-  gd.ElideAutoloadInvokes     = HHBBC::options.ElideAutoloadInvokes;
-  gd.UsedHHBBC                = Option::UseHHBBC;
-  gd.PHP7_IntSemantics        = RuntimeOption::PHP7_IntSemantics;
-  gd.PHP7_ScalarTypes         = RuntimeOption::PHP7_ScalarTypes;
-  gd.PHP7_Substr              = RuntimeOption::PHP7_Substr;
-  gd.PHP7_Builtins            = RuntimeOption::PHP7_Builtins;
-  gd.AutoprimeGenerators      = RuntimeOption::AutoprimeGenerators;
-  gd.HardPrivatePropInference = true;
-  gd.PromoteEmptyObject       = RuntimeOption::EvalPromoteEmptyObject;
-  gd.EnableRenameFunction     = RuntimeOption::EvalJitEnableRenameFunction;
-  gd.HackArrCompatNotices     = RuntimeOption::EvalHackArrCompatNotices;
+  auto gd                       = Repo::GlobalData{};
+  gd.UsedHHBBC                  = Option::UseHHBBC;
+  gd.EnableHipHopSyntax         = RuntimeOption::EnableHipHopSyntax;
+  gd.HardTypeHints              = HHBBC::options.HardTypeHints;
+  gd.HardReturnTypeHints        = HHBBC::options.HardReturnTypeHints;
+  gd.HardPrivatePropInference   = true;
+  gd.DisallowDynamicVarEnvFuncs = HHBBC::options.DisallowDynamicVarEnvFuncs;
+  gd.ElideAutoloadInvokes       = HHBBC::options.ElideAutoloadInvokes;
+  gd.PHP7_IntSemantics          = RuntimeOption::PHP7_IntSemantics;
+  gd.PHP7_ScalarTypes           = RuntimeOption::PHP7_ScalarTypes;
+  gd.PHP7_Substr                = RuntimeOption::PHP7_Substr;
+  gd.PHP7_Builtins              = RuntimeOption::PHP7_Builtins;
+  gd.AutoprimeGenerators        = RuntimeOption::AutoprimeGenerators;
+  gd.PromoteEmptyObject         = RuntimeOption::EvalPromoteEmptyObject;
+  gd.EnableRenameFunction       = RuntimeOption::EvalJitEnableRenameFunction;
+  gd.HackArrCompatNotices       = RuntimeOption::EvalHackArrCompatNotices;
 
   for (auto a : Option::APCProfile) {
     gd.APCProfile.emplace_back(StringData::MakeStatic(folly::StringPiece(a)));
@@ -11300,83 +11323,7 @@ bool isFileHack(const char* code, int codeLen, bool allowPartial) {
   }
 }
 
-UnitEmitter* makeFatalUnit(const char* filename, const MD5& md5,
-                           const std::string& msg) {
-  // basically duplicated from as.cpp but is maybe too janky to be
-  // a common routine somewhere...
-
-  // The line numbers we output are bogus, but it's not totally clear
-  // what line numbers to put. It might be worth adding a mechanism for
-  // the external emitter to emit a line number when it fails that we can
-  // use when available.
-  UnitEmitter* ue = new UnitEmitter(md5);
-  ue->m_filepath = makeStaticString(filename);
-  ue->initMain(1, 1);
-  ue->emitOp(OpString);
-  ue->emitInt32(ue->mergeLitstr(makeStaticString(msg)));
-  ue->emitOp(OpFatal);
-  ue->emitByte(static_cast<uint8_t>(FatalOp::Runtime));
-  FuncEmitter* fe = ue->getMain();
-  fe->maxStackCells = 1;
-  fe->finish(ue->bcPos(), false);
-  ue->recordFunction(fe);
-
-  return ue;
-}
-
-UnitEmitter* useExternalEmitter(const char* code, int codeLen,
-                                const char* filename, const MD5& md5) {
-#ifdef _MSC_VER
-  Logger::Error("The external emitter is not supported under MSVC!");
-  return nullptr;
-#else
-  std::string hhas, errorOutput;
-
-  try {
-    std::vector<std::string> cmd({
-        RuntimeOption::EvalUseExternalEmitter, "--stdin", filename});
-    auto options = folly::Subprocess::Options().pipeStdin().pipeStdout().pipeStderr();
-
-    // Run the external emitter, sending the code to its stdin
-    folly::Subprocess proc(cmd, options);
-    std::tie(hhas, errorOutput) = proc.communicate(std::string(code, codeLen));
-    proc.waitChecked();
-
-    // External emitter succeeded; assemble its output
-    // If assembly fails (probably because of malformed emitter
-    // output), the assembler will return a unit that Fatals and we
-    // won't do a fallback to the regular emitter. We may want to
-    // revisit this.
-    return assemble_string(hhas.data(), hhas.length(), filename, md5);
-
-  } catch (const std::exception& e) {
-    std::string errorMsg = e.what();
-    if (!errorOutput.empty()) {
-      // Add the stderr to the output
-      errorMsg += folly::format(". Output: '{}'",
-                                folly::trimWhitespace(errorOutput)).str();
-    }
-
-    // If we aren't going to fall back to the internal emitter, generate a
-    // Fatal'ing unit.
-    if (!RuntimeOption::EvalExternalEmitterFallback) {
-      auto msg =
-        folly::format("Failure running external emitter: {}", errorMsg);
-      return makeFatalUnit(filename, md5, msg.str());
-    }
-
-    // Unless we have fallback at the highest level, print a
-    // diagnostic when we fail
-    if (RuntimeOption::EvalExternalEmitterFallback < 2) {
-      Logger::Warning("Failure running external emitter for %s: %s",
-                      filename,
-                      errorMsg.c_str());
-    }
-    return nullptr;
-  }
-#endif
-}
-
+////////////////////////////////////////////////////////////////////////////////
 }
 
 extern "C" {
@@ -11429,29 +11376,38 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
       if (const char* dot = strrchr(filename, '.')) {
         const char hhbc_ext[] = "hhas";
         if (!strcmp(dot + 1, hhbc_ext)) {
-          ue.reset(assemble_string(code, codeLen, filename, md5));
+          ue = assemble_string(code, codeLen, filename, md5);
           if (BuiltinSymbols::s_systemAr) {
             ue->m_filepath = makeStaticString(
               "/:" + ue->m_filepath->toCppString());
             BuiltinSymbols::s_systemAr->addHhasFile(std::move(ue));
-            ue.reset(assemble_string(code, codeLen, filename, md5));
+            ue = assemble_string(code, codeLen, filename, md5);
           }
         }
       }
     }
 
-    // If we are configured to use an external emitter and we are compiling
-    // a strict mode hack file, try external emitting. Don't externally emit
-    // systemlib because the external emitter can't handle that yet.
-    if (!ue &&
-        !RuntimeOption::EvalUseExternalEmitter.empty() &&
-        isFileHack(code, codeLen,
-                   RuntimeOption::EvalExternalEmitterAllowPartial) &&
-        SystemLib::s_inited) {
-      ue.reset(useExternalEmitter(code, codeLen, filename, md5));
+    auto const hcMode = hackc_mode();
+    if (hcMode != HackcMode::kNever && SystemLib::s_inited) {
+      auto res = hackc_compile(code, codeLen, filename, md5);
+      match<void>(
+        res,
+        [&] (std::unique_ptr<Unit>& u) {
+          unit = std::move(u);
+        },
+        [&] (std::string& err) {
+          if (hcMode == HackcMode::kFallback) return;
+          ue = createFatalUnit(
+            makeStaticString(filename),
+            md5,
+            FatalOp::Runtime,
+            makeStaticString(err)
+          );
+        }
+      );
     }
 
-    if (!ue) {
+    if (!ue && !unit) {
       auto parseit = [=] (AnalysisResultPtr ar) {
         Scanner scanner(code, codeLen,
                         RuntimeOption::GetScannerType(), filename);
@@ -11473,11 +11429,14 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
 
       ue.reset(emitHHBCUnitEmitter(ar, fsp, md5));
     }
-    // NOTE: Repo errors are ignored!
-    Repo::get().commitUnit(ue.get(), unitOrigin);
 
-    unit = ue->create();
-    ue.reset();
+    if (!unit) {
+      // NOTE: Repo errors are ignored!
+      Repo::get().commitUnit(ue.get(), unitOrigin);
+
+      unit = ue->create();
+      ue.reset();
+    }
 
     if (unit->sn() == -1) {
       // the unit was not committed to the Repo, probably because

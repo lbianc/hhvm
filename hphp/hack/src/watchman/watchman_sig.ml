@@ -11,8 +11,11 @@
 module Types = struct
 
   exception Timeout
+  exception Watchman_error of string
+
 
   type subscribe_mode =
+    | All_changes
     | Defer_changes
     (** See also Watchman docs on drop. This means the subscriber will not
      * get a list of files changed during a repo update. Practically, this
@@ -27,6 +30,8 @@ module Types = struct
     (** Seconds used for init timeout - will be reused for reinitialization. *)
     init_timeout: int;
     sync_directory: string;
+    (** See watchman expression terms. *)
+    expression_terms: Hh_json.json list;
     root: Path.t;
   }
 
@@ -87,17 +92,19 @@ module type S = sig
   val get_changes_synchronously: timeout:int ->
     watchman_instance -> watchman_instance * SSet.t
 
-  (** Exposing things for unit tests.
-   *
-   * We have to double-declare the module signature in this .mli and in the .ml
-   * which is unfortunate, but because we use the abstract type "env", the
-   * alternative would involve verbose mutuaully-recursive modules.*)
-  module type Testing_sig = sig
+  (** Expose some things for testing. *)
+  module Testing : sig
     val test_env : env
+    val test_settings : init_settings
+
     val transform_asynchronous_get_changes_response :
       env -> Hh_json.json -> env * pushed_changes
   end
 
-  module Testing : Testing_sig
+  module Mocking : sig
+    val print_env : env -> string
+    val init_returns : string option -> unit
+    val get_changes_returns : changes -> unit
+  end
 
-end
+end;;

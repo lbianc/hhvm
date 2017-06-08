@@ -99,6 +99,16 @@ let get_local_var_def ast name p =
   let def = List.hd (ServerFindLocals.go_from_ast ast line char) in
   Option.map def ~f:(FileOutline.summarize_local name)
 
+(* summarize a class or typedef carried with SymbolOccurrence.Class *)
+let summarize_class_typedef opt x =
+  Naming_heap.TypeIdHeap.get x >>= fun (pos, ct) ->
+    let fn = FileInfo.get_pos_filename pos in
+    match ct with
+      | `Class -> (Parser_heap.find_class_in_file opt fn x >>=
+                fun c -> Some (FileOutline.summarize_class c ~no_children:true))
+      | `Typedef -> (Parser_heap.find_typedef_in_file opt fn x >>=
+                fun tdef -> Some (FileOutline.summarize_typedef tdef))
+
 let go tcopt ast result =
   match result.SymbolOccurrence.type_ with
     | SymbolOccurrence.Method (c_name, method_name) ->
@@ -141,8 +151,7 @@ let go tcopt ast result =
       get_gconst_by_name tcopt result.SymbolOccurrence.name >>= fun cst ->
       Some (FileOutline.summarize_gconst cst)
     | SymbolOccurrence.Class ->
-      get_class_by_name tcopt result.SymbolOccurrence.name >>= fun c ->
-      Some (FileOutline.summarize_class c ~no_children:true)
+      summarize_class_typedef tcopt result.SymbolOccurrence.name
     | SymbolOccurrence.Typeconst (c_name, typeconst_name) ->
       Typing_lazy_heap.get_class tcopt c_name >>= fun class_ ->
       SMap.get typeconst_name class_.tc_typeconsts >>= fun m ->
@@ -150,38 +159,3 @@ let go tcopt ast result =
     | SymbolOccurrence.LocalVar ->
       get_local_var_def
         ast result.SymbolOccurrence.name result.SymbolOccurrence.pos
-
-let build_symbol_occurence kind name =
-  {
-    SymbolOccurrence.name = "\\" ^ name;
-    type_ = kind;
-    pos = Pos.none;
-  }
-
-let from_symbol_id tcopt id =
-  match Str.split (Str.regexp_string "::") id with
-  | [kind; name] when kind = SymbolDefinition.function_kind_name ->
-      go tcopt [] (build_symbol_occurence SymbolOccurrence.Function name)
-  | [kind; name] when kind = SymbolDefinition.type_id_kind_name ->
-      go tcopt [] (build_symbol_occurence SymbolOccurrence.Class name)
-  | [kind; class_name; method_name ]
-        when kind = SymbolDefinition.method_kind_name ->
-      go tcopt [] (build_symbol_occurence
-        (SymbolOccurrence.Method ("\\" ^ class_name, method_name)) "")
-  | [kind; class_name; property_name ]
-        when kind = SymbolDefinition.property_kind_name ->
-      go tcopt [] (build_symbol_occurence
-        (SymbolOccurrence.Property ("\\" ^ class_name, property_name)) "")
-  | [kind; class_name; const_name ]
-        when kind = SymbolDefinition.class_const_kind_name ->
-      let try_const () = go tcopt [] (build_symbol_occurence
-        (SymbolOccurrence.ClassConst ("\\" ^ class_name, const_name)) "")
-      in
-      let try_typeconst () = go tcopt [] (build_symbol_occurence
-        (SymbolOccurrence.Typeconst ("\\" ^ class_name, const_name)) "")
-      in
-      begin match try_const () with
-      | Some result -> Some result
-      | None -> try_typeconst ()
-      end
-  | _ -> None

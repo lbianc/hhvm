@@ -840,6 +840,17 @@ initialized before being read and becomes uninitialized after being read. A
 classref slot must be uninitialized before being written to and becomes
 initialized after being written.
 
+17) Assertion (AssertRATL and AssertRATStk) instructions cannot be separated
+from the following instruction by control flow. Practically speaking, this means
+that the instruction immediately following an assertion cannot be a jump target.
+
+18) Sequences of member instructions should be consistent and continuous. That
+is, only member instructions and asserts may appear in the sequence, control
+flow cannot interrupt the sequence, and the member op mode should be consistent
+across all instructions in the sequence. This is because in the case of
+exceptions the unwinder decides whether the member state is live by looking at
+the instruction that threw.
+
 Instruction set
 ---------------
 
@@ -1427,6 +1438,16 @@ CastDict      [C]  ->  [C:Dict]
 CastKeyset    [C]  ->  [C:Keyset]
 
   Cast to keyset. Pushes keyset($1) onto the stack.
+
+CastVArray    [C]  ->  [C:Arr]
+
+  Cast to vector-like array. Performs an array cast, but drops any keys from
+  the input.
+
+CastDArray    [C]  ->  [C:Arr]
+
+  Cast to dict-like array. Performs an array cast, but handles object inputs
+  like CastDict.
 
 InstanceOf    [C C]  ->  [C:Bool]
 
@@ -3487,15 +3508,11 @@ BaseH    []  ->  []
 10.2 Intermediate operations
 -----------------------------
 
-Dim   <member key>    <prop/elem op> <member op mode>    []  ->  []
+Dim  <member op mode> <member key>     []  ->  []
 
-FPassDim   <param id> <member key> <prop/elem op>    []  ->  []
+FPassDim   <param id> <member key>    []  ->  []
 
   {Prop,Elem}{L,C,I,T}{W,D,U} member operation.
-
-DimNewElem <member op mode>    []  ->  []
-
-FPassDimNewElem <param id>    []  ->  []
 
   NewElem operation.
 

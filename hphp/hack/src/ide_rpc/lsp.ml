@@ -6,7 +6,7 @@
  * LICENSE file in the "hack" directory of this source tree. An additional grant
  * of patent rights can be found in the PATENTS file in the same directory.
  *
- *)
+*)
 
 (**
  * This file is an OCaml representation of the Language Server Protocol
@@ -64,9 +64,9 @@ module Location = struct
 end
 
 (* Marked_string can be used to render human readable text. It is either a
- * markdown string or a code-block that provides a language and a code snippet,
- * equivalent to ```${language}\n${value}\n```. Note that markdown strings
- * will be sanitized by the client - including escaping html *)
+ * markdown string or a code-block that provides a language and a code snippet.
+ * Note that markdown strings will be sanitized by the client - including
+ * escaping html *)
 type marked_string =
   | Marked_string of string
   | Marked_code of string * string (* lang, value *)
@@ -110,8 +110,8 @@ module Versioned_text_document_identifier = struct
 end
 
 (* Describes textual changes on a single text document. The text document is
-  referred to as a versioned_text_document_identifier to allow clients to check
-  the text document version before an edit is applied. *)
+   referred to as a versioned_text_document_identifier to allow clients to check
+   the text document version before an edit is applied. *)
 module Text_document_edit = struct
   type t = {
     text_document: Versioned_text_document_identifier.t;
@@ -193,6 +193,16 @@ module Symbol_information = struct
     | Number  (* 16 *)
     | Boolean  (* 17 *)
     | Array  (* 18 *)
+end
+
+
+(* For showing messages (not diagnostics) in the user interface. *)
+module Message_type = struct
+  type t =
+    | ErrorMessage  (* 1 *)
+    | WarningMessage  (* 2 *)
+    | InfoMessage  (* 3 *)
+    | LogMessage  (* 4 *)
 end
 
 
@@ -376,10 +386,10 @@ module Publish_diagnostics = struct
   }
 
   and diagnostic_severity =
-  | Error (* 1 *)
-  | Warning (* 2 *)
-  | Information (* 3 *)
-  | Hint (* 4 *)
+    | Error (* 1 *)
+    | Warning (* 2 *)
+    | Information (* 3 *)
+    | Hint (* 4 *)
 end
 
 (* DidOpenTextDocument notification, method="textDocument/didOpen" *)
@@ -613,8 +623,47 @@ module Document_on_type_formatting = struct
 end
 
 
+(* LogMessage notification, method="window/logMessage" *)
+module Log_message = struct
+  type params = log_message_params
+
+  and log_message_params = {
+    type_: Message_type.t;
+    message: string;
+  }
+end
+
+
+(* ShowMessage notification, method="window/showMessage" *)
+module Show_message = struct
+  type params = show_message_params
+
+  and show_message_params = {
+    type_: Message_type.t;
+    message: string;
+  }
+end
+
+
+(* ShowMessage request, method="window/showMessageRequest" *)
+module Show_message_request = struct
+  type params = show_message_request_params
+
+  and show_message_request_params = {
+    type_: Message_type.t;
+    message: string;
+    actions: message_action_item list;
+  }
+
+  and message_action_item = {
+    title: string;
+  }
+end
+
+
 (* ErrorResponse *)
 module Error = struct
+  (* Defined by JSON-RPC. *)
   exception Parse of string (* -32700 *)
   exception Invalid_request of string (* -32600 *)
   exception Method_not_found of string (* -32601 *)
@@ -622,6 +671,9 @@ module Error = struct
   exception Internal_error of string (* -32603 *)
   exception Server_error_start of string * Initialize.error_data (* -32099 *)
   exception Server_error_end of string (* -32000 *)
-  exception Server_not_initialized of string (* -32002*)
+  exception Server_not_initialized of string (* -32002 *)
   exception Unknown of string (* -32001 *)
+
+  (* Defined by the protocol. *)
+  exception Request_cancelled of string (* -32800 *)
 end

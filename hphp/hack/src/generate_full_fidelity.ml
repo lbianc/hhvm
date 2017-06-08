@@ -8,77 +8,24 @@
  *
  *)
 
+open Printf
 open Full_fidelity_schema
 
 let full_fidelity_path_prefix = "hphp/hack/src/parser/"
 
-module GenerateFFSyntax = struct
+type comment_style =
+  | CStyle
+  | MLStyle
+  | HHStyle
 
-  let to_parse_tree x =
-    let mapper f = Printf.sprintf "      %s_%s: t;\n" x.prefix f in
-    let fields = map_and_concat mapper x.fields in
-    Printf.sprintf "    and %s = {\n%s    }\n"
-      x.type_name fields
-
-  let to_syntax x =
-    Printf.sprintf "    | %s of %s\n"
-      x.kind_name x.type_name
-
-  let to_to_kind x =
-    Printf.sprintf "      | %s _ ->\n        SyntaxKind.%s\n"
-      x.kind_name x.kind_name
-
-  let to_type_tests x =
-    Printf.sprintf "    let is_%s node =\n      kind node = SyntaxKind.%s\n"
-      x.type_name x.kind_name
-
-  let to_child_list_from_type x =
-    let mapper1 f = Printf.sprintf "      %s_%s;\n" x.prefix f in
-    let mapper2 f = Printf.sprintf "      %s_%s" x.prefix f in
-    let fields1 = map_and_concat mapper1 x.fields in
-    let fields2 = String.concat ",\n" (List.map mapper2 x.fields) in
-    Printf.sprintf "    let get_%s_children {\n%s    } = (\n%s\n    )\n\n"
-      x.type_name fields1 fields2
-
-  let to_children x =
-    let mapper f = Printf.sprintf "        %s_%s;\n" x.prefix f in
-    let fields = map_and_concat mapper x.fields in
-    Printf.sprintf "      | %s {\n%s      } -> [\n%s      ]\n"
-      x.kind_name fields fields
-
-  let to_children_names x =
-    let mapper1 f = Printf.sprintf "        %s_%s;\n" x.prefix f in
-    let mapper2 f = Printf.sprintf "        \"%s_%s\";\n" x.prefix f in
-    let fields1 = map_and_concat mapper1 x.fields in
-    let fields2 = map_and_concat mapper2 x.fields in
-    Printf.sprintf "      | %s {\n%s      } -> [\n%s      ]\n"
-      x.kind_name fields1 fields2
-
-  let to_syntax_from_children x =
-    let mapper f = Printf.sprintf "          %s_%s;\n" x.prefix f in
-    let fields = map_and_concat mapper x.fields in
-    Printf.sprintf "      | (SyntaxKind.%s, [
-%s        ]) ->
-        %s {
-%s        }
-"
-      x.kind_name fields x.kind_name fields
-
-  let to_constructor_methods x =
-    let mapper1 f = Printf.sprintf "      %s_%s\n" x.prefix f in
-    let mapper2 f = Printf.sprintf "        %s_%s;\n" x.prefix f in
-    let fields1 = map_and_concat mapper1 x.fields in
-    let fields2 = map_and_concat mapper2 x.fields in
-    Printf.sprintf "    let make_%s
-%s    =
-      from_children SyntaxKind.%s [
-%s      ]
-
-"
-      x.type_name fields1 x.kind_name fields2
-
-  let full_fidelity_syntax_template =
-"(**
+let make_header comment_style (header_comment : string) : string =
+  let open_char, close_char = match comment_style with
+  | CStyle -> "/", '/'
+  | MLStyle -> "(", ')'
+  | HHStyle -> "<?hh // strict\n/", '/'
+  in
+  sprintf
+"%s**
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -87,29 +34,108 @@ module GenerateFFSyntax = struct
  * grant of patent rights can be found in the PATENTS file in the same
  * directory.
  *
- *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(* @" ^ "generated *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
-(**
- * This module contains the code describing the structure of a syntax tree.
+ **
  *
- * The relationships between the various functors and signatures here needs
- * some explanation.
+ * THIS FILE IS @%s; DO NOT EDIT IT
+ * To regenerate this file, run
  *
- * First off, the structure of the syntax tree is described by the collection
- * of recursive types that makes up the bulk of this file. The type \"t\" is
- * the type of a node in the syntax tree; each node has associated with it
- * an arbitrary value of type SyntaxValue.t, and syntax node proper, which
- * has structure given by the \"syntax\" type.
+ *   buck run //hphp/hack/src:generate_full_fidelity
  *
- * Note that every child in the syntax tree is of type t, except for the
- * \"Token\" type. This should be the *only* child of a type other than t.
+ * This module contains the type describing the structure of a syntax tree.
+ *
+ **
+ *%s
+ *%c"
+  open_char
+  (* Any file containing '@' followed by the word 'generated' is considered a
+   * generated file in Phabricator. Cheeky trick to avoid making this script
+   * being seen as generated. *)
+  "generated"
+  header_comment
+  close_char
+
+
+type valign =
+  (string -> string -> string, unit, string, string -> string) format4
+
+let all_tokens = given_text_tokens @ variable_text_tokens @ no_text_tokens
+let align_fmt : 'a . ('a -> string) -> 'a list -> valign = fun f xs ->
+  let folder acc x = max acc (String.length (f x)) in
+  let width = List.fold_left folder 0 xs in
+  Scanf.format_from_string (sprintf "%%-%ds" width) "%-1s"
+let kind_name_fmt   = align_fmt (fun x -> x.kind_name  ) schema
+let type_name_fmt   = align_fmt (fun x -> x.type_name  ) schema
+let trivia_kind_fmt = align_fmt (fun x -> x.trivia_kind) trivia_kinds
+let token_kind_fmt  = align_fmt (fun x -> x.token_kind ) all_tokens
+
+module GenerateFFSyntaxType = struct
+  let to_parse_tree x =
+    let field_width = 50 - String.length x.prefix in
+    let fmt = sprintf "%s_%%-%ds: t\n" x.prefix field_width in
+    let mapper (f,_) = sprintf (Scanf.format_from_string fmt "%-1s") f in
+    let fields = map_and_concat_separated "    ; " mapper x.fields in
+    sprintf "  and %s =\n    { %s    }\n"
+      x.type_name fields
+
+  let to_syntax x =
+    sprintf ("  | " ^^ kind_name_fmt ^^ " of %s\n")
+      x.kind_name x.type_name
+
+  let to_aggregate_type x =
+    let aggregated_types = aggregation_of x in
+    let prefix, trim = aggregate_type_pfx_trim x in
+    let compact = Str.global_replace (Str.regexp trim) "" in
+    let valign = align_fmt (fun x -> compact x.kind_name) aggregated_types in
+    let type_name = aggregate_type_name x in
+    let make_constructor ty =
+      sprintf ("%s" ^^ valign ^^ " of %s")
+        prefix (compact ty.kind_name)
+        ty.type_name
+    in
+    let type_body = List.map make_constructor aggregated_types in
+    sprintf "  and %s =\n  | %s\n" type_name (String.concat "\n  | " type_body)
+
+  let to_validated_syntax x =
+    (* Not proud of this, but we have to exclude these things that don't occur
+     * in validated syntax. Their absence being the point of the validated
+     * syntax
+     *)
+    if x.kind_name = "ErrorSyntax" || x.kind_name = "ListItem" then "" else
+    begin
+      let open Printf in
+      let mapper (f,c) =
+        let rec make_type_string : child_spec -> string = function
+        | Aggregate t -> aggregate_type_name t
+        | Token -> "Token.t"
+        | Just t ->
+          (match SMap.get t schema_map with
+          | None   -> failwith @@ sprintf "Unknown type: %s" t
+          | Some t -> t.type_name
+          )
+        | ZeroOrMore ((Just _ | Aggregate _ | Token) as c) ->
+          sprintf "%s listesque" (make_type_string c)
+        | ZeroOrOne  ((Just _ | Aggregate _ | Token) as c) ->
+          sprintf "%s option" (make_type_string c)
+        | ZeroOrMore c -> sprintf "(%s) listesque" (make_type_string c)
+        | ZeroOrOne  c -> sprintf "(%s) option"    (make_type_string c)
+        in
+        sprintf "%s_%s: %s value" x.prefix f (make_type_string c)
+      in
+      let fields = map_and_concat_separated "\n    ; " mapper x.fields in
+      sprintf "  and %s =\n    { %s\n    }\n" x.type_name fields
+    end
+
+  let full_fidelity_syntax_template : string = make_header MLStyle "
+ * This module contains the type describing the structure of a syntax tree.
+ *
+ * The structure of the syntax tree is described by the collection of recursive
+ * types that makes up the bulk of this file. The type `t` is the type of a node
+ * in the syntax tree; each node has associated with it an arbitrary value of
+ * type `SyntaxValue.t`, and syntax node proper, which has structure given by
+ * the `syntax` type.
+ *
+ * Note that every child in the syntax tree is of type `t`, except for the
+ * `Token.t` type. This should be the *only* child of a type other than `t`.
  * We are explicitly NOT attempting to impose a type structure on the parse
  * tree beyond what is already implied by the types here. For example,
  * we are not attempting to put into the type system here the restriction that
@@ -124,8 +150,12 @@ module GenerateFFSyntax = struct
  * tree code.
  *
  * We want to be able to use different kinds of tokens, with different
- * performance characteristics. Therefore this module is first functorized by
- * token type.
+ * performance characteristics. Moreover, we want to associate arbitrary values
+ * with the syntax nodes, so that we can construct syntax trees with various
+ * properties -- trees that only know their widths and are thereby cheap to
+ * serialize, trees that have full position data for each node, trees where the
+ * tokens know their text and can therefore be edited, trees that have name
+ * annotations or type annotations, and so on.
  *
  * We wish to associate arbitrary values with the syntax nodes so that we can
  * construct syntax trees with various properties -- trees that only know
@@ -134,25 +164,8 @@ module GenerateFFSyntax = struct
  * can therefore be edited, trees that have name annotations or type
  * annotations, and so on.
  *
- * Therefore this module is functorized again with the value type to be
- * associated with the node.
- *
- * We also wish to provide factory methods, so that nodes can be built up
- * from their child nodes. A factory method must not just know all the
- * children and the kind of node it is constructing; it also must know how
- * to construct the value that this node is going to be tagged with. For
- * that reason, a third, optional functor is provided. This functor requires
- * that methods be provided to construct the values associated with a token
- * or with any arbitrary node, given its children. If this functor is used
- * then the resulting module contains factory methods.
- *
- * This module also provides some useful helper functions, like an iterator,
- * a rewriting visitor, and so on.
- *
- *)
-
-module SyntaxKind = Full_fidelity_syntax_kind
-module Operator = Full_fidelity_operator
+ * Therefore this module is functorized by the types for token and value to be
+ * associated with the node." ^ "
 
 module type TokenType = sig
   type t
@@ -164,22 +177,141 @@ module type SyntaxValueType = sig
   type t
 end
 
-(* These functors describe the shape of a parse tree that has a particular
-   kind of token in the leaves, and a particular kind of value associated
-   with each node. *)
+(* This functor describe the shape of a parse tree that has a particular kind of
+ * token in the leaves, and a particular kind of value associated with each
+ * node.
+ *)
+module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
+  type t = {
+    syntax : syntax ;
+    value : SyntaxValue.t
+  }
+PARSE_TREE  and syntax =
+  | Token                             of Token.t
+  | Missing
+  | SyntaxList                        of t list
+SYNTAX
+end (* MakeSyntaxType *)
+
+module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
+  type 'a value = SyntaxValue.t * 'a
+  (* TODO: Different styles of list seem to only happen in predetermined places,
+   * so split this out again into specific variants
+   *)
+  type 'a listesque =
+  | Syntactic of ('a value * Token.t option value) value list
+  | NonSyntactic of 'a value list
+  | MissingList
+  | SingletonList of 'a value
+AGGREGATE_TYPESVALIDATED_SYNTAX
+end (* MakeValidated *)
+"
+
+  let full_fidelity_syntax_type =
+  {
+    filename = full_fidelity_path_prefix ^ "full_fidelity_syntax_type.ml";
+    template = full_fidelity_syntax_template;
+    transformations = [
+      { pattern = "PARSE_TREE"; func = to_parse_tree };
+      { pattern = "SYNTAX"; func = to_syntax };
+      { pattern = "VALIDATED_SYNTAX"; func = to_validated_syntax };
+    ];
+    token_no_text_transformations = [];
+    token_given_text_transformations = [];
+    token_variable_text_transformations = [];
+    trivia_transformations = [];
+    aggregate_transformations = [
+      { aggregate_pattern = "AGGREGATE_TYPES"; aggregate_func = to_aggregate_type };
+    ];
+  }
+end (* GenerateFFSyntaxType *)
+
+
+module GenerateFFSyntax = struct
+
+  let to_parse_tree x =
+    let mapper (f,_) = sprintf "      %s_%s: t;\n" x.prefix f in
+    let fields = map_and_concat mapper x.fields in
+    sprintf "    and %s = {\n%s    }\n"
+      x.type_name fields
+
+  let to_syntax x =
+    sprintf ("    | " ^^ kind_name_fmt ^^ " of %s\n")
+      x.kind_name x.type_name
+
+  let to_to_kind x =
+    sprintf ("      | " ^^ kind_name_fmt ^^ " _ -> SyntaxKind.%s\n")
+      x.kind_name x.kind_name
+
+  let to_type_tests x =
+    sprintf ("    let is_" ^^ type_name_fmt ^^ " = has_kind SyntaxKind.%s\n")
+      x.type_name x.kind_name
+
+  let to_child_list_from_type x =
+    let mapper1 (f,_) = sprintf "      %s_%s;\n" x.prefix f in
+    let mapper2 (f,_) = sprintf "      %s_%s" x.prefix f in
+    let fields1 = map_and_concat mapper1 x.fields in
+    let fields2 = String.concat ",\n" (List.map mapper2 x.fields) in
+    sprintf "    let get_%s_children {\n%s    } = (\n%s\n    )\n\n"
+      x.type_name fields1 fields2
+
+  let to_children x =
+    let mapper (f,_) = sprintf "        %s_%s;\n" x.prefix f in
+    let fields = map_and_concat mapper x.fields in
+    sprintf "      | %s {\n%s      } -> [\n%s      ]\n"
+      x.kind_name fields fields
+
+  let to_children_names x =
+    let mapper1 (f,_) = sprintf "        %s_%s;\n" x.prefix f in
+    let mapper2 (f,_) = sprintf "        \"%s_%s\";\n" x.prefix f in
+    let fields1 = map_and_concat mapper1 x.fields in
+    let fields2 = map_and_concat mapper2 x.fields in
+    sprintf "      | %s {\n%s      } -> [\n%s      ]\n"
+      x.kind_name fields1 fields2
+
+  let to_syntax_from_children x =
+    let mapper (f,_) = sprintf "          %s_%s;\n" x.prefix f in
+    let fields = map_and_concat mapper x.fields in
+    sprintf "      | (SyntaxKind.%s, [
+%s        ]) ->
+        %s {
+%s        }
+"
+      x.kind_name fields x.kind_name fields
+
+  let to_constructor_methods x =
+    let mapper1 (f,_) = sprintf "      %s_%s\n" x.prefix f in
+    let mapper2 (f,_) = sprintf "        %s_%s;\n" x.prefix f in
+    let fields1 = map_and_concat mapper1 x.fields in
+    let fields2 = map_and_concat mapper2 x.fields in
+    sprintf "    let make_%s
+%s    =
+      from_children SyntaxKind.%s [
+%s      ]
+
+"
+      x.type_name fields1 x.kind_name fields2
+
+  let full_fidelity_syntax_template = make_header MLStyle "
+ * With these factory methods, nodes can be built up from their child nodes. A
+ * factory method must not just know all the children and the kind of node it is
+ * constructing; it also must know how to construct the value that this node is
+ * going to be tagged with. For that reason, an optional functor is provided.
+ * This functor requires that methods be provided to construct the values
+ * associated with a token or with any arbitrary node, given its children. If
+ * this functor is used then the resulting module contains factory methods.
+ *
+ * This module also provides some useful helper functions, like an iterator,
+ * a rewriting visitor, and so on." ^ "
+
+open Full_fidelity_syntax_type
+module SyntaxKind = Full_fidelity_syntax_kind
+module Operator = Full_fidelity_operator
+
 module WithToken(Token: TokenType) = struct
   module WithSyntaxValue(SyntaxValue: SyntaxValueType) = struct
 
-    type t = {
-      syntax : syntax ;
-      value : SyntaxValue.t
-    }
-PARSE_TREE
-    and syntax =
-    | Token of Token.t
-    | Missing
-    | SyntaxList of t list
-SYNTAX
+    include MakeSyntaxType(Token)(SyntaxValue)
 
     let make syntax value =
       { syntax; value }
@@ -198,13 +330,16 @@ SYNTAX
 
     let to_kind syntax =
       match syntax with
-      | Missing -> SyntaxKind.Missing
-      | Token _  -> SyntaxKind.Token
-      | SyntaxList _ -> SyntaxKind.SyntaxList
+      | Missing                             -> SyntaxKind.Missing
+      | Token                             _ -> SyntaxKind.Token
+      | SyntaxList                        _ -> SyntaxKind.SyntaxList
 TO_KIND
 
     let kind node =
       to_kind (syntax node)
+
+    let has_kind syntax_kind node =
+      kind node = syntax_kind
 
     let is_missing node =
       kind node = SyntaxKind.Missing
@@ -234,21 +369,21 @@ TYPE_TESTS
       | _ -> false
 
 
-    let is_semicolon = is_specific_token Full_fidelity_token_kind.Semicolon
-    let is_name = is_specific_token Full_fidelity_token_kind.Name
-    let is_construct = is_specific_token Full_fidelity_token_kind.Construct
-    let is_destruct = is_specific_token Full_fidelity_token_kind.Destruct
-    let is_static = is_specific_token Full_fidelity_token_kind.Static
-    let is_private = is_specific_token Full_fidelity_token_kind.Private
-    let is_public = is_specific_token Full_fidelity_token_kind.Public
-    let is_protected = is_specific_token Full_fidelity_token_kind.Protected
-    let is_abstract = is_specific_token Full_fidelity_token_kind.Abstract
-    let is_final = is_specific_token Full_fidelity_token_kind.Final
-    let is_void = is_specific_token Full_fidelity_token_kind.Void
+    let is_semicolon  = is_specific_token Full_fidelity_token_kind.Semicolon
+    let is_name       = is_specific_token Full_fidelity_token_kind.Name
+    let is_construct  = is_specific_token Full_fidelity_token_kind.Construct
+    let is_destruct   = is_specific_token Full_fidelity_token_kind.Destruct
+    let is_static     = is_specific_token Full_fidelity_token_kind.Static
+    let is_private    = is_specific_token Full_fidelity_token_kind.Private
+    let is_public     = is_specific_token Full_fidelity_token_kind.Public
+    let is_protected  = is_specific_token Full_fidelity_token_kind.Protected
+    let is_abstract   = is_specific_token Full_fidelity_token_kind.Abstract
+    let is_final      = is_specific_token Full_fidelity_token_kind.Final
+    let is_void       = is_specific_token Full_fidelity_token_kind.Void
     let is_left_brace = is_specific_token Full_fidelity_token_kind.LeftBrace
-    let is_ellipsis = is_specific_token Full_fidelity_token_kind.DotDotDot
-    let is_comma = is_specific_token Full_fidelity_token_kind.Comma
-    let is_array = is_specific_token Full_fidelity_token_kind.Array
+    let is_ellipsis   = is_specific_token Full_fidelity_token_kind.DotDotDot
+    let is_comma      = is_specific_token Full_fidelity_token_kind.Comma
+    let is_array      = is_specific_token Full_fidelity_token_kind.Array
 
 CHILD_LIST_FROM_TYPE
 
@@ -371,6 +506,74 @@ SYNTAX_FROM_CHILDREN      | (SyntaxKind.Missing, []) -> Missing
 
 CONSTRUCTOR_METHODS
 
+      (* Takes a node and a function from token to token and returns a node with
+      the function applied to the leading token, if there is one. *)
+      let modify_leading_token node f =
+        let rec aux nodes =
+          match nodes with
+          | [] -> (nodes, false)
+          | h :: t ->
+            begin
+            match get_token h with
+            | Some token ->
+              let new_token = f token in
+              let new_token = make_token new_token in
+              ((new_token :: t), true)
+            | None ->
+              let (new_children, success) = aux (children h) in
+              if success then
+                let new_head = from_children (kind h) new_children in
+                ((new_head :: t), true)
+              else
+                let (new_tail, success) = aux t in
+                if success then
+                  ((h :: new_tail), true)
+                else
+                  (nodes, false)
+              end in
+        let (results, _) = aux [node] in
+        match results with
+        | [] -> failwith
+          \"how did we get a smaller list out than we started with?\"
+        | h :: [] -> h
+        | _ -> failwith
+          \"how did we get a larger list out than we started with?\"
+
+      (* Takes a node and a function from token to token and returns a node with
+      the function applied to the trailing token, if there is one. *)
+      let modify_trailing_token node f =
+        (* We have a list of nodes, reversed, so the rightmost node is first. *)
+        let rec aux nodes =
+          match nodes with
+          | [] -> (nodes, false)
+          | h :: t ->
+            begin
+            match get_token h with
+            | Some token ->
+              let new_token = f token in
+              let new_token = make_token new_token in
+              ((new_token :: t), true)
+            | None ->
+              let (new_children, success) = aux (List.rev (children h)) in
+              if success then
+                let new_children = List.rev new_children in
+                let new_head = from_children (kind h) new_children in
+                ((new_head :: t), true)
+              else
+                let (new_tail, success) = aux t in
+                if success then
+                  ((h :: new_tail), true)
+                else
+                  (nodes, false)
+              end in
+        let (results, _) = aux [node] in
+        match results with
+        | [] -> failwith
+          \"how did we get a smaller list out than we started with?\"
+        | h :: [] -> h
+        | _ -> failwith
+          \"how did we get a larger list out than we started with?\"
+
     end (* WithValueBuilder *)
   end (* WithSyntaxValue *)
 end (* WithToken *)
@@ -381,8 +584,6 @@ end (* WithToken *)
     filename = full_fidelity_path_prefix ^ "full_fidelity_syntax.ml";
     template = full_fidelity_syntax_template;
     transformations = [
-      { pattern = "PARSE_TREE"; func = to_parse_tree };
-      { pattern = "SYNTAX"; func = to_syntax };
       { pattern = "TO_KIND"; func = to_to_kind };
       { pattern = "TYPE_TESTS"; func = to_type_tests };
       { pattern = "CHILD_LIST_FROM_TYPE"; func = to_child_list_from_type };
@@ -394,7 +595,8 @@ end (* WithToken *)
     token_no_text_transformations = [];
     token_given_text_transformations = [];
     token_variable_text_transformations = [];
-    trivia_transformations = []
+    trivia_transformations = [];
+    aggregate_transformations = [];
   }
 
 end (* GenerateFFSyntax *)
@@ -402,30 +604,14 @@ end (* GenerateFFSyntax *)
 module GenerateFFTriviaKind = struct
 
   let to_trivia { trivia_kind; trivia_text } =
-    Printf.sprintf "| %s\n" trivia_kind
+    sprintf "  | %s\n" trivia_kind
 
   let to_to_string { trivia_kind; trivia_text } =
-    Printf.sprintf "  | %s -> \"%s\"\n" trivia_kind trivia_text
+    sprintf ("  | " ^^ trivia_kind_fmt ^^ " -> \"%s\"\n")
+      trivia_kind trivia_text
 
-  let full_fidelity_trivia_kind_template =
-"(**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the \"hack\" directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(* @" ^ "generated *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
+  let full_fidelity_trivia_kind_template = make_header MLStyle "" ^ "
+
 type t =
 TRIVIA
 let to_string kind =
@@ -444,7 +630,8 @@ let full_fidelity_trivia_kind =
     { trivia_pattern = "TRIVIA";
       trivia_func = map_and_concat to_trivia };
     { trivia_pattern = "TO_STRING";
-      trivia_func = map_and_concat to_to_string }]
+      trivia_func = map_and_concat to_to_string }];
+  aggregate_transformations = [];
 }
 
 end (* GenerateFFSyntaxKind *)
@@ -452,41 +639,25 @@ end (* GenerateFFSyntaxKind *)
 module GenerateFFSyntaxKind = struct
 
   let to_tokens x =
-    Printf.sprintf "| %s\n" x.kind_name
+    sprintf "  | %s\n" x.kind_name
 
   let to_to_string x =
-    Printf.sprintf "  | %s -> \"%s\"\n" x.kind_name x.description
+    sprintf ("  | " ^^ kind_name_fmt ^^ " -> \"%s\"\n")
+      x.kind_name x.description
 
-  let full_fidelity_syntax_kind_template =
-"(**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the \"hack\" directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(* @" ^ "generated *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
+  let full_fidelity_syntax_kind_template = make_header MLStyle "" ^ "
+
 type t =
-| Token
-| Missing
-| SyntaxList
+  | Token
+  | Missing
+  | SyntaxList
 TOKENS
 
 let to_string kind =
   match kind with
-  | Missing -> \"missing\"
-  | Token -> \"token\"
-  | SyntaxList -> \"list\"
+  | Missing                           -> \"missing\"
+  | Token                             -> \"token\"
+  | SyntaxList                        -> \"list\"
 TO_STRING"
 
 let full_fidelity_syntax_kind =
@@ -500,7 +671,8 @@ let full_fidelity_syntax_kind =
   token_no_text_transformations = [];
   token_given_text_transformations = [];
   token_variable_text_transformations = [];
-  trivia_transformations = []
+  trivia_transformations = [];
+  aggregate_transformations = [];
 }
 
 end (* GenerateFFTriviaKind *)
@@ -508,22 +680,22 @@ end (* GenerateFFTriviaKind *)
 module GenerateFFJavaScript = struct
 
   let to_from_json x =
-    Printf.sprintf "    case '%s':
+    sprintf "    case '%s':
       return %s.from_json(json, position, source);
 " x.description x.kind_name
 
   let trivia_from_json { trivia_kind; trivia_text } =
-    Printf.sprintf "    case '%s':
+    sprintf "    case '%s':
       return %s.from_json(json, position, source);
 " trivia_text trivia_kind
 
   let trivia_static_from_json { trivia_kind; trivia_text } =
-    Printf.sprintf "      case '%s':
+    sprintf "      case '%s':
         return new %s(trivia_text);
 " trivia_text trivia_kind
 
   let trivia_classes { trivia_kind; trivia_text } =
-    Printf.sprintf "class %s extends EditableTrivia
+    sprintf "class %s extends EditableTrivia
 {
   constructor(text) { super('%s', text); }
   with_text(text)
@@ -535,38 +707,38 @@ module GenerateFFJavaScript = struct
 " trivia_kind trivia_text trivia_kind
 
   let to_editable_syntax x =
-    let ctor_mapper f = f in
+    let ctor_mapper (f,_) = f in
     let ctor = map_and_concat_separated ",\n    " ctor_mapper x.fields in
     let ctor2 = map_and_concat_separated ",\n        " ctor_mapper x.fields in
-    let children_mapper f = Printf.sprintf "%s: %s" f f in
+    let children_mapper (f,_) = sprintf "%s: %s" f f in
     let children =
       map_and_concat_separated ",\n      " children_mapper x.fields in
-    let props_mapper f =
-      Printf.sprintf "get %s() { return this.children.%s; }" f f in
+    let props_mapper (f,_) =
+      sprintf "get %s() { return this.children.%s; }" f f in
     let props = map_and_concat_separated "\n  " props_mapper x.fields in
-    let withs_mapper f =
-      let inner_mapper f_inner =
+    let withs_mapper (f,_) =
+      let inner_mapper (f_inner,_) =
         let prefix = if f_inner = f then "" else "this." in
-        Printf.sprintf "%s%s" prefix f_inner in
+        sprintf "%s%s" prefix f_inner in
       let inner = map_and_concat_separated ",\n      " inner_mapper x.fields in
-      Printf.sprintf "with_%s(%s){\n    return new %s(\n      %s);\n  }"
+      sprintf "with_%s(%s){\n    return new %s(\n      %s);\n  }"
         f f x.kind_name inner in
     let withs = map_and_concat_separated "\n  " withs_mapper x.fields in
-    let rewriter_mapper f =
-      Printf.sprintf "var %s = this.%s.rewrite(rewriter, new_parents);" f f in
+    let rewriter_mapper (f,_) =
+      sprintf "var %s = this.%s.rewrite(rewriter, new_parents);" f f in
     let rewriter =
       map_and_concat_separated "\n    " rewriter_mapper x.fields in
-    let condition_mapper f = Printf.sprintf "%s === this.%s" f f in
+    let condition_mapper (f,_) = sprintf "%s === this.%s" f f in
     let condition =
       map_and_concat_separated " &&\n      " condition_mapper x.fields in
-    let json_mapper f = Printf.sprintf
+    let json_mapper (f,_) = sprintf
       "let %s = EditableSyntax.from_json(
       json.%s_%s, position, source);
     position += %s.width;" f x.prefix f f in
     let json = map_and_concat_separated "\n    " json_mapper x.fields in
-    let keys_mapper f = Printf.sprintf "'%s'" f in
+    let keys_mapper (f,_) = sprintf "'%s'" f in
     let keys = map_and_concat_separated ",\n        " keys_mapper x.fields in
-    Printf.sprintf
+    sprintf
 "class %s extends EditableSyntax
 {
   constructor(
@@ -614,10 +786,10 @@ module GenerateFFJavaScript = struct
   x.kind_name
 
   let to_exports_syntax x =
-    Printf.sprintf "exports.%s = %s;\n" x.kind_name x.kind_name
+    sprintf "exports.%s = %s;\n" x.kind_name x.kind_name
 
   let to_editable_no_text x =
-    Printf.sprintf "class %sToken extends EditableToken
+    sprintf "class %sToken extends EditableToken
 {
   constructor(leading, trailing)
   {
@@ -627,7 +799,7 @@ module GenerateFFJavaScript = struct
 " x.token_kind x.token_text
 
 let to_editable_given_text x =
-  Printf.sprintf "class %sToken extends EditableToken
+  sprintf "class %sToken extends EditableToken
 {
   constructor(leading, trailing)
   {
@@ -637,7 +809,7 @@ let to_editable_given_text x =
 " x.token_kind x.token_text x.token_text
 
   let to_editable_variable_text x =
-    Printf.sprintf "class %sToken extends EditableToken
+    sprintf "class %sToken extends EditableToken
 {
   constructor(leading, trailing, text)
   {
@@ -652,7 +824,7 @@ let to_editable_given_text x =
 " x.token_kind x.token_text x.token_kind
 
   let to_factory_no_text x =
-    Printf.sprintf
+    sprintf
 "    case '%s':
        return new %sToken(leading, trailing);
 "
@@ -661,37 +833,19 @@ let to_editable_given_text x =
   let to_factory_given_text = to_factory_no_text
 
   let to_factory_variable_text x =
-    Printf.sprintf
+    sprintf
 "    case '%s':
        return new %sToken(leading, trailing, token_text);
 "
       x.token_text x.token_kind
 
   let to_export_token x =
-    Printf.sprintf "exports.%sToken = %sToken;\n" x.token_kind x.token_kind
+    sprintf "exports.%sToken = %sToken;\n" x.token_kind x.token_kind
 
   let to_export_trivia x =
-    Printf.sprintf "exports.%s = %s;\n" x.trivia_kind x.trivia_kind
+    sprintf "exports.%s = %s;\n" x.trivia_kind x.trivia_kind
 
-  let full_fidelity_javascript_template =
-"/**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the 'hack' directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- */
-/* THIS FILE IS GENERATED; DO NOT EDIT IT */
-/* @" ^ "generated */
-/**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*/
+  let full_fidelity_javascript_template = make_header CStyle "" ^ "
 
 \"use strict\";
 
@@ -1200,7 +1354,8 @@ EXPORTS_SYNTAX"
         trivia_func = map_and_concat trivia_classes };
       { trivia_pattern = "EXPORTS_TRIVIA";
         trivia_func = map_and_concat to_export_trivia }
-    ]
+    ];
+    aggregate_transformations = [];
   }
 
 end (* GenerateFFJavaScript *)
@@ -1208,22 +1363,22 @@ end (* GenerateFFJavaScript *)
 module GenerateFFHack = struct
 
   let to_from_json x =
-    Printf.sprintf "    case '%s':
+    sprintf "    case '%s':
       return %s::from_json($json, $position, $source);
 " x.description x.kind_name
 
   let to_from_json_trivia { trivia_kind; trivia_text } =
-    Printf.sprintf "    case '%s':
+    sprintf "    case '%s':
       return %s::from_json($json, $position, $source);
 " trivia_text trivia_kind
 
   let to_static_from_json_trivia { trivia_kind; trivia_text } =
-    Printf.sprintf "      case '%s':
+    sprintf "      case '%s':
         return new %s($trivia_text);
 " trivia_text trivia_kind
 
   let to_classes_trivia { trivia_kind; trivia_text } =
-    Printf.sprintf "class %s extends EditableTrivia {
+    sprintf "class %s extends EditableTrivia {
   public function __construct(string $text) {
     parent::__construct('%s', $text);
   }
@@ -1236,50 +1391,50 @@ module GenerateFFHack = struct
 
 
   let to_editable_syntax x =
-    let ctor_mapper f = Printf.sprintf "EditableSyntax $%s" f in
+    let ctor_mapper (f,_) = sprintf "EditableSyntax $%s" f in
     let ctor = map_and_concat_separated ",\n    " ctor_mapper x.fields in
-    let ctor2_mapper f = Printf.sprintf "$%s" f in
+    let ctor2_mapper (f,_) = sprintf "$%s" f in
     let ctor2 = map_and_concat_separated ",\n        " ctor2_mapper x.fields in
-    let props_mapper f =
-      Printf.sprintf "private EditableSyntax $_%s;" f in
+    let props_mapper (f,_) =
+      sprintf "private EditableSyntax $_%s;" f in
     let props = map_and_concat_separated "\n  " props_mapper x.fields in
-    let getters_mapper f =
-      Printf.sprintf "public function %s(): EditableSyntax {
+    let getters_mapper (f,_) =
+      sprintf "public function %s(): EditableSyntax {
     return $this->_%s;
   }" f f in
     let getters = map_and_concat_separated "\n  " getters_mapper x.fields in
 
-    let assignments_mapper f =
-      Printf.sprintf "$this->_%s = $%s;" f f in
+    let assignments_mapper (f,_) =
+      sprintf "$this->_%s = $%s;" f f in
     let assignments = map_and_concat_separated
       "\n    " assignments_mapper x.fields in
-    let withs_mapper f =
-      let inner_mapper f_inner =
+    let withs_mapper (f,_) =
+      let inner_mapper (f_inner,_) =
         let prefix = if f_inner = f then "$" else "$this->_" in
-        Printf.sprintf "%s%s" prefix f_inner in
+        sprintf "%s%s" prefix f_inner in
       let inner = map_and_concat_separated ",\n      " inner_mapper x.fields in
-      Printf.sprintf "public function with_%s(EditableSyntax $%s): %s {
+      sprintf "public function with_%s(EditableSyntax $%s): %s {
     return new %s(
       %s);
   }"
         f f x.kind_name x.kind_name inner in
     let withs = map_and_concat_separated "\n  " withs_mapper x.fields in
-    let rewriter_mapper f =
-      Printf.sprintf "$%s = $this->%s()->rewrite($rewriter, $new_parents);" f f in
+    let rewriter_mapper (f,_) =
+      sprintf "$%s = $this->%s()->rewrite($rewriter, $new_parents);" f f in
     let rewriter =
       map_and_concat_separated "\n    " rewriter_mapper x.fields in
-    let condition_mapper f = Printf.sprintf "$%s === $this->%s()" f f in
+    let condition_mapper (f,_) = sprintf "$%s === $this->%s()" f f in
     let condition =
       map_and_concat_separated " &&\n      " condition_mapper x.fields in
-    let json_mapper f = Printf.sprintf
+    let json_mapper (f,_) = sprintf
       "$%s = EditableSyntax::from_json(
       $json->%s_%s, $position, $source);
     $position += $%s->width();" f x.prefix f f in
     let json = map_and_concat_separated "\n    " json_mapper x.fields in
-    let children_mapper f = Printf.sprintf "yield $this->_%s;" f in
+    let children_mapper (f,_) = sprintf "yield $this->_%s;" f in
     let children =
       map_and_concat_separated "\n    " children_mapper x.fields in
-    Printf.sprintf
+    sprintf
 "final class %s extends EditableSyntax {
   %s
   public function __construct(
@@ -1320,7 +1475,7 @@ module GenerateFFHack = struct
   condition x.kind_name ctor2 json x.kind_name ctor2 children
 
   let to_editable_no_text x =
-    Printf.sprintf "final class %sToken extends EditableToken {
+    sprintf "final class %sToken extends EditableToken {
   public function __construct(
     EditableSyntax $leading,
     EditableSyntax $trailing) {
@@ -1338,7 +1493,7 @@ module GenerateFFHack = struct
 " x.token_kind x.token_text x.token_kind x.token_kind x.token_kind x.token_kind
 
 let to_editable_given_text x =
-  Printf.sprintf "final class %sToken extends EditableToken {
+  sprintf "final class %sToken extends EditableToken {
   public function __construct(
     EditableSyntax $leading,
     EditableSyntax $trailing) {
@@ -1357,7 +1512,7 @@ let to_editable_given_text x =
   x.token_kind x.token_kind
 
   let to_editable_variable_text x =
-    Printf.sprintf "final class %sToken extends EditableToken {
+    sprintf "final class %sToken extends EditableToken {
   public function __construct(
     EditableSyntax $leading,
     EditableSyntax $trailing,
@@ -1383,7 +1538,7 @@ let to_editable_given_text x =
   x.token_kind x.token_kind
 
   let to_factory_no_text x =
-    Printf.sprintf
+    sprintf
 "    case '%s':
        return new %sToken($leading, $trailing);
 "
@@ -1392,32 +1547,13 @@ let to_editable_given_text x =
   let to_factory_given_text = to_factory_no_text
 
   let to_factory_variable_text x =
-    Printf.sprintf
+    sprintf
 "    case '%s':
        return new %sToken($leading, $trailing, $token_text);
 "
       x.token_text x.token_kind
 
-  let full_fidelity_hack_template =
-"<?hh // strict
-/**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the 'hack' directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- */
-/* THIS FILE IS GENERATED; DO NOT EDIT IT */
-/* @" ^ "generated */
-/**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*/
+  let full_fidelity_hack_template = make_header HHStyle "" ^ "
 
 require_once 'full_fidelity_parser.php';
 
@@ -2052,7 +2188,8 @@ function from_json(mixed $json): EditableSyntax {
       { trivia_pattern = "STATIC_FROM_JSON_TRIVIA";
         trivia_func = map_and_concat to_static_from_json_trivia };
       { trivia_pattern = "TRIVIA_CLASSES";
-        trivia_func = map_and_concat to_classes_trivia }]
+        trivia_func = map_and_concat to_classes_trivia }];
+    aggregate_transformations = [];
   }
 
 end (* GenerateFFHack *)
@@ -2060,50 +2197,41 @@ end (* GenerateFFHack *)
 
 module GenerateFFTokenKind = struct
 
+  let given_text_width =
+    let folder acc x = max acc (String.length x.token_text) in
+    List.fold_left folder 0 given_text_tokens
+
   let to_kind_declaration x =
-    Printf.sprintf "  | %s\n" x.token_kind
+    sprintf "  | %s\n" x.token_kind
 
   let to_from_string x =
-    Printf.sprintf "  | \"%s\" -> Some %s\n" x.token_text x.token_kind
+    let spacer_width = given_text_width - String.length x.token_text in
+    let spacer = String.make spacer_width ' ' in
+    sprintf "  | \"%s\"%s -> Some %s\n" x.token_text spacer x.token_kind
 
   let to_to_string x =
-    Printf.sprintf "  | %s -> \"%s\"\n" x.token_kind x.token_text
+    sprintf ("  | " ^^ token_kind_fmt ^^ " -> \"%s\"\n")
+      x.token_kind x.token_text
 
-  let full_fidelity_token_kind_template = "(**
- * Copyright (c) 2016, Facebook, Inc.
- * All rights reserved.
- *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the \"hack\" directory of this source tree. An additional
- * grant of patent rights can be found in the PATENTS file in the same
- * directory.
- *
- *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(* @" ^ "generated *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
+  let full_fidelity_token_kind_template = make_header MLStyle "" ^ "
 
 type t =
-KIND_DECLARATIONS_NO_TEXT
-KIND_DECLARATIONS_GIVEN_TEXT
+  (* No text tokens *)
+KIND_DECLARATIONS_NO_TEXT  (* Given text tokens *)
+KIND_DECLARATIONS_GIVEN_TEXT  (* Variable text tokens *)
 KIND_DECLARATIONS_VARIABLE_TEXT
 
 let from_string keyword =
   match keyword with
-  | \"true\" -> Some BooleanLiteral
-  | \"false\" -> Some BooleanLiteral
-FROM_STRING_GIVEN_TEXT
-  | _ -> None
+  | \"true\"         -> Some BooleanLiteral
+  | \"false\"        -> Some BooleanLiteral
+FROM_STRING_GIVEN_TEXT  | _              -> None
 
 let to_string kind =
-match kind with
-| EndOfFile -> \"end of file\"
-TO_STRING_GIVEN_TEXT
+  match kind with
+(* No text tokens *)
+TO_STRING_NO_TEXT  (* Given text tokens *)
+TO_STRING_GIVEN_TEXT  (* Variable text tokens *)
 TO_STRING_VARIABLE_TEXT
 "
   let full_fidelity_token_kind =
@@ -2113,7 +2241,9 @@ TO_STRING_VARIABLE_TEXT
     transformations = [];
     token_no_text_transformations = [
       { token_pattern = "KIND_DECLARATIONS_NO_TEXT";
-        token_func = map_and_concat to_kind_declaration }];
+        token_func = map_and_concat to_kind_declaration };
+      { token_pattern = "TO_STRING_NO_TEXT";
+        token_func = map_and_concat to_to_string }];
     token_given_text_transformations = [
       { token_pattern = "KIND_DECLARATIONS_GIVEN_TEXT";
         token_func = map_and_concat to_kind_declaration };
@@ -2126,16 +2256,320 @@ TO_STRING_VARIABLE_TEXT
         token_func = map_and_concat to_kind_declaration };
       { token_pattern = "TO_STRING_VARIABLE_TEXT";
         token_func = map_and_concat to_to_string }];
-    trivia_transformations = []
+    trivia_transformations = [];
+    aggregate_transformations = [];
   }
 
 end (* GenerateFFTokenKind *)
 
+module GenerateFFPositionedSyntax = struct
+  exception No_fields_in_schema_node of schema_node
+
+  let to_kind_declaration x =
+    sprintf "  | %s\n" x.token_kind
+
+  let to_from_string x =
+    sprintf "  | \"%s\" -> Some %s\n" x.token_text x.token_kind
+
+  let to_to_string x =
+    sprintf "  | %s -> \"%s\"\n" x.token_kind x.token_text
+
+  let full_fidelity_positioned_syntax_template = make_header MLStyle "
+ * Positioned syntax tree
+ *
+ * A positioned syntax tree stores the original source text,
+ * the offset of the leading trivia, the width of the leading trivia,
+ * node proper, and trailing trivia. From all this information we can
+ * rapidly compute the absolute position of any portion of the node,
+ * or the text." ^ "
+
+module SyntaxTree = Full_fidelity_syntax_tree
+module SourceText = Full_fidelity_source_text
+module PositionedToken = Full_fidelity_positioned_token
+
+module SyntaxWithPositionedToken =
+  Full_fidelity_syntax.WithToken(PositionedToken)
+
+module PositionedSyntaxValue = struct
+  type t = {
+    source_text: SourceText.t;
+    offset: int; (* Beginning of first trivia *)
+    leading_width: int;
+    width: int; (* Width of node, not counting trivia *)
+    trailing_width: int;
+  }
+
+  let make source_text offset leading_width width trailing_width =
+    { source_text; offset; leading_width; width; trailing_width }
+
+  let source_text value =
+    value.source_text
+
+  let start_offset value =
+    value.offset
+
+  let leading_width value =
+    value.leading_width
+
+  let width value =
+    value.width
+
+  let trailing_width value =
+    value.trailing_width
+end
+
+include SyntaxWithPositionedToken.WithSyntaxValue(PositionedSyntaxValue)
+
+let source_text node =
+  PositionedSyntaxValue.source_text (value node)
+
+let leading_width node =
+  PositionedSyntaxValue.leading_width (value node)
+
+let width node =
+  PositionedSyntaxValue.width (value node)
+
+let trailing_width node =
+  PositionedSyntaxValue.trailing_width (value node)
+
+let full_width node =
+  (leading_width node) + (width node) + (trailing_width node)
+
+let leading_start_offset node =
+  PositionedSyntaxValue.start_offset (value node)
+
+let leading_end_offset node =
+  let w = (leading_width node) - 1 in
+  let w = if w < 0 then 0 else w in
+  (leading_start_offset node) + w
+
+let start_offset node =
+  (leading_start_offset node) + (leading_width node)
+
+let end_offset node =
+  let w = (width node) - 1 in
+  let w = if w < 0 then 0 else w in
+  (start_offset node) + w
+
+let trailing_start_offset node =
+  (leading_start_offset node) + (leading_width node) + (width node)
+
+let trailing_end_offset node =
+  let w = (full_width node) - 1 in
+  let w = if w < 0 then 0 else w in
+  (leading_start_offset node) + w
+
+let leading_start_position node =
+  SourceText.offset_to_position (source_text node) (leading_start_offset node)
+
+let leading_end_position node =
+  SourceText.offset_to_position (source_text node) (leading_end_offset node)
+
+let start_position node =
+  SourceText.offset_to_position (source_text node) (start_offset node)
+
+let end_position node =
+  SourceText.offset_to_position (source_text node) (end_offset node)
+
+let trailing_start_position node =
+  SourceText.offset_to_position (source_text node) (trailing_start_offset node)
+
+let trailing_end_position node =
+  SourceText.offset_to_position (source_text node) (trailing_end_offset node)
+
+let leading_span node =
+  ((leading_start_position node), (leading_end_position node))
+
+let span node =
+  ((start_position node), (end_position node))
+
+let trailing_span node =
+  ((trailing_start_position node), (trailing_end_position node))
+
+let full_span node =
+  ((leading_start_position node), (trailing_end_position node))
+
+let full_text node =
+  SourceText.sub
+    (source_text node) (leading_start_offset node) (full_width node)
+
+let leading_text node =
+  SourceText.sub
+    (source_text node)
+    (leading_start_offset node)
+    (leading_width node)
+
+let trailing_text node =
+  SourceText.sub
+    (source_text node) ((end_offset node) + 1) (trailing_width node)
+
+let text node =
+  SourceText.sub (source_text node) (start_offset node) (width node)
+
+(* Takes a node and an offset; produces the descent through the parse tree
+   to that position. *)
+let parentage node position =
+  let rec aux nodes position acc =
+    match nodes with
+    | [] -> acc
+    | h :: t ->
+      let width = full_width h in
+      if position < width then
+        aux (children h) position (h :: acc)
+      else
+        aux t (position - width) acc in
+  aux [node] position []
+
+module FromMinimal = struct
+  module SyntaxKind = Full_fidelity_syntax_kind
+  module M = Full_fidelity_minimal_syntax
+
+  exception Multiplicitous_conversion_result of int
+
+  type todo =
+  | Build of (M.t * int * todo)
+  | Convert of (M.t * todo)
+  | Done
+
+  let from_minimal source_text (node : M.t) : t =
+    let make_syntax minimal_node positioned_syntax offset =
+      let leading_width = M.leading_width minimal_node in
+      let width = M.width minimal_node in
+      let trailing_width = M.trailing_width minimal_node in
+      let value = PositionedSyntaxValue.make
+        source_text offset leading_width width trailing_width in
+      make positioned_syntax value
+    in
+    let build minimal_t (results : t list) : syntax * t list =
+      match M.kind minimal_t, results with
+      | SyntaxKind.SyntaxList, _ ->
+        let len =
+          match M.syntax minimal_t with
+          | M.SyntaxList l -> List.length l
+          | _ -> failwith \"SyntaxKind out of sync with Syntax (impossible).\"
+        in
+        let rec aux ls n rs =
+          match n, rs with
+          | 0, _ -> ls, rs
+          | _, [] -> failwith \"Rebuilding list with insufficient elements.\"
+          | n, (r::rs) -> aux (r :: ls) (n - 1) rs
+        in
+        let ls, rs = aux [] len results in
+        SyntaxList ls, rs
+BUILD_CASES
+      | _ ->
+        failwith @@ Printf.sprintf
+          \"BUILD: Failed to build %s with %d results.\"
+          (SyntaxKind.to_string @@ M.kind minimal_t)
+          (List.length results)
+    in
+
+    let rec dispatch (offset : int) (todo : todo) (results : t list) : t =
+      match todo with
+      | Build (node, node_offset, todo) ->
+        let syntax, results = build node results in
+        let results = make_syntax node syntax node_offset :: results in
+        dispatch offset todo results
+      | Convert (n, todo) -> convert offset todo results n
+      | Done ->
+        (match results with
+        | [result] -> result
+        | _  -> raise @@ Multiplicitous_conversion_result (List.length results)
+        )
+    and convert (offset : int) (todo : todo) (results : t list) : M.t -> t = function
+    | { M.syntax = M.Token token; _ } as minimal_t ->
+      let token = PositionedToken.from_minimal source_text token offset in
+      let syntax = Token token in
+      let node = make_syntax minimal_t syntax offset in
+      let offset = offset + M.full_width minimal_t in
+      dispatch offset todo (node :: results)
+    | { M.syntax = M.Missing; _ } as minimal_t ->
+      let node = make_syntax minimal_t Missing offset in
+      dispatch offset todo (node :: results)
+    | { M.syntax = M.SyntaxList l; _ } as minimal_t ->
+      let todo = Build (minimal_t, offset, todo) in
+      let todo = List.fold_right (fun n t -> Convert (n,t)) l todo in
+      dispatch offset todo results
+CONVERT_CASES    in
+    convert 0 Done [] node
+end
+
+let from_minimal = FromMinimal.from_minimal
+
+let from_tree tree =
+  from_minimal (SyntaxTree.text tree) (SyntaxTree.root tree)
+
+"
+
+  let to_convert_cases x =
+    let open Printf in
+    let fields, first, other =
+      match List.map (fun (f,_) -> sprintf "%s_%s" x.prefix f) x.fields with
+      | (first :: other) as fields -> fields, first, other
+      | _ -> raise (No_fields_in_schema_node x)
+    in
+    let fields =
+      String.concat "\n        ; " @@
+        List.map (fun (f,_) -> sprintf "M.%s_%s" x.prefix f) x.fields
+    in
+    let todos =
+      String.concat "" @@
+        List.rev_map (sprintf "let todo = Convert (%s, todo) in\n        ") other
+    in
+    sprintf
+"    | { M.syntax = M.%s
+        { %s
+        }
+      ; _ } as minimal_t ->
+        let todo = Build (minimal_t, offset, todo) in
+        %sconvert offset todo results %s
+"
+      x.kind_name
+      fields
+      todos
+      first
+
+  let to_build_cases x =
+    let open Printf in
+    let fields = List.map (fun (f,_) -> sprintf "%s_%s" x.prefix f) x.fields in
+    sprintf
+"      | SyntaxKind.%s
+      , (  %s
+        :: results
+        ) ->
+          %s
+          { %s
+          }, results
+"
+      x.kind_name
+      (String.concat "\n        :: " @@ List.rev fields)
+      x.kind_name
+      (String.concat "\n          ; " fields)
+
+  let full_fidelity_positioned_syntax =
+  {
+    filename = full_fidelity_path_prefix ^ "full_fidelity_positioned_syntax.ml";
+    template = full_fidelity_positioned_syntax_template;
+    transformations = [
+      { pattern = "CONVERT_CASES"; func = to_convert_cases };
+      { pattern = "BUILD_CASES";   func = to_build_cases   };
+    ];
+    token_no_text_transformations = [];
+    token_given_text_transformations = [];
+    token_variable_text_transformations = [];
+    trivia_transformations = [];
+    aggregate_transformations = [];
+  }
+
+end (* GenerateFFPositionedSyntax *)
+
 let () =
+  generate_file GenerateFFSyntaxType.full_fidelity_syntax_type;
   generate_file GenerateFFTriviaKind.full_fidelity_trivia_kind;
   generate_file GenerateFFSyntax.full_fidelity_syntax;
   generate_file GenerateFFSyntaxKind.full_fidelity_syntax_kind;
   generate_file GenerateFFJavaScript.full_fidelity_javascript;
   generate_file GenerateFFHack.full_fidelity_hack;
   generate_file GenerateFFTokenKind.full_fidelity_token_kind;
-  generate_file GenerateFFJSONSchema.full_fidelity_json_schema
+  generate_file GenerateFFJSONSchema.full_fidelity_json_schema;
+  generate_file GenerateFFPositionedSyntax.full_fidelity_positioned_syntax;

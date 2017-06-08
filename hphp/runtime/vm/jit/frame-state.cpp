@@ -478,6 +478,9 @@ void FrameStateMgr::update(const IRInstruction* inst) {
     }
     break;
 
+  case FuncGuard:
+    break;
+
   case DefFP:
   case FreeActRec:
     cur().fpValue = inst->dst();
@@ -656,10 +659,6 @@ void FrameStateMgr::update(const IRInstruction* inst) {
     );
     break;
 
-  case CufIterSpillFrame:
-    spillFrameStack(inst->extra<CufIterSpillFrame>()->spOffset,
-                    cur().bcSPOff, inst);
-    break;
   case SpillFrame:
     spillFrameStack(inst->extra<SpillFrame>()->spOffset,
                     cur().bcSPOff, inst);

@@ -28,7 +28,7 @@
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/url.h"
 #include "hphp/runtime/base/zend-url.h"
-#include "hphp/runtime/base/type-conversions.h"
+#include "hphp/runtime/base/tv-type.h"
 #include "hphp/runtime/server/access-log.h"
 #include "hphp/runtime/server/http-protocol.h"
 #include "hphp/runtime/ext/openssl/ext_openssl.h"
@@ -642,7 +642,7 @@ bool Transport::setCookie(const String& name, const String& value, int64_t expir
         toString(DateTime::DateFormat::Cookie);
       cookie += sdt.data();
       cookie += "; Max-Age=";
-      String sdelta = toString( expire - time(0) );
+      String sdelta = String(expire - time(0));
       cookie += sdelta.data();
     }
   }
@@ -928,7 +928,7 @@ StringHolder Transport::compressGzip(const void *data, int size,
     compressionLevel = level;
   }
   if (m_compressor == nullptr) {
-    m_compressor = folly::make_unique<StreamCompressor>(
+    m_compressor = std::make_unique<StreamCompressor>(
         compressionLevel, CODING_GZIP, true);
   }
   int len = size;
@@ -972,7 +972,7 @@ StringHolder Transport::compressBrotli(const void *data, int size,
           folly::findLastSet(static_cast<unsigned int>(size) - 1));
     }
 
-    m_brotliCompressor = folly::make_unique<brotli::BrotliCompressor>(params);
+    m_brotliCompressor = std::make_unique<brotli::BrotliCompressor>(params);
   }
 
   size_t len = size;

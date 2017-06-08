@@ -120,8 +120,10 @@ std::string escaped_long(Cell cell) {
 //////////////////////////////////////////////////////////////////////
 
 struct EHFault { std::string label; };
-struct EHCatch { std::string label; };
+struct EHCatchLegacy { std::string label; };
+struct EHCatch { Offset end; };
 using EHInfo = boost::variant< EHFault
+                             , EHCatchLegacy
                              , EHCatch
                              >;
 
@@ -185,7 +187,8 @@ FuncInfo find_func_info(const Func* func) {
       finfo.ehInfo[&eh] = [&]() -> EHInfo {
         switch (eh.m_type) {
         case EHEnt::Type::Catch:
-          return EHCatch { add_target("C", eh.m_handler) };
+          if (eh.m_end != kInvalidOffset) return EHCatch { eh.m_end };
+          return EHCatchLegacy { add_target("C", eh.m_handler) };
         case EHEnt::Type::Fault:
           return EHFault { add_target("F", eh.m_handler) };
         }
@@ -373,6 +376,12 @@ void print_instr(Output& out, const FuncInfo& finfo, PC pc) {
 
 void print_func_directives(Output& out, const FuncInfo& finfo) {
   const Func* func = finfo.func;
+  if (func->isMemoizeWrapper()) {
+    out.fmtln(".ismemoizewrapper;");
+  }
+  if (auto const wrapper = func->dynCallWrapper()) {
+    out.fmtln(".dyncallwrapper \"{}\";", wrapper->name());
+  }
   if (auto const niters = func->numIterators()) {
     out.fmtln(".numiters {};", niters);
   }
@@ -400,6 +409,7 @@ void print_func_body(Output& out, const FuncInfo& finfo) {
   auto const bcStop  = func->unit()->at(func->past());
 
   min_priority_queue<Offset> ehEnds;
+  min_priority_queue<Offset> ehHandlers;
 
   while (bcIter != bcStop) {
     auto const off = func->unit()->offsetOf(bcIter);
@@ -412,6 +422,21 @@ void print_func_body(Output& out, const FuncInfo& finfo) {
       out.fmtln("}}");
     }
 
+    if (!ehHandlers.empty() && ehHandlers.top() == off) {
+      ehHandlers.pop();
+      out.dec_indent();
+      out.fmtln("}} .catch {{");
+      out.inc_indent();
+
+      // You can't have multiple handlers at the same location.
+      assertx(ehHandlers.empty() || ehHandlers.top() != off);
+
+      // Skip the implicitly defined Catch opcode by .catch {} directive.
+      assertx(peek_op(bcIter) == OpCatch);
+      bcIter += instrLen(bcIter);
+      continue;
+    }
+
     // Next, open any new protected regions that start at this offset.
     for (; ehIter != ehStop && ehIter->first == off; ++ehIter) {
       auto const info = finfo.ehInfo.find(ehIter->second);
@@ -419,14 +444,21 @@ void print_func_body(Output& out, const FuncInfo& finfo) {
       match<void>(
         info->second,
         [&] (const EHCatch& ehCatch) {
+          assertx(ehIter->second->m_past == ehIter->second->m_handler);
+          out.fmtln(".try {{");
+          ehHandlers.push(ehIter->second->m_handler);
+          ehEnds.push(ehCatch.end);
+        },
+        [&] (const EHCatchLegacy& ehCatch) {
           out.fmtln(".try_catch {} {{", ehCatch.label);
+          ehEnds.push(ehIter->second->m_past);
         },
         [&] (const EHFault& fault) {
           out.fmtln(".try_fault {} {{", fault.label);
+          ehEnds.push(ehIter->second->m_past);
         }
       );
       out.inc_indent();
-      ehEnds.push(ehIter->second->m_past);
     }
 
     // Then, print labels if we have any.  This order keeps the labels
@@ -682,7 +714,14 @@ void print_alias(Output& out, const TypeAlias& alias) {
             type_constraint(constraint));
 }
 
+void print_unit_strict_types(Output& out, const Unit* unit) {
+  if (!RuntimeOption::PHP7_ScalarTypes) return;
+  if (unit->useStrictTypes()) out.fmtln(".strict 1;");
+  else out.fmtln(".strict 0;");
+}
+
 void print_unit_metadata(Output& out, const Unit* unit) {
+  out.nl();
   out.fmtln(".filepath {};", escaped(unit->filepath()));
   for (auto i = size_t{0}; i < unit->numArrays(); ++i) {
     auto const ad = unit->lookupArrayId(i);
@@ -694,6 +733,7 @@ void print_unit_metadata(Output& out, const Unit* unit) {
 void print_unit(Output& out, const Unit* unit) {
   out.fmtln("# {} starts here", unit->filepath());
   out.nl();
+  print_unit_strict_types(out, unit);
   print_unit_metadata(out, unit);
   for (auto* func : unit->funcs())        print_func(out, func);
   for (auto& cls : unit->preclasses())    print_cls(out, cls.get());

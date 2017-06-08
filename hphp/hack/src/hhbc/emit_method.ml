@@ -10,77 +10,79 @@
 
 open Core
 open Instruction_sequence
-open Hhbc_ast
 
-let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
-  fun ast_class ast_method ->
+let from_ast_wrapper : bool -> _ ->
+  Ast.class_ -> Ast.method_ -> Hhas_method.t =
+  fun privatize make_name ast_class ast_method ->
   let method_is_abstract =
     List.mem ast_method.Ast.m_kind Ast.Abstract ||
     ast_class.Ast.c_kind = Ast.Cinterface in
   let method_is_final = List.mem ast_method.Ast.m_kind Ast.Final in
-  let method_is_private = List.mem ast_method.Ast.m_kind Ast.Private in
-  let method_is_protected = List.mem ast_method.Ast.m_kind Ast.Protected in
-  let method_is_public =
-    List.mem ast_method.Ast.m_kind Ast.Public ||
-    (not method_is_private && not method_is_protected) in
   let method_is_static = List.mem ast_method.Ast.m_kind Ast.Static in
+  let namespace = ast_class.Ast.c_namespace in
   let method_attributes =
-    Emit_attribute.from_asts ast_method.Ast.m_user_attributes in
-  let tparams = ast_class.Ast.c_tparams @ ast_method.Ast.m_tparams in
+    Emit_attribute.from_asts namespace ast_method.Ast.m_user_attributes in
+  let method_is_private =
+    privatize || List.mem ast_method.Ast.m_kind Ast.Private in
+  let method_is_protected =
+    not privatize && List.mem ast_method.Ast.m_kind Ast.Protected in
+  let method_is_public =
+    not privatize && (
+    List.mem ast_method.Ast.m_kind Ast.Public ||
+    (not method_is_private && not method_is_protected)) in
+  let is_memoize =
+    Emit_attribute.ast_any_is_memoize ast_method.Ast.m_user_attributes in
+  let (_, original_name) = ast_method.Ast.m_name in
   let (_,class_name) = ast_class.Ast.c_name in
-  let (_,method_name) = ast_method.Ast.m_name in
+  let class_name = Utils.strip_ns class_name in
   let ret =
-    if method_name = Naming_special_names.Members.__construct
-    || method_name = Naming_special_names.Members.__destruct
+    if original_name = Naming_special_names.Members.__construct
+    || original_name = Naming_special_names.Members.__destruct
     then None
     else ast_method.Ast.m_ret in
-  let default_instrs return_type =
-      if List.mem ast_method.Ast.m_kind Ast.Abstract
-      then gather [
-        instr_string ("Cannot call abstract method " ^ Utils.strip_ns class_name
-          ^ "::" ^ method_name ^ "()");
-        instr (IOp (Fatal FatalOp.RuntimeOmitFrame))
-      ]
-      else let default_seq =
-        gather [
-          instr_null;
-          instr_retc
-        ] in
-        (* TODO: the following cannot use Emit_body.has_type_constraint
-         *       because it would not follow the current HHVM behaviour *)
-        match return_type with
-        | None -> default_seq
-        | Some x when x. Hhas_type_info.type_info_user_type = Some "" ->
-          default_seq
-        | _ -> gather [
-            instr_null;
-            instr_verifyRetTypeC;
-            instr_retc
-          ] in
-    let method_is_async =
-      ast_method.Ast.m_fun_kind = Ast_defs.FAsync
-      || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator in
-    let body_instrs,
-      method_decl_vars,
-      method_num_iters,
-      method_num_cls_ref_slots,
-      method_params,
-      method_return_type,
-      method_is_generator,
-      method_is_pair_generator =
-    Emit_body.from_ast
-      ~has_this:(not method_is_static)
-      ~skipawaitable:(ast_method.Ast.m_fun_kind = Ast_defs.FAsync)
-      tparams
-      ast_method.Ast.m_params
-      ret
-      ast_method.Ast.m_body
-      default_instrs
-  in
+  let method_id = make_name ast_method.Ast.m_name in
+  let method_is_async =
+    ast_method.Ast.m_fun_kind = Ast_defs.FAsync
+    || ast_method.Ast.m_fun_kind = Ast_defs.FAsyncGenerator in
+  if not method_is_static
+    && ast_class.Ast.c_final
+    && ast_class.Ast.c_kind = Ast.Cabstract
+  then Emit_fatal.raise_fatal_parse
+    ("Class " ^ class_name ^ " contains non-static method " ^ original_name
+     ^ " and therefore cannot be declared 'abstract final'");
+  let default_dropthrough =
+    if List.mem ast_method.Ast.m_kind Ast.Abstract
+    then Some (Emit_fatal.emit_fatal_runtimeomitframe
+      ("Cannot call abstract method " ^ class_name
+        ^ "::" ^ original_name ^ "()"))
+    else
+    if method_is_async
+    then Some (gather [instr_null; instr_retc])
+    else None in
+  let scope =
+    [Ast_scope.ScopeItem.Method ast_method;
+     Ast_scope.ScopeItem.Class ast_class] in
   (* TODO: use something that can't be faked in user code *)
   let method_is_closure_body =
-    snd ast_method.Ast.m_name = "__invoke"
-    && String_utils.string_starts_with (snd ast_class.Ast.c_name) "Closure$" in
+   original_name = "__invoke"
+   && String_utils.string_starts_with class_name "Closure$" in
+  let scope =
+    if method_is_closure_body
+    then Ast_scope.ScopeItem.Lambda :: scope else scope in
+  let method_body, method_is_generator, method_is_pair_generator =
+    Emit_body.emit_body
+      ~scope:scope
+      ~is_closure_body:method_is_closure_body
+      ~is_memoize
+      ~skipawaitable:(ast_method.Ast.m_fun_kind = Ast_defs.FAsync)
+      ~is_return_by_ref:ast_method.Ast.m_ret_by_ref
+      ~default_dropthrough
+      ~return_value:instr_null
+      ~namespace
+      ast_method.Ast.m_params
+      ret
+      [Ast.Stmt (Ast.Block ast_method.Ast.m_body)]
+  in
   (* Horrible hack to get decl_vars in the same order as HHVM *)
   let captured_vars =
     if method_is_closure_body
@@ -97,18 +99,15 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
     if List.mem vars "$this"
     then remove_this vars @ ["$this"]
     else vars in
+  let method_decl_vars = Hhas_body.decl_vars method_body in
   let method_decl_vars =
     if method_is_closure_body
     then
       let method_decl_vars = move_this method_decl_vars in
       "$0Closure" :: captured_vars @
       List.filter method_decl_vars (fun v -> not (List.mem captured_vars v))
-    else
-      if method_is_static
-      then move_this method_decl_vars
-      else remove_this method_decl_vars
-  in
-  let method_body = instr_seq_to_list body_instrs in
+    else move_this method_decl_vars in
+  let method_body = Hhas_body.with_decl_vars method_body method_decl_vars in
   Hhas_method.make
     method_attributes
     method_is_protected
@@ -117,17 +116,23 @@ let from_ast : Ast.class_ -> Ast.method_ -> Hhas_method.t =
     method_is_static
     method_is_final
     method_is_abstract
-    method_name
-    method_params
-    method_return_type
+    false (*method_no_injection*)
+    method_id
     method_body
-    method_decl_vars
-    method_num_iters
-    method_num_cls_ref_slots
     method_is_async
     method_is_generator
     method_is_pair_generator
     method_is_closure_body
+
+let from_ast ast_class ast_method =
+  let is_memoize = Emit_attribute.ast_any_is_memoize ast_method.Ast.m_user_attributes in
+  let make_name (_, name) =
+    if is_memoize
+    then Hhbc_id.Method.from_ast_name (name ^ Emit_memoize_helpers.memoize_suffix)
+    else Hhbc_id.Method.from_ast_name name
+  in
+  from_ast_wrapper is_memoize make_name ast_class ast_method
+
 
 let from_asts ast_class ast_methods =
   List.map ast_methods (from_ast ast_class)

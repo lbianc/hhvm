@@ -51,14 +51,17 @@ void visit_locations(const BlockList& blocks, Visit visit) {
         [&] (ReturnEffects x)     { visit(x.kills); },
         [&] (CallEffects x)       { visit(x.kills);
                                     visit(x.stack);
-                                    visit(x.locals); },
+                                    visit(x.locals);
+                                    visit(x.callee); },
         [&] (GeneralEffects x)    { visit(x.loads);
                                     visit(x.stores);
                                     visit(x.moves);
                                     visit(x.kills); },
         [&] (PureLoad x)          { visit(x.src); },
         [&] (PureStore x)         { visit(x.dst); },
-        [&] (PureSpillFrame x)    { visit(x.stk); visit(x.ctx); },
+        [&] (PureSpillFrame x)    { visit(x.stk);
+                                    visit(x.ctx);
+                                    visit(x.callee); },
         [&] (ExitEffects x)       { visit(x.live); visit(x.kills); }
       );
     }
@@ -260,6 +263,12 @@ ALocBits AliasAnalysis::may_alias(AliasClass acls) const {
   ret |= may_alias_part(*this, acls, acls.iterPos(), AIterPosAny, all_iterPos);
   ret |= may_alias_part(*this, acls, acls.iterBase(), AIterBaseAny,
                         all_iterBase);
+  ret |= may_alias_part(*this, acls, acls.cufIterFunc(), ACufIterFuncAny,
+                        all_cufIterFunc);
+  ret |= may_alias_part(*this, acls, acls.cufIterCtx(), ACufIterCtxAny,
+                        all_cufIterCtx);
+  ret |= may_alias_part(*this, acls, acls.cufIterInvName(), ACufIterInvNameAny,
+                        all_cufIterInvName);
 
   return ret;
 }
@@ -309,6 +318,12 @@ ALocBits AliasAnalysis::expand(AliasClass acls) const {
   ret |= expand_part(*this, acls, acls.ref(), ARefAny, all_ref);
   ret |= expand_part(*this, acls, acls.iterPos(), AIterPosAny, all_iterPos);
   ret |= expand_part(*this, acls, acls.iterBase(), AIterBaseAny, all_iterBase);
+  ret |= expand_part(*this, acls, acls.cufIterFunc(), ACufIterFuncAny,
+                     all_cufIterFunc);
+  ret |= expand_part(*this, acls, acls.cufIterCtx(), ACufIterCtxAny,
+                     all_cufIterCtx);
+  ret |= expand_part(*this, acls, acls.cufIterInvName(), ACufIterInvNameAny,
+                     all_cufIterInvName);
 
   return ret;
 }
@@ -355,6 +370,13 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
     }
 
     if (acls.is_iterPos() || acls.is_iterBase()) {
+      add_class(ret, acls);
+      return;
+    }
+
+    if (acls.is_cufIterFunc() ||
+        acls.is_cufIterCtx() ||
+        acls.is_cufIterInvName()) {
       add_class(ret, acls);
       return;
     }
@@ -458,6 +480,21 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
       return;
     }
 
+    if (acls.is_cufIterFunc()) {
+      ret.all_cufIterFunc.set(meta.index);
+      return;
+    }
+
+    if (acls.is_cufIterCtx()) {
+      ret.all_cufIterCtx.set(meta.index);
+      return;
+    }
+
+    if (acls.is_cufIterInvName()) {
+      ret.all_cufIterInvName.set(meta.index);
+      return;
+    }
+
     if (acls.is_ref()) {
       meta.conflicts = ret.all_ref;
       meta.conflicts.reset(meta.index);
@@ -553,14 +590,20 @@ std::string show(const AliasAnalysis& ainfo) {
                       " {: <20}       : {}\n"
                       " {: <20}       : {}\n"
                       " {: <20}       : {}\n"
+                      " {: <20}       : {}\n"
+                      " {: <20}       : {}\n"
+                      " {: <20}       : {}\n"
                       " {: <20}       : {}\n",
-    "all props",    show(ainfo.all_props),
-    "all elemIs",   show(ainfo.all_elemIs),
-    "all refs",     show(ainfo.all_ref),
-    "all iterPos",  show(ainfo.all_iterPos),
-    "all iterBase", show(ainfo.all_iterBase),
-    "all frame",    show(ainfo.all_frame),
-    "all clsRefSlot", show(ainfo.all_clsRefSlot)
+    "all props",          show(ainfo.all_props),
+    "all elemIs",         show(ainfo.all_elemIs),
+    "all refs",           show(ainfo.all_ref),
+    "all iterPos",        show(ainfo.all_iterPos),
+    "all iterBase",       show(ainfo.all_iterBase),
+    "all cufIterFunc",    show(ainfo.all_cufIterFunc),
+    "all cufIterCtx",     show(ainfo.all_cufIterCtx),
+    "all cufIterInvName", show(ainfo.all_cufIterInvName),
+    "all frame",          show(ainfo.all_frame),
+    "all clsRefSlot",     show(ainfo.all_clsRefSlot)
   );
   for (auto& kv : ainfo.local_sets) {
     folly::format(&ret, " ex {: <17}       : {}\n",

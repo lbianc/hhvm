@@ -27,7 +27,9 @@
 #include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/packed-array-defs.h"
 #include "hphp/runtime/base/set-array.h"
-#include "hphp/runtime/base/tv-helpers.h"
+#include "hphp/runtime/base/tv-mutate.h"
+#include "hphp/runtime/base/tv-type.h"
+#include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/base/type-variant.h"
 
 namespace HPHP {
@@ -120,17 +122,14 @@ ArrayData* EmptyArray::CopyWithStrongIterators(const ArrayData* ad) {
  */
 ALWAYS_INLINE
 member_lval EmptyArray::MakePackedInl(TypedValue tv) {
-  auto const cap = kPackedSmallSize;
   auto const ad = static_cast<ArrayData*>(
-    MM().objMalloc(sizeof(ArrayData) + cap * sizeof(TypedValue))
+    MM().mallocSmallIndex(PackedArray::SmallSizeIndex)
   );
-  assert(cap == CapCode::ceil(cap).code);
+  ad->initHeader(uint16_t(PackedArray::SmallSizeIndex), HeaderKind::Packed, 1);
   ad->m_sizeAndPos = 1; // size=1, pos=0
-  ad->initHeader(CapCode::exact(cap), HeaderKind::Packed, 1);
 
-  auto const elem = reinterpret_cast<TypedValue*>(ad + 1);
-  elem->m_data = tv.m_data;
-  elem->m_type = tv.m_type;
+  auto const elem = packedData(ad);
+  *elem = tv;
 
   assert(ad->kind() == ArrayData::kPackedKind);
   assert(ad->m_size == 1);
@@ -152,7 +151,7 @@ member_lval EmptyArray::MakePacked(TypedValue tv) {
  */
 NEVER_INLINE
 member_lval EmptyArray::MakeMixed(StringData* key, TypedValue val) {
-  auto const ad = reqAllocArray(MixedArray::SmallScale);
+  auto const ad = MixedArray::reqAlloc(MixedArray::SmallScale);
   MixedArray::InitSmall(ad, 1/*count*/, 1/*size*/, 0/*nextIntKey*/);
   auto const data = ad->data();
   auto const hash = reinterpret_cast<int32_t*>(data + MixedArray::SmallSize);
@@ -180,7 +179,7 @@ member_lval EmptyArray::MakeMixed(StringData* key, TypedValue val) {
  * value is already incref'd.
  */
 member_lval EmptyArray::MakeMixed(int64_t key, TypedValue val) {
-  auto const ad = reqAllocArray(MixedArray::SmallScale);
+  auto const ad = MixedArray::reqAlloc(MixedArray::SmallScale);
   MixedArray::InitSmall(ad, 1/*count*/, 1/*size*/, (key >= 0) ? key + 1 : 0);
   auto const data = ad->data();
   auto const hash = reinterpret_cast<int32_t*>(data + MixedArray::SmallSize);
@@ -209,7 +208,7 @@ member_lval EmptyArray::MakeMixed(int64_t key, TypedValue val) {
 ArrayData* EmptyArray::SetInt(ArrayData*, int64_t k, Cell c, bool) {
   // TODO(#3888164): we should make it so we don't need KindOfUninit checks
   if (c.m_type == KindOfUninit) c.m_type = KindOfNull;
-  tvRefcountedIncRef(&c);
+  tvIncRefGen(&c);
   auto const lval = k == 0 ? EmptyArray::MakePacked(c)
                            : EmptyArray::MakeMixed(k, c);
   return lval.arr_base();
@@ -219,7 +218,7 @@ ArrayData* EmptyArray::SetStr(ArrayData*,
                               StringData* k,
                               Cell val,
                               bool copy) {
-  tvRefcountedIncRef(&val);
+  tvIncRefGen(&val);
   // TODO(#3888164): we should make it so we don't need KindOfUninit checks
   if (val.m_type == KindOfUninit) val.m_type = KindOfNull;
   return EmptyArray::MakeMixed(k, val).arr_base();
@@ -259,7 +258,7 @@ ArrayData* EmptyArray::SetRefInt(ArrayData*,
                                  bool) {
   if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatRefBind(k);
   auto ref = *var.asRef();
-  tvIncRef(&ref);
+  tvIncRefCountable(&ref);
   auto const lval = k == 0 ? EmptyArray::MakePacked(ref)
                            : EmptyArray::MakeMixed(k, ref);
   return lval.arr_base();
@@ -271,24 +270,24 @@ ArrayData* EmptyArray::SetRefStr(ArrayData*,
                                  bool) {
   if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatRefBind(k);
   auto ref = *var.asRef();
-  tvIncRef(&ref);
+  tvIncRefCountable(&ref);
   return EmptyArray::MakeMixed(k, ref).arr_base();
 }
 
 ArrayData* EmptyArray::Append(ArrayData*, Cell v, bool copy) {
-  tvRefcountedIncRef(&v);
+  tvIncRefGen(&v);
   return EmptyArray::MakePackedInl(v).arr_base();
 }
 
 ArrayData* EmptyArray::AppendRef(ArrayData*, Variant& v, bool copy) {
   if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatRefNew();
   auto ref = *v.asRef();
-  tvIncRef(&ref);
+  tvIncRefCountable(&ref);
   return EmptyArray::MakePacked(ref).arr_base();
 }
 
-ArrayData* EmptyArray::AppendWithRef(ArrayData*, const Variant& v, bool copy) {
-  if (RuntimeOption::EvalHackArrCompatNotices && v.isReferenced()) {
+ArrayData* EmptyArray::AppendWithRef(ArrayData*, TypedValue v, bool copy) {
+  if (RuntimeOption::EvalHackArrCompatNotices && tvIsReferenced(v)) {
     raiseHackArrCompatRefNew();
   }
   auto tv = make_tv<KindOfNull>();
@@ -330,7 +329,7 @@ ArrayData* EmptyArray::PopOrDequeue(ArrayData* ad, Variant& value) {
 }
 
 ArrayData* EmptyArray::Prepend(ArrayData*, Cell v, bool) {
-  tvRefcountedIncRef(&v);
+  tvIncRefGen(&v);
   return EmptyArray::MakePacked(v).arr_base();
 }
 

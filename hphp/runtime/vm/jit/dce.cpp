@@ -64,10 +64,6 @@ bool canDCE(IRInstruction* inst) {
   case ConvBoolToArr:
   case ConvDblToArr:
   case ConvIntToArr:
-  case ConvStrToArr:
-  case ConvVecToArr:
-  case ConvDictToArr:
-  case ConvKeysetToArr:
   case ConvArrToBool:
   case ConvDblToBool:
   case ConvIntToBool:
@@ -85,10 +81,6 @@ bool canDCE(IRInstruction* inst) {
   case ConvResToInt:
   case ConvDblToStr:
   case ConvIntToStr:
-  case ConvDictToVec:
-  case ConvKeysetToVec:
-  case ConvVecToDict:
-  case ConvKeysetToDict:
   case ConvClsToCctx:
   case NewColFromArray:
   case GtInt:
@@ -226,7 +218,6 @@ bool canDCE(IRInstruction* inst) {
   case CountKeyset:
   case CountCollection:
   case Nop:
-  case AKExistsArr:
   case AKExistsDict:
   case AKExistsKeyset:
   case LdBindAddr:
@@ -258,8 +249,6 @@ bool canDCE(IRInstruction* inst) {
   case LdMBase:
   case MethodExists:
   case LdTVAux:
-  case ArrayIdx:
-  case ArrayIsset:
   case DictGetQuiet:
   case DictGetK:
   case DictIsset:
@@ -274,6 +263,10 @@ bool canDCE(IRInstruction* inst) {
   case Select:
   case MemoGet:
   case LdARCtx:
+  case LdCufIterFunc:
+  case LdCufIterCtx:
+  case LdCufIterInvName:
+  case StrictlyIntegerConv:
     assertx(!inst->isControlFlow());
     return true;
 
@@ -281,7 +274,6 @@ bool canDCE(IRInstruction* inst) {
   case AKExistsObj:
   case StStk:
   case SpillFrame:
-  case CufIterSpillFrame:
   case CheckType:
   case CheckNullptr:
   case CheckTypeMem:
@@ -315,8 +307,15 @@ bool canDCE(IRInstruction* inst) {
   case AddIntO:
   case SubIntO:
   case MulIntO:
+
+    // These conversion functions either can run arbitrary PHP code, or decref
+    // their inputs.
   case ConvObjToArr:
   case ConvCellToArr:
+  case ConvStrToArr:
+  case ConvVecToArr:
+  case ConvDictToArr:
+  case ConvKeysetToArr:
   case ConvObjToDbl:
   case ConvCellToDbl:
   case ConvObjToInt:
@@ -326,13 +325,24 @@ bool canDCE(IRInstruction* inst) {
   case ConvResToStr:
   case ConvCellToStr:
   case ConvArrToVec:
-  case ConvArrToDict:
+  case ConvDictToVec:
+  case ConvKeysetToVec:
   case ConvObjToVec:
+  case ConvArrToDict:
+  case ConvVecToDict:
+  case ConvKeysetToDict:
   case ConvObjToDict:
   case ConvArrToKeyset:
   case ConvVecToKeyset:
   case ConvDictToKeyset:
   case ConvObjToKeyset:
+  case ConvArrToVArr:
+  case ConvVecToVArr:
+  case ConvDictToVArr:
+  case ConvKeysetToVArr:
+  case ConvObjToVArr:
+  case ConvObjToDArr:
+
   case GtObj:
   case GteObj:
   case LtObj:
@@ -444,6 +454,7 @@ bool canDCE(IRInstruction* inst) {
   case IncRef:
   case DecRef:
   case DecRefNZ:
+  case FuncGuard:
   case DefFP:
   case DefSP:
   case Count:
@@ -454,6 +465,7 @@ bool canDCE(IRInstruction* inst) {
   case VerifyRetCallable:
   case VerifyRetCls:
   case VerifyRetFail:
+  case VerifyRetFailHard:
   case RaiseUninitLoc:
   case RaiseUndefProp:
   case RaiseMissingArg:
@@ -538,7 +550,9 @@ bool canDCE(IRInstruction* inst) {
   case IterFree:
   case MIterFree:
   case DecodeCufIter:
-  case CIterFree:
+  case StCufIterFunc:
+  case StCufIterCtx:
+  case StCufIterInvName:
   case BaseG:
   case PropX:
   case PropQ:
@@ -654,7 +668,13 @@ bool canDCE(IRInstruction* inst) {
   case ProfileInstanceCheck:
   case MemoSet:
   case KillClsRef:
+  case KillCufIter:
     return false;
+
+  case AKExistsArr:
+  case ArrayIsset:
+  case ArrayIdx:
+    return !RuntimeOption::EvalHackArrCompatNotices;
   }
   not_reached();
 }

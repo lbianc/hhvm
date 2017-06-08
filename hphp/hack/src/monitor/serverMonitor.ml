@@ -45,7 +45,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
      * then sent to the living server.
      *
      * String is the server name it wants to connect to. *)
-    purgatory_clients : (MonitorRpc.handoff_options * Unix.file_descr) list;
+    purgatory_clients : (MonitorRpc.handoff_options * Unix.file_descr) Queue.t;
   }
 
   let fd_to_int (x: Unix.file_descr) : int = Obj.magic x
@@ -119,10 +119,24 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
           Died_unexpectedly (proc_stat, was_oom))
     | _ -> server
 
-  let start_server options exit_status =
-    let server_process = SC.start_server options exit_status in
+  let start_server ~informant_managed options exit_status =
+    let server_process = SC.start_server
+      ~prior_exit_status:exit_status
+      ~informant_managed options in
     setup_autokill_server_on_exit server_process;
     Alive server_process
+
+  let maybe_start_first_server options informant =
+    if Informant.should_start_first_server informant then begin
+      Hh_logger.log "Starting first server";
+      start_server ~informant_managed:(Informant.is_managing informant)
+        options None
+    end
+    else begin
+      Hh_logger.log ("Not starting first server. " ^^
+        "Starting will be triggered by informant later.");
+      Informant_killed
+    end
 
   let kill_server_with_check = function
       | Alive server ->
@@ -142,7 +156,9 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
 
   let restart_server env exit_status =
     kill_server_and_wait_for_exit env;
-    let new_server = start_server env.server_start_options exit_status in
+    let informant_managed = Informant.is_managing env.informant in
+    let new_server = start_server ~informant_managed env.server_start_options
+      exit_status in
     { env with
       server = new_server;
       retries = env.retries + 1;
@@ -186,15 +202,6 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
        Hh_logger.log "Watchman died. Restarting hh_server (attempt: %d)"
          (env.retries + 1);
        restart_server env exit_status
-     end
-     else if informant_report = Informant_sig.Kill_server then begin
-       Hh_logger.log "Informant directed server kill. Killing server.";
-       HackEventLogger.informant_induced_kill ();
-       kill_server_and_wait_for_exit env;
-       {
-         env with
-         server = Informant_killed;
-       }
      end
      else if informant_report = Informant_sig.Restart_server then begin
        Hh_logger.log "Informant directed server restart. Restarting server.";
@@ -274,8 +281,20 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
          "server socket not yet ready. No more retries. Ignoring request.")
 
   (** Does not return. *)
-  and client_out_of_date_ client_fd =
+  and client_out_of_date_ client_fd _mismatch_info =
     msg_to_channel client_fd Build_id_mismatch;
+    (* TODO: around July 2017, change this to
+     *   "Build_id_mismatch_ex mismatch_info"
+     * Why that date? Imagine if we make the change and someone has a hh_server
+     * currently running which sends the _ex form. Then they hg update to a
+     * bookmark associated with an older version of hh_client which doesn't yet
+     * recognize the _ex form! They'd get a segfault in their hh_client.
+     * Well, hh_client started recognizing the _ex form around April 2017, so
+     * by July, we needn't worry about bookmarks that old.
+     * Oh, and when we make the change here, we should add a TODO for two months
+     * in the future that monitorConnection.ml:verify_cstate can safely assert
+     * that the Build_id_mismatch form will never arise.
+    *)
     HackEventLogger.out_of_date ()
 
   (** Kills servers, sends build ID mismatch message to client, and exits.
@@ -284,12 +303,13 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
    * the client can wait for socket closure as indication that both the monitor
    * and server have exited.
   *)
-  and client_out_of_date env client_fd =
+  and client_out_of_date env client_fd mismatch_info =
+    Hh_logger.log "Client out of date. Killing server.";
     kill_server_with_check env.server;
     let kill_signal_time = Unix.gettimeofday () in
     (** If we detect out of date client, should always kill server and exit
      * monitor, even if messaging to channel or event logger fails. *)
-    (try client_out_of_date_ client_fd with
+    (try client_out_of_date_ client_fd mismatch_info with
      | e -> Hh_logger.log
          "Handling client_out_of_date threw with: %s" (Printexc.to_string e));
     wait_for_server_exit_with_check env.server kill_signal_time;
@@ -323,23 +343,20 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
           msg_to_channel client_fd (PH.Server_not_alive_dormant
             "Warning - starting a server by force-dormant-start option...");
           restart_server env None
+        end else begin
+          msg_to_channel client_fd (PH.Server_not_alive_dormant
+            "Server killed by informant. Waiting for next server...");
+          env
         end
-      else begin
-        msg_to_channel client_fd (PH.Server_not_alive_dormant
-          "Server killed by informant. Waiting for next server...");
-        env
-      end
       in
-      if (List.length env.purgatory_clients) >= max_purgatory_clients then
+      if (Queue.length env.purgatory_clients) >= max_purgatory_clients then
         let () = msg_to_channel
           client_fd PH.Server_dormant_connections_limit_reached in
         env
       else
-        {
-          env with
-          purgatory_clients =
-            (handoff_options, client_fd) :: env.purgatory_clients;
-        }
+        let () = Queue.add (handoff_options, client_fd)
+          env.purgatory_clients in
+        env
     | _ ->
       msg_to_channel client_fd PH.Server_name_not_found;
       env
@@ -349,35 +366,36 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       let client_version = read_version client_fd in
       if client_version <> Build_id.build_revision
       then
-        client_out_of_date env client_fd
+        client_out_of_date env client_fd ServerMonitorUtils.current_build_info
       else (
         msg_to_channel client_fd Connection_ok;
         handle_monitor_rpc env client_fd
       )
     with
-    | Marshal_tools.Malformed_Preamble_Exception ->
-      (** TODO: Remove this after 2 Hack deploys. *)
-      (Hh_logger.log "
-          Marshal tools read malformed preamble, interpreting as version change.
-          ";
-       client_out_of_date env client_fd)
     | Malformed_build_id as e ->
       HackEventLogger.malformed_build_id ();
       Hh_logger.log "Malformed Build ID";
       raise e
 
   and push_purgatory_clients env =
-    let clients = env.purgatory_clients in
-    let env = { env with purgatory_clients = [] ; } in
-    let env = List.fold_left clients ~init:env ~f:begin
+    (** We create a queue and transfer all the purgatory clients to it before
+     * processing to avoid repeatedly retrying the same client even after
+     * an EBADF. Control flow is easier this way than trying to manage an
+     * immutable env in the face of exceptions. *)
+    let clients = Queue.create () in
+    Queue.transfer env.purgatory_clients clients;
+    let env = Queue.fold begin
       fun env (handoff_options, client_fd) ->
-        client_prehandoff env handoff_options client_fd
-    end in
+        try client_prehandoff env handoff_options client_fd with
+        | Unix.Unix_error(Unix.EBADF, _, _) ->
+          Hh_logger.log "Purgatory client disconnected. Dropping.";
+          env
+    end env clients in
     env
 
   and maybe_push_purgatory_clients env =
-    match env.server, env.purgatory_clients with
-    | Alive _, [] ->
+    match env.server, Queue.length env.purgatory_clients with
+    | Alive _, 0 ->
       env
     | Alive _, _ ->
       push_purgatory_clients env
@@ -449,11 +467,22 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
         Printf.eprintf "Caught exception while waking client: %s\n%!"
           (Printexc.to_string e)
     end;
-    let server_process = start_server server_start_options None in
+    (** It is essential that we initiate the Informant before the server if we
+     * want to give the opportunity for the Informant to truly take
+     * ownership over the lifetime of the server.
+     *
+     * This is because start_server won't actually start a server if it sees
+     * a hg update sentinel file indicating an hg update is in-progress.
+     * Starting the informant first ensures that its Watchman watch is started
+     * before we check for the hgupdate sentinel file - this is required
+     * for the informant to properly observe an update is complete without
+     * hitting race conditions. *)
     let informant = Informant.init informant_init_env in
+    let server_process = maybe_start_first_server
+      server_start_options informant in
     let env = {
       informant;
-      purgatory_clients = [];
+      purgatory_clients = Queue.create ();
       server = server_process;
       server_start_options;
       retries = 0;

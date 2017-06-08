@@ -14,7 +14,7 @@ open ServerCommandTypes
 
 let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
   fun genv env ~is_stale -> function
-    | STATUS ->
+    | STATUS _ ->
         HackEventLogger.check_response (Errors.get_error_list env.errorl);
         let error_list = Errors.get_sorted_error_list env.errorl in
         let error_list = List.map ~f:Errors.to_absolute error_list in
@@ -36,9 +36,6 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     | IDENTIFY_FUNCTION (file_input, line, char) ->
         let content = ServerFileSync.get_file_content file_input in
         env, ServerIdentifyFunction.go_absolute content line char env.tcopt
-    | GET_DEFINITION_BY_ID id ->
-        env, Option.map (ServerSymbolDefinition.from_symbol_id env.tcopt id)
-          SymbolDefinition.to_absolute
     | METHOD_JUMP (class_, find_children) ->
       env, MethodJumps.get_inheritance env.tcopt class_ ~find_children
         env.files_info genv.workers
@@ -101,16 +98,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     | FORMAT (content, from, to_) ->
         env, ServerFormat.go genv content from to_
     | IDE_FORMAT action ->
-        let open ServerFormatTypes in
-        let open Ide_api_types in
-        let (filename, range_opt) = match action with
-          | Document filename -> (filename, None)
-          | Range range -> (range.range_filename, Some range.file_range)
-          | Position _ -> failwith "Not yet implemented: formatAtPosition"
-        in
-        let content = ServerFileSync.get_file_content
-          (ServerUtils.FileName filename) in
-        env, ServerFormat.go_ide genv content range_opt
+        env, ServerFormat.go_ide genv action
     | TRACE_AI action ->
         env, Ai.TraceService.go action Typing_check_utils.check_defs
            (ServerArgs.ai_mode genv.options) env.tcopt
@@ -148,3 +136,5 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
       env, ServerUtils.FileName path |>
       ServerFileSync.get_file_content |>
       FileOutline.outline env.popt
+    | IDE_IDLE ->
+      {env with ide_idle = true;}, ()

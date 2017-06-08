@@ -66,6 +66,8 @@ void emit_svcreq(CodeBlock& cb,
 
   auto const is_reused = start != cb.frontier();
 
+  if (!is_reused) cb.assertCanEmit(stub_size());
+
   CodeBlock stub;
   auto const realAddr = is_reused ? start : cb.toDestAddress(start);
   stub.init(start, realAddr, stub_size(), "svcreq_stub");
@@ -229,12 +231,12 @@ namespace arm {
   // vasm lea is emitted in 4 bytes.
   //   ADD imm
   static constexpr int kLeaVmSpLen = 4;
-  // The largest of vasm setcc, copy, or leap is emitted in 8 bytes.
-  //   AND imm, MOV, or ADRP + ADD imm
-  static constexpr int kMovLen = 8;
-  // The largest of vasm copy or leap is emitted in 8 bytes.
-  //   MOV or ADRP + ADD imm
-  static constexpr int kPersist = 8;
+  // The largest of vasm setcc, copy, or leap is emitted in 16 bytes.
+  //   AND imm, MOV, LDR + B + dc64, or ADRP + ADD imm
+  static constexpr int kMovLen = 16;
+  // The largest of vasm copy or leap is emitted in 16 bytes.
+  //   MOV, LDR + B + dc64, or ADRP + ADD imm
+  static constexpr int kPersist = 16;
   // vasm copy and jmpi is emitted in 20 bytes.
   //   MOV and 16
   static constexpr int kSvcReqExit = 20;

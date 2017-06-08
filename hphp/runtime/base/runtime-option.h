@@ -104,6 +104,7 @@ struct RuntimeOption {
   static int ForceErrorReportingLevel; // Bitmask ORed with the reporting level
 
   static std::string ServerUser; // run server under this user account
+  static bool AllowRunAsRoot; // Allow running hhvm as root.
 
   static int  MaxSerializedStringSize;
   static bool NoInfiniteRecursionDetection;
@@ -139,6 +140,7 @@ struct RuntimeOption {
   static int ServerThreadDropCacheTimeoutSeconds;
   static int ServerThreadJobLIFOSwitchThreshold;
   static int ServerThreadJobMaxQueuingMilliSeconds;
+  static bool AlwaysDecodePostDataDefault;
   static bool ServerThreadDropStack;
   static bool ServerHttpSafeMode;
   static bool ServerStatCache;
@@ -159,7 +161,6 @@ struct RuntimeOption {
   static int PspTimeoutSeconds;
   static int PspCpuTimeoutSeconds;
   static int64_t MaxRequestAgeFactor;
-  static int64_t ServerMemoryHeadRoom;
   static int64_t RequestMemoryMaxBytes;
   static int64_t ImageMemoryMaxBytes;
   static int ServerGracefulShutdownWait;
@@ -244,6 +245,7 @@ struct RuntimeOption {
   static std::string SSLCertificateDir;
   static bool TLSDisableTLS1_2;
   static std::string TLSClientCipherSpec;
+  static bool EnableSSLWithPlainText;
 
   static int XboxServerThreadCount;
   static int XboxServerMaxQueueLength;
@@ -305,6 +307,7 @@ struct RuntimeOption {
   static int AdminServerQueueToWorkerRatio;
   static std::string AdminPassword;
   static std::set<std::string> AdminPasswords;
+  static std::set<std::string> HashedAdminPasswords;
 
   /*
    * Options related to reverse proxying. ProxyOriginRaw and ProxyPercentageRaw
@@ -457,17 +460,28 @@ struct RuntimeOption {
   F(int, JitConcurrently,              1)                               \
   F(int, JitThreads,                   4)                               \
   F(int, JitWorkerThreads,             0)                               \
+  F(int, JitLdimmqSpan,                8)                               \
   F(bool, RecordSubprocessTimes,       false)                           \
   F(bool, AllowHhas,                   false)                           \
-  F(string, UseExternalEmitter,        "")                              \
-  /* ExternalEmitterFallback:
-     0 - No fallback; fail when external emitter fails
-     1 - Fallback to builtin emitter if external emitter fails,
-         but log a diagnostic
-     2 - Fallback to builtin emitter if external emitter fails and
-         don't log anything */                                          \
-  F(int, ExternalEmitterFallback,      0)                               \
-  F(bool, ExternalEmitterAllowPartial, false)                           \
+  /* Whether to use hh_single_compile by default if available. */       \
+  F(bool, HackCompilerDefault,         false)                           \
+  /* The command to invoke to spawn hh_single_compile in server mode. */\
+  F(string, HackCompilerCommand,       "")                              \
+  /* The number of hh_single_compile daemons to keep alive. */          \
+  F(uint64_t, HackCompilerWorkers,     Process::GetCPUCount() / 2)      \
+  /* The number of times to retry after an infra failure communicating
+     with a compiler process. */                                        \
+  F(uint64_t, HackCompilerMaxRetries,  0)                               \
+  /* Whether or not to fallback to hphpc if hh_single_compile fails for
+     any reason. */                                                     \
+  F(bool, HackCompilerFallback,        false)                           \
+  /* Whether to run the verifier on units produced by
+     hh_single_compile. */                                              \
+  F(bool, HackCompilerVerify,          true)                            \
+  /* Whether to write verbose log messages to the error log and include
+     the hhas from failing units in the fatal error messages produced by
+     bad hh_single_compile units. */                                    \
+  F(bool, HackCompilerVerboseErrors,   true)                            \
   F(bool, EmitSwitch,                  true)                            \
   F(bool, LogThreadCreateBacktraces,   false)                           \
   F(bool, FailJitPrologs,              false)                           \
@@ -492,6 +506,7 @@ struct RuntimeOption {
   F(bool, SpinOnCrash,                 false)                           \
   F(uint32_t, DumpRingBufferOnCrash,   0)                               \
   F(bool, PerfPidMap,                  true)                            \
+  F(bool, PerfPidMapIncludeFilePath,   true)                            \
   F(bool, PerfJitDump,                 false)                           \
   F(string, PerfJitDumpDir,            "/tmp")                          \
   F(bool, PerfDataMap,                 false)                           \
@@ -508,11 +523,13 @@ struct RuntimeOption {
   F(bool, ProfileHWEnable,             true)                            \
   F(string, ProfileHWEvents,           std::string(""))                 \
   F(bool, ProfileHWExcludeKernel,      false)                           \
+  F(bool, ProfileHWStructLog,          false)                           \
   F(bool, JitAlwaysInterpOne,          false)                           \
   F(int32_t, JitNopInterval,           0)                               \
   F(uint32_t, JitMaxTranslations,      10)                              \
   F(uint32_t, JitMaxProfileTranslations, 30)                            \
   F(uint64_t, JitGlobalTranslationLimit, -1)                            \
+  F(int64_t, JitMaxRequestTranslationTime, -1)                          \
   F(uint32_t, JitMaxRegionInstrs,      1347)                            \
   F(uint32_t, JitProfileInterpRequests, kDefaultProfileInterpRequests)  \
   F(bool, JitProfileWarmupRequests,    false)                           \
@@ -537,7 +554,7 @@ struct RuntimeOption {
   F(bool, JitPseudomain,               true)                            \
   F(uint32_t, JitWarmupStatusBytes,    ((25 << 10) + 1))                \
   F(uint32_t, JitWarmupMaxCodeGenRate, 100)                             \
-  F(uint32_t, JitWarmupRateSeconds,    15)                              \
+  F(uint32_t, JitWarmupRateSeconds,    64)                              \
   F(uint32_t, JitWriteLeaseExpiration, 1500) /* in microseconds */      \
   F(int, JitRetargetJumps,             1)                               \
   F(bool, HHIRLICM,                    false)                           \
@@ -556,6 +573,7 @@ struct RuntimeOption {
   F(bool, HHIRGlobalValueNumbering,    true)                            \
   F(bool, HHIRPredictionOpts,          true)                            \
   F(bool, HHIRMemoryOpts,              true)                            \
+  F(uint32_t, HHIRLoadElimMaxIters,    10)                              \
   F(bool, HHIRStorePRE,                true)                            \
   F(bool, HHIROutlineGenericIncDecRef, true)                            \
   F(double, HHIRMixedArrayProfileThreshold, 0.8554)                     \
@@ -569,6 +587,7 @@ struct RuntimeOption {
   F(bool,     JitPGO,                  pgoDefault())                    \
   F(string,   JitPGORegionSelector,    "hotcfg")                        \
   F(uint64_t, JitPGOThreshold,         pgoThresholdDefault())           \
+  F(bool,     JitPGOOnly,              false)                           \
   F(bool,     JitPGOHotOnly,           false)                           \
   F(bool,     JitPGOUsePostConditions, true)                            \
   F(uint32_t, JitUnlikelyDecRefPercent, 5)                              \
@@ -588,6 +607,7 @@ struct RuntimeOption {
   /* DumpBytecode =1 dumps user php, =2 dumps systemlib & user php */   \
   F(int32_t, DumpBytecode,             0)                               \
   F(bool, DumpHhas,                    false)                           \
+  F(bool, DisableHphpcOpts,            false)                           \
   F(bool, DumpTC,                      false)                           \
   F(string, DumpTCPath,                "/tmp")                          \
   F(bool, DumpTCAnchors,               false)                           \
@@ -597,7 +617,7 @@ struct RuntimeOption {
   F(bool, DumpAst,                     false)                           \
   F(bool, DumpTargetProfiles,          false)                           \
   F(bool, MapTgtCacheHuge,             false)                           \
-  F(uint32_t, MaxHotTextHugePages,     hugePagesSoundNice() ? 1 : 0)    \
+  F(uint32_t, MaxHotTextHugePages,     hugePagesSoundNice() ? 8 : 0)    \
   F(int32_t, MaxLowMemHugePages,       hugePagesSoundNice() ? 8 : 0)    \
   F(bool, LowStaticArrays,             true)                            \
   F(bool, UncountedMixedArrayHuge,     true)                            \
@@ -615,6 +635,9 @@ struct RuntimeOption {
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
   F(uint32_t, StaticContentsLogRate,   100)                             \
+  F(uint32_t, LogUnitLoadRate,         0)                               \
+  F(uint32_t, MaxDeferredErrors,       50)                              \
+  F(bool, JitAlignMacroFusionPairs, alignMacroFusionPairs())            \
   F(uint32_t, SerDesSampleRate,            0)                           \
   F(int, SimpleJsonMaxLength,        2 << 20)                           \
   F(uint32_t, JitSampleRate,               0)                           \
@@ -631,7 +654,6 @@ struct RuntimeOption {
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(bool, LogServerRestartStats, false)                                 \
-  F(bool, EnableOptTCBuffer,  false)                                    \
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \

@@ -28,9 +28,24 @@ module WithStatementAndDeclAndTypeParser
   include PrecedenceParser
   include Full_fidelity_parser_helpers.WithParser(PrecedenceParser)
 
+  exception Cancel_attempt
+
+  type binary_expression_prefix_kind =
+    | Prefix_byref_assignment | Prefix_assignment | Prefix_none
+
   let parse_type_specifier parser =
     let type_parser = TypeParser.make parser.lexer parser.errors in
     let (type_parser, node) = TypeParser.parse_type_specifier type_parser in
+    let lexer = TypeParser.lexer type_parser in
+    let errors = TypeParser.errors type_parser in
+    let parser = { parser with lexer; errors } in
+    (parser, node)
+
+  let parse_generic_type_arguments_opt parser =
+    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let (type_parser, node) =
+      TypeParser.parse_generic_type_argument_list_opt type_parser
+    in
     let lexer = TypeParser.lexer type_parser in
     let errors = TypeParser.errors type_parser in
     let parser = { parser with lexer; errors } in
@@ -64,7 +79,9 @@ module WithStatementAndDeclAndTypeParser
 
   let rec parse_expression parser =
     let (parser, term) = parse_term parser in
-    parse_remaining_expression parser term
+    if kind term = SyntaxKind.QualifiedNameExpression
+    then parse_remaining_expression_or_specified_function_call parser term
+    else parse_remaining_expression parser term
 
   and parse_expression_with_reset_precedence parser =
     with_reset_precedence parser parse_expression
@@ -135,7 +152,10 @@ module WithStatementAndDeclAndTypeParser
     | Static -> parse_scope_resolution_or_name parser
     | Yield -> parse_yield_expression parser
     | Print -> parse_print_expression parser
-    | Dollar
+    | Dollar -> parse_dollar_expression parser
+    | Suspend
+      (* TODO: The operand to a suspend is required to be a call to a
+      coroutine. Give an error in a later pass if this isn't the case. *)
     | Exclamation
     | PlusPlus
     | MinusMinus
@@ -162,7 +182,8 @@ module WithStatementAndDeclAndTypeParser
     | Function -> parse_anon parser
     | DollarDollar ->
       (parser1, make_pipe_variable_expression (make_token token))
-    | Async -> parse_anon_or_lambda_or_awaitable parser
+    | Async
+    | Coroutine -> parse_anon_or_lambda_or_awaitable parser
     | Include
     | Include_once
     | Require
@@ -554,17 +575,100 @@ module WithStatementAndDeclAndTypeParser
     let result = make_inclusion_expression require filename in
     (parser, result)
 
-  and next_is_lower_precedence parser =
+  and peek_next_kind_if_operator parser =
     let kind = peek_token_kind parser in
-    if not (Operator.is_trailing_operator_token kind) then
-      true (* No trailing operator; terminate the expression. *)
+    if Operator.is_trailing_operator_token kind then
+      Some kind
     else
-      let operator = Operator.trailing_from_token kind in
-      (Operator.precedence operator) < parser.precedence
+      None
+
+  and operator_has_lower_precedence operator_kind parser =
+    let operator = Operator.trailing_from_token operator_kind in
+    (Operator.precedence operator) < parser.precedence
+
+  and next_is_lower_precedence parser =
+    match peek_next_kind_if_operator parser with
+    | None -> true
+    | Some kind -> operator_has_lower_precedence kind parser
+
+  and parse_remaining_expression_or_specified_function_call parser term =
+    try begin
+      let parser, type_arguments = parse_generic_type_arguments_opt parser in
+      if kind type_arguments <> SyntaxKind.TypeArguments
+      || List.exists is_missing @@ children type_arguments
+      then raise Cancel_attempt;
+      let term = make_generic_type_specifier term type_arguments in
+      let parser, function_call = parse_function_call parser term in
+      if kind function_call <> SyntaxKind.FunctionCallExpression
+      then raise Cancel_attempt;
+      parser, function_call
+    end with Cancel_attempt -> parse_remaining_expression parser term
+
+  (* Checks if given expression is a PHP variable.
+  per PHP grammar:
+  https://github.com/php/php-langspec/blob/master/spec/10-expressions.md#grammar-variable
+   A variable is an expression that can in principle be used as an lvalue *)
+  and can_be_used_as_lvalue t =
+    is_variable_expression t ||
+    is_subscript_expression t ||
+    is_member_selection_expression t ||
+    is_scope_resolution_expression t
+
+  (* checks if expression is a valid right hand side in by-ref assignment
+   which is '&'PHP variable *)
+  and is_byref_assignment_source t =
+    match syntax t with
+    | PrefixUnaryExpression {
+        prefix_unary_operator = { syntax = Token t; _ };
+        prefix_unary_operand = operand
+      } ->
+      Token.kind t = Ampersand && can_be_used_as_lvalue operand
+    | _ -> false
+
+  (*detects if left_term and operator can be treated as a beginning of
+   assignment (respecting the precedence of operator on the left of
+   left term). Returns
+   - Prefix_none - either operator is not one of assignment operators or
+   precedence of the operator on the left is higher than precedence of
+   assignment.
+   - Prefix_assignment - left_term  and operator can be interpreted as a
+   prefix of assignment
+   - Prefix_byref_assignment - left_term and operator can be interpreted as a
+   prefix of byref assignment.*)
+  and check_if_parsable_as_assignment left_term operator left_precedence =
+    (* in PHP precedence of assignment in expression is bumped up to
+       recognize cases like !$x = ... or $a == $b || $c = ...
+       which should be parsed as !($x = ...) and $a == $b || ($c = ...)
+    *)
+    if left_precedence >= Operator.precedence_for_assignment_in_expressions then
+      Prefix_none
+    else match operator with
+    | Equal when can_be_used_as_lvalue left_term -> Prefix_byref_assignment
+    | Equal when is_list_expression left_term -> Prefix_assignment
+    | PlusEqual | MinusEqual | StarEqual | SlashEqual |
+      StarStarEqual | DotEqual | PercentEqual | AmpersandEqual |
+      BarEqual | CaratEqual | LessThanLessThanEqual |
+      GreaterThanGreaterThanEqual
+      when can_be_used_as_lvalue left_term ->
+      Prefix_assignment
+    | _ -> Prefix_none
 
   and parse_remaining_expression parser term =
-    if next_is_lower_precedence parser then (parser, term)
-    else match peek_token_kind parser with
+    match peek_next_kind_if_operator parser with
+    | None -> (parser, term)
+    | Some token ->
+    let assignment_prefix_kind =
+      check_if_parsable_as_assignment term token parser.precedence
+    in
+    (* stop parsing expression if:
+    - precedence of the operator is less than precedence of the operator
+      on the left
+    AND
+    - <term> <operator> does not look like a prefix of
+      some assignment expression*)
+    if operator_has_lower_precedence token parser &&
+       assignment_prefix_kind = Prefix_none then (parser, term)
+    else match token with
     (* Binary operators *)
     (* TODO Add an error if PHP and / or / xor are used in Hack.  *)
     (* TODO Add an error if PHP style <> is used in Hack. *)
@@ -610,7 +714,7 @@ module WithStatementAndDeclAndTypeParser
     | Carat
     | BarGreaterThan
     | QuestionQuestion ->
-      parse_remaining_binary_expression parser term
+      parse_remaining_binary_expression parser term assignment_prefix_kind
     | Instanceof ->
       parse_instanceof_expression parser term
     | QuestionMinusGreaterThan
@@ -861,6 +965,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | Const
     | Construct
     | Continue
+    | Coroutine
     | Darray
     | Dict
     | Default
@@ -916,6 +1021,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | Static
     | String
     | Super
+    | Suspend
     | Switch
     | This
     | Throw
@@ -1128,10 +1234,11 @@ TODO: This will need to be fixed to allow situations where the qualified name
         async-opt  lambda-function-signature  ==>  lambda-body
     *)
     let (parser, async) = optional_token parser Async in
+    let (parser, coroutine) = optional_token parser Coroutine in
     let (parser, signature) = parse_lambda_signature parser in
     let (parser, arrow) = expect_lambda_arrow parser in
     let (parser, body) = parse_lambda_body parser in
-    let result = make_lambda_expression async signature arrow body in
+    let result = make_lambda_expression async coroutine signature arrow body in
     (parser, result)
 
   and parse_lambda_signature parser =
@@ -1182,6 +1289,26 @@ TODO: This will need to be fixed to allow situations where the qualified name
     let (parser, operand) = parse_expression_with_operator_precedence
       parser operator in
     let result = make_prefix_unary_expression token operand in
+    (parser, result)
+
+  and parse_simple_variable parser =
+    match peek_token_kind parser with
+    | Variable ->
+      let (parser1, variable) = next_token parser in
+      (parser1, make_token variable)
+    | Dollar -> parse_dollar_expression parser
+    | _ -> expect_variable parser
+
+  and parse_dollar_expression parser =
+    let (parser, dollar) = assert_token parser Dollar in
+    let (parser, operand) =
+      if peek_token_kind parser = TokenKind.LeftBrace
+      then parse_braced_expression parser
+      else
+        parse_expression_with_operator_precedence parser
+          (Operator.prefix_unary_from_token TokenKind.Dollar)
+    in
+    let result = make_prefix_unary_expression dollar operand in
     (parser, result)
 
   and parse_instanceof_expression parser left =
@@ -1282,7 +1409,8 @@ TODO: This will need to be fixed to allow situations where the qualified name
     let result = make_instanceof_expression left op right in
     parse_remaining_expression parser result
 
-  and parse_remaining_binary_expression parser left_term =
+  and parse_remaining_binary_expression
+    parser left_term assignment_prefix_kind =
     (* We have a left term. If we get here then we know that
      * we have a binary operator to its right, and that furthermore,
      * the binary operator is of equal or higher precedence than the
@@ -1321,16 +1449,49 @@ TODO: This will need to be fixed to allow situations where the qualified name
      * will simply return B, we'll construct (A x B) and recurse with that
      * as the left term.
      *)
-      assert (not (next_is_lower_precedence parser));
+      let is_rhs_of_assignment = assignment_prefix_kind <> Prefix_none in
+      assert (not (next_is_lower_precedence parser) || is_rhs_of_assignment);
+
       let (parser1, token) = next_token parser in
       let operator = Operator.trailing_from_token (Token.kind token) in
-      let precedence = Operator.precedence operator in
-      let (parser2, right_term) = parse_term parser1 in
-      let (parser2, right_term) = parse_remaining_binary_expression_helper
-        parser2 right_term precedence in
-      let term = make_binary_expression
-        left_term (make_token token) right_term in
-      parse_remaining_expression parser2 term
+      let default () =
+        let precedence = Operator.precedence operator in
+        let (parser2, right_term) =
+          if is_rhs_of_assignment then
+            (* reset the current precedence to make sure that expression on
+              the right hand side of the assignment is fully consumed *)
+            with_reset_precedence parser1 parse_term
+          else
+            parse_term parser1 in
+        let (parser2, right_term) = parse_remaining_binary_expression_helper
+          parser2 right_term precedence in
+        let term = make_binary_expression
+          left_term (make_token token) right_term in
+        parse_remaining_expression parser2 term
+      in
+      (*if we are on the right hand side of the assignment - peek if next
+      token is '&'. If it is - then parse next term. If overall next term is
+      '&'PHP variable then the overall expression should be parsed as
+      ... (left_term = & right_term) ...
+      *)
+      if assignment_prefix_kind = Prefix_byref_assignment &&
+         Token.kind (peek_token parser1) = Ampersand then
+        let (parser2, right_term) =
+          parse_term @@ with_precedence
+            parser1
+            Operator.precedence_for_assignment_in_expressions in
+        if is_byref_assignment_source right_term then
+          let left_term = make_binary_expression
+            left_term (make_token token) right_term
+          in
+          let (parser2, left_term) = parse_remaining_binary_expression_helper
+            parser2 left_term parser.precedence
+          in
+          parse_remaining_expression parser2 left_term
+        else
+          default ()
+      else
+        default ()
 
   and parse_remaining_binary_expression_helper
       parser right_term left_precedence =
@@ -1342,17 +1503,59 @@ TODO: This will need to be fixed to allow situations where the qualified name
        In this case "right term" would be B and "left precedence"
        would be the precedence of +.
        See comments above for more details. *)
-    let token = peek_token parser in
-    if Operator.is_trailing_operator_token (Token.kind token) then
-      let right_operator = Operator.trailing_from_token (Token.kind token) in
+    let kind = Token.kind (peek_token parser) in
+    if Operator.is_trailing_operator_token kind then
+      let right_operator = Operator.trailing_from_token kind in
       let right_precedence = Operator.precedence right_operator in
       let associativity = Operator.associativity right_operator in
+      let is_parsable_as_assignment =
+        (* check if this is the case ... $a = ...
+           where
+             'left_precedence' - precedence of the operation on the left of $a
+             'rigft_term' - $a
+             'kind' - operator that follows right_term
+
+          in case if right_term is valid left hand side for the assignment
+          and token is assignment operator and left_precedence is less than
+          bumped priority fort the assignment we reset precedence before parsing
+          right hand side of the assignment to make sure it is consumed.
+          *)
+        check_if_parsable_as_assignment
+          right_term kind left_precedence <> Prefix_none
+      in
       if right_precedence > left_precedence ||
         (associativity = Operator.RightAssociative &&
-          right_precedence = left_precedence ) then
-        let parser1 = with_precedence parser right_precedence in
+         right_precedence = left_precedence ) ||
+         is_parsable_as_assignment then
         let (parser2, right_term) =
-          parse_remaining_expression parser1 right_term in
+          let precedence =
+            if is_parsable_as_assignment then
+              (* if expression can be parsed as an assignment, keep track of
+                 the precedence on the left of the assignment (it is ok since
+                 we'll internally boost the precedence when parsing rhs of the
+                 assignment)
+                 This is necessary for cases like:
+                 ... + $a = &$b * $c + ...
+                       ^             ^
+                       #             $
+                 it should be parsed as
+                 (... + ($a = &$b) * $c) + ...
+                 when we are at position (#)
+                 - we will first consume byref assignment as a e1
+                 - check that precedence of '*' is greater than precedence of
+                   the '+' (left_precedence) and consume e1 * $c as $e2
+                 - check that precedence of '+' is less or equal than precedence
+                   of the '+' (left_precedence) and stop so the final result
+                   before we get to the point ($) will be
+                   (... + $e2)
+                 *)
+              left_precedence
+            else
+              right_precedence
+          in
+          let parser1 = with_precedence parser precedence in
+          parse_remaining_expression parser1 right_term
+        in
         let parser3 = with_precedence parser2 parser.precedence in
         parse_remaining_binary_expression_helper
           parser3 right_term left_precedence
@@ -1645,7 +1848,11 @@ TODO: This will need to be fixed to allow situations where the qualified name
   and parse_anon_or_lambda_or_awaitable parser =
     (* TODO: The original Hack parser accepts "async" as an identifier, and
     so we do too. We might consider making it reserved. *)
-    let (parser1, _) = assert_token parser Async in
+    (* Skip any async or coroutine declarations that may be present. When we
+       feed the original parser into the syntax parsers. they will take care of
+       them as appropriate. *)
+    let (parser1, _) = optional_token parser Async in
+    let (parser1, _) = optional_token parser1 Coroutine in
     match peek_token_kind parser1 with
     | Function -> parse_anon parser
     | LeftBrace -> parse_async_block parser
@@ -1657,13 +1864,14 @@ TODO: This will need to be fixed to allow situations where the qualified name
     (*
      * grammar:
      *  awaitable-creation-expression :
-     *    async compound-statement
+     *    async-opt  coroutine-opt  compound-statement
      * TODO awaitable-creation-expression must not be used as the
      *      anonymous-function-body in a lambda-expression
      *)
-    let parser, async = assert_token parser Async in
+    let parser, async = optional_token parser Async in
+    let parser, coroutine = optional_token parser Coroutine in
     let parser, stmt = parse_compound_statement parser in
-    parser, make_awaitable_creation_expression async stmt
+    parser, make_awaitable_creation_expression async coroutine stmt
 
   and parse_anon_use_opt parser =
     (* SPEC:
@@ -1703,7 +1911,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
   and parse_anon parser =
     (* SPEC
       anonymous-function-creation-expression:
-        async-opt  function
+        async-opt  coroutine-opt  function
         ( anonymous-function-parameter-list-opt  )
         anonymous-function-return-opt
         anonymous-function-use-clauseopt
@@ -1715,14 +1923,25 @@ TODO: This will need to be fixed to allow situations where the qualified name
        parse an optional parameter list; it already takes care of making the
        type annotations optional. *)
     let (parser, async) = optional_token parser Async in
+    let (parser, coroutine) = optional_token parser Coroutine in
     let (parser, fn) = assert_token parser Function in
     let (parser, left_paren, params, right_paren) =
       parse_parameter_list_opt parser in
     let (parser, colon, return_type) = parse_optional_return parser in
     let (parser, use_clause) = parse_anon_use_opt parser in
     let (parser, body) = parse_compound_statement parser in
-    let result = make_anonymous_function async fn left_paren params
-      right_paren colon return_type use_clause body in
+    let result =
+      make_anonymous_function
+        async
+        coroutine
+        fn
+        left_paren
+        params
+        right_paren
+        colon
+        return_type
+        use_clause
+        body in
     (parser, result)
 
   and parse_braced_expression parser =

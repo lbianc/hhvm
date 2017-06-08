@@ -32,6 +32,7 @@ let parse_options () =
   let files = ref [] in
   let start_char = ref None in
   let end_char = ref None in
+  let at_char = ref None in
   let inplace = ref false in
   let diff = ref false in
   let root = ref None in
@@ -46,6 +47,11 @@ let parse_options () =
         Arg.Int (fun x -> end_char := Some x);
       ]),
       "[start end]  Range of character positions to be formatted (1 indexed)";
+
+    "--at-char",
+      Arg.Int (fun x -> at_char := Some x),
+      "[idx]  Format a node ending at the given character" ^
+      " (0 indexed)";
 
     "-i", Arg.Set inplace, " Format file in-place";
     "--in-place", Arg.Set inplace, " Format file in-place";
@@ -75,7 +81,8 @@ let parse_options () =
     | Some s, Some e -> Some (s - 1, e - 1)
     | _ -> None
   in
-  (!files, range, !inplace, !diff, !root, !diff_dry), (!debug, !test)
+  (!files, range, !at_char, !inplace, !diff, !root, !diff_dry),
+  (!debug, !test)
 
 let file_exists path = Option.is_some (Sys_utils.realpath path)
 
@@ -87,6 +94,7 @@ type filename = string
 type format_options =
   | Print of filename option * range option
   | InPlace of filename
+  | AtChar of filename option * int
   | Diff of root option * dry
 
 let mode_string format_options =
@@ -96,10 +104,12 @@ let mode_string format_options =
   | Print (None, None) -> "STDIN"
   | Print (None, Some _) -> "STDIN_RANGE"
   | InPlace _ -> "IN_PLACE"
+  | AtChar (_, _) -> "AT_CHAR"
   | Diff (_, false) -> "DIFF"
   | Diff (_, true) -> "DIFF_DRY"
 
-let validate_options env (files, range, inplace, diff, root, diff_dry) =
+let validate_options env
+    (files, range, at_char, inplace, diff, root, diff_dry) =
   let fail msg = raise (InvalidCliArg msg) in
   let filename =
     match files with
@@ -119,19 +129,23 @@ let validate_options env (files, range, inplace, diff, root, diff_dry) =
   (* Let --diff-dry-run imply --diff *)
   let diff = diff || diff_dry in
 
-  match diff, inplace, filename, range with
+  match diff, inplace, filename, range, at_char with
   | _ when env.debug && diff -> fail "Can't format diff in debug mode"
 
-  | true, _, Some _, _ -> fail "--diff mode expects no files"
-  | true, _, _, Some _ -> fail "--diff mode expects no range"
+  | true, _, Some _, _, _ -> fail "--diff mode expects no files"
+  | true, _, _, Some _, _ -> fail "--diff mode expects no range"
+  | true, _, _, _, Some _ -> fail "--diff mode can't format at-char"
 
-  (* TODO: Allow formatting a range in-place. *)
-  | _, true, _, Some _ -> fail "Can't format a range in-place"
-  | _, true, None, _ -> fail "Provide a filename to format in-place"
+  | _, true, None, _, _ -> fail "Provide a filename to format in-place"
+  | _, true, _, Some _, _ -> fail "Can't format a range in-place"
+  | _, true, _, _, Some _ -> fail "Can't format at-char in-place"
 
-  | false, false, _, _ -> Print (filename, range)
-  | false, true, Some filename, None -> InPlace filename
-  | true, _, None, None -> Diff (root, diff_dry)
+  | false, false, _, Some _, Some _ -> fail "--at-char expects no range"
+
+  | false, false, _, _, None -> Print (filename, range)
+  | false, true, Some filename, None, _ -> InPlace filename
+  | false, false, _, None, Some pos -> AtChar (filename, pos)
+  | true, _, None, None, _ -> Diff (root, diff_dry)
 
 let read_stdin () =
   let buf = Buffer.create 256 in
@@ -185,6 +199,35 @@ let expand_to_line_boundaries ?ranges source_text range =
     let ed = if ed > line_start && ed < line_end then line_end else ed in
     st, ed
   ) (start_char, end_char) ranges
+
+let get_split_boundaries solve_states =
+  List.fold solve_states
+    ~init:[]
+    ~f:begin fun boundaries solve_state ->
+      let {Solve_state.rvm; chunk_group; _} = solve_state in
+      let chunks = chunk_group.Chunk_group.chunks in
+      match chunks with
+      | [] -> boundaries
+      | hd :: tl ->
+        let boundaries, last_range = List.fold tl
+          ~init:(boundaries, Chunk.get_range hd)
+          ~f:begin fun (boundaries, curr_range) chunk ->
+            let chunk_range = Chunk.get_range chunk in
+            if Solve_state.has_split_before_chunk chunk rvm
+              then curr_range :: boundaries, chunk_range
+              else boundaries, (fst curr_range, snd chunk_range)
+          end
+        in
+        last_range :: boundaries
+    end
+  |> List.rev
+
+let expand_to_split_boundaries boundaries range =
+  List.fold boundaries ~init:range ~f:(fun (st, ed) (b_st, b_ed) ->
+    let st = if st > b_st && st < b_ed then b_st else st in
+    let ed = if ed > b_st && ed < b_ed then b_ed else ed in
+    st, ed
+  )
 
 let format ?range ?ranges parsed_file =
   let source_text, _, editable = parsed_file in
@@ -242,15 +285,17 @@ let format_intervals intervals parsed_file =
   let text = SourceText.text source_text in
   let lines = String_utils.split_on_newlines text in
   let chunk_groups = Hack_format.transform editable |> Chunk_builder.build in
+  let solve_states = Line_splitter.find_solve_states chunk_groups in
   let line_ranges = get_char_ranges lines in
+  let split_boundaries = get_split_boundaries solve_states in
   let ranges = intervals
     |> List.map ~f:(line_interval_to_char_range line_ranges)
-    |> List.map ~f:(expand_to_line_boundaries ~ranges:line_ranges source_text)
+    |> List.map ~f:(expand_to_split_boundaries split_boundaries)
     |> Interval.union_list
     |> List.sort ~cmp:Interval.comparator
   in
   let formatted_intervals = List.map ranges (fun range ->
-    range, Line_splitter.solve ~range chunk_groups
+    range, Line_splitter.print ~range solve_states
   ) in
   let length = SourceText.length source_text in
   let buf = Buffer.create (length + 256) in
@@ -266,6 +311,38 @@ let format_intervals intervals parsed_file =
 let format_diff_intervals intervals parsed_file =
   try format_intervals intervals parsed_file with
   | Invalid_argument s -> raise (InvalidDiff s)
+
+let format_at_char parsed_file pos =
+  let source_text, tree, editable = parsed_file in
+  let chunk_groups = editable
+    |> Hack_format.transform
+    |> Chunk_builder.build in
+  let module PS = Full_fidelity_positioned_syntax in
+  (* Grab the node which is the direct parent of the token at pos *)
+  let token, node = match PS.parentage (PS.from_tree tree) pos with
+    | token :: node :: tl -> token, node
+    | _ -> invalid_arg "Invalid offset" in
+  (* Format up to the end of the token at the given offset. *)
+  let pos = PS.end_offset token in
+  (* Our ranges are half-open, so the range end is the token end offset + 1. *)
+  let ed = pos + 1 in
+  (* Take a half-open range which starts at the beginning of the parent node *)
+  let range = (PS.start_offset node, ed) in
+  (* Expand the start offset to the nearest line boundary in the original
+   * source, since we want to add a leading newline before the node we're
+   * formatting if one should be there and isn't already present. *)
+  let range = (fst (expand_to_line_boundaries source_text range), ed) in
+  (* Find a solution for that range, then expand the range start to a split
+   * boundary (a line boundary in the formatted source). *)
+  let solve_states = Line_splitter.find_solve_states ~range chunk_groups in
+  let split_boundaries = get_split_boundaries solve_states in
+  let range = (fst (expand_to_split_boundaries split_boundaries range), ed) in
+  (* Produce the formatted text *)
+  let formatted = Line_splitter.print solve_states ~range in
+  (* We don't want a trailing newline here (in as-you-type-formatting, it would
+   * place the cursor on the next line), but the Line_splitter always prints one
+   * at the end of a formatted range. So, we remove it. *)
+  range, String.sub formatted 0 (String.length formatted - 1)
 
 let debug_print ?range filename =
   let source_text, syntax_tree, editable = parse filename in
@@ -294,6 +371,15 @@ let main (env: env) (options: format_options) =
       |> parse
       |> format
       |> output ?filename
+  | AtChar (filename, pos) ->
+    env.file <- filename;
+    if env.debug then debug_print filename;
+    let parsed_file = parse filename in
+    let range, formatted =
+      try format_at_char parsed_file pos with
+      | Invalid_argument s -> raise (InvalidCliArg s) in
+    Printf.printf "%d %d\n" (fst range) (snd range);
+    output formatted;
   | Diff (root, dry) ->
     let root = get_root root in
     env.root <- Path.to_string root;

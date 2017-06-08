@@ -29,14 +29,13 @@ end
 (* The following datatypes can be interpreted as follows:
  * MESSAGE_TAG : Argument type (sent from client to server) -> return type t *)
 type _ t =
-  | STATUS : Server_status.t t
+  | STATUS : bool -> Server_status.t t
   | INFER_TYPE : ServerUtils.file_input * int * int ->
       InferAtPosService.result t
   | COVERAGE_LEVELS : ServerUtils.file_input -> Coverage_level.result t
   | AUTOCOMPLETE : string -> AutocompleteService.result t
   | IDENTIFY_FUNCTION : ServerUtils.file_input * int * int ->
       IdentifySymbolService.result t
-  | GET_DEFINITION_BY_ID : string -> string SymbolDefinition.t option t
   | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
   | FIND_DEPENDENT_FILES: string list -> string list t
   | FIND_REFS : FindRefsService.action -> FindRefsService.result t
@@ -71,6 +70,7 @@ type _ t =
   | SUBSCRIBE_DIAGNOSTIC : int -> unit t
   | UNSUBSCRIBE_DIAGNOSTIC : int -> unit t
   | OUTLINE : string -> FileOutline.outline t
+  | IDE_IDLE : unit t
 
 let is_disconnect_rpc : type a. a t -> bool = function
   | DISCONNECT -> true
@@ -94,10 +94,16 @@ and streamed =
 type push =
   | DIAGNOSTIC of int * (Pos.absolute Errors.error_ list) SMap.t
   | NEW_CLIENT_CONNECTED
+  | FATAL_EXCEPTION of Marshal_tools.remote_exception_data
 
 type 'a persistent_connection_message_type =
   | Push of push
   | Response of 'a
+  | Hello
+  (* Hello is the first message sent after handoff. It's used for both *)
+  (* persistent and non-persistent connections. It's included in this  *)
+  (* type, though, because ocaml typing forces a single type to come   *)
+  (* Marshal.from_fd_with_preamble.                                    *)
 
 (** Timeout on reading the command from the client - client probably frozen. *)
 exception Read_command_timeout

@@ -36,7 +36,6 @@
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/base/surprise-flags.h"
 #include "hphp/runtime/base/init-fini-node.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/base/thread-safe-setlocale.h"
 #include "hphp/runtime/base/variable-serializer.h"
@@ -70,6 +69,7 @@
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/mcgen.h"
 #include "hphp/runtime/vm/jit/translator.h"
+#include "hphp/runtime/vm/hack-compiler.h"
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/treadmill.h"
@@ -105,6 +105,7 @@
 #include <folly/portability/Fcntl.h>
 #include <folly/portability/Libgen.h>
 #include <folly/portability/Stdlib.h>
+#include <folly/portability/Unistd.h>
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/program_options/options_description.hpp>
@@ -330,7 +331,7 @@ void register_variable(Array& variables, char *name, const Variant& value,
         gpc_elements.back().assignRef(val);
       } else {
         String key(index, index_len, CopyString);
-        Variant v = symtable->rvalAt(key);
+        auto const& v = symtable->rvalAt(key);
         if (v.isNull() || !v.isArray()) {
           symtable->set(key, Array::Create());
         }
@@ -939,8 +940,14 @@ static int start_server(const std::string &username, int xhprof) {
         Cronolog::changeOwner(username, el.second.symLink);
       }
     }
-    Capability::ChangeUnixUser(username);
+    if (!Capability::ChangeUnixUser(username, RuntimeOption::AllowRunAsRoot)) {
+      _exit(1);
+    }
     LightProcess::ChangeUser(username);
+  } else if (getuid() == 0 && !RuntimeOption::AllowRunAsRoot) {
+    Logger::Error("hhvm not allowed to run as root unless "
+                  "-vServer.AllowRunAsRoot=1 is used.");
+    _exit(1);
   }
   Capability::SetDumpable();
 #endif
@@ -986,7 +993,7 @@ static int start_server(const std::string &username, int xhprof) {
   if (RuntimeOption::RepoLocalReadaheadRate > 0 &&
       !RuntimeOption::RepoLocalPath.empty()) {
     HttpServer::CheckMemAndWait();
-    readaheadThread = folly::make_unique<std::thread>([&] {
+    readaheadThread = std::make_unique<std::thread>([&] {
         BootStats::Block timer("Readahead Repo");
         auto path = RuntimeOption::RepoLocalPath.c_str();
         Logger::Info("readahead %s", path);
@@ -1749,6 +1756,11 @@ static int execute_program_impl(int argc, char** argv) {
                              RuntimeOption::LightProcessCount,
                              RuntimeOption::EvalRecordSubprocessTimes,
                              inherited_fds);
+
+    // HackC initialization should happen immediately prior to LightProcess
+    // configuration as it will create a private delegate process to deal with
+    // hackc instances.
+    hackc_init();
   }
 #endif
 
@@ -2465,7 +2477,16 @@ void hphp_session_exit(const Transport* transport) {
   TI().onSessionExit();
 
   if (transport) {
-    HardwareCounter::UpdateServiceData(transport->getCpuTime(), true /*psp*/);
+    std::unique_ptr<StructuredLogEntry> entry;
+    if (RuntimeOption::EvalProfileHWStructLog) {
+      entry = std::make_unique<StructuredLogEntry>();
+      entry->setInt("response_code", transport->getResponseCode());
+    }
+    HardwareCounter::UpdateServiceData(transport->getCpuTime(),
+                                       transport->getWallTime(),
+                                       entry.get(),
+                                       true /*psp*/);
+    if (entry) StructuredLog::log("hhvm_request_perf", *entry);
   }
 
   // We might have events from after the final surprise flag check of the
@@ -2501,6 +2522,7 @@ void hphp_process_exit() noexcept {
   LOG_AND_IGNORE(Eval::Debugger::Stop())
   LOG_AND_IGNORE(g_context.destroy())
   LOG_AND_IGNORE(ExtensionRegistry::moduleShutdown())
+  LOG_AND_IGNORE(hackc_shutdown())
 #ifndef _MSC_VER
   LOG_AND_IGNORE(LightProcess::Close())
 #endif

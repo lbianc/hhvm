@@ -90,7 +90,6 @@ std::string Option::Tab = "  ";
 const char *Option::UserFilePrefix = "php/";
 
 bool Option::PreOptimization = false;
-bool Option::HardConstProp = true;
 
 bool Option::KeepStatementsWithNoEffect = false;
 
@@ -220,8 +219,9 @@ void Option::Load(const IniSetting::Map& ini, Hdf &config) {
   Config::Bind(HHBBC::options.HardTypeHints, ini, config,
                "HardTypeHints", true);
   Config::Bind(HHBBC::options.HardReturnTypeHints, ini, config,
-               "HardReturnTypeHints", false);
-  Config::Bind(HardConstProp, ini, config, "HardConstProp", true);
+               "HardReturnTypeHints", true);
+  Config::Bind(HHBBC::options.HardConstProp, ini, config,
+               "HardConstProp", true);
   Config::Bind(HHBBC::options.ElideAutoloadInvokes, ini, config,
                "ElideAutoloadInvokes", true);
 
@@ -336,15 +336,6 @@ void Option::FilterFiles(std::vector<std::string> &files,
       files.erase(files.begin() + i);
     }
   }
-}
-
-//////////////////////////////////////////////////////////////////////
-
-void initialize_hhbbc_options() {
-  if (!Option::UseHHBBC) return;
-  HHBBC::options.HardConstProp          = Option::HardConstProp;
-  HHBBC::options.DisallowDynamicVarEnvFuncs =
-    (RuntimeOption::DisallowDynamicVarEnvFuncs == HackStrictOption::ON);
 }
 
 //////////////////////////////////////////////////////////////////////

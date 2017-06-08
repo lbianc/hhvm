@@ -372,6 +372,12 @@ struct ClassInfo {
   std::unordered_map<SString,borrowed_ptr<const php::Const>> clsConstants;
 
   /*
+   * A vector of the used traits, in class order, mirroring the
+   * php::Class usedTraitNames vector.
+   */
+  CompactVector<borrowed_ptr<const ClassInfo>> usedTraits;
+
+  /*
    * A (case-insensitive) map from class method names to the php::Func
    * associated with it.  This map is flattened across the inheritance
    * hierarchy.
@@ -879,15 +885,50 @@ void find_deps(IndexData& data,
 }
 
 bool build_cls_info_rec(borrowed_ptr<ClassInfo> rleaf,
-                        borrowed_ptr<const ClassInfo> rparent) {
+                        borrowed_ptr<const ClassInfo> rparent,
+                        bool directIface) {
   if (!rparent) return true;
 
-  if (!build_cls_info_rec(rleaf, rparent->parent)) return false;
-  for (auto& iface : rparent->declInterfaces) {
-    if (!build_cls_info_rec(rleaf, iface)) return false;
+  auto const isIface = rparent->cls->attrs & AttrInterface;
+
+  /*
+   * Make a table of all the constants on this class.
+   *
+   * Duplicate class constants override parent class constants, but
+   * its an error for two different interfaces to define the same
+   * constant, or for a class to override a constant thats defined in
+   * one of its declared interfaces.
+   *
+   */
+  for (auto& c : rparent->cls->constants) {
+    auto& cptr = rleaf->clsConstants[c.name];
+    if (!cptr) {
+      cptr = &c;
+      continue;
+    }
+
+    if (isIface &&
+        cptr->val.hasValue() &&
+        c.val.hasValue() &&
+        cptr->cls != rparent->cls) {
+      if ((cptr->cls->attrs & AttrInterface) || directIface) {
+        ITRACE(2,
+               "build_cls_info_rec failed for `{}' because "
+               "`{}' was defined by both `{}' and `{}'",
+               rleaf->cls->name, c.name,
+               rparent->cls->name, cptr->cls->name);
+        return false;
+      }
+    }
   }
 
-  auto const isIface = rparent->cls->attrs & AttrInterface;
+  if (!build_cls_info_rec(rleaf, rparent->parent, false)) return false;
+  for (auto const iface : rparent->declInterfaces) {
+    if (!build_cls_info_rec(rleaf, iface, rparent == rleaf)) return false;
+  }
+  for (auto const trait : rparent->usedTraits) {
+    if (!build_cls_info_rec(rleaf, trait, false)) return false;
+  }
 
   /*
    * Make a flattened table of all the interfaces implemented by the class.
@@ -897,32 +938,9 @@ bool build_cls_info_rec(borrowed_ptr<ClassInfo> rleaf,
   }
 
   /*
-   * Make a table of all the constants on this class.
-   *
-   * Duplicate class constants override parent class constants, but
-   * for interfaces it's an error to have a duplicate constant, unless
-   * it just happens from implementing the same interface more than
-   * once, or the constant is abstract.
-   *
-   * Note: hphpc doesn't actually check for this case, but since with
-   * HardConstProp we're potentially doing propagation of these
-   * constants without autoload, it seems like it could be potentially
-   * surprising to propagate incorrect constants from mis-declared
-   * classes that would fatal if they were ever defined.
-   */
-  for (auto& c : rparent->cls->constants) {
-    auto& cptr = rleaf->clsConstants[c.name];
-    if (isIface && cptr) {
-      if (cptr->val.hasValue() && c.val.hasValue() &&
-          cptr->cls != rparent->cls) {
-        return false;
-      }
-    }
-    cptr = &c;
-  }
-
-  /*
-   * Make a table of the methods on this class, excluding interface methods.
+   * Make a table of the methods on this class, excluding interface
+   * methods (and trait methods, since they've already been
+   * flattenned).
    *
    * Duplicate method names override parent methods, unless the parent method
    * is final and the class is not a __MockClass, in which case this class
@@ -933,7 +951,8 @@ bool build_cls_info_rec(borrowed_ptr<ClassInfo> rleaf,
    * fatal, but note that resolve_method needs to be pretty careful about
    * privates and overriding in general.
    */
-  if (!isIface) {
+  if (!isIface &&
+      (rparent == rleaf || !(rparent->cls->attrs & AttrTrait))) {
     for (auto& m : rparent->cls->methods) {
       auto& ent = rleaf->methods[m->name];
       if (ent.func) {
@@ -942,7 +961,14 @@ bool build_cls_info_rec(borrowed_ptr<ClassInfo> rleaf,
           continue;
         }
         if (ent.func->attrs & AttrFinal) {
-          if (!is_mock_class(rleaf->cls)) return false;
+          if (!is_mock_class(rleaf->cls)) {
+            ITRACE(2,
+                   "build_cls_info_rec failed for `{}' because "
+                   "`{}' tried to override final method `{}'",
+                   rleaf->cls->name, rparent->cls->name,
+                   ent.func->name);
+            return false;
+          }
         }
         if (ent.func->attrs & AttrPrivate) {
           ent.hasPrivateAncestor =
@@ -1001,7 +1027,7 @@ borrowed_ptr<const php::Func> find_constructor(borrowed_ptr<ClassInfo> cinfo) {
  * would be a fatal at runtime.
  */
 bool build_cls_info(borrowed_ptr<ClassInfo> cinfo) {
-  if (!build_cls_info_rec(cinfo, cinfo)) return false;
+  if (!build_cls_info_rec(cinfo, cinfo, false)) return false;
 
   cinfo->ctor = find_constructor(cinfo);
 
@@ -1140,11 +1166,12 @@ private:
 };
 
 struct NamingEnv::Define {
-  explicit Define(NamingEnv& env, SString n, borrowed_ptr<ClassInfo> ci)
+  explicit Define(NamingEnv& env, SString n, borrowed_ptr<ClassInfo> ci,
+                  borrowed_ptr<const php::Class> cls)
     : env(env)
     , n(n)
   {
-    ITRACE(2, "defining {}\n", n->data());
+    ITRACE(2, "defining {} for {}\n", n, cls->name);
     always_assert(!env.names.count(n));
     env.names[n] = ci;
   }
@@ -1164,48 +1191,86 @@ private:
 void resolve_combinations(IndexData& index,
                           NamingEnv& env,
                           borrowed_ptr<const php::Class> cls) {
+
+  auto resolve_one = [&] (SString name) {
+    if (env.try_lookup(name)) return true;
+    auto any = false;
+    for (auto& kv : copy_range(index.classInfo, name)) {
+      NamingEnv::Define def{env, name, kv.second, cls};
+      resolve_combinations(index, env, cls);
+      any = true;
+    }
+    if (!any) {
+      ITRACE(2,
+             "Resolve combinations failed for `{}' because "
+             "there were no resolutions of `{}'\n",
+             cls->name, name);
+    }
+    return false;
+  };
+
   // Recurse with all combinations of bases and interfaces in the
   // naming environment.
   if (cls->parentName) {
-    if (!env.try_lookup(cls->parentName)) {
-      for (auto& kv : copy_range(index.classInfo, cls->parentName)) {
-        NamingEnv::Define def{env, cls->parentName, kv.second};
-        resolve_combinations(index, env, cls);
-      }
-      return;
-    }
+    if (!resolve_one(cls->parentName)) return;
   }
   for (auto& iname : cls->interfaceNames) {
-    if (!env.try_lookup(iname)) {
-      for (auto& kv : copy_range(index.classInfo, iname)) {
-        NamingEnv::Define def{env, iname, kv.second};
-        resolve_combinations(index, env, cls);
-      }
-      return;
-    }
+    if (!resolve_one(iname)) return;
+  }
+  for (auto& tname : cls->usedTraitNames) {
+    if (!resolve_one(tname)) return;
   }
 
   // Everything is defined in the naming environment here.  (We
   // returned early if something didn't exist.)
 
-  auto cinfo = folly::make_unique<ClassInfo>();
+  auto cinfo = std::make_unique<ClassInfo>();
   cinfo->cls = cls;
   if (cls->parentName) {
     cinfo->parent   = env.lookup(cls->parentName);
     cinfo->baseList = cinfo->parent->baseList;
-    if (cinfo->parent->cls->attrs & AttrInterface) return;
+    if (cinfo->parent->cls->attrs & AttrInterface) {
+      ITRACE(2,
+             "Resolve combinations failed for `{}' because "
+             "its parent `{}' is not a class\n",
+             cls->name, cls->parentName);
+      return;
+    }
   }
   cinfo->baseList.push_back(borrow(cinfo));
 
   for (auto& iname : cls->interfaceNames) {
     auto const iface = env.lookup(iname);
-    if (!(iface->cls->attrs & AttrInterface)) return;
+    if (!(iface->cls->attrs & AttrInterface)) {
+      ITRACE(2,
+             "Resolve combinations failed for `{}' because `{}' "
+             "is not an interface\n",
+             cls->name, iname);
+      return;
+    }
     cinfo->declInterfaces.push_back(iface);
+  }
+
+  for (auto& tname : cls->usedTraitNames) {
+    auto const trait = env.lookup(tname);
+    if (!(trait->cls->attrs & AttrTrait)) {
+      ITRACE(2,
+             "Resolve combinations failed for `{}' because `{}' "
+             "is not a trait\n",
+             cls->name, tname);
+      return;
+    }
+    cinfo->usedTraits.push_back(trait);
   }
 
   if (!build_cls_info(borrow(cinfo))) return;
 
   ITRACE(2, "  resolved: {}\n", cls->name);
+  if (Trace::moduleEnabled(Trace::hhbbc_index, 3)) {
+    for (auto const DEBUG_ONLY& iface : cinfo->implInterfaces) {
+      ITRACE(3, "    implements: {}\n", iface.second->cls->name);
+    }
+  }
   index.allClassInfos.push_back(std::move(cinfo));
   index.classInfo.emplace(cls->name, borrow(index.allClassInfos.back()));
 }
@@ -1217,15 +1282,23 @@ void preresolve(IndexData& index, NamingEnv& env, SString clsName) {
   // after hphpc is fixed not to just remove them.
 
   ITRACE(2, "preresolve: {}\n", clsName);
-  for (auto& kv : find_range(index.classes, clsName)) {
-    if (kv.second->parentName) {
-      preresolve(index, env, kv.second->parentName);
+  {
+    Trace::Indent indent;
+    for (auto& kv : find_range(index.classes, clsName)) {
+      if (kv.second->parentName) {
+        preresolve(index, env, kv.second->parentName);
+      }
+      for (auto& i : kv.second->interfaceNames) {
+        preresolve(index, env, i);
+      }
+      for (auto& t : kv.second->usedTraitNames) {
+        preresolve(index, env, t);
+      }
+      resolve_combinations(index, env, kv.second);
     }
-    for (auto& i : kv.second->interfaceNames) {
-      preresolve(index, env, i);
-    }
-    resolve_combinations(index, env, kv.second);
   }
+  ITRACE(3, "preresolve: {} ({} resolutions)\n",
+         clsName, index.classInfo.count(clsName));
 }
 
 void compute_subclass_list(IndexData& index) {
@@ -1240,7 +1313,7 @@ void define_func_family(IndexData& index,
                         borrowed_ptr<ClassInfo> cinfo,
                         SString name,
                         borrowed_ptr<const php::Func> func) {
-  index.funcFamilies.push_back(folly::make_unique<FuncFamily>());
+  index.funcFamilies.push_back(std::make_unique<FuncFamily>());
   auto const family = borrow(index.funcFamilies.back());
 
   for (auto& cleaf : cinfo->subclassList) {
@@ -1907,7 +1980,7 @@ PublicSPropEntry lookup_public_static_impl(
 //////////////////////////////////////////////////////////////////////
 
 Index::Index(borrowed_ptr<php::Program> program)
-  : m_data(folly::make_unique<IndexData>())
+  : m_data(std::make_unique<IndexData>())
 {
   trace_time tracer("create index");
 
@@ -1936,7 +2009,7 @@ Index::Index(borrowed_ptr<php::Program> program)
                          attribute_setter(
                            ta->attrs,
                            flag &&
-                           !m_data->classes.count(ta->name) &&
+                           !m_data->classInfo.count(ta->name) &&
                            !m_data->classAliases.count(ta->name),
                            AttrUnique);
                        });
@@ -1947,6 +2020,7 @@ Index::Index(borrowed_ptr<php::Program> program)
                          attribute_setter(
                            cinfo->cls->attrs,
                            flag &&
+                           !m_data->typeAliases.count(cinfo->cls->name) &&
                            !m_data->classAliases.count(cinfo->cls->name),
                            AttrUnique);
                        });
@@ -2023,30 +2097,33 @@ Index::lookup_closures(borrowed_ptr<const php::Class> cls) const {
 
 //////////////////////////////////////////////////////////////////////
 
+res::Class Index::resolve_class(borrowed_ptr<const php::Class> cls) const {
+
+  ClassInfo* result = nullptr;
+
+  auto const classes = find_range(m_data->classInfo, cls->name);
+  for (auto it = begin(classes); it != end(classes); ++it) {
+    auto const cinfo = it->second;
+    if (cinfo->cls == cls) {
+      if (result) {
+        result = nullptr;
+        break;
+      }
+      result = cinfo;
+    }
+  }
+  if (result) return res::Class { this, result };
+
+  // We know its a class, not an enum or type alias, so return
+  // by name
+  return res::Class { this, cls->name.get() };
+}
+
 folly::Optional<res::Class> Index::resolve_class(Context ctx,
                                                  SString clsName) const {
   clsName = normalizeNS(clsName);
 
-  // We know it has to name a class only if there's no type alias with this
-  // name.
-  //
-  // TODO(#3519401): when we start unfolding type aliases, we could
-  // look at whether it is an alias for a specific class here.
-  // (Note this might need to split into a different API: type
-  // aliases aren't allowed everywhere we're doing resolve_class
-  // calls.)
-  if (m_data->typeAliases.count(clsName)) {
-    return folly::none;
-  }
-
-  auto name_only = [&] () -> folly::Optional<res::Class> {
-    // We also refuse to have name-only resolutions of enums, so that
-    // all name only resolutions can be treated as objects.
-    if (!m_data->enums.count(clsName)) {
-      return res::Class { this, clsName };
-    }
-    return folly::none;
-  };
+  if (ctx.cls && ctx.cls->name->isame(clsName)) return resolve_class(ctx.cls);
 
   /*
    * If there's only one preresolved ClassInfo, we can give out a
@@ -2057,39 +2134,167 @@ folly::Optional<res::Class> Index::resolve_class(Context ctx,
   for (auto it = begin(classes); it != end(classes); ++it) {
     auto const cinfo = it->second;
     if (cinfo->cls->attrs & AttrUnique) {
-      if (debug && std::next(it) != end(classes)) {
+      if (debug &&
+          (std::next(it) != end(classes) ||
+           m_data->typeAliases.count(clsName))) {
         std::fprintf(stderr, "non unique \"unique\" class: %s\n",
           cinfo->cls->name->data());
-        for (; it != end(classes); ++it) {
-          std::fprintf(stderr, "   and %s\n", cinfo->cls->name->data());
+        while (++it != end(classes)) {
+          std::fprintf(stderr, "   and %s\n", it->second->cls->name->data());
         }
-        assert(0);
+        auto const typeAliases = find_range(m_data->typeAliases, clsName);
+
+        for (auto ta = begin(typeAliases); ta != end(typeAliases); ++ta) {
+          std::fprintf(stderr, "   and type-alias %s\n",
+                       ta->second->name->data());
+        }
+        always_assert(0);
       }
       return res::Class { this, cinfo };
     }
     break;
   }
 
-  return name_only();
+  // We refuse to have name-only resolutions of enums, or typeAliases,
+  // so that all name only resolutions can be treated as objects.
+  if (!m_data->enums.count(clsName) &&
+      !m_data->typeAliases.count(clsName)) {
+    return res::Class { this, clsName };
+  }
+
+  return folly::none;
+}
+
+folly::Optional<res::Class> Index::selfCls(const Context& ctx) const {
+  if (!ctx.cls) return folly::none;
+  return resolve_class(ctx.cls);
+}
+
+folly::Optional<res::Class> Index::parentCls(const Context& ctx) const {
+  if (!ctx.cls || !ctx.cls->parentName) return folly::none;
+  if (auto const parent = resolve_class(ctx.cls).parent()) return parent;
+  return resolve_class(ctx, ctx.cls->parentName);
+}
+
+
+Index::ResolvedInfo Index::resolve_type_name(SString inName) const {
+  folly::Optional<std::unordered_set<const void*>> seen;
+
+  auto nullable = false;
+  auto name = inName;
+
+  for (unsigned i = 0; ; ++i) {
+    name = normalizeNS(name);
+    auto const classes = find_range(m_data->classInfo, name);
+    auto const cls_it = begin(classes);
+    if (cls_it != end(classes)) {
+      auto const cinfo = cls_it->second;
+      if (!(cinfo->cls->attrs & AttrUnique)) {
+        if (!m_data->enums.count(name) && !m_data->typeAliases.count(name)) {
+          break;
+        }
+        return { AnnotType::Object, false, nullptr };
+      }
+      if (!(cinfo->cls->attrs & AttrEnum)) {
+        return { AnnotType::Object, nullable, cinfo };
+      }
+      auto const& tc = cinfo->cls->enumBaseTy;
+      assert(!tc.isNullable());
+      if (tc.type() != AnnotType::Object) {
+        return { tc.type(), nullable, tc.typeName() };
+      }
+      name = tc.typeName();
+    } else {
+      auto const typeAliases = find_range(m_data->typeAliases, name);
+      auto const ta_it = begin(typeAliases);
+      if (ta_it == end(typeAliases)) break;
+      auto const ta = ta_it->second;
+      if (!(ta->attrs & AttrUnique)) {
+        return { AnnotType::Object, false, nullptr };
+      }
+      nullable = nullable || ta->nullable;
+      if (ta->type != AnnotType::Object) {
+        return { ta->type, nullable, ta->value.get() };
+      }
+      name = ta->value;
+    }
+
+    // deal with cycles. Since we don't expect to
+    // encounter them, just use a counter until we hit a chain length
+    // of 10, then start tracking the names we resolve.
+    if (i == 10) {
+      seen.emplace();
+      seen->insert(name);
+    } else if (i > 10) {
+      if (!seen->insert(name).second) {
+        return { AnnotType::Object, false, nullptr };
+      }
+    }
+  }
+
+  return { AnnotType::Object, nullable, name };
+}
+
+folly::Optional<Type> Index::resolve_class_or_type_alias(
+  const Context& ctx, SString name, const Type& candidate) const {
+
+  auto const res = resolve_type_name(name);
+
+  if (res.nullable && candidate.subtypeOf(TInitNull)) return TInitNull;
+
+  if (res.type == AnnotType::Object) {
+    auto resolve = [&] (const res::Class& rcls) -> folly::Optional<Type> {
+      if (!interface_supports_non_objects(rcls.name()) ||
+          candidate.subtypeOf(TObj)) {
+        return subObj(rcls);
+      }
+
+      if (candidate.subtypeOf(TOptArr)) {
+        if (interface_supports_array(rcls.name())) return TArr;
+      } else if (candidate.subtypeOf(TOptVec)) {
+        if (interface_supports_vec(rcls.name())) return TVec;
+      } else if (candidate.subtypeOf(TOptDict)) {
+        if (interface_supports_dict(rcls.name())) return TDict;
+      } else if (candidate.subtypeOf(TOptKeyset)) {
+        if (interface_supports_keyset(rcls.name())) return TKeyset;
+      } else if (candidate.subtypeOf(TOptStr)) {
+        if (interface_supports_string(rcls.name())) return TStr;
+      } else if (candidate.subtypeOf(TOptInt)) {
+        if (interface_supports_int(rcls.name())) return TInt;
+      } else if (candidate.subtypeOf(TOptDbl)) {
+        if (interface_supports_double(rcls.name())) return TDbl;
+      }
+      return folly::none;
+    };
+
+    if (res.value.isNull()) return folly::none;
+
+    auto ty = res.value.right() ?
+      resolve({ this, res.value.right() }) :
+      resolve({ this, res.value.left() });
+
+    if (ty && res.nullable) *ty = opt(std::move(*ty));
+    return ty;
+  }
+
+  return get_type_for_annotated_type(ctx, res.type, res.nullable,
+                                     res.value.left(), candidate);
 }
 
 std::pair<res::Class,borrowed_ptr<php::Class>>
 Index::resolve_closure_class(Context ctx, int32_t idx) const {
-  auto const name = ctx.unit->classes[idx]->name;
-  auto const rcls = resolve_class(ctx, name);
+  auto const cls = borrow(ctx.unit->classes[idx]);
+  auto const rcls = resolve_class(cls);
 
   // Closure classes must be unique and defined in the unit that uses
   // the CreateCl opcode, so resolution must succeed.
   always_assert_flog(
-    rcls.hasValue() && rcls->val.right(),
+    rcls.resolved(),
     "A Closure class ({}) failed to resolve",
-    name->data()
+    cls->name
   );
 
-  return {
-    *rcls,
-    const_cast<borrowed_ptr<php::Class>>(rcls->val.right()->cls)
-  };
+  return { rcls, cls };
 }
 
 res::Class Index::builtin_class(SString name) const {
@@ -2323,141 +2528,80 @@ Index::resolve_func_fallback(Context ctx,
     : std::make_pair(resolve_func_helper(r2, fallbackName), folly::none);
 }
 
-Type Index::lookup_constraint(Context ctx, const TypeConstraint& tc) const {
+/*
+ * Gets a type for the constraint.
+ *
+ * If getSuperType is true, the type could be a super-type of the
+ * actual type constraint (eg TCell). Otherwise its guaranteed that
+ * for any t, t.subtypeOf(get_type_for_constraint<false>(ctx, tc, t)
+ * implies t would pass the constraint.
+ *
+ * The candidate type is used to disambiguate; if we're applying a
+ * Traversable constraint to a TObj, we should return
+ * subObj(Traversable).  If we're applying it to an Array, we should
+ * return Array.
+ */
+template<bool getSuperType>
+Type Index::get_type_for_constraint(Context ctx,
+                                    const TypeConstraint& tc,
+                                    const Type& candidate) const {
   assert(IMPLIES(
     !tc.hasConstraint() || tc.isTypeVar() || tc.isTypeConstant(),
     tc.isMixed()));
 
-  /*
-   * Soft hints (@Foo) are not checked.
-   */
-  if (tc.isSoft()) return TCell;
-
-  switch (tc.metaType()) {
-    case AnnotMetaType::Precise: {
-      auto const mainType = [&]() -> const Type {
-        auto const dt = tc.underlyingDataType();
-        assert(dt.hasValue());
-
-        switch (*dt) {
-        case KindOfUninit:       return TCell;
-        case KindOfNull:         return TNull;
-        case KindOfBoolean:      return TBool;
-        case KindOfInt64:        return TInt;
-        case KindOfDouble:       return TDbl;
-        case KindOfPersistentString:
-        case KindOfString:       return TStr;
-        case KindOfPersistentVec:
-        case KindOfVec:          return TVec;
-        case KindOfPersistentDict:
-        case KindOfDict:         return TDict;
-        case KindOfPersistentKeyset:
-        case KindOfKeyset:       return TKeyset;
-        case KindOfPersistentArray:
-        case KindOfArray:        return TArr;
-        case KindOfResource:     return TRes;
-        case KindOfObject:
-          /*
-           * If we can resolve the class, we'll give an object of a type
-           * according to that resolution.  Some classes in hhvm can be
-           * "enums", which we need to handle as non-object types.  A name-only
-           * resolution is guaranteed to be some kind of non-enum,
-           * non-type-alias object (see resolve_class).
-           */
-          if (auto const rcls = resolve_class(ctx, tc.typeName())) {
-            if (auto const cinfo = rcls->val.right()) {
-              if (cinfo->cls->attrs & AttrEnum) {
-                return lookup_constraint(ctx, cinfo->cls->enumBaseTy);
-              }
-            }
-            return interface_supports_non_objects(rcls->name())
-              ? TInitCell // none of these interfaces support Uninits
-              : subObj(*rcls);
-          }
-          return TInitCell;
-        case KindOfRef:
-          always_assert_flog(false, "Unexpected DataType");
-          break;
-        }
-        return TInitCell;
-      }();
-
-      return (mainType == TInitCell || !tc.isNullable())
-        ? mainType
-        : opt(mainType);
-    }
-    case AnnotMetaType::Mixed:
-      /*
-       * Here we handle "mixed", typevars, and some other ignored
-       * typehints (ex. "(function(..): ..)" typehints).
-       */
-      return TCell;
-    case AnnotMetaType::Self:
-    case AnnotMetaType::Parent:
-    case AnnotMetaType::Callable:
-      break;
-    case AnnotMetaType::Number:
-      return tc.isNullable() ? TOptNum : TNum;
-    case AnnotMetaType::ArrayKey:
-      // TODO(3774082): Support TInt | TStr type constraint
-      return TInitCell;
+  if (getSuperType) {
+    /*
+     * Soft hints (@Foo) are not checked.
+     */
+    if (tc.isSoft()) return TCell;
   }
 
-  return TCell;
+  if (auto const t = get_type_for_annotated_type(ctx,
+                                                 tc.type(),
+                                                 tc.isNullable(),
+                                                 tc.typeName(),
+                                                 candidate)) {
+    return *t;
+  }
+  return getSuperType ? TInitCell : TBottom;
 }
 
-bool Index::satisfies_constraint(Context ctx, const Type t,
-                                 const TypeConstraint& tc) const {
-  return t.subtypeOf(satisfies_constraint_helper(ctx, tc));
-}
+folly::Optional<Type> Index::get_type_for_annotated_type(
+  Context ctx, AnnotType annot, bool nullable,
+  SString name, const Type& candidate) const {
 
-Type Index::satisfies_constraint_helper(Context ctx,
-                                        const TypeConstraint& tc) const {
-  assert(IMPLIES(
-    !tc.hasConstraint() || tc.isTypeVar() || tc.isTypeConstant(),
-    tc.isMixed()));
-
-  switch (tc.metaType()) {
+  if (candidate.subtypeOf(TInitNull) && nullable) {
+    return TInitNull;
+  }
+  auto const mainType = [&]() -> const folly::Optional<Type> {
+    switch (getAnnotMetaType(annot)) {
     case AnnotMetaType::Precise: {
-      auto const mainType = [&]() -> const Type {
-        auto const dt = tc.underlyingDataType();
-        assert(dt.hasValue());
-        switch (*dt) {
-        case KindOfUninit:       return TBottom;
-        case KindOfNull:         return TNull;
-        case KindOfBoolean:      return TBool;
-        case KindOfInt64:        return TInt;
-        case KindOfDouble:       return TDbl;
-        case KindOfPersistentString:
-        case KindOfString:       return TStr;
-        case KindOfPersistentVec:
-        case KindOfVec:          return TVec;
-        case KindOfPersistentDict:
-        case KindOfDict:         return TDict;
-        case KindOfPersistentKeyset:
-        case KindOfKeyset:       return TKeyset;
-        case KindOfPersistentArray:
-        case KindOfArray:        return TArr;
-        case KindOfResource:     return TRes;
-        case KindOfObject:
-          if (auto const rcls = resolve_class(ctx, tc.typeName())) {
-            if (auto const cinfo = rcls->val.right()) {
-              if (cinfo->cls->attrs & AttrEnum) {
-                return
-                  satisfies_constraint_helper(ctx, cinfo->cls->enumBaseTy);
-              }
-            }
-            return subObj(*rcls);
-          }
-          return TBottom;
-        case KindOfRef:
-          always_assert_flog(false, "Unexpected DataType");
-          break;
-        }
-        return TBottom;
-      }();
-      return (mainType == TBottom || !tc.isNullable()) ? mainType
-        : opt(mainType);
+      auto const dt = getAnnotDataType(annot);
+
+      switch (dt) {
+      case KindOfUninit:       return TBottom;
+      case KindOfNull:         return TNull;
+      case KindOfBoolean:      return TBool;
+      case KindOfInt64:        return TInt;
+      case KindOfDouble:       return TDbl;
+      case KindOfPersistentString:
+      case KindOfString:       return TStr;
+      case KindOfPersistentVec:
+      case KindOfVec:          return TVec;
+      case KindOfPersistentDict:
+      case KindOfDict:         return TDict;
+      case KindOfPersistentKeyset:
+      case KindOfKeyset:       return TKeyset;
+      case KindOfPersistentArray:
+      case KindOfArray:        return TArr;
+      case KindOfResource:     return TRes;
+      case KindOfObject:
+        return resolve_class_or_type_alias(ctx, name, candidate);
+      case KindOfRef:
+        always_assert_flog(false, "Unexpected DataType");
+        break;
+      }
+      break;
     }
     case AnnotMetaType::Mixed:
       /*
@@ -2466,17 +2610,36 @@ Type Index::satisfies_constraint_helper(Context ctx,
        */
       return TGen;
     case AnnotMetaType::Self:
+      if (auto s = selfCls(ctx)) return subObj(*s);
+      break;
     case AnnotMetaType::Parent:
+      if (auto p = parentCls(ctx)) return subObj(*p);
+      break;
     case AnnotMetaType::Callable:
       break;
     case AnnotMetaType::Number:
-      return tc.isNullable() ? TOptNum : TNum;
+      return TNum;
     case AnnotMetaType::ArrayKey:
-      // TODO(3774082): Support TInt | TStr type constraint
-      break;
-  }
+      if (candidate.subtypeOf(TInt)) return TInt;
+      if (candidate.subtypeOf(TStr)) return TStr;
+      return TArrKey;
+    }
+    return folly::none;
+  }();
 
-  return TBottom;
+  if (!mainType || !nullable || mainType->couldBe(TInitNull)) return mainType;
+  return opt(*mainType);
+}
+
+Type Index::lookup_constraint(Context ctx,
+                              const TypeConstraint& tc,
+                              const Type& t) const {
+  return get_type_for_constraint<true>(ctx, tc, t);
+}
+
+bool Index::satisfies_constraint(Context ctx, const Type& t,
+                                 const TypeConstraint& tc) const {
+  return t.subtypeOf(get_type_for_constraint<false>(ctx, tc, t));
 }
 
 bool Index::is_async_func(res::Func rfunc) const {

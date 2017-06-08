@@ -354,6 +354,11 @@ void Func::finishedEmittingParams(std::vector<ParamInfo>& fParams) {
   assert(numParams() == fParams.size());
 }
 
+bool Func::isMemoizeImplName(const StringData* name) {
+  return name->size() > 13 && !memcmp(name->data() + name->size() - 13,
+                                      "$memoize_impl", 13);
+}
+
 const StringData* Func::genMemoizeImplName(const StringData* origName) {
   return makeStaticString(folly::sformat("{}$memoize_impl", origName->data()));
 }
@@ -622,6 +627,8 @@ static void print_attrs(std::ostream& out, Attr attrs) {
   if (attrs & AttrReadsCallerFrame) { out << " (reads_caller_frame)"; }
   if (attrs & AttrWritesCallerFrame) { out << " (writes_caller_frame)"; }
   if (attrs & AttrSkipFrame) { out << " (skip_frame)"; }
+  if (attrs & AttrIsFoldable) { out << " (foldable)"; }
+  if (attrs & AttrNoInjection) { out << " (no_injection)"; }
 }
 
 void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
@@ -630,6 +637,7 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
   } else if (preClass() != nullptr) {
     out << "Method";
     print_attrs(out, m_attrs);
+    if (isMemoizeWrapper()) out << " (memoize_wrapper)";
     if (cls() != nullptr) {
       out << ' ' << fullName()->data();
     } else {
@@ -638,6 +646,7 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
   } else {
     out << "Function";
     print_attrs(out, m_attrs);
+    if (isMemoizeWrapper()) out << " (memoize_wrapper)";
     out << ' ' << m_name->data();
   }
 
@@ -651,7 +660,7 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
     auto const& param = params[i];
     out << " Param: " << localVarName(i)->data();
     if (param.typeConstraint.hasConstraint()) {
-      out << " " << param.typeConstraint.displayName();
+      out << " " << param.typeConstraint.displayName(this, true);
     }
     if (param.userType) {
       out << " (" << param.userType->data() << ")";
@@ -669,7 +678,7 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
       (returnUserType() && !returnUserType()->empty())) {
     out << " Ret: ";
     if (returnTypeConstraint().hasConstraint()) {
-      out << " " << returnTypeConstraint().displayName();
+      out << " " << returnTypeConstraint().displayName(this, true);
     }
     if (returnUserType() && !returnUserType()->empty()) {
       out << " (" << returnUserType()->data() << ")";
@@ -688,6 +697,13 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
       << "numIterators: " << numIterators() << '\n'
       << "numClsRefSlots: " << numClsRefSlots() << '\n';
 
+  if (auto const f = dynCallWrapper()) {
+    out << "dynCallWrapper: " << f->fullName()->data() << '\n';
+  }
+  if (auto const f = dynCallTarget()) {
+    out << "dynCallTarget: " << f->fullName()->data() << '\n';
+  }
+
   const EHEntVec& ehtab = shared()->m_ehtab;
   size_t ehId = 0;
   for (auto it = ehtab.begin(); it != ehtab.end(); ++it, ++ehId) {
@@ -702,6 +718,9 @@ void Func::prettyPrint(std::ostream& out, const PrintOpts& opts) const {
       out << " itRef " << (it->m_itRef ? "true" : "false");
     }
     out << " handle at " << it->m_handler;
+    if (it->m_end != kInvalidOffset) {
+      out << ":" << it->m_end;
+    }
     if (it->m_parentIndex != -1) {
       out << " parentIndex " << it->m_parentIndex;
     }
@@ -1049,7 +1068,8 @@ FuncSet s_ignores_frame = {
   "HH\\dict",
   "HH\\keyset",
   "HH\\varray",
-  "HH\\darray"
+  "HH\\darray",
+  "HH\\array_key_cast"
 };
 
 const StaticString s_assert("assert");
@@ -1125,7 +1145,7 @@ bool funcNeedsCallerFrame(const Func* callee) {
 
   return
     (callee->isCPPBuiltin() &&
-     s_ignores_frame.count(callee->name()->data()) == 0) ||
+      s_ignores_frame.count(callee->name()->data()) == 0) ||
     funcReadsLocals(callee) ||
     funcWritesLocals(callee);
 }

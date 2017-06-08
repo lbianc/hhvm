@@ -22,6 +22,7 @@ module TNBody       = Typing_naming_body
 type mode =
   | Ai of Ai_options.t
   | Autocomplete
+  | Ffp_autocomplete
   | Color
   | Coverage
   | Dump_symbol_info
@@ -35,7 +36,6 @@ type mode =
   | Find_local of int * int
   | Outline
   | Find_refs of int * int
-  | Symbol_definition_by_id of string
   | Highlight_refs of int * int
   | Decl_compare
 
@@ -247,6 +247,9 @@ let parse_options () =
     "--auto-complete",
       Arg.Unit (set_mode Autocomplete),
       " Produce autocomplete suggestions";
+    "--ffp-auto-complete",
+      Arg.Unit (set_mode Ffp_autocomplete),
+      " Produce autocomplete suggestions using the full-fidelity parse tree";
     "--colour",
       Arg.Unit (set_mode Color),
       " Produce colour output";
@@ -280,9 +283,6 @@ let parse_options () =
         Arg.Int (fun column -> set_mode (Identify_symbol (!line, column)) ());
       ]),
       "<pos> Show info about symbol at given line and column";
-    "--symbol-by-id",
-      Arg.String (fun s -> set_mode (Symbol_definition_by_id s) ()),
-      "<id> Show info about symbol with given id";
     "--find-local",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
@@ -470,7 +470,7 @@ let parse_name_and_decl popt files_contents tcopt =
         let funs, classes, typedefs, consts = Ast_utils.get_defs ast in
         { FileInfo.
           file_mode; funs; classes; typedefs; consts; comments = Some comments;
-          consider_names_just_for_autoload = false }
+        }
       end parsed_files in
 
     Relative_path.Map.iter files_info begin fun fn fileinfo ->
@@ -576,6 +576,12 @@ let handle_mode mode filename opts popt files_contents files_info errors =
         let open AutocompleteService in
         Printf.printf "%s %s\n" r.res_name r.res_ty
       end result
+  | Ffp_autocomplete ->
+      let filename_string = Relative_path.to_absolute filename in
+      let (keyword, row, col) =
+        FfpAutocompleteService.auto_complete filename_string
+      in
+      Printf.printf "Test type: %s\nRow: %d\nCol: %d\n" keyword row col
   | Color ->
       Relative_path.Map.iter files_info begin fun fn fileinfo ->
         if fn = builtins_filename then () else begin
@@ -654,13 +660,6 @@ let handle_mode mode filename opts popt files_contents files_info errors =
     begin match ServerIdentifyFunction.go_absolute file line column opts with
       | [] -> print_endline "None"
       | result -> ClientGetDefinition.print_readable ~short_pos:true result
-    end
-  | Symbol_definition_by_id id ->
-    let result = ServerSymbolDefinition.from_symbol_id opts id in
-    begin match result with
-      | None -> print_endline "None"
-      | Some s ->
-        FileOutline.print ~short_pos:true [SymbolDefinition.to_absolute s]
     end
   | Find_local (line, column) ->
     let file = cat (Relative_path.to_absolute filename) in

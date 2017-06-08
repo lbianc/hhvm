@@ -71,11 +71,11 @@ let warn_dir_not_exist dir = match dir with
   | Some dir ->
     dir
 
-let load_ fn =
+let load_ fn ~silent =
   (* Print out the contents in our logs so we know what settings this server
    * was started with *)
   let contents = Sys_utils.cat fn in
-  Printf.eprintf "%s:\n%s\n" fn contents;
+  if not silent then Printf.eprintf "%s:\n%s\n" fn contents;
   let config = Config_file.parse_contents contents in
   let use_watchman = bool_ "use_watchman"
     ~default:default.use_watchman config in
@@ -103,7 +103,7 @@ let load_ fn =
     ~default:default.type_decl_bucket_size config in
   let watchman_init_timeout = int_ "watchman_init_timeout"
     ~default:default.watchman_init_timeout config in
-  let watchman_subscribe = bool_ "watchman_subscribe"
+  let watchman_subscribe = bool_ "watchman_subscribe_v2"
     ~default:default.watchman_subscribe config in
   let watchman_sync_directory_opt =
     string_opt "watchman_sync_directory" config in
@@ -146,8 +146,8 @@ let load_ fn =
     load_script_config;
   }
 
-let load () =
-  try load_ path
+let load ~silent =
+  try load_ path ~silent
   with
   | e ->
     Hh_logger.log "Loading config exception: %s" (Printexc.to_string e);

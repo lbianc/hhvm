@@ -38,7 +38,7 @@ class virtual ['b] iter :
                    Ast_visitors_ancestors.expr ->
                    Ast_visitors_ancestors.expr -> unit;
         on_Block : 'c -> Ast_visitors_ancestors.block -> unit;
-        on_Break : 'c -> Ast_visitors_ancestors.pos_t -> unit;
+        on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> unit;
         on_CA_enum : 'c -> string list -> unit;
         on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> unit;
         on_CA_hint : 'c -> Ast_visitors_ancestors.hint -> unit;
@@ -60,6 +60,12 @@ class virtual ['b] iter :
                                Ast_visitors_ancestors.trait_req_kind ->
                                Ast_visitors_ancestors.hint -> unit;
         on_ClassUse : 'c -> Ast_visitors_ancestors.hint -> unit;
+        on_cu_alias_type : 'c -> Ast_visitors_ancestors.cu_alias_type -> unit;
+        on_ClassUseAlias : 'c ->
+                           (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+                           Ast_visitors_ancestors.id ->
+                           Ast_visitors_ancestors.cu_alias_type ->
+                           unit;
         on_ClassVars : 'c ->
                        Ast_visitors_ancestors.kind list ->
                        Ast_visitors_ancestors.hint option ->
@@ -82,16 +88,18 @@ class virtual ['b] iter :
         on_Constant : 'c -> Ast_visitors_ancestors.gconst -> unit;
         on_Constraint_as : 'c -> unit; on_Constraint_eq : 'c -> unit;
         on_Constraint_super : 'c -> unit;
-        on_Continue : 'c -> Ast_visitors_ancestors.pos_t -> unit;
+        on_Continue : 'c -> Ast_visitors_ancestors.pos_t -> int option -> unit;
         on_Contravariant : 'c -> unit; on_Covariant : 'c -> unit;
         on_Cst_const : 'c -> unit; on_Cst_define : 'c -> unit;
         on_Ctrait : 'c -> unit;
+        on_Def_inline : 'c ->
+                                                Ast_visitors_ancestors.def ->
+                                                unit;
         on_Default : 'c -> Ast_visitors_ancestors.block -> unit;
         on_Diff : 'c -> unit; on_Diff2 : 'c -> unit;
         on_Do : 'c ->
                 Ast_visitors_ancestors.block ->
                 Ast_visitors_ancestors.expr -> unit;
-        on_Dollardollar : 'c -> unit; on_Dot : 'c -> unit;
         on_EQeqeq : 'c -> unit;
         on_Efun : 'c ->
                   Ast_visitors_ancestors.fun_ ->
@@ -105,6 +113,7 @@ class virtual ['b] iter :
         on_Eq : 'c -> Ast_visitors_ancestors.bop option -> unit;
         on_Eqeq : 'c -> unit;
         on_Expr : 'c -> Ast_visitors_ancestors.expr -> unit;
+        on_Omitted : 'c -> unit;
         on_Expr_list : 'c -> Ast_visitors_ancestors.expr list -> unit;
         on_FAsync : 'c -> unit; on_FAsyncGenerator : 'c -> unit;
         on_FGenerator : 'c -> unit; on_FSync : 'c -> unit;
@@ -160,6 +169,7 @@ class virtual ['b] iter :
         on_Lfun : 'c -> Ast_visitors_ancestors.fun_ -> unit;
         on_List : 'c -> Ast_visitors_ancestors.expr list -> unit;
         on_Lt : 'c -> unit; on_Lte : 'c -> unit; on_Ltlt : 'c -> unit;
+        on_Cmp : 'c -> unit;
         on_Lvar : 'c -> Ast_visitors_ancestors.id -> unit;
         on_Lvarvar : 'c -> int -> Ast_visitors_ancestors.id -> unit;
         on_Method : 'c -> Ast_visitors_ancestors.method_ -> unit;
@@ -169,6 +179,8 @@ class virtual ['b] iter :
         on_Namespace : 'c ->
                        Ast_visitors_ancestors.id ->
                        Ast_visitors_ancestors.program -> unit;
+        on_SetNamespaceEnv : 'c ->
+                             Ast_visitors_ancestors.nsenv -> unit;
         on_NamespaceUse : 'c ->
                           (Ast_visitors_ancestors.ns_kind *
                            Ast_visitors_ancestors.id *
@@ -209,6 +221,7 @@ class virtual ['b] iter :
         on_Slash : 'c -> unit; on_Star : 'c -> unit;
         on_Starstar : 'c -> unit; on_Static : 'c -> unit;
         on_Static_var : 'c -> Ast_visitors_ancestors.expr list -> unit;
+        on_Global_var : 'c -> Ast_visitors_ancestors.expr list -> unit;
         on_Stmt : 'c -> Ast_visitors_ancestors.stmt -> unit;
         on_String : 'c -> Ast_visitors_ancestors.pstring -> unit;
         on_String2 : 'c -> Ast_visitors_ancestors.expr list -> unit;
@@ -230,7 +243,9 @@ class virtual ['b] iter :
         on_Unot : 'c -> unit; on_Unsafe : 'c -> unit;
         on_Unsafeexpr : 'c -> Ast_visitors_ancestors.expr -> unit;
         on_Updecr : 'c -> unit; on_Upincr : 'c -> unit;
-        on_Uplus : 'c -> unit; on_Uref : 'c -> unit; on_Utild : 'c -> unit;
+        on_Uplus : 'c -> unit; on_Uref : 'c -> unit; on_Usplat : 'c -> unit;
+        on_Usilence : 'c -> unit;
+        on_Utild : 'c -> unit;
         on_While : 'c ->
                    Ast_visitors_ancestors.expr ->
                    Ast_visitors_ancestors.block -> unit;
@@ -243,6 +258,19 @@ class virtual ['b] iter :
                      option -> unit;
         on_XhpAttrUse : 'c -> Ast_visitors_ancestors.hint -> unit;
         on_XhpCategory : 'c -> Ast_visitors_ancestors.pstring list -> unit;
+        on_XhpChild : 'c -> Ast_visitors_ancestors.xhp_child -> unit;
+        on_xhp_child : 'c -> Ast_visitors_ancestors.xhp_child -> unit;
+        on_ChildName : 'c -> Ast_visitors_ancestors.id -> unit;
+        on_ChildList : 'c -> Ast_visitors_ancestors.xhp_child list -> unit;
+        on_ChildUnary : 'c -> Ast_visitors_ancestors.xhp_child ->
+          Ast_visitors_ancestors.xhp_child_op -> unit;
+        on_ChildBinary : 'c -> Ast_visitors_ancestors.xhp_child ->
+          Ast_visitors_ancestors.xhp_child -> unit;
+        on_xhp_child_op : 'c -> Ast_visitors_ancestors.xhp_child_op -> unit;
+        on_ChildStar : 'c -> unit;
+        on_ChildPlus : 'c -> unit;
+        on_ChildQuestion : 'c -> unit;
+
         on_Xml : 'c ->
                  Ast_visitors_ancestors.id ->
                  (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr)
@@ -349,7 +377,7 @@ class virtual ['b] iter :
       Ast_visitors_ancestors.bop ->
       Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr -> unit
     method on_Block : 'c -> Ast_visitors_ancestors.block -> unit
-    method on_Break : 'c -> Ast_visitors_ancestors.pos_t -> unit
+    method on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> unit
     method on_CA_enum : 'c -> string list -> unit
     method on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> unit
     method on_CA_hint : 'c -> Ast_visitors_ancestors.hint -> unit
@@ -374,6 +402,12 @@ class virtual ['b] iter :
       Ast_visitors_ancestors.trait_req_kind ->
       Ast_visitors_ancestors.hint -> unit
     method on_ClassUse : 'c -> Ast_visitors_ancestors.hint -> unit
+    method on_cu_alias_type : 'c -> Ast_visitors_ancestors.cu_alias_type -> unit
+    method on_ClassUseAlias : 'c ->
+                              (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+                              Ast_visitors_ancestors.id ->
+                              Ast_visitors_ancestors.cu_alias_type ->
+                              unit
     method on_ClassVars :
       'c ->
       Ast_visitors_ancestors.kind list ->
@@ -386,6 +420,7 @@ class virtual ['b] iter :
       'c ->
       Ast_visitors_ancestors.id -> Ast_visitors_ancestors.pstring -> unit
     method on_Clone : 'c -> Ast_visitors_ancestors.expr -> unit
+    method on_Cmp : 'c -> unit
     method on_Cnormal : 'c -> unit
     method on_Collection :
       'c ->
@@ -398,19 +433,24 @@ class virtual ['b] iter :
     method on_Constraint_as : 'c -> unit
     method on_Constraint_eq : 'c -> unit
     method on_Constraint_super : 'c -> unit
-    method on_Continue : 'c -> Ast_visitors_ancestors.pos_t -> unit
+    method on_Continue :
+      'c ->
+      Ast_visitors_ancestors.pos_t ->
+      int option -> unit
     method on_Contravariant : 'c -> unit
     method on_Covariant : 'c -> unit
     method on_Cst_const : 'c -> unit
     method on_Cst_define : 'c -> unit
     method on_Ctrait : 'c -> unit
+    method on_Def_inline :
+      'c ->
+      Ast_visitors_ancestors.def -> unit
     method on_Default : 'c -> Ast_visitors_ancestors.block -> unit
     method on_Diff : 'c -> unit
     method on_Diff2 : 'c -> unit
     method on_Do :
       'c ->
       Ast_visitors_ancestors.block -> Ast_visitors_ancestors.expr -> unit
-    method on_Dollardollar : 'c -> unit
     method on_Dot : 'c -> unit
     method on_EQeqeq : 'c -> unit
     method on_Efun :
@@ -503,6 +543,9 @@ class virtual ['b] iter :
     method on_Namespace :
       'c ->
       Ast_visitors_ancestors.id -> Ast_visitors_ancestors.program -> unit
+    method on_SetNamespaceEnv :
+      'c ->
+      Ast_visitors_ancestors.nsenv -> unit
     method on_NamespaceUse :
       'c ->
       (Ast_visitors_ancestors.ns_kind * Ast_visitors_ancestors.id *
@@ -556,6 +599,7 @@ class virtual ['b] iter :
     method on_Starstar : 'c -> unit
     method on_Static : 'c -> unit
     method on_Static_var : 'c -> Ast_visitors_ancestors.expr list -> unit
+    method on_Global_var : 'c -> Ast_visitors_ancestors.expr list -> unit
     method on_Stmt : 'c -> Ast_visitors_ancestors.stmt -> unit
     method on_String : 'c -> Ast_visitors_ancestors.pstring -> unit
     method on_String2 : 'c -> Ast_visitors_ancestors.expr list -> unit
@@ -583,6 +627,8 @@ class virtual ['b] iter :
     method on_Upincr : 'c -> unit
     method on_Uplus : 'c -> unit
     method on_Uref : 'c -> unit
+    method on_Usplat : 'c -> unit
+    method on_Usilence : 'c -> unit
     method on_Utild : 'c -> unit
     method on_While :
       'c ->
@@ -596,6 +642,19 @@ class virtual ['b] iter :
       option -> unit
     method on_XhpAttrUse : 'c -> Ast_visitors_ancestors.hint -> unit
     method on_XhpCategory : 'c -> Ast_visitors_ancestors.pstring list -> unit
+    method on_XhpChild : 'c -> Ast_visitors_ancestors.xhp_child -> unit
+    method on_xhp_child : 'c -> Ast_visitors_ancestors.xhp_child -> unit
+    method on_ChildName : 'c -> Ast_visitors_ancestors.id -> unit
+    method on_ChildList : 'c -> Ast_visitors_ancestors.xhp_child list -> unit
+    method on_ChildUnary : 'c -> Ast_visitors_ancestors.xhp_child ->
+      Ast_visitors_ancestors.xhp_child_op -> unit
+    method on_ChildBinary : 'c -> Ast_visitors_ancestors.xhp_child ->
+      Ast_visitors_ancestors.xhp_child -> unit
+    method on_xhp_child_op : 'c -> Ast_visitors_ancestors.xhp_child_op -> unit
+    method on_ChildStar : 'c -> unit
+    method on_ChildPlus : 'c -> unit
+    method on_ChildQuestion : 'c -> unit
+
     method on_Xml :
       'c ->
       Ast_visitors_ancestors.id ->

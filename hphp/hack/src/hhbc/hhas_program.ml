@@ -8,17 +8,16 @@
  *
 *)
 
-open Core
-
 type t = {
+  hhas_adata   : Hhas_adata.t list;
   hhas_fun     : Hhas_function.t list;
   hhas_classes : Hhas_class.t list;
   hhas_typedefs: Hhas_typedef.t list;
-  hhas_main    : Hhas_main.t;
+  hhas_main    : Hhas_body.t;
 }
 
-let make hhas_fun hhas_classes hhas_typedefs hhas_main =
-  { hhas_fun; hhas_classes; hhas_typedefs; hhas_main }
+let make hhas_adata hhas_fun hhas_classes hhas_typedefs hhas_main =
+  { hhas_adata; hhas_fun; hhas_classes; hhas_typedefs; hhas_main }
 
 let functions hhas_prog =
   hhas_prog.hhas_fun
@@ -32,40 +31,43 @@ let typedefs hhas_prog =
 let main hhas_prog =
   hhas_prog.hhas_main
 
-let emit_main block =
-  let return_seq _ = Instruction_sequence.empty in
-  let body_instrs, decl_vars, num_iters, _, _, _, _, _ =
-    Emit_body.from_ast
-      ~skipawaitable:false ~has_this:false
-      [] [] None block return_seq in
-  Hhas_main.make (Instruction_sequence.instr_seq_to_list body_instrs)
-    decl_vars num_iters
+let adata hhas_prog =
+  hhas_prog.hhas_adata
+
+open Instruction_sequence
+
+let emit_main defs =
+  let body, _is_generator, _is_pair_generator =
+    Emit_body.emit_body
+      ~namespace:Namespace_env.empty_with_default_popt
+      ~is_closure_body:false
+      ~is_memoize:false
+      ~skipawaitable:false
+      ~is_return_by_ref:false
+      ~scope:Ast_scope.Scope.toplevel
+      ~return_value:(instr_int 1)
+      ~default_dropthrough:None
+      [] None defs
+  in
+    body
 
 open Closure_convert
 
-let from_ast
-  (parsed_functions,
-  parsed_classes,
-  parsed_typedefs,
-  _parsed_consts,
-  parsed_statements) =
-  let st = initial_state (List.length parsed_classes) in
-  let st, parsed_statements =
-    List.map_env st parsed_statements convert_toplevel in
-  let st, parsed_functions = List.map_env st parsed_functions convert_fun in
-  let st, parsed_classes = List.map_env st parsed_classes convert_class in
-  let closure_classes = Closure_convert.get_closure_classes st in
-  let all_classes = parsed_classes @ closure_classes in
-  let compiled_funs = Emit_function.from_asts parsed_functions in
-  let compiled_funs = Generate_memoized.memoize_functions compiled_funs in
-  let compiled_classes = Emit_class.from_asts all_classes in
-  let compiled_classes = Generate_memoized.memoize_classes compiled_classes in
-  let compiled_typedefs = Emit_typedef.from_asts parsed_typedefs in
-  let _compiled_consts = [] in (* TODO *)
-  let pos = Pos.none in
-  let parsed_statements = match List.last parsed_statements with
-    | Some (Ast.Return _) -> parsed_statements
-    | _ -> parsed_statements @ [Ast.Return (pos, Some (pos, Ast.Int(pos, "1")))]
-  in
-  let compiled_statements = emit_main parsed_statements in
-  make compiled_funs compiled_classes compiled_typedefs compiled_statements
+let from_ast ast =
+  let closed_ast = convert_toplevel_prog ast in
+  try
+    let compiled_defs = emit_main closed_ast in
+    let compiled_funs = Emit_function.emit_functions_from_program closed_ast in
+    let compiled_classes = Emit_class.emit_classes_from_program closed_ast in
+    let compiled_typedefs = Emit_typedef.emit_typedefs_from_program closed_ast in
+    let adata = Emit_adata.get_adata () in
+    make adata compiled_funs compiled_classes compiled_typedefs compiled_defs
+  with Emit_fatal.IncludeTimeFatalException (op, message) ->
+    Iterator.reset_iterator ();
+    let body = Emit_body.make_body (Emit_fatal.emit_fatal op message)
+      [] (* decl_vars *)
+      false (*is_memoize_wrapper*)
+      [] (* params *)
+      None (* return_type_info *)
+    in
+      make [] [] [] [] body

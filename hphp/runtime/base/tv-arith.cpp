@@ -22,9 +22,11 @@
 #include <folly/ScopeGuard.h>
 
 #include "hphp/runtime/base/array-data-defs.h"
+#include "hphp/runtime/base/double-to-int64.h"
 #include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/tv-conversions.h"
+#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/ext/std/ext_std_math.h"
 #include "hphp/util/overflow.h"
 
@@ -379,10 +381,9 @@ Cell cellBitOp(StrLenOp strLenOp, Cell c1, Cell c2) {
 template<class Op>
 void cellBitOpEq(Op op, Cell& c1, Cell c2) {
   auto const result = op(c1, c2);
-  auto const type = c1.m_type;
-  auto const data = c1.m_data.num;
+  auto const old = c1;
   tvCopy(result, c1);
-  tvRefcountedDecRefHelper(type, data);
+  tvDecRefGen(old);
 }
 
 // Op must implement the interface described for cellIncDecOp.
@@ -670,7 +671,7 @@ void cellMulEqO(Cell& c1, Cell c2) { cellSet(cellMulO(c1, c2), c1); }
 void cellDivEq(Cell& c1, Cell c2) {
   assert(cellIsPlausible(c1));
   assert(cellIsPlausible(c2));
-  if (!isTypedNum(c1)) {
+  if (!isIntType(c1.m_type) && !isDoubleType(c1.m_type)) {
     cellSet(numericConvHelper(c1), c1);
   }
   cellCopy(cellDiv(c1, c2), c1);
@@ -714,7 +715,7 @@ void cellBitNot(Cell& cell) {
 
     case KindOfDouble:
       cell.m_type     = KindOfInt64;
-      cell.m_data.num = ~toInt64(cell.m_data.dbl);
+      cell.m_data.num = ~double_to_int64(cell.m_data.dbl);
       break;
 
     case KindOfString:

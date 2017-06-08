@@ -72,6 +72,28 @@ bool isBlockEnd(const Vinstr& inst) {
   }
 }
 
+bool isCall(const Vinstr& inst) {
+  switch (inst.op) {
+    case Vinstr::call:
+    case Vinstr::callarray:
+    case Vinstr::callfaststub:
+    case Vinstr::callm:
+    case Vinstr::callphp:
+    case Vinstr::callr:
+    case Vinstr::calls:
+    case Vinstr::callstub:
+    case Vinstr::calltc:
+    case Vinstr::tailcallphp:
+    case Vinstr::tailcallstub:
+    case Vinstr::vcall:
+    case Vinstr::vcallarray:
+    case Vinstr::vinvoke:
+      return true;
+    default:
+      return false;
+  }
+}
+
 Width width(Vinstr::Opcode op) {
   switch (op) {
     // service requests
@@ -99,6 +121,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::phidef:
     case Vinstr::phijcc:
     case Vinstr::phijmp:
+    case Vinstr::funcguard:
     // native function abi
     case Vinstr::vcall:
     case Vinstr::vinvoke:
@@ -203,8 +226,6 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::andbim:
     case Vinstr::notb:
     case Vinstr::orbim:
-    case Vinstr::subb:
-    case Vinstr::subbi:
     case Vinstr::xorb:
     case Vinstr::xorbi:
     case Vinstr::cmpb:
@@ -215,6 +236,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::testbi:
     case Vinstr::testbim:
     case Vinstr::cmovb:
+    case Vinstr::csincb:
     case Vinstr::setcc:
     case Vinstr::movb:
     case Vinstr::loadb:
@@ -227,6 +249,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::incwm:
     case Vinstr::orwim:
     case Vinstr::cmovw:
+    case Vinstr::csincw:
     case Vinstr::cmpwim:
     case Vinstr::cmpwm:
     case Vinstr::testwim:
@@ -252,6 +275,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::subli:
     case Vinstr::xorl:
     case Vinstr::cmovl:
+    case Vinstr::csincl:
     case Vinstr::cmpl:
     case Vinstr::cmpli:
     case Vinstr::cmplm:
@@ -262,8 +286,10 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::movl:
     case Vinstr::loadl:
     case Vinstr::loadzbl:
+    case Vinstr::loadtql:
     case Vinstr::storel:
     case Vinstr::storeli:
+    case Vinstr::ubfmli:
       return Width::Long;
 
     case Vinstr::addq:
@@ -303,6 +329,7 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::testqim:
     case Vinstr::cloadq:
     case Vinstr::cmovq:
+    case Vinstr::csincq:
     case Vinstr::lea:
     case Vinstr::leap:
     case Vinstr::lead:

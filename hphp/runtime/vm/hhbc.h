@@ -439,6 +439,8 @@ constexpr int32_t kMaxConcatN = 4;
   O(CastDict,        NA,               ONE(CV),         ONE(CV),    NF) \
   O(CastKeyset,      NA,               ONE(CV),         ONE(CV),    NF) \
   O(CastVec,         NA,               ONE(CV),         ONE(CV),    NF) \
+  O(CastVArray,      NA,               ONE(CV),         ONE(CV),    NF) \
+  O(CastDArray,      NA,               ONE(CV),         ONE(CV),    NF) \
   O(InstanceOf,      NA,               TWO(CV,CV),      ONE(CV),    NF) \
   O(InstanceOfD,     ONE(SA),          ONE(CV),         ONE(CV),    NF) \
   O(Print,           NA,               ONE(CV),         ONE(CV),    NF) \
@@ -1072,6 +1074,31 @@ inline bool isMemberFinalOp(Op op) {
 
     default:
       return false;
+  }
+}
+
+inline bool isMemberOp(Op op) {
+  return isMemberBaseOp(op) || isMemberDimOp(op) || isMemberFinalOp(op);
+}
+
+inline MOpMode finalMemberOpMode(Op op) {
+  switch(op){
+    case Op::FPassM:
+    case Op::MemoGet:
+      return MOpMode::Warn;
+    case Op::SetM:
+    case Op::VGetM:
+    case Op::IncDecM:
+    case Op::SetOpM:
+    case Op::BindM:
+    case Op::SetWithRefLML:
+    case Op::SetWithRefRML:
+    case Op::MemoSet:
+      return MOpMode::Define;
+    case Op::UnsetM:
+      return MOpMode::Unset;
+    default:
+      return MOpMode::None;
   }
 }
 

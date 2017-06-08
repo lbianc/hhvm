@@ -134,6 +134,7 @@ struct ActRec {
 
   static constexpr uintptr_t kTrashedVarEnvSlot = 0xfeeefeee000f000f;
   static constexpr uintptr_t kTrashedThisSlot = 0xfeeefeeef00fe00e;
+  static constexpr uintptr_t kTrashedFuncSlot = 0xfeeefeeef00fe00d;
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -385,6 +386,16 @@ static_assert(kArRetOff % sizeof(TypedValue) == 0, "");
  */
 bool isReturnHelper(void* address);
 bool isDebuggerReturnHelper(void* address);
+
+/* Offset of the m_func and m_thisUnsafe fields in cells */
+
+static_assert(offsetof(ActRec, m_func) % sizeof(Cell) == 0, "");
+static_assert(offsetof(ActRec, m_thisUnsafe) % sizeof(Cell) == 0, "");
+
+constexpr auto kActRecFuncCellOff = offsetof(ActRec, m_func) /
+                                    sizeof(Cell);
+constexpr auto kActRecCtxCellOff  = offsetof(ActRec, m_thisUnsafe) /
+                                    sizeof(Cell);
 
 ///////////////////////////////////////////////////////////////////////////////
 

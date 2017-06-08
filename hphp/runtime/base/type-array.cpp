@@ -20,8 +20,8 @@
 #include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/apc-local-array.h"
 #include "hphp/runtime/base/array-util.h"
-#include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/comparisons.h"
+#include "hphp/runtime/base/double-to-int64.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/mixed-array-defs.h"
@@ -34,10 +34,14 @@
 #include "hphp/runtime/base/zend-qsort.h"
 #include "hphp/runtime/base/zend-string.h"
 
+#include "hphp/runtime/ext/extension.h"
+
 #include <unicode/coll.h> // icu
 #include <vector>
 
 namespace HPHP {
+
+////////////////////////////////////////////////////////////////////////////////
 
 const Array null_array{};
 const Array empty_array_ref{staticEmptyArray()};
@@ -78,13 +82,11 @@ Array Array::Create(const Variant& name, const Variant& var) {
 Array::~Array() {}
 
 ///////////////////////////////////////////////////////////////////////////////
-// operators
 
-Array &Array::operator=(const Variant& var) {
+Array& Array::operator=(const Variant& var) {
   return operator=(var.toArray());
 }
 
-// Move assign
 Array& Array::operator=(Variant&& v) {
   if (isArrayLikeType(v.asTypedValue()->m_type)) {
     m_arr = req::ptr<ArrayData>::attach(v.asTypedValue()->m_data.parr);
@@ -95,6 +97,30 @@ Array& Array::operator=(Variant&& v) {
   return *this;
 }
 
+void Array::escalate() {
+  if (m_arr) {
+    auto escalated = m_arr->escalate();
+    if (escalated != m_arr) m_arr = Ptr::attach(escalated);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+Array Array::values() const {
+  PackedArrayInit ai(size());
+  for (ArrayIter iter(*this); iter; ++iter) {
+    ai.appendWithRef(iter.secondRef());
+  }
+  return ai.toArray();
+}
+
+ArrayIter Array::begin(const String& context /* = null_string */) const {
+  return ArrayIter(*this);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// PHP operations.
+
 Array Array::operator+(ArrayData *data) const {
   return Array(*this).plusImpl(data);
 }
@@ -103,7 +129,7 @@ Array Array::operator+(const Array& arr) const {
   return Array(*this).plusImpl(arr.get());
 }
 
-Array &Array::operator+=(ArrayData *data) {
+Array& Array::operator+=(ArrayData *data) {
   return plusImpl(data);
 }
 
@@ -113,14 +139,14 @@ static void throw_bad_array_merge() {
                           "merging an array with NULL or non-array.");
 }
 
-Array &Array::operator+=(const Variant& var) {
+Array& Array::operator+=(const Variant& var) {
   if (!var.isArray()) {
     throw_bad_array_merge();
   }
   return operator+=(var.getArrayData());
 }
 
-Array &Array::operator+=(const Array& arr) {
+Array& Array::operator+=(const Array& arr) {
   return plusImpl(arr.get());
 }
 
@@ -153,7 +179,7 @@ Array Array::intersect(const Variant& array, bool by_key, bool by_value,
 }
 
 static int CompareAsStrings(const Variant& v1, const Variant& v2, const void *data) {
-  return HPHP::same(HPHP::toString(v1), HPHP::toString(v2)) ? 0 : -1;
+  return HPHP::same(v1.toString(), v2.toString()) ? 0 : -1;
 }
 
 Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match,
@@ -280,8 +306,43 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
   return ret;
 }
 
+Array& Array::merge(const Array& arr) {
+  return mergeImpl(arr.get());
+}
+
+Array& Array::plusImpl(ArrayData *data) {
+  if (m_arr == nullptr || data == nullptr) {
+    throw_bad_array_merge();
+  }
+  if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
+  if (!data->empty()) {
+    if (m_arr->empty()) {
+      m_arr = data;
+    } else if (m_arr != data) {
+      auto const escalated = m_arr->plusEq(data);
+      if (escalated != m_arr) {
+        m_arr = Ptr::attach(escalated);
+      }
+    }
+  }
+  return *this;
+}
+
+Array& Array::mergeImpl(ArrayData *data) {
+  if (m_arr == nullptr || data == nullptr) {
+    throw_bad_array_merge();
+  }
+  if (!data->empty()) {
+    auto const escalated = m_arr->merge(data);
+    if (escalated != m_arr) m_arr = Ptr::attach(escalated);
+  } else {
+    m_arr->renumber();
+  }
+  return *this;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
-// manipulations
+// Type conversions.
 
 String Array::toString() const {
   if (m_arr == nullptr) return empty_string();
@@ -303,43 +364,8 @@ String Array::toString() const {
   return keyset_string;
 }
 
-Array &Array::merge(const Array& arr) {
-  return mergeImpl(arr.get());
-}
-
-Array &Array::plusImpl(ArrayData *data) {
-  if (m_arr == nullptr || data == nullptr) {
-    throw_bad_array_merge();
-  }
-  if (RuntimeOption::EvalHackArrCompatNotices) raiseHackArrCompatAdd();
-  if (!data->empty()) {
-    if (m_arr->empty()) {
-      m_arr = data;
-    } else if (m_arr != data) {
-      auto const escalated = m_arr->plusEq(data);
-      if (escalated != m_arr) {
-        m_arr = Ptr::attach(escalated);
-      }
-    }
-  }
-  return *this;
-}
-
-Array &Array::mergeImpl(ArrayData *data) {
-  if (m_arr == nullptr || data == nullptr) {
-    throw_bad_array_merge();
-  }
-  if (!data->empty()) {
-    auto const escalated = m_arr->merge(data);
-    if (escalated != m_arr) m_arr = Ptr::attach(escalated);
-  } else {
-    m_arr->renumber();
-  }
-  return *this;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
-// comparisons
+// Comparisons.
 
 bool Array::same(const Array& v2) const {
   if (!m_arr) return !v2.get();
@@ -621,136 +647,55 @@ int Array::compare(const Array& v2, bool flip /* = false */) const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// iterator
+// Element rval/lval.
 
-ArrayIter Array::begin(const String& context /* = null_string */) const {
-  return ArrayIter(*this);
-}
-
-void Array::escalate() {
-  if (m_arr) {
-    auto escalated = m_arr->escalate();
-    if (escalated != m_arr) m_arr = Ptr::attach(escalated);
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// offset functions
-
-Variant Array::rvalAt(int key, AccessFlags flags) const {
-  if (m_arr) return m_arr->get((int64_t)key, any(flags & AccessFlags::Error));
-  return init_null();
-}
-
-const Variant& Array::rvalAtRef(int key, AccessFlags flags) const {
+const Variant& Array::rvalAt(int key, AccessFlags flags) const {
   if (m_arr) return m_arr->get((int64_t)key, any(flags & AccessFlags::Error));
   return uninit_variant;
 }
 
-Variant Array::rvalAt(int64_t key, AccessFlags flags) const {
-  if (m_arr) return m_arr->get(key, any(flags & AccessFlags::Error));
-  return init_null();
-}
-
-const Variant& Array::rvalAtRef(int64_t key, AccessFlags flags) const {
+const Variant& Array::rvalAt(int64_t key, AccessFlags flags) const {
   if (m_arr) return m_arr->get(key, any(flags & AccessFlags::Error));
   return uninit_variant;
 }
 
-const Variant& Array::rvalAtRef(const String& key, AccessFlags flags) const {
-  if (m_arr) {
-    auto const error = any(flags & AccessFlags::Error);
-    if (any(flags & AccessFlags::Key)) return m_arr->get(key, error);
-    if (key.isNull()) {
-      if (!useWeakKeys()) {
-        throwInvalidArrayKeyException(uninit_variant.asTypedValue(),
-                                      m_arr.get());
-      }
-      if (RuntimeOption::EvalHackArrCompatNotices) {
-        raiseHackArrCompatImplicitArrayKey(uninit_variant.asTypedValue());
-      }
-      return m_arr->get(staticEmptyString(), error);
-    }
-    int64_t n;
-    if (!m_arr->convertKey(key.get(), n)) {
-      return m_arr->get(key, error);
-    } else {
-      return m_arr->get(n, error);
-    }
-  }
-  return uninit_variant;
-}
-
-Variant Array::rvalAt(const String& key, AccessFlags flags) const {
-  return Array::rvalAtRef(key, flags);
-}
-
-const Variant& Array::rvalAtRef(const Variant& key, AccessFlags flags) const {
+const Variant& Array::rvalAt(const String& key, AccessFlags flags) const {
   if (!m_arr) return uninit_variant;
-  auto const bad_key = [&] {
+  auto const error = any(flags & AccessFlags::Error);
+
+  if (any(flags & AccessFlags::Key)) return m_arr->get(key, error);
+
+  if (key.isNull()) {
     if (!useWeakKeys()) {
-      throwInvalidArrayKeyException(key.asTypedValue(), m_arr.get());
+      throwInvalidArrayKeyException(uninit_variant.asTypedValue(),
+                                    m_arr.get());
     }
     if (RuntimeOption::EvalHackArrCompatNotices) {
-      raiseHackArrCompatImplicitArrayKey(key.asTypedValue());
+      raiseHackArrCompatImplicitArrayKey(uninit_variant.asTypedValue());
     }
-  };
-  switch (key.getRawType()) {
-    case KindOfUninit:
-    case KindOfNull:
-      bad_key();
-      return m_arr->get(staticEmptyString(), any(flags & AccessFlags::Error));
-
-    case KindOfBoolean:
-      bad_key();
-    case KindOfInt64:
-      return m_arr->get(key.asTypedValue()->m_data.num,
-                        any(flags & AccessFlags::Error));
-
-    case KindOfDouble:
-      bad_key();
-      return m_arr->get(HPHP::toInt64(key.asTypedValue()->m_data.dbl),
-                        any(flags & AccessFlags::Error));
-
-    case KindOfPersistentString:
-    case KindOfString:
-      {
-        int64_t n;
-        if (!any(flags & AccessFlags::Key) &&
-            m_arr->convertKey(key.asTypedValue()->m_data.pstr, n)) {
-          return m_arr->get(n, any(flags & AccessFlags::Error));
-        }
-      }
-      return m_arr->get(key.asCStrRef(), any(flags & AccessFlags::Error));
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-    case KindOfObject:
-      bad_key();
-      throw_bad_type_exception("Invalid type used as key");
-      return uninit_variant;
-
-    case KindOfResource:
-      bad_key();
-      return m_arr->get(key.toInt64(), any(flags & AccessFlags::Error));
-
-    case KindOfRef:
-      return rvalAtRef(*(key.asTypedValue()->m_data.pref->var()), flags);
+    return m_arr->get(staticEmptyString(), error);
   }
-  not_reached();
+
+  int64_t n;
+  if (m_arr->convertKey(key.get(), n)) {
+    return m_arr->get(n, error);
+  }
+  return m_arr->get(key, error);
 }
 
-Variant Array::rvalAt(const Variant& key, AccessFlags flags) const {
-  return Array::rvalAtRef(key, flags);
+const Variant& Array::rvalAt(const Variant& key, AccessFlags flags) const {
+  if (!m_arr) return uninit_variant;
+  auto const error = any(flags & AccessFlags::Error);
+
+  if (any(flags & AccessFlags::Key)) return m_arr->get(key, error);
+  auto const k = convertKey(key);
+  if (!k.isNull()) {
+    return m_arr->get(k, error);
+  }
+  return uninit_variant;
 }
 
-Variant &Array::lvalAt() {
+Variant& Array::lvalAt() {
   if (!m_arr) m_arr = Ptr::attach(ArrayData::Create());
   auto const lval = m_arr->lvalNew(m_arr->cowCheck());
   if (lval.arr_base() != m_arr) m_arr = Ptr::attach(lval.arr_base());
@@ -758,7 +703,7 @@ Variant &Array::lvalAt() {
   return tvAsVariant(lval.tv());
 }
 
-Variant &Array::lvalAtRef() {
+Variant& Array::lvalAtRef() {
   if (!m_arr) m_arr = Ptr::attach(ArrayData::Create());
   auto const lval = m_arr->lvalNewRef(m_arr->cowCheck());
   if (lval.arr_base() != m_arr) m_arr = Ptr::attach(lval.arr_base());
@@ -766,26 +711,32 @@ Variant &Array::lvalAtRef() {
   return tvAsVariant(lval.tv());
 }
 
-Variant &Array::lvalAt(const String& key, AccessFlags flags) {
+member_lval Array::lvalAt(Cell key, AccessFlags flags) {
   if (any(flags & AccessFlags::Key)) return lvalAtImpl(key, flags);
-  return lvalAtImpl(convertKey(key), flags);
-}
-
-Variant &Array::lvalAt(const Variant& key, AccessFlags flags) {
-  if (any(flags & AccessFlags::Key)) return lvalAtImpl(key, flags);
-  VarNR k(convertKey(key));
-  if (!k.isNull()) {
+  auto const k = convertKey(key);
+  if (!isNullType(k.m_type)) {
     return lvalAtImpl(k, flags);
   }
-  return lvalBlackHole();
+  return member_lval { nullptr, lvalBlackHole().asTypedValue() };
 }
 
-Variant &Array::lvalAtRef(const String& key, AccessFlags flags) {
+Variant& Array::lvalAt(const String& key, AccessFlags flags) {
+  return tvAsVariant(any(flags & AccessFlags::Key)
+    ? lvalAtImpl(key, flags).tv()
+    : lvalAtImpl(convertKey(key).tv(), flags).tv()
+  );
+}
+
+Variant& Array::lvalAt(const Variant& key, AccessFlags flags) {
+  return tvAsVariant(lvalAt(*key.asCell(), flags).tv());
+}
+
+Variant& Array::lvalAtRef(const String& key, AccessFlags flags) {
   if (any(flags & AccessFlags::Key)) return lvalAtRefImpl(key, flags);
   return lvalAtRefImpl(convertKey(key), flags);
 }
 
-Variant &Array::lvalAtRef(const Variant& key, AccessFlags flags) {
+Variant& Array::lvalAtRef(const Variant& key, AccessFlags flags) {
   if (any(flags & AccessFlags::Key)) return lvalAtRefImpl(key, flags);
   VarNR k(convertKey(key));
   if (!k.isNull()) {
@@ -794,20 +745,20 @@ Variant &Array::lvalAtRef(const Variant& key, AccessFlags flags) {
   return lvalBlackHole();
 }
 
-template<typename T>
-ALWAYS_INLINE
-void Array::setImpl(const T &key, const Variant& v) {
+///////////////////////////////////////////////////////////////////////////////
+
+template<typename T> ALWAYS_INLINE
+void Array::setImpl(const T& key, const Variant& v) {
   if (!m_arr) {
-    m_arr = Ptr::attach(ArrayData::Create(key, v));
+    m_arr = Ptr::attach(ArrayData::Create(key, *v.asTypedValue()));
   } else {
-    ArrayData *escalated = m_arr->set(key, v, m_arr->cowCheck());
+    ArrayData *escalated = m_arr->set(key, *v.asCell(), m_arr->cowCheck());
     if (escalated != m_arr) m_arr = Ptr::attach(escalated);
   }
 }
 
-template<typename T>
-ALWAYS_INLINE
-void Array::setRefImpl(const T &key, Variant& v) {
+template<typename T> ALWAYS_INLINE
+void Array::setRefImpl(const T& key, Variant& v) {
   if (!m_arr) {
     m_arr = Ptr::attach(ArrayData::CreateRef(key, v));
   } else {
@@ -817,13 +768,12 @@ void Array::setRefImpl(const T &key, Variant& v) {
   }
 }
 
-template<typename T>
-ALWAYS_INLINE
-void Array::addImpl(const T &key, const Variant& v) {
+template<typename T> ALWAYS_INLINE
+void Array::addImpl(const T& key, const Variant& v) {
   if (!m_arr) {
-    m_arr = Ptr::attach(ArrayData::Create(key, v));
+    m_arr = Ptr::attach(ArrayData::Create(key, *v.asTypedValue()));
   } else {
-    ArrayData *escalated = m_arr->add(key, v, m_arr->cowCheck());
+    ArrayData *escalated = m_arr->add(key, *v.asCell(), m_arr->cowCheck());
     if (escalated != m_arr) m_arr = Ptr::attach(escalated);
   }
 }
@@ -834,14 +784,14 @@ void Array::set(int64_t key, const Variant& v) {
 
 void Array::set(const String& key, const Variant& v, bool isKey /* = false */) {
   if (isKey) return setImpl(key, v);
-  setImpl(convertKey(key), v);
+  setImpl(convertKey(key).tv(), v);
 }
 
 void Array::set(const Variant& key, const Variant& v, bool isKey /* = false */) {
   if (key.getRawType() == KindOfInt64) return setImpl(key.getNumData(), v);
-  if (isKey) return setImpl(key, v);
+  if (isKey) return setImpl(*key.asCell(), v);
   VarNR k(convertKey(key));
-  if (!k.isNull()) setImpl(k, v);
+  if (!k.isNull()) setImpl(k.tv(), v);
 }
 
 void Array::setRef(int64_t key, Variant& v) {
@@ -866,26 +816,18 @@ void Array::add(int64_t key, const Variant& v) {
 
 void Array::add(const String& key, const Variant& v, bool isKey /* = false */) {
   if (isKey) return addImpl(key, v);
-  addImpl(convertKey(key), v);
+  addImpl(convertKey(key).tv(), v);
 }
 
 void Array::add(const Variant& key, const Variant& v, bool isKey /* = false */) {
   if (key.getRawType() == KindOfInt64) return addImpl(key.getNumData(), v);
-  if (isKey) return addImpl(key, v);
+  if (isKey) return addImpl(*key.asCell(), v);
   VarNR k(convertKey(key));
-  if (!k.isNull()) addImpl(k, v);
+  if (!k.isNull()) addImpl(k.tv(), v);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// membership functions
-
-Array Array::values() const {
-  PackedArrayInit ai(size());
-  for (ArrayIter iter(*this); iter; ++iter) {
-    ai.appendWithRef(iter.secondRef());
-  }
-  return ai.toArray();
-}
+// Element access and mutation.
 
 bool Array::exists(const String& key, bool isKey /* = false */) const {
   if (isKey) return existsImpl(key);
@@ -908,12 +850,9 @@ bool Array::exists(const Variant& key, bool isKey /* = false */) const {
   return false;
 }
 
-void Array::remove(const String& key, bool isString /* = false */) {
-  if (isString) {
-    removeImpl(key);
-  } else {
-    removeImpl(convertKey(key));
-  }
+void Array::remove(const String& key, bool isKey /* = false */) {
+  if (isKey) return removeImpl(key);
+  return removeImpl(convertKey(key));
 }
 
 void Array::remove(const Variant& key) {
@@ -934,7 +873,7 @@ void Array::remove(const Variant& key) {
   }
 }
 
-const Variant& Array::append(const Variant& v) {
+void Array::append(const Variant& v) {
   if (!m_arr) operator=(Create());
   assertx(m_arr);
 
@@ -943,25 +882,25 @@ const Variant& Array::append(const Variant& v) {
 
   auto escalated = m_arr->append(cell, m_arr->cowCheck());
   if (escalated != m_arr) m_arr = Ptr::attach(escalated);
-
-  return v;
 }
 
-const Variant& Array::appendRef(Variant& v) {
+void Array::appendRef(Variant& v) {
   if (!m_arr) {
     m_arr = Ptr::attach(ArrayData::CreateRef(v));
   } else {
     ArrayData *escalated = m_arr->appendRef(v, m_arr->cowCheck());
     if (escalated != m_arr) m_arr = Ptr::attach(escalated);
   }
-  return v;
 }
 
-const Variant& Array::appendWithRef(const Variant& v) {
+void Array::appendWithRef(TypedValue v) {
   if (!m_arr) m_arr = Ptr::attach(ArrayData::Create());
   ArrayData *escalated = m_arr->appendWithRef(v, m_arr->cowCheck());
   if (escalated != m_arr) m_arr = Ptr::attach(escalated);
-  return v;
+}
+
+void Array::appendWithRef(const Variant& v) {
+  appendWithRef(*v.asTypedValue());
 }
 
 Variant Array::pop() {
@@ -996,7 +935,7 @@ void Array::prepend(const Variant& v) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// sorting
+// Sorting.
 
 static int array_compare_func(const void *n1, const void *n2, const void *op) {
   int index1 = *(int*)n1;

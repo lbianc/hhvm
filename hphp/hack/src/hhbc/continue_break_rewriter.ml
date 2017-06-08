@@ -96,11 +96,13 @@ unconditional jumps to the right place. *)
 
   let add_iterator lst =
     match opt_iterator with
-      | Some it -> it :: lst
+      | Some x -> x :: lst
       | None -> lst in
   let wrap_return ret =
     match opt_iterator with
-      | Some it -> instrs [(IIterator (IterFree it)); ret]
+      | Some (is_mutable, it) ->
+        let iter_free = if is_mutable then MIterFree it else IterFree it in
+        instrs [(IIterator iter_free); ret]
       | _ -> instr ret in
   let rewriter i =
     match i with
@@ -111,7 +113,7 @@ unconditional jumps to the right place. *)
       | ISpecialFlow (Break (level, original, itrs)) when level > 1 ->
         instr (ISpecialFlow (Break ((level - 1), original, add_iterator itrs)))
       | ISpecialFlow (Break (_, _, itrs)) ->
-        (match itrs with
+        (match add_iterator itrs with
         | [] -> instr (IContFlow (Jmp break_label))
         | itrs -> instr (IIterator (IterBreak (break_label, itrs))))
       | IContFlow (RetC) -> wrap_return (IContFlow (RetC))
@@ -152,14 +154,12 @@ let get_continues_and_breaks instrseq =
   (* These can be in any old order; we're building a lookup table after all.
   However, the order should be (1) consistent from run to run, and (2) ideally
   should be in source-code order, so that if there is a continue followed by
-  a break, then the continue is zero and the break is one. Since this list
-  comes out in reverse source code order, we reverse it here to be more
-  compatible with the original HHVM emitter.
+  a break, then the continue is zero and the break is one.
   TODO: We might consider sorting the list using the comparator in ULCB.
   That way we know the list order will be stable even if the order in which
   we visit the instructions changes for some reason. It won't match HHVM then
-  though. For now, stick with reversing it. *)
-  List.rev (ULCB.items results)
+  though. For now, stick with the source-code order. *)
+  ULCB.items results
 
 (* TODO: We must have this already somewhere. *)
 let index_of items item =

@@ -8,15 +8,15 @@
  *
 *)
 
-(* Unnamed local variables
-TODO: We will need to rename the unnamed local variables so that their count
-begins at the number of named local variables in the method.
+(* Type of locals as they appear in instructions.
+ * Named variables are those appearing in the .declvars declaration. These
+ * can also be referenced by number (0 to n-1), but we use Unnamed only for
+ * variables n and above not appearing in .declvars
  *)
-
 type t =
  | Unnamed of int
+   (* Named local, necessarily starting with `$` *)
  | Named of string
- | Pipe (* Will be rewritten to an unnamed local. *)
 
 let next_local = ref 0
 
@@ -25,5 +25,11 @@ let get_unnamed_local () =
   next_local := current + 1;
   Unnamed current
 
-let reset_local () =
-  next_local := 0
+let scope f =
+  let current = !next_local in
+  let result = f () in
+  next_local := current;
+  result
+
+let reset_local base =
+  next_local := base

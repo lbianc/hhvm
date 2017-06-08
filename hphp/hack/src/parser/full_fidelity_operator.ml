@@ -17,6 +17,7 @@ not how they look on the page. *)
 | IndexingOperator
 | FunctionCallOperator
 | AwaitOperator
+| SuspendOperator
 | PipeOperator
 | ConditionalQuestionOperator
 | ConditionalColonOperator
@@ -98,7 +99,7 @@ let precedence operator =
   (* TODO: variable operator $ *)
   match operator with
   | IncludeOperator | IncludeOnceOperator | RequireOperator
-  | RequireOnceOperator | AwaitOperator -> 1
+  | RequireOnceOperator | AwaitOperator | SuspendOperator -> 1
   | PHPOrOperator -> 2
   | PHPExclusiveOrOperator -> 3
   | PHPAndOperator -> 4
@@ -129,15 +130,19 @@ let precedence operator =
   | ReferenceOperator | ErrorControlOperator
   | PrefixIncrementOperator | PrefixDecrementOperator
   | LogicalNotOperator| NotOperator
-  | DollarOperator | UnaryPlusOperator | UnaryMinusOperator -> 19
+  | UnaryPlusOperator | UnaryMinusOperator -> 19
   | InstanceofOperator -> 20
   | ExponentOperator -> 21
   | PostfixIncrementOperator | PostfixDecrementOperator -> 22
   | FunctionCallOperator -> 23
   | NewOperator | CloneOperator -> 24
-  | IndexingOperator -> 25
-  | MemberSelectionOperator | NullSafeMemberSelectionOperator -> 26
-  | ScopeResolutionOperator -> 27
+  (* value 25 is reserved for assignment that appear in expressions *)
+  | IndexingOperator -> 26
+  | MemberSelectionOperator | NullSafeMemberSelectionOperator -> 27
+  | ScopeResolutionOperator -> 28
+  | DollarOperator -> 29
+
+let precedence_for_assignment_in_expressions = 25
 
 let associativity operator =
   match operator with
@@ -145,6 +150,7 @@ let associativity operator =
   | StrictNotEqualOperator | LessThanOperator | LessThanOrEqualOperator
   | GreaterThanOperator | GreaterThanOrEqualOperator | InstanceofOperator
   | NewOperator | CloneOperator | AwaitOperator | SpaceshipOperator
+  | SuspendOperator
     -> NotAssociative
 
   | PipeOperator | ConditionalQuestionOperator | ConditionalColonOperator
@@ -180,6 +186,7 @@ let associativity operator =
 
 let prefix_unary_from_token token =
   match token with
+  | Suspend -> SuspendOperator
   | Await -> AwaitOperator
   | Exclamation -> LogicalNotOperator
   | Tilde -> NotOperator
@@ -399,6 +406,7 @@ let to_string kind =
   | IndexingOperator -> "indexing"
   | FunctionCallOperator -> "function_call"
   | AwaitOperator -> "await"
+  | SuspendOperator -> "suspend"
   | PipeOperator -> "pipe"
   | ConditionalQuestionOperator -> "conditional"
   | ConditionalColonOperator -> "colon"

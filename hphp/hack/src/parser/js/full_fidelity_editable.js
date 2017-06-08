@@ -3,19 +3,22 @@
  * All rights reserved.
  *
  * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the 'hack' directory of this source tree. An additional
+ * LICENSE file in the "hack" directory of this source tree. An additional
  * grant of patent rights can be found in the PATENTS file in the same
  * directory.
  *
+ **
+ *
+ * THIS FILE IS @generated; DO NOT EDIT IT
+ * To regenerate this file, run
+ *
+ *   buck run //hphp/hack/src:generate_full_fidelity
+ *
+ * This module contains the type describing the structure of a syntax tree.
+ *
+ **
+ *
  */
-/* THIS FILE IS GENERATED; DO NOT EDIT IT */
-/* @generated */
-/**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*/
 
 "use strict";
 
@@ -112,6 +115,8 @@ class EditableSyntax
       return NamespaceDeclaration.from_json(json, position, source);
     case 'namespace_body':
       return NamespaceBody.from_json(json, position, source);
+    case 'namespace_empty_body':
+      return NamespaceEmptyBody.from_json(json, position, source);
     case 'namespace_use_declaration':
       return NamespaceUseDeclaration.from_json(json, position, source);
     case 'namespace_group_use_declaration':
@@ -132,6 +137,10 @@ class EditableSyntax
       return ClassishDeclaration.from_json(json, position, source);
     case 'classish_body':
       return ClassishBody.from_json(json, position, source);
+    case 'trait_use_conflict_resolution_item':
+      return TraitUseConflictResolutionItem.from_json(json, position, source);
+    case 'trait_use_conflict_resolution':
+      return TraitUseConflictResolution.from_json(json, position, source);
     case 'trait_use':
       return TraitUse.from_json(json, position, source);
     case 'require_clause':
@@ -320,6 +329,8 @@ class EditableSyntax
       return VectorTypeSpecifier.from_json(json, position, source);
     case 'keyset_type_specifier':
       return KeysetTypeSpecifier.from_json(json, position, source);
+    case 'tuple_type_explicit_specifier':
+      return TupleTypeExplicitSpecifier.from_json(json, position, source);
     case 'varray_type_specifier':
       return VarrayTypeSpecifier.from_json(json, position, source);
     case 'vector_array_type_specifier':
@@ -693,6 +704,8 @@ class EditableToken extends EditableSyntax
        return new ConstructToken(leading, trailing);
     case 'continue':
        return new ContinueToken(leading, trailing);
+    case 'coroutine':
+       return new CoroutineToken(leading, trailing);
     case 'darray':
        return new DarrayToken(leading, trailing);
     case 'default':
@@ -807,6 +820,8 @@ class EditableToken extends EditableSyntax
        return new StringToken(leading, trailing);
     case 'super':
        return new SuperToken(leading, trailing);
+    case 'suspend':
+       return new SuspendToken(leading, trailing);
     case 'switch':
        return new SwitchToken(leading, trailing);
     case 'this':
@@ -1230,6 +1245,13 @@ class ContinueToken extends EditableToken
     super('continue', leading, trailing, 'continue');
   }
 }
+class CoroutineToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('coroutine', leading, trailing, 'coroutine');
+  }
+}
 class DarrayToken extends EditableToken
 {
   constructor(leading, trailing)
@@ -1627,6 +1649,13 @@ class SuperToken extends EditableToken
   constructor(leading, trailing)
   {
     super('super', leading, trailing, 'super');
+  }
+}
+class SuspendToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('suspend', leading, trailing, 'suspend');
   }
 }
 class SwitchToken extends EditableToken
@@ -4011,6 +4040,53 @@ class NamespaceBody extends EditableSyntax
     return NamespaceBody._children_keys;
   }
 }
+class NamespaceEmptyBody extends EditableSyntax
+{
+  constructor(
+    semicolon)
+  {
+    super('namespace_empty_body', {
+      semicolon: semicolon });
+  }
+  get semicolon() { return this.children.semicolon; }
+  with_semicolon(semicolon){
+    return new NamespaceEmptyBody(
+      semicolon);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var semicolon = this.semicolon.rewrite(rewriter, new_parents);
+    if (
+      semicolon === this.semicolon)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new NamespaceEmptyBody(
+        semicolon), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let semicolon = EditableSyntax.from_json(
+      json.namespace_semicolon, position, source);
+    position += semicolon.width;
+    return new NamespaceEmptyBody(
+        semicolon);
+  }
+  get children_keys()
+  {
+    if (NamespaceEmptyBody._children_keys == null)
+      NamespaceEmptyBody._children_keys = [
+        'semicolon'];
+    return NamespaceEmptyBody._children_keys;
+  }
+}
 class NamespaceUseDeclaration extends EditableSyntax
 {
   constructor(
@@ -4485,6 +4561,7 @@ class FunctionDeclarationHeader extends EditableSyntax
 {
   constructor(
     async,
+    coroutine,
     keyword,
     ampersand,
     name,
@@ -4498,6 +4575,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   {
     super('function_declaration_header', {
       async: async,
+      coroutine: coroutine,
       keyword: keyword,
       ampersand: ampersand,
       name: name,
@@ -4510,6 +4588,7 @@ class FunctionDeclarationHeader extends EditableSyntax
       where_clause: where_clause });
   }
   get async() { return this.children.async; }
+  get coroutine() { return this.children.coroutine; }
   get keyword() { return this.children.keyword; }
   get ampersand() { return this.children.ampersand; }
   get name() { return this.children.name; }
@@ -4523,6 +4602,22 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_async(async){
     return new FunctionDeclarationHeader(
       async,
+      this.coroutine,
+      this.keyword,
+      this.ampersand,
+      this.name,
+      this.type_parameter_list,
+      this.left_paren,
+      this.parameter_list,
+      this.right_paren,
+      this.colon,
+      this.type,
+      this.where_clause);
+  }
+  with_coroutine(coroutine){
+    return new FunctionDeclarationHeader(
+      this.async,
+      coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4537,6 +4632,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_keyword(keyword){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       keyword,
       this.ampersand,
       this.name,
@@ -4551,6 +4647,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_ampersand(ampersand){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       ampersand,
       this.name,
@@ -4565,6 +4662,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_name(name){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       name,
@@ -4579,6 +4677,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_type_parameter_list(type_parameter_list){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4593,6 +4692,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_left_paren(left_paren){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4607,6 +4707,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_parameter_list(parameter_list){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4621,6 +4722,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_right_paren(right_paren){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4635,6 +4737,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_colon(colon){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4649,6 +4752,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_type(type){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4663,6 +4767,7 @@ class FunctionDeclarationHeader extends EditableSyntax
   with_where_clause(where_clause){
     return new FunctionDeclarationHeader(
       this.async,
+      this.coroutine,
       this.keyword,
       this.ampersand,
       this.name,
@@ -4681,6 +4786,7 @@ class FunctionDeclarationHeader extends EditableSyntax
     let new_parents = parents.slice();
     new_parents.push(this);
     var async = this.async.rewrite(rewriter, new_parents);
+    var coroutine = this.coroutine.rewrite(rewriter, new_parents);
     var keyword = this.keyword.rewrite(rewriter, new_parents);
     var ampersand = this.ampersand.rewrite(rewriter, new_parents);
     var name = this.name.rewrite(rewriter, new_parents);
@@ -4693,6 +4799,7 @@ class FunctionDeclarationHeader extends EditableSyntax
     var where_clause = this.where_clause.rewrite(rewriter, new_parents);
     if (
       async === this.async &&
+      coroutine === this.coroutine &&
       keyword === this.keyword &&
       ampersand === this.ampersand &&
       name === this.name &&
@@ -4710,6 +4817,7 @@ class FunctionDeclarationHeader extends EditableSyntax
     {
       return rewriter(new FunctionDeclarationHeader(
         async,
+        coroutine,
         keyword,
         ampersand,
         name,
@@ -4727,6 +4835,9 @@ class FunctionDeclarationHeader extends EditableSyntax
     let async = EditableSyntax.from_json(
       json.function_async, position, source);
     position += async.width;
+    let coroutine = EditableSyntax.from_json(
+      json.function_coroutine, position, source);
+    position += coroutine.width;
     let keyword = EditableSyntax.from_json(
       json.function_keyword, position, source);
     position += keyword.width;
@@ -4759,6 +4870,7 @@ class FunctionDeclarationHeader extends EditableSyntax
     position += where_clause.width;
     return new FunctionDeclarationHeader(
         async,
+        coroutine,
         keyword,
         ampersand,
         name,
@@ -4775,6 +4887,7 @@ class FunctionDeclarationHeader extends EditableSyntax
     if (FunctionDeclarationHeader._children_keys == null)
       FunctionDeclarationHeader._children_keys = [
         'async',
+        'coroutine',
         'keyword',
         'ampersand',
         'name',
@@ -5415,6 +5528,216 @@ class ClassishBody extends EditableSyntax
         'elements',
         'right_brace'];
     return ClassishBody._children_keys;
+  }
+}
+class TraitUseConflictResolutionItem extends EditableSyntax
+{
+  constructor(
+    aliasing_name,
+    aliasing_keyword,
+    aliased_name)
+  {
+    super('trait_use_conflict_resolution_item', {
+      aliasing_name: aliasing_name,
+      aliasing_keyword: aliasing_keyword,
+      aliased_name: aliased_name });
+  }
+  get aliasing_name() { return this.children.aliasing_name; }
+  get aliasing_keyword() { return this.children.aliasing_keyword; }
+  get aliased_name() { return this.children.aliased_name; }
+  with_aliasing_name(aliasing_name){
+    return new TraitUseConflictResolutionItem(
+      aliasing_name,
+      this.aliasing_keyword,
+      this.aliased_name);
+  }
+  with_aliasing_keyword(aliasing_keyword){
+    return new TraitUseConflictResolutionItem(
+      this.aliasing_name,
+      aliasing_keyword,
+      this.aliased_name);
+  }
+  with_aliased_name(aliased_name){
+    return new TraitUseConflictResolutionItem(
+      this.aliasing_name,
+      this.aliasing_keyword,
+      aliased_name);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var aliasing_name = this.aliasing_name.rewrite(rewriter, new_parents);
+    var aliasing_keyword = this.aliasing_keyword.rewrite(rewriter, new_parents);
+    var aliased_name = this.aliased_name.rewrite(rewriter, new_parents);
+    if (
+      aliasing_name === this.aliasing_name &&
+      aliasing_keyword === this.aliasing_keyword &&
+      aliased_name === this.aliased_name)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new TraitUseConflictResolutionItem(
+        aliasing_name,
+        aliasing_keyword,
+        aliased_name), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let aliasing_name = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_item_aliasing_name, position, source);
+    position += aliasing_name.width;
+    let aliasing_keyword = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_item_aliasing_keyword, position, source);
+    position += aliasing_keyword.width;
+    let aliased_name = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_item_aliased_name, position, source);
+    position += aliased_name.width;
+    return new TraitUseConflictResolutionItem(
+        aliasing_name,
+        aliasing_keyword,
+        aliased_name);
+  }
+  get children_keys()
+  {
+    if (TraitUseConflictResolutionItem._children_keys == null)
+      TraitUseConflictResolutionItem._children_keys = [
+        'aliasing_name',
+        'aliasing_keyword',
+        'aliased_name'];
+    return TraitUseConflictResolutionItem._children_keys;
+  }
+}
+class TraitUseConflictResolution extends EditableSyntax
+{
+  constructor(
+    keyword,
+    names,
+    left_brace,
+    clauses,
+    right_brace)
+  {
+    super('trait_use_conflict_resolution', {
+      keyword: keyword,
+      names: names,
+      left_brace: left_brace,
+      clauses: clauses,
+      right_brace: right_brace });
+  }
+  get keyword() { return this.children.keyword; }
+  get names() { return this.children.names; }
+  get left_brace() { return this.children.left_brace; }
+  get clauses() { return this.children.clauses; }
+  get right_brace() { return this.children.right_brace; }
+  with_keyword(keyword){
+    return new TraitUseConflictResolution(
+      keyword,
+      this.names,
+      this.left_brace,
+      this.clauses,
+      this.right_brace);
+  }
+  with_names(names){
+    return new TraitUseConflictResolution(
+      this.keyword,
+      names,
+      this.left_brace,
+      this.clauses,
+      this.right_brace);
+  }
+  with_left_brace(left_brace){
+    return new TraitUseConflictResolution(
+      this.keyword,
+      this.names,
+      left_brace,
+      this.clauses,
+      this.right_brace);
+  }
+  with_clauses(clauses){
+    return new TraitUseConflictResolution(
+      this.keyword,
+      this.names,
+      this.left_brace,
+      clauses,
+      this.right_brace);
+  }
+  with_right_brace(right_brace){
+    return new TraitUseConflictResolution(
+      this.keyword,
+      this.names,
+      this.left_brace,
+      this.clauses,
+      right_brace);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var names = this.names.rewrite(rewriter, new_parents);
+    var left_brace = this.left_brace.rewrite(rewriter, new_parents);
+    var clauses = this.clauses.rewrite(rewriter, new_parents);
+    var right_brace = this.right_brace.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      names === this.names &&
+      left_brace === this.left_brace &&
+      clauses === this.clauses &&
+      right_brace === this.right_brace)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new TraitUseConflictResolution(
+        keyword,
+        names,
+        left_brace,
+        clauses,
+        right_brace), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_keyword, position, source);
+    position += keyword.width;
+    let names = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_names, position, source);
+    position += names.width;
+    let left_brace = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_left_brace, position, source);
+    position += left_brace.width;
+    let clauses = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_clauses, position, source);
+    position += clauses.width;
+    let right_brace = EditableSyntax.from_json(
+      json.trait_use_conflict_resolution_right_brace, position, source);
+    position += right_brace.width;
+    return new TraitUseConflictResolution(
+        keyword,
+        names,
+        left_brace,
+        clauses,
+        right_brace);
+  }
+  get children_keys()
+  {
+    if (TraitUseConflictResolution._children_keys == null)
+      TraitUseConflictResolution._children_keys = [
+        'keyword',
+        'names',
+        'left_brace',
+        'clauses',
+        'right_brace'];
+    return TraitUseConflictResolution._children_keys;
   }
 }
 class TraitUse extends EditableSyntax
@@ -9670,6 +9993,7 @@ class AnonymousFunction extends EditableSyntax
 {
   constructor(
     async_keyword,
+    coroutine_keyword,
     function_keyword,
     left_paren,
     parameters,
@@ -9681,6 +10005,7 @@ class AnonymousFunction extends EditableSyntax
   {
     super('anonymous_function', {
       async_keyword: async_keyword,
+      coroutine_keyword: coroutine_keyword,
       function_keyword: function_keyword,
       left_paren: left_paren,
       parameters: parameters,
@@ -9691,6 +10016,7 @@ class AnonymousFunction extends EditableSyntax
       body: body });
   }
   get async_keyword() { return this.children.async_keyword; }
+  get coroutine_keyword() { return this.children.coroutine_keyword; }
   get function_keyword() { return this.children.function_keyword; }
   get left_paren() { return this.children.left_paren; }
   get parameters() { return this.children.parameters; }
@@ -9702,6 +10028,20 @@ class AnonymousFunction extends EditableSyntax
   with_async_keyword(async_keyword){
     return new AnonymousFunction(
       async_keyword,
+      this.coroutine_keyword,
+      this.function_keyword,
+      this.left_paren,
+      this.parameters,
+      this.right_paren,
+      this.colon,
+      this.type,
+      this.use,
+      this.body);
+  }
+  with_coroutine_keyword(coroutine_keyword){
+    return new AnonymousFunction(
+      this.async_keyword,
+      coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9714,6 +10054,7 @@ class AnonymousFunction extends EditableSyntax
   with_function_keyword(function_keyword){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       function_keyword,
       this.left_paren,
       this.parameters,
@@ -9726,6 +10067,7 @@ class AnonymousFunction extends EditableSyntax
   with_left_paren(left_paren){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       left_paren,
       this.parameters,
@@ -9738,6 +10080,7 @@ class AnonymousFunction extends EditableSyntax
   with_parameters(parameters){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       parameters,
@@ -9750,6 +10093,7 @@ class AnonymousFunction extends EditableSyntax
   with_right_paren(right_paren){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9762,6 +10106,7 @@ class AnonymousFunction extends EditableSyntax
   with_colon(colon){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9774,6 +10119,7 @@ class AnonymousFunction extends EditableSyntax
   with_type(type){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9786,6 +10132,7 @@ class AnonymousFunction extends EditableSyntax
   with_use(use){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9798,6 +10145,7 @@ class AnonymousFunction extends EditableSyntax
   with_body(body){
     return new AnonymousFunction(
       this.async_keyword,
+      this.coroutine_keyword,
       this.function_keyword,
       this.left_paren,
       this.parameters,
@@ -9814,6 +10162,7 @@ class AnonymousFunction extends EditableSyntax
     let new_parents = parents.slice();
     new_parents.push(this);
     var async_keyword = this.async_keyword.rewrite(rewriter, new_parents);
+    var coroutine_keyword = this.coroutine_keyword.rewrite(rewriter, new_parents);
     var function_keyword = this.function_keyword.rewrite(rewriter, new_parents);
     var left_paren = this.left_paren.rewrite(rewriter, new_parents);
     var parameters = this.parameters.rewrite(rewriter, new_parents);
@@ -9824,6 +10173,7 @@ class AnonymousFunction extends EditableSyntax
     var body = this.body.rewrite(rewriter, new_parents);
     if (
       async_keyword === this.async_keyword &&
+      coroutine_keyword === this.coroutine_keyword &&
       function_keyword === this.function_keyword &&
       left_paren === this.left_paren &&
       parameters === this.parameters &&
@@ -9839,6 +10189,7 @@ class AnonymousFunction extends EditableSyntax
     {
       return rewriter(new AnonymousFunction(
         async_keyword,
+        coroutine_keyword,
         function_keyword,
         left_paren,
         parameters,
@@ -9854,6 +10205,9 @@ class AnonymousFunction extends EditableSyntax
     let async_keyword = EditableSyntax.from_json(
       json.anonymous_async_keyword, position, source);
     position += async_keyword.width;
+    let coroutine_keyword = EditableSyntax.from_json(
+      json.anonymous_coroutine_keyword, position, source);
+    position += coroutine_keyword.width;
     let function_keyword = EditableSyntax.from_json(
       json.anonymous_function_keyword, position, source);
     position += function_keyword.width;
@@ -9880,6 +10234,7 @@ class AnonymousFunction extends EditableSyntax
     position += body.width;
     return new AnonymousFunction(
         async_keyword,
+        coroutine_keyword,
         function_keyword,
         left_paren,
         parameters,
@@ -9894,6 +10249,7 @@ class AnonymousFunction extends EditableSyntax
     if (AnonymousFunction._children_keys == null)
       AnonymousFunction._children_keys = [
         'async_keyword',
+        'coroutine_keyword',
         'function_keyword',
         'left_paren',
         'parameters',
@@ -10013,23 +10369,35 @@ class LambdaExpression extends EditableSyntax
 {
   constructor(
     async,
+    coroutine,
     signature,
     arrow,
     body)
   {
     super('lambda_expression', {
       async: async,
+      coroutine: coroutine,
       signature: signature,
       arrow: arrow,
       body: body });
   }
   get async() { return this.children.async; }
+  get coroutine() { return this.children.coroutine; }
   get signature() { return this.children.signature; }
   get arrow() { return this.children.arrow; }
   get body() { return this.children.body; }
   with_async(async){
     return new LambdaExpression(
       async,
+      this.coroutine,
+      this.signature,
+      this.arrow,
+      this.body);
+  }
+  with_coroutine(coroutine){
+    return new LambdaExpression(
+      this.async,
+      coroutine,
       this.signature,
       this.arrow,
       this.body);
@@ -10037,6 +10405,7 @@ class LambdaExpression extends EditableSyntax
   with_signature(signature){
     return new LambdaExpression(
       this.async,
+      this.coroutine,
       signature,
       this.arrow,
       this.body);
@@ -10044,6 +10413,7 @@ class LambdaExpression extends EditableSyntax
   with_arrow(arrow){
     return new LambdaExpression(
       this.async,
+      this.coroutine,
       this.signature,
       arrow,
       this.body);
@@ -10051,6 +10421,7 @@ class LambdaExpression extends EditableSyntax
   with_body(body){
     return new LambdaExpression(
       this.async,
+      this.coroutine,
       this.signature,
       this.arrow,
       body);
@@ -10062,11 +10433,13 @@ class LambdaExpression extends EditableSyntax
     let new_parents = parents.slice();
     new_parents.push(this);
     var async = this.async.rewrite(rewriter, new_parents);
+    var coroutine = this.coroutine.rewrite(rewriter, new_parents);
     var signature = this.signature.rewrite(rewriter, new_parents);
     var arrow = this.arrow.rewrite(rewriter, new_parents);
     var body = this.body.rewrite(rewriter, new_parents);
     if (
       async === this.async &&
+      coroutine === this.coroutine &&
       signature === this.signature &&
       arrow === this.arrow &&
       body === this.body)
@@ -10077,6 +10450,7 @@ class LambdaExpression extends EditableSyntax
     {
       return rewriter(new LambdaExpression(
         async,
+        coroutine,
         signature,
         arrow,
         body), parents);
@@ -10087,6 +10461,9 @@ class LambdaExpression extends EditableSyntax
     let async = EditableSyntax.from_json(
       json.lambda_async, position, source);
     position += async.width;
+    let coroutine = EditableSyntax.from_json(
+      json.lambda_coroutine, position, source);
+    position += coroutine.width;
     let signature = EditableSyntax.from_json(
       json.lambda_signature, position, source);
     position += signature.width;
@@ -10098,6 +10475,7 @@ class LambdaExpression extends EditableSyntax
     position += body.width;
     return new LambdaExpression(
         async,
+        coroutine,
         signature,
         arrow,
         body);
@@ -10107,6 +10485,7 @@ class LambdaExpression extends EditableSyntax
     if (LambdaExpression._children_keys == null)
       LambdaExpression._children_keys = [
         'async',
+        'coroutine',
         'signature',
         'arrow',
         'body'];
@@ -13331,22 +13710,33 @@ class AwaitableCreationExpression extends EditableSyntax
 {
   constructor(
     async,
+    coroutine,
     compound_statement)
   {
     super('awaitable_creation_expression', {
       async: async,
+      coroutine: coroutine,
       compound_statement: compound_statement });
   }
   get async() { return this.children.async; }
+  get coroutine() { return this.children.coroutine; }
   get compound_statement() { return this.children.compound_statement; }
   with_async(async){
     return new AwaitableCreationExpression(
       async,
+      this.coroutine,
+      this.compound_statement);
+  }
+  with_coroutine(coroutine){
+    return new AwaitableCreationExpression(
+      this.async,
+      coroutine,
       this.compound_statement);
   }
   with_compound_statement(compound_statement){
     return new AwaitableCreationExpression(
       this.async,
+      this.coroutine,
       compound_statement);
   }
   rewrite(rewriter, parents)
@@ -13356,9 +13746,11 @@ class AwaitableCreationExpression extends EditableSyntax
     let new_parents = parents.slice();
     new_parents.push(this);
     var async = this.async.rewrite(rewriter, new_parents);
+    var coroutine = this.coroutine.rewrite(rewriter, new_parents);
     var compound_statement = this.compound_statement.rewrite(rewriter, new_parents);
     if (
       async === this.async &&
+      coroutine === this.coroutine &&
       compound_statement === this.compound_statement)
     {
       return rewriter(this, parents);
@@ -13367,6 +13759,7 @@ class AwaitableCreationExpression extends EditableSyntax
     {
       return rewriter(new AwaitableCreationExpression(
         async,
+        coroutine,
         compound_statement), parents);
     }
   }
@@ -13375,11 +13768,15 @@ class AwaitableCreationExpression extends EditableSyntax
     let async = EditableSyntax.from_json(
       json.awaitable_async, position, source);
     position += async.width;
+    let coroutine = EditableSyntax.from_json(
+      json.awaitable_coroutine, position, source);
+    position += coroutine.width;
     let compound_statement = EditableSyntax.from_json(
       json.awaitable_compound_statement, position, source);
     position += compound_statement.width;
     return new AwaitableCreationExpression(
         async,
+        coroutine,
         compound_statement);
   }
   get children_keys()
@@ -13387,6 +13784,7 @@ class AwaitableCreationExpression extends EditableSyntax
     if (AwaitableCreationExpression._children_keys == null)
       AwaitableCreationExpression._children_keys = [
         'async',
+        'coroutine',
         'compound_statement'];
     return AwaitableCreationExpression._children_keys;
   }
@@ -14684,6 +15082,110 @@ class KeysetTypeSpecifier extends EditableSyntax
         'type',
         'right_angle'];
     return KeysetTypeSpecifier._children_keys;
+  }
+}
+class TupleTypeExplicitSpecifier extends EditableSyntax
+{
+  constructor(
+    keyword,
+    left_angle,
+    types,
+    right_angle)
+  {
+    super('tuple_type_explicit_specifier', {
+      keyword: keyword,
+      left_angle: left_angle,
+      types: types,
+      right_angle: right_angle });
+  }
+  get keyword() { return this.children.keyword; }
+  get left_angle() { return this.children.left_angle; }
+  get types() { return this.children.types; }
+  get right_angle() { return this.children.right_angle; }
+  with_keyword(keyword){
+    return new TupleTypeExplicitSpecifier(
+      keyword,
+      this.left_angle,
+      this.types,
+      this.right_angle);
+  }
+  with_left_angle(left_angle){
+    return new TupleTypeExplicitSpecifier(
+      this.keyword,
+      left_angle,
+      this.types,
+      this.right_angle);
+  }
+  with_types(types){
+    return new TupleTypeExplicitSpecifier(
+      this.keyword,
+      this.left_angle,
+      types,
+      this.right_angle);
+  }
+  with_right_angle(right_angle){
+    return new TupleTypeExplicitSpecifier(
+      this.keyword,
+      this.left_angle,
+      this.types,
+      right_angle);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var left_angle = this.left_angle.rewrite(rewriter, new_parents);
+    var types = this.types.rewrite(rewriter, new_parents);
+    var right_angle = this.right_angle.rewrite(rewriter, new_parents);
+    if (
+      keyword === this.keyword &&
+      left_angle === this.left_angle &&
+      types === this.types &&
+      right_angle === this.right_angle)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new TupleTypeExplicitSpecifier(
+        keyword,
+        left_angle,
+        types,
+        right_angle), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let keyword = EditableSyntax.from_json(
+      json.tuple_type_keyword, position, source);
+    position += keyword.width;
+    let left_angle = EditableSyntax.from_json(
+      json.tuple_type_left_angle, position, source);
+    position += left_angle.width;
+    let types = EditableSyntax.from_json(
+      json.tuple_type_types, position, source);
+    position += types.width;
+    let right_angle = EditableSyntax.from_json(
+      json.tuple_type_right_angle, position, source);
+    position += right_angle.width;
+    return new TupleTypeExplicitSpecifier(
+        keyword,
+        left_angle,
+        types,
+        right_angle);
+  }
+  get children_keys()
+  {
+    if (TupleTypeExplicitSpecifier._children_keys == null)
+      TupleTypeExplicitSpecifier._children_keys = [
+        'keyword',
+        'left_angle',
+        'types',
+        'right_angle'];
+    return TupleTypeExplicitSpecifier._children_keys;
   }
 }
 class VarrayTypeSpecifier extends EditableSyntax
@@ -16918,6 +17420,7 @@ exports.CloneToken = CloneToken;
 exports.ConstToken = ConstToken;
 exports.ConstructToken = ConstructToken;
 exports.ContinueToken = ContinueToken;
+exports.CoroutineToken = CoroutineToken;
 exports.DarrayToken = DarrayToken;
 exports.DefaultToken = DefaultToken;
 exports.DefineToken = DefineToken;
@@ -16975,6 +17478,7 @@ exports.ShapeToken = ShapeToken;
 exports.StaticToken = StaticToken;
 exports.StringToken = StringToken;
 exports.SuperToken = SuperToken;
+exports.SuspendToken = SuspendToken;
 exports.SwitchToken = SwitchToken;
 exports.ThisToken = ThisToken;
 exports.ThrowToken = ThrowToken;
@@ -17113,6 +17617,7 @@ exports.PropertyDeclaration = PropertyDeclaration;
 exports.PropertyDeclarator = PropertyDeclarator;
 exports.NamespaceDeclaration = NamespaceDeclaration;
 exports.NamespaceBody = NamespaceBody;
+exports.NamespaceEmptyBody = NamespaceEmptyBody;
 exports.NamespaceUseDeclaration = NamespaceUseDeclaration;
 exports.NamespaceGroupUseDeclaration = NamespaceGroupUseDeclaration;
 exports.NamespaceUseClause = NamespaceUseClause;
@@ -17123,6 +17628,8 @@ exports.WhereConstraint = WhereConstraint;
 exports.MethodishDeclaration = MethodishDeclaration;
 exports.ClassishDeclaration = ClassishDeclaration;
 exports.ClassishBody = ClassishBody;
+exports.TraitUseConflictResolutionItem = TraitUseConflictResolutionItem;
+exports.TraitUseConflictResolution = TraitUseConflictResolution;
 exports.TraitUse = TraitUse;
 exports.RequireClause = RequireClause;
 exports.ConstDeclaration = ConstDeclaration;
@@ -17217,6 +17724,7 @@ exports.XHPClose = XHPClose;
 exports.TypeConstant = TypeConstant;
 exports.VectorTypeSpecifier = VectorTypeSpecifier;
 exports.KeysetTypeSpecifier = KeysetTypeSpecifier;
+exports.TupleTypeExplicitSpecifier = TupleTypeExplicitSpecifier;
 exports.VarrayTypeSpecifier = VarrayTypeSpecifier;
 exports.VectorArrayTypeSpecifier = VectorArrayTypeSpecifier;
 exports.TypeParameter = TypeParameter;

@@ -21,6 +21,7 @@
 #include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/strings.h"
+#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/type-structure.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/globals-array.h"
@@ -365,6 +366,23 @@ Class* Class::rescope(Class* ctx, Attr attrs /* = AttrNone */) {
   return fermeture.get();
 }
 
+EnumValues* Class::setEnumValues(EnumValues* values) {
+  auto extra = m_extra.ensureAllocated();
+  EnumValues* expected = nullptr;
+  if (!extra->m_enumValues.compare_exchange_strong(
+        expected, values, std::memory_order_relaxed)) {
+    // Already set by someone else, use theirs.
+    delete values;
+    return expected;
+  } else {
+    return values;
+  }
+}
+
+Class::ExtraData::~ExtraData() {
+  delete m_enumValues.load(std::memory_order_relaxed);
+}
+
 void Class::destroy() {
   /*
    * If we were never put on NamedEntity::classList, or
@@ -389,6 +407,20 @@ void Class::destroy() {
    */
   auto const pcls = m_preClass.get();
   pcls->namedEntity()->removeClass(this);
+
+  if (m_sPropCache) {
+    // Other threads find this class via rds::s_handleTable.
+    // Remove our sprop entries before the treadmill delay.
+    for (Slot i = 0, n = numStaticProperties(); i < n; ++i) {
+      if (m_staticProperties[i].cls == this) {
+        auto const &link = m_sPropCache[i];
+        if (link.bound()) {
+          rds::unbind(rds::SPropCache{this, i}, link.handle());
+        }
+      }
+    }
+  }
+
   Treadmill::enqueue(
     [this] {
       releaseRefs();
@@ -566,23 +598,47 @@ Class::Avail Class::avail(Class*& parent,
     }
   }
 
-  for (size_t i = 0, n = m_extra->m_usedTraits.size(); i < n; ++i) {
-    auto usedTrait = m_extra->m_usedTraits.at(i).get();
-    const StringData* usedTraitName = m_preClass.get()->usedTraits()[i];
-    PreClass* ptrait = usedTrait->m_preClass.get();
-    Class* trait = Unit::getClass(ptrait->namedEntity(), usedTraitName,
-                                  tryAutoload);
-    if (trait != usedTrait) {
-      if (trait == nullptr) {
-        parent = usedTrait;
-        return Avail::Fail;
+  if (RuntimeOption::RepoAuthoritative) {
+    if (m_preClass->usedTraits().size()) {
+      int numIfaces = m_interfaces.size();
+      for (int i = 0; i < numIfaces; i++) {
+        auto di = m_interfaces[i].get();
+
+        PreClass *pint = di->m_preClass.get();
+        Class* interface = Unit::getClass(pint->namedEntity(), pint->name(),
+                                          tryAutoload);
+        if (interface != di) {
+          if (interface == nullptr) {
+            parent = di;
+            return Avail::Fail;
+          }
+          if (UNLIKELY(di->isZombie())) {
+            const_cast<Class*>(this)->destroy();
+          }
+          return Avail::False;
+        }
       }
-      if (UNLIKELY(usedTrait->isZombie())) {
-        const_cast<Class*>(this)->destroy();
+    }
+  } else {
+    for (size_t i = 0, n = m_extra->m_usedTraits.size(); i < n; ++i) {
+      auto usedTrait = m_extra->m_usedTraits.at(i).get();
+      const StringData* usedTraitName = m_preClass.get()->usedTraits()[i];
+      PreClass* ptrait = usedTrait->m_preClass.get();
+      Class* trait = Unit::getClass(ptrait->namedEntity(), usedTraitName,
+                                    tryAutoload);
+      if (trait != usedTrait) {
+        if (trait == nullptr) {
+          parent = usedTrait;
+          return Avail::Fail;
+        }
+        if (UNLIKELY(usedTrait->isZombie())) {
+          const_cast<Class*>(this)->destroy();
+        }
+        return Avail::False;
       }
-      return Avail::False;
     }
   }
+
   return Avail::True;
 }
 
@@ -1145,7 +1201,7 @@ Cell Class::clsCnsGet(const StringData* clsCnsName, bool includeTypeCns) const {
 
   // The caller will inc-ref the returned value, so undo the inc-ref caused by
   // storing it in the cache.
-  tvDecRefOnly(&ret);
+  tvDecRefGenNZ(&ret);
   return ret;
 }
 
@@ -1195,8 +1251,9 @@ bool Class::verifyPersistent() const {
   if (m_parent.get() && !classHasPersistentRDS(m_parent.get())) {
     return false;
   }
-  for (auto const& declInterface : declInterfaces()) {
-    if (!classHasPersistentRDS(declInterface.get())) {
+  int numIfaces = m_interfaces.size();
+  for (int i = 0; i < numIfaces; i++) {
+    if (!classHasPersistentRDS(m_interfaces[i])) {
       return false;
     }
   }
@@ -1849,13 +1906,19 @@ void Class::setConstants() {
       }
 
       if (existingConst.cls != iConst.cls) {
-        raise_error("%s cannot inherit the %sconstant %s from %s, because it "
-                    "was previously inherited from %s",
-                    m_preClass->name()->data(),
-                    iConst.isType() ? "type " : "",
-                    iConst.name->data(),
-                    iConst.cls->name()->data(),
-                    existingConst.cls->name()->data());
+        // It's only an error if the constant comes from the declared
+        // interfaces.
+        for (auto const& interface : declInterfaces()) {
+          if (interface.get() == iface) {
+            raise_error("%s cannot inherit the %sconstant %s from %s, because "
+                        "it was previously inherited from %s",
+                        m_preClass->name()->data(),
+                        iConst.isType() ? "type " : "",
+                        iConst.name->data(),
+                        iConst.cls->name()->data(),
+                        existingConst.cls->name()->data());
+          }
+        }
       }
     }
   }
@@ -2525,7 +2588,9 @@ void Class::checkInterfaceMethods() {
  */
 void Class::addInterfacesFromUsedTraits(InterfaceMap::Builder& builder) const {
 
-  for (auto const& trait : m_extra->m_usedTraits) {
+  for (auto const& traitName : m_preClass->usedTraits()) {
+    auto const trait = Unit::lookupClass(traitName);
+    assert(trait->attrs() & AttrTrait);
     int numIfcs = trait->m_interfaces.size();
 
     for (int i = 0; i < numIfcs; i++) {

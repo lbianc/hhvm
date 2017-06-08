@@ -42,6 +42,7 @@ module Phase        = Typing_phase
 module Subst        = Decl_subst
 module ExprDepTy    = Typing_dependent_type.ExprDepTy
 module Conts        = Typing_continuations
+module TCO          = TypecheckerOptions
 
 (*****************************************************************************)
 (* Debugging *)
@@ -204,7 +205,14 @@ let rec check_memoizable env param ty =
   | _, Tarraykind AKany
   | _, Tarraykind AKempty ->
       ()
-  | _, Tarraykind (AKvarray ty | AKvec ty | AKdarray(_, ty) | AKmap(_, ty)) ->
+  | _,
+    Tarraykind (
+      AKvarray ty
+      | AKvec ty
+      | AKdarray(_, ty)
+      | AKdarray_or_varray ty
+      | AKmap(_, ty)
+    ) ->
       check_memoizable env param ty
   | _, Tarraykind (AKshape fdm) ->
       ShapeMap.iter begin fun _ (_, tv) ->
@@ -452,6 +460,8 @@ and block env stl =
 and stmt env = function
   | Fallthrough ->
       env, T.Fallthrough
+  | GotoLabel _
+  | Goto _
   | Noop ->
       env, T.Noop
   | Expr e ->
@@ -650,6 +660,15 @@ and stmt env = function
     end ~init:env in
     let env, tel, _ = exprs env el in
     env, T.Static_var tel
+  | Global_var el ->
+    let env = List.fold_left el ~f:begin fun env e ->
+      match e with
+        | _, Binop (Ast.Eq _, (_, Lvar (p, x)), _) ->
+          Env.add_todo env (TGen.no_generic p x)
+        | _ -> env
+    end ~init:env in
+    let env, tel, _ = exprs env el in
+    env, T.Global_var tel
   | Throw (is_terminal, e) ->
     let p = fst e in
     let env, te, ty = expr env e in
@@ -968,11 +987,19 @@ and expr_
     let env, supertype = compute_supertype env tys in
     env, exprs, supertype in
 
+  let shape_and_tuple_arrays_enabled =
+    not @@
+      TypecheckerOptions.experimental_feature_enabled
+        (Env.get_options env)
+        TypecheckerOptions.experimental_disable_shape_and_tuple_arrays in
+
   match e with
   | Any -> expr_error env (Reason.Rwitness p)
   | Array [] ->
     make_result env (T.Array []) (Reason.Rwitness p, Tarraykind AKempty)
-  | Array l when Typing_arrays.is_shape_like_array env l ->
+  | Array l
+    when Typing_arrays.is_shape_like_array env l &&
+      shape_and_tuple_arrays_enabled ->
       let env, (tafl, fdm) = List.fold_left_env env l
         ~init:([], ShapeMap.empty)
         ~f:begin fun env (tafl,fdm) x ->
@@ -988,14 +1015,21 @@ and expr_
         | Nast.AFvalue _ -> true
         | Nast.AFkvalue _ -> false in
       if fields_consistent && is_vec then
-        let env, tel, fields =
-          List.foldi l ~f:begin fun index (env, tel, acc) e ->
-            let env, te, ty = aktuple_field env e in
-            env, te::tel, IMap.add index ty acc
-          end ~init:(env, [], IMap.empty) in
-         make_result env
-           (T.Array (List.map (List.rev tel) (fun e -> T.AFvalue e)))
-           (Reason.Rwitness p, Tarraykind (AKtuple fields))
+        let env, tel, arraykind =
+          if shape_and_tuple_arrays_enabled then
+            let env, tel, fields =
+              List.foldi l ~f:begin fun index (env, tel, acc) e ->
+                let env, te, ty = aktuple_field env e in
+                env, te::tel, IMap.add index ty acc
+              end ~init:(env, [], IMap.empty) in
+            env, tel, AKtuple fields
+          else
+            let env, tel, value_ty =
+              compute_exprs_and_supertype env l array_field_value in
+            env, tel, AKvec value_ty in
+        make_result env
+          (T.Array (List.map (List.rev tel) (fun e -> T.AFvalue e)))
+          (Reason.Rwitness p, Tarraykind arraykind)
       else
       let env, value_exprs_and_tys = List.rev_map_env env l array_field_value in
       let tvl, value_tys = List.unzip value_exprs_and_tys in
@@ -1067,6 +1101,9 @@ and expr_
         (Reason.Rwitness p, ty)
   | Clone e ->
     let env, te, ty = expr env e in
+    (* Clone only works on objects; anything else fatals at runtime *)
+    let tobj = (Reason.Rwitness p, Tobject) in
+    let env = Type.sub_type p Reason.URclone env ty tobj in
     make_result env (T.Clone te) ty
   | This when Env.is_static env ->
       Errors.this_in_static p;
@@ -1543,7 +1580,9 @@ and expr_
         new_object ~check_not_abstract p env c el uel in
       let env = Env.forget_members env p in
       make_result env (T.New(tc, tel, tuel)) (ExprDepTy.make env c ty)
-  | Cast ((_, Harray (None, None)), _) when Env.is_strict env ->
+  | Cast ((_, Harray (None, None)), _)
+    when Env.is_strict env
+    || TCO.migration_flag_enabled (Env.get_tcopt env) "array_cast" ->
       Errors.array_cast p;
       expr_error env (Reason.Rwitness p)
   | Cast (hint, e) ->
@@ -2010,8 +2049,9 @@ let make_result env te1 ty1 = (env, T.make_typed_expr p ty1 te1, ty1) in
               env, te
             end in
             make_result env (T.List tel) ty2
-          (* array<t> *)
-          | (_, Tarraykind (AKvec elt_type)) ->
+          (* array<t> or varray<t> *)
+          | (_, Tarraykind (AKvec elt_type))
+          | (_, Tarraykind (AKvarray elt_type)) ->
             let env, tel = List.map_env env el begin fun env e ->
               let env, te, _ = assign (fst e) env e elt_type in
               env, te
@@ -2230,6 +2270,7 @@ and call_parent_construct pos env el uel =
         | Tarray (_, _)
         | Tdarray (_, _)
         | Tvarray _
+        | Tdarray_or_varray _
         | Tgeneric _
         | Toption _
         | Tprim _
@@ -2315,6 +2356,9 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
        Errors.unpacking_disallowed_builtin_function p pseudo_func;
      let env = if Env.is_strict env then
        (match el, uel with
+         | [(_, Array_get ((_, Class_const _), Some _))], [] ->
+           Errors.const_mutation p Pos.none "";
+           env
          | [(_, Array_get (ea, Some _))], [] ->
            let env, _te, ty = expr env ea in
            if List.exists ~f:(fun super -> SubType.is_sub_type env ty super) [
@@ -2373,7 +2417,7 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
         | (_, Tarraykind (AKtuple _)) ->
             let env, ty = Typing_arrays.downcast_aktypes env ty in
             get_array_filter_return_type env ty
-        | (r, Tarraykind (AKvec tv)) ->
+        | (r, Tarraykind (AKvec tv | AKvarray tv)) ->
             let env, tv = get_value_type env tv in
             env, (r, Tarraykind (AKvec tv))
         | (r, Tunresolved x) ->
@@ -2501,7 +2545,7 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
               | (_, Tarraykind (AKtuple _ )) ->
                 let env, x = Typing_arrays.downcast_aktypes env x in
                 build_output_container env x
-              | (r, Tarraykind AKvec _) ->
+              | (r, Tarraykind (AKvec _ | AKvarray _)) ->
                 env, (fun tr -> (r, Tarraykind (AKvec(tr))) )
               | ((_, Tany) as any) ->
                 env, (fun _ -> any)
@@ -2576,6 +2620,7 @@ and dispatch_call p env call_type (fpos, fun_expr as e) el uel =
       (* Directly call get_fun so that we can muck with the type before
        * instantiation -- much easier to work in terms of Tgeneric Tk/Tv than
        * trying to figure out which Tvar is which. *)
+      Typing_hooks.dispatch_fun_id_hook (p, SN.FB.idx);
       (match Env.get_fun env (snd id) with
       | Some fty ->
         let param1, (name2, (r2, _)), (name3, (r3, _)) =
@@ -2810,6 +2855,10 @@ and array_get is_lvalue p env ty1 e2 ty2 =
       let ty1 = Reason.Ridx (fst e2, fst ety1), Tprim Tint in
       let env = Type.sub_type p Reason.index_array env ty2 ty1 in
       env, ty
+  | Tarraykind (AKdarray_or_varray ty) ->
+      let ty1 = Reason.Rdarray_or_varray_key p, Tprim Tarraykey in
+      let env = Type.sub_type p Reason.index_array env ty2 ty1 in
+      env, ty
   | Tclass ((_, cn) as id, argl)
     when cn = SN.Collections.cVector
     || cn = SN.Collections.cVec ->
@@ -2965,7 +3014,7 @@ and array_get is_lvalue p env ty1 e2 ty2 =
           Errors.undefined_field
             p (TUtils.get_printable_shape_field_name field);
           env, (Reason.Rwitness p, Terr)
-        | Some { sft_optional = true; _ } ->
+        | Some { sft_optional = true; _ } when not is_lvalue ->
           let declared_field =
               List.find_exn
                 ~f:(fun x -> Ast.ShapeField.compare field x = 0)
@@ -2977,7 +3026,7 @@ and array_get is_lvalue p env ty1 e2 ty2 =
             declaration_pos
             (TUtils.get_printable_shape_field_name field);
           env, (Reason.Rwitness p, Terr)
-        | Some { sft_optional = false; sft_ty } -> env, sft_ty)
+        | Some { sft_optional = _; sft_ty } -> env, sft_ty)
     )
   | Toption _ ->
       Errors.null_container p
@@ -3281,8 +3330,8 @@ and obj_get_concrete_ty ~is_method env concrete_ty class_id
               (fun _ -> Reason.Rwitness id_pos, Tany)
           else paraml in
         let member_info = Env.get_member is_method env class_info id_str in
-        Typing_hooks.dispatch_cmethod_hook class_info paraml id env None
-          ~is_method;
+        Typing_hooks.dispatch_cmethod_hook class_info paraml id env
+          (Some class_id) ~is_method;
 
         match member_info with
         | None when not is_method ->
@@ -3842,7 +3891,7 @@ and unop p env uop te ty =
     env, T.make_typed_expr p result_ty (T.Unop(uop, te)), result_ty in
   match uop with
   | Ast.Unot ->
-      Async.enforce_not_awaitable env p ty;
+      Async.enforce_nullable_or_not_awaitable env p ty;
       (* !$x (logical not) works with any type, so we just return Tbool *)
       make_result env te (Reason.Rlogic_ret p, Tprim Tbool)
   | Ast.Utild ->
@@ -3864,6 +3913,12 @@ and unop p env uop te ty =
       (* We basically just ignore references in non-strict files *)
       if Env.is_strict env then
         Errors.reference_expr p;
+      make_result env te ty
+  | Ast.Usplat ->
+      (* TODO(13988978) Splat operator not supported at use sites yet. *)
+      make_result env te ty
+  | Ast.Usilence ->
+      (* Silencing does not change the type *)
       make_result env te ty
 
 and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
@@ -4030,7 +4085,8 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
       if not in_cond
       then Typing_equality_check.assert_nontrivial p bop env ty1 ty2;
       make_result env te1 te2 (Reason.Rcomp p, Tprim Tbool)
-  | Ast.Lt | Ast.Lte | Ast.Gt | Ast.Gte ->
+  | Ast.Lt | Ast.Lte | Ast.Gt | Ast.Gte | Ast.Cmp ->
+      let ty_result = match bop with Ast.Cmp -> Tprim Tint | _ -> Tprim Tbool in
       let ty_num = (Reason.Rcomp p, Tprim Nast.Tnum) in
       let ty_string = (Reason.Rcomp p, Tprim Nast.Tstring) in
       let ty_datetime =
@@ -4043,7 +4099,7 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
        *   function(DateTime, DateTime): bool
        *)
       if both_sub ty_num || both_sub ty_string || both_sub ty_datetime
-      then make_result env te1 te2 (Reason.Rcomp p, Tprim Tbool)
+      then make_result env te1 te2 (Reason.Rcomp p, ty_result)
       else
         (* TODO this is questionable; PHP's semantics for conversions with "<"
          * are pretty crazy and we may want to just disallow this? *)
@@ -4051,7 +4107,7 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
          *   function<T>(T, T): bool
          *)
         let env, _ = Type.unify p Reason.URnone env ty1 ty2 in
-        make_result env te1 te2 (Reason.Rcomp p, Tprim Tbool)
+        make_result env te1 te2 (Reason.Rcomp p, ty_result)
   | Ast.Dot ->
     (* A bit weird, this one:
      *   function(Stringish | string, Stringish | string) : string)
@@ -4137,7 +4193,7 @@ and condition_isset env = function
 and condition env tparamet =
   let expr env x =
     let env, _te, ty = raw_expr ~in_cond:true env x in
-    Async.enforce_not_awaitable env (fst x) ty;
+    Async.enforce_nullable_or_not_awaitable env (fst x) ty;
     env, ty
   in function
   | _, Expr_list [] -> env
@@ -4285,7 +4341,7 @@ and condition env tparamet =
 
         if SubType.is_sub_type env obj_ty (
           Reason.none, Tclass ((Pos.none, SN.Classes.cAwaitable), [Reason.none, Tany])
-        ) then () else Async.enforce_not_awaitable env (fst ivar) x_ty;
+        ) then () else Async.enforce_nullable_or_not_awaitable env (fst ivar) x_ty;
 
       let safe_instanceof_enabled =
         TypecheckerOptions.experimental_feature_enabled
@@ -4694,6 +4750,7 @@ and check_extend_abstract_const ~is_final p smap =
         | Tarray (_, _)
         | Tdarray (_, _)
         | Tvarray _
+        | Tdarray_or_varray _
         | Toption _
         | Tprim _
         | Tfun _

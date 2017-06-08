@@ -22,7 +22,6 @@
 
 #include <folly/Likely.h>
 
-#include "hphp/runtime/base/cap-code.h"
 #include "hphp/runtime/base/countable.h"
 #include "hphp/runtime/base/member-lval.h"
 #include "hphp/runtime/base/memory-manager.h"
@@ -102,15 +101,18 @@ public:
   /**
    * Create a new ArrayData with specified array element(s).
    */
-  static ArrayData *Create();
-  static ArrayData *Create(const Variant& value);
-  static ArrayData *Create(const Variant& name, const Variant& value);
-  static ArrayData *CreateRef(Variant& value);
-  static ArrayData *CreateRef(const Variant& name, Variant& value);
+  static ArrayData* Create();
+  static ArrayData* Create(TypedValue value);
+  static ArrayData* Create(const Variant& value);
+  static ArrayData* Create(TypedValue name, TypedValue value);
+  static ArrayData* Create(const Variant& name, TypedValue value);
+  static ArrayData* Create(const Variant& name, const Variant& value);
+  static ArrayData* CreateRef(Variant& value);
+  static ArrayData* CreateRef(const Variant& name, Variant& value);
 
-  static ArrayData *CreateVec();
-  static ArrayData *CreateDict();
-  static ArrayData *CreateKeyset();
+  static ArrayData* CreateVec();
+  static ArrayData* CreateDict();
+  static ArrayData* CreateKeyset();
 
   /*
    * Called to return an ArrayData to the request heap.  This is
@@ -140,15 +142,8 @@ public:
    */
   bool useWeakKeys() const { return isPHPArray(); }
 
-  bool convertKey(const StringData* key, int64_t& i) const;
-
-  /*
-   * Return the capacity stored in the header. Not to be confused
-   * with MixedArray::capacity
-   */
-  uint32_t cap() const {
-    return aux<CapCode>().decode();
-  }
+  bool convertKey(const StringData* key, int64_t& i,
+                  bool notice = RuntimeOption::EvalHackArrCompatNotices) const;
 
   /**
    * Number of elements this array has.
@@ -196,6 +191,8 @@ public:
 
   bool isPHPArray() const { return kind() < kDictKind; }
   bool isHackArray() const { return kind() >= kDictKind; }
+
+  bool isVArray() const { return isPacked() || isEmptyArray(); }
 
   DataType toDataType() const {
     auto const k = kind();
@@ -267,6 +264,7 @@ public:
    */
   member_lval lval(int64_t k, bool copy);
   member_lval lval(StringData* k, bool copy);
+  member_lval lval(Cell k, bool copy);
   member_lval lvalRef(int64_t k, bool copy);
   member_lval lvalRef(StringData* k, bool copy);
 
@@ -304,6 +302,8 @@ public:
    */
   ArrayData *add(int64_t k, const Variant& v, bool copy);
   ArrayData *add(StringData* k, const Variant& v, bool copy);
+  ArrayData *add(int64_t k, Cell v, bool copy);
+  ArrayData *add(StringData* k, Cell v, bool copy);
 
   /**
    * Remove a value at specified key. If "copy" is true, make a copy first
@@ -328,12 +328,17 @@ public:
   member_lval lval(const Variant& k, bool copy);
   member_lval lvalRef(const String& k, bool copy);
   member_lval lvalRef(const Variant& k, bool copy);
+  ArrayData *set(Cell k, Cell v, bool copy);
+  ArrayData *set(const String& k, Cell v, bool copy);
   ArrayData *set(const String& k, const Variant& v, bool copy);
   ArrayData *set(const Variant& k, const Variant& v, bool copy);
+  ArrayData *set(const StringData*, Cell, bool) = delete;
   ArrayData *set(const StringData*, const Variant&, bool) = delete;
   ArrayData *setRef(const String& k, Variant& v, bool copy);
   ArrayData *setRef(const Variant& k, Variant& v, bool copy);
   ArrayData *setRef(const StringData*, Variant&, bool) = delete;
+  ArrayData *add(Cell k, Cell v, bool copy);
+  ArrayData *add(const String& k, Cell v, bool copy);
   ArrayData *add(const String& k, const Variant& v, bool copy);
   ArrayData *add(const Variant& k, const Variant& v, bool copy);
   ArrayData *remove(const String& k, bool copy);
@@ -393,6 +398,7 @@ public:
   /**
    * Similar to append(v, copy), with reference in v preserved.
    */
+  ArrayData* appendWithRef(TypedValue v, bool copy);
   ArrayData* appendWithRef(const Variant& v, bool copy);
 
   ArrayData* plusEq(const ArrayData* elems);
@@ -420,6 +426,8 @@ public:
   ArrayData* toDict(bool copy);
   ArrayData* toVec(bool copy);
   ArrayData* toKeyset(bool copy);
+
+  ArrayData* toVArray(bool copy);
 
   /**
    * Only map classes need this. Re-index all numeric keys to start from 0.
@@ -518,8 +526,9 @@ protected:
   static const Variant& getNotFound(const String& k);
   static const Variant& getNotFound(const Variant& k);
 
-  static bool IsValidKey(const String& k);
+  static bool IsValidKey(Cell k);
   static bool IsValidKey(const Variant& k);
+  static bool IsValidKey(const String& k);
   static bool IsValidKey(const StringData* k) { return k; }
 
 protected:
@@ -660,7 +669,7 @@ struct ArrayFunctions {
   ArrayData* (*copyStatic[NK])(const ArrayData*);
   ArrayData* (*append[NK])(ArrayData*, Cell v, bool copy);
   ArrayData* (*appendRef[NK])(ArrayData*, Variant& v, bool copy);
-  ArrayData* (*appendWithRef[NK])(ArrayData*, const Variant& v, bool copy);
+  ArrayData* (*appendWithRef[NK])(ArrayData*, TypedValue v, bool copy);
   ArrayData* (*plusEq[NK])(ArrayData*, const ArrayData* elems);
   ArrayData* (*merge[NK])(ArrayData*, const ArrayData* elems);
   ArrayData* (*pop[NK])(ArrayData*, Variant& value);
@@ -676,6 +685,7 @@ struct ArrayFunctions {
   ArrayData* (*toDict[NK])(ArrayData*, bool);
   ArrayData* (*toVec[NK])(ArrayData*, bool);
   ArrayData* (*toKeyset[NK])(ArrayData*, bool);
+  ArrayData* (*toVArray[NK])(ArrayData*, bool);
 };
 
 extern const ArrayFunctions g_array_funcs;

@@ -22,6 +22,7 @@
 #include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-util.h"
+#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/type-structure.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
@@ -690,7 +691,7 @@ String HHVM_FUNCTION(hphp_get_original_class_name, const String& name) {
 [[noreturn]]
 void Reflection::ThrowReflectionExceptionObject(const Variant& message) {
   Object inst{s_ReflectionExceptionClass};
-  tvRefcountedDecRef(
+  tvDecRefGen(
     g_context->invokeFunc(s_ReflectionExceptionClass->getCtor(),
                           make_packed_array(message),
                           inst.get())
@@ -898,7 +899,7 @@ static Array get_function_param_info(const Func* func) {
       }
       param.set(s_attributes, VarNR(userAttrs));
     }
-    ai.append(VarNR(param));
+    ai.append(VarNR(param).tv());
   }
 
   auto arr = ai.toArray();
@@ -977,7 +978,7 @@ static Array get_function_user_attributes(const Func* func) {
 
   ArrayInit ai(userAttrs.size(), ArrayInit::Mixed{});
   for (auto it = userAttrs.begin(); it != userAttrs.end(); ++it) {
-    ai.set(VarNR::MakeKey(String(StrNR(it->first))), tvAsCVarRef(&it->second));
+    ai.set(VarNR::MakeKey(StrNR(it->first).asString()).tv(), it->second);
   }
   return ai.toArray();
 }
@@ -1340,7 +1341,7 @@ static Array get_trait_alias_info(const Class* cls) {
     ArrayInit ai(aliases.size(), ArrayInit::Map{});
 
     for (auto const& namePair : aliases) {
-      ai.set(StrNR(namePair.first), VarNR(namePair.second));
+      ai.set(StrNR(namePair.first), VarNR(namePair.second).tv());
     }
     return ai.toArray();
   } else {
@@ -1353,7 +1354,7 @@ static Array get_trait_alias_info(const Class* cls) {
 
     for (auto const& rule : rules) {
       auto namePair = rule.asNamePair();
-      ai.set(StrNR(namePair.first), VarNR(namePair.second));
+      ai.set(StrNR(namePair.first), VarNR(namePair.second).tv());
     }
     return ai.toArray();
   }
@@ -1660,10 +1661,10 @@ static Array HHVM_METHOD(ReflectionClass, getClassPropertyInfo) {
   }
 
   ArrayInit ret(4, ArrayInit::Mixed{});
-  ret.set(s_properties, VarNR(arrProp));
-  ret.set(s_private_properties, VarNR(arrPriv));
-  ret.set(s_properties_index, VarNR(arrIdx));
-  ret.set(s_private_properties_index, VarNR(arrPrivIdx));
+  ret.set(s_properties, VarNR(arrProp).tv());
+  ret.set(s_private_properties, VarNR(arrPriv).tv());
+  ret.set(s_properties_index, VarNR(arrIdx).tv());
+  ret.set(s_private_properties_index, VarNR(arrPrivIdx).tv());
   return ret.toArray();
 }
 
@@ -1681,7 +1682,7 @@ static Array HHVM_METHOD(ReflectionClass, getDynamicPropertyInfos,
   for (ArrayIter it(dynPropArray); !it.end(); it.next()) {
     Array info = Array::Create();
     set_dyn_prop_info(info, it.first(), cls->name());
-    ret.setValidKey(it.first(), VarNR(info));
+    ret.setValidKey(*it.first().asTypedValue(), VarNR(info).tv());
   }
   return ret.toArray();
 }

@@ -117,7 +117,7 @@ Array HashCollection::toKeysArray() {
       ai.append(int64_t{e->ikey});
     } else {
       assert(e->hasStrKey());
-      ai.append(VarNR(e->skey));
+      ai.append(VarNR(e->skey).tv());
     }
   }
   return ai.toArray();
@@ -184,7 +184,7 @@ void HashCollection::reserve(int64_t sz) {
     }
     // Fast path: The requested capacity is greater than the current capacity.
     // Grow to the smallest allowed capacity that is sufficient.
-    grow(computeScaleFromSize(sz));
+    grow(MixedArray::computeScaleFromSize(sz));
     assert(canMutateBuffer());
     return;
   }
@@ -308,13 +308,14 @@ void HashCollection::shrink(uint32_t oldCap /* = 0 */) {
     auto data = mixedData(arr);
     m_arr = arr;
     auto table = (int32_t*)(data + size_t(newCap));
-    m_arr->m_size = m_size;
+    auto table_mask = tableMask();
+    arr->m_size = m_size;
     setPosLimit(m_size);
     setNextKI(oldNextKI);
     for (uint32_t frPos = 0, toPos = 0; toPos < m_size; ++toPos, ++frPos) {
       frPos = skipTombstonesNoBoundsCheck(frPos, oldUsed, oldBuf);
       copyElm(oldBuf[frPos], data[toPos]);
-      *findForNewInsert(table, tableMask(), data[toPos].probe()) = toPos;
+      *findForNewInsert(table, table_mask, data[toPos].probe()) = toPos;
     }
     oldAd->setZombie();
     decRefArr(oldAd);
@@ -328,8 +329,9 @@ void HashCollection::shrink(uint32_t oldCap /* = 0 */) {
   assert(!isCapacityTooHigh() || newCap == oldCap);
 }
 
-HashCollection::Elm& HashCollection::allocElmFront(int32_t* ei) {
-  assert(ei && !validPos(*ei) && m_size <= posLimit() && posLimit() < cap());
+HashCollection::Elm& HashCollection::allocElmFront(MixedArray::Inserter ei) {
+  assert(MixedArray::isValidIns(ei) && !MixedArray::isValidPos(*ei));
+  assert(m_size <= posLimit() && posLimit() < cap());
   // Move the existing elements to make element slot 0 available.
   memmove(data() + 1, data(), posLimit() * sizeof(Elm));
   incPosLimit();
@@ -350,47 +352,6 @@ HashCollection::Elm& HashCollection::allocElmFront(int32_t* ei) {
   incSize();
   // Store the value into element slot 0.
   return data()[0];
-}
-
-// Quadratic probe is:
-//
-//   h(k, i) = (k + c1*i + c2*(i^2)) % tableSize
-//
-// Use 1/2 for c1 and c2. In combination with a table size that is a power of
-// 2, this guarantees a probe sequence of length tableSize that probes all
-// table elements exactly once.
-
-template <class Hit>
-ALWAYS_INLINE
-ssize_t HashCollection::findImpl(hash_t h0, Hit hit) const {
-  uint32_t mask = tableMask();
-  auto elms = data();
-  auto hashtable = hashTab();
-  for (uint32_t probeIndex = h0, i = 1;; ++i) {
-    auto pos = hashtable[probeIndex & mask];
-    if (validPos(pos)) {
-      if (hit(elms[pos])) return pos;
-    } else if (pos & 1) {
-      assert(pos == Empty);
-      return pos;
-    }
-    probeIndex += i;
-    assertx(i <= mask);
-    assertx(probeIndex == static_cast<uint32_t>(h0) + (i + i * i) / 2);
-  }
-}
-
-ssize_t HashCollection::find(int64_t ki, inthash_t h) const {
-  return findImpl(h, [ki] (const Elm& e) {
-    return hitIntKey(e, ki);
-  });
-}
-
-ssize_t
-HashCollection::find(const StringData* s, strhash_t h) const {
-  return findImpl(h, [s, h] (const Elm& e) {
-    return hitStringKey(e, s, h);
-  });
 }
 
 /**

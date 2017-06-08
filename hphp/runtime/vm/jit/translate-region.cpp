@@ -161,24 +161,27 @@ bool blockHasUnprocessedPred(
 }
 
 /*
- * If this region's entry block is at the entry point for a function, we have
- * some additional information we can assume about the types of non-parameter
- * local variables.
- *
- * Note: we can't assume anything if there are DV initializers, because they
- * can run arbitrary code before they get to the main entry point (and they do,
- * in some hhas-based builtins), if they even go there (they aren't required
- * to).
+ * If this region's entry block is at an entry point for a function (DV init or
+ * main entry), we can assert that all non-parameter locals are Uninit under
+ * some conditions.  This function checks the necessary conditions and, if they
+ * hold, emits such type assertions.
  */
 void emitEntryAssertions(irgen::IRGS& irgs, const Func* func, SrcKey sk) {
-  if (sk.offset() != func->base()) return;
+  if (!func->isEntry(sk.offset())) return;
 
-  // The assertions inserted here are only valid if the first bytecode
-  // instruction does not have unprocessed predecessors.  This invariant is
-  // ensured by the emitter using an EntryNop instruction when necessary.
-  for (auto& pinfo : func->params()) {
-    if (pinfo.hasDefaultValue()) return;
+  // If we're at the Func main entry point, we can't assume anything if there
+  // are DV initializers, because they can run arbitrary code before they get
+  // here (and they do, in some hhas-based builtins, and they may not even get
+  // to the Func main entry point).
+  if (sk.offset() == func->base()) {
+    // The assertions inserted here are only valid if the first bytecode
+    // instruction does not have unprocessed predecessors.  This invariant is
+    // ensured by the emitter using an EntryNop instruction when necessary.
+    for (auto& pinfo : func->params()) {
+      if (pinfo.hasDefaultValue()) return;
+    }
   }
+
   if (func->isClosureBody()) {
     // In a closure, non-parameter locals can have types other than Uninit
     // after the prologue runs.  (Local 0 will be the closure itself, and other
@@ -867,7 +870,7 @@ std::unique_ptr<IRUnit> irGenRegion(const RegionDesc& region,
   auto result = TranslateResult::Retry;
 
   while (result == TranslateResult::Retry) {
-    unit = folly::make_unique<IRUnit>(context);
+    unit = std::make_unique<IRUnit>(context);
     unit->initLogEntry(context.func);
     irgen::IRGS irgs{*unit, &region};
 
@@ -942,7 +945,7 @@ std::unique_ptr<IRUnit> irGenInlineRegion(const TransContext& ctx,
   auto caller = ctx.srcKey().func();
 
   while (result == TranslateResult::Retry) {
-    unit = folly::make_unique<IRUnit>(ctx);
+    unit = std::make_unique<IRUnit>(ctx);
     irgen::IRGS irgs{*unit, &region};
     auto& irb = *irgs.irb;
     InliningDecider inl{caller};

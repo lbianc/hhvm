@@ -17,7 +17,7 @@ module TLazyHeap = Typing_lazy_heap
  * state that they depend on *)
 let rpc_command_needs_full_check : type a. a t -> bool = function
   (* global error list is not updated during small checks *)
-  | STATUS -> true
+  | STATUS _ -> true
   (* newly subscribed client will need a full list of errors *)
   | SUBSCRIBE_DIAGNOSTIC _ -> true
   (* some Ai stuff - calls to those will likely never be interleaved with IDE
@@ -43,7 +43,7 @@ let command_needs_full_check = function
   | Stream LIST_FILES -> true (* Same as Rpc STATUS *)
   | _ -> false
 
-let full_recheck_if_needed genv env msg =
+let full_recheck_if_needed' genv env msg =
   if
     (not env.ServerEnv.needs_full_check) &&
     (Relative_path.Set.is_empty env.ServerEnv.ide_needs_parsing)
@@ -54,9 +54,36 @@ let full_recheck_if_needed genv env msg =
   let env, _, _ = ServerTypeCheck.(check genv env Full_check) in
   env
 
+let ignore_ide = function
+  | Rpc (STATUS true) -> true
+  | _ -> false
+
+let apply_changes env changes =
+  Relative_path.Map.fold changes
+    ~init:env
+    ~f:begin fun path content env ->
+      ServerFileSync.open_file env (Relative_path.to_absolute path) content
+    end
+
+let get_unsaved_changes env  =
+  let changes = ServerFileSync.get_unsaved_changes env in
+  Relative_path.Map.(map ~f:fst changes, map ~f:snd changes)
+
+let full_recheck_if_needed genv env msg =
+  if ignore_ide msg then
+    let ide, disk = get_unsaved_changes env in
+    let env = apply_changes env disk in
+    let env = full_recheck_if_needed' genv env msg in
+    apply_changes env ide
+  else
+    full_recheck_if_needed' genv env msg
+
 (****************************************************************************)
 (* Called by the client *)
 (****************************************************************************)
+
+exception Remote_exception of Marshal_tools.remote_exception_data
+
 let rpc : type a. Timeout.in_channel * out_channel -> a t -> a
 = fun (_, oc) cmd ->
   Marshal.to_channel oc (Rpc cmd) [];
@@ -67,7 +94,10 @@ let rpc : type a. Timeout.in_channel * out_channel -> a t -> a
 let rec wait_for_rpc_response fd push_messages =
   match Marshal_tools.from_fd_with_preamble fd with
   | Response r -> r, List.rev push_messages
+  | Push (ServerCommandTypes.FATAL_EXCEPTION remote_e_data) ->
+    raise (Remote_exception remote_e_data)
   | Push m -> wait_for_rpc_response fd (m :: push_messages)
+  | Hello -> failwith "unexpected hello after connection already established"
 
 let rpc_persistent :
   type a. Timeout.in_channel * out_channel -> a t -> a * push list

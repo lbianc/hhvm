@@ -18,7 +18,8 @@
 
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/stats.h"
-#include "hphp/runtime/base/tv-helpers.h"
+#include "hphp/runtime/base/tv-mutate.h"
+#include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/member-operations.h"
 #include "hphp/runtime/vm/vm-regs.h"
@@ -30,6 +31,7 @@
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/tc.h"
+#include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/unique-stubs.h"
 
 #include "hphp/util/abi-cxx.h"
@@ -37,6 +39,7 @@
 #include "hphp/util/assertions.h"
 #include "hphp/util/dwarf-reg.h"
 #include "hphp/util/eh-frame.h"
+#include "hphp/util/logger.h"
 #include "hphp/util/trace.h"
 #include "hphp/util/unwind-itanium.h"
 
@@ -61,6 +64,35 @@ rds::Link<UnwindRDS,true> g_unwind_rds(rds::kInvalidHandle);
 namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
+
+enum class ExceptionKind {
+  Unclassified,
+  StdException,
+  NonStdException,
+  PhpException,
+  CppException,
+  InvalidSetMException,
+  TVCoercionException,
+};
+
+struct TIHash {
+  std::size_t operator()(const std::type_info* ti) const {
+    return ti->hash_code();
+  }
+};
+
+struct TIEqual {
+  bool operator()(const std::type_info* lhs, const std::type_info* rhs) const {
+    if (intptr_t(lhs) < 0) return false;
+    return *lhs == *rhs;
+  }
+};
+
+using TypeInfoMap = folly::AtomicHashArray<const std::type_info*,
+                                           ExceptionKind,
+                                           TIHash, TIEqual>;
+
+TypeInfoMap::SmartPtr typeInfoMap;
 
 /*
  * Sync VM regs for the TC frame represented by `context'.
@@ -162,6 +194,8 @@ bool install_catch_trace(_Unwind_Context* ctx, _Unwind_Exception* exn,
   return true;
 }
 
+__thread std::pair<const std::type_info*, ExceptionKind> cachedTypeInfo;
+
 ///////////////////////////////////////////////////////////////////////////////
 
 }
@@ -186,14 +220,80 @@ tc_unwind_personality(int version,
           exn_cls == kLLVMMagicDependentClass);
   assertx(version == 1);
 
-  auto const& ti = typeinfoFromUE(ue);
-  auto const std_exception = exceptionFromUE(ue);
+  auto const ti = &typeinfoFromUE(ue);
+
+  // Note that cachedTypeInfo isn't just for performance.
+  // If the search phase doesn't find it in the map, it returns
+  // _URC_HANDLER_FOUND - so the cleanup phase must also fail to find
+  // it. Another thread might have added it to the map in the interim,
+  // however, so its important to use the cachedTypeInfo.
+  auto const exceptionKind = [&] () -> ExceptionKind {
+    if (ti != cachedTypeInfo.first) {
+      assert(actions & _UA_SEARCH_PHASE);
+      auto const it = typeInfoMap->find(ti);
+      cachedTypeInfo.first = ti;
+      cachedTypeInfo.second = it == typeInfoMap->end() ?
+        ExceptionKind::Unclassified : it->second;
+    }
+    return cachedTypeInfo.second;
+  }();
+
+  if (exceptionKind == ExceptionKind::Unclassified) {
+    if (actions & _UA_SEARCH_PHASE) {
+      FTRACE(1,
+             "Unclassified exception was thrown, "
+             "returning _URC_HANDLER_FOUND\n");
+      return _URC_HANDLER_FOUND;
+    }
+#ifndef _MSC_VER
+    __cxxabiv1::__cxa_begin_catch(ue);
+#endif
+    auto exn = std::current_exception();
+#ifndef _MSC_VER
+    __cxxabiv1::__cxa_end_catch();
+#endif
+    ExceptionKind ek;
+    try {
+      try {
+        std::rethrow_exception(exn);
+      } catch (const InvalidSetMException&) {
+        ek = ExceptionKind::InvalidSetMException;
+        throw;
+      } catch (const TVCoercionException&) {
+        ek = ExceptionKind::TVCoercionException;
+        throw;
+      } catch (const req::root<Object>&) {
+        ek = ExceptionKind::PhpException;
+        throw;
+      } catch (const Object&) {
+        ek = ExceptionKind::PhpException;
+        Logger::Error("Throwing an unwrapped Object");
+        throw;
+      } catch (const BaseException&) {
+        ek = ExceptionKind::CppException;
+        throw;
+      } catch (const std::exception& e) {
+        ek = ExceptionKind::CppException;
+        throw FatalErrorException(
+          0, "Invalid exception with message `%s'", e.what());
+      } catch (...) {
+        ek = ExceptionKind::CppException;
+        throw FatalErrorException("Unknown invalid exception");
+      }
+    } catch (...) {
+      cachedTypeInfo.second = ek;
+      typeInfoMap->emplace(ti, ek);
+      throw;
+    };
+  }
+
   InvalidSetMException* ism = nullptr;
   TVCoercionException* tce = nullptr;
-  if (ti == typeid(InvalidSetMException)) {
-    ism = static_cast<InvalidSetMException*>(std_exception);
-  } else if (ti == typeid(TVCoercionException)) {
-    tce = static_cast<TVCoercionException*>(std_exception);
+
+  if (exceptionKind == ExceptionKind::InvalidSetMException) {
+    ism = static_cast<InvalidSetMException*>(exceptionFromUE(ue));
+  } else if (exceptionKind == ExceptionKind::TVCoercionException) {
+    tce = static_cast<TVCoercionException*>(exceptionFromUE(ue));
   }
 
   if (Trace::moduleEnabled(TRACEMOD, 1)) {
@@ -201,11 +301,11 @@ tc_unwind_personality(int version,
       (actions & _UA_SEARCH_PHASE) ? "search" : "cleanup";
 #ifndef _MSC_VER
     int status;
-    auto* exnType = abi::__cxa_demangle(ti.name(), nullptr, nullptr, &status);
+    auto* exnType = abi::__cxa_demangle(ti->name(), nullptr, nullptr, &status);
     SCOPE_EXIT { free(exnType); };
     assertx(status == 0);
 #else
-    auto* exnType = ti.name();
+    auto* exnType = ti->name();
 #endif
     FTRACE(1, "unwind {} exn {}: regState {}, ip {}, type {}\n",
            unwindType, ue,
@@ -239,11 +339,11 @@ tc_unwind_personality(int version,
    * which is an exit trace from hhir with a few special instructions.
    */
   else if (actions & _UA_CLEANUP_PHASE) {
-    TypedValue tv = ism ? ism->tv() : tce ? tce->tv() : TypedValue();
     if (tl_regState == VMRegState::DIRTY) {
       sync_regstate(context);
     }
 
+    TypedValue tv = ism ? ism->tv() : tce ? tce->tv() : TypedValue();
     // If we have a catch trace at the IP in the frame given by `context',
     // install it.
     if (install_catch_trace(context, ue, ism || tce, tv)) {
@@ -419,6 +519,7 @@ void initUnwinder(TCA base, size_t size) {
   ehfw.end_fde(size);
   ehfw.null_fde();
   s_ehFrames.push_back(ehfw.register_and_release());
+  typeInfoMap = TypeInfoMap::create(512, {});
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -253,7 +253,13 @@ static bool purge_decay_hard() {
   // (pre-4.1.0), or because ratio-based purging is no longer present
   // (likely post-4.x).
   ssize_t decay_time;
-  return (mallctlRead("opt.decay_time", &decay_time, true) == 0);
+  // 4.x decay time API
+  int ret = mallctlRead("opt.decay_time", &decay_time, true);
+  if (ret != 0) {
+    // 5.x decay time API
+    ret = mallctlRead("opt.dirty_decay_ms", &decay_time, true);
+  }
+  return (ret == 0);
 }
 
 static bool purge_decay() {
@@ -315,7 +321,7 @@ void enable_numa(bool local) {
     base_arena = arenas;
     for (int i = 0; i < numa_num_nodes; i++) {
       int arena;
-      if (mallctlRead("arenas.extend", &arena, true) != 0) {
+      if (mallctlRead(JEMALLOC_NEW_ARENA_CMD, &arena, true) != 0) {
         return;
       }
       if (arena != arenas) {
@@ -384,7 +390,7 @@ void set_numa_binding(int node) {
 static void numa_purge_arena() {}
 #endif
 
-#ifdef USE_JEMALLOC_CHUNK_HOOKS
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
 /*
  * Get `pages` (at most 2) 1G huge pages and map to the low memory that grows
  * down from 4G.  We can do either one (3G-4G) or two pages (2G-4G).
@@ -485,7 +491,7 @@ struct JEMallocInitializer {
     initNuma();
 
     // Create a special arena to be used for allocating objects in low memory.
-    if (mallctlRead("arenas.extend", &low_arena, true) != 0) {
+    if (mallctlRead(JEMALLOC_NEW_ARENA_CMD, &low_arena, true) != 0) {
       // Error; bail out.
       return;
     }
@@ -504,7 +510,7 @@ struct JEMallocInitializer {
     assert((uintptr_t(sbrk(0)) & kHugePageMask) == 0);
     highest_lowmall_addr = (char*)sbrk(0) - 1;
 
-#if defined USE_JEMALLOC_CHUNK_HOOKS && defined __linux__
+#if defined USE_JEMALLOC_CUSTOM_HOOKS && defined __linux__
     // Number of 1G huge pages for data in low memeory
     int low_1g_pages = 0;
     if (char* buffer = getenv("HHVM_LOW_1G_PAGE")) {
@@ -615,12 +621,19 @@ void low_malloc_skip_huge(void* start, void* end) {
   }
 }
 
-#ifdef USE_JEMALLOC_CHUNK_HOOKS
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
 void* low_malloc_huge1g_impl(size_t size) {
   if (size == 0) return nullptr;
   if (low_huge1g_arena == 0) return low_malloc(size);
   auto ret = mallocx(size, low_mallocx_huge1g_flags());
   if (ret) return ret;
+  if (size < size2m) {
+    // We are out of space in the 1G arena, I don't expect it to get more pages
+    // later, because we (should) rarely deallocate in that arena.  This is fine
+    // because the decallocation call to both arenas are the same.
+    static_assert(low_dallocx_huge1g_flags() == dallocx_huge1g_flags(), "");
+    low_huge1g_arena = 0;
+  }
   return low_malloc(size);
 }
 
@@ -655,9 +668,11 @@ int jemalloc_pprof_disable() {
 
 int jemalloc_pprof_dump(const std::string& prefix, bool force) {
   if (!force) {
+    bool enabled = false;
     bool active = false;
-    // Check if profiling has been enabled before trying to dump.
-    int err = mallctlRead("opt.prof", &active, true);
+    // Check if profiling is active before trying to dump.
+    int err = mallctlRead("opt.prof", &enabled, true) ||
+      (enabled && mallctlRead("prof.active", &active, true));
     if (err || !active) {
       return 0; // nothing to do
     }
@@ -678,8 +693,10 @@ int jemalloc_pprof_dump(const std::string& prefix, bool force) {
 #define STRINGIFY(x) STRINGIFY_HELPER(x)
 
 extern "C" {
-  const char* malloc_conf = "narenas:1,lg_tcache_max:16,"
-    "lg_dirty_mult:" STRINGIFY(LG_DIRTY_MULT_DEFAULT)
+  const char* malloc_conf = "narenas:1,lg_tcache_max:16"
+#if (JEMALLOC_VERSION_MAJOR < 5)
+    ",lg_dirty_mult:" STRINGIFY(LG_DIRTY_MULT_DEFAULT)
+#endif
 #ifdef ENABLE_HHPROF
     ",prof:true,prof_active:false,prof_thread_active_init:false"
 #endif

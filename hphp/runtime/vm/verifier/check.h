@@ -28,6 +28,12 @@ struct Func;
 
 namespace Verifier {
 
+enum ErrorMode {
+  kStderr,
+  kVerbose,
+  kThrow
+};
+
 /**
  * Check one whole unit, including its internal string, array, sourceLoc,
  * preClass, and func tables.
@@ -45,7 +51,7 @@ namespace Verifier {
  * -- PreClasses
  * -- Metadata
  */
-bool checkUnit(const Unit*, bool verbose = false);
+bool checkUnit(const Unit*, ErrorMode mode = kStderr);
 
 /**
  * Checker for one Func.  Rules from doc/bytecode.specification:
@@ -65,6 +71,8 @@ bool checkUnit(const Unit*, bool verbose = false);
  *     FPush.
  * 12. State of each iterator variable known everywhere.
  * 13. initialized state of iterators correct for Iter* instructions.
+ * 17. Asserts not separated from following instruction by control flow
+ * 18. Member instruction sequences are consistent and continuous
  * -- All region and branch offsets must refer to valid instruction starts.
  * -- Every FPI region is wholly contained in one body/funclet section.
  * -- every string table index in-bounds
@@ -95,7 +103,7 @@ bool checkUnit(const Unit*, bool verbose = false);
  *    certian attributes are mutually exclusive, others aren't, some
  *    imply bytecode restrictions.  (access This from static? etc).
  */
-bool checkFunc(const Func*, bool verbose = false);
+bool checkFunc(const Func*, ErrorMode mode = kStderr);
 
 /**
  * Checker for HNI native function signatures. Verifies that argument types
@@ -115,7 +123,7 @@ bool checkFunc(const Func*, bool verbose = false);
  * -- Methods take an ObjectData* as their first argument
  * -- Static methods take a const Class* as their first argument
  */
-bool checkNativeFunc(const Func*, bool verbose = false);
+bool checkNativeFunc(const Func*, ErrorMode mode = kStderr);
 
 }} // HPHP::Verifier
 

@@ -68,8 +68,9 @@ let connect args =
     retry_if_init = args.retry_if_init;
     expiry = args.timeout;
     no_load = args.no_load;
-    to_ide = false;
     ai_mode = args.ai_mode;
+    progress_callback = ClientConnect.tty_progress_reporter;
+    do_post_handoff_handshake = true;
   }
 
 let rpc args command =
@@ -191,10 +192,6 @@ let main args =
       let result = rpc args @@ Rpc.IDENTIFY_FUNCTION (content, line, char) in
       ClientGetDefinition.go result args.output_json;
       Exit_status.No_error
-    | MODE_GET_DEFINITION_BY_ID id ->
-      let result = rpc args @@ Rpc.GET_DEFINITION_BY_ID id in
-      ClientOutline.print_definition result args.output_json;
-      Exit_status.No_error
     | MODE_TYPE_AT_POS arg ->
       let tpos = Str.split (Str.regexp ":") arg in
       let fn, line, char =
@@ -247,11 +244,12 @@ let main args =
       ClientMethodJumps.go results false args.output_json;
       Exit_status.No_error
     | MODE_STATUS ->
+      let ignore_ide = ClientMessages.ignore_ide_from args.from in
       let {
         Rpc.Server_status.liveness;
         has_unsaved_changes;
         error_list;
-      } = rpc args Rpc.STATUS in
+      } = rpc args (Rpc.STATUS ignore_ide) in
       let stale_msg = is_stale_msg liveness in
       if args.output_json || args.from <> "" || error_list = []
       then begin

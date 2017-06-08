@@ -25,7 +25,6 @@
 #include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/array-common.h"
 #include "hphp/runtime/base/array-iterator.h"
-#include "hphp/runtime/base/type-conversions.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/base/runtime-option.h"
@@ -249,70 +248,70 @@ const ArrayFunctions g_array_funcs = {
   /*
    * const Variant& GetValueRef(const ArrayData*, ssize_t pos)
    *
-   *   Return a reference to the value at an iterator position.  `pos'
-   *   must be a valid position for this array.
+   *   Return a reference to the value at an iterator position.  `pos' must be
+   *   a valid position for this array.
    */
   DISPATCH(GetValueRef)
 
   /*
    * bool IsVectorData(const ArrayData*)
    *
-   *   Returns true if this array is empty, or if it has only
-   *   contiguous integer keys and the first key is zero.  Determining
-   *   this may be an O(N) operation.
+   *   Return true if this array is empty, or if it has only contiguous integer
+   *   keys and the first key is zero.  Determining this may be an O(N)
+   *   operation.
    */
   DISPATCH(IsVectorData)
 
   /*
    * bool ExistsInt(const ArrayData*, int64_t key)
    *
-   *   Returns true iff this array contains an element with the
-   *   supplied integer key.
+   *   Return true iff this array contains an element with the supplied integer
+   *   key.
    */
   DISPATCH(ExistsInt)
 
   /*
    * bool ExistsStr(const ArrayData*, const StringData*)
    *
-   *   Return true iff this array contains an element with the
-   *   supplied string key.  The string must not be an integer-like
-   *   string.
+   *   Return true iff this array contains an element with the supplied string
+   *   key.  The string will not undergo intish-key cast.
    */
   DISPATCH(ExistsStr)
 
   /*
-   * ArrayData* LvalInt(ArrayData*, int64_t k, Variant*& out, bool copy)
-   * ArrayData* LvalIntRef(ArrayData*, int64_t k, Variant*& out, bool copy)
+   * member_lval LvalInt(ArrayData*, int64_t k, bool copy)
+   * member_lval LvalIntRef(ArrayData*, int64_t k, bool copy)
    *
-   *   Looks up a value in the array by the supplied integer key, creating it as
-   *   a KindOfNull if it doesn't exist, and sets `out' to point to it. Use the
-   *   ref variant if the retrieved value will be boxed. This function has
+   *   Look up a value in the array by the supplied integer key, creating it as
+   *   a KindOfNull if it doesn't exist, and return a reference to it.  Use the
+   *   ref variant if the retrieved value will be boxed.  This function has
    *   copy/grow semantics.
    */
   DISPATCH(LvalInt)
   DISPATCH(LvalIntRef)
 
   /*
-   * ArrayData* LvalStr(ArrayData*, StringData* key, Variant*& out, bool copy)
-   * ArrayData* LvalStrRef(ArrayData*, StringData* key, Variant*& out, bool copy)
+   * member_lval LvalStr(ArrayData*, StringData* key, bool copy)
+   * member_lval LvalStrRef(ArrayData*, StringData* key, bool copy)
    *
-   *   Looks up a value in the array by the supplied string key, creating it as
-   *   a KindOfNull if it doesn't exist, and sets `out' to point to it.  The
-   *   string `key' may not be an integer-like string. Use the ref variant if
-   *   the retrieved value will be boxed. This function has copy/grow semantics.
+   *   Look up a value in the array by the supplied string key, creating it as
+   *   a KindOfNull if it doesn't exist, and return a reference to it.  The
+   *   string `key' may not be an integer-like string.  Use the ref variant if
+   *   the retrieved value will be boxed.  This function has copy/grow
+   *   semantics.
    */
   DISPATCH(LvalStr)
   DISPATCH(LvalStrRef)
 
   /*
-   * ArrayData* LvalNew(ArrayData*, Variant*& out, bool copy)
-   * ArrayData* LvalNewRef(ArrayData*, Variant*& out, bool copy)
+   * member_lval LvalNew(ArrayData*, bool copy)
+   * member_lval LvalNewRef(ArrayData*, bool copy)
    *
-   *   This function inserts a new null value in the array at the next available
-   *   integer key, and then sets `out' to point to it.  In the case that there
-   *   is no next available integer key, this function sets out to point to the
-   *   lvalBlackHole. Use the ref variant if the retrieved value will be
-   *   boxed. This function has copy/grow semantics.
+   *   Insert a new null value in the array at the next available integer key,
+   *   and return a reference to it.  In the case that there is no next
+   *   available integer key, this function returns a reference to the
+   *   lvalBlackHole.  Use the ref variant if the retrieved value will be
+   *   boxed.  This function has copy/grow semantics.
    */
   DISPATCH(LvalNew)
   DISPATCH(LvalNewRef)
@@ -546,7 +545,7 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(AppendRef)
 
   /*
-   * ArrayData* AppendWithRef(ArrayData*, const Variant& v, bool copy)
+   * ArrayData* AppendWithRef(ArrayData*, TypedValue v, bool copy)
    *
    *   "With ref" append.  This function appends a new value to the
    *   array with the next available integer key, if there is a next
@@ -703,12 +702,24 @@ const ArrayFunctions g_array_funcs = {
    /*
    * ArrayData* ToKeyset(ArrayData*, bool)
    *
-   *   Convert to a keyset. Values will be discarded and the keyset will contain
-   *   just the keys. If already a keyset, it will be returned unchange (without
-   *   copying). If copy is false, it may be converted in place. If the input
-   *   array contains references, an exception will be thrown.
+   *   Convert to a keyset. Keys will be discarded and the keyset will contain
+   *   just the values in iteration order. If already a keyset, it will be
+   *   returned unchange (without copying). If copy is false, it may be
+   *   converted in place. If the input array contains references, or if the
+   *   input contains values that are neither integers or strings, an exception
+   *   will be thrown.
    */
   DISPATCH(ToKeyset)
+
+  /*
+   * ArrayData* ToVArray(ArrayData*, bool)
+   *
+   * Convert to a varray (vector-like array). The array will be converted to a
+   * packed (or empty) array, discarding keys. If already a packed or empty
+   * array, it will be returned unchanged (without copying). If copy is false,
+   * it may be converted in place.
+   */
+  DISPATCH(ToVArray)
 };
 
 #undef DISPATCH
@@ -719,39 +730,46 @@ const ArrayFunctions g_array_funcs = {
 // access converts them to integers.  non-int-string assertions should go
 // upstream of the ArrayData api.
 
+bool ArrayData::IsValidKey(Cell k) {
+  return isIntType(k.m_type) ||
+        (isStringType(k.m_type) && IsValidKey(k.m_data.pstr));
+}
+
+bool ArrayData::IsValidKey(const Variant& k) {
+  return IsValidKey(*k.asCell());
+}
+
 bool ArrayData::IsValidKey(const String& k) {
   return IsValidKey(k.get());
 }
 
-bool ArrayData::IsValidKey(const Variant& k) {
-  return k.isInteger() ||
-         (k.isString() && IsValidKey(k.getStringData()));
-}
-
-ArrayData *ArrayData::Create(const Variant& value) {
+ArrayData* ArrayData::Create(TypedValue value) {
   PackedArrayInit pai(1);
   pai.append(value);
   return pai.create();
 }
 
-ArrayData *ArrayData::Create(const Variant& name, const Variant& value) {
-  ArrayInit init(1, ArrayInit::Map{});
-  DEBUG_ONLY int64_t unused;
-  assertx(name.isString() ?
-         !name.getStringData()->isStrictlyInteger(unused) :
-         name.isInteger());
+ArrayData* ArrayData::Create(TypedValue name, TypedValue value) {
+  if (debug) {
+    DEBUG_ONLY int64_t unused;
+    DEBUG_ONLY auto const k = tvToCell(name);
+    assertx(isStringType(k.m_type) ?
+              !k.m_data.pstr->isStrictlyInteger(unused) :
+              isIntType(k.m_type));
+  }
 
+  ArrayInit init(1, ArrayInit::Map{});
   init.setValidKey(name, value);
   return init.create();
 }
 
-ArrayData *ArrayData::CreateRef(Variant& value) {
+ArrayData* ArrayData::CreateRef(Variant& value) {
   PackedArrayInit pai(1);
   pai.appendRef(value);
   return pai.create();
 }
 
-ArrayData *ArrayData::CreateRef(const Variant& name, Variant& value) {
+ArrayData* ArrayData::CreateRef(const Variant& name, Variant& value) {
   ArrayInit init(1, ArrayInit::Map{});
   DEBUG_ONLY int64_t unused;
   assertx(name.isString() ?
@@ -1011,9 +1029,9 @@ Variant ArrayData::each() {
 
 const Variant& ArrayData::get(const Variant& k, bool error) const {
   assert(IsValidKey(k));
-  auto const cell = k.asCell();
-  return isIntKey(cell) ? get(getIntKey(cell), error)
-                        : get(getStringKey(cell), error);
+  auto const cell = *k.asCell();
+  return detail::isIntKey(cell) ? get(detail::getIntKey(cell), error)
+                                : get(detail::getStringKey(cell), error);
 }
 
 const Variant& ArrayData::getNotFound(int64_t k) {

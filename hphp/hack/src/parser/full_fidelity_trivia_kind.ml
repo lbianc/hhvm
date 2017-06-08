@@ -7,36 +7,40 @@
  * grant of patent rights can be found in the PATENTS file in the same
  * directory.
  *
+ **
+ *
+ * THIS FILE IS @generated; DO NOT EDIT IT
+ * To regenerate this file, run
+ *
+ *   buck run //hphp/hack/src:generate_full_fidelity
+ *
+ * This module contains the type describing the structure of a syntax tree.
+ *
+ **
+ *
  *)
-(* THIS FILE IS GENERATED; DO NOT EDIT IT *)
-(* @generated *)
-(**
-  To regenerate this file build hphp/hack/src:generate_full_fidelity and run
-  the binary.
-  buck build hphp/hack/src:generate_full_fidelity
-  buck-out/bin/hphp/hack/src/generate_full_fidelity/generate_full_fidelity.opt
-*)
+
 type t =
-| WhiteSpace
-| EndOfLine
-| DelimitedComment
-| SingleLineComment
-| Unsafe
-| UnsafeExpression
-| FixMe
-| IgnoreError
-| FallThrough
-| Markup
+  | WhiteSpace
+  | EndOfLine
+  | DelimitedComment
+  | SingleLineComment
+  | Unsafe
+  | UnsafeExpression
+  | FixMe
+  | IgnoreError
+  | FallThrough
+  | Markup
 
 let to_string kind =
   match kind with
-  | WhiteSpace -> "whitespace"
-  | EndOfLine -> "end_of_line"
-  | DelimitedComment -> "delimited_comment"
+  | WhiteSpace        -> "whitespace"
+  | EndOfLine         -> "end_of_line"
+  | DelimitedComment  -> "delimited_comment"
   | SingleLineComment -> "single_line_comment"
-  | Unsafe -> "unsafe"
-  | UnsafeExpression -> "unsafe_expression"
-  | FixMe -> "fix_me"
-  | IgnoreError -> "ignore_error"
-  | FallThrough -> "fall_through"
-  | Markup -> "markup"
+  | Unsafe            -> "unsafe"
+  | UnsafeExpression  -> "unsafe_expression"
+  | FixMe             -> "fix_me"
+  | IgnoreError       -> "ignore_error"
+  | FallThrough       -> "fall_through"
+  | Markup            -> "markup"

@@ -225,7 +225,7 @@ Variant ArrayUtil::Range(int64_t low, int64_t high, int64_t step /* = 1 */) {
     }
     rangeCheckAlloc((low - high) / step);
     for (; low >= high; low -= step) {
-      ret.append(toInt64(low));
+      ret.append(low);
     }
   } else if (high > low) { // Positive steps
     if (high - low < step || step <= 0) {
@@ -234,10 +234,10 @@ Variant ArrayUtil::Range(int64_t low, int64_t high, int64_t step /* = 1 */) {
     }
     rangeCheckAlloc((high - low) / step);
     for (; low <= high; low += step) {
-      ret.append(toInt64(low));
+      ret.append(low);
     }
   } else {
-    ret.append(toInt64(low));
+    ret.append(low);
   }
   return ret;
 }
@@ -331,18 +331,25 @@ Variant ArrayUtil::Shuffle(const Array& input) {
   }
   php_array_data_shuffle(indices);
 
-  if (input->isVecArray()) {
+  if (input.isVecArray()) {
     VecArrayInit ret(count);
     for (int i = 0; i < count; i++) {
       ssize_t pos = indices[i];
       ret.append(input->getValueRef(pos));
     }
     return ret.toVariant();
-  } else if (input->isDict()) {
+  } else if (input.isDict()) {
     DictInit ret(count);
     for (int i = 0; i < count; i++) {
       ssize_t pos = indices[i];
       ret.append(input->getValueRef(pos));
+    }
+    return ret.toVariant();
+  } else if (input.isKeyset()) {
+    KeysetInit ret(count);
+    for (int i = 0; i < count; i++) {
+      ssize_t pos = indices[i];
+      ret.add(input->getValueRef(pos));
     }
     return ret.toVariant();
   } else {

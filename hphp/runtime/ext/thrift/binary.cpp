@@ -121,7 +121,7 @@ Variant binary_deserialize(int8_t thrift_typeID, PHPInputTransport& transport,
       return init_null();
     case T_STRUCT: {
       Variant val;
-      if ((val = fieldspec.rvalAt(s_class)).isNull()) {
+      if ((val = fieldspec[s_class]).isNull()) {
         throw_tprotocolexception("no class type in spec", INVALID_DATA);
         skip_element(T_STRUCT, transport);
         return init_null();
@@ -272,11 +272,16 @@ Variant binary_deserialize(int8_t thrift_typeID, PHPInputTransport& transport,
         }
         return arr.toVariant();
       } else if (format.equal(s_collection)) {
-        auto const pvec(req::make<c_Vector>(size));
-        for (uint32_t s = 0; s < size; ++s) {
-          pvec->add(binary_deserialize(type, transport, elemspec));
+        if (size == 0) {
+          return Variant(req::make<c_Vector>());
         }
-        return Variant(std::move(pvec));
+        auto vec = req::make<c_Vector>(size);
+        int64_t i = 0;
+        do {
+          auto val = binary_deserialize(type, transport, elemspec);
+          cellDup(*val.asCell(), *vec->appendForUnserialize(i));
+        } while (++i < size);
+        return Variant(std::move(vec));
       } else {
         PackedArrayInit pai(size);
         for (auto s = uint32_t{0}; s < size; ++s) {
@@ -425,7 +430,7 @@ void binary_deserialize_slow(const Object& zthis, const Array& spec,
   INC_TPC(thrift_read_slow);
   while (ttype != T_STOP) {
     Variant val;
-    if (!(val = spec.rvalAt(fieldno)).isNull()) {
+    if (!(val = spec[fieldno]).isNull()) {
       Array fieldspec = val.toArray();
       // pull the field name
       String varname = fieldspec.rvalAt(s_var).toString();

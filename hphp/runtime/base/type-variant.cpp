@@ -19,10 +19,12 @@
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/comparisons.h"
+#include "hphp/runtime/base/double-to-int64.h"
 #include "hphp/runtime/base/dummy-resource.h"
 #include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/tv-arith.h"
+#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/base/zend-string.h"
@@ -88,7 +90,7 @@ Variant::Variant(StringData *v) noexcept {
 // the version of the high frequency function that is not inlined
 NEVER_INLINE
 Variant::Variant(const Variant& v) noexcept {
-  constructValHelper(v);
+  cellDup(tvToInitCell(v.asTypedValue()), *asTypedValue());
 }
 
 /*
@@ -153,21 +155,6 @@ void tweak_variant_dtors() {
     (RawDestructor)getMethodPtr(&ObjectData::releaseNoObjDestructCheck);
 }
 
-Variant &Variant::assign(const Variant& v) noexcept {
-  AssignValHelper(this, &v);
-  return *this;
-}
-
-Variant& Variant::assignRef(Variant& v) noexcept {
-  assignRefHelper(v);
-  return *this;
-}
-
-Variant& Variant::setWithRef(const Variant& v) noexcept {
-  setWithRefHelper(v, isRefcountedType(m_type));
-  return *this;
-}
-
 #define IMPLEMENT_SET(argType, setOp)                     \
   void Variant::set(argType v) noexcept {                 \
     if (isPrimitive()) {                                  \
@@ -175,10 +162,9 @@ Variant& Variant::setWithRef(const Variant& v) noexcept {
     } else if (m_type == KindOfRef) {                     \
       m_data.pref->var()->set(v);                         \
     } else {                                              \
-      auto const d = m_data.num;                          \
-      auto const t = m_type;                              \
+      auto const old = *asTypedValue();                   \
       setOp;                                              \
-      tvDecRefHelper(t, d);                               \
+      tvDecRefCountable(old);                             \
     }                                                     \
   }
 
@@ -201,11 +187,10 @@ IMPLEMENT_SET(const StaticString&,
       self->setNull();                                                  \
     } else {                                                            \
       v->incRefCount();                                                 \
-      auto const d = self->m_data.num;                                  \
-      auto const t = self->m_type;                                      \
+      auto const old = *self->asTypedValue();                           \
       self->m_type = dtype;                                             \
       self->m_data.member = v;                                          \
-      tvRefcountedDecRefHelper(t, d);                                   \
+      tvDecRefGen(old);                                                    \
     }                                                                   \
   }
 
@@ -225,11 +210,10 @@ IMPLEMENT_PTR_SET(ResourceHdr, pres, KindOfResource)
     if (UNLIKELY(!v)) {                                                 \
       self->setNull();                                                  \
     } else {                                                            \
-      auto const d = self->m_data.num;                                  \
-      auto const t = self->m_type;                                      \
+      auto const old = *self->asTypedValue();                           \
       self->m_type = dtype;                                             \
       self->m_data.member = v;                                          \
-      tvRefcountedDecRefHelper(t, d);                                   \
+      tvDecRefGen(old);                                                    \
     }                                                                   \
   }
 
@@ -405,7 +389,7 @@ int64_t Variant::toInt64Helper(int base /* = 10 */) const {
     case KindOfNull:
     case KindOfBoolean:
     case KindOfInt64:         return m_data.num;
-    case KindOfDouble:        return HPHP::toInt64(m_data.dbl);
+    case KindOfDouble:        return double_to_int64(m_data.dbl);
     case KindOfPersistentString:
     case KindOfString:        return m_data.pstr->toInt64(base);
     case KindOfPersistentVec:

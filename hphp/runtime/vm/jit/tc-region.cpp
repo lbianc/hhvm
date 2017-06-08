@@ -110,12 +110,13 @@ TransLocMaker relocateLocalTranslation(TransRange range, TransKind kind,
       }
 
       relocate(rel, view.main(), range.main.begin(), range.main.end(),
-               srcView.main(), fixups, nullptr);
+               srcView.main(), fixups, nullptr, AreaIndex::Main);
       relocate(rel, view.cold(), range.cold.begin(), range.cold.end(),
-               srcView.cold(), fixups, nullptr);
+               srcView.cold(), fixups, nullptr, AreaIndex::Cold);
       if (&srcView.cold() != &srcView.frozen()) {
         relocate(rel, view.frozen(), range.frozen.begin(),
-                 range.frozen.end(), srcView.frozen(), fixups, nullptr);
+                 range.frozen.end(), srcView.frozen(), fixups, nullptr,
+                 AreaIndex::Frozen);
       }
 
       adjustForRelocation(rel);
@@ -321,7 +322,6 @@ void publishOptFunctionInternal(FuncMetaInfo info,
 
   invalidateFuncProfSrcKeys(func);
 
-  mcgen::ReadThreadLocalTC localTC(info.tcBuf);
   for (auto& trans : info.translations) {
     auto const regionSk = trans.sk;
     auto& range = trans.range;
@@ -515,12 +515,15 @@ void publishOptFunction(FuncMetaInfo info) {
 }
 
 void publishSortedOptFunctions(std::vector<FuncMetaInfo> infos) {
+  // Do this first to ensure that the code and metadata locks have been dropped
+  // before running the treadmill
+  ProfData::Session pds;
+
   auto codeLock = lockCode();
   auto metaLock = lockMetadata();
 
   size_t failedBytes = 0;
   bool hasSpace = checkTCLimits();
-  ProfData::Session pds;
 
   for (auto& finfo : infos) {
     if (!Func::isFuncIdValid(finfo.fid)) {

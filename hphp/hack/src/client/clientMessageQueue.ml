@@ -1,24 +1,35 @@
 open Core
 open Lsp_fmt
 
+type client_message_kind =
+ | Request
+ | Notification
+ | Response
+
+let kind_to_string = function
+ | Request -> "Request"
+ | Notification -> "Notification"
+ | Response -> "Response"
+
 type client_message = {
   timestamp : float;
-  method_ : string;
-  id : Hh_json.json option;
-  params : Hh_json.json option;
-  is_request : bool;
+  kind : client_message_kind;
+  method_ : string; (* mandatory for request+notification; empty otherwise *)
+  id : Hh_json.json option; (* mandatory for request+response *)
+  params : Hh_json.json option; (* optional for request+notification *)
+  result : Hh_json.json option; (* optional for response *)
+  error: Hh_json.json option; (* optional for response *)
 }
 
 type result =
   | Message of client_message
-  | Error
-  | Exit
+  | Fatal_exception of Marshal_tools.remote_exception_data
+  | Recoverable_exception of Marshal_tools.remote_exception_data
 
 type daemon_message =
-  | Client_message of client_message
-  | No_more_messages
-  | Recoverable_exn of exn (* like parse errors *)
-  | Fatal_exn of exn (* like stdin closing *)
+  | Daemon_message of client_message
+  | Daemon_fatal_exception of Marshal_tools.remote_exception_data
+  | Daemon_recoverable_exception of Marshal_tools.remote_exception_data
 
 type daemon_operation =
   | Read
@@ -39,19 +50,32 @@ type t = {
 (* Try to read a message from the daemon's stdin, which is where all of the
    editor messages can be read from. May throw if the message is malformed. *)
 let read_message (reader : Buffered_line_reader.t) : client_message =
-  (* May throw an exception during parsing. *)
-  let message = reader
-    |> Http_lite.read_message_utf8
-    |> Hh_json.json_of_string in
-  let json = Some message in
+  let message = reader |> Http_lite.read_message_utf8 in
+  let json = Some (Hh_json.json_of_string message) in
 
   let id = Jget.val_opt json "id" in
+  let method_ = Jget.string_opt json "method" in
+  let params = Jget.val_opt json "params" in
+  let result = Jget.val_opt json "result" in
+  let error = Jget.obj_opt json "error" in
+  (* Following categorization mostly mirrors that of VSCode except that     *)
+  (* VSCode allows number+string+null ID for response, but we allow any ID. *)
+  (* https://github.com/Microsoft/vscode-languageserver-node/blob/master/jsonrpc/src/main.ts#L655 *)
+  let kind = match id, method_, result, error with
+    | Some _id, Some _method, _, _            -> Request
+    | None,     Some _method, _, _            -> Notification
+    | _,        _,            Some _result, _ -> Response
+    | _,        _,            _, Some _error  -> Response
+    | _ -> raise (Hh_json.Syntax_error "Not JsonRPC")
+  in
   {
     timestamp = Unix.gettimeofday ();
     id;
-    method_ = Jget.string_exn json "method";
-    params = Jget.obj_opt json "params";
-    is_request = Option.is_some id;
+    method_ = Option.value method_ ~default:""; (* is easier to consume *)
+    params;
+    result;
+    error;
+    kind;
   }
 
 
@@ -98,21 +122,23 @@ let run_daemon' (oc : daemon_message Daemon.out_channel) : unit =
           let message = read_message reader in
           Queue.push message messages_to_send;
           true
-        with
-          | End_of_file ->
-            Marshal_tools.to_fd_with_preamble out_fd No_more_messages;
-            false
-          (* Most likely a parse error or similar. *)
-          | e ->
-            Marshal_tools.to_fd_with_preamble out_fd (Recoverable_exn e);
-            true
+        with e ->
+          let message = Printexc.to_string e in
+          let stack = Printexc.get_backtrace () in
+          let edata = { Marshal_tools.message; stack; } in
+          let (should_continue, marshal) = match e with
+            | Hh_json.Syntax_error _ -> true, Daemon_recoverable_exception edata
+            | _ -> false, Daemon_fatal_exception edata
+          in
+          Marshal_tools.to_fd_with_preamble out_fd marshal;
+          should_continue
         end
       | Write ->
         assert (not (Queue.is_empty messages_to_send));
         let message = Queue.pop messages_to_send in
         (* We can assume that the entire write will succeed, since otherwise
            Marshal_tools.to_fd_with_preamble will throw an exception. *)
-        Marshal_tools.to_fd_with_preamble out_fd (Client_message message);
+        Marshal_tools.to_fd_with_preamble out_fd (Daemon_message message);
         true
     in
     if should_continue then loop ()
@@ -123,14 +149,18 @@ let run_daemon' (oc : daemon_message Daemon.out_channel) : unit =
 let run_daemon
     (_dummy_param : unit)
     (_ic, (oc : daemon_message Daemon.out_channel)) =
+  Printexc.record_backtrace true;
   try
     run_daemon' oc
   with e ->
     (* An exception that's gotten here is not simply a parse error, but
        something else, so we should terminate the daemon at this point. *)
+    let message = Printexc.to_string e in
+    let stack = Printexc.get_backtrace () in
     try
       let out_fd = Daemon.descr_of_out_channel oc in
-      Marshal_tools.to_fd_with_preamble out_fd (Fatal_exn e)
+      Marshal_tools.to_fd_with_preamble out_fd
+        (Daemon_fatal_exception { Marshal_tools.message; stack; })
     with _ ->
       (* There may be a broken pipe, for example. We should just give up on
          reporting the error. *)
@@ -165,21 +195,18 @@ let get_read_fd (message_queue : t) : Unix.file_descr =
 let read_single_message_into_queue_blocking (message_queue : t) : result =
   let message =
     try Marshal_tools.from_fd_with_preamble message_queue.daemon_in_fd
-    with End_of_file ->
+    with End_of_file as e ->
       (* This is different from when the client hangs up. It handles the case
          that the daemon process exited: for example, if it was killed. *)
-      No_more_messages
+      let message = Printexc.to_string e in
+      let stack = Printexc.get_backtrace () in
+      Daemon_fatal_exception { Marshal_tools.message; stack; }
   in
 
   let message = match message with
-    | Client_message message -> Message message
-    | No_more_messages -> Exit
-    | Recoverable_exn e ->
-      Hh_logger.exc e ~prefix:"Client message queue recoverable exception: ";
-      Error
-    | Fatal_exn e ->
-      Hh_logger.exc e ~prefix:"Client message queue fatal exception: ";
-      Exit
+    | Daemon_message message -> Message message
+    | Daemon_fatal_exception edata -> Fatal_exception edata
+    | Daemon_recoverable_exception edata -> Recoverable_exception edata
   in
   Queue.push message message_queue.messages;
   message
@@ -195,8 +222,9 @@ let rec read_messages_into_queue_nonblocking (message_queue : t) : unit =
        messages if the daemon is still available to read from. Otherwise, we may
        infinite loop as a result of `Unix.select` returning that a file
        descriptor is available to read on. *)
-    if message <> Exit
-    then read_messages_into_queue_nonblocking message_queue;
+    match message with
+    | Fatal_exception _ -> ()
+    | _ -> read_messages_into_queue_nonblocking message_queue;
   end
 
 let has_message (queue : t) : bool =

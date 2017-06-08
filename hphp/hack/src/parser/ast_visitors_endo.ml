@@ -68,6 +68,11 @@ class virtual ['self] endo =
                else (r0, r1, r2)) env c0
       in
       if c0 == r0 then this else NamespaceUse r0
+    method on_SetNamespaceEnv env this c0 =
+      let r0 = self#on_Namespace_env env c0 in
+      if c0 == r0
+      then this
+      else SetNamespaceEnv r0
     method on_def env this =
       match this with
       | Fun c0 -> self#on_Fun env this c0
@@ -77,6 +82,7 @@ class virtual ['self] endo =
       | Constant c0 -> self#on_Constant env this c0
       | Namespace (c0, c1) -> self#on_Namespace env this c0 c1
       | NamespaceUse c0 -> self#on_NamespaceUse env this c0
+      | SetNamespaceEnv c0 -> self#on_SetNamespaceEnv env this c0
     method on_typedef env this =
       let r0 = self#on_id env this.t_id in
       let r1 = self#on_list self#on_tparam env this.t_tparams in
@@ -268,6 +274,19 @@ class virtual ['self] endo =
     method on_ClassUse env this c0 =
       let r0 = self#on_hint env c0 in
       if c0 == r0 then this else ClassUse r0
+    method on_ClassUseAlias env this c0 c1 c2 =
+      let r0 =
+        (fun env ((c0, c1) as this) ->
+          let r0 = self#on_id env c0 in
+          let r1 = self#on_option self#on_pstring env c1 in
+          if c0 == r0 && c1 == r1
+          then this
+          else (r0, r1)) env c0
+      in
+      let r1 = self#on_id env c1 in
+      let r2 = self#on_cu_alias_type env c2 in
+      if c0 == r0 && c1 == r1 && c2 == r2
+      then this else ClassUseAlias (r0, r1, r2)
     method on_XhpAttrUse env this c0 =
       let r0 = self#on_hint env c0 in
       if c0 == r0 then this else XhpAttrUse r0
@@ -305,6 +324,50 @@ class virtual ['self] endo =
     method on_XhpCategory env this c0 =
       let r0 = self#on_list self#on_pstring env c0 in
       if c0 == r0 then this else XhpCategory r0
+    method on_XhpChild env this c0 =
+      let r0 = self#on_xhp_child env c0 in
+      if c0 == r0 then this else XhpChild r0
+
+    method on_xhp_child env this =
+      match this with
+      | ChildName c0 -> self#on_ChildName env this c0
+      | ChildList c0 -> self#on_ChildList env this c0
+      | ChildUnary (c0, c1) -> self#on_ChildUnary env this c0 c1
+      | ChildBinary (c0, c1) -> self#on_ChildBinary env this c0 c1
+
+    method on_ChildName env this c0 =
+      let r0 = self#on_id env c0 in
+      if c0 == r0 then this else ChildName r0
+
+    method on_ChildList env this c0 =
+      let r0 = self#on_list self#on_xhp_child env c0 in
+      if c0 == r0 then this else ChildList r0
+
+    method on_ChildUnary env this c0 c1 =
+      let r0 = self#on_xhp_child env c0 in
+      let r1 = self#on_xhp_child_op env c1 in
+      if c0 == r0 && c1 == r1 then this else ChildUnary (r0, r1)
+
+    method on_ChildBinary env this c0 c1 =
+      let r0 = self#on_xhp_child env c0 in
+      let r1 = self#on_xhp_child env c1 in
+      if c0 == r0 && c1 == r1 then this else ChildBinary (r0, r1)
+
+    method on_xhp_child_op env this =
+      match this with
+      | ChildStar -> self#on_ChildStar env this
+      | ChildPlus -> self#on_ChildPlus env this
+      | ChildQuestion -> self#on_ChildQuestion env this
+
+    method on_ChildStar env this = this
+    method on_ChildPlus env this = this
+    method on_ChildQuestion env this = this
+
+    method on_cu_alias_type env this =
+      match this with
+      | CU_as
+      | CU_insteadof -> this
+
     method on_class_elt env this =
       match this with
       | Const (c0, c1) -> self#on_Const env this c0 c1
@@ -312,6 +375,7 @@ class virtual ['self] endo =
       | Attributes c0 -> self#on_Attributes env this c0
       | TypeConst c0 -> self#on_TypeConst env this c0
       | ClassUse c0 -> self#on_ClassUse env this c0
+      | ClassUseAlias (c0, c1, at) -> self#on_ClassUseAlias env this c0 c1 at
       | XhpAttrUse c0 -> self#on_XhpAttrUse env this c0
       | ClassTraitRequire (c0, c1) as this ->
           self#on_ClassTraitRequire env this c0 c1
@@ -320,6 +384,7 @@ class virtual ['self] endo =
       | XhpAttr (c0, c1, c2, c3) as this ->
           self#on_XhpAttr env this c0 c1 c2 c3
       | Method c0 -> self#on_Method env this c0
+      | XhpChild c0 -> self#on_XhpChild env this c0
       | XhpCategory c0 -> self#on_XhpCategory env this c0
     method on_CA_name env this c0 =
       let r0 = self#on_id env c0 in
@@ -616,18 +681,19 @@ class virtual ['self] endo =
         }
     method on_Unsafe env this = this
     method on_Fallthrough env this = this
+    method on_Omitted env this = this
     method on_Expr env this c0 =
       let r0 = self#on_expr env c0 in
       if c0 == r0 then this else Expr r0
     method on_Block env this c0 =
       let r0 = self#on_block env c0 in
       if c0 == r0 then this else Block r0
-    method on_Break env this c0 =
+    method on_Break env this c0 level_opt =
       let r0 = self#on_Pos_t env c0 in
-      if c0 == r0 then this else Break r0
-    method on_Continue env this c0 =
+      if c0 == r0 then this else Break (r0, level_opt)
+    method on_Continue env this c0 level_opt =
       let r0 = self#on_Pos_t env c0 in
-      if c0 == r0 then this else Continue r0
+      if c0 == r0 then this else Continue(r0, level_opt)
     method on_Throw env this c0 =
       let r0 = self#on_expr env c0 in
       if c0 == r0 then this else Throw r0
@@ -639,6 +705,9 @@ class virtual ['self] endo =
     method on_Static_var env this c0 =
       let r0 = self#on_list self#on_expr env c0 in
       if c0 == r0 then this else Static_var r0
+    method on_Global_var env this c0 =
+      let r0 = self#on_list self#on_expr env c0 in
+      if c0 == r0 then this else Global_var r0
     method on_If env this c0 c1 c2 =
       let r0 = self#on_expr env c0 in
       let r1 = self#on_block env c1 in
@@ -684,6 +753,11 @@ class virtual ['self] endo =
       if c0 == r0 && c1 == r1 && c2 == r2
       then this
       else Try (r0, r1, r2)
+    method on_Def_inline env this c0 =
+      let r0 = self#on_def env c0 in
+      if c0 == r0
+      then this
+      else Def_inline r0
     method on_Noop env this = this
     method on_stmt env this =
       match this with
@@ -691,13 +765,14 @@ class virtual ['self] endo =
       | Fallthrough -> self#on_Fallthrough env this
       | Expr c0 -> self#on_Expr env this c0
       | Block c0 -> self#on_Block env this c0
-      | Break c0 -> self#on_Break env this c0
-      | Continue c0 -> self#on_Continue env this c0
+      | Break (c0, level_opt) -> self#on_Break env this c0 level_opt
+      | Continue (c0, level_opt) -> self#on_Continue env this c0 level_opt
       | Throw c0 -> self#on_Throw env this c0
       | Return (c0, c1) -> self#on_Return env this c0 c1
       | GotoLabel c0 -> self#on_GotoLabel env this c0
       | Goto c0 -> self#on_Goto env this c0
       | Static_var c0 -> self#on_Static_var env this c0
+      | Global_var c0 -> self#on_Global_var env this c0
       | If (c0, c1, c2) -> self#on_If env this c0 c1 c2
       | Do (c0, c1) -> self#on_Do env this c0 c1
       | While (c0, c1) -> self#on_While env this c0 c1
@@ -706,6 +781,8 @@ class virtual ['self] endo =
       | Foreach (c0, c1, c2, c3) as this ->
           self#on_Foreach env this c0 c1 c2 c3
       | Try (c0, c1, c2) -> self#on_Try env this c0 c1 c2
+      | Def_inline c0 ->
+          self#on_Def_inline env this c0
       | Noop -> self#on_Noop env this
     method on_As_v env this c0 =
       let r0 = self#on_expr env c0 in
@@ -778,7 +855,6 @@ class virtual ['self] endo =
       let r1 = self#on_id env c1 in if c0 == r0 && c1 == r1
       then this
       else Lvarvar (r0, r1)
-    method on_Dollardollar env this = this
     method on_Clone env this c0 =
       let r0 = self#on_expr env c0 in
       if c0 == r0 then this else Clone r0
@@ -942,7 +1018,6 @@ class virtual ['self] endo =
       | Id_type_arguments (c0, c1) -> self#on_Id_type_arguments env this c0 c1
       | Lvar c0 -> self#on_Lvar env this c0
       | Lvarvar (c0, c1) -> self#on_Lvarvar env this c0 c1
-      | Dollardollar -> self#on_Dollardollar env this
       | Clone c0 -> self#on_Clone env this c0
       | Obj_get (c0, c1, c2) as this ->
           self#on_Obj_get env this c0 c1 c2
@@ -975,6 +1050,7 @@ class virtual ['self] endo =
       | Xml (c0, c1, c2) -> self#on_Xml env this c0 c1 c2
       | Unsafeexpr c0 -> self#on_Unsafeexpr env this c0
       | Import (c0, c1) -> self#on_Import env this c0 c1
+      | Omitted         -> self#on_Omitted env this
     method on_Include env this = this
     method on_Require env this = this
     method on_IncludeOnce env this = this
@@ -1012,6 +1088,7 @@ class virtual ['self] endo =
     method on_Lte env this = this
     method on_Gt env this = this
     method on_Gte env this = this
+    method on_Cmp env this = this
     method on_Dot env this = this
     method on_Amp env this = this
     method on_Bar env this = this
@@ -1044,6 +1121,7 @@ class virtual ['self] endo =
       | Bar -> self#on_Bar env this
       | Ltlt -> self#on_Ltlt env this
       | Gtgt -> self#on_Gtgt env this
+      | Cmp -> self#on_Cmp env this
       | Percent -> self#on_Percent env this
       | Xor -> self#on_Xor env this
       | Eq c0 -> self#on_Eq env this c0
@@ -1056,6 +1134,8 @@ class virtual ['self] endo =
     method on_Upincr env this = this
     method on_Updecr env this = this
     method on_Uref env this = this
+    method on_Usplat env this = this
+    method on_Usilence env this = this
     method on_uop env this =
       match this with
       | Utild -> self#on_Utild env this
@@ -1067,6 +1147,8 @@ class virtual ['self] endo =
       | Upincr -> self#on_Upincr env this
       | Updecr -> self#on_Updecr env this
       | Uref -> self#on_Uref env this
+      | Usplat -> self#on_Usplat env this
+      | Usilence -> self#on_Usilence env this
     method on_Default env this c0 =
       let r0 = self#on_block env c0 in
       if c0 == r0 then this else Default r0

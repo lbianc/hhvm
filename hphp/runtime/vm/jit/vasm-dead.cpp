@@ -71,6 +71,10 @@ bool effectful(Vinstr& inst) {
     case Vinstr::copy:
     case Vinstr::copy2:
     case Vinstr::copyargs:
+    case Vinstr::csincb:
+    case Vinstr::csincw:
+    case Vinstr::csincl:
+    case Vinstr::csincq:
     case Vinstr::cvtsi2sd:
     case Vinstr::cvtsi2sdm:
     case Vinstr::cvttsd2siq:
@@ -105,6 +109,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::loadqp:
     case Vinstr::loadsd:
     case Vinstr::loadtqb:
+    case Vinstr::loadtql:
     case Vinstr::loadups:
     case Vinstr::loadw:
     case Vinstr::loadzbl:
@@ -145,8 +150,6 @@ bool effectful(Vinstr& inst) {
     case Vinstr::shrqi:
     case Vinstr::sqrtsd:
     case Vinstr::srem:
-    case Vinstr::subb:
-    case Vinstr::subbi:
     case Vinstr::subl:
     case Vinstr::subli:
     case Vinstr::subq:
@@ -165,6 +168,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::testwim:
     case Vinstr::ucomisd:
     case Vinstr::unpcklpd:
+    case Vinstr::ubfmli:
     case Vinstr::xorb:
     case Vinstr::xorbi:
     case Vinstr::xorl:
@@ -179,6 +183,7 @@ bool effectful(Vinstr& inst) {
     case Vinstr::bindaddr:
     case Vinstr::bindjcc:
     case Vinstr::bindjmp:
+    case Vinstr::funcguard:
     case Vinstr::call:
     case Vinstr::callarray:
     case Vinstr::callfaststub:

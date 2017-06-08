@@ -344,20 +344,95 @@ void emitCastArray(IRGS& env) {
   push(env, gen(env, ConvCellToArr, src));
 }
 
+void emitCastVArray(IRGS& env) {
+  auto const src = popC(env);
+
+  auto const raise = [&](const char* type) {
+    gen(
+      env,
+      ThrowInvalidOperation,
+      cns(
+        env,
+        makeStaticString(folly::sformat("{} to varray conversion", type))
+      )
+    );
+    return cns(env, TBottom);
+  };
+
+  push(
+    env,
+    [&] {
+      if (src->isA(TArr))    {
+        // ConvArrToVArr can be simplified away if the array is packed or the
+        // empty array.
+        env.irb->constrainValue(
+          src,
+          TypeConstraint{DataTypeSpecialized}.setWantArrayKind()
+        );
+        return gen(env, ConvArrToVArr, src);
+      }
+      if (src->isA(TVec))    return gen(env, ConvVecToVArr, src);
+      if (src->isA(TDict))   return gen(env, ConvDictToVArr, src);
+      if (src->isA(TKeyset)) return gen(env, ConvKeysetToVArr, src);
+      if (src->isA(TObj))    return gen(env, ConvObjToVArr, src);
+      if (src->isA(TNull))   return raise("Null");
+      if (src->isA(TBool))   return raise("Bool");
+      if (src->isA(TInt))    return raise("Int");
+      if (src->isA(TDbl))    return raise("Double");
+      if (src->isA(TStr))    return raise("String");
+      if (src->isA(TRes))    return raise("Resource");
+      always_assert_flog(false, "Unexpected {} in emitCastVArray", src->type());
+    }()
+  );
+}
+
+void emitCastDArray(IRGS& env) {
+  auto const src = popC(env);
+
+  auto const raise = [&](const char* type) {
+    gen(
+      env,
+      ThrowInvalidOperation,
+      cns(
+        env,
+        makeStaticString(folly::sformat("{} to darray conversion", type))
+      )
+    );
+    return cns(env, TBottom);
+  };
+
+  push(
+    env,
+    [&] {
+      if (src->isA(TArr))    return src;
+      if (src->isA(TVec))    return gen(env, ConvVecToArr, src);
+      if (src->isA(TDict))   return gen(env, ConvDictToArr, src);
+      if (src->isA(TKeyset)) return gen(env, ConvKeysetToArr, src);
+      if (src->isA(TObj))    return gen(env, ConvObjToDArr, src);
+      if (src->isA(TNull))   return raise("Null");
+      if (src->isA(TBool))   return raise("Bool");
+      if (src->isA(TInt))    return raise("Int");
+      if (src->isA(TDbl))    return raise("Double");
+      if (src->isA(TStr))    return raise("String");
+      if (src->isA(TRes))    return raise("Resource");
+      always_assert_flog(false, "Unexpected {} in emitCastDArray", src->type());
+    }()
+  );
+}
+
 void emitCastVec(IRGS& env) {
   auto const src = popC(env);
 
   auto const raise = [&](const char* type) {
     gen(
       env,
-      RaiseWarning,
+      ThrowInvalidOperation,
       cns(
         env,
         makeStaticString(folly::sformat("{} to vec conversion", type))
       )
     );
-    decRef(env, src);
-    return cns(env, staticEmptyVecArray());
+    return cns(env, TBottom);
   };
 
   push(
@@ -374,7 +449,7 @@ void emitCastVec(IRGS& env) {
       if (src->isA(TDbl))    return raise("Double");
       if (src->isA(TStr))    return raise("String");
       if (src->isA(TRes))    return raise("Resource");
-      not_reached();
+      always_assert_flog(false, "Unexpected {} in emitCastVec", src->type());
     }()
   );
 }
@@ -385,14 +460,13 @@ void emitCastDict(IRGS& env) {
   auto const raise = [&](const char* type) {
     gen(
       env,
-      RaiseWarning,
+      ThrowInvalidOperation,
       cns(
         env,
         makeStaticString(folly::sformat("{} to dict conversion", type))
       )
     );
-    decRef(env, src);
-    return cns(env, staticEmptyDictArray());
+    return cns(env, TBottom);
   };
 
   push(
@@ -420,14 +494,13 @@ void emitCastKeyset(IRGS& env) {
   auto const raise = [&](const char* type) {
     gen(
       env,
-      RaiseWarning,
+      ThrowInvalidOperation,
       cns(
         env,
         makeStaticString(folly::sformat("{} to keyset conversion", type))
       )
     );
-    decRef(env, src);
-    return cns(env, staticEmptyKeysetArray());
+    return cns(env, TBottom);
   };
 
   push(
@@ -444,7 +517,7 @@ void emitCastKeyset(IRGS& env) {
       if (src->isA(TDbl))     return raise("Double");
       if (src->isA(TStr))     return raise("String");
       if (src->isA(TRes))     return raise("Resource");
-      not_reached();
+      always_assert_flog(false, "Unexpected {} in emitCastKeyset", src->type());
     }()
   );
 }

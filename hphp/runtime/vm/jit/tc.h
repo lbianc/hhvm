@@ -69,22 +69,16 @@ struct TransMetaInfo {
   TransRec transRec;
 };
 
-struct ThreadTCBuffer {
-  ThreadTCBuffer() = default;
-  explicit ThreadTCBuffer(TCA start);
-  ThreadTCBuffer(ThreadTCBuffer&&) = default;
-  ThreadTCBuffer& operator=(ThreadTCBuffer&&) = default;
-
-#ifndef NDEBUG
-  ~ThreadTCBuffer();
-#endif
+struct LocalTCBuffer {
+  LocalTCBuffer() = default;
+  explicit LocalTCBuffer(Address start, size_t initialSize);
+  LocalTCBuffer(LocalTCBuffer&&) = default;
+  LocalTCBuffer& operator=(LocalTCBuffer&&) = default;
 
   OptView view();
-  TCA start() const { return m_start; }
-  bool valid() const { return m_start; }
+  bool valid() const { return m_main.base() != nullptr; }
 
 private:
-  TCA m_start{nullptr};
   CodeBlock m_main;
   CodeBlock m_cold;
   CodeBlock m_frozen;
@@ -93,7 +87,7 @@ private:
 
 struct FuncMetaInfo {
   FuncMetaInfo() = default;
-  FuncMetaInfo(Func* f, ThreadTCBuffer&& buf)
+  FuncMetaInfo(Func* f, LocalTCBuffer&& buf)
     : fid(f->getFuncId())
     , func(f)
     , tcBuf(std::move(buf))
@@ -104,7 +98,7 @@ struct FuncMetaInfo {
 
   FuncId fid;
   Func* func;
-  ThreadTCBuffer tcBuf;
+  LocalTCBuffer tcBuf;
   std::vector<ProfTransRec*> prologues;
   std::vector<TransMetaInfo> translations;
 };
@@ -184,12 +178,17 @@ bool canTranslate();
  * Whether we should emit a translation of kind for func, ignoring the cap on
  * overall TC size.
  */
-bool shouldTranslateNoSizeLimit(const Func* func);
+bool shouldTranslateNoSizeLimit(const Func* func, TransKind kind);
 
 /*
  * Whether we should emit a translation of kind for func.
  */
 bool shouldTranslate(const Func* func, TransKind kind);
+
+/*
+ * Whether we are still profiling new functions.
+ */
+bool shouldProfileNewFuncs();
 
 /*
  * Whether we should try profile-guided optimization when translating `func'.

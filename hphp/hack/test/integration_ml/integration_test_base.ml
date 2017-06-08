@@ -22,7 +22,9 @@ let global_opts = GlobalOptions.make
   ~tco_safe_vector_array: false
   ~tco_user_attrs: None
   ~tco_experimental_features: GlobalOptions.tco_experimental_all
+  ~tco_migration_flags: SSet.empty
   ~po_auto_namespace_map: []
+  ~ignored_fixme_codes: ISet.empty
 
 let server_config = ServerConfig.set_tc_options server_config global_opts
 let server_config = ServerConfig.set_parser_options
@@ -205,9 +207,9 @@ let ide_autocomplete env (path, line, column) =
     )
   }
 
-let status env =
+let status ?(ignore_ide=false) env =
   run_loop_once env { default_loop_input with
-    new_client = Some (RequestResponse ServerCommandTypes.STATUS)
+    new_client = Some (RequestResponse (ServerCommandTypes.STATUS ignore_ide))
   }
 
 let assert_no_diagnostics loop_output =
@@ -221,7 +223,8 @@ let assert_no_diagnostics loop_output =
 let assert_has_diagnostics loop_output =
   match loop_output.push_message with
   | Some (DIAGNOSTIC _) -> ()
-  | Some NEW_CLIENT_CONNECTED ->
+  | Some NEW_CLIENT_CONNECTED
+  | Some FATAL_EXCEPTION _ ->
     fail "Unexpected push message"
   | None -> fail "Expected to receive push diagnostics."
 
@@ -272,3 +275,11 @@ let assert_autocomplete loop_output expected =
   let results_as_string = list_to_string results in
   let expected_as_string = list_to_string expected in
   assertEqual expected_as_string results_as_string
+
+let assert_status loop_output expected =
+  let {Server_status.error_list; _} = match loop_output.new_client_response with
+    | Some res -> res
+    | _ -> fail "Expected status response"
+  in
+  let results_as_string = errors_to_string error_list in
+  assertEqual expected results_as_string

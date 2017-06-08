@@ -18,6 +18,7 @@
 
 #include "hphp/runtime/base/apc-array.h"
 #include "hphp/runtime/base/apc-local-array.h"
+#include "hphp/runtime/base/array-helpers.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/comparisons.h"
@@ -28,6 +29,8 @@
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/tv-comparisons.h"
+#include "hphp/runtime/base/tv-refcount.h"
+#include "hphp/runtime/base/tv-type.h"
 #include "hphp/runtime/base/variable-serializer.h"
 
 #include "hphp/runtime/vm/member-operations.h"
@@ -46,16 +49,11 @@
 #include "hphp/runtime/base/packed-array-defs.h"
 #include "hphp/runtime/base/array-iterator-defs.h"
 
-#if defined(__x86_64__) && defined(FACEBOOK) && !defined(NO_SSE42) &&\
-    defined(NO_M_DATA)
-#include "hphp/runtime/base/mixed-array-x64.h"
-#endif
-
 namespace HPHP {
 
 TRACE_SET_MOD(runtime);
 
-static_assert(computeAllocBytes(MixedArray::SmallScale) ==
+static_assert(MixedArray::computeAllocBytes(MixedArray::SmallScale) ==
               kEmptyMixedArraySize, "");
 
 std::aligned_storage<kEmptyMixedArraySize, 16>::type s_theEmptyDictArray;
@@ -65,7 +63,7 @@ struct MixedArray::Initializer {
     auto const ad = reinterpret_cast<MixedArray*>(&s_theEmptyDictArray);
     auto const data = mixedData(ad);
     auto const hash = mixedHash(data, 1);
-    ad->initHash(hash, 1);
+    ad->InitHash(hash, 1);
     ad->m_sizeAndPos = 0;
     ad->m_scale_used = 1;
     ad->m_nextKI = 0;
@@ -81,13 +79,13 @@ ArrayData* MixedArray::MakeReserveImpl(uint32_t size, HeaderKind hk) {
   assert(hk == HeaderKind::Mixed || hk == HeaderKind::Dict);
 
   auto const scale = computeScaleFromSize(size);
-  auto const ad    = reqAllocArray(scale);
+  auto const ad    = reqAlloc(scale);
 
   // Intialize the hash table first, because the header is already in L1 cache,
   // but the hash table may not be.  So let's issue the cache request ASAP.
   auto const data = mixedData(ad);
   auto const hash = mixedHash(data, scale);
-  ad->initHash(hash, scale);
+  ad->InitHash(hash, scale);
 
   ad->m_sizeAndPos   = 0; // size=0, pos=0
   ad->initHeader(hk, 1);
@@ -156,11 +154,11 @@ MixedArray* MixedArray::MakeStruct(uint32_t size, const StringData* const* keys,
   assert(size > 0);
 
   auto const scale = computeScaleFromSize(size);
-  auto const ad    = reqAllocArray(scale);
+  auto const ad    = reqAlloc(scale);
 
   auto const data = mixedData(ad);
   auto const hash = mixedHash(data, scale);
-  ad->initHash(hash, scale);
+  ad->InitHash(hash, scale);
 
   ad->m_sizeAndPos       = size; // pos=0
   ad->initHeader(HeaderKind::Mixed, 1);
@@ -199,33 +197,33 @@ MixedArray* MixedArray::MakeMixed(uint32_t size,
   assert(size > 0);
 
   auto const scale = computeScaleFromSize(size);
-  auto const ad    = reqAllocArray(scale);
+  auto const ad    = reqAlloc(scale);
 
   auto const data = mixedData(ad);
   auto const hash = mixedHash(data, scale);
-  ad->initHash(hash, scale);
+  ad->InitHash(hash, scale);
 
   ad->m_sizeAndPos       = size; // pos=0
   ad->initHeader(HeaderKind::Mixed, 1);
   ad->m_scale_used       = scale | uint64_t{size} << 32; // used=size
   ad->m_nextKI           = 0;
 
-  // Append values by moving -- Caller assumes we update refcount.
+  // Append values by moving -- no refcounts are updated.
   for (uint32_t i = 0; i < size; i++) {
     auto& kTv = keysAndValues[i * 2];
     if (kTv.m_type == KindOfString) {
       auto k = kTv.m_data.pstr;
       auto h = k->hash();
-      auto ei = ad->findForInsert(k, h);
-      if (validPos(*ei)) return nullptr;
-      data[i].setStrKey(k, h);
+      auto ei = ad->findForInsertUpdate(k, h);
+      if (isValidPos(ei)) return nullptr;
+      data[i].setStrKeyNoIncRef(k, h);
       *ei = i;
     } else {
       assert(kTv.m_type == KindOfInt64);
       auto k = kTv.m_data.num;
       auto h = hash_int64(k);
-      auto ei = ad->findForInsert(k, h);
-      if (validPos(*ei)) return nullptr;
+      auto ei = ad->findForInsertUpdate(k, h);
+      if (isValidPos(ei)) return nullptr;
       data[i].setIntKey(k, h);
       *ei = i;
     }
@@ -251,8 +249,8 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
                                   AllocMode mode, HeaderKind dest_hk) {
   assert(dest_hk == HeaderKind::Mixed || dest_hk == HeaderKind::Dict);
   auto const scale = other.m_scale;
-  auto const ad = mode == AllocMode::Request ? reqAllocArray(scale)
-                                             : staticAllocArray(scale);
+  auto const ad = mode == AllocMode::Request ? reqAlloc(scale)
+                                             : staticAlloc(scale);
 
   // Copy everything including tombstones.  We want to copy the elements and
   // the hash separately, because the array may not be very full.
@@ -265,7 +263,7 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
                  sizeof(MixedArray) + sizeof(Elm) * other.m_used + 24);
   RefCount count = mode == AllocMode::Request ? 1 : StaticValue;
   ad->initHeader(dest_hk, count);
-  copyHash(ad->hashTab(), other.hashTab(), scale);
+  CopyHash(ad->hashTab(), other.hashTab(), scale);
 
   // Bump up refcounts as needed.
   auto const elms = ad->data();
@@ -275,7 +273,7 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
     if (e.hasStrKey()) e.skey->incRefCount();
     if (UNLIKELY(e.data.m_type == KindOfRef)) {
       auto ref = e.data.m_data.pref;
-      // See also tvDupFlattenVars()
+      // See also tvDupWithRef()
       if (!ref->isReferenced() && ref->tv()->m_data.parr != &other) {
         cellDup(*ref->tv(), *reinterpret_cast<Cell*>(&e.data));
         continue;
@@ -288,7 +286,7 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
         throwRefInvalidArrayValueException(staticEmptyDictArray());
       }
     }
-    tvRefcountedIncRef(&e.data);
+    tvIncRefGen(&e.data);
   }
 
   // We need to assert this up here before we possibly call compact (which
@@ -340,13 +338,6 @@ MixedArray* MixedArray::copyMixedAndResizeIfNeededSlow() const {
   auto const ret = copy->resize();
   if (copy != ret) Release(copy);
   return ret;
-}
-
-//////////////////////////////////////////////////////////////////////
-
-size_t MixedArray::computeAllocBytesFromMaxElms(uint32_t maxElms) {
-  auto const scale = computeScaleFromSize(maxElms);
-  return computeAllocBytes(scale);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -422,7 +413,7 @@ Variant MixedArray::CreateVarForUncountedArray(const Variant& source) {
 }
 
 ALWAYS_INLINE static bool UncountedMixedArrayOnHugePage() {
-#ifdef USE_JEMALLOC_CHUNK_HOOKS
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
   return high_huge1g_arena && RuntimeOption::EvalUncountedMixedArrayHuge;
 #else
   return false;
@@ -447,7 +438,7 @@ ArrayData* MixedArray::MakeUncounted(ArrayData* array, size_t extra) {
   assert((extra & 0xf) == 0);
   bcopy32_inline(ad, a, sizeof(MixedArray) + sizeof(Elm) * used + 24);
   ad->m_count = UncountedValue; // after bcopy, update count
-  copyHash(ad->hashTab(), a->hashTab(), scale);
+  CopyHash(ad->hashTab(), a->hashTab(), scale);
 
   // Need to make sure keys and values are all uncounted.
   auto dstElem = ad->data();
@@ -496,7 +487,7 @@ void MixedArray::Release(ArrayData* in) {
         // pointers to freed memory gracefully in prod mode.
         if (debug) ptr->skey = nullptr;
       }
-      tvRefcountedDecRef(&ptr->data);
+      tvDecRefGen(&ptr->data);
     }
 
     if (UNLIKELY(strong_iterators_exist())) {
@@ -614,65 +605,6 @@ bool MixedArray::checkInvariants() const {
 //=============================================================================
 // Iteration.
 
-inline ssize_t MixedArray::prevElm(Elm* elms, ssize_t ei) const {
-  assert(ei < ssize_t(m_used));
-  while (--ei >= 0) {
-    if (!elms[ei].isTombstone()) {
-      return ei;
-    }
-  }
-  return m_used;
-}
-
-ssize_t MixedArray::IterBegin(const ArrayData* ad) {
-  auto a = asMixed(ad);
-  return a->nextElm(a->data(), -1);
-}
-
-ssize_t MixedArray::IterLast(const ArrayData* ad) {
-  auto a = asMixed(ad);
-  auto elms = a->data();
-  ssize_t ei = a->m_used;
-  while (--ei >= 0) {
-    if (!elms[ei].isTombstone()) {
-      return ei;
-    }
-  }
-  return a->m_used;
-}
-
-ssize_t MixedArray::IterEnd(const ArrayData* ad) {
-  auto a = asMixed(ad);
-  return a->m_used;
-}
-
-ssize_t MixedArray::IterAdvance(const ArrayData* ad, ssize_t pos) {
-  auto a = asMixed(ad);
-  ++pos;
-  if (pos >= a->m_used) return a->m_used;
-  if (!a->data()[pos].isTombstone()) {
-    return pos;
-  }
-  return a->iter_advance_helper(pos);
-}
-
-// caller has already incremented pos but encountered a tombstone
-ssize_t MixedArray::iter_advance_helper(ssize_t next_pos) const {
-  Elm* elms = data();
-  for (auto limit = m_used; size_t(next_pos) < limit; ++next_pos) {
-    if (!elms[next_pos].isTombstone()) {
-      return next_pos;
-    }
-  }
-  assert(next_pos == m_used);
-  return next_pos;
-}
-
-ssize_t MixedArray::IterRewind(const ArrayData* ad, ssize_t pos) {
-  auto a = asMixed(ad);
-  return a->prevElm(a->data(), pos);
-}
-
 size_t MixedArray::Vsize(const ArrayData*) { not_reached(); }
 
 const Variant& MixedArray::GetValueRef(const ArrayData* ad, ssize_t pos) {
@@ -709,66 +641,6 @@ bool MixedArray::IsVectorData(const ArrayData* ad) {
 //=============================================================================
 // Lookup.
 
-ALWAYS_INLINE bool hitStringKey(const MixedArray::Elm& e, const StringData* s,
-                                strhash_t hash) {
-  // hitStringKey() should only be called on an Elm that is referenced by a
-  // hash table entry. MixedArray guarantees that when it adds a hash table
-  // entry that it always sets it to refer to a valid element. Likewise when
-  // it removes an element it always removes the corresponding hash entry.
-  // Therefore the assertion below must hold.
-  assert(!MixedArray::isTombstone(e.data.m_type));
-  return hash == e.hash() && (s == e.skey || s->same(e.skey));
-}
-
-static bool hitIntKey(const MixedArray::Elm& e, int64_t ki) {
-  // hitIntKey() should only be called on an Elm that is referenced by a
-  // hash table entry. MixedArray guarantees that when it adds a hash table
-  // entry that it always sets it to refer to a valid element. Likewise when
-  // it removes an element it always removes the corresponding hash entry.
-  // Therefore the assertion below must hold.
-  assert(!e.isTombstone());
-  return e.ikey == ki && e.hasIntKey();
-}
-
-// Quadratic probe is:
-//
-//   h(k, i) = (k + c1*i + c2*(i^2)) % tableSize
-//
-// Use 1/2 for c1 and c2.  In combination with a table size that is a power of
-// 2, this guarantees a probe sequence of length tableSize that probes all
-// table elements exactly once.
-
-template <class Hit> ALWAYS_INLINE
-ssize_t MixedArray::findImpl(hash_t h0, Hit hit) const {
-  uint32_t mask = this->mask();
-  auto elms = data();
-  auto hashtable = hashTab();
-  for (uint32_t probeIndex = h0, i = 1;; ++i) {
-    auto pos = hashtable[probeIndex & mask];
-    if (validPos(pos)) {
-      if (hit(elms[pos])) return pos;
-    } else if (pos & 1) {
-      assert(pos == Empty);
-      return pos;
-    }
-    probeIndex += i;
-    assertx(i <= mask);
-    assertx(probeIndex == static_cast<uint32_t>(h0) + (i + i * i) / 2);
-  }
-}
-
-ssize_t MixedArray::find(int64_t ki, inthash_t h) const {
-  return findImpl(h, [ki] (const Elm& e) {
-    return hitIntKey(e, ki);
-  });
-}
-
-ssize_t MixedArray::find(const StringData* s, strhash_t h) const {
-  return findImpl(h, [s, h] (const Elm& e) {
-    return hitStringKey(e, s, h);
-  });
-}
-
 NEVER_INLINE
 int32_t* warnUnbalanced(MixedArray* a, size_t n, int32_t* ei) {
   if (n > size_t(RuntimeOption::MaxArrayChain)) {
@@ -778,96 +650,35 @@ int32_t* warnUnbalanced(MixedArray* a, size_t n, int32_t* ei) {
   return ei;
 }
 
-template <class Hit> ALWAYS_INLINE
-int32_t* MixedArray::findForInsertImpl(hash_t h0, Hit hit) const {
-  uint32_t mask = this->mask();
-  auto elms = data();
-  auto hashtable = hashTab();
-  for (uint32_t probeIndex = h0, i = 1;; ++i) {
-    auto ei = &hashtable[probeIndex & mask];
-    int32_t pos = *ei;
-    if (validPos(pos)) {
-      if (hit(elms[pos])) {
-        return ei;
-      }
-    } else if (pos & 1) {
-      assert(pos == Empty);
-      return ei;
-    }
-    probeIndex += i;
-    assertx(i <= mask);
-    assertx(probeIndex == static_cast<uint32_t>(h0) + (i + i * i) / 2);
-  }
-}
-
-int32_t* MixedArray::findForInsert(int64_t ki, inthash_t h) const {
-  return findForInsertImpl(h, [ki] (const Elm& e) {
-    return hitIntKey(e, ki);
-  });
-}
-
-int32_t* MixedArray::findForInsert(const StringData* s, strhash_t h) const {
-  return findForInsertImpl(h, [s, h] (const Elm& e) {
-    return hitStringKey(e, s, h);
-  });
-}
-
 MixedArray::InsertPos MixedArray::insert(int64_t k) {
   assert(!isFull());
   auto h = hash_int64(k);
-  auto ei = findForInsert(k, h);
-  if (validPos(*ei)) {
-    return InsertPos(true, data()[*ei].data);
+  auto ei = findForInsertUpdate(k, h);
+  if (isValidPos(ei)) {
+    return InsertPos(true, data()[(int32_t)*ei].data);
   }
   if (k >= m_nextKI && m_nextKI >= 0) m_nextKI = k + 1;
-  auto& e = allocElm(ei);
-  e.setIntKey(k, h);
-  return InsertPos(false, e.data);
+  auto e = allocElm(ei);
+  e->setIntKey(k, h);
+  return InsertPos(false, e->data);
 }
 
 MixedArray::InsertPos MixedArray::insert(StringData* k) {
   assert(!isFull());
   auto const h = k->hash();
-  auto ei = findForInsert(k, h);
-  if (validPos(*ei)) {
-    return InsertPos(true, data()[*ei].data);
+  auto ei = findForInsertUpdate(k, h);
+  if (isValidPos(ei)) {
+    return InsertPos(true, data()[(int32_t)*ei].data);
   }
-  auto& e = allocElm(ei);
-  e.setStrKey(k, h);
-  return InsertPos(false, e.data);
-}
-
-template <class Hit, class Remove> ALWAYS_INLINE
-ssize_t MixedArray::findForRemoveImpl(hash_t h0, Hit hit, Remove remove) const {
-  size_t mask = this->mask();
-  auto elms = data();
-  auto hashtable = hashTab();
-  for (uint32_t probe = h0, i = 1;; ++i) {
-    auto ei = &hashtable[probe & mask];
-    auto pos = *ei;
-    if (validPos(pos)) {
-      if (hit(elms[pos])) {
-        remove(elms[pos]);
-        *ei = Tombstone;
-        return pos;
-      }
-    } else if (pos & 1) {
-      assert(pos == Empty);
-      return pos;
-    }
-    probe += i;
-    assertx(i <= mask);
-    assertx(probe == static_cast<uint32_t>(h0) + (i + i * i) / 2);
-  }
+  auto e = allocElm(ei);
+  e->setStrKey(k, h);
+  return InsertPos(false, e->data);
 }
 
 NEVER_INLINE
-ssize_t MixedArray::findForRemove(int64_t ki, inthash_t h, bool updateNext) {
+int32_t MixedArray::findForRemove(int64_t ki, inthash_t h, bool updateNext) {
   // all vector methods should work w/out touching the hashtable
-  return findForRemoveImpl(h,
-      [&] (const Elm& e) {
-        return hitIntKey(e, ki);
-      },
+  return findForRemove(ki, h,
       [this, ki, updateNext] (Elm& e) {
         assert(ki == e.ikey);
         // Conform to PHP5 behavior
@@ -883,11 +694,8 @@ ssize_t MixedArray::findForRemove(int64_t ki, inthash_t h, bool updateNext) {
   );
 }
 
-ssize_t MixedArray::findForRemove(const StringData* s, strhash_t h) {
-  return findForRemoveImpl(h,
-      [&] (const Elm& e) {
-        return hitStringKey(e, s, h);
-      },
+int32_t MixedArray::findForRemove(const StringData* s, strhash_t h) {
+  return findForRemove(s, h,
       [] (Elm& e) {
         decRefStr(e.skey);
         e.setIntKey(0, hash_int64(0));
@@ -917,21 +725,27 @@ ArrayData* MixedArray::zInitVal(TypedValue& tv, RefData* v) {
 
 ALWAYS_INLINE
 MixedArray* MixedArray::initRef(TypedValue& tv, Variant& v) {
-  tvAsUninitializedVariant(&tv).constructRefHelper(v);
+  tvBoxIfNeeded(v.asTypedValue());
+  refDup(*v.asTypedValue(), tv);
   return this;
 }
 
 ALWAYS_INLINE
-MixedArray* MixedArray::initWithRef(TypedValue& tv, const Variant& v) {
+MixedArray* MixedArray::initWithRef(TypedValue& tv, TypedValue v) {
   tvWriteNull(&tv);
   tvAsVariant(&tv).setWithRef(v);
   return this;
 }
 
 ALWAYS_INLINE
+MixedArray* MixedArray::initWithRef(TypedValue& tv, const Variant& v) {
+  return initWithRef(tv, *v.asTypedValue());
+}
+
+ALWAYS_INLINE
 ArrayData* MixedArray::zSetVal(TypedValue& tv, RefData* v) {
   // Dec ref the old value
-  tvRefcountedDecRef(tv);
+  tvDecRefGen(tv);
   // Store the RefData but do not increment the refcount
   tv.m_type = KindOfRef;
   tv.m_data.pref = v;
@@ -977,7 +791,9 @@ MixedArray::InsertCheckUnbalanced(MixedArray* ad,
   for (uint32_t i = 0; iter != stop; ++iter, ++i) {
     auto& e = *iter;
     if (e.isTombstone()) continue;
-    *ad->findForNewInsertCheckUnbalanced(table, mask, e.probe()) = i;
+    *ad->findForNewInsertWarn(table,
+                              mask,
+                              e.probe()) = i;
   }
   return ad;
 }
@@ -988,7 +804,7 @@ MixedArray::Grow(MixedArray* old, uint32_t newScale) {
   assert(MixedArray::Capacity(newScale) >= old->m_size);
   assert(newScale >= 1 && (newScale & (newScale - 1)) == 0);
 
-  auto ad            = reqAllocArray(newScale);
+  auto ad            = reqAlloc(newScale);
   auto const oldUsed = old->m_used;
   ad->m_sizeAndPos   = old->m_sizeAndPos;
   ad->initHeader(*old, 1);
@@ -997,7 +813,7 @@ MixedArray::Grow(MixedArray* old, uint32_t newScale) {
   copyElmsNextUnsafe(ad, old, oldUsed);
 
   auto table = mixedHash(ad->data(), newScale);
-  ad->initHash(table, newScale);
+  ad->InitHash(table, newScale);
 
   if (UNLIKELY(strong_iterators_exist())) {
     move_strong_iterators(ad, old);
@@ -1084,7 +900,7 @@ void MixedArray::compact(bool renumber /* = false */) {
   auto elms = data();
   auto mask = this->mask();
   auto table = hashTab();
-  initHash(table, scale());
+  InitHash(table, scale());
   for (uint32_t frPos = 0, toPos = 0; toPos < m_size; ++toPos, ++frPos) {
     while (elms[frPos].isTombstone()) {
       assert(frPos + 1 < m_used);
@@ -1153,12 +969,12 @@ bool MixedArray::nextInsert(Cell v) {
   // know that m_nextKI is not present in the array, so it is safe
   // to use findForNewInsert()
   auto ei = findForNewInsert(h);
-  assert(!validPos(*ei));
+  assert(!isValidPos(ei));
   // Allocate and initialize a new element.
-  auto& e = allocElm(ei);
-  e.setIntKey(ki, h);
+  auto e = allocElm(ei);
+  e->setIntKey(ki, h);
   m_nextKI = ki + 1; // Update next free element.
-  cellDup(v, e.data);
+  cellDup(v, e->data);
   return true;
 }
 
@@ -1172,25 +988,30 @@ ArrayData* MixedArray::nextInsertRef(Variant& data) {
   // know that m_nextKI is not present in the array, so it is safe
   // to use findForNewInsert()
   auto ei = findForNewInsert(h);
-  auto& e = allocElm(ei);
-  e.setIntKey(ki, h);
+  auto e = allocElm(ei);
+  e->setIntKey(ki, h);
   m_nextKI = ki + 1; // Update next free element.
-  return initRef(e.data, data);
+  return initRef(e->data, data);
 }
 
-ArrayData* MixedArray::nextInsertWithRef(const Variant& data) {
+ArrayData* MixedArray::nextInsertWithRef(TypedValue data) {
   assert(!isFull());
 
   int64_t ki = m_nextKI;
   auto h = hash_int64(ki);
   auto ei = findForNewInsert(h);
-  assert(!validPos(*ei));
+  assert(!isValidPos(ei));
 
   // Allocate a new element.
-  auto& e = allocElm(ei);
-  e.setIntKey(ki, h);
+  auto e = allocElm(ei);
+  e->setIntKey(ki, h);
   m_nextKI = ki + 1; // Update next free element.
-  return initWithRef(e.data, data);
+  return initWithRef(e->data, data);
+}
+
+ALWAYS_INLINE
+ArrayData* MixedArray::nextInsertWithRef(const Variant& data) {
+  return nextInsertWithRef(*data.asTypedValue());
 }
 
 template <class K> ALWAYS_INLINE
@@ -1200,12 +1021,12 @@ ArrayData* MixedArray::update(K k, Cell data) {
   if (p.found) {
     // TODO(#3888164): we should restructure things so we don't have
     // to check KindOfUninit here.
-    setVal(p.tv, data);
+    setElem(p.tv, data);
     return this;
   }
   // TODO(#3888164): we should restructure things so we don't have to
   // check KindOfUninit here.
-  initVal(p.tv, data);
+  initElem(p.tv, data);
   return this;
 }
 
@@ -1228,12 +1049,12 @@ ArrayData* MixedArray::zAppendImpl(RefData* data, int64_t* key_ptr) {
   int64_t ki = m_nextKI;
   auto h = hash_int64(ki);
   auto ei = findForNewInsert(h);
-  assert(!validPos(*ei));
-  auto& e = allocElm(ei);
-  e.setIntKey(ki, h);
+  assert(!isValidPos(ei));
+  auto e = allocElm(ei);
+  e->setIntKey(ki, h);
   m_nextKI = ki + 1;
   *key_ptr = ki;
-  return zInitVal(e.data, data);
+  return zInitVal(e->data, data);
 }
 
 member_lval MixedArray::LvalInt(ArrayData* ad, int64_t k, bool copy) {
@@ -1419,15 +1240,14 @@ void MixedArray::eraseNoCompact(ssize_t pos) {
   auto& e = elms[pos];
   // Mark the value as a tombstone.
   TypedValue* tv = &e.data;
-  DataType oldType = tv->m_type;
-  uint64_t oldDatum = tv->m_data.num;
+  auto const oldTV = *tv;
   tv->m_type = kInvalidDataType;
   --m_size;
   // Mark the hash entry as "deleted".
   assert(m_used <= capacity());
 
   // Finally, decref the old value
-  tvRefcountedDecRefHelper(oldType, oldDatum);
+  tvDecRefGen(oldTV);
 }
 
 ArrayData* MixedArray::RemoveInt(ArrayData* ad, int64_t k, bool copy) {
@@ -1458,47 +1278,6 @@ ArrayData* MixedArray::CopyWithStrongIterators(const ArrayData* ad) {
     move_strong_iterators(copied, const_cast<MixedArray*>(a));
   }
   return copied;
-}
-
-//=============================================================================
-// non-variant interface
-
-const TypedValue* MixedArray::NvGetInt(const ArrayData* ad, int64_t ki) {
-  auto a = asMixed(ad);
-  auto i = a->find(ki, hash_int64(ki));
-  return LIKELY(validPos(i)) ? &a->data()[i].data : nullptr;
-}
-
-#if !defined(__SSE4_2__) || defined(NO_HWCRC) || !defined(NO_M_DATA) || \
-  defined(_MSC_VER)
-// This function is implemented directly in ASM in mixed-array-x64.S otherwise.
-const TypedValue* MixedArray::NvGetStr(const ArrayData* ad,
-                                       const StringData* k) {
-  auto a = asMixed(ad);
-  auto i = a->find(k, k->hash());
-  if (LIKELY(validPos(i))) {
-    return &a->data()[i].data;
-  }
-  return nullptr;
-}
-#else
-  // mixed-array-x64.S depends on StringData and MixedArray layout.
-  // If these fail, update the constants
-  static_assert(sizeof(StringData) == SD_DATA, "");
-  static_assert(StringData::sizeOff() == SD_LEN, "");
-  static_assert(StringData::hashOff() == SD_HASH, "");
-  static_assert(MixedArray::dataOff() == MA_DATA, "");
-  static_assert(MixedArray::scaleOff() == MA_SCALE, "");
-  static_assert(MixedArray::Elm::keyOff() == ELM_KEY, "");
-  static_assert(MixedArray::Elm::hashOff() == ELM_HASH, "");
-  static_assert(MixedArray::Elm::dataOff() == ELM_DATA, "");
-#endif
-
-Cell MixedArray::NvGetKey(const ArrayData* ad, ssize_t pos) {
-  auto a = asMixed(ad);
-  assert(pos != a->m_used);
-  assert(!isTombstone(a->data()[pos].data.m_type));
-  return getElmKey(a->data()[pos]);
 }
 
 ArrayData* MixedArray::Append(ArrayData* ad, Cell v, bool copy) {
@@ -1535,12 +1314,11 @@ ArrayData* MixedArray::AppendRef(ArrayData* ad, Variant& v, bool copy) {
   return a->nextInsertRef(v);
 }
 
-ArrayData* MixedArray::AppendWithRef(ArrayData* ad, const Variant& v,
-                                     bool copy) {
+ArrayData* MixedArray::AppendWithRef(ArrayData* ad, TypedValue v, bool copy) {
   auto a = asMixed(ad);
   assert(a->isMixed());
 
-  if (RuntimeOption::EvalHackArrCompatNotices && v.isReferenced()) {
+  if (RuntimeOption::EvalHackArrCompatNotices && tvIsReferenced(v)) {
     raiseHackArrCompatRefNew();
   }
 
@@ -1557,7 +1335,7 @@ NEVER_INLINE
 MixedArray* MixedArray::CopyReserve(const MixedArray* src,
                                     size_t expectedSize) {
   auto const scale = computeScaleFromSize(expectedSize);
-  auto const ad    = reqAllocArray(scale);
+  auto const ad    = reqAlloc(scale);
   auto const oldUsed = src->m_used;
 
   ad->m_sizeAndPos      = src->m_sizeAndPos;
@@ -1567,7 +1345,7 @@ MixedArray* MixedArray::CopyReserve(const MixedArray* src,
 
   auto const data  = ad->data();
   auto const table = mixedHash(data, scale);
-  ad->initHash(table, scale);
+  ad->InitHash(table, scale);
 
   auto dstElm = data;
   auto srcElm = src->data();
@@ -1591,7 +1369,7 @@ MixedArray* MixedArray::CopyReserve(const MixedArray* src,
   auto mask = MixedArray::Mask(scale);
   for (; srcElm != srcStop; ++srcElm) {
     if (srcElm->isTombstone()) continue;
-    tvDupFlattenVars(&srcElm->data, &dstElm->data, src);
+    tvDupWithRef(srcElm->data, dstElm->data, src);
     auto const hash = static_cast<int32_t>(srcElm->probe());
     if (hash < 0) {
       dstElm->setIntKey(srcElm->ikey, hash);
@@ -1692,17 +1470,17 @@ ArrayData* MixedArray::PlusEq(ArrayData* ad, const ArrayData* elems) {
 
     auto const hash = srcElem->hash();
     if (srcElem->hasStrKey()) {
-      auto const ei = ret->findForInsert(srcElem->skey, hash);
-      if (validPos(*ei)) continue;
-      auto& e = ret->allocElm(ei);
-      e.setStrKey(srcElem->skey, hash);
-      ret->initWithRef(e.data, tvAsCVarRef(&srcElem->data));
+      auto const ei = ret->findForInsertUpdate(srcElem->skey, hash);
+      if (isValidPos(ei)) continue;
+      auto e = ret->allocElm(ei);
+      e->setStrKey(srcElem->skey, hash);
+      ret->initWithRef(e->data, tvAsCVarRef(&srcElem->data));
     } else {
-      auto const ei = ret->findForInsert(srcElem->ikey, hash);
-      if (validPos(*ei)) continue;
-      auto& e = ret->allocElm(ei);
-      e.setIntKey(srcElem->ikey, hash);
-      ret->initWithRef(e.data, tvAsCVarRef(&srcElem->data));
+      auto const ei = ret->findForInsertUpdate(srcElem->ikey, hash);
+      if (isValidPos(ei)) continue;
+      auto e = ret->allocElm(ei);
+      e->setIntKey(srcElem->ikey, hash);
+      ret->initWithRef(e->data, tvAsCVarRef(&srcElem->data));
     }
   }
 
@@ -2035,14 +1813,11 @@ ArrayData* MixedArray::AppendRefDict(ArrayData* adIn, Variant&, bool) {
 }
 
 ArrayData*
-MixedArray::AppendWithRefDict(ArrayData* adIn, const Variant& v, bool copy) {
+MixedArray::AppendWithRefDict(ArrayData* adIn, TypedValue v, bool copy) {
   assert(asMixed(adIn)->checkInvariants());
   assert(adIn->isDict());
-  if (v.isReferenced()) throwRefInvalidArrayValueException(adIn);
-  auto const cell = LIKELY(v.getType() != KindOfUninit)
-    ? *v.asCell()
-    : make_tv<KindOfNull>();
-  return Append(adIn, cell, copy);
+  if (tvIsReferenced(v)) throwRefInvalidArrayValueException(adIn);
+  return Append(adIn, tvToInitCell(v), copy);
 }
 
 //////////////////////////////////////////////////////////////////////

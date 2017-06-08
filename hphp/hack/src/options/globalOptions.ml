@@ -14,7 +14,9 @@ type t = {
   tco_safe_vector_array : bool;
   tco_user_attrs : SSet.t option;
   tco_experimental_features : SSet.t;
+  tco_migration_flags : SSet.t;
   po_auto_namespace_map : (string * string) list;
+  ignored_fixme_codes : ISet.t;
 }
 
 let tco_experimental_instanceof = "instanceof"
@@ -33,16 +35,41 @@ let tco_experimental_goto = "goto"
 let tco_experimental_shape_idx_relaxed =
   "shape_idx_relaxed"
 
+(**
+ * Prevents arraus from being promoted to shape-like or tuple-like arrays.
+ *)
+let tco_experimental_disable_shape_and_tuple_arrays =
+  "disable_shape_and_tuple_arrays"
+
+(**
+ * If enabled, the following promotions will be applied at parse time:
+ *
+ *   1. A shape field whose type is nullable will also have the field considered
+ *      as optional. I.e., shape('x' => ?int) will be interpreted as
+ *      shape(?'x' => ?int).
+ *   2. All shapes will be considered to support unknown fields. I.e.,
+ *      shape('x' => int) will be interpreted as shape('x' => int, ...).
+ *)
+let tco_experimental_promote_nullable_to_optional_in_shapes =
+  "promote_nullable_to_optional_in_shapes"
+
 let tco_experimental_all =
- List.fold_left
-   (fun acc x -> SSet.add x acc) SSet.empty
+ SSet.empty |> List.fold_right SSet.add
    [
      tco_experimental_instanceof;
      tco_experimental_optional_shape_field;
      tco_experimental_darray_and_varray;
      tco_experimental_goto;
      tco_experimental_shape_idx_relaxed;
+     tco_experimental_disable_shape_and_tuple_arrays;
+     tco_experimental_promote_nullable_to_optional_in_shapes;
    ]
+
+let tco_migration_flags_all =
+  SSet.empty |> List.fold_right SSet.add
+    [
+      "array_cast"
+    ]
 
 let default = {
  tco_assume_php = true;
@@ -52,7 +79,9 @@ let default = {
  (** Default all features for testing. Actual options are set by reading
   * from hhconfig, which defaults to empty. *)
  tco_experimental_features = tco_experimental_all;
+ tco_migration_flags = SSet.empty;
  po_auto_namespace_map = [];
+ ignored_fixme_codes = ISet.empty;
 }
 
 (* Use this instead of default when you don't have access to a project
@@ -73,13 +102,17 @@ let make ~tco_assume_php
          ~tco_safe_vector_array
          ~tco_user_attrs
          ~tco_experimental_features
-         ~po_auto_namespace_map = {
+         ~tco_migration_flags
+         ~po_auto_namespace_map
+         ~ignored_fixme_codes = {
                    tco_assume_php;
                    tco_safe_array;
                    tco_safe_vector_array;
                    tco_user_attrs;
                    tco_experimental_features;
+                   tco_migration_flags;
                    po_auto_namespace_map;
+                   ignored_fixme_codes;
         }
 let tco_assume_php t = t.tco_assume_php
 let tco_safe_array t = t.tco_safe_array
@@ -90,4 +123,7 @@ let tco_allowed_attribute t name = match t.tco_user_attrs with
  | Some attr_names -> SSet.mem name attr_names
 let tco_experimental_feature_enabled t s =
   SSet.mem s t.tco_experimental_features
+let tco_migration_flag_enabled t s =
+  SSet.mem s t.tco_migration_flags
 let po_auto_namespace_map t = t.po_auto_namespace_map
+let ignored_fixme_codes t = t.ignored_fixme_codes

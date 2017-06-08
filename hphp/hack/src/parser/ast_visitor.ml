@@ -30,7 +30,7 @@ class type ['a] ast_visitor_type = object
   method on_binop : 'a -> bop -> expr -> expr -> 'a
   method on_pipe : 'a -> expr -> expr -> 'a
   method on_block : 'a -> block -> 'a
-  method on_break : 'a -> Pos.t -> 'a
+  method on_break : 'a -> Pos.t -> int option -> 'a
   method on_call : 'a -> expr -> expr list -> expr list -> 'a
   method on_case : 'a -> case -> 'a
   method on_cast : 'a -> hint -> expr -> 'a
@@ -39,13 +39,15 @@ class type ['a] ast_visitor_type = object
   method on_class_get : 'a -> id -> pstring -> 'a
   method on_clone : 'a -> expr -> 'a
   method on_collection: 'a -> id -> afield list -> 'a
-  method on_continue : 'a -> Pos.t -> 'a
+  method on_continue : 'a -> Pos.t -> int option -> 'a
   method on_darray : 'a -> (expr * expr) list -> 'a
+  method on_def_inline : 'a -> def -> 'a
   method on_do : 'a -> block -> expr -> 'a
   method on_efun : 'a -> fun_ -> (id * bool) list -> 'a
   method on_eif : 'a -> expr -> expr option -> expr -> 'a
   method on_nullCoalesce : 'a -> expr -> expr -> 'a
   method on_expr : 'a -> expr -> 'a
+  method on_omitted: 'a -> 'a
   method on_expr_ : 'a -> expr_ -> 'a
   method on_expr_list : 'a -> expr list -> 'a
   method on_fallthrough : 'a -> 'a
@@ -70,7 +72,6 @@ class type ['a] ast_visitor_type = object
   method on_list : 'a -> expr list -> 'a
   method on_lvar : 'a -> id -> 'a
   method on_lvarvar : 'a -> int -> id -> 'a
-  method on_dollardollar : 'a -> 'a
   method on_new : 'a -> expr -> expr list -> expr list -> 'a
   method on_noop : 'a -> 'a
   method on_null : 'a -> 'a
@@ -84,6 +85,7 @@ class type ['a] ast_visitor_type = object
   method on_shape : 'a -> (shape_field_name * expr) list -> 'a
   method on_shape_field_name: 'a -> shape_field_name -> 'a
   method on_static_var : 'a -> expr list -> 'a
+  method on_global_var : 'a -> expr list -> 'a
   method on_stmt : 'a -> stmt -> 'a
   method on_string2 : 'a -> expr list -> 'a
   method on_string : 'a -> pstring -> 'a
@@ -108,6 +110,9 @@ class type ['a] ast_visitor_type = object
   method on_class_elt: 'a -> class_elt -> 'a
   method on_classTraitRequire: 'a -> trait_req_kind -> hint -> 'a
   method on_classUse: 'a -> hint -> 'a
+  method on_cu_alias_type: 'a -> cu_alias_type -> 'a
+  method on_classUseAlias: 'a ->
+                           (id * pstring option) -> id -> cu_alias_type -> 'a
   method on_classVars: 'a -> kind list -> hint option -> class_var list -> 'a
   method on_const: 'a -> hint option -> (id * expr) list -> 'a
   method on_constant: 'a -> gconst -> 'a
@@ -127,6 +132,7 @@ class type ['a] ast_visitor_type = object
                      ((Pos.t * expr list) option) -> 'a
   method on_xhpAttrUse: 'a -> hint -> 'a
   method on_xhpCategory: 'a -> pstring list -> 'a
+  method on_xhp_child: 'a -> xhp_child -> 'a
 
 end
 
@@ -136,8 +142,8 @@ end
 
 class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
 
-  method on_break acc _ = acc
-  method on_continue acc _ = acc
+  method on_break acc _ _ = acc
+  method on_continue acc _ _ = acc
   method on_noop acc = acc
   method on_fallthrough acc = acc
   method on_unsafe acc = acc
@@ -158,6 +164,8 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
     | Some e -> this#on_expr acc e
 
   method on_static_var acc el = List.fold_left this#on_expr acc el
+
+  method on_global_var acc el = List.fold_left this#on_expr acc el
 
   method on_if acc e b1 b2 =
     let acc = this#on_expr acc e in
@@ -229,9 +237,9 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
   method on_stmt acc = function
     | Unsafe                  -> this#on_unsafe acc
     | Expr e                  -> this#on_expr acc e
-    | Break p                 -> this#on_break acc p
+    | Break (p, level_opt)    -> this#on_break acc p level_opt
     | Block b                 -> this#on_block acc b
-    | Continue p              -> this#on_continue acc p
+    | Continue (p, level_opt) -> this#on_continue acc p level_opt
     | Throw   (e)             -> this#on_throw acc e
     | Return  (p, eopt)       -> this#on_return acc p eopt
     | GotoLabel label         -> this#on_goto_label acc label
@@ -243,12 +251,29 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
     | Switch  (e, cl)         -> this#on_switch acc e cl
     | Foreach (e, popt, ae, b)-> this#on_foreach acc e popt ae b
     | Try     (b, cl, fb)     -> this#on_try acc b cl fb
+    | Def_inline d ->
+      this#on_def_inline acc d
     | Noop                    -> this#on_noop acc
     | Fallthrough             -> this#on_fallthrough acc
     | Static_var el           -> this#on_static_var acc el
+    | Global_var el           -> this#on_global_var acc el
+
+  method on_def_inline acc d =
+    this#on_def acc d
+
+  method on_xhp_child acc e =
+    match e with
+   | ChildName id ->  this#on_id acc id
+   | ChildList children -> List.fold_left this#on_xhp_child acc children
+   | ChildUnary (child, _) -> this#on_xhp_child acc child
+   | ChildBinary (c1, c2) ->
+     let acc = this#on_xhp_child acc c1 in
+     this#on_xhp_child acc c2
 
   method on_expr acc (_, e) =
     this#on_expr_ acc e
+
+  method on_omitted acc = acc
 
   method on_expr_ acc e =
     match e with
@@ -270,7 +295,6 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
    | Id_type_arguments (id, hl) -> this#on_id_type_arguments acc id hl
    | Lvar id     -> this#on_lvar acc id
    | Lvarvar (n, id)  -> this#on_lvarvar acc n id
-   | Dollardollar -> this#on_dollardollar acc
    | Yield_break -> this#on_yield_break acc
    | Yield e     -> this#on_yield acc e
    | Await e     -> this#on_await acc e
@@ -293,6 +317,7 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
    | New         (e, el, uel) -> this#on_new acc e el uel
    | Efun        (f, idl)         -> this#on_efun acc f idl
    | Xml         (id, attrl, el) -> this#on_xml acc id attrl el
+   | Omitted                     -> this#on_omitted  acc
 
   method on_array acc afl =
     List.fold_left this#on_afield acc afl
@@ -320,7 +345,6 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
 
   method on_lvar acc _ = acc
   method on_lvarvar acc _ _ = acc
-  method on_dollardollar acc = acc
 
   method on_obj_get acc e1 e2 =
     let acc = this#on_expr acc e1 in
@@ -504,7 +528,7 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
     | Constant g -> this#on_constant acc g
     | Namespace (i, p) -> this#on_namespace acc i p
     | NamespaceUse idl -> this#on_namespaceUse acc idl
-
+    | SetNamespaceEnv e -> acc
 
   method on_class_ acc c =
     let acc = List.fold_left this#on_user_attribute acc c.c_user_attributes in
@@ -567,14 +591,20 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
       | None -> acc in
     acc
 
+  method on_cu_alias_type acc = function
+    | CU_as
+    | CU_insteadof -> acc
+
   method on_class_elt acc = function
     | Const (hopt, iel) -> this#on_const acc hopt iel
     | AbsConst (h, a) -> this#on_absConst acc h a
     | Attributes cl -> this#on_attributes acc cl
     | TypeConst t -> this#on_typeConst acc t
     | ClassUse h -> this#on_classUse acc h
+    | ClassUseAlias (id1, id2, at) -> this#on_classUseAlias acc id1 id2 at
     | XhpAttrUse h -> this#on_xhpAttrUse acc h
     | XhpCategory cs -> this#on_xhpCategory acc cs
+    | XhpChild c -> this#on_xhp_child acc c
     | ClassTraitRequire (t, h) -> this#on_classTraitRequire acc t h
     | ClassVars (c,v,l) -> this#on_classVars acc c v l
     | XhpAttr (t,h,i,n) -> this#on_xhpAttr acc t h i n
@@ -608,6 +638,14 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
     acc
   method on_classUse acc h =
     let acc = this#on_hint acc h in
+    acc
+  method on_classUseAlias acc (id1, po) id2 at =
+    let acc = this#on_id acc id1 in
+    let acc = match po with
+      | Some p -> this#on_pstring acc p
+      | None -> acc in
+    let acc = this#on_id acc id2 in
+    let acc = this#on_cu_alias_type acc at in
     acc
   method on_xhpAttrUse acc h =
     let acc = this#on_hint acc h in

@@ -71,6 +71,7 @@ type t =
   | Rpredicated      of Pos.t * string
   | Rinstanceof      of Pos.t * string
   | Rfinal_property  of Pos.t
+  | Rdarray_or_varray_key of Pos.t
 
 and expr_dep_type_reason =
   | ERexpr of int
@@ -193,6 +194,13 @@ let rec to_string prefix r =
       [(p, prefix ^ " from this instanceof test matching " ^ s)]
   | Rfinal_property _ ->
       [(p, prefix ^ " because properties cannot be declared final")]
+  | Rdarray_or_varray_key _ ->
+      [(
+        p,
+        "This is darray_or_varray, which requires arraykey-typed keys when \
+        used with an array (used like a hashtable)"
+      )]
+
 
 and to_pos = function
   | Rnone     -> Pos.none
@@ -250,6 +258,7 @@ and to_pos = function
   | Rused_as_shape p -> p
   | Rpredicated (p, _) -> p
   | Rinstanceof (p, _) -> p
+  | Rdarray_or_varray_key p
   | Rfinal_property p -> p
 
 (* This is a mapping from internal expression ids to a standardized int.
@@ -311,6 +320,7 @@ type ureason =
   | URsubsume_tconst_cstr
   | URsubsume_tconst_assign
   | URfinal_property
+  | URclone
 
 let index_array = URindex "array"
 let index_tuple = URindex "tuple"
@@ -357,6 +367,7 @@ let string_of_ureason = function
      "The assigned type of this type constant is inconsistent with its parent"
   | URfinal_property ->
       "Property cannot be declared final"
+  | URclone -> "Clone cannot be called on non-object"
 
 let compare r1 r2 =
   let get_pri = function

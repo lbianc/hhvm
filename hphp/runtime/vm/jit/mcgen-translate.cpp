@@ -52,10 +52,8 @@ namespace {
 std::thread s_retranslateAllThread;
 std::atomic<bool> s_retranslateAllComplete{false};
 
-tc::FuncMetaInfo optimize(Func* func, TCA localBuf) {
-  tc::FuncMetaInfo info(func, tc::ThreadTCBuffer(localBuf));
-  folly::Optional<UseThreadLocalTC> useLocal;
-  if (localBuf) useLocal.emplace(info.tcBuf);
+void optimize(tc::FuncMetaInfo& info) {
+  auto const func = info.func;
 
   // Regenerate the prologues and DV funclets before the actual function body.
   auto const includedBody = regeneratePrologues(func, info);
@@ -82,13 +80,10 @@ tc::FuncMetaInfo optimize(Func* func, TCA localBuf) {
       transCFGAnnot = ""; // so we don't annotate it again
     }
   }
-
-  return info;
 }
 
 struct OptimizeData {
   FuncId id;
-  TCA buf;
   tc::FuncMetaInfo info;
 };
 
@@ -110,8 +105,7 @@ struct TranslateWorker : JobQueueWorker<OptimizeData*, void*, true, true> {
     if (profData()->optimized(d->id)) return;
     profData()->setOptimized(d->id);
 
-    auto func = const_cast<Func*>(Func::fromFuncId(d->id));
-    d->info = optimize(func, d->buf);
+    optimize(d->info);
   }
 };
 
@@ -181,10 +175,13 @@ createCallGraph(jit::hash_map<hfsort::TargetId, FuncId>& funcID) {
       if (!Func::isFuncIdValid(callerFuncId)) continue;
       const auto callerTargetId = targetID[callerFuncId];
       const auto callCount = pd->transCounter(callerTransId);
-      cg.incArcWeight(callerTargetId, calleeTargetId, callCount);
-      totalCalls += callCount;
-      FTRACE(3, "  - adding arc @ {} : {} => {} [weight = {}] \n",
-             callAddr, callerTargetId, calleeTargetId, callCount);
+      // Don't create arcs with zero weight
+      if (callCount) {
+        cg.incArcWeight(callerTargetId, calleeTargetId, callCount);
+        totalCalls += callCount;
+        FTRACE(3, "  - adding arc @ {} : {} => {} [weight = {}] \n",
+               callAddr, callerTargetId, calleeTargetId, callCount);
+      }
     }
   };
 
@@ -195,7 +192,7 @@ createCallGraph(jit::hash_map<hfsort::TargetId, FuncId>& funcID) {
     const auto calleeTargetId = targetID[fid];
     const auto transIds = pd->funcProfTransIDs(fid);
     uint32_t totalCalls = 0;
-    uint32_t profCount  = 0;
+    uint32_t profCount  = 1; // avoid zero sample counts
     for (int nargs = 0; nargs <= func->numNonVariadicParams() + 1; nargs++) {
       auto transId = pd->proflogueTransId(func, nargs);
       if (transId == kInvalidTransID) continue;
@@ -277,18 +274,24 @@ void retranslateAll() {
 
   // 2) Generate machine code for all the profiled functions.
 
+  auto const initialSize = 512;
   auto const ntargets = cg.targets.size();
   std::vector<OptimizeData> jobs;
   jobs.reserve(ntargets);
-  auto buffer = (TCA)::malloc(localTCSize() * ntargets);
-  SCOPE_EXIT { ::free(buffer); };
+  std::unique_ptr<uint8_t[]> codeBuffer(new uint8_t[ntargets * initialSize]);
 
-  for (int tid = 0; tid < cg.targets.size(); ++tid) {
-    jobs.emplace_back(OptimizeData {
-      target2FuncId[tid],
-      &buffer[localTCSize() * tid]
-    });
-    enqueueRetranslateOptRequest(&jobs.back());
+  {
+    Treadmill::Session session;
+    auto bufp = codeBuffer.get();
+    for (int tid = 0; tid < cg.targets.size(); ++tid, bufp += initialSize) {
+      auto const fid = target2FuncId[tid];
+      auto const func = const_cast<Func*>(Func::fromFuncId(fid));
+      jobs.emplace_back(OptimizeData{
+        fid,
+        tc::FuncMetaInfo(func, tc::LocalTCBuffer(bufp, initialSize))
+      });
+      enqueueRetranslateOptRequest(&jobs.back());
+    }
   }
 
   dispatcher().waitEmpty();
@@ -413,7 +416,8 @@ TCA retranslate(TransArgs args, const RegionContext& ctx) {
   VMProtect _;
 
   auto sr = tc::findSrcRec(args.sk);
-  always_assert(sr);
+  auto const initialNumTrans = sr->numTrans();
+
   if (isDebuggerAttachedProcess() && isSrcKeyInDbgBL(args.sk)) {
     // We are about to translate something known to be blacklisted by
     // debugger, exit early
@@ -459,6 +463,7 @@ TCA retranslate(TransArgs args, const RegionContext& ctx) {
   }
 
   const auto numTrans = sr->numTrans();
+  if (numTrans != initialNumTrans) return sr->getTopTranslation();
   if (args.kind == TransKind::Profile) {
     if (numTrans > RuntimeOption::EvalJitMaxProfileTranslations) {
       always_assert(numTrans ==
@@ -505,11 +510,9 @@ bool retranslateOpt(FuncId funcId) {
 
   func->setFuncBody(tc::ustubs().funcBodyHelperThunk);
 
-  auto buf = RuntimeOption::EvalEnableOptTCBuffer
-    ? cachedLocalTCBuffer()
-    : nullptr;
-
-  tc::publishOptFunction(optimize(func, buf));
+  tc::FuncMetaInfo info(func, tc::LocalTCBuffer());
+  optimize(info);
+  tc::publishOptFunction(std::move(info));
   tc::checkFreeProfData();
 
   return true;
@@ -550,6 +553,16 @@ bool retranslateAllPending() {
   return
     retranslateAllEnabled() &&
     !s_retranslateAllComplete.load(std::memory_order_acquire);
+}
+
+int getActiveWorker() {
+  if (s_retranslateAllComplete.load(std::memory_order_relaxed)) {
+    return 0;
+  }
+  if (auto disp = s_dispatcher.load(std::memory_order_relaxed)) {
+    return disp->getActiveWorker();
+  }
+  return 0;
 }
 
 }}}

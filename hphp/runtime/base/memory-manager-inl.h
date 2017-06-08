@@ -137,94 +137,115 @@ inline void MemoryManager::FreeList::push(void* val, size_t size) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-inline uint32_t MemoryManager::estimateCap(uint32_t requested) {
+inline size_t MemoryManager::estimateCap(size_t requested) {
   return requested <= kMaxSmallSize ? smallSizeClass(requested)
                                     : requested;
 }
 
-inline uint32_t MemoryManager::bsr(uint32_t x) {
-#if defined(__i386__) || defined(__x86_64__)
-  uint32_t ret;
-  __asm__ ("bsr %1, %0"
+inline size_t MemoryManager::bsrq(size_t x) {
+#if defined(__x86_64__)
+  size_t ret;
+  __asm__ ("bsrq %1, %0"
            : "=r"(ret) // Outputs.
            : "r"(x)    // Inputs.
            );
   return ret;
 #elif defined(__powerpc64__)
-  uint32_t ret;
-  __asm__ ("cntlzw %0, %1"
+  size_t ret;
+  __asm__ ("cntlzd %0, %1"
            : "=r"(ret) // Outputs.
            : "r"(x)    // Inputs.
            );
-  return 31 - ret;
+  return 63 - ret;
 #elif defined(__aarch64__)
-  uint32_t ret;
-  __asm__ ("clz %w0, %w1"
+  size_t ret;
+  __asm__ ("clz %x0, %x1"
            : "=r"(ret) // Outputs.
            : "r"(x)    // Inputs.
            );
-  return 31 - ret;
+  return 63 - ret;
 #else
   // Equivalent (but incompletely strength-reduced by gcc):
-  return 31 - __builtin_clz(x);
+  return 63 - __builtin_clzl(x);
 #endif
 }
 
-inline size_t MemoryManager::computeSmallSize2Index(uint32_t size) {
-  uint32_t x = bsr((size<<1)-1);
-  uint32_t shift = (x < kLgSizeClassesPerDoubling + kLgSmallSizeQuantum)
-                   ? 0 : x - (kLgSizeClassesPerDoubling + kLgSmallSizeQuantum);
-  uint32_t grp = shift << kLgSizeClassesPerDoubling;
-
-  int32_t lgReduced = x - kLgSizeClassesPerDoubling
-                      - 1; // Counteract left shift of bsr() argument.
-  uint32_t lgDelta = (lgReduced < int32_t(kLgSmallSizeQuantum))
-                     ? kLgSmallSizeQuantum : lgReduced;
-  uint32_t deltaInverseMask = -1 << lgDelta;
-  constexpr uint32_t kModMask = (1u << kLgSizeClassesPerDoubling) - 1;
-  uint32_t mod = ((((size-1) & deltaInverseMask) >> lgDelta)) & kModMask;
-
-  auto const index = grp + mod;
-  assert(index < kNumSmallSizes);
+inline size_t MemoryManager::computeSize2Index(size_t size) {
+  assert(size > 1);
+  assert(size <= kMaxSizeClass);
+  // We want to round size up to the nearest size class, and return the index
+  // of that size class. The first 1 << kLgSizeClassesPerDoubling size classes
+  // are denormal; their sizes are (class + 1) << kLgSmallSizeQuantum.
+  // After that we have the normal size classes, whose size is
+  // (1 << kLgSizeClassesPerDoubling + mantissa) << (exp + kLgSmallSizeQuantum)
+  // where (mantissa - 1) is stored in the kLgSizeClassesPerDoubling low bits
+  // of the class index, and (exp + 1) is stored in the bits above that; for
+  // denormal sizes, the bits above the mantissa are stored as 0.
+  // In the normal case, if we do the math naively, we need to calculate
+  // the class index as
+  // (exp + 1) << kLgSizeClassesPerDoubling + (mantissa - 1)
+  // but conveniently, that's equivalent to
+  // (exp << kLgSizeClassesPerDoubling) +
+  //   (1 << kLgSizeClassesPerDoubling + mantissa - 1)
+  // This lets us skip taking the leading 1 off of the mantissa, and skip
+  // adding 1 to the exponent.
+  size_t nBits = bsrq(--size);
+  if (UNLIKELY(nBits < kLgSizeClassesPerDoubling + kLgSmallSizeQuantum)) {
+    // denormal sizes
+    // UNLIKELY because these normally go through lookupSmallSize2Index
+    return size >> kLgSmallSizeQuantum;
+  }
+  size_t exp = nBits - (kLgSizeClassesPerDoubling + kLgSmallSizeQuantum);
+  size_t rawMantissa = size >> (nBits - kLgSizeClassesPerDoubling);
+  size_t index = (exp << kLgSizeClassesPerDoubling) + rawMantissa;
+  assert(index < kNumSizeClasses);
   return index;
 }
 
-inline size_t MemoryManager::lookupSmallSize2Index(uint32_t size) {
+inline size_t MemoryManager::lookupSmallSize2Index(size_t size) {
+  assert(size > 0);
+  assert(size <= kMaxSmallSizeLookup);
   auto const index = kSmallSize2Index[(size-1) >> kLgSmallSizeQuantum];
-  assert(index == computeSmallSize2Index(size));
   return index;
 }
 
-inline size_t MemoryManager::smallSize2Index(uint32_t size) {
+inline size_t MemoryManager::smallSize2Index(size_t size) {
   assert(size > 0);
   assert(size <= kMaxSmallSize);
   if (LIKELY(size <= kMaxSmallSizeLookup)) {
     return lookupSmallSize2Index(size);
   }
-  return computeSmallSize2Index(size);
+  return computeSize2Index(size);
 }
 
-inline uint32_t MemoryManager::smallIndex2Size(size_t index) {
-  return kSmallIndex2Size[index];
+inline size_t MemoryManager::size2Index(size_t size) {
+  assert(size > 0);
+  assert(size <= kMaxSizeClass);
+  if (LIKELY(size <= kMaxSmallSizeLookup)) {
+    return lookupSmallSize2Index(size);
+  }
+  return computeSize2Index(size);
 }
 
-inline uint32_t MemoryManager::smallSizeClass(uint32_t reqBytes) {
-  uint32_t x = bsr((reqBytes<<1)-1);
-  int32_t lgReduced = x - kLgSizeClassesPerDoubling
-                      - 1; // Counteract left shift of bsr() argument.
-  uint32_t lgDelta = (lgReduced < int32_t(kLgSmallSizeQuantum))
-                      ? kLgSmallSizeQuantum : lgReduced;
-  uint32_t delta = 1u << lgDelta;
-  uint32_t deltaMask = delta - 1;
-  auto const ret = (reqBytes + deltaMask) & ~deltaMask;
+inline size_t MemoryManager::sizeIndex2Size(size_t index) {
+  return kSizeIndex2Size[index];
+}
+
+inline size_t MemoryManager::smallSizeClass(size_t size) {
+  assert(size > 1);
+  assert(size <= kMaxSmallSize);
+  // Round up to the nearest kLgSizeClassesPerDoubling + 1 significant bits,
+  // or to the nearest kLgSmallSizeQuantum, whichever is greater.
+  ssize_t nInsignificantBits = bsrq(--size) - kLgSizeClassesPerDoubling;
+  size_t roundTo = (nInsignificantBits < ssize_t(kLgSmallSizeQuantum))
+    ? kLgSmallSizeQuantum : nInsignificantBits;
+  size_t ret = ((size >> roundTo) + 1) << roundTo;
+  assert(ret >= kSmallSizeAlign);
   assert(ret <= kMaxSmallSize);
   return ret;
 }
 
-inline void* MemoryManager::mallocSmallIndex(size_t index, uint32_t bytes) {
-  assert(index < kNumSmallSizes);
-  assert(bytes <= kSmallIndex2Size[index]);
-
+inline void* MemoryManager::mallocSmallSizeFast(size_t bytes, size_t index) {
   if (debug) requestEagerGC();
 
   m_stats.mmUsage += bytes;
@@ -234,22 +255,25 @@ inline void* MemoryManager::mallocSmallIndex(size_t index, uint32_t bytes) {
     p = mallocSmallSizeSlow(bytes, index);
   }
   assert((reinterpret_cast<uintptr_t>(p) & kSmallSizeAlignMask) == 0);
-  FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
+  FTRACE(3, "mallocSmallSizeFast: {} -> {}\n", bytes, p);
   return p;
 }
 
-inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
-  assert(bytes > 0);
-  assert(bytes <= kMaxSmallSize);
-  unsigned index = smallSize2Index(bytes);
-  return mallocSmallIndex(index, bytes);
+inline void* MemoryManager::mallocSmallIndex(size_t index) {
+  assert(index < kNumSmallSizes);
+  return mallocSmallSizeFast(sizeIndex2Size(index), index);
 }
 
-inline void MemoryManager::freeSmallIndex(void* ptr, size_t index,
-                                          uint32_t bytes) {
+inline void* MemoryManager::mallocSmallSize(size_t bytes) {
+  assert(bytes > 0);
+  assert(bytes <= kMaxSmallSize);
+  return mallocSmallSizeFast(bytes, smallSize2Index(bytes));
+}
+
+inline void MemoryManager::freeSmallIndex(void* ptr, size_t index) {
   assert(index < kNumSmallSizes);
   assert((reinterpret_cast<uintptr_t>(ptr) & kSmallSizeAlignMask) == 0);
-  assert(bytes <= kSmallIndex2Size[index]);
+  size_t bytes = sizeIndex2Size(index);
 
   if (UNLIKELY(m_bypassSlabAlloc)) {
     return freeBigSize(ptr, bytes);
@@ -263,7 +287,7 @@ inline void MemoryManager::freeSmallIndex(void* ptr, size_t index,
   FTRACE(3, "freeSmallIndex: {} ({} bytes)\n", ptr, bytes);
 }
 
-inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
+inline void MemoryManager::freeSmallSize(void* ptr, size_t bytes) {
   assert(bytes > 0);
   assert(bytes <= kMaxSmallSize);
   assert((reinterpret_cast<uintptr_t>(ptr) & kSmallSizeAlignMask) == 0);
@@ -295,6 +319,18 @@ void MemoryManager::objFree(void* vp, size_t size) {
   freeBigSize(vp, size);
 }
 
+ALWAYS_INLINE
+void* MemoryManager::objMallocIndex(size_t index) {
+  if (LIKELY(index < kNumSmallSizes)) return mallocSmallIndex(index);
+  return mallocBigSize<MemoryManager::FreeRequested>(sizeIndex2Size(index)).ptr;
+}
+
+ALWAYS_INLINE
+void MemoryManager::objFreeIndex(void* ptr, size_t index) {
+  if (LIKELY(index < kNumSmallSizes)) return freeSmallIndex(ptr, index);
+  return freeBigSize(ptr, sizeIndex2Size(index));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 inline int64_t MemoryManager::getAllocated() const {
@@ -313,6 +349,10 @@ inline int64_t MemoryManager::getDeallocated() const {
 #else
   return 0;
 #endif
+}
+
+inline int64_t MemoryManager::currentUsage() const {
+  return m_stats.mmUsage;
 }
 
 inline MemoryUsageStats MemoryManager::getStats() {

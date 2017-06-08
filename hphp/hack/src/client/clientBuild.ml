@@ -10,12 +10,9 @@
 
 open Utils
 
-(* 800s was chosen because it was above most of the historical p95 of
- * hack server startup times as observed here:
- * https://fburl.com/48825801, see also https://fburl.com/29184831 *)
-let num_build_retries = 800
-
 type env = {
+  (** Number of times to retry establishing a connection to the server. *)
+  retries : int;
   root : Path.t;
   wait : bool;
   (** Force the monitor to start a server if one isn't running. *)
@@ -72,12 +69,13 @@ let main env =
      * the update/rebase to complete); but since need Hack to finish the
      * update/rebase, we need to force it to be started. *)
     force_dormant_start = env.force_dormant_start;
-    retries = if env.wait then None else Some num_build_retries;
+    retries = if env.wait then None else Some env.retries;
     retry_if_init = true;
     expiry = None;
     no_load = false;
-    to_ide = false;
     ai_mode = None;
+    progress_callback = ClientConnect.tty_progress_reporter;
+    do_post_handoff_handshake = true;
   } in
   let old_svnrev = Option.try_with begin fun () ->
     Sys_utils.read_file ServerBuild.svnrev_path

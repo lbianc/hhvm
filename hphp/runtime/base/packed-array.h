@@ -48,8 +48,10 @@ struct APCArray;
  * types.  The TypedValue's are placed right after the array header.
  */
 struct PackedArray final : type_scan::MarkCountable<PackedArray> {
-  static constexpr uint32_t MaxSize = 0xFFFFFFFFul;
   static constexpr uint32_t SmallSize = 3;
+  // the smallest and largest MM size classes we use for allocating PackedArrays
+  static constexpr size_t SmallSizeIndex = 3;
+  static constexpr size_t MaxSizeIndex = 121;
 
   static void Release(ArrayData*);
   static void ReleaseUncounted(ArrayData*, size_t extra = 0);
@@ -87,8 +89,6 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   static ssize_t IterRewind(const ArrayData*, ssize_t pos);
   static constexpr auto ValidMArrayIter = &ArrayCommon::ValidMArrayIter;
   static bool AdvanceMArrayIter(ArrayData*, MArrayIter& fp);
-  static void CopyPackedHelper(const ArrayData* adIn, ArrayData* ad,
-                               RefCount initial_count, HeaderKind dest_hk);
   static ArrayData* Copy(const ArrayData* ad);
   static ArrayData* CopyWithStrongIterators(const ArrayData*);
   static ArrayData* CopyStatic(const ArrayData*);
@@ -104,7 +104,7 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   static ArrayData* ZAppend(ArrayData*, RefData* v, int64_t* key_ptr);
   static ArrayData* Append(ArrayData*, Cell v, bool copy);
   static ArrayData* AppendRef(ArrayData*, Variant& v, bool copy);
-  static ArrayData* AppendWithRef(ArrayData*, const Variant& v, bool copy);
+  static ArrayData* AppendWithRef(ArrayData*, TypedValue v, bool copy);
   static ArrayData* PlusEq(ArrayData*, const ArrayData* elems);
   static ArrayData* Merge(ArrayData*, const ArrayData* elems);
   static ArrayData* Pop(ArrayData*, Variant& value);
@@ -120,6 +120,7 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   }
 
   static constexpr auto ToKeyset = &ArrayCommon::ToKeyset;
+  static constexpr auto ToVArray = &ToPHPArray;
 
   static const TypedValue* NvTryGetIntVec(const ArrayData*, int64_t);
   static const TypedValue* NvTryGetStrVec(const ArrayData*, const StringData*);
@@ -134,7 +135,7 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   static ArrayData* SetRefIntVec(ArrayData*, int64_t, Variant&, bool);
   static ArrayData* SetRefStrVec(ArrayData*, StringData*, Variant&, bool);
   static ArrayData* AppendRefVec(ArrayData*, Variant&, bool);
-  static ArrayData* AppendWithRefVec(ArrayData*, const Variant&, bool);
+  static ArrayData* AppendWithRefVec(ArrayData*, TypedValue, bool);
   static ArrayData* PlusEqVec(ArrayData*, const ArrayData*);
   static ArrayData* ToPHPArrayVec(ArrayData*, bool);
   static ArrayData* ToDictVec(ArrayData*, bool);
@@ -177,6 +178,7 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   static constexpr auto OnSetEvalScalarVec = &OnSetEvalScalar;
   static constexpr auto EscalateVec = &Escalate;
   static constexpr auto ToKeysetVec = &ArrayCommon::ToKeyset;
+  static constexpr auto ToVArrayVec = &ToPHPArrayVec;
 
   //////////////////////////////////////////////////////////////////////
 
@@ -194,11 +196,10 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
    * static packed copy, like CopyStatic().
    */
   static ArrayData* ConvertStatic(const ArrayData*);
-  static ArrayData* ConvertStaticHelper(const ArrayData*);
 
   static ptrdiff_t entriesOffset();
-  static uint32_t getMaxCapInPlaceFast(uint32_t cap);
 
+  static uint32_t capacity(const ArrayData*);
   static size_t heapSize(const ArrayData*);
   static void scan(const ArrayData*, type_scan::Scanner&);
 
@@ -222,7 +223,6 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
   static ArrayData* MakeUninitializedVec(uint32_t size);
 
   static ArrayData* MakeUncounted(ArrayData* array, size_t extra = 0);
-  static ArrayData* MakeUncountedHelper(ArrayData* array, size_t extra);
 
   static ArrayData* MakeVecFromAPC(const APCArray* apc);
 
@@ -244,7 +244,6 @@ struct PackedArray final : type_scan::MarkCountable<PackedArray> {
 
 private:
   static ArrayData* Grow(ArrayData*);
-  static ArrayData* GrowHelper(ArrayData*);
   static MixedArray* ToMixedHeader(const ArrayData*, size_t);
   static MixedArray* ToMixed(ArrayData*);
   static MixedArray* ToMixedCopy(const ArrayData*);
@@ -255,14 +254,12 @@ private:
   static SortFlavor preSort(ArrayData*);
 
   static ArrayData* MakeReserveImpl(uint32_t, HeaderKind);
-  static ArrayData* MakeReserveSlow(uint32_t, HeaderKind);
 
   template<bool reverse>
   static ArrayData* MakePackedImpl(uint32_t, const TypedValue*, HeaderKind);
 
-  static ArrayData* MakeUninitializedImpl(uint32_t, HeaderKind);
-
-  static ArrayData* CopyStaticHelper(const ArrayData*);
+  template<bool convertingPackedToVec>
+  static bool CopyPackedHelper(const ArrayData* adIn, ArrayData* ad);
 
   static bool VecEqualHelper(const ArrayData*, const ArrayData*, bool);
   static int64_t VecCmpHelper(const ArrayData*, const ArrayData*);

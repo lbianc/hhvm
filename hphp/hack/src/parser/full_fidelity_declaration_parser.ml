@@ -130,7 +130,11 @@ module WithExpressionAndStatementAndTypeParser
 
     let (parser, token) = next_token parser in
     let token = make_token token in
-    let (parser, name) = expect_name parser in
+    (* Not `expect_name` but `expect_name_allow_keywords`, because the parser
+     * must allow keywords in the place of identifiers; at least to parse .hhi
+     * files.
+     *)
+    let (parser, name) = expect_name_allow_keywords parser in
     let (parser, generic) = parse_generic_parameter_list_opt parser in
     let (parser, constr) = parse_type_constraint_opt parser in
     let (parser, equal) = expect_equal parser in
@@ -222,10 +226,11 @@ module WithExpressionAndStatementAndTypeParser
 
   and parse_namespace_body parser =
     let (parser, token) = next_token parser in
+    let full_token = make_token token in
     match Token.kind token with
-    | Semicolon -> (parser, make_token token)
+    | Semicolon -> (parser, make_namespace_empty_body full_token)
     | LeftBrace ->
-      let left = make_token token in
+      let left = full_token in
       let (parser, body) =
         parse_terminated_list parser parse_declaration RightBrace in
       let (parser, right) = expect_right_brace parser in
@@ -535,6 +540,7 @@ module WithExpressionAndStatementAndTypeParser
     | Use -> parse_trait_use parser
     | Const -> parse_const_or_type_const_declaration parser (make_missing ())
     | Abstract -> parse_methodish_or_const_or_type_const parser
+    | Async
     | Static
     | Public
     | Protected
@@ -599,17 +605,24 @@ module WithExpressionAndStatementAndTypeParser
   and parse_xhp_children_term parser =
     (* SPEC (Draft)
     xhp-children-term:
-      name
-      xhp-class-name
-      xhp-category-name
+      ( xhp-children-expressions ) trailing-opt
+      name trailing-opt
+      xhp-class-name trailing-opt
+      xhp-category-name trailing-opt
+    trailing: * ? +
+
+    Note that there may be only zero or one trailing unary operator.
+    "foo*?" is not a legal xhp child expression.
     *)
     let (parser1, token) = next_xhp_children_name_or_other parser in
     let name = make_token token in
     match Token.kind token with
     | Name
     | XHPClassName
-    | XHPCategoryName -> (parser1, name)
-    | LeftParen -> parse_xhp_children_paren parser
+    | XHPCategoryName -> parse_xhp_children_trailing parser1 name
+    | LeftParen ->
+      let (parser, term) = parse_xhp_children_paren parser in
+      parse_xhp_children_trailing parser term
     | _ ->
       (* ERROR RECOVERY: Eat the offending token, keep going. *)
       (with_error parser SyntaxError.error1053, name)
@@ -621,24 +634,28 @@ module WithExpressionAndStatementAndTypeParser
     | Plus
     | Question ->
       let result = make_postfix_unary_expression term (make_token token) in
-      parse_xhp_children_trailing parser1 result
-    | Bar ->
-      let (parser, right) = parse_xhp_children_expression parser1 in
-      let result = make_binary_expression term (make_token token) right in
-      (parser, result)
+      (parser1, result)
     | _ -> (parser, term)
+
+  and parse_xhp_children_bar parser left =
+    let (parser1, token) = next_token parser in
+    match Token.kind token with
+    | Bar ->
+      let (parser, right) = parse_xhp_children_term parser1 in
+      let result = make_binary_expression left (make_token token) right in
+      parse_xhp_children_bar parser result
+    | _ -> (parser, left)
 
   and parse_xhp_children_expression parser =
     (* SPEC (Draft)
     xhp-children-expression:
       xhp-children-term
-      xhp-children-expression *
-      xhp-children-expression +
-      xhp-children-expression ?
-      xhp-children-term | xhp-children-expression
-    *)
+      xhp-children-expression | xhp-children-term
+
+    Note that the bar operator is left-associative. (Not that it matters
+    semantically. *)
     let (parser, term) = parse_xhp_children_term parser in
-    parse_xhp_children_trailing parser term
+    parse_xhp_children_bar parser term
 
   and parse_xhp_children_declaration parser =
     (* SPEC (Draft)
@@ -834,10 +851,76 @@ module WithExpressionAndStatementAndTypeParser
     if is_missing attribute_spec then
       match peek_token_kind parser with
       | Async
+      | Coroutine
       | Function -> parse_methodish parser attribute_spec modifiers
       | _ -> parse_property_declaration parser modifiers
     else
       parse_methodish parser attribute_spec modifiers
+
+  and parse_trait_use_conflict_resolution_item parser =
+    let parser, aliasing_name = parse_qualified_name_type parser in
+    let parser, aliasing_name =
+      if (peek_token_kind parser) = ColonColon then
+        (* scope resolution expression case *)
+        let (parser, cc_token) = expect_coloncolon parser in
+        let (parser, name) = expect_name parser in
+        (parser, make_scope_resolution_expression aliasing_name cc_token name)
+      else
+        (* plain qualified name case *)
+        (parser, aliasing_name)
+    in
+    let (parser, aliasing_kw) =
+      if (peek_token_kind parser) = As then
+        assert_token parser As
+      else
+        assert_token parser Insteadof
+    in
+    let (parser, aliased_name) = parse_qualified_name_type parser in
+    let trait_use_conflict_resolution_item =
+      make_trait_use_conflict_resolution_item
+        aliasing_name
+        aliasing_kw
+        aliased_name
+    in
+    (parser, trait_use_conflict_resolution_item)
+
+  (*  SPEC:
+    trait-use-conflict-resolution:
+      use trait-name-list  {  trait-use-conflict-resolution-list  }
+
+    trait-use-conflict-resolution-list:
+      trait-use-conflict-resolution-item
+      trait-use-conflict-resolution-item  trait-use-conflict-resolution-list
+
+    trait-use-conflict-resolution-item:
+      trait-use-conflict-resolution-item-alising-name  as  qualified-name
+      trait-use-conflict-resolution-item-alising-name  insteadof  qualified-name
+
+    trait-use-conflict-resolution-item-alising-name:
+      qualified-name
+      scope-resolution-expression
+  *)
+  and parse_trait_use_conflict_resolution parser use_token trait_name_list =
+    let (parser, left_brace) = assert_token parser LeftBrace in
+    let (parser, clauses) =
+      parse_separated_list
+        parser
+        TokenKind.Semicolon
+        TrailingAllowed
+        RightBrace
+        SyntaxError.error1004
+        parse_trait_use_conflict_resolution_item
+    in
+    let (parser, right_brace) = assert_token parser RightBrace in
+    let trait_use_conflict_resolution =
+      make_trait_use_conflict_resolution
+        use_token
+        trait_name_list
+        left_brace
+        clauses
+        right_brace
+    in
+    (parser, trait_use_conflict_resolution)
 
   (* SPEC:
     trait-use-clause:
@@ -849,10 +932,20 @@ module WithExpressionAndStatementAndTypeParser
   *)
   and parse_trait_use parser =
     let (parser, use_token) = assert_token parser Use in
-    let (parser, trait_name_list) = parse_comma_list
-      parser Semicolon SyntaxError.error1004 parse_qualified_name_type in
-    let (parser, semi) = expect_semicolon parser in
-    (parser, make_trait_use use_token trait_name_list semi)
+    let (parser, trait_name_list) =
+      parse_separated_list_opt_predicate
+        parser
+        Comma
+        NoTrailing
+        (function Semicolon | LeftBrace -> true | _ -> false)
+        SyntaxError.error1004
+        parse_qualified_name_type
+    in
+    if (peek_token_kind parser) = LeftBrace then
+      parse_trait_use_conflict_resolution parser use_token trait_name_list
+    else
+      let (parser, semi) = expect_semicolon parser in
+      (parser, make_trait_use use_token trait_name_list semi)
 
   and parse_const_or_type_const_declaration parser abstr =
     let (parser, const) = assert_token parser Const in
@@ -1189,7 +1282,7 @@ module WithExpressionAndStatementAndTypeParser
   and parse_function_declaration_header parser =
     (* SPEC
       function-definition-header:
-        attribute-specification-opt  async-opt  function  name  /
+        attribute-specification-opt  async-opt  coroutine-opt  function  name  /
         generic-type-parameter-list-opt  (  parameter-list-opt  ) :  /
         return-type   where-clause-opt
 
@@ -1202,6 +1295,7 @@ module WithExpressionAndStatementAndTypeParser
       TODO: Produce an error if this occurs in strict mode, or if it
       TODO: appears before a special name like __construct, and so on. *)
     let (parser, async_token) = optional_token parser Async in
+    let (parser, coroutine_token) = optional_token parser Coroutine in
     let (parser, function_token) = expect_function parser in
     let (parser, ampersand_token) = optional_token parser Ampersand in
     let (parser, label) =
@@ -1213,10 +1307,20 @@ module WithExpressionAndStatementAndTypeParser
     let (parser, colon_token, return_type) =
       parse_return_type_hint_opt parser in
     let (parser, where_clause) = parse_where_clause_opt parser in
-    let syntax = make_function_declaration_header async_token
-      function_token ampersand_token label generic_type_parameter_list
-      left_paren_token parameter_list right_paren_token colon_token
-      return_type where_clause in
+    let syntax =
+      make_function_declaration_header
+        async_token
+        coroutine_token
+        function_token
+        ampersand_token
+        label
+        generic_type_parameter_list
+        left_paren_token
+        parameter_list
+        right_paren_token
+        colon_token
+        return_type
+        where_clause in
     (parser, syntax)
 
   (* A function label is either a function name, a __construct label, or a
@@ -1313,7 +1417,7 @@ module WithExpressionAndStatementAndTypeParser
     | Enum -> parse_enum_declaration parser attribute_specification
     | Type | Newtype ->
       parse_alias_declaration parser attribute_specification
-    | Async | Function ->
+    | Async | Coroutine | Function ->
       parse_function_declaration parser attribute_specification
     | Abstract
     | Final
@@ -1345,6 +1449,7 @@ module WithExpressionAndStatementAndTypeParser
     | Final
     | Class -> parse_classish_declaration parser(make_missing())
     | Async
+    | Coroutine
     | Function -> parse_function_declaration parser (make_missing())
     | LessThanLessThan ->
       parse_enum_or_classish_or_function_declaration parser

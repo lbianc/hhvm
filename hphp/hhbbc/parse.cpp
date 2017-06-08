@@ -194,11 +194,17 @@ std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
    *     fault-protected region begins a block.
    *
    *   - Each fault or catch entry point begins a block.
+   *
+   *   - The instruction immediately after the end of any
+   *     fault or catch region begins a block.
    */
   for (auto& eh : fe.ehtab) {
     markBlock(eh.m_base);
     markBlock(eh.m_past);
     markBlock(eh.m_handler);
+    if (eh.m_end != kInvalidOffset) {
+      markBlock(eh.m_end);
+    }
   }
 
   // Now, each interval in blockStarts delinates a basic block.
@@ -265,7 +271,7 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
   auto nextExnNode = uint32_t{0};
 
   for (auto& eh : fe.ehtab) {
-    auto node = folly::make_unique<php::ExnNode>();
+    auto node = std::make_unique<php::ExnNode>();
     node->id = nextExnNode++;
     node->parent = nullptr;
 
@@ -562,30 +568,26 @@ void populate_block(ParseUnitState& puState,
 #define FLAGS_ARG_CF_TF
 #define FLAGS_ARG_CF_FF
 
-#define O(opcode, imms, inputs, outputs, flags)         \
-  case Op::opcode:                                      \
-    {                                                   \
-      if (Op::opcode == Op::AssertRATL ||               \
-          Op::opcode == Op::AssertRATStk) {             \
-        break;                                          \
-      }                                                 \
-      auto b = Bytecode {};                             \
-      b.op = Op::opcode;                                \
-      b.srcLoc = srcLocIx;                              \
-      IMM_##imms                                        \
-      FLAGS_##flags                                     \
-      new (&b.opcode) bc::opcode { IMM_ARG_##imms       \
-                                   FLAGS_ARG_##flags }; \
-      if (Op::opcode == Op::DefCns) defcns();           \
-      if (Op::opcode == Op::AddElemC ||                 \
-          Op::opcode == Op::AddNewElemC) addelem();     \
-      if (Op::opcode == Op::DefCls)    defcls(b);       \
-      if (Op::opcode == Op::DefClsNop) defclsnop(b);    \
-      if (Op::opcode == Op::AliasCls) aliascls(b);      \
-      if (Op::opcode == Op::CreateCl)  createcl(b);     \
-      blk.hhbcs.push_back(std::move(b));                \
-      assert(pc == next);                               \
-    }                                                   \
+#define O(opcode, imms, inputs, outputs, flags)                    \
+  case Op::opcode:                                                 \
+    {                                                              \
+      auto b = [&] () -> Bytecode {                                \
+        IMM_##imms /*these two macros advance the pc as required*/ \
+        FLAGS_##flags                                              \
+        if (isTypeAssert(op)) bc::Nop {};                          \
+        return bc::opcode { IMM_ARG_##imms FLAGS_ARG_##flags };    \
+      }();                                                         \
+      b.srcLoc = srcLocIx;                                         \
+      if (Op::opcode == Op::DefCns) defcns();                      \
+      if (Op::opcode == Op::AddElemC ||                            \
+          Op::opcode == Op::AddNewElemC) addelem();                \
+      if (Op::opcode == Op::DefCls)    defcls(b);                  \
+      if (Op::opcode == Op::DefClsNop) defclsnop(b);               \
+      if (Op::opcode == Op::AliasCls) aliascls(b);                 \
+      if (Op::opcode == Op::CreateCl)  createcl(b);                \
+      blk.hhbcs.push_back(std::move(b));                           \
+      assert(pc == next);                                          \
+    }                                                              \
     break;
 
   assert(pc != past);
@@ -740,7 +742,7 @@ void build_cfg(ParseUnitState& puState,
   auto findBlock = [&] (Offset off) {
     auto& ptr = blockMap[off];
     if (!ptr) {
-      ptr               = folly::make_unique<php::Block>();
+      ptr               = std::make_unique<php::Block>();
       ptr->id           = blockMap.size() - 1;
       ptr->section      = php::Block::Section::Main;
       ptr->exnNode      = nullptr;
@@ -821,7 +823,7 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
   FTRACE(2, "  func: {}\n",
     fe.name->data() && *fe.name->data() ? fe.name->data() : "pseudomain");
 
-  auto ret             = folly::make_unique<php::Func>();
+  auto ret             = std::make_unique<php::Func>();
   ret->name            = fe.name;
   ret->srcInfo         = php::SrcInfo { fe.getLocation(),
                                         fe.docComment };
@@ -840,6 +842,7 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
   ret->isGenerator        = fe.isGenerator;
   ret->isPairGenerator    = fe.isPairGenerator;
   ret->isMemoizeWrapper   = fe.isMemoizeWrapper;
+  ret->isMemoizeImpl      = Func::isMemoizeImplName(fe.name);
 
   add_frame_variables(*ret, fe);
 
@@ -858,7 +861,7 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
       }
     }();
 
-    ret->nativeInfo                   = folly::make_unique<php::NativeInfo>();
+    ret->nativeInfo                   = std::make_unique<php::NativeInfo>();
     ret->nativeInfo->returnType       = fe.hniReturnType;
     ret->nativeInfo->dynCallWrapperId = fe.dynCallWrapperId;
     if (f && ret->params.size()) {
@@ -947,7 +950,7 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
                                         const PreClassEmitter& pce) {
   FTRACE(2, "  class: {}\n", pce.name()->data());
 
-  auto ret               = folly::make_unique<php::Class>();
+  auto ret               = std::make_unique<php::Class>();
   ret->name              = pce.name();
   ret->srcInfo           = php::SrcInfo { pce.getLocation(),
                                           pce.docComment() };
@@ -1080,7 +1083,7 @@ std::unique_ptr<php::Unit> parse_unit(php::Program& prog,
 
   auto const& ue = *uep;
 
-  auto ret      = folly::make_unique<php::Unit>();
+  auto ret      = std::make_unique<php::Unit>();
   ret->md5      = ue.md5();
   ret->filename = ue.m_filepath;
   ret->preloadPriority = ue.m_preloadPriority;
@@ -1117,7 +1120,7 @@ std::unique_ptr<php::Unit> parse_unit(php::Program& prog,
 
   for (auto& ta : ue.typeAliases()) {
     ret->typeAliases.push_back(
-      folly::make_unique<php::TypeAlias>(ta)
+      std::make_unique<php::TypeAlias>(ta)
     );
   }
 

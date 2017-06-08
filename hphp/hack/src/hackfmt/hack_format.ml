@@ -12,6 +12,7 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module Syntax = Full_fidelity_editable_syntax
 module TriviaKind = Full_fidelity_trivia_kind
 module Trivia = Full_fidelity_editable_trivia
+module Token = Full_fidelity_editable_token
 module Rewriter = Full_fidelity_rewriter.WithSyntax(Syntax)
 
 open Core
@@ -185,7 +186,7 @@ let rec transform node =
         | SyntaxList [declarator] ->
           Nest [
             Space;
-            SplitWith Cost.Assignment;
+            SplitWith Cost.Base;
             t declarator;
           ];
         | SyntaxList xs ->
@@ -213,6 +214,11 @@ let rec transform node =
     Fmt [
       Space;
       braced_block_nest left_b right_b [handle_possible_list decls];
+    ]
+  | NamespaceEmptyBody x ->
+    let semi = get_namespace_empty_body_children x in
+    Fmt [
+      t semi;
     ]
   | NamespaceUseDeclaration x ->
     let (kw, use_kind, clauses, semi) =
@@ -261,11 +267,24 @@ let rec transform node =
       Newline;
     ]
   | FunctionDeclarationHeader x ->
-    let (async, kw, amp, name, type_params, leftp, params, rightp, colon,
-      ret_type, where) = get_function_declaration_header_children x
+    let (
+      async,
+      coroutine,
+      kw,
+      amp,
+      name,
+      type_params,
+      leftp,
+      params,
+      rightp,
+      colon,
+      ret_type,
+      where
+    ) = get_function_declaration_header_children x
     in
     Fmt [
-      Span (transform_fn_decl_name async kw amp name type_params leftp);
+      Span (
+        transform_fn_decl_name async coroutine kw amp name type_params leftp);
       transform_fn_decl_args params rightp colon ret_type where;
     ]
   | WhereClause x ->
@@ -297,11 +316,31 @@ let rec transform node =
         in
         let fn_name, args_and_where = match syntax func_decl with
           | FunctionDeclarationHeader x ->
-            let (async, kw, amp, name, type_params, leftp, params, rightp,
-                 colon, ret_type, where) =
-              get_function_declaration_header_children x
+            let (
+              async,
+              coroutine,
+              kw,
+              amp,
+              name,
+              type_params,
+              leftp,
+              params,
+              rightp,
+              colon,
+              ret_type,
+              where
+            ) = get_function_declaration_header_children x
             in
-            Fmt (transform_fn_decl_name async kw amp name type_params leftp),
+            Fmt (
+              transform_fn_decl_name
+                async
+                coroutine
+                kw
+                amp
+                name
+                type_params
+                leftp
+            ),
             transform_fn_decl_args params rightp colon ret_type where
           | _ -> failwith "Expected FunctionDeclarationHeader"
         in
@@ -369,6 +408,35 @@ let rec transform node =
         handle_possible_list body
       ];
       Newline;
+    ]
+  | TraitUseConflictResolutionItem x ->
+    let (aliasing_name, kw, aliased_name) =
+      get_trait_use_conflict_resolution_item_children x
+    in
+    Fmt [
+      t aliasing_name;
+      Space;
+      t kw;
+      Space;
+      t aliased_name;
+      Newline;
+    ]
+  | TraitUseConflictResolution x ->
+    let (kw, elements, lb, clauses, rb) =
+      get_trait_use_conflict_resolution_children x
+    in
+    Fmt [
+      t kw;
+      WithRule (Rule.Argument, Nest [
+        handle_possible_list ~before_each:space_split elements;
+      ]);
+      t lb;
+      Newline;
+      WithRule (Rule.Argument, Nest [
+        handle_possible_list ~before_each:space_split clauses;
+      ]);
+      Newline;
+      t rb;
     ]
   | TraitUse x ->
     let (kw, elements, semi) = get_trait_use_children x in
@@ -695,15 +763,27 @@ let rec transform node =
       Space;
       t eq_kw;
       Space;
-      SplitWith Cost.Assignment;
+      SplitWith Cost.Base;
       Nest [t value];
     ]
   | AnonymousFunction x ->
-    let (async_kw, fun_kw, lp, params, rp, colon, ret_type, use, body) =
-      get_anonymous_function_children x in
+    let (
+      async_kw,
+      coroutine_kw,
+      fun_kw,
+      lp,
+      params,
+      rp,
+      colon,
+      ret_type,
+      use,
+      body
+    ) = get_anonymous_function_children x in
     Fmt [
       t async_kw;
       when_present async_kw space;
+      t coroutine_kw;
+      when_present coroutine_kw space;
       t fun_kw;
       transform_argish_with_return_type lp params rp colon ret_type;
       t use;
@@ -720,10 +800,13 @@ let rec transform node =
       transform_argish left_p vars right_p;
     ]
   | LambdaExpression x ->
-    let (async, signature, arrow, body) = get_lambda_expression_children x in
+    let (async, coroutine, signature, arrow, body) =
+      get_lambda_expression_children x in
     Fmt [
       t async;
       when_present async space;
+      t coroutine;
+      when_present coroutine space;
       t signature;
       Space;
       t arrow;
@@ -849,7 +932,13 @@ let rec transform node =
     Fmt [
       t left_b;
       Split;
-      WithRule (Rule.Argument, Fmt [
+      let rule =
+        if List.is_empty (trailing_trivia left_b)
+        && List.is_empty (trailing_trivia expr)
+          then Rule.Simple Cost.Base
+          else Rule.Argument
+      in
+      WithRule (rule, Fmt [
         Nest [t expr];
         Split;
         t right_b
@@ -881,18 +970,7 @@ let rec transform node =
     Fmt [
       t name;
       Space;
-      t left_b;
-      if is_missing initializers then t right_b
-      else Fmt [
-        Space;
-        Split;
-        WithRule (Rule.Argument, Fmt [
-          Nest [
-            handle_possible_list ~after_each:after_each_literal initializers
-          ];
-          t right_b;
-        ])
-      ]
+      transform_argish ~spaces:true left_b initializers right_b;
     ]
   | ObjectCreationExpression x ->
     let (kw, obj_type, left_p, arg_list, right_p) =
@@ -963,10 +1041,13 @@ let rec transform node =
       transform_braced_item lb expr rb;
     ]
   | AwaitableCreationExpression x ->
-    let (kw, body) = get_awaitable_creation_expression_children x in
+    let (async_kw, coroutine_kw, body) =
+      get_awaitable_creation_expression_children x in
     Fmt [
-      t kw;
-      Space;
+      t async_kw;
+      when_present async_kw space;
+      t coroutine_kw;
+      when_present coroutine_kw space;
       (* TODO: rethink possible one line bodies *)
       (* TODO: correctly handle spacing after the closing brace *)
       handle_possible_compound_statement ~space:false body;
@@ -1032,7 +1113,7 @@ let rec transform node =
     Span [
       t name;
       t eq;
-      SplitWith Cost.Assignment;
+      SplitWith Cost.Base;
       Nest [t expr];
     ]
   | XHPOpen x ->
@@ -1057,88 +1138,111 @@ let rec transform node =
         ]
     ]
   | XHPExpression x ->
-    (**
-     * XHP breaks the normal rules of trivia. If there is a newline after the
-     * XHPOpen tag then it becomes leading trivia for the first token in the
-     * XHPBody instead of trailing trivia for the open tag.
-     *
-     * To deal with this we remove the body's leading trivia, split it after the
-     * first newline, and treat the first half as trailing trivia.
-     *)
     let handle_xhp_body body =
       match syntax body with
-      | Missing -> Nothing
-      | SyntaxList (hd :: tl) ->
-        let leading, hd = remove_leading_trivia hd in
-        let (up_to_first_newline, after_newline, _) =
-          List.fold leading
-            ~init:([], [], false)
-            ~f:(fun (upto, after, seen) t ->
-              if seen then upto, t :: after, true
-              else t :: upto, after, Trivia.kind t = TriviaKind.EndOfLine
-            )
-        in
-        Fmt [
-          Split;
-          transform_trailing_trivia up_to_first_newline;
-          Split;
-          transform_leading_trivia after_newline;
-          let prev_token_had_trailing_trivia = ref false in
-          Fmt (List.map (hd :: tl) ~f:(fun node -> Fmt [
-            begin
-              let leading, node = remove_leading_trivia node in
-              let result = Fmt [
-                if !prev_token_had_trailing_trivia
-                  then transform_leading_trivia leading
-                  else transform_xhp_leading_trivia leading;
-                t node;
-              ] in
-              begin match syntax node with
-                | XHPExpression _ ->
-                  prev_token_had_trailing_trivia := true
-                | Token t ->
-                  prev_token_had_trailing_trivia :=
-                    EditableToken.kind t = EditableToken.TokenKind.XHPBody
-                | _ ->
-                  prev_token_had_trailing_trivia := false
+      | Missing -> Nothing, true
+      | SyntaxList xs ->
+        (* XHP breaks the normal rules of trivia. All trailing trivia (except on
+         * XHPBody tokens) is lexed as leading trivia for the next token.
+         *
+         * To deal with this, we keep track of whether the last token we added
+         * was one that trailing trivia is scanned for. If it wasn't, we handle
+         * the next token's leading trivia with transform_xhp_leading_trivia,
+         * which treats all trivia up to the first newline as trailing trivia.
+         *)
+        let prev_token_scanned_trailing_trivia = ref false in
+        let prev_token_was_xhpbody = ref false in
+        let transformed_body = Fmt (List.map xs ~f:begin fun node ->
+          let leading, node = remove_leading_trivia node in
+          let transformed_node = Fmt [
+            (* Whitespace in an XHPBody is only significant when adjacent to an
+             * XHPBody token, so we are free to add splits between other nodes
+             * (like XHPExpressions and BracedExpressions). We can also safely
+             * add splits before XHPBody tokens, but only if they already have
+             * whitespace in their leading trivia.
+             *
+             * Splits *after* XHPBody tokens are handled below by
+             * trailing_whitespace, so if the previous token was an XHPBody
+             * token, we don't need to do anything. *)
+            if !prev_token_was_xhpbody
+              then Nothing
+              else begin
+                match syntax node with
+                | Token _ -> if has_invisibles leading then Split else Nothing
+                | _ -> Split
               end;
-              result
-            end;
-            let has_trailing_whitespace =
-              List.exists (Syntax.trailing_trivia node)
-                ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.WhiteSpace)
-            in
-            let has_trailing_newline =
-              List.exists (Syntax.trailing_trivia node)
-                ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.EndOfLine)
-            in
+            if !prev_token_scanned_trailing_trivia
+              then transform_leading_trivia leading
+              else transform_xhp_leading_trivia leading;
+            t node;
+          ] in
+          (* XHPExpressions currently have trailing trivia when in an
+           * XHPBody, but they shouldn't--see T16787398.
+           * Once that issue is resolved, prev_token_scanned_trailing_trivia and
+           * prev_token_was_xhpbody will be equivalent and one can be removed.
+           *)
+          let open EditableToken in
+          prev_token_scanned_trailing_trivia := begin
             match syntax node with
-            | XHPExpression _ ->
-              if has_trailing_whitespace then space_split () else Split
-            | Token _ ->
-              if has_trailing_newline then Newline
-              else if has_trailing_whitespace then Space else Nothing
-            | _ ->
-              if has_trailing_whitespace then Space else Nothing
-          ]))
-        ]
+            | XHPExpression _ -> true
+            | Token t -> kind t = TokenKind.XHPBody
+            | _ -> false
+          end;
+          prev_token_was_xhpbody := begin
+            match syntax node with
+            | Token t -> kind t = TokenKind.XHPBody
+            | _ -> false
+          end;
+          (* Here, we preserve newlines after XHPBody tokens and don't add
+           * splits between them. This means that we don't reflow paragraphs in
+           * XHP to fit in the column limit.
+           *
+           * If we were to split between XHPBody tokens, we'd need a new Rule
+           * type to govern word-wrap style splitting, since using independent
+           * splits (e.g. SplitWith Cost.Base) between every token would make
+           * solving too expensive. *)
+          let trailing = Syntax.trailing_trivia node in
+          let trailing_whitespace =
+            match syntax node with
+            | Token _ when has_newline trailing -> Newline
+            | _ when has_whitespace trailing -> Space
+            | _ -> Nothing
+          in
+          Fmt [transformed_node; trailing_whitespace]
+        end) in
+        let leading_token =
+          match Syntax.leading_token (List.hd_exn xs) with
+          | None -> failwith "Expected token"
+          | Some token -> token
+        in
+        let can_split_before_first_token =
+          let open EditableToken in
+          kind leading_token <> TokenKind.XHPBody ||
+          has_invisibles (leading leading_token)
+        in
+        let transformed_body = Fmt [
+          if can_split_before_first_token then Split else Nothing;
+          transformed_body;
+        ] in
+        let can_split_before_close = not !prev_token_was_xhpbody in
+        transformed_body, can_split_before_close
       | _ -> failwith "Expected SyntaxList"
     in
 
     let (xhp_open, body, close) = get_xhp_expression_children x in
-    WithPossibleLazyRule (Rule.XHPExpression, t xhp_open, Fmt [
-      Nest [
-        handle_xhp_body body
-      ];
-      when_present close (fun () -> Fmt [
-        Split;
-        let leading, close = remove_leading_trivia close in Fmt [
-          (* Ignore extra newlines by treating this as trailing trivia *)
-          ignore_trailing_invisibles leading;
-          t close;
-        ]
-      ]);
-    ])
+    WithPossibleLazyRule (Rule.XHPExpression, t xhp_open,
+      let transformed_body, can_split_before_close = handle_xhp_body body in
+      Fmt [
+        Nest [transformed_body];
+        when_present close begin fun () ->
+          let leading, close = remove_leading_trivia close in Fmt [
+            (* Ignore extra newlines by treating this as trailing trivia *)
+            ignore_trailing_invisibles leading;
+            if can_split_before_close then Split else Nothing;
+            t close;
+          ]
+        end;
+      ])
   | VarrayTypeSpecifier x ->
     let (kw, left_a, varray_type, _, right_a) =
       get_varray_type_specifier_children x in
@@ -1275,6 +1379,13 @@ let rec transform node =
   | TupleTypeSpecifier x ->
     let (left_p, types, right_p) = get_tuple_type_specifier_children x in
     transform_argish left_p types right_p
+  | TupleTypeExplicitSpecifier x ->
+    let (kw, left_a, types, right_a) =
+      get_tuple_type_explicit_specifier_children x in
+    Fmt [
+      t kw;
+      transform_argish left_a types right_a
+    ]
   | ErrorSyntax _ ->
     raise Hackfmt_error.InvalidSyntax
 
@@ -1282,6 +1393,9 @@ and when_present node f =
   match syntax node with
   | Missing -> Nothing
   | _ -> f ()
+
+and is_present node =
+  not (is_missing node)
 
 and transform_simple node =
   Fmt (List.map (children node) transform)
@@ -1525,10 +1639,12 @@ and handle_switch_body left_b sections right_b =
     )
   ]
 
-and transform_fn_decl_name async kw amp name type_params leftp =
+and transform_fn_decl_name async coroutine kw amp name type_params leftp =
   [
     transform async;
     when_present async space;
+    transform coroutine;
+    when_present coroutine space;
     transform kw;
     Space;
     transform amp;
@@ -1552,20 +1668,29 @@ and transform_argish_with_return_type left_p params right_p colon ret_type =
   Fmt [
     transform left_p;
     when_present params split;
-    WithRule (Rule.Argument, Fmt [
-      transform_possible_comma_list params right_p;
+    WithRule (Rule.Argument, Span [
+      Span [ transform_possible_comma_list params right_p ];
       transform colon;
       when_present colon space;
       transform ret_type;
     ])
   ]
 
-and transform_argish ?(allow_trailing=true) left_p arg_list right_p =
+and transform_argish ?(allow_trailing=true) ?(spaces=false)
+    left_p arg_list right_p =
   Fmt [
     transform left_p;
     when_present arg_list split;
-    WithRule (Rule.Argument, Span [
-      transform_possible_comma_list ~allow_trailing arg_list right_p
+    if spaces && is_present arg_list then Space else Nothing;
+    let rule = match syntax arg_list with
+      | SyntaxList [x]
+        when List.is_empty (trailing_trivia left_p)
+          && List.is_empty (trailing_trivia x)
+        -> Rule.Simple Cost.Base
+      | _ -> Rule.Argument
+    in
+    WithRule (rule, Span [
+      transform_possible_comma_list ~allow_trailing ~spaces arg_list right_p
     ])
   ]
 
@@ -1575,18 +1700,19 @@ and transform_braced_item left_p item right_p =
   let leading, right_p = remove_leading_trivia right_p in
   Fmt [
     transform left_p;
-    Split;
+    when_present item split;
     WithRule (Rule.Argument, Span [
       Nest [
         transform item;
         transform_leading_trivia leading;
       ];
-      Split;
+      when_present item split;
       transform right_p;
     ]);
   ]
 
-and transform_possible_comma_list ?(allow_trailing=true) items right_p =
+and transform_possible_comma_list ?(allow_trailing=true) ?(spaces=false)
+    items right_p =
   (* Remove the right paren's leading trivia and handle it inside the Nest, so
    * that comments will be indented correctly. *)
   let leading, right_p = match syntax right_p with
@@ -1601,6 +1727,7 @@ and transform_possible_comma_list ?(allow_trailing=true) items right_p =
       transform_leading_trivia leading;
     ];
     when_present items split;
+    if spaces && is_present items then Space else Nothing;
     transform right_p;
   ]
 
@@ -1609,13 +1736,12 @@ and remove_leading_trivia node =
     | Some t -> t
     | None -> failwith "Expected leading token"
   in
-  let rewritten_node, changed = Rewriter.rewrite_pre (fun rewrite_node ->
+  let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
     match syntax rewrite_node with
     | Token t when t == leading_token ->
-      Some (Syntax.make_token {t with EditableToken.leading = []}, true)
-    | _  -> Some (rewrite_node, false)
+      Rewriter.Replace (Syntax.make_token {t with EditableToken.leading = []})
+    | _  -> Rewriter.Keep
   ) node in
-  if not changed then failwith "Leading token not rewritten";
   EditableToken.leading leading_token, rewritten_node
 
 and remove_trailing_trivia node =
@@ -1623,13 +1749,12 @@ and remove_trailing_trivia node =
     | Some t -> t
     | None -> failwith "Expected trailing token"
   in
-  let rewritten_node, changed = Rewriter.rewrite_pre (fun rewrite_node ->
+  let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
     match syntax rewrite_node with
     | Token t when t == trailing_token ->
-      Some (Syntax.make_token {t with EditableToken.trailing = []}, true)
-    | _  -> Some (rewrite_node, false)
+      Rewriter.Replace (Syntax.make_token {t with EditableToken.trailing = []})
+    | _  -> Rewriter.Keep
   ) node in
-  if not changed then failwith "Trailing token not rewritten";
   rewritten_node, EditableToken.trailing trailing_token
 
 and transform_last_arg ~allow_trailing node =
@@ -1671,7 +1796,7 @@ and transform_mapish_entry key arrow value =
     Space;
     transform arrow;
     Space;
-    SplitWith Cost.Assignment;
+    SplitWith Cost.Base;
     Nest [transform value];
   ]
 
@@ -1742,7 +1867,7 @@ and transform_binary_expression ~is_nested expr =
       Space;
       transform operator;
       Space;
-      SplitWith Cost.Assignment;
+      SplitWith Cost.Base;
       Nest [transform right];
     ]
   else
@@ -1801,8 +1926,8 @@ and transform_binary_expression ~is_nested expr =
                      * remove it once we can return an expanded formatting
                      * range. *)
                     if op_has_spaces
-                      then Fmt [Space; SplitWith Cost.Assignment]
-                      else SplitWith Cost.Assignment
+                      then Fmt [Space; SplitWith Cost.Base]
+                      else SplitWith Cost.Base
                   end
                   else (if op_has_spaces then space_split () else Split);
                   transform_operand operand;
@@ -1816,6 +1941,25 @@ and transform_binary_expression ~is_nested expr =
       | _ ->
         failwith "Expected non empty list of binary expression pieces"
     ]
+
+(* True if the trivia list contains WhiteSpace trivia.
+ * Note that WhiteSpace includes spaces and tabs, but not newlines. *)
+and has_whitespace trivia_list =
+  List.exists trivia_list
+    ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.WhiteSpace)
+
+(* True if the trivia list contains EndOfLine trivia. *)
+and has_newline trivia_list =
+  List.exists trivia_list
+    ~f:(fun trivia -> Trivia.kind trivia = TriviaKind.EndOfLine)
+
+(* True if the trivia list contains any "invisible" trivia, meaning spaces,
+ * tabs, or newlines. *)
+and has_invisibles trivia_list =
+  List.exists trivia_list ~f:begin fun trivia ->
+    Trivia.kind trivia = TriviaKind.WhiteSpace ||
+    Trivia.kind trivia = TriviaKind.EndOfLine
+  end
 
 and transform_leading_trivia t = transform_trivia ~is_leading:true t
 and transform_trailing_trivia t = transform_trivia ~is_leading:false t
@@ -1831,10 +1975,6 @@ and transform_trivia ~is_leading trivia =
   let whitespace_followed_last_comment = ref false in
   let trailing_invisibles = ref [] in
   let comments = ref [] in
-  let has_newline l =
-    List.exists l ~f:(fun t -> Trivia.kind t = TriviaKind.EndOfLine) in
-  let has_whitespace l =
-    List.exists l ~f:(fun t -> Trivia.kind t = TriviaKind.WhiteSpace) in
   let make_comment _ =
     if Option.is_some !last_comment then begin
       newline_followed_last_comment := has_newline !trailing_invisibles;
@@ -1849,7 +1989,10 @@ and transform_trivia ~is_leading trivia =
           if !whitespace_followed_last_comment then Space
           else if !newline_followed_last_comment then Newline
           else Nothing
-        end else Nothing;
+        end
+        else if Option.is_some !last_comment
+          then Newline (* Always add a newline after a single-line comment *)
+          else Nothing;
       ])
       :: !comments;
     last_comment := None;
@@ -1918,7 +2061,6 @@ and transform_trivia ~is_leading trivia =
       last_comment := Some (Fmt [
         if !currently_leading then Newline else Space;
         Comment ((Trivia.text triv), (Trivia.width triv));
-        Newline;
       ]);
       last_comment_was_delimited := false;
       currently_leading := false;
@@ -1971,17 +2113,15 @@ and ignore_trailing_invisibles triv =
   Fmt (List.map triv ~f:(fun t -> Ignore ((Trivia.text t), (Trivia.width t))))
 
 and transform_xhp_leading_trivia triv =
-  let newlines = ref 0 in
-  Fmt (List.map triv ~f:(fun t ->
-    let ignored = Ignore ((Trivia.text t), (Trivia.width t)) in
-    match Trivia.kind t with
-    | TriviaKind.EndOfLine ->
-      newlines := !newlines + 1;
-      Fmt [
-        ignored;
-        if !newlines = 1 then Newline
-        else if !newlines <= _MAX_CONSECUTIVE_BLANK_LINES + 1 then BlankLine
-        else Nothing
-      ]
-    | _ -> ignored;
-  ))
+  let (up_to_first_newline, after_newline, _) =
+    List.fold triv
+      ~init:([], [], false)
+      ~f:begin fun (upto, after, seen) t ->
+        if seen then upto, t :: after, true
+        else t :: upto, after, Trivia.kind t = TriviaKind.EndOfLine
+      end
+  in
+  Fmt [
+    ignore_trailing_invisibles up_to_first_newline;
+    transform_leading_invisibles after_newline;
+  ]
