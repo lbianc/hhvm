@@ -123,16 +123,16 @@ public:
          AnalysisResultPtr ar, int fileSize = 0);
 
   // implementing ParserBase
-  virtual bool parseImpl();
+  bool parseImpl() override;
   virtual bool parseImpl5();
   virtual bool parseImpl7();
   bool parse();
-  virtual void error(ATTRIBUTE_PRINTF_STRING const char* fmt, ...)
-    ATTRIBUTE_PRINTF(2,3);
+  void error(ATTRIBUTE_PRINTF_STRING const char* fmt, ...) override
+      ATTRIBUTE_PRINTF(2, 3);
   IMPLEMENT_XHP_ATTRIBUTES;
 
-  virtual void fatal(const Location* loc, const char* msg);
-  virtual void parseFatal(const Location* loc, const char* msg);
+  void fatal(const Location* loc, const char* msg) override;
+  void parseFatal(const Location* loc, const char* msg) override;
   std::string errString();
 
   // result
@@ -356,7 +356,8 @@ public:
   void onGroupUse(const std::string &prefix, const Token &tok,
                   UseDeclarationConsumer f);
 
-  void useClass(const std::string &fn, const std::string &as);
+  void useClassAndNamespace(const std::string &fn, const std::string &as);
+  void useNamespace(const std::string &fn, const std::string &as);
   void useFunction(const std::string &fn, const std::string &as);
   void useConst(const std::string &cnst, const std::string &as);
 
@@ -393,10 +394,10 @@ public:
    */
   void onCompleteLabelScope(bool fresh);
 
-  virtual void invalidateGoto(TStatementPtr stmt, GotoError error);
-  virtual void invalidateLabel(TStatementPtr stmt);
+  void invalidateGoto(TStatementPtr stmt, GotoError error) override;
+  void invalidateLabel(TStatementPtr stmt) override;
 
-  virtual TStatementPtr extractStatement(ScannerToken *stmt);
+  TStatementPtr extractStatement(ScannerToken* stmt) override;
 
   FileScopePtr getFileScope() { return m_file; }
 
@@ -529,9 +530,10 @@ public:
    */
   struct AliasTable {
     enum class AliasFlags {
-      None = 0,
+      None = 0x0,
       HH = 0x1,
       PHP7_ScalarTypes = 0x2,
+      RuntimeOption = 0x4,
     };
 
     struct AutoAlias {
@@ -555,11 +557,11 @@ public:
     AliasTable(const AutoAliasMap& aliases,
                std::function<AliasFlags ()> autoOracle);
 
-    std::string getName(const std::string& alias, int line_no, bool forNs);
+    std::string getName(const std::string& alias, int line_no);
     std::string getNameRaw(const std::string& alias);
     AliasType getType(const std::string& alias);
     int getLine(const std::string& alias);
-    bool isAliased(const std::string& alias, bool forNs);
+    bool isAliased(const std::string& alias);
     void set(const std::string& alias,
              const std::string& name,
              AliasType type,
@@ -590,20 +592,38 @@ private:
   NamespaceState m_nsState;
   bool m_nsFileScope;
   std::string m_namespace; // current namespace
-  AliasTable m_nsAliasTable;
   std::vector<uint32_t> m_nsStack;
 
-  // Function aliases
+  /* Namespace aliases:
+   *  - RuntimeOption::AliasedNamespace
+   *  - `use Foo\bar`
+   *  - Potential future: `use namespace Foo\bar`
+   */
+  AliasTable m_nsAliasTable;
+
+  /* Class aliases:
+   * - auto-aliased classes, e.g. `Vector`, `vec`)
+   * - `use Foo\bar`
+   * - Potential future: `use type Foo\bar`
+   */
+  AliasTable m_classAliasTable;
+
+  /* Function aliases:
+   *  - `use function Foo\bar`
+   */
   hphp_string_iset m_fnTable;
   hphp_string_imap<std::string> m_fnAliasTable;
 
-  // Constant aliases
+  /* Constant aliases:
+   *  - `use const Foo\bar`
+   */
   hphp_string_set m_cnstTable;
   hphp_string_map<std::string> m_cnstAliasTable;
 
-  void registerAlias(std::string name);
+  void registerClassAlias(std::string name);
   AliasFlags getAliasFlags();
   const AutoAliasMap& getAutoAliasedClasses();
+  const AutoAliasMap& getAutoAliasedNamespaces();
 };
 
 inline Parser::AliasFlags operator|(const Parser::AliasFlags& lhs,

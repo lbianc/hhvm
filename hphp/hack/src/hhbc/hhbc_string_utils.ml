@@ -20,6 +20,19 @@ let strip_ns s =
   (* strip zero or more chars followed by a backslash *)
   Str.replace_first (Str.regexp {|.*\\|}) "" s
 
+
+module Types = struct
+  let fix_casing s = match String.lowercase_ascii s with
+    | "vector" -> "Vector"
+    | "immvector" -> "ImmVector"
+    | "set" -> "Set"
+    | "immset" -> "ImmSet"
+    | "map" -> "Map"
+    | "immmap" -> "ImmMap"
+    | "pair" -> "Pair"
+    | _ -> s
+end
+
 (* Integers are represented as strings *)
 module Integer = struct
   (* Dont accidentally convert 0 to 0o *)
@@ -71,9 +84,9 @@ module Closures = struct
     if String_utils.string_starts_with s "Closure$"
     then
       let suffix = String_utils.lstrip s "Closure$" in
-      match String_utils.split ';' suffix with
+      match Str.split_delim (Str.regexp ";") suffix with
       | [prefix; _count] ->
-        begin match String_utils.split '#' prefix with
+        begin match Str.split_delim (Str.regexp "#") prefix with
         | [prefix; _] -> Some prefix
         | _ -> Some prefix
         end

@@ -165,7 +165,6 @@ bool canDCE(IRInstruction* inst) {
   case IsWaitHandle:
   case IsCol:
   case UnboxPtr:
-  case BoxPtr:
   case LdStk:
   case LdLoc:
   case LdClsRef:
@@ -266,6 +265,7 @@ bool canDCE(IRInstruction* inst) {
   case LdCufIterFunc:
   case LdCufIterCtx:
   case LdCufIterInvName:
+  case LdStaticLoc:
   case StrictlyIntegerConv:
     assertx(!inst->isControlFlow());
     return true;
@@ -301,7 +301,6 @@ bool canDCE(IRInstruction* inst) {
   case CheckRefs:
   case EndGuards:
   case CheckNonNull:
-  case CheckClosureStaticLocInit:
   case DivDbl:
   case DivInt:
   case AddIntO:
@@ -422,6 +421,7 @@ bool canDCE(IRInstruction* inst) {
   case InitSProps:
   case InitObjProps:
   case DebugBacktrace:
+  case DebugBacktraceFast:
   case InitThrowableFileAndLine:
   case ConstructInstance:
   case AllocPackedArray:
@@ -478,7 +478,6 @@ bool canDCE(IRInstruction* inst) {
   case RaiseArrayKeyNotice:
   case RaiseVarEnvDynCall:
   case RaiseHackArrCompatNotice:
-  case InitClosureStaticLoc:
   case InitStaticLoc:
   case PrintStr:
   case PrintInt:
@@ -502,7 +501,8 @@ bool canDCE(IRInstruction* inst) {
   case OODeclExists:
   case StClosureCtx:
   case StClosureArg:
-  case CreateCont:
+  case CreateGen:
+  case CreateAGen:
   case CreateAFWH:
   case CreateAFWHNoVV:
   case AFWHPrepareChild:
@@ -662,13 +662,14 @@ bool canDCE(IRInstruction* inst) {
   case SyncReturnBC:
   case SetOpCell:
   case ConjureUse:
-  case LdStaticLoc:
+  case CheckStaticLoc:
   case LdClsMethodFCacheFunc:
   case LdClsMethodCacheFunc:
   case ProfileInstanceCheck:
   case MemoSet:
   case KillClsRef:
   case KillCufIter:
+  case BoxPtr:
     return false;
 
   case AKExistsArr:

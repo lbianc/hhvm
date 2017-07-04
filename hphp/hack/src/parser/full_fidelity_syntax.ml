@@ -60,7 +60,6 @@ module WithToken(Token: TokenType) = struct
       | Token                             _ -> SyntaxKind.Token
       | SyntaxList                        _ -> SyntaxKind.SyntaxList
       | EndOfFile                         _ -> SyntaxKind.EndOfFile
-      | ScriptHeader                      _ -> SyntaxKind.ScriptHeader
       | Script                            _ -> SyntaxKind.Script
       | SimpleTypeSpecifier               _ -> SyntaxKind.SimpleTypeSpecifier
       | LiteralExpression                 _ -> SyntaxKind.LiteralExpression
@@ -101,6 +100,8 @@ module WithToken(Token: TokenType) = struct
       | InclusionDirective                _ -> SyntaxKind.InclusionDirective
       | CompoundStatement                 _ -> SyntaxKind.CompoundStatement
       | ExpressionStatement               _ -> SyntaxKind.ExpressionStatement
+      | MarkupSection                     _ -> SyntaxKind.MarkupSection
+      | MarkupSuffix                      _ -> SyntaxKind.MarkupSuffix
       | UnsetStatement                    _ -> SyntaxKind.UnsetStatement
       | WhileStatement                    _ -> SyntaxKind.WhileStatement
       | IfStatement                       _ -> SyntaxKind.IfStatement
@@ -219,7 +220,6 @@ module WithToken(Token: TokenType) = struct
       kind node = SyntaxKind.SyntaxList
 
     let is_end_of_file                          = has_kind SyntaxKind.EndOfFile
-    let is_script_header                        = has_kind SyntaxKind.ScriptHeader
     let is_script                               = has_kind SyntaxKind.Script
     let is_simple_type_specifier                = has_kind SyntaxKind.SimpleTypeSpecifier
     let is_literal_expression                   = has_kind SyntaxKind.LiteralExpression
@@ -260,6 +260,8 @@ module WithToken(Token: TokenType) = struct
     let is_inclusion_directive                  = has_kind SyntaxKind.InclusionDirective
     let is_compound_statement                   = has_kind SyntaxKind.CompoundStatement
     let is_expression_statement                 = has_kind SyntaxKind.ExpressionStatement
+    let is_markup_section                       = has_kind SyntaxKind.MarkupSection
+    let is_markup_suffix                        = has_kind SyntaxKind.MarkupSuffix
     let is_unset_statement                      = has_kind SyntaxKind.UnsetStatement
     let is_while_statement                      = has_kind SyntaxKind.WhileStatement
     let is_if_statement                         = has_kind SyntaxKind.IfStatement
@@ -407,21 +409,9 @@ module WithToken(Token: TokenType) = struct
       end_of_file_token
     )
 
-    let get_script_header_children {
-      header_less_than;
-      header_question;
-      header_language;
-    } = (
-      header_less_than,
-      header_question,
-      header_language
-    )
-
     let get_script_children {
-      script_header;
       script_declarations;
     } = (
-      script_header,
       script_declarations
     )
 
@@ -871,6 +861,26 @@ module WithToken(Token: TokenType) = struct
     } = (
       expression_statement_expression,
       expression_statement_semicolon
+    )
+
+    let get_markup_section_children {
+      markup_prefix;
+      markup_text;
+      markup_suffix;
+      markup_expression;
+    } = (
+      markup_prefix,
+      markup_text,
+      markup_suffix,
+      markup_expression
+    )
+
+    let get_markup_suffix_children {
+      markup_suffix_less_than_question;
+      markup_suffix_name;
+    } = (
+      markup_suffix_less_than_question,
+      markup_suffix_name
     )
 
     let get_unset_statement_children {
@@ -1893,6 +1903,7 @@ module WithToken(Token: TokenType) = struct
 
     let get_closure_type_specifier_children {
       closure_outer_left_paren;
+      closure_coroutine;
       closure_function_keyword;
       closure_inner_left_paren;
       closure_parameter_types;
@@ -1902,6 +1913,7 @@ module WithToken(Token: TokenType) = struct
       closure_outer_right_paren;
     } = (
       closure_outer_left_paren,
+      closure_coroutine,
       closure_function_keyword,
       closure_inner_left_paren,
       closure_parameter_types,
@@ -2063,20 +2075,9 @@ module WithToken(Token: TokenType) = struct
       } -> [
         end_of_file_token;
       ]
-      | ScriptHeader {
-        header_less_than;
-        header_question;
-        header_language;
-      } -> [
-        header_less_than;
-        header_question;
-        header_language;
-      ]
       | Script {
-        script_header;
         script_declarations;
       } -> [
-        script_header;
         script_declarations;
       ]
       | SimpleTypeSpecifier {
@@ -2487,6 +2488,24 @@ module WithToken(Token: TokenType) = struct
       } -> [
         expression_statement_expression;
         expression_statement_semicolon;
+      ]
+      | MarkupSection {
+        markup_prefix;
+        markup_text;
+        markup_suffix;
+        markup_expression;
+      } -> [
+        markup_prefix;
+        markup_text;
+        markup_suffix;
+        markup_expression;
+      ]
+      | MarkupSuffix {
+        markup_suffix_less_than_question;
+        markup_suffix_name;
+      } -> [
+        markup_suffix_less_than_question;
+        markup_suffix_name;
       ]
       | UnsetStatement {
         unset_keyword;
@@ -3420,6 +3439,7 @@ module WithToken(Token: TokenType) = struct
       ]
       | ClosureTypeSpecifier {
         closure_outer_left_paren;
+        closure_coroutine;
         closure_function_keyword;
         closure_inner_left_paren;
         closure_parameter_types;
@@ -3429,6 +3449,7 @@ module WithToken(Token: TokenType) = struct
         closure_outer_right_paren;
       } -> [
         closure_outer_left_paren;
+        closure_coroutine;
         closure_function_keyword;
         closure_inner_left_paren;
         closure_parameter_types;
@@ -3575,20 +3596,9 @@ module WithToken(Token: TokenType) = struct
       } -> [
         "end_of_file_token";
       ]
-      | ScriptHeader {
-        header_less_than;
-        header_question;
-        header_language;
-      } -> [
-        "header_less_than";
-        "header_question";
-        "header_language";
-      ]
       | Script {
-        script_header;
         script_declarations;
       } -> [
-        "script_header";
         "script_declarations";
       ]
       | SimpleTypeSpecifier {
@@ -3999,6 +4009,24 @@ module WithToken(Token: TokenType) = struct
       } -> [
         "expression_statement_expression";
         "expression_statement_semicolon";
+      ]
+      | MarkupSection {
+        markup_prefix;
+        markup_text;
+        markup_suffix;
+        markup_expression;
+      } -> [
+        "markup_prefix";
+        "markup_text";
+        "markup_suffix";
+        "markup_expression";
+      ]
+      | MarkupSuffix {
+        markup_suffix_less_than_question;
+        markup_suffix_name;
+      } -> [
+        "markup_suffix_less_than_question";
+        "markup_suffix_name";
       ]
       | UnsetStatement {
         unset_keyword;
@@ -4932,6 +4960,7 @@ module WithToken(Token: TokenType) = struct
       ]
       | ClosureTypeSpecifier {
         closure_outer_left_paren;
+        closure_coroutine;
         closure_function_keyword;
         closure_inner_left_paren;
         closure_parameter_types;
@@ -4941,6 +4970,7 @@ module WithToken(Token: TokenType) = struct
         closure_outer_right_paren;
       } -> [
         "closure_outer_left_paren";
+        "closure_coroutine";
         "closure_function_keyword";
         "closure_inner_left_paren";
         "closure_parameter_types";
@@ -5142,22 +5172,10 @@ module WithToken(Token: TokenType) = struct
         EndOfFile {
           end_of_file_token;
         }
-      | (SyntaxKind.ScriptHeader, [
-          header_less_than;
-          header_question;
-          header_language;
-        ]) ->
-        ScriptHeader {
-          header_less_than;
-          header_question;
-          header_language;
-        }
       | (SyntaxKind.Script, [
-          script_header;
           script_declarations;
         ]) ->
         Script {
-          script_header;
           script_declarations;
         }
       | (SyntaxKind.SimpleTypeSpecifier, [
@@ -5607,6 +5625,26 @@ module WithToken(Token: TokenType) = struct
         ExpressionStatement {
           expression_statement_expression;
           expression_statement_semicolon;
+        }
+      | (SyntaxKind.MarkupSection, [
+          markup_prefix;
+          markup_text;
+          markup_suffix;
+          markup_expression;
+        ]) ->
+        MarkupSection {
+          markup_prefix;
+          markup_text;
+          markup_suffix;
+          markup_expression;
+        }
+      | (SyntaxKind.MarkupSuffix, [
+          markup_suffix_less_than_question;
+          markup_suffix_name;
+        ]) ->
+        MarkupSuffix {
+          markup_suffix_less_than_question;
+          markup_suffix_name;
         }
       | (SyntaxKind.UnsetStatement, [
           unset_keyword;
@@ -6628,6 +6666,7 @@ module WithToken(Token: TokenType) = struct
         }
       | (SyntaxKind.ClosureTypeSpecifier, [
           closure_outer_left_paren;
+          closure_coroutine;
           closure_function_keyword;
           closure_inner_left_paren;
           closure_parameter_types;
@@ -6638,6 +6677,7 @@ module WithToken(Token: TokenType) = struct
         ]) ->
         ClosureTypeSpecifier {
           closure_outer_left_paren;
+          closure_coroutine;
           closure_function_keyword;
           closure_inner_left_paren;
           closure_parameter_types;
@@ -6837,23 +6877,10 @@ module WithToken(Token: TokenType) = struct
         end_of_file_token;
       ]
 
-    let make_script_header
-      header_less_than
-      header_question
-      header_language
-    =
-      from_children SyntaxKind.ScriptHeader [
-        header_less_than;
-        header_question;
-        header_language;
-      ]
-
     let make_script
-      script_header
       script_declarations
     =
       from_children SyntaxKind.Script [
-        script_header;
         script_declarations;
       ]
 
@@ -7342,6 +7369,28 @@ module WithToken(Token: TokenType) = struct
       from_children SyntaxKind.ExpressionStatement [
         expression_statement_expression;
         expression_statement_semicolon;
+      ]
+
+    let make_markup_section
+      markup_prefix
+      markup_text
+      markup_suffix
+      markup_expression
+    =
+      from_children SyntaxKind.MarkupSection [
+        markup_prefix;
+        markup_text;
+        markup_suffix;
+        markup_expression;
+      ]
+
+    let make_markup_suffix
+      markup_suffix_less_than_question
+      markup_suffix_name
+    =
+      from_children SyntaxKind.MarkupSuffix [
+        markup_suffix_less_than_question;
+        markup_suffix_name;
       ]
 
     let make_unset_statement
@@ -8452,6 +8501,7 @@ module WithToken(Token: TokenType) = struct
 
     let make_closure_type_specifier
       closure_outer_left_paren
+      closure_coroutine
       closure_function_keyword
       closure_inner_left_paren
       closure_parameter_types
@@ -8462,6 +8512,7 @@ module WithToken(Token: TokenType) = struct
     =
       from_children SyntaxKind.ClosureTypeSpecifier [
         closure_outer_left_paren;
+        closure_coroutine;
         closure_function_keyword;
         closure_inner_left_paren;
         closure_parameter_types;

@@ -114,7 +114,7 @@
 #include "hphp/parser/hphp.tab.hpp"
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/hack-compiler.h"
+#include "hphp/runtime/vm/extern-compiler.h"
 #include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/runtime/vm/repo-global-data.h"
@@ -316,7 +316,7 @@ struct Emitter {
 #define IMM_BLA std::vector<Label*>&
 #define IMM_SLA std::vector<StrOff>&
 #define IMM_ILA std::vector<IterPair>&
-#define IMM_IVA int32_t
+#define IMM_IVA uint32_t
 #define IMM_LA int32_t
 #define IMM_IA int32_t
 #define IMM_CAR ClsRefSlotPlaceholder
@@ -731,7 +731,8 @@ public:
     return m_ue.bcPos() == m_curFunc->base ||
            isJumpTarget(m_ue.bcPos()) ||
            (m_prevOpcode.hasValue() &&
-            (instrFlags(m_prevOpcode.value()) & TF) == 0);
+            ((instrFlags(m_prevOpcode.value()) & TF) == 0 ||
+             m_prevOpcode.value() == OpExit));
   }
   FuncEmitter* getFuncEmitter() { return m_curFunc; }
   Id getStateLocal() {
@@ -1324,7 +1325,7 @@ struct OpEmitContext {
 #define DEC_BLA std::vector<Label*>&
 #define DEC_SLA std::vector<StrOff>&
 #define DEC_ILA std::vector<IterPair>&
-#define DEC_IVA int32_t
+#define DEC_IVA uint32_t
 #define DEC_LA int32_t
 #define DEC_IA int32_t
 #define DEC_CAR ClsRefSlotPlaceholder
@@ -3766,6 +3767,7 @@ void EmitterVisitor::visit(FileScopePtr file) {
   m_ue.m_filepath = makeStaticString(filename);
   m_ue.m_isHHFile = file->isHHFile();
   m_ue.m_useStrictTypes = file->useStrictTypes();
+  m_ue.m_useStrictTypesForBuiltins = file->useStrictTypesForBuiltins();
 
   FunctionScopePtr func(file->getPseudoMain());
   if (!func) return;
@@ -4445,14 +4447,13 @@ bool EmitterVisitor::visit(ConstructPtr node) {
       } else {
         Label done;
         emitVirtualLocal(local);
-        e.StaticLoc(local, name);
+        e.StaticLocCheck(local, name);
         e.JmpNZ(done);
 
         emitVirtualLocal(local);
         visit(value);
         emitConvertToCell(e);
-        emitSet(e);
-        emitPop(e);
+        e.StaticLocDef(local, name);
 
         done.set(e);
       }
@@ -6121,7 +6122,7 @@ bool EmitterVisitor::visit(ConstructPtr node) {
     TypedValue uninit;
     tvWriteUninit(&uninit);
     for (auto& useVar : useVars) {
-      pce->addProperty(useVar.first, AttrPrivate, nullptr, nullptr,
+      pce->addProperty(useVar.first, AttrPrivate, staticEmptyString(), nullptr,
                        &uninit, RepoAuthType{});
     }
 
@@ -8182,7 +8183,7 @@ void EmitterVisitor::emitPostponedMeths() {
       for (auto& sv : m_curFunc->staticVars) {
         auto const str = makeStaticString(
           folly::format("86static_{}", sv.name->data()).str());
-        fe->pce()->addProperty(str, AttrPrivate, nullptr, nullptr,
+        fe->pce()->addProperty(str, AttrPrivate, staticEmptyString(), nullptr,
                                &uninit, RepoAuthType{});
       }
     }
@@ -8764,7 +8765,7 @@ void EmitterVisitor::addMemoizeProp(MethodStatementPtr meth) {
     Attr attrs = AttrPrivate | AttrNoSerialize;
     attrs = attrs | (funcScope->isStatic() ? AttrStatic : AttrNone);
     pce->addProperty(
-      name, attrs, nullptr, nullptr, &val, RepoAuthType{}
+      name, attrs, staticEmptyString(), nullptr, &val, RepoAuthType{}
     );
     return name;
   };
@@ -11301,10 +11302,13 @@ void emitAllHHBC(AnalysisResultPtr&& ar) {
   }
 
   RuntimeOption::EvalJit = false; // For HHBBC to invoke builtins.
-  auto pair = HHBBC::whole_program(
-    std::move(ues),
-    Option::ParserThreadCount > 0 ? Option::ParserThreadCount : 0
-  );
+  auto pair = [&]{
+    Timer timer(Timer::WallTime, "running HHBBC");
+    return HHBBC::whole_program(
+      std::move(ues),
+      Option::ParserThreadCount > 0 ? Option::ParserThreadCount : 0
+    );
+  }();
   batchCommit(std::move(pair.first));
   commitGlobalData(std::move(pair.second));
 }
@@ -11314,13 +11318,23 @@ namespace {
 bool startsWith(const char* big, const char* small) {
   return strncmp(big, small, strlen(small)) == 0;
 }
-bool isFileHack(const char* code, int codeLen, bool allowPartial) {
-  if (allowPartial) {
-    return codeLen > strlen("<?hh") && startsWith(code, "<?hh");
-  } else {
-    return codeLen > strlen("<?hh // strict") &&
-      (startsWith(code, "<?hh // strict") || startsWith(code, "<?hh //strict"));
+
+bool isFileHack(const char* code, size_t codeLen) {
+  // if the file starts with a shebang
+  if (codeLen > 2 && strncmp(code, "#!", 2) == 0) {
+    // reset code to the next char after the shebang line
+    const char* loc = reinterpret_cast<const char*>(
+        memchr(code, '\n', codeLen));
+    if (!loc) {
+      return false;
+    }
+
+    ptrdiff_t offset = loc - code;
+    code = loc + 1;
+    codeLen -= offset + 1;
   }
+
+  return codeLen > strlen("<?hh") && startsWith(code, "<?hh");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -11387,24 +11401,47 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
       }
     }
 
-    auto const hcMode = hackc_mode();
-    if (hcMode != HackcMode::kNever && SystemLib::s_inited) {
-      auto res = hackc_compile(code, codeLen, filename, md5);
-      match<void>(
-        res,
-        [&] (std::unique_ptr<Unit>& u) {
-          unit = std::move(u);
-        },
-        [&] (std::string& err) {
-          if (hcMode == HackcMode::kFallback) return;
-          ue = createFatalUnit(
-            makeStaticString(filename),
-            md5,
-            FatalOp::Runtime,
-            makeStaticString(err)
-          );
-        }
-      );
+    // maybe run external compilers, but not until we've done all of systemlib
+    if (SystemLib::s_inited) {
+      auto const hcMode = hackc_mode();
+
+      // Use the PHP7 compiler if it is configured and the file is PHP
+      if (RuntimeOption::EvalPHP7CompilerEnabled &&
+          !RuntimeOption::EnableHipHopSyntax &&
+          !isFileHack(code, codeLen)) {
+        auto res = php7_compile(code, codeLen, filename, md5);
+        match<void>(res,
+          [&] (std::unique_ptr<Unit>& u) {
+            unit = std::move(u);
+          },
+          [&] (std::string& err) {
+            ue = createFatalUnit(
+              makeStaticString(filename),
+              md5,
+              FatalOp::Runtime,
+              makeStaticString(err)
+            );
+          }
+        );
+      // otherwise, use hackc if we're allowed to try
+      } else if (hcMode != HackcMode::kNever) {
+        auto res = hackc_compile(code, codeLen, filename, md5);
+        match<void>(
+          res,
+          [&] (std::unique_ptr<Unit>& u) {
+            unit = std::move(u);
+          },
+          [&] (std::string& err) {
+            if (hcMode == HackcMode::kFallback) return;
+            ue = createFatalUnit(
+              makeStaticString(filename),
+              md5,
+              FatalOp::Runtime,
+              makeStaticString(err)
+            );
+          }
+        );
+      }
     }
 
     if (!ue && !unit) {

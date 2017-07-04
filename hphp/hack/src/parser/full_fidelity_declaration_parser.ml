@@ -123,11 +123,6 @@ module WithExpressionAndStatementAndTypeParser
             =  type-specifier  ;
     *)
 
-    (* ERROR RECOVERY: We allow the "type" version to have a constraint in the
-       initial parse.
-       TODO: Produce an error in a later pass if the "type" version has a
-       constraint. *)
-
     let (parser, token) = next_token parser in
     let token = make_token token in
     (* Not `expect_name` but `expect_name_allow_keywords`, because the parser
@@ -380,24 +375,6 @@ module WithExpressionAndStatementAndTypeParser
       | _ -> (with_error parser SyntaxError.error1035, (make_missing()))
 
   and parse_classish_extends_opt parser =
-    (* In this routine we parse a list which starts with "extends" and then
-    consists of comma-separated types.
-
-    The rules for extends lists are:
-
-    * In an interface, the list, if it exists, can have one or more types.
-    * In a class, the list, if it exists, must have one type.
-    * In a trait, there is no extends clause.
-
-    However, we parse the clause in all three cases the same; this makes it
-    easier to report a good error later.
-
-    TODO: Report that error.
-
-
-
-    *)
-
     let (parser1, extends_token) = next_token parser in
     if (Token.kind extends_token) <> Extends then
       (parser, make_missing (), make_missing ())
@@ -406,16 +383,6 @@ module WithExpressionAndStatementAndTypeParser
     (parser, make_token extends_token, extends_list)
 
   and parse_classish_implements_opt parser =
-    (* The rules for implements are similar to those for extends; see above.
-
-    * In a class, the list, if it exists, can have one or more types.
-    * In an interface, there is no implements clause
-    * In a trait, there is no implements clause
-
-    But again, it is easier to simply parse it now and give an error later.
-
-    TODO: Give that error.
-    *)
     let (parser1, implements_token) = next_token parser in
     if (Token.kind implements_token) <> Implements then
       (parser, make_missing (), make_missing ())
@@ -949,7 +916,8 @@ module WithExpressionAndStatementAndTypeParser
 
   and parse_const_or_type_const_declaration parser abstr =
     let (parser, const) = assert_token parser Const in
-    if (peek_token_kind parser) = Type then
+    if (peek_token_kind parser) = Type
+       && (peek_token_kind ~lookahead:1 parser <> Equal) then
       parse_type_const_declaration parser abstr const
     else
       parse_const_declaration parser abstr const
@@ -1182,12 +1150,20 @@ module WithExpressionAndStatementAndTypeParser
   same data structure for a decorated expression as a declaration; one
   is a *use* and the other is a *definition*. *)
   and parse_decorated_variable parser =
-    (* TODO: We might consider parsing both &...$x and ...&$x and give an
-    appropriate error saying you can't mix ref and variadic.  The original
-    Hack and HHVM parsers do this for &...$x, but not ...&$x. *)
+    (* TODO: Error on
+          ... ... variable
+          & & variable
+          ... & variable
+       at a later pass
+     *)
     let (parser, decorator) = next_token parser in
-    let (parser, variable) = expect_variable parser in
     let decorator = make_token decorator in
+    let (parser, variable) =
+      match peek_token_kind parser with
+      | DotDotDot
+      | Ampersand -> parse_decorated_variable parser
+      | _ -> expect_variable parser
+    in
     parser, make_decorated_expression decorator variable
 
   and parse_visibility_modifier_opt parser =
@@ -1461,45 +1437,31 @@ module WithExpressionAndStatementAndTypeParser
       (* TODO: What if it's not a legal statement? Do we still make progress
       here? *)
 
-  let parse_script_header parser =
-    (* The script header is
-      < ? name
-      where the < may have leading trivia, such as a # comment before it,
-      but there must be no trailing trivia of the <.
-
-      The name is optional in PHP, but not in Hack, and the name, if there
-      is one, must appear immediately after the ?, with no intervening trivia.
-
-    *)
-    let original_parser = parser in
-    let (parser, less_than) = next_token parser in
-    (* TODO: Give an error if there is trailing trivia on the < *)
-    let (parser, question) = next_token parser in
-    let (parser, language) = if Token.trailing question = [] then
-    (* TODO: Handle the case where the langauge is not a Name. *)
-      let (parser, language) = next_token parser in
-      (parser, make_token language)
-    else
-      (parser, (make_missing())) in
-    let valid = (Token.kind less_than) == LessThan &&
-                (Token.kind question) == Question in
+  let parse_leading_markup_section parser =
+    let parser1, markup_section = parse_in_statement_parser parser
+      (StatementParser.parse_markup_section ~is_leading_section:true)
+    in
+    let valid =
+      match markup_section.syntax with
+      (* proceed successfully if we've consumed <?... *)
+      (* TODO: Give an error if there is leading trivia on the < in an hh file *)
+      (* TODO: Handle the case where the langauge is not a Name. *)
+      | MarkupSection { markup_suffix; _ } -> not (is_missing markup_suffix)
+      | _ -> false
+    in
     if valid then
-      let less_than = make_token less_than in
-      let question = make_token question in
-      let script_header = make_script_header less_than question language in
-      (parser, script_header)
+      parser1, markup_section
     else
+      let parser = with_error parser SyntaxError.error1001 in
+      let markup_section =
+        make_markup_section (make_missing ()) (make_missing ())
+          (make_missing ()) (make_missing ())
+      in
       (* ERROR RECOVERY *)
       (* Make no progress; try parsing the file without a header *)
-      let parser = with_error original_parser SyntaxError.error1001 in
-      let less_than = make_missing() in
-      let question = make_missing() in
-      let language = make_missing() in
-      let script_header = make_script_header less_than question language in
-      (parser, script_header )
+      parser, markup_section
 
   let parse_script parser =
-    let (parser, script_header) = parse_script_header parser in
     let rec aux parser acc =
       let (parser, declaration) = parse_declaration parser in
       (* TODO: Assert that we either made progress, or we're at the end of
@@ -1513,9 +1475,12 @@ module WithExpressionAndStatementAndTypeParser
           else (parser, declaration :: acc)
         | _ -> (parser, acc)
       else aux parser (declaration :: acc) in
+    (* parse leading markup section *)
+    let (parser, header) = parse_leading_markup_section parser in
     let (parser, declarations) = aux parser [] in
-    let declarations = make_list (List.rev declarations) in
-    let result = make_script script_header declarations in
+    (* include leading markup section as a head of declaration list *)
+    let declarations = make_list (header :: List.rev declarations) in
+    let result = make_script declarations in
     (* If we are not at the end of the file, something is wrong. *)
     assert ((peek_token_kind parser) = TokenKind.EndOfFile);
     (parser, result)

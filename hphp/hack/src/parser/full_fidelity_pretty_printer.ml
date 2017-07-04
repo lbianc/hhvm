@@ -164,7 +164,6 @@ let get_doc_from_trivia trivia_lst allow_break =
     | Kind.SingleLineComment ->
       (* no code after comments *)
       (text (Trivia.text trivia), true)
-    | Kind.Markup
     | Kind.FixMe
     | Kind.IgnoreError
     | Kind.UnsafeExpression
@@ -205,6 +204,15 @@ let ellipsis = make_simple (text "...")
 let rec get_doc node =
   match syntax node with
   | Missing -> missing
+  | MarkupSection x ->
+    group_doc (get_doc x.markup_prefix ^|
+    get_doc x.markup_text ^|
+    get_doc x.markup_suffix ^|
+    get_doc x.markup_expression)
+  | MarkupSuffix x ->
+    group_doc (get_doc x.markup_suffix_less_than_question ^^^
+    get_doc x.markup_suffix_name)
+
   | Token x -> from_token x
 
   | SyntaxList x -> get_from_children x
@@ -220,11 +228,7 @@ let rec get_doc node =
   | PipeVariableExpression x -> get_doc x.pipe_variable_expression
   | ListItem x -> (get_doc x.list_item) ^^^ (get_doc x.list_separator)
   | EndOfFile { end_of_file_token } -> get_doc end_of_file_token
-  | ScriptHeader x -> get_doc x.header_less_than ^^^
-                      get_doc x.header_question ^^^
-                      (x.header_language |> get_doc |> add_break)
-  | Script x -> group_doc ( get_doc x.script_header
-                     ^| get_doc x.script_declarations )
+  | Script x -> get_doc x.script_declarations
   | ClassishDeclaration
     { classish_attribute; classish_modifiers; classish_keyword;
       classish_name; classish_type_parameters; classish_extends_keyword;
@@ -1313,6 +1317,7 @@ let rec get_doc node =
     ar ^^^ la ^^^ kt ^^^ co ^| vt ^^^ ra
   | ClosureTypeSpecifier
   { closure_outer_left_paren;
+    closure_coroutine;
     closure_function_keyword;
     closure_inner_left_paren;
     closure_parameter_types;
@@ -1321,6 +1326,7 @@ let rec get_doc node =
     closure_return_type;
     closure_outer_right_paren } ->
     let olp = get_doc closure_outer_left_paren in
+    let cor = get_doc closure_coroutine in
     let fnc = get_doc closure_function_keyword in
     let ilp = get_doc closure_inner_left_paren in
     let pts = get_doc closure_parameter_types in
@@ -1328,7 +1334,7 @@ let rec get_doc node =
     let col = get_doc closure_colon in
     let ret = get_doc closure_return_type in
     let orp = get_doc closure_outer_right_paren in
-    olp ^^^ fnc ^^| ilp ^^^ pts ^^^ irp ^^^ col ^^^ ret ^^^ orp
+    olp ^^^ cor ^| fnc ^^| ilp ^^^ pts ^^^ irp ^^^ col ^^^ ret ^^^ orp
   | ClassnameTypeSpecifier x ->
     let cn = get_doc x.classname_keyword in
     let la = get_doc x.classname_left_angle in

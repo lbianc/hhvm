@@ -345,12 +345,12 @@ void in(ISS& env, const bc::AddElemC& op) {
   auto const v = popC(env);
   auto const k = popC(env);
 
-  auto const outTy = [&] (Type ty) -> folly::Optional<Type> {
+  auto const outTy = [&] (Type ty) -> folly::Optional<std::pair<Type,bool>> {
     if (ty.subtypeOf(TArr)) {
       return array_set(std::move(ty), k, v);
     }
     if (ty.subtypeOf(TDict)) {
-      return dict_set(std::move(ty), k, v).first;
+      return dict_set(std::move(ty), k, v);
     }
     return folly::none;
   }(popC(env));
@@ -359,12 +359,13 @@ void in(ISS& env, const bc::AddElemC& op) {
     return push(env, union_of(TArr, TDict));
   }
 
-  if (outTy->subtypeOf(TBottom)) {
+  if (outTy->first.subtypeOf(TBottom)) {
     unreachable(env);
-  } else {
+  } else if (outTy->second) {
+    nothrow(env);
     if (env.collect.trackConstantArrays) constprop(env);
   }
-  push(env, std::move(*outTy));
+  push(env, std::move(outTy->first));
 }
 
 void in(ISS& env, const bc::AddElemV& op) {
@@ -669,8 +670,12 @@ void castBoolImpl(ISS& env, bool negate) {
     return push(env, std::move(*cell));
   }
 
-  if (t.subtypeOf(TArrE)) return push(env, negate ? TTrue : TFalse);
-  if (t.subtypeOf(TArrN)) return push(env, negate ? TFalse : TTrue);
+  if (t.subtypeOfAny(TArrE, TVecE, TDictE, TKeysetE)) {
+    return push(env, negate ? TTrue : TFalse);
+  }
+  if (t.subtypeOfAny(TArrN, TVecN, TDictN, TKeysetN)) {
+    return push(env, negate ? TFalse : TTrue);
+  }
 
   push(env, TBool);
 }
@@ -743,7 +748,20 @@ void in(ISS& env, const bc::CastKeyset&) {
 }
 
 void in(ISS& env, const bc::CastVArray&)  {
-  castImpl(env, TArr, tvCastToVArrayInPlace);
+  auto const t = popC(env);
+  if (auto val = tv(t)) {
+    auto result = eval_cell(
+      [&] {
+        tvCastToVArrayInPlace(&*val);
+        return *val;
+      }
+    );
+    if (result) {
+      constprop(env);
+      return push(env, std::move(*result));
+    }
+  }
+  push(env, TArr);
 }
 
 void in(ISS& env, const bc::CastDArray&)  {
@@ -834,6 +852,25 @@ void group(ISS& env, const bc::IsTypeL& istype, const JmpOp& jmp) {
 
 namespace {
 
+folly::Optional<Cell> staticLocHelper(ISS& env, LocalId l, Type init) {
+  if (is_volatile_local(env.ctx.func, l)) return folly::none;
+  unbindLocalStatic(env, l);
+  setLocRaw(env, l, TRef);
+  bindLocalStatic(env, l, std::move(init));
+  if (!env.ctx.func->isMemoizeWrapper &&
+      !env.ctx.func->isClosureBody &&
+      env.collect.localStaticTypes.size() > l) {
+    auto t = env.collect.localStaticTypes[l];
+    if (auto v = tv(t)) {
+      useLocalStatic(env, l);
+      setLocRaw(env, l, t);
+      return v;
+    }
+  }
+  useLocalStatic(env, l);
+  return folly::none;
+}
+
 // If the current function is a memoize wrapper, return the inferred return type
 // of the function being wrapped.
 Type memoizeImplRetType(ISS& env) {
@@ -911,6 +948,37 @@ void typeTestPropagate(ISS& env, Type valTy, Type testTy,
   push(env, std::move(takenOnSuccess ? failTy : testTy));
 }
 
+}
+
+// After a StaticLocCheck, we know the local is bound on the true path,
+// and not changed on the false path.
+template<class JmpOp>
+void group(ISS& env, const bc::StaticLocCheck& slc, const JmpOp& jmp) {
+  auto const takenOnInit = jmp.op == Op::JmpNZ;
+  auto save = env.state;
+
+  if (auto const v = staticLocHelper(env, slc.loc1, TBottom)) {
+    return impl(env, slc, jmp);
+  }
+
+  if (env.collect.localStaticTypes.size() > slc.loc1 &&
+      env.collect.localStaticTypes[slc.loc1].subtypeOf(TBottom)) {
+    if (takenOnInit) {
+      env.state = std::move(save);
+      jmp_nevertaken(env);
+    } else {
+      env.propagate(jmp.target, save);
+      jmp_nofallthrough(env);
+    }
+    return;
+  }
+
+  if (takenOnInit) {
+    env.propagate(jmp.target, env.state);
+    env.state = std::move(save);
+  } else {
+    env.propagate(jmp.target, save);
+  }
 }
 
 // If we duplicate a value, and then test its type and Jmp based on that result,
@@ -1256,10 +1324,18 @@ void in(ISS& env, const bc::ClsRefGetC& op) {
 void in(ISS& env, const bc::AKExists& op) {
   auto const t1   = popC(env);
   auto const t2   = popC(env);
-  auto const t1Ok = t1.subtypeOf(TObj) || t1.subtypeOf(TArr);
-  auto const t2Ok = t2.subtypeOf(TInt) || t2.subtypeOf(TNull) ||
-                    t2.subtypeOf(TStr);
-  if (t1Ok && t2Ok) nothrow(env);
+
+  auto const mayThrow = [&]{
+    if (!t1.subtypeOfAny(TObj, TArr, TVec, TDict, TKeyset)) return true;
+    if (t2.subtypeOfAny(TStr, TNull)) {
+      return t1.subtypeOfAny(TObj, TArr) &&
+        RuntimeOption::EvalHackArrCompatNotices;
+    }
+    if (t2.subtypeOf(TInt)) return false;
+    return true;
+  }();
+
+  if (!mayThrow) nothrow(env);
   push(env, TBool);
 }
 
@@ -1639,8 +1715,11 @@ void in(ISS& env, const bc::SetOpL& op) {
     // We may have inferred a TSStr or TSArr with a value here, but
     // at runtime it will not be static.  For now just throw that
     // away.  TODO(#3696042): should be able to loosen_statics here.
-    if (resultTy->subtypeOf(TStr))      resultTy = TStr;
+    if (resultTy->subtypeOf(TStr)) resultTy = TStr;
     else if (resultTy->subtypeOf(TArr)) resultTy = TArr;
+    else if (resultTy->subtypeOf(TVec)) resultTy = TVec;
+    else if (resultTy->subtypeOf(TDict)) resultTy = TDict;
+    else if (resultTy->subtypeOf(TKeyset)) resultTy = TKeyset;
 
     setLoc(env, op.loc1, *resultTy);
     push(env, *resultTy);
@@ -2138,7 +2217,7 @@ void in(ISS& env, const bc::FPassC& op) {
   nothrow(env);
 }
 
-void fpassCXHelper(ISS& env, int param, bool error) {
+void fpassCXHelper(ISS& env, uint32_t param, bool error) {
   auto const& fpi = fpiTop(env);
   if (fpi.kind == FPIKind::Builtin) {
     switch (prepKind(env, param)) {
@@ -2361,7 +2440,7 @@ void in(ISS& env, const bc::IterInit& op) {
   // below.
   freeIter(env, op.iter1);
   env.propagate(op.target, env.state);
-  if (t1.subtypeOf(TArrE)) {
+  if (t1.subtypeOfAny(TArrE, TVecE, TDictE, TKeysetE)) {
     nothrow(env);
     jmp_nofallthrough(env);
     return;
@@ -2382,7 +2461,7 @@ void in(ISS& env, const bc::IterInitK& op) {
   auto const t1 = popC(env);
   freeIter(env, op.iter1);
   env.propagate(op.target, env.state);
-  if (t1.subtypeOf(TArrE)) {
+  if (t1.subtypeOfAny(TArrE, TVecE, TDictE, TKeysetE)) {
     nothrow(env);
     jmp_nofallthrough(env);
     return;
@@ -2600,28 +2679,29 @@ void in(ISS& env, const bc::InitThisLoc& op) {
   setLocRaw(env, op.loc1, TCell);
 }
 
-folly::Optional<Cell> staticLocHelper(ISS& env, LocalId l, Type init) {
-  unbindLocalStatic(env, l);
-  setLocRaw(env, l, TRef);
-  bindLocalStatic(env, l, std::move(init));
-  if (!env.ctx.func->isClosureBody &&
+void in(ISS& env, const bc::StaticLocDef& op) {
+  if (staticLocHelper(env, op.loc1, topC(env))) {
+    return reduce(env, bc::SetL { op.loc1 }, bc::PopC {});
+  }
+  popC(env);
+}
+
+void in(ISS& env, const bc::StaticLocCheck& op) {
+  auto const l = op.loc1;
+  setLocRaw(env, l, TGen);
+  maybeBindLocalStatic(env, l);
+  if (!env.ctx.func->isMemoizeWrapper &&
+      !env.ctx.func->isClosureBody &&
       env.collect.localStaticTypes.size() > l) {
     auto t = env.collect.localStaticTypes[l];
     if (auto v = tv(t)) {
       useLocalStatic(env, l);
       setLocRaw(env, l, t);
-      return v;
+      return reduce(env,
+                    gen_constant(*v),
+                    bc::SetL { op.loc1 }, bc::PopC {},
+                    bc::True {});
     }
-  }
-  return folly::none;
-}
-
-void in(ISS& env, const bc::StaticLoc& op) {
-  if (auto const v = staticLocHelper(env, op.loc1, TBottom)) {
-    return reduce(env,
-                  gen_constant(*v),
-                  bc::SetL { op.loc1 }, bc::PopC {},
-                  bc::True {});
   }
   push(env, TBool);
 }
@@ -3055,6 +3135,15 @@ void interpStep(ISS& env, Iterator& it, Iterator stop) {
       default: break;
       }
       break;
+    default: break;
+    }
+    break;
+  case Op::StaticLocCheck:
+    switch (o2) {
+    case Op::JmpZ:
+      return group(env, it, it[0].StaticLocCheck, it[1].JmpZ);
+    case Op::JmpNZ:
+      return group(env, it, it[0].StaticLocCheck, it[1].JmpNZ);
     default: break;
     }
     break;

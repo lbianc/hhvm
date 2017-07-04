@@ -577,7 +577,7 @@ struct SyncReturnBCData : IRExtraData {
 
 struct CallArrayData : IRExtraData {
   explicit CallArrayData(IRSPRelOffset spOffset,
-                         int32_t numParams,
+                         uint32_t numParams,
                          Offset pcOffset,
                          Offset after,
                          const Func* callee,
@@ -604,7 +604,7 @@ struct CallArrayData : IRExtraData {
   }
 
   IRSPRelOffset spOffset; // offset from StkPtr to bottom of call's ActRec+args
-  int32_t numParams;
+  uint32_t numParams;
   Offset pc;     // XXX why isn't this available in the marker?
   Offset after;  // offset from unit m_bc (unlike m_soff in ActRec)
   const Func* callee; // nullptr if not statically known
@@ -746,6 +746,12 @@ struct StaticLocName : IRExtraData {
     );
   }
 
+  bool equals(const StaticLocName& o) const {
+    return func == o.func && name == o.name;
+  }
+  size_t hash() const {
+    return hash_int64_pair((intptr_t)func, (intptr_t)name);
+  }
   const Func* func;
   const StringData* name;
 };
@@ -1082,21 +1088,25 @@ struct GeneratorState : IRExtraData {
 };
 
 struct ContEnterData : IRExtraData {
-  explicit ContEnterData(IRSPRelOffset spOffset, Offset returnBCOffset)
+  explicit ContEnterData(IRSPRelOffset spOffset, Offset returnBCOffset,
+                         bool isAsync)
     : spOffset(spOffset)
     , returnBCOffset(returnBCOffset)
+    , isAsync(isAsync)
   {}
 
   std::string show() const {
-    return folly::to<std::string>(spOffset.offset, ',', returnBCOffset);
+    return folly::to<std::string>(spOffset.offset, ',', returnBCOffset,
+                                  isAsync ? ",async" : "");
   }
 
   IRSPRelOffset spOffset;
   Offset returnBCOffset;
+  bool isAsync;
 };
 
 struct NewColData : IRExtraData {
-  explicit NewColData(int itype)
+  explicit NewColData(uint32_t itype)
     : type(static_cast<CollectionType>(itype))
   {}
 
@@ -1297,7 +1307,9 @@ X(LdClsMethodCacheCls,          ClsMethodData);
 X(LdClsMethodFCacheFunc,        ClsMethodData);
 X(LookupClsMethodFCache,        ClsMethodData);
 X(LdIfaceMethod,                IfaceMethodData);
+X(LdClosureStaticLoc,           StaticLocName);
 X(LdStaticLoc,                  StaticLocName);
+X(CheckStaticLoc,               StaticLocName);
 X(InitStaticLoc,                StaticLocName);
 X(LdClsCns,                     ClsCnsName);
 X(InitClsCns,                   ClsCnsName);

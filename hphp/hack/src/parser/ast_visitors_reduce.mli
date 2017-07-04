@@ -38,6 +38,7 @@ class virtual ['b] reduce :
                    Ast_visitors_ancestors.expr ->
                    Ast_visitors_ancestors.expr -> 'd;
         on_Block : 'c -> Ast_visitors_ancestors.block -> 'd;
+        on_BracedExpr : 'c -> Ast_visitors_ancestors.expr -> 'd;
         on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> 'd;
         on_CA_enum : 'c -> string list -> 'd;
         on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> 'd;
@@ -129,6 +130,9 @@ class virtual ['b] reduce :
         on_Fun : 'c -> Ast_visitors_ancestors.fun_ -> 'd; on_Gt : 'c -> 'd;
         on_GotoLabel : 'c -> Ast_visitors_ancestors.pstring -> 'd;
         on_Goto : 'c -> Ast_visitors_ancestors.pstring -> 'd;
+        on_Markup : 'c ->
+                    Ast_visitors_ancestors.pstring ->
+                    Ast_visitors_ancestors.expr option -> 'd;
         on_Gte : 'c -> 'd; on_Gtgt : 'c -> 'd;
         on_Haccess : 'c ->
                      Ast_visitors_ancestors.id ->
@@ -272,6 +276,7 @@ class virtual ['b] reduce :
                  Ast_visitors_ancestors.id ->
                  (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr)
                  list -> Ast_visitors_ancestors.expr list -> 'd;
+        on_LogXor : 'c -> 'd;
         on_Xor : 'c -> 'd;
         on_Yield : 'c -> Ast_visitors_ancestors.afield -> 'd;
         on_Yield_break : 'c -> 'd;
@@ -369,6 +374,7 @@ class virtual ['b] reduce :
       Ast_visitors_ancestors.bop ->
       Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr -> 'd
     method on_Block : 'c -> Ast_visitors_ancestors.block -> 'd
+    method on_BracedExpr : 'c -> Ast_visitors_ancestors.expr -> 'd
     method on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> 'd
     method on_CA_enum : 'c -> string list -> 'd
     method on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> 'd
@@ -637,6 +643,7 @@ class virtual ['b] reduce :
       Ast_visitors_ancestors.id ->
       (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr) list ->
       Ast_visitors_ancestors.expr list -> 'd
+    method on_LogXor : 'c -> 'd
     method on_Xor : 'c -> 'd
     method on_Yield : 'c -> Ast_visitors_ancestors.afield -> 'd
     method on_Yield_break : 'c -> 'd

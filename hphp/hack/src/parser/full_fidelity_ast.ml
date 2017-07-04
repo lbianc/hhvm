@@ -18,8 +18,9 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module TK = Full_fidelity_token_kind
 module PT = Full_fidelity_positioned_token
 module SourceText = Full_fidelity_source_text
+open Prim_defs
 
-
+open Core
 
 let drop_pstr : int -> pstring -> pstring = fun cnt (pos, str) ->
   let len = String.length str in
@@ -65,7 +66,11 @@ let get_pos : node -> Pos.t = fun node ->
     let pos_file = !(lowerer_state.filePath) in
     let text = source_text node in
     (* TODO(8086635) Figure out where this off-by-one comes from *)
-    let start_offset = start_offset node - 1 in
+    let start_offset =
+      (*should be removed after resolving TODO above *)
+      let start_offset = start_offset node in
+      if start_offset = 0 then 0 else start_offset - 1
+    in
     let end_offset = end_offset node in
     let s_line, s_column = SourceText.offset_to_position text start_offset in
     let e_line, e_column = SourceText.offset_to_position text end_offset in
@@ -146,8 +151,7 @@ let is_ret_by_ref node = not @@ is_missing node
 let couldMap : 'a . f:'a parser -> 'a list parser = fun ~f -> fun node env ->
   let rec synmap : 'a . 'a parser -> 'a list parser = fun f node env ->
     match syntax node with
-    | SyntaxList        l -> List.flatten @@
-        List.map (fun n -> go ~f n env) l
+    | SyntaxList        l -> List.concat_map l ~f:(fun n -> go ~f n env)
     | ListItem          i -> [f i.list_item env]
     | _ -> [f node env]
   and go : 'a . f:'a parser -> 'a list parser = fun ~f -> function
@@ -162,7 +166,7 @@ let as_list : node -> node list =
     | x -> x
   in function
   | { syntax = SyntaxList ({syntax = ListItem _; _}::_ as synl); _ } ->
-    List.map strip_list_item synl
+    List.map ~f:strip_list_item synl
   | { syntax = SyntaxList synl; _ } -> synl
   | { syntax = Missing; _ } -> []
   | syn -> [syn]
@@ -196,7 +200,7 @@ let pBop : (expr -> expr -> expr_) parser = fun node env lhs rhs ->
   | Some TK.Star                        -> Binop (Star,              lhs, rhs)
   | Some TK.Or                          -> Binop (BArbar,            lhs, rhs)
   | Some TK.And                         -> Binop (AMpamp,            lhs, rhs)
-  | Some TK.Xor                         -> Binop (Xor,               lhs, rhs)
+  | Some TK.Xor                         -> Binop (LogXor,            lhs, rhs)
   | Some TK.Carat                       -> Binop (Xor,               lhs, rhs)
   | Some TK.Slash                       -> Binop (Slash,             lhs, rhs)
   | Some TK.Dot                         -> Binop (Dot,               lhs, rhs)
@@ -350,6 +354,7 @@ let fun_template yielding node suspension_kind =
   let p = get_pos node in
   { f_mode            = !(lowerer_state.mode)
   ; f_tparams         = []
+  ; f_constrs         = []
   ; f_ret             = None
   ; f_ret_by_ref      = false
   ; f_name            = p, ";anonymous"
@@ -395,20 +400,9 @@ let mpShapeField : ('a, shape_field) metaparser =
   fun hintParser node env ->
     match syntax node with
     | FieldSpecifier { field_question; field_name; field_type; _ } ->
-        let promote_nullable_to_optional_in_shapes =
-          TypecheckerOptions.experimental_feature_enabled
-            !(lowerer_state.popt)
-            TypecheckerOptions.experimental_promote_nullable_to_optional_in_shapes in
-        let is_nullable = function
-        | _, Hoption _ -> true
-        | _ -> false in
         let sf_optional = not (is_missing field_question) in
         let sf_name = pShapeFieldName field_name env in
         let sf_hint = hintParser field_type env in
-        (* TODO(t17492233): Remove this line once shapes use new syntax. *)
-        let sf_optional =
-          sf_optional ||
-          (promote_nullable_to_optional_in_shapes && is_nullable sf_hint) in
         { sf_optional; sf_name; sf_hint }
     | _ ->
         let sf_name, sf_hint = mpShapeExpressionField hintParser node env in
@@ -437,12 +431,21 @@ let rec pHint : hint parser = fun node env ->
       { tuple_type_keyword = kw
       ; tuple_type_types   = ty
       ; _ }
+    | VarrayTypeSpecifier
+      { varray_keyword = kw
+      ; varray_type    = ty
+      ; _ }
     | VectorArrayTypeSpecifier
       { vector_array_keyword = kw
       ; vector_array_type    = ty
       ; _ }
       -> Happly (pos_name kw, couldMap ~f:pHint ty env)
 
+    | DarrayTypeSpecifier
+      { darray_keyword = kw
+      ; darray_key     = key
+      ; darray_value   = value
+      ; _ }
     | MapArrayTypeSpecifier
       { map_array_keyword = kw
       ; map_array_key     = key
@@ -450,7 +453,7 @@ let rec pHint : hint parser = fun node env ->
       ; _ } ->
         Happly
         ( pos_name kw
-        , List.map (fun x -> pHint x env) [ key; value ]
+        , List.map ~f:(fun x -> pHint x env) [ key; value ]
         )
     | DictionaryTypeSpecifier
       { dictionary_type_keyword = kw
@@ -470,12 +473,13 @@ let rec pHint : hint parser = fun node env ->
       Hsoft (pHint soft_type env)
     | ClosureTypeSpecifier { closure_parameter_types; closure_return_type; _} ->
       let param_types =
-        List.map (fun x -> pHint x env) (as_list closure_parameter_types)
+        List.map ~f:(fun x -> pHint x env)
+          (as_list closure_parameter_types)
       in
       let is_variadic_param x = snd x = Htuple [] in
       Hfun
-      ( List.filter (fun x -> not (is_variadic_param x)) param_types
-      , List.exists is_variadic_param param_types
+      ( List.filter ~f:(fun x -> not (is_variadic_param x)) param_types
+      , List.exists ~f:is_variadic_param param_types
       , pHint closure_return_type env
       )
     | TypeConstant { type_constant_left_type; type_constant_right_type; _ } ->
@@ -499,7 +503,6 @@ type fun_hdr =
   ; fh_parameters      : fun_param list
   ; fh_return_type     : hint option
   ; fh_param_modifiers : fun_param list
-  ; fh_keep_noop       : bool
   ; fh_ret_by_ref      : bool
   }
 
@@ -510,7 +513,6 @@ let empty_fun_hdr =
   ; fh_parameters      = []
   ; fh_return_type     = None
   ; fh_param_modifiers = []
-  ; fh_keep_noop       = false
   ; fh_ret_by_ref      = false
   }
 
@@ -528,20 +530,34 @@ and pFunParam : fun_param parser = fun node env ->
     ; parameter_name
     ; parameter_default_value
     } ->
-    let decoration, name =
+    let is_reference, is_variadic, name =
       match syntax parameter_name with
       | DecoratedExpression
         { decorated_expression_decorator; decorated_expression_expression } ->
-          text decorated_expression_decorator, decorated_expression_expression
-      | _ -> "", parameter_name
+          (* There is a chance that the expression might be nested with an
+           additional decorator, check this *)
+          begin match syntax decorated_expression_expression with
+          | DecoratedExpression
+            { decorated_expression_decorator = nested_decorator
+            ; decorated_expression_expression = nested_expression } ->
+            let decorator = text decorated_expression_decorator in
+            let nested_decorator = text nested_decorator in
+            decorator = "&" || nested_decorator = "&",
+            decorator = "..." || nested_decorator = "...",
+            nested_expression
+          | _ ->
+            let decorator = text decorated_expression_decorator in
+            decorator = "&", decorator = "...", decorated_expression_expression
+          end
+      | _ -> false, false, parameter_name
     in
     { param_hint            = mpOptional pHint parameter_type env
-    ; param_is_reference    = decoration = "&"
-    ; param_is_variadic     = decoration = "..."
+    ; param_is_reference    = is_reference
+    ; param_is_variadic     = is_variadic
     ; param_id              = pos_name name
     ; param_expr            =
       mpOptional pSimpleInitializer parameter_default_value env
-    ; param_user_attributes = List.flatten @@
+    ; param_user_attributes = List.concat @@
       couldMap ~f:pUserAttribute parameter_attribute env
     (* implicit field via constructor parameter.
      * This is always None except for constructors and the modifier
@@ -550,7 +566,7 @@ and pFunParam : fun_param parser = fun node env ->
     ; param_modifier =
       let rec go = function
       | [] -> None
-      | x :: _ when List.mem x [Private; Public; Protected] -> Some x
+      | x :: _ when List.mem [Private; Public; Protected] x -> Some x
       | _ :: xs -> go xs
       in
       go (pKinds parameter_visibility env)
@@ -763,11 +779,10 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
         | Some TK.Await                   -> Await expr
         | Some TK.Clone                   -> Clone expr
         | Some TK.Dollar                  ->
-          (match expr with
-          | _, Lvarvar (n, id) -> Lvarvar (n + 1, id)
-          | _, Lvar id         -> Lvarvar (1, id)
-          (* TODO(17510521) Give ${<expr>} a proper representation. *)
-          | _ -> Unsafeexpr expr
+          (match snd expr with
+          | Lvarvar (n, id) -> Lvarvar (n + 1, id)
+          | Lvar id         -> Lvarvar (1, id)
+          | _ -> BracedExpr expr
           )
         | _ -> missing_syntax "unary operator" node env
         )
@@ -790,7 +805,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
 
     | DefineExpression { define_keyword; define_argument_list; _ } -> Call
       ( (let name = pos_name define_keyword in fst name, Id name)
-      , List.map (fun x -> pExpr x env) (as_list define_argument_list)
+      , List.map ~f:(fun x -> pExpr x env) (as_list define_argument_list)
       , []
       )
 
@@ -969,6 +984,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       let aggregate_tokens node =
         let rec search = function (* scroll through non-token things *)
         | [] -> []
+        | t :: xs when token_kind t = Some TK.XHPComment -> search xs
         | { syntax = Token b; _ } as t :: xs -> track t b None xs
         | x :: xs -> x :: search xs
         and track t b oe = function (* keep going through consecutive tokens *)
@@ -995,7 +1011,8 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       Xml
       ( name
       , couldMap ~f:pAttr xhp_open_attributes env
-      , List.map (fun x -> pEmbedded unesc_xhp x env) (aggregate_tokens body)
+      , List.map ~f:(fun x -> pEmbedded unesc_xhp x env)
+          (aggregate_tokens body)
       )
     (* FIXME; should this include Missing? ; "| Missing -> Null" *)
     | _ -> missing_syntax "expression" node env
@@ -1014,7 +1031,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
   p, expr_
 and pBlock : block parser = fun node env ->
    match pStmt node env with
-   | Block block -> List.filter (fun x -> x <> Noop) block
+   | Block block -> List.filter ~f:(fun x -> x <> Noop) block
    | stmt -> [stmt]
 and pStmt : stmt parser = fun node env ->
   match syntax node with
@@ -1040,7 +1057,7 @@ and pStmt : stmt parser = fun node env ->
     in
     Switch
     ( pExpr switch_expression env
-    , List.flatten @@ couldMap ~f:pSwitchSection switch_sections env
+    , List.concat @@ couldMap ~f:pSwitchSection switch_sections env
     )
   | IfStatement
     { if_condition; if_statement; if_elseif_clauses; if_else_clause; _ } ->
@@ -1059,9 +1076,9 @@ and pStmt : stmt parser = fun node env ->
     If
     ( pExpr if_condition env
     , [ pStmt if_statement env ]
-    , List.fold_right (@@)
+    , List.fold_right ~f:(@@)
         (couldMap ~f:pElseIf if_elseif_clauses env)
-        [ match syntax if_else_clause with
+        ~init:[ match syntax if_else_clause with
           | ElseClause { else_statement; _ } -> pStmt else_statement env
           | Missing -> Noop
           | _ -> missing_syntax "else clause" if_else_clause env
@@ -1072,7 +1089,7 @@ and pStmt : stmt parser = fun node env ->
     then Noop
     else Expr (pExpr expression_statement_expression env)
   | CompoundStatement { compound_statements; _ } ->
-    Block (List.filter (fun x -> x <> Noop) @@
+    Block (List.filter ~f:(fun x -> x <> Noop) @@
       couldMap ~f:pStmt compound_statements env)
   | ThrowStatement { throw_expression; _ } -> Throw (pExpr throw_expression env)
   | DoStatement { do_body; do_condition; _ } ->
@@ -1177,6 +1194,7 @@ and pStmt : stmt parser = fun node env ->
     Continue (get_pos node, pBreak_or_continue_level env level)
   | GlobalStatement { global_variables; _ } ->
     Global_var (couldMap ~f:pExpr global_variables env)
+  | MarkupSection _ -> pMarkup node env
   | _ when env.max_depth > 0 ->
     (* OCaml optimisers; Forgive them, for they know not what they do!
      *
@@ -1185,6 +1203,20 @@ and pStmt : stmt parser = fun node env ->
      *)
     Def_inline (pDef node { env with max_depth = env.max_depth - 1 })
   | _ -> missing_syntax "statement" node env
+
+and pMarkup node env =
+  match syntax node with
+  | MarkupSection { markup_text; markup_expression; _ } ->
+    let expr =
+      match syntax markup_expression with
+      | Missing -> None
+      | ExpressionStatement {
+          expression_statement_expression = e
+        ; _} -> Some (pExpr e env)
+      | _ -> failwith "expression expected"
+    in
+    Markup ((get_pos node, text markup_text), expr)
+  | _ -> failwith "invalid node"
 
 and pBreak_or_continue_level env level =
   match mpOptional pExpr level env with
@@ -1242,16 +1274,7 @@ and pFunHdr : fun_hdr parser = fun node env ->
     ; function_type
     ; _ } ->
       let fh_parameters = couldMap ~f:pFunParam function_parameter_list env in
-      let fh_return_type, fh_keep_noop =
-        match mpOptional pHint function_type env with
-        | Some x -> Some x, false
-        | None ->
-            let pos = get_pos function_type in
-            match text function_name with
-            | "__construct"
-            | "__destruct" -> Some (pos, Happly ((pos, "void"), [])), true
-            | _            -> None, false
-      in
+      let fh_return_type = mpOptional pHint function_type env in
       let fh_suspension_kind =
         mk_suspension_kind function_async function_coroutine in
       { fh_suspension_kind
@@ -1260,8 +1283,7 @@ and pFunHdr : fun_hdr parser = fun node env ->
       ; fh_parameters
       ; fh_return_type
       ; fh_param_modifiers =
-        List.filter (fun p -> Option.is_some p.param_modifier) fh_parameters
-      ; fh_keep_noop
+        List.filter ~f:(fun p -> Option.is_some p.param_modifier) fh_parameters
       ; fh_ret_by_ref      = is_ret_by_ref function_ampersand
       }
   | LambdaSignature { lambda_parameters; lambda_type; _ } ->
@@ -1359,10 +1381,10 @@ and pClassElt : class_elt list parser = fun node env ->
       in
       let hdr = pFunHdr methodish_function_decl_header env in
       let member_init, member_def =
-        List.split @@
-          List.map classvar_init @@
-            List.filter (fun p -> Option.is_some p.param_modifier) @@
-              hdr.fh_parameters
+        List.unzip @@
+          List.filter_map hdr.fh_parameters ~f:(fun p ->
+            Option.map ~f: (fun _ -> classvar_init p) p.param_modifier
+          )
       in
       let pBody = fun node env ->
         if is_missing node then [] else
@@ -1390,7 +1412,7 @@ and pClassElt : class_elt list parser = fun node env ->
       ; m_name            = hdr.fh_name
       ; m_params          = hdr.fh_parameters
       ; m_body            = body
-      ; m_user_attributes = List.flatten @@
+      ; m_user_attributes = List.concat @@
         couldMap ~f:pUserAttribute methodish_attribute env
       ; m_ret             = hdr.fh_return_type
       ; m_ret_by_ref      = hdr.fh_ret_by_ref
@@ -1500,7 +1522,7 @@ and pXhpChild : xhp_child parser = fun node env ->
     ChildBinary(left, right)
   | XHPChildrenParenthesizedList {xhp_children_list_xhp_children; _} ->
     let children = as_list xhp_children_list_xhp_children in
-    let children = List.map (fun x -> pXhpChild x env) children in
+    let children = List.map ~f:(fun x -> pXhpChild x env) children in
     ChildList children
   | _ -> missing_syntax "xhp children" node env
 
@@ -1538,7 +1560,7 @@ and pDef : def parser = fun node env ->
           | Some b -> b
         end
       ; f_user_attributes =
-        List.flatten @@ couldMap ~f:pUserAttribute function_attribute_spec env
+        List.concat @@ couldMap ~f:pUserAttribute function_attribute_spec env
       }
   | ClassishDeclaration
     { classish_attribute       = attr
@@ -1553,8 +1575,8 @@ and pDef : def parser = fun node env ->
     ; _ } ->
       Class
       { c_mode            = !(lowerer_state.mode)
-      ; c_user_attributes = List.flatten @@ couldMap ~f:pUserAttribute attr env
-      ; c_final           = List.mem Final @@ pKinds mods env
+      ; c_user_attributes = List.concat @@ couldMap ~f:pUserAttribute attr env
+      ; c_final           = List.mem (pKinds mods env) Final
       ; c_is_xhp          =
         (match token_kind name with
         | Some TK.XHPElementName | Some TK.XHPClassName -> true
@@ -1582,7 +1604,7 @@ and pDef : def parser = fun node env ->
     { const_type_specifier = ty
     ; const_declarators    = decls
     ; _ } ->
-      (match List.map syntax (as_list decls) with
+      (match List.map ~f:syntax (as_list decls) with
       | [ ConstantDeclarator
           { constant_declarator_name        = name
           ; constant_declarator_initializer = init
@@ -1609,8 +1631,8 @@ and pDef : def parser = fun node env ->
       ; t_tparams         = pTParaml tparams env
       ; t_constraint      = Option.map ~f:snd @@
           mpOptional pTConstraint constr env
-      ; t_user_attributes = List.flatten @@
-          List.map (fun x -> pUserAttribute x env) (as_list attr)
+      ; t_user_attributes = List.concat @@
+          List.map ~f:(fun x -> pUserAttribute x env) (as_list attr)
       ; t_namespace       = Namespace_env.empty !(lowerer_state.popt)
       ; t_mode            = !(lowerer_state.mode)
       ; t_kind            =
@@ -1634,7 +1656,7 @@ and pDef : def parser = fun node env ->
       in
       Class
       { c_mode            = !(lowerer_state.mode)
-      ; c_user_attributes = List.flatten @@ couldMap ~f:pUserAttribute attrs env
+      ; c_user_attributes = List.concat @@ couldMap ~f:pUserAttribute attrs env
       ; c_final           = false
       ; c_kind            = Cenum
       ; c_is_xhp          = false
@@ -1667,7 +1689,7 @@ and pDef : def parser = fun node env ->
       { syntax = NamespaceBody { namespace_declarations = decls; _ }; _ }
     ; _ } -> Namespace
       ( pos_name name
-      , List.map (fun x -> pDef x env) (as_list decls)
+      , List.map ~f:(fun x -> pDef x env) (as_list decls)
       )
   | NamespaceDeclaration { namespace_name = name; _ } ->
     Namespace (pos_name name, [])
@@ -1698,7 +1720,7 @@ and pDef : def parser = fun node env ->
           )
       | _ -> missing_syntax "namespace use clause" node env
       in
-      NamespaceUse (List.map f (as_list clauses))
+      NamespaceUse (List.map ~f (as_list clauses))
   | NamespaceGroupUseDeclaration _ -> NamespaceUse []
   (* Fail open, assume top-level statement. Not too nice when reporting bugs,
    * but if this turns out prohibitive, just `try` this and catch-and-correct
@@ -1754,10 +1776,12 @@ let pProgram : program parser = fun node env ->
    *)
   | { syntax = ExpressionStatement
       { expression_statement_expression =
-        { syntax = DefineExpression { define_argument_list = args; _ } ; _ }
+        { syntax = DefineExpression
+          { define_keyword; define_argument_list = args; _ }
+        ; _ }
       ; _ }
     ; _ } :: nodel ->
-      ( match List.map (fun x -> pExpr x env) (as_list args) with
+      ( match List.map ~f:(fun x -> pExpr x env) (as_list args) with
       | [ _, String name; e ] -> Constant
         { cst_mode      = !(lowerer_state.mode)
         ; cst_kind      = Cst_define
@@ -1766,7 +1790,9 @@ let pProgram : program parser = fun node env ->
         ; cst_value     = e
         ; cst_namespace = Namespace_env.empty !(lowerer_state.popt)
         }
-      | _ -> missing_syntax "DefineExpression:inner" args env
+      | args ->
+        let name = pos_name define_keyword in
+        Stmt (Expr (fst name, Call ((fst name, Id name), args, [])))
       ) :: aux env nodel
   | node :: nodel -> pDef node env :: aux env nodel
   in
@@ -1788,7 +1814,7 @@ let pScript node env =
 
 exception Malformed_trivia of int
 
-type scoured_comment = Pos.t * string
+type scoured_comment = Pos.t * comment
 type scoured_comments = scoured_comment list
 
 let scour_comments
@@ -1812,7 +1838,6 @@ let scour_comments
             | `SawSlash    -> "SawSlash"
             | `EmbeddedCmt -> "EmbeddedCmt"
             | `EndEmbedded -> "EndEmbedded"
-            | `NonSourceText    -> "NonSourceText"
           in
           if not !(lowerer_state.suppress_output) then
             Printf.eprintf "Error parsing trivia in state %s: '%s'\n" state str;
@@ -1828,7 +1853,7 @@ let scour_comments
             let (p, c) as result =
               Full_fidelity_source_text.
               ( pos_of_offset start end_
-              , sub source_text start (end_ - start)
+              , CmtLine (sub source_text start (end_ - start))
               )
             in
             result :: acc
@@ -1840,45 +1865,21 @@ let scour_comments
               Full_fidelity_source_text.
               (* Should be 'start end_', but keeping broken for fidelity. *)
               ( pos_of_offset (end_) (end_ + 1)
-              , sub source_text start (end_ - start)
+              , CmtBlock (sub source_text start (end_ - start))
               )
             in
             result :: acc
-        in
-        let text_at_pos_is_equal_to pos s =
-          let s_length = String.length s in
-          if pos + s_length >= length then false
-          else
-            let rec go i =
-              i = s_length || (str.[pos + i] = s.[i] && go (i + 1))
-            in
-            go 0
         in
         let rec go start state idx : scoured_comments =
           if idx = length (* finished? *)
           then begin
             match state with
-            | `Free | `NonSourceText -> acc
+            | `Free -> acc
             | `LineCmt -> mk `Line start length acc
             | _        -> fail state start
           end else begin
             let next = idx + 1 in
             match state, str.[idx] with
-            (* Found one of start tags - switch to the PHP mode *)
-            | `NonSourceText,    '<' when text_at_pos_is_equal_to idx "<?php" ->
-              let next = idx + (String.length "<?php") in
-              go next `Free next
-            | `NonSourceText,    '<' when text_at_pos_is_equal_to idx "<?=" ->
-              let next = idx + (String.length "<?=") in
-              go next `Free next
-            (* Skip non source text content *)
-            | `NonSourceText,    _ -> go next state next
-            (* End tag terminates line comment, collect it  *)
-            (* Then exit PHP section of the code and skip all non source
-               content *)
-            | `LineCmt,     '?' when text_at_pos_is_equal_to idx "?>" ->
-              let next = idx + (String.length "?>") in
-              mk `Line  start idx @@ go next `NonSourceText next
             (* Ending comments produces the comment just scanned *)
             | `LineCmt,     '\n' -> mk `Line  start idx @@ go next `Free next
             | `EndEmbedded, '/'  -> mk `Block start idx @@ go next `Free next
@@ -1898,10 +1899,6 @@ let scour_comments
             (* When scanning comments, anything else is accepted *)
             | `LineCmt,     _             -> go start state        next
             | `EmbeddedCmt, _             -> go start state        next
-            | _,        '?' when text_at_pos_is_equal_to idx "?>" ->
-            (* Exit PHP section of the code and skip all markup content *)
-              let next = idx + (String.length "?>") in
-              go next `NonSourceText next
             (* Anything else; bail *)
             | _ -> fail state start
           end
@@ -1913,7 +1910,7 @@ let scour_comments
       | Token _ ->
         let acc = parse acc (leading_start_offset node) (leading_text node) in
         parse acc (trailing_start_offset node) (trailing_text node)
-      | _ -> List.fold_left aux acc (children node)
+      | _ -> List.fold_left ~f:aux ~init:acc (children node)
     in
     aux [] tree
 
@@ -1926,7 +1923,7 @@ type result =
   ; ast      : Ast.program
   ; content  : string
   ; file     : Relative_path.t
-  ; comments : (Pos.t * string) list
+  ; comments : (Pos.t * comment) list
   }
 
 let from_text
@@ -1936,17 +1933,23 @@ let from_text
   ?(ignore_pos            = false)
   ?(quick                 = false)
   ?(suppress_output       = false)
+  ?(lower_coroutines      = true)
   ?(parser_options        = ParserOptions.default)
   (file        : Relative_path.t)
   (source_text : Full_fidelity_source_text.t)
   : result =
     let open Full_fidelity_syntax_tree in
     let tree   = make source_text in
+    let tree =
+      if lower_coroutines then
+        Coroutine_lowerer.lower_coroutines tree
+      else
+        tree in
     let script = Full_fidelity_positioned_syntax.from_tree tree in
     let fi_mode = if is_php tree then FileInfo.Mphp else
       let mode_string = String.trim (mode tree) in
       let mode_word =
-        try Some (List.hd (Str.split (Str.regexp " +") mode_string)) with
+        try List.hd (Str.split (Str.regexp " +") mode_string) with
         | _ -> None
       in
       Option.value_map mode_word ~default:FileInfo.Mpartial ~f:(function
@@ -1984,7 +1987,7 @@ let from_text
     in
     if keep_errors then begin
       Fixmes.HH_FIXMES.add file fixmes;
-      Option.iter (Core.List.last !errors) Errors.parsing_error
+      Option.iter (List.last !errors) Errors.parsing_error
     end;
     { fi_mode; ast; content; comments; file }
 
@@ -1994,6 +1997,7 @@ let from_file
   ?(keep_errors           = true)
   ?(ignore_pos            = false)
   ?(quick                 = false)
+  ?lower_coroutines
   ?(parser_options        = ParserOptions.default)
   (path : Relative_path.t)
   : result =
@@ -2003,6 +2007,7 @@ let from_file
       ~keep_errors
       ~ignore_pos
       ~quick
+      ?lower_coroutines
       ~parser_options
       path
       (Full_fidelity_source_text.from_file path)
@@ -2024,6 +2029,8 @@ let from_text_with_legacy
   ?(keep_errors           = true)
   ?(ignore_pos            = false)
   ?(quick                 = false)
+  ?(suppress_output       = false)
+  ?lower_coroutines
   ?(parser_options        = ParserOptions.default)
   (file    : Relative_path.t)
   (content : string)
@@ -2034,6 +2041,8 @@ let from_text_with_legacy
       ~keep_errors
       ~ignore_pos
       ~quick
+      ~suppress_output
+      ?lower_coroutines
       ~parser_options
       file
       (Full_fidelity_source_text.make content)
@@ -2044,6 +2053,7 @@ let from_file_with_legacy
   ?(keep_errors           = true)
   ?(ignore_pos            = false)
   ?(quick                 = false)
+  ?lower_coroutines
   ?(parser_options        = ParserOptions.default)
   (file : Relative_path.t)
   : Parser_hack.parser_return =
@@ -2053,5 +2063,6 @@ let from_file_with_legacy
       ~keep_errors
       ~ignore_pos
       ~quick
+      ?lower_coroutines
       ~parser_options
       file

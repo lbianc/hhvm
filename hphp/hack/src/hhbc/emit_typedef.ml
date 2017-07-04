@@ -13,9 +13,13 @@ open Core
 let kind_to_type_info ~tparams ~namespace k =
   match k with
   | Ast.Alias h | Ast.NewType h ->
-    Emit_type_hint.hint_to_type_info
-      ~skipawaitable:false ~nullable:false
-      ~always_extended:false ~tparams ~namespace h
+    Emit_type_hint.(hint_to_type_info
+      ~kind:TypeDef ~skipawaitable:false ~nullable:false ~tparams ~namespace h)
+
+let kind_to_type_structure ~tparams k =
+  match k with
+  | Ast.Alias h | Ast.NewType h ->
+    Emit_type_constant.hint_to_type_constant ~is_typedef:true ~tparams h
 
 let emit_typedef : Ast.typedef -> Hhas_typedef.t =
   fun ast_typedef ->
@@ -25,9 +29,13 @@ let emit_typedef : Ast.typedef -> Hhas_typedef.t =
   let tparams = Emit_body.tparams_to_strings ast_typedef.Ast.t_tparams in
   let typedef_type_info =
     kind_to_type_info ~tparams ~namespace ast_typedef.Ast.t_kind in
+  let typedef_type_structure =
+    kind_to_type_structure ~tparams ast_typedef.Ast.t_kind
+  in
   Hhas_typedef.make
     typedef_name
     typedef_type_info
+    (Some typedef_type_structure)
 
 let emit_typedefs_from_program ast =
   List.filter_map ast

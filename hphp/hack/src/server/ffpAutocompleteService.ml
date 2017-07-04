@@ -8,38 +8,65 @@
  *
 *)
 
-open String_utils
+open Core
 
-module EditableTrivia = Full_fidelity_editable_trivia
-module TriviaKind = Full_fidelity_trivia_kind
+module TokenKind = Full_fidelity_token_kind
 module SyntaxTree = Full_fidelity_syntax_tree
+module MinimalSyntax = Full_fidelity_minimal_syntax
 module PositionedSyntax = Full_fidelity_positioned_syntax
-module SynUtil = Full_fidelity_syntax_utilities.WithSyntax(PositionedSyntax)
 module SourceText = Full_fidelity_source_text
+module ACKeyword = FfpAutocompleteKeywords
+module ACLocal = FfpAutocompleteLocalNames
+module SyntaxKind = Full_fidelity_syntax_kind
 
-let parse_flags flag_comment =
-  let args_regex = Str.regexp "[A-Za-z-_]+ [1-9][0-9]* [1-9][0-9]*" in
-  try
-    let _ = Str.search_forward args_regex flag_comment 0 in
-    let raw_flags = Str.matched_string flag_comment in
-    match split ' ' raw_flags with
-    | [k; r; c] -> Some (k, int_of_string r, int_of_string c)
-    | _ -> None
-  with
-    Not_found -> None
+(*
+ * TODO: The following types of completions are not yet implemented:
+ * - Function Invocations
+ * - :: and \ invocations
+ *)
+let autocomplete_word (tree:SyntaxTree.t) offset stub =
+  let open MinimalSyntax in
+  let autocomplete_child =
+    List.hd_exn @@ parentage (SyntaxTree.root tree) offset in
+  let result = match syntax autocomplete_child with
+  (* TODO: Handle function invocation, class name, and other completions here *)
+  (* TODO: Add test cases to make sure the right type of completion is taken for a given token *)
+  | Token {
+      MinimalToken.kind = TokenKind.Name; _
+    } -> ACKeyword.autocomplete_keyword tree offset stub
+  | Token {
+      MinimalToken.kind = TokenKind.Variable; _
+    }
+  | Token {
+      MinimalToken.kind = TokenKind.Dollar; _
+    } -> ACLocal.autocomplete_local tree offset
+  | Token {
+      MinimalToken.kind = TokenKind.MinusGreaterThan (* This token: -> *); _
+    } -> [] (* TODO: Not implemented yet *)
+  | Token {
+      MinimalToken.kind = TokenKind.ColonColon (* This token: :: *); _
+    } -> [] (* TODO: Not implemented yet *)
+  | Token {
+      MinimalToken.kind = TokenKind.NamespacePrefix; _
+    } -> [] (* TODO: Not implemented yet *)
+  | _ -> [] (* Unimplemented completion type *)
+  in
+  match result with
+  | [] -> None
+  | x -> Some x
 
-let process_node acc n =
-  match acc with
-  | Some flags -> Some flags
-  | None ->
-    let comments = PositionedSyntax.leading_text n in
-    parse_flags comments
+(* Get the token we wish to complete. This is necessary because the keyword autocompletion filters
+   results based on what we have typed so far. This will potentially be removed in the future.*)
+let get_autocomplete_stub (syntax_tree:SyntaxTree.t) offset =
+  let open PositionedSyntax in
+  let positioned_tree = from_tree syntax_tree in
+  let autocomplete_child = List.hd_exn @@ parentage positioned_tree offset in
+  text autocomplete_child
 
-let auto_complete filename =
-  let file = Relative_path.create Relative_path.Dummy filename in
-  let source_text = SourceText.from_file file in
+let auto_complete (file:string) (row, col) =
+  let source_text = SourceText.make file in
   let syntax_tree = SyntaxTree.make source_text in
-  let syntax_tree_root = PositionedSyntax.from_tree syntax_tree in
-  match SynUtil.fold process_node None syntax_tree_root with
-  | None -> failwith "Invalid test file: no flags found"
-  | Some a -> a
+
+  let offset = SourceText.position_to_offset source_text (row, col) in
+  let stub = get_autocomplete_stub syntax_tree offset in
+  autocomplete_word syntax_tree offset stub

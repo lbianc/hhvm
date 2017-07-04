@@ -7,6 +7,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  *)
 
+module CoroutineClosureGenerator = Coroutine_closure_generator
 module CoroutineStateMachineData = Coroutine_state_machine_data
 module CoroutineSyntax = Coroutine_syntax
 module EditableSyntax = Full_fidelity_editable_syntax
@@ -364,7 +365,7 @@ let rewrite_for next_loop_label node =
  * list. For demonstrative purposes, we assume that the next label number is 1.
  *
  *   $closure->nextLabel = 1;
- *   $coroutineResult = innerCoroutine();
+ *   $coroutineResult = innerCoroutine($closure);
  *   if ($coroutineResult->isSuspended()) {
  *     return $coroutineResult;
  *   }
@@ -376,6 +377,7 @@ let rewrite_for next_loop_label node =
  *   }
  *   $closure->nextLabel = 2;
  *   $coroutineResult = outerCoroutine(
+ *     $closure,
  *     $closure->coroutineResultData1,
  *     otherMethod(),
  *   );
@@ -404,30 +406,49 @@ let extract_suspend_statements node next_label =
       (next_label, prefix_statements_acc) =
     match syntax node with
     | PrefixUnaryExpression {
-        prefix_unary_operator =
-          { syntax = Token { EditableToken.kind = TokenKind.Suspend; _;}; _; };
-        prefix_unary_operand;
+        prefix_unary_operator = {
+          syntax = Token { EditableToken.kind = TokenKind.Suspend; _; };
+          _;
+        };
+        prefix_unary_operand = {
+          syntax = FunctionCallExpression ({
+            function_call_argument_list;
+            _;
+          } as function_call_expression);
+          _;
+        };
       } ->
         let update_next_label_syntax = set_next_label_syntax next_label in
+
+        let function_call_argument_list =
+          prepend_to_comma_delimited_syntax_list
+            closure_variable_syntax
+            function_call_argument_list in
+        let invoke_coroutine =
+          FunctionCallExpression {
+            function_call_expression with function_call_argument_list
+          } in
+        let invoke_coroutine_syntax = make_syntax invoke_coroutine in
 
         let assign_coroutine_result_syntax =
           make_assignment_syntax
             coroutine_result_variable
-            prefix_unary_operand in
+            invoke_coroutine_syntax in
 
         let select_is_suspended_member_syntax =
           make_member_selection_expression_syntax
             coroutine_result_variable_syntax
             is_suspended_member_syntax in
-        let call_is_selected_syntax =
+        let call_is_suspended_syntax =
           make_function_call_expression_syntax
             select_is_suspended_member_syntax
             [] in
         let return_coroutine_result_syntax =
-          make_return_statement_syntax coroutine_result_variable_syntax in
+          make_return_statement_syntax
+            create_suspended_coroutine_result_syntax in
         let return_if_suspended_syntax =
           make_if_syntax
-            call_is_selected_syntax
+            call_is_suspended_syntax
             [ return_coroutine_result_syntax ] in
 
         let select_coroutine_result_syntax =
@@ -446,11 +467,13 @@ let extract_suspend_statements node next_label =
         let declare_next_label_syntax =
           make_label_declaration_syntax (StateLabel next_label) in
 
-        let coroutine_result_data_variable =
-          make_coroutine_result_data_variable next_label in
+        let coroutine_result_data_variable_syntax =
+          make_member_selection_expression_syntax
+            closure_variable_syntax
+            (make_coroutine_result_data_member_name_syntax next_label) in
         let assign_coroutine_result_data_syntax =
-          make_assignment_syntax
-            coroutine_result_data_variable
+          make_assignment_syntax_variable
+            coroutine_result_data_variable_syntax
             coroutine_data_variable_syntax in
 
         let exception_not_null_syntax =
@@ -469,9 +492,6 @@ let extract_suspend_statements node next_label =
           assign_coroutine_result_data_syntax;
           throw_if_exception_not_null_syntax;
         ] in
-
-        let coroutine_result_data_variable_syntax =
-          make_token_syntax TokenKind.Variable coroutine_result_data_variable in
 
         (next_label + 1, prefix_statements_acc @ statements),
         Rewriter.Result.Replace coroutine_result_data_variable_syntax
@@ -613,104 +633,112 @@ let extract_suspend_statements_and_gather_rewrite_data_for_expressions
  * expression node appropriately.
  *)
 let rewrite_suspends node =
-  let rewrite_statements node next_label =
-    match syntax node with
-    | ReturnStatement { return_expression; _; } ->
-        let (next_label, prefix_statements), return_expression =
-          extract_suspend_statements return_expression next_label in
-        let return_expression =
-          if is_missing return_expression then coroutine_unit_call_syntax
-          else return_expression in
-        let return_expression = make_object_creation_expression_syntax
-          "ActualCoroutineResult" [return_expression] in
-        let assignment = set_next_label_syntax (-1) in
-        let ret = make_return_statement_syntax return_expression in
-        let statements = prefix_statements @ [ assignment; ret ] in
-        let statements = make_compound_statement_syntax statements in
+  let rewrite_statements ancestors node next_label =
+    (* TODO(tingley/ericlippert): We don't want to rewrite lambdas. The Rewriter
+       does not have the capability to "rewrite_where" -- we should add it,
+       similarly to the lambda_analyzer. *)
+    if Core_list.exists
+        ~f:(fun node -> is_lambda_expression node || is_anonymous_function node)
+        ancestors then
+      next_label, Rewriter.Result.Keep
+    else
+      match syntax node with
+      | ReturnStatement { return_expression; _; } ->
+          let (next_label, prefix_statements), return_expression =
+            extract_suspend_statements return_expression next_label in
+          let return_expression =
+            if is_missing return_expression then coroutine_unit_call_syntax
+            else return_expression in
+          let return_expression = make_object_creation_expression_syntax
+            "ActualCoroutineResult" [return_expression] in
+          let assignment = set_next_label_syntax (-1) in
+          let ret = make_return_statement_syntax return_expression in
+          let statements = prefix_statements @ [ assignment; ret ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | IfStatement node ->
+        let (next_label, statements) = rewrite_if_statement next_label node in
         next_label, Rewriter.Result.Replace statements
-    | IfStatement node ->
-      let (next_label, statements) = rewrite_if_statement next_label node in
-      next_label, Rewriter.Result.Replace statements
-    | ExpressionStatement ({ expression_statement_expression; _; } as node) ->
-        let (next_label, prefix_statements), expression_statement_expression =
-          extract_suspend_statements
-            expression_statement_expression
-            next_label in
-        let new_expression_statement =
-          make_syntax
-            (ExpressionStatement
-              { node with expression_statement_expression; }) in
-        let statements = prefix_statements @ [ new_expression_statement ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    | SwitchStatement ({ switch_expression; _; } as node) ->
-        let (next_label, prefix_statements), switch_expression =
-          extract_suspend_statements switch_expression next_label in
-        let new_switch_statement =
-          make_syntax (SwitchStatement { node with switch_expression; }) in
-        let statements = prefix_statements @ [ new_switch_statement; ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    | ThrowStatement ({ throw_expression; _; } as node) ->
-        let (next_label, prefix_statements), throw_expression =
-          extract_suspend_statements throw_expression next_label in
-        let new_throw_statement =
-          make_syntax (ThrowStatement { node with throw_expression; }) in
-        let statements = prefix_statements @ [ new_throw_statement; ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    | ForeachStatement ({ foreach_collection; _; } as node) ->
-        let (next_label, prefix_statements), foreach_collection =
-          extract_suspend_statements foreach_collection next_label in
-        let new_foreach_collection=
-          make_syntax (ForeachStatement { node with foreach_collection; }) in
-        let statements = prefix_statements @ [ new_foreach_collection; ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    | EchoStatement ({ echo_expressions; _; } as node) ->
-        let next_label, prefix_statements, echo_expressions =
-          extract_suspend_statements_and_gather_rewrite_data_for_expressions
-            next_label
-            echo_expressions in
-        let echo_expressions =
-          make_delimited_list comma_syntax echo_expressions in
-        let new_echo_statement =
-          make_syntax (EchoStatement { node with echo_expressions; }) in
-        let statements = prefix_statements @ [ new_echo_statement; ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    | UnsetStatement ({ unset_variables; _; } as node) ->
-        let next_label, prefix_statements, unset_variables =
-          extract_suspend_statements_and_gather_rewrite_data_for_expressions
-            next_label
-            unset_variables in
-        let unset_variables = make_delimited_list comma_syntax unset_variables in
-        let new_unset_statement =
-          make_syntax (UnsetStatement { node with unset_variables; }) in
-        let statements = prefix_statements @ [ new_unset_statement; ] in
-        let statements = make_compound_statement_syntax statements in
-        next_label, Rewriter.Result.Replace statements
-    (* while-condition constructs should have already been rewritten into
-       while-true-with-if-condition constructs. *)
-    | WhileStatement _
-    (* for constructs should have already been rewritten into
-       while-true-with-if-condition constructs. *)
-    | ForStatement _
-    (* do-while constructs should have already been rewritten into
-       while-true-with-if-condition constructs. *)
-    | DoStatement _
-    (* Suspends will be handled recursively by compound statement's children. *)
-    | CompoundStatement _
-    (* Suspends will be handled recursively by try statements's children. *)
-    | TryStatement _
-    | GotoStatement _ (* Suspends are invalid in goto statements. *)
-    | BreakStatement _ (* Suspends are impossible in break statements. *)
-    | ContinueStatement _ (* Suspends are impossible in continue statements. *)
-    | FunctionStaticStatement _ (* Suspends are impossible in these. *)
-    | GlobalStatement _ (* Suspends are impossible in global statements. *)
-    | _ ->
-        next_label, Rewriter.Result.Keep in
-  Rewriter.aggregating_rewrite_post rewrite_statements node 1
+      | ExpressionStatement ({ expression_statement_expression; _; } as node) ->
+          let (next_label, prefix_statements), expression_statement_expression =
+            extract_suspend_statements
+              expression_statement_expression
+              next_label in
+          let new_expression_statement =
+            make_syntax
+              (ExpressionStatement
+                { node with expression_statement_expression; }) in
+          let statements = prefix_statements @ [ new_expression_statement ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | SwitchStatement ({ switch_expression; _; } as node) ->
+          let (next_label, prefix_statements), switch_expression =
+            extract_suspend_statements switch_expression next_label in
+          let new_switch_statement =
+            make_syntax (SwitchStatement { node with switch_expression; }) in
+          let statements = prefix_statements @ [ new_switch_statement; ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | ThrowStatement ({ throw_expression; _; } as node) ->
+          let (next_label, prefix_statements), throw_expression =
+            extract_suspend_statements throw_expression next_label in
+          let new_throw_statement =
+            make_syntax (ThrowStatement { node with throw_expression; }) in
+          let statements = prefix_statements @ [ new_throw_statement; ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | ForeachStatement ({ foreach_collection; _; } as node) ->
+          let (next_label, prefix_statements), foreach_collection =
+            extract_suspend_statements foreach_collection next_label in
+          let new_foreach_collection=
+            make_syntax (ForeachStatement { node with foreach_collection; }) in
+          let statements = prefix_statements @ [ new_foreach_collection; ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | EchoStatement ({ echo_expressions; _; } as node) ->
+          let next_label, prefix_statements, echo_expressions =
+            extract_suspend_statements_and_gather_rewrite_data_for_expressions
+              next_label
+              echo_expressions in
+          let echo_expressions =
+            make_delimited_list comma_syntax echo_expressions in
+          let new_echo_statement =
+            make_syntax (EchoStatement { node with echo_expressions; }) in
+          let statements = prefix_statements @ [ new_echo_statement; ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      | UnsetStatement ({ unset_variables; _; } as node) ->
+          let next_label, prefix_statements, unset_variables =
+            extract_suspend_statements_and_gather_rewrite_data_for_expressions
+              next_label
+              unset_variables in
+          let unset_variables = make_delimited_list comma_syntax unset_variables in
+          let new_unset_statement =
+            make_syntax (UnsetStatement { node with unset_variables; }) in
+          let statements = prefix_statements @ [ new_unset_statement; ] in
+          let statements = make_compound_statement_syntax statements in
+          next_label, Rewriter.Result.Replace statements
+      (* while-condition constructs should have already been rewritten into
+         while-true-with-if-condition constructs. *)
+      | WhileStatement _
+      (* for constructs should have already been rewritten into
+         while-true-with-if-condition constructs. *)
+      | ForStatement _
+      (* do-while constructs should have already been rewritten into
+         while-true-with-if-condition constructs. *)
+      | DoStatement _
+      (* Suspends will be handled recursively by compound statement's children. *)
+      | CompoundStatement _
+      (* Suspends will be handled recursively by try statements's children. *)
+      | TryStatement _
+      | GotoStatement _ (* Suspends are invalid in goto statements. *)
+      | BreakStatement _ (* Suspends are impossible in break statements. *)
+      | ContinueStatement _ (* Suspends are impossible in continue statements. *)
+      | FunctionStaticStatement _ (* Suspends are impossible in these. *)
+      | GlobalStatement _ (* Suspends are impossible in global statements. *)
+      | _ ->
+          next_label, Rewriter.Result.Keep in
+  Rewriter.parented_aggregating_rewrite_post rewrite_statements node 1
 
 (* case 0: goto state_label_0; *)
 let make_switch_section_syntax number =
@@ -781,11 +809,7 @@ let unnest_compound_statements node =
   Rewriter.rewrite_post rewrite node
 
 let lower_body { methodish_function_body; _} =
-
-  (* TODO:
-  *)
   let locals_and_params = gather_locals_and_params methodish_function_body in
-
   let body = add_missing_return methodish_function_body in
   let (next_loop_label, body) = rewrite_do 0 body in
   let body = rewrite_while body in
@@ -794,31 +818,23 @@ let lower_body { methodish_function_body; _} =
   let body = add_switch (next_loop_label, body) in
   let body = add_try_finally locals_and_params body in
   let body = unnest_compound_statements body in
+
+  let coroutine_result_data_variables =
+    next_loop_label
+      |> Core_list.range 1
+      |> Core_list.map ~f:make_coroutine_result_data_variable
+      |> Core_list.fold
+        ~f:(fun acc name ->
+            SMap.add name (make_token_syntax TokenKind.Name name) acc)
+        ~init:SMap.empty in
+  let locals_and_params =
+    SMap.union locals_and_params coroutine_result_data_variables in
+
   (body, locals_and_params)
 
-let make_function_decl_header
-    classish_name
-    function_name
-    { function_type; _; } =
-  (*
-  function foo_GeneratedStateMachine(
-    C_foo_GeneratedClosure $closure,
-    mixed $coroutineData,
-    ?Exception $exception) : CoroutineResult<Unit>
-  *)
-  make_function_decl_header_syntax
-    (make_state_machine_method_name function_name)
-    [
-      make_closure_parameter_syntax classish_name function_name;
-      coroutine_data_parameter_syntax;
-      nullable_exception_parameter_syntax;
-    ]
-    (make_coroutine_result_type_syntax function_type)
-
 let make_closure_lambda_signature
-    classish_name
-    function_name
-    function_type =
+    class_node
+    ({ function_type; _; } as header_node) =
   (*
   ( C_foo_GeneratedClosure $closure,
     mixed $coroutineData,
@@ -826,7 +842,7 @@ let make_closure_lambda_signature
   *)
   make_lambda_signature_syntax
     [
-      make_closure_parameter_syntax classish_name function_name;
+      make_closure_parameter_syntax class_node header_node;
       coroutine_data_parameter_syntax;
       nullable_exception_parameter_syntax;
     ]
@@ -844,8 +860,8 @@ let extract_parameter_declarations { function_parameter_list; _; } =
       | _ -> failwith "Parameter had unexpected type."
       end
 
-let compute_state_machine_data locals_and_params function_node =
-  let parameters = extract_parameter_declarations function_node in
+let compute_state_machine_data locals_and_params header_node =
+  let parameters = extract_parameter_declarations header_node in
   let parameter_names =
     parameters
       |> Core_list.map ~f:
@@ -877,10 +893,15 @@ let compute_state_machine_data locals_and_params function_node =
  *)
 let generate_coroutine_state_machine
     classish_name
-    function_name
     method_node
-    function_node =
+    header_node =
   let body, locals_and_params = lower_body method_node in
   let state_machine_data =
-    compute_state_machine_data locals_and_params function_node in
-  body, state_machine_data
+    compute_state_machine_data locals_and_params header_node in
+  let closure_syntax =
+    CoroutineClosureGenerator.generate_coroutine_closure
+      classish_name
+      method_node
+      header_node
+      state_machine_data in
+  body, closure_syntax

@@ -66,6 +66,7 @@ MODULES=\
   naming\
   options\
   parser\
+	parser/coroutine\
 	parser/schema\
   procs\
   recorder\
@@ -86,6 +87,7 @@ MODULES=\
   utils/hh_json\
   monitor\
   watchman\
+  watchman_event_watcher\
   $(FSNOTIFY)\
   $(INOTIFY)
 

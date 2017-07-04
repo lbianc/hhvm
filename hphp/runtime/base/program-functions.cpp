@@ -31,6 +31,7 @@
 #include "hphp/runtime/base/perf-mem-event.h"
 #include "hphp/runtime/base/php-globals.h"
 #include "hphp/runtime/base/plain-file.h"
+#include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/stat-cache.h"
 #include "hphp/runtime/base/stream-wrapper-registry.h"
@@ -69,7 +70,7 @@
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/mcgen.h"
 #include "hphp/runtime/vm/jit/translator.h"
-#include "hphp/runtime/vm/hack-compiler.h"
+#include "hphp/runtime/vm/extern-compiler.h"
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/treadmill.h"
@@ -876,7 +877,7 @@ static bool set_execution_mode(folly::StringPiece mode) {
     Logger::Escape = true;
     return true;
   } else if (mode == "run" || mode == "debug" || mode == "translate" ||
-             mode == "dumphhas") {
+             mode == "dumphhas" || mode == "verify") {
     // We don't run PHP in "translate" mode, so just treat it like cli mode.
     RuntimeOption::ServerMode = false;
     Logger::Escape = false;
@@ -944,6 +945,7 @@ static int start_server(const std::string &username, int xhprof) {
       _exit(1);
     }
     LightProcess::ChangeUser(username);
+    compilers_set_user(username);
   } else if (getuid() == 0 && !RuntimeOption::AllowRunAsRoot) {
     Logger::Error("hhvm not allowed to run as root unless "
                   "-vServer.AllowRunAsRoot=1 is used.");
@@ -1094,7 +1096,7 @@ static int start_server(const std::string &username, int xhprof) {
 
   if (RuntimeOption::StopOldServer) HttpServer::StopOldServer();
 
-  if (RuntimeOption::EvalEnableNuma) {
+  if (RuntimeOption::EvalEnableNuma && !getenv("HHVM_DISABLE_NUMA")) {
 #ifdef USE_JEMALLOC
     unsigned narenas;
     size_t mib[3];
@@ -1399,7 +1401,7 @@ static int execute_program_impl(int argc, char** argv) {
     ("compiler-id", "display the git hash for the compiler")
     ("repo-schema", "display the repository schema id")
     ("mode,m", value<std::string>(&po.mode)->default_value("run"),
-     "run | debug (d) | server (s) | daemon | replay | translate (t)")
+     "run | debug (d) | server (s) | daemon | replay | translate (t) | verify")
     ("interactive,a", "Shortcut for --mode debug") // -a is from PHP5
     ("config,c", value<std::vector<std::string>>(&po.config)->composing(),
      "load specified config file")
@@ -1521,7 +1523,8 @@ static int execute_program_impl(int argc, char** argv) {
         cout << desc << "\n";
         return -1;
       }
-      if (po.config.empty() && !vm.count("no-config")) {
+      if (po.config.empty() && !vm.count("no-config")
+          && ::getenv("HHVM_NO_DEFAULT_CONFIGS") == nullptr) {
         auto file_callback = [&po] (const char *filename) {
           Logger::Verbose("Using default config file: %s", filename);
           po.config.push_back(filename);
@@ -1530,6 +1533,16 @@ static int execute_program_impl(int argc, char** argv) {
                                          file_callback);
         add_default_config_files_globbed(DEFAULT_CONFIG_DIR "/config*.hdf",
                                          file_callback);
+      }
+      const auto env_config = ::getenv("HHVM_CONFIG_FILE");
+      if (env_config != nullptr) {
+        add_default_config_files_globbed(
+          env_config,
+          [&po](const char* filename) {
+            Logger::Verbose("Using config file from environment: %s", filename);
+            po.config.push_back(filename);
+          }
+        );
       }
 // When we upgrade boost, we can remove this and also get rid of the parent
 // try statement and move opts back into the original try block
@@ -1667,12 +1680,19 @@ static int execute_program_impl(int argc, char** argv) {
   // Do this as early as possible to avoid creating temp files and spawing
   // light processes. Correct compilation still requires loading all of the
   // ini/hdf/cli options.
-  if (po.mode == "dumphhas") {
+  if (po.mode == "dumphhas" || po.mode == "verify") {
     if (po.file.empty() && po.args.empty()) {
       std::cerr << "Nothing to do. Pass a php file to compile.\n";
       return 1;
     }
-    auto const file = po.file.empty() ? po.args[0].c_str() : po.file.c_str();
+
+    auto const file = [] (std::string file) -> std::string {
+      if (!FileUtil::isAbsolutePath(file)) {
+        return SourceRootInfo::GetCurrentSourceRoot() + std::move(file);
+      }
+      return file;
+    }(po.file.empty() ? po.args[0] : po.file);
+
     RuntimeOption::RepoCommit = false; // avoid initializing a repo
 
     std::fstream fs(file, std::ios::in);
@@ -1693,11 +1713,19 @@ static int execute_program_impl(int argc, char** argv) {
     // Initialize compiler state
     compile_file(0, 0, MD5(), 0);
 
-    RuntimeOption::EvalDumpHhas = true;
+    if (po.mode == "dumphhas")  RuntimeOption::EvalDumpHhas = true;
+    else RuntimeOption::EvalVerifyOnly = true;
     SystemLib::s_inited = true;
 
+    auto compiled = compile_file(str.c_str(), str.size(), md5, file.c_str(),
+                                 nullptr);
+
+    if (po.mode == "verify") {
+      return 0;
+    }
+
     // This will dump the hhas for file as EvalDumpHhas was set
-    if (!compile_file(str.c_str(), str.size(), md5, file, nullptr)) {
+    if (!compiled) {
       std::cerr << "Unable to compile \"" << file << "\"\n";
       return 1;
     }
@@ -1760,7 +1788,7 @@ static int execute_program_impl(int argc, char** argv) {
     // HackC initialization should happen immediately prior to LightProcess
     // configuration as it will create a private delegate process to deal with
     // hackc instances.
-    hackc_init();
+    compilers_init();
   }
 #endif
 
@@ -2061,10 +2089,12 @@ static void update_constants_and_options() {
   // have been now bound to their proper value.
   IniSettingMap ini = IniSettingMap();
   for (auto& filename: s_config_files) {
+    SuppressHackArrCompatNotices shacn;
     Config::ParseIniFile(filename, ini, true);
   }
   // Reset the INI settings from the CLI.
   for (auto& iniStr: s_ini_strings) {
+    SuppressHackArrCompatNotices shacn;
     Config::ParseIniString(iniStr, ini, true);
   }
 
@@ -2307,6 +2337,11 @@ void hphp_session_init() {
   s_sessionInitialized = true;
   ExtensionRegistry::requestInit();
 
+  // Sample function calls for this request
+  if (RID().logFunctionCalls()) {
+    EventHook::Enable();
+  }
+
   auto const pme_freq = RuntimeOption::EvalPerfMemEventRequestFreq;
   if (pme_freq > 0 && folly::Random::rand32(pme_freq) == 0) {
     // Enable memory access sampling for this request.
@@ -2522,7 +2557,7 @@ void hphp_process_exit() noexcept {
   LOG_AND_IGNORE(Eval::Debugger::Stop())
   LOG_AND_IGNORE(g_context.destroy())
   LOG_AND_IGNORE(ExtensionRegistry::moduleShutdown())
-  LOG_AND_IGNORE(hackc_shutdown())
+  LOG_AND_IGNORE(compilers_shutdown())
 #ifndef _MSC_VER
   LOG_AND_IGNORE(LightProcess::Close())
 #endif

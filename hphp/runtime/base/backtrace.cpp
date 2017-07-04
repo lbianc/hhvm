@@ -27,6 +27,8 @@
 #include "hphp/runtime/vm/vm-regs.h"
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/unique-stubs.h"
+#include "hphp/runtime/vm/treadmill.h"
+#include "hphp/util/concurrent-scalable-cache.h"
 #include "hphp/util/struct-log.h"
 
 #include <folly/small_vector.h>
@@ -146,6 +148,10 @@ static ActRec* getActRecFromWaitHandleWrapper(
 }
 
 Array createBacktrace(const BacktraceArgs& btArgs) {
+  if (btArgs.isCompact()) {
+    return createCompactBacktrace()->extract();
+  }
+
   auto bt = Array::Create();
   folly::small_vector<c_WaitableWaitHandle*, 64> visitedWHs;
 
@@ -303,13 +309,13 @@ Array createBacktrace(const BacktraceArgs& btArgs) {
 
     auto const withNames = btArgs.m_withArgNames;
     auto const withValues = btArgs.m_withArgValues;
-    if (!btArgs.m_withArgNames && !btArgs.m_withArgValues) {
+    if ((!btArgs.m_withArgNames && !btArgs.m_withArgValues) ||
+        !RuntimeOption::EnableArgsInBacktraces) {
       // do nothing
     } else if (funcname.same(s_include)) {
       auto filepath = const_cast<StringData*>(curUnit->filepath());
       frame.set(s_args, make_packed_array(filepath));
-    } else if (!RuntimeOption::EnableArgsInBacktraces || isReturning) {
-      // Provide an empty 'args' array to be consistent with hphpc.
+    } else if (isReturning) {
       frame.set(s_args, empty_array());
     } else {
       auto args = Array::Create();
@@ -390,41 +396,46 @@ Array createBacktrace(const BacktraceArgs& btArgs) {
 }
 
 void addBacktraceToStructLog(const Array& bt, StructuredLogEntry& cols) {
+  std::set<std::string> strings;
   std::vector<folly::StringPiece> files;
   std::vector<folly::StringPiece> functions;
   std::vector<folly::StringPiece> lines;
+  auto addString = [&] (std::string&& s) -> folly::StringPiece {
+    return *strings.insert(std::move(s)).first;
+  };
+  auto addVariant = [&] (const Variant& v) -> folly::StringPiece {
+    if (v.isString()) return v.toCStrRef().slice();
+    return addString(v.toString().toCppString());
+  };
   for (ArrayIter it(bt.get()); it; ++it) {
     Array frame = it.second().toArray();
-    files.emplace_back(frame[s_file].toString().data());
+    files.emplace_back(addVariant(frame[s_file]));
     if (frame.exists(s_class)) {
       functions.emplace_back(
-        folly::sformat("{}{}{}",
-          frame[s_class].toString().data(),
-          frame[s_type].toString().data(),
-          frame[s_function].toString().data()
-          )
-        );
+        addString(folly::sformat("{}{}{}",
+                                 frame[s_class].toString().data(),
+                                 frame[s_type].toString().data(),
+                                 frame[s_function].toString().data()
+                                )
+                 ));
     } else {
-      functions.emplace_back(frame[s_function].toString().data());
+      functions.emplace_back(addVariant(frame[s_function]));
     }
-    lines.emplace_back(frame[s_line].toString().data());
+    lines.emplace_back(addVariant(frame[s_line]));
   }
   cols.setVec("php_files", files);
   cols.setVec("php_functions", functions);
   cols.setVec("php_lines", lines);
 }
 
-int64_t createBacktraceHash() {
+template<class L>
+static void walkStack(L func) {
   VMRegAnchor _;
   folly::small_vector<c_WaitableWaitHandle*, 64> visitedWHs;
   ActRec* fp = vmfp();
 
-  // Settings constants before looping
-  int64_t hash = 0x9e3779b9;
-  Unit* prev_unit = nullptr;
-
   // If there are no VM frames, we're done.
-  if (!fp || !rds::header()) return hash;
+  if (!fp || !rds::header()) return;
 
   // Handle the subsequent VM frames.
   Offset prevPc = 0;
@@ -433,6 +444,16 @@ int64_t createBacktraceHash() {
     // Do not capture frame for HPHP only functions.
     if (fp->func()->isNoInjection()) continue;
 
+    func(fp, prevPc);
+  }
+}
+
+int64_t createBacktraceHash() {
+  // Settings constants before looping
+  int64_t hash = 0x9e3779b9;
+  Unit* prev_unit = nullptr;
+
+  walkStack([&] (ActRec* fp, Offset) {
     auto const curFunc = fp->func();
     auto const curUnit = curFunc->unit();
 
@@ -452,9 +473,160 @@ int64_t createBacktraceHash() {
     // implementation (boost::hash_combine)
     auto funchash = curFunc->fullName()->hash();
     hash ^= funchash + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-  }
+  });
 
   return hash;
+}
+
+req::ptr<CompactTrace> createCompactBacktrace() {
+  auto ret = req::make<CompactTrace>();
+  walkStack([&] (ActRec* fp, Offset prevPc) { ret->insert(fp, prevPc); });
+  return ret;
+}
+
+namespace {
+
+struct CTKHasher final {
+  int64_t hash(const CompactTrace::Key& k) const { return k.m_hash; }
+  bool equal(const CompactTrace::Key& k1, const CompactTrace::Key& k2) const;
+};
+
+struct CacheDeleter final {
+  void operator()(ArrayData* ad) const {
+    if (!ad->isUncounted()) return;
+    Treadmill::enqueue([ad] {
+      PackedArray::ReleaseUncounted(ad, 0);
+    });
+  }
+};
+
+using CachedArray = std::shared_ptr<ArrayData>;
+using Cache = ConcurrentScalableCache<CompactTrace::Key,CachedArray,CTKHasher>;
+Cache s_cache(1024);
+
+bool CTKHasher::equal(
+  const CompactTrace::Key& k1,
+  const CompactTrace::Key& k2
+) const {
+  if (k1.m_hash != k2.m_hash || k1.m_frames.size() != k2.m_frames.size()) {
+    return false;
+  }
+  for (int i = 0; i < k1.m_frames.size(); ++i) {
+    auto& a = k1.m_frames[i];
+    auto& b = k2.m_frames[i];
+    if (a.func != b.func || a.prevPcAndHasThis != b.prevPcAndHasThis) {
+      return false;
+    }
+  }
+  return true;
+}
+}
+
+IMPLEMENT_RESOURCE_ALLOCATION(CompactTrace)
+
+void CompactTrace::Key::insert(const ActRec* fp, int32_t prevPc) {
+  auto const funcHash = use_lowptr
+    ? (uintptr_t)fp->func() << 32
+    : (uintptr_t)fp->func();
+  m_hash ^= funcHash + 0x9e3779b9 + (m_hash << 6) + (m_hash >> 2);
+  m_hash ^= prevPc + 0x9e3779b9 + (m_hash << 6) + (m_hash >> 2);
+
+  auto const curUnit = fp->func()->unit();
+  auto const curOp = curUnit->getOp(prevPc);
+  auto const isReturning =
+    curOp == Op::RetC || curOp == Op::RetV ||
+    curOp == Op::CreateCont || curOp == Op::Await ||
+    fp->localsDecRefd();
+  m_frames.push_back(Frame{
+    fp->func(),
+    prevPc,
+    !isReturning && arGetContextClass(fp) && fp->hasThis()
+  });
+}
+
+Array CompactTrace::Key::extract() const {
+  PackedArrayInit aInit(m_frames.size(), CheckAllocation{});
+  for (int idx = 0; idx < m_frames.size(); ++idx) {
+    auto const prev = idx < m_frames.size() - 1 ? &m_frames[idx + 1] : nullptr;
+    ArrayInit frame(7, ArrayInit::Map{});
+    if (prev && !prev->func->isBuiltin()) {
+      auto const prevUnit = prev->func->unit();
+      auto prevFile = prevUnit->filepath();
+      if (prev->func->originalFilename()) {
+        prevFile = prev->func->originalFilename();
+      }
+
+      auto const prevPc = prev->prevPc;
+      auto const opAtPrevPc = prevUnit->getOp(prevPc);
+      Offset pcAdjust = 0;
+      if (opAtPrevPc == Op::PopR ||
+          opAtPrevPc == Op::UnboxR ||
+          opAtPrevPc == Op::UnboxRNop) {
+        pcAdjust = 1;
+      }
+      frame.set(s_file, StrNR(prevFile).asString());
+      frame.set(s_line, prevUnit->getLineNumber(prevPc - pcAdjust));
+    }
+
+    auto const f = m_frames[idx].func;
+
+    // Check for include.
+    String funcname{const_cast<StringData*>(f->displayName())};
+    if (f->isClosureBody()) {
+      // Strip the file hash from the closure name.
+      String fullName{const_cast<StringData*>(f->baseCls()->name())};
+      funcname = fullName.substr(0, fullName.find(';'));
+    }
+
+    // Check for pseudomain.
+    if (funcname.empty()) {
+      if (!prev) continue;
+      else funcname = s_include;
+    }
+
+    frame.set(s_function, funcname);
+
+    if (!funcname.same(s_include)) {
+      // Closures have an m_this but they aren't in object context.
+      auto ctx = m_frames[idx].func->cls();
+      if (ctx != nullptr && !f->isClosureBody()) {
+        frame.set(s_class, Variant{const_cast<StringData*>(ctx->name())});
+        if (m_frames[idx].hasThis) {
+          frame.set(s_type, s_arrow);
+        } else {
+          frame.set(s_type, s_double_colon);
+        }
+      }
+    } else {
+      auto filepath = const_cast<StringData*>(f->unit()->filepath());
+      frame.set(s_args, make_packed_array(filepath));
+    }
+
+    aInit.append(frame.toVariant());
+  }
+
+  return aInit.toArray();
+}
+
+Array CompactTrace::extract() const {
+  if (m_key.m_frames.size() == 1) return empty_array();
+
+  Cache::ConstAccessor acc;
+  if (s_cache.find(acc, m_key)) {
+    return Array(acc.get()->get());
+  }
+
+  auto arr = m_key.extract();
+  auto ins = CachedArray(
+    arr.get()->empty()
+      ? staticEmptyArray()
+      : PackedArray::MakeUncounted(arr.get(), 0),
+    CacheDeleter()
+  );
+  if (!s_cache.insert(m_key, ins)) {
+    return arr;
+  }
+  return Array(ins.get());
 }
 
 } // HPHP

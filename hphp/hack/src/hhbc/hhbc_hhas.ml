@@ -508,13 +508,16 @@ let string_of_misc instruction =
     | ClsRefName id -> sep ["ClsRefName"; string_of_classref id]
     | VerifyParamType id -> sep ["VerifyParamType"; string_of_param_id id]
     | VerifyRetTypeC -> "VerifyRetTypeC"
+    | VerifyRetTypeV -> "VerifyRetTypeV"
     | Catch -> "Catch"
     | CheckThis -> "CheckThis"
     | IsUninit -> "IsUninit"
     | CGetCUNop -> "CGetCUNop"
     | UGetCUNop -> "UGetCUNop"
-    | StaticLoc (local, text) ->
-      sep ["StaticLoc"; string_of_local_id local; "\"" ^ text ^ "\""]
+    | StaticLocCheck (local, text) ->
+      sep ["StaticLocCheck"; string_of_local_id local; "\"" ^ text ^ "\""]
+    | StaticLocDef (local, text) ->
+      sep ["StaticLocDef"; string_of_local_id local; "\"" ^ text ^ "\""]
     | StaticLocInit (local, text) ->
       sep ["StaticLocInit"; string_of_local_id local; "\"" ^ text ^ "\""]
     | MemoGet (count, Local.Unnamed first, local_count) ->
@@ -536,7 +539,8 @@ let string_of_misc instruction =
     | InitThisLoc id -> sep ["InitThisLoc"; string_of_local_id id]
     | AKExists -> "AKExists"
     | OODeclExists ck -> sep ["OODeclExists"; string_of_class_kind ck]
-    | Silence (local, op) -> sep ["Silence"; string_of_local_id local; string_of_op_silence op]
+    | Silence (local, op) ->
+      sep ["Silence"; string_of_local_id local; string_of_op_silence op]
     | _ -> failwith "instruct_misc Not Implemented"
 
 let iterator_instruction_name_prefix instruction =
@@ -732,15 +736,15 @@ let string_of_type_info_option tio =
 
 let rec string_of_afield = function
   | A.AFvalue e ->
-    " " ^ string_of_param_default_value e
+    string_of_param_default_value e
   | A.AFkvalue (k, v) ->
-    " " ^ string_of_param_default_value k ^
+    string_of_param_default_value k ^
     " => " ^ string_of_param_default_value v
 
 and string_of_afield_list afl =
   if List.length afl = 0
   then ""
-  else String.concat "," @@ List.map string_of_afield afl
+  else String.concat ", " @@ List.map string_of_afield afl
 
 and shape_field_name_to_expr = function
   | A.SFlit (pos, s)
@@ -770,6 +774,7 @@ and string_of_bop = function
   | A.Gtgt -> ">>"
   | A.Percent -> "%"
   | A.Xor -> "^"
+  | A.LogXor -> "xor"
   | A.Diff -> "!="
   | A.Diff2 -> "!=="
 
@@ -801,12 +806,16 @@ and string_of_import_flavor = function
   | A.IncludeOnce -> "include_once"
   | A.RequireOnce -> "require_once"
 
+and string_of_is_variadic b =
+  if b then "..." else ""
+and string_of_is_reference b =
+  if b then "&" else ""
+
 and string_of_fun f use_list =
   let string_of_args p =
     let hint =
       Option.value_map p.A.param_hint ~default:"" ~f:(string_of_hint ~ns:true)
     in
-    let is_ref = if p.A.param_is_reference then "&" else "" in
     let name = snd @@ p.A.param_id in
     let default_val =
       Option.value_map
@@ -814,7 +823,8 @@ and string_of_fun f use_list =
         ~default:""
         ~f:(fun e -> " = " ^ (string_of_param_default_value e))
     in
-    hint ^ " " ^ is_ref ^ name ^ default_val
+      string_of_is_variadic p.A.param_is_variadic ^ hint ^ " "
+      ^ string_of_is_reference p.A.param_is_reference ^ name ^ default_val
   in
   let args = String.concat ", " @@ List.map string_of_args f.A.f_params in
   let use_list_helper ((_, id), b) = (if b then "&" else "") ^ id in
@@ -943,7 +953,7 @@ and string_of_param_default_value expr =
     in
     let suffix = String.make n '}' in
     prefix ^ s ^ suffix
-  | A.Unsafeexpr e -> string_of_param_default_value e
+  | A.Unsafeexpr e | A.BracedExpr e -> string_of_param_default_value e
   | A.Cast (h, e) ->
     let h = string_of_hint ~ns: false h in
     let e = string_of_param_default_value e in
@@ -986,8 +996,9 @@ let string_of_param p =
   let param_type_info = Hhas_param.type_info p in
   let param_name = Hhas_param.name p in
   let param_default_value = Hhas_param.default_value p in
-  string_of_type_info_option param_type_info
-  ^ (if Hhas_param.is_reference p then "&" else "")
+    string_of_is_variadic (Hhas_param.is_variadic p)
+  ^ string_of_type_info_option param_type_info
+  ^ string_of_is_reference (Hhas_param.is_reference p)
   ^ param_name
   ^ string_of_param_default_value_option param_default_value
 
@@ -1015,18 +1026,35 @@ let add_num_iters buf indent num_iters =
   then add_indented_line buf indent
     (Printf.sprintf ".numiters %d;" num_iters)
 
+let add_static_default_value_option buf indent label opt_expr =
+  let val_str = match opt_expr with
+  | None ->
+    " = \"\"\"null\"\"\""
+  | Some expr ->
+    " = \"\"\""
+    ^ (string_of_param_default_value expr)
+    ^ "\"\"\"" in
+  add_indented_line buf indent (".static " ^ label ^ val_str ^ ";")
+
+let add_static_values buf indent lst =
+  Core.List.iter lst
+    (fun (label, e) -> add_static_default_value_option buf indent label e)
+
 let add_body buf indent body =
   add_num_iters buf indent (Hhas_body.num_iters body);
   if Hhas_body.is_memoize_wrapper body
   then add_indented_line buf indent ".ismemoizewrapper;";
   add_num_cls_ref_slots buf indent (Hhas_body.num_cls_ref_slots body);
   add_decl_vars buf indent (Hhas_body.decl_vars body);
+  add_static_values buf indent (Hhas_body.static_inits body);
   add_instruction_list buf indent
     (Instruction_sequence.instr_seq_to_list (Hhas_body.instrs body))
 
 let function_attributes f =
   let user_attrs = Hhas_function.attributes f in
   let attrs = Emit_adata.attributes_to_strings user_attrs in
+  let attrs =
+    if not (Hhas_function.is_top f) then "nontop" :: attrs else attrs in
   let text = String.concat " " attrs in
   if text = "" then "" else "[" ^ text ^ "] "
 
@@ -1089,6 +1117,7 @@ let add_method_def buf method_def =
 let class_special_attributes c =
   let user_attrs = Hhas_class.attributes c in
   let attrs = Emit_adata.attributes_to_strings user_attrs in
+  let attrs = if not (Hhas_class.is_top c) then "nontop" :: attrs else attrs in
   let attrs = if Hhas_class.is_closure_class c
               then "no_override" :: "unique" :: attrs
               else attrs in
@@ -1138,9 +1167,14 @@ let property_attributes p =
   let text = if text = "" then "" else "[" ^ text ^ "] " in
   text
 
+let property_type_info p =
+  let tinfo = Hhas_property.type_info p in
+  (string_of_type_info ~is_enum:false tinfo) ^ " "
+
 let add_property class_def buf property =
   B.add_string buf "\n  .property ";
   B.add_string buf (property_attributes property);
+  B.add_string buf (property_type_info property);
   B.add_string buf (Hhbc_id.Prop.to_raw_string (Hhas_property.name property));
   B.add_string buf " =\n    ";
   let initial_value = Hhas_property.initial_value property in
@@ -1162,23 +1196,37 @@ let add_constant buf c =
   let value = Hhas_constant.value c in
   B.add_string buf "\n  .const ";
   B.add_string buf name;
-  B.add_string buf " = ";
   begin match value with
-  | Typed_value.Uninit -> B.add_string buf "uninit"
-  | _ -> B.add_string buf "\"\"\"";
-  SS.add_string_from_seq buf @@ Emit_adata.adata_to_string_seq value;
-  B.add_string buf "\"\"\""
-  end;
+  | Some Typed_value.Uninit ->
+    B.add_string buf " = uninit"
+  | Some value ->
+    B.add_string buf " = \"\"\"";
+    SS.add_string_from_seq buf @@ Emit_adata.adata_to_string_seq value;
+    B.add_string buf "\"\"\""
+  | None -> ()
+    end;
   B.add_string buf ";"
 
 let add_type_constant buf c =
   B.add_string buf "\n  .const ";
   B.add_string buf (Hhas_type_constant.name c);
   let initializer_t = Hhas_type_constant.initializer_t c in
-  B.add_string buf " isType = \"\"\"";
-  B.add_string buf @@ SS.seq_to_string @@
-    Emit_adata.adata_to_string_seq initializer_t;
-  B.add_string buf "\"\"\";"
+  B.add_string buf " isType";
+  match initializer_t with
+  | Some init ->
+    B.add_string buf " = \"\"\"";
+    B.add_string buf @@ SS.seq_to_string @@
+      Emit_adata.adata_to_string_seq init;
+    B.add_string buf "\"\"\";"
+  | None -> B.add_string buf ";"
+
+let add_requirement buf r =
+  B.add_string buf "\n  .require ";
+  match r with
+  | (Ast.MustExtend, name) ->
+      B.add_string buf ("extends <" ^ name ^ ">;")
+  | (Ast.MustImplement, name) ->
+      B.add_string buf ("implements <" ^ name ^ ">;")
 
 let add_enum_ty buf c =
   match Hhas_class.enum_type c with
@@ -1234,6 +1282,7 @@ let add_class_def buf class_def =
   add_enum_ty buf class_def;
   List.iter (add_constant buf) (Hhas_class.constants class_def);
   List.iter (add_type_constant buf) (Hhas_class.type_constants class_def);
+  List.iter (add_requirement buf) (Hhas_class.requirements class_def);
   List.iter (add_property class_def buf) (Hhas_class.properties class_def);
   List.iter (add_method_def buf) (Hhas_class.methods class_def);
   (* TODO: other members *)
@@ -1259,9 +1308,18 @@ let add_top_level buf body =
 let add_typedef buf typedef =
   let name = Hhas_typedef.name typedef in
   let type_info = Hhas_typedef.type_info typedef in
+  let opt_ts = Hhas_typedef.type_structure typedef in
   B.add_string buf "\n.alias ";
   B.add_string buf (Hhbc_id.Class.to_raw_string name);
-  B.add_string buf (" = " ^ string_of_typedef_info type_info ^ ";")
+  B.add_string buf (" = " ^ string_of_typedef_info type_info);
+  match opt_ts with
+  | Some ts ->
+    B.add_string buf " \"\"\"";
+    B.add_string buf @@ SS.seq_to_string @@
+      Emit_adata.adata_to_string_seq ts;
+    B.add_string buf "\"\"\";"
+  | None ->
+    B.add_string buf ";"
 
 let add_program buf hhas_prog =
   B.add_string buf "#starts here\n";

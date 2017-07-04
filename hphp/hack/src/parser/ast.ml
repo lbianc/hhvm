@@ -209,6 +209,7 @@ and fun_param = {
 and fun_ = {
   f_mode            : FileInfo.mode;
   f_tparams         : tparam list;
+  f_constrs         : (hint * constraint_kind * hint) list;
   f_ret             : hint option;
   f_ret_by_ref      : bool;
   f_name            : id;
@@ -276,6 +277,7 @@ and stmt =
   | Try of block * catch list * block
   | Def_inline of def
   | Noop
+  | Markup of pstring * expr option
 
 and as_expr =
   | As_v of expr
@@ -328,6 +330,7 @@ and expr_ =
   | Eif of expr * expr option * expr
   | NullCoalesce of expr * expr
   | InstanceOf of expr * expr
+  | BracedExpr of expr
   | New of expr * expr list * expr list
   (* Traditional PHP-style closure with a use list. Each use element is
     a name and a bool indicating if its a reference or value *)

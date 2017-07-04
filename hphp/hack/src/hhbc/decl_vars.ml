@@ -42,7 +42,7 @@ class declvar_visitor = object(this)
       ~f:(fun acc (_, e) ->
         match e with
         | (Ast.Id id | Ast.Lvarvar(_, id)) -> add_local ~bareparam:false acc id
-        | Ast.Unsafeexpr e -> this#on_expr acc e
+        | Ast.BracedExpr e -> this#on_expr acc e
         | _ -> acc)
   method! on_foreach acc e pos iterator block =
     let acc =
@@ -71,6 +71,12 @@ class declvar_visitor = object(this)
     List.fold_left use_list ~init:acc
       ~f:(fun acc (x, _isref) -> add_local ~bareparam:false acc x)
   method! on_call acc e el1 el2 =
+    let acc =
+      match e with
+      | (_, Ast.Id(p, "HH\\set_frame_metadata"))
+      | (_, Ast.Id(p, "\\HH\\set_frame_metadata")) ->
+        add_local ~bareparam:false acc (p,"$86metadata")
+      | _ -> acc in
     let call_isset =
       match e with (_, Ast.Id(_, "isset")) -> true | _ -> false in
     let on_arg acc e =
@@ -101,7 +107,14 @@ end
 (* See decl_vars.mli for details *)
 let from_ast ~is_closure_body ~has_this ~params b =
   let visitor = new declvar_visitor in
-  let needs_local_this, decl_vars = visitor#on_program (false, ULS.empty) b in
+  let needs_local_this, decl_vars =
+    (* pull variables used in default values *)
+    let acc = List.fold_left params ~init:(false, ULS.empty) ~f:(
+      fun acc p -> Option.fold (Hhas_param.default_value p) ~init:acc ~f:(
+        fun acc (_, v) -> visitor#on_expr acc v)
+      )
+    in
+    visitor#on_program acc b in
   let param_names =
     List.fold_left
       params

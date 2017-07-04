@@ -604,6 +604,19 @@ module WithStatementAndDeclAndTypeParser
       parser, function_call
     end with Cancel_attempt -> parse_remaining_expression parser term
 
+  (* checks if t is a prefix unary expression where operator has expected kind
+     and and operand matched predicate *)
+  and check_prefix_unary_expression t expected_kind operand_predicate =
+    match syntax t with
+    | PrefixUnaryExpression {
+        prefix_unary_operator = {
+          syntax = Token t
+        ; _ };
+        prefix_unary_operand
+      } when Token.kind t = expected_kind ->
+        operand_predicate prefix_unary_operand
+    | _ -> false
+
   (* Checks if given expression is a PHP variable.
   per PHP grammar:
   https://github.com/php/php-langspec/blob/master/spec/10-expressions.md#grammar-variable
@@ -612,18 +625,13 @@ module WithStatementAndDeclAndTypeParser
     is_variable_expression t ||
     is_subscript_expression t ||
     is_member_selection_expression t ||
-    is_scope_resolution_expression t
+    is_scope_resolution_expression t ||
+    check_prefix_unary_expression t Dollar can_be_used_as_lvalue
 
   (* checks if expression is a valid right hand side in by-ref assignment
    which is '&'PHP variable *)
   and is_byref_assignment_source t =
-    match syntax t with
-    | PrefixUnaryExpression {
-        prefix_unary_operator = { syntax = Token t; _ };
-        prefix_unary_operand = operand
-      } ->
-      Token.kind t = Ampersand && can_be_used_as_lvalue operand
-    | _ -> false
+    check_prefix_unary_expression t Ampersand can_be_used_as_lvalue
 
   (*detects if left_term and operator can be treated as a beginning of
    assignment (respecting the precedence of operator on the left of
@@ -871,7 +879,10 @@ TODO: This will need to be fixed to allow situations where the qualified name
         new  class-type-designator  (  argument-expression-list-opt  )
     *)
     (* PHP allows the entire expression list to be omitted. *)
-    (* TODO: Give an error in a later pass if it is omitted in Hack. *)
+    (* TODO: SPEC ERROR: PHP allows the entire expression list to be omitted,
+     * but Hack disallows this behavior. (See SyntaxError.error2038.) However,
+     * the Hack spec still states that the argument expression list is optional.
+     * Update the spec to say that the argument expression list is required. *)
     let (parser, new_token) = assert_token parser New in
     let (parser, designator) = parse_designator parser in
     let (parser, left, args, right) =
@@ -923,7 +934,10 @@ TODO: This will need to be fixed to allow situations where the qualified name
       print expr
     *)
     let (parser, token) = assert_token parser Print in
-    let (parser, expr) = parse_expression parser in
+    let (parser, expr) =
+      with_numeric_precedence parser Operator.precedence_for_print
+        parse_expression
+    in
     let syntax = make_print_expression token expr in
     (parser, syntax)
 
@@ -1133,6 +1147,9 @@ TODO: This will need to be fixed to allow situations where the qualified name
     | StarStar
     | StarStarEqual -> false
     (* Misc *)
+    | Markup
+    | LessThanQuestion
+    | QuestionGreaterThan
     | ErrorToken
     | TokenKind.EndOfFile -> false
     (* TODO: Sort out rules for interactions between casts and XHP. *)
@@ -1655,9 +1672,6 @@ TODO: This will need to be fixed to allow situations where the qualified name
       must be an expression that designates a vector-like array or
       an instance of the class types Vector, ImmVector, or Pair
       (the "source").
-
-      TODO: Produce an error later if the list is not on the left side of
-      an assignment.
 
       TODO: Produce an error later if the expressions in the list destructuring
       are not lvalues.

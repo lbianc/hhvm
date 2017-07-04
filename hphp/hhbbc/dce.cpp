@@ -184,28 +184,22 @@ uint32_t numPush(const Bytecode& bc) {
   return bc.numPush();
 }
 
-// Returns whether decrefing a type could run a destructor.
-bool couldRunDestructor(const Type& t) {
-  // We could check for specialized objects to see if they don't
-  // declare a user-defined destructor, but currently don't.
-  return
-    t.couldBe(TObj) ||
-    t.couldBe(TRef) ||
-    t.couldBe(TCArrN) ||
-    t.couldBe(TCVecN) ||
-    t.couldBe(TCDictN);
-}
-
 // Returns whether a set on something containing type t could have
 // side-effects (running destuctors, or modifying arbitrary things via
 // a Ref).
 bool setCouldHaveSideEffects(const Type& t) {
   return
-    t.couldBe(TObj) ||
     t.couldBe(TRef) ||
+    could_run_destructor(t);
+}
+
+bool couldBeCowType(const Type& t) {
+  return
+    t.couldBe(TCStr) ||
     t.couldBe(TCArrN) ||
     t.couldBe(TCVecN) ||
-    t.couldBe(TCDictN);
+    t.couldBe(TCDictN) ||
+    t.couldBe(TCKeysetN);
 }
 
 // Some reads could raise warnings and run arbitrary code.
@@ -573,7 +567,7 @@ bool popCouldRunDestructor(Env& env, uint32_t i = 0) {
   // reference, so popping the stack won't run any destructors.
   auto const& s = env.stateBefore.stack;
   auto const& e = s[s.size() - i - 1];
-  return e.equivLocal == NoLocalId && couldRunDestructor(e.type);
+  return e.equivLocal == NoLocalId && could_run_destructor(e.type);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1183,10 +1177,22 @@ void dce(Env& env, const bc::Dup&) {
 }
 
 void dce(Env& env, const bc::CGetL& op) {
-  stack_ops(env, [&] (const UseInfo& ui) {
+  stack_ops(env, [&] (UseInfo& ui) {
       scheduleGenLoc(env, op.loc1);
       if (allUnused(ui) && !readCouldHaveSideEffects(locRaw(env, op.loc1))) {
         return PushFlags::MarkUnused;
+      }
+      if (!isLocLive(env, op.loc1) &&
+          couldBeCowType(locRaw(env, op.loc1)) &&
+          !setCouldHaveSideEffects(locRaw(env, op.loc1)) &&
+          !readCouldHaveSideEffects(locRaw(env, op.loc1))) {
+        markUisLive(env, isLinked(ui), ui);
+        addLocGen(env, op.loc1);
+        CompactVector<Bytecode> bcs;
+        bcs.emplace_back(bc::PushL { op.loc1 });
+        env.dceState.replaceMap.emplace(env.id, std::move(bcs));
+        ui.actions[env.id] = DceAction::Replace;
+        return PushFlags::MarkDead;
       }
       return PushFlags::MarkLive;
     });
@@ -1239,6 +1245,11 @@ void dce(Env& env, const bc::NewMixedArray&) {
 
 void dce(Env& env, const bc::AddElemC& op) {
   stack_ops(env, [&] (UseInfo& ui) {
+      // If the set might throw it needs to be kept.
+      if (env.flags.wasPEI) {
+        return PushFlags::MarkLive;
+      }
+
       if (allUnused(ui)) {
         return PushFlags::MarkUnused;
       }
@@ -1287,7 +1298,7 @@ void dce(Env& env, const bc::AddElemC& op) {
           bcs.emplace_back(bc::NewStructArray { get_string_keys(arrPost) });
         } else if (cat.cat == Type::ArrayCat::Packed) {
           bcs.emplace_back(
-            bc::NewPackedArray { static_cast<int32_t>(*postSize) }
+            bc::NewPackedArray { static_cast<uint32_t>(*postSize) }
           );
         } else {
           return PushFlags::MarkLive;

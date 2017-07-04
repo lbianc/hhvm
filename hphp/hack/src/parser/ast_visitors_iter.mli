@@ -38,6 +38,7 @@ class virtual ['b] iter :
                    Ast_visitors_ancestors.expr ->
                    Ast_visitors_ancestors.expr -> unit;
         on_Block : 'c -> Ast_visitors_ancestors.block -> unit;
+        on_BracedExpr : 'c -> Ast_visitors_ancestors.expr -> unit;
         on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> unit;
         on_CA_enum : 'c -> string list -> unit;
         on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> unit;
@@ -133,6 +134,9 @@ class virtual ['b] iter :
         on_Fun : 'c -> Ast_visitors_ancestors.fun_ -> unit;
         on_GotoLabel : 'c -> Ast_visitors_ancestors.pstring -> unit;
         on_Goto : 'c -> Ast_visitors_ancestors.pstring -> unit;
+        on_Markup : 'c ->
+                    Ast_visitors_ancestors.pstring ->
+                    Ast_visitors_ancestors.expr option -> unit;
         on_Gt : 'c -> unit; on_Gte : 'c -> unit; on_Gtgt : 'c -> unit;
         on_Haccess : 'c ->
                      Ast_visitors_ancestors.id ->
@@ -275,6 +279,7 @@ class virtual ['b] iter :
                  Ast_visitors_ancestors.id ->
                  (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr)
                  list -> Ast_visitors_ancestors.expr list -> unit;
+        on_LogXor : 'c -> unit;
         on_Xor : 'c -> unit;
         on_Yield : 'c -> Ast_visitors_ancestors.afield -> unit;
         on_Yield_break : 'c -> unit;
@@ -377,6 +382,7 @@ class virtual ['b] iter :
       Ast_visitors_ancestors.bop ->
       Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr -> unit
     method on_Block : 'c -> Ast_visitors_ancestors.block -> unit
+    method on_BracedExpr : 'c -> Ast_visitors_ancestors.expr -> unit
     method on_Break : 'c -> Ast_visitors_ancestors.pos_t -> int option -> unit
     method on_CA_enum : 'c -> string list -> unit
     method on_CA_field : 'c -> Ast_visitors_ancestors.ca_field -> unit
@@ -488,6 +494,8 @@ class virtual ['b] iter :
       Ast_visitors_ancestors.pos_t option ->
       Ast_visitors_ancestors.as_expr -> Ast_visitors_ancestors.block -> unit
     method on_Fun : 'c -> Ast_visitors_ancestors.fun_ -> unit
+    method on_GotoLabel : 'c -> Ast_visitors_ancestors.pstring -> unit
+    method on_Goto : 'c -> Ast_visitors_ancestors.pstring -> unit
     method on_Gt : 'c -> unit
     method on_Gte : 'c -> unit
     method on_Gtgt : 'c -> unit
@@ -660,6 +668,7 @@ class virtual ['b] iter :
       Ast_visitors_ancestors.id ->
       (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr) list ->
       Ast_visitors_ancestors.expr list -> unit
+    method on_LogXor : 'c -> unit
     method on_Xor : 'c -> unit
     method on_Yield : 'c -> Ast_visitors_ancestors.afield -> unit
     method on_Yield_break : 'c -> unit

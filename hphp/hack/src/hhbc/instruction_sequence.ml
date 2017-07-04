@@ -11,6 +11,8 @@
 open Core
 open Hhbc_ast
 
+module A = Ast
+
 (* The various from_X functions below take some kind of AST (expression,
  * statement, etc.) and produce what is logically a sequence of instructions.
  * This could simply be represented by a list, but then we would need to
@@ -28,6 +30,7 @@ let instr x = Instr_list [x]
 let instrs x = Instr_list x
 let gather x = Instr_concat x
 let empty = Instr_list []
+let optional b instrs = if b then gather instrs else empty
 
 let class_ref_rewrite_sentinel = -100
 
@@ -64,6 +67,7 @@ let instr_false = instr (ILitConst False)
 let instr_true = instr (ILitConst True)
 let instr_eq = instr (IOp Eq)
 let instr_gt = instr (IOp Gt)
+let instr_print = instr (IOp Print)
 let instr_retc = instr (IContFlow RetC)
 let instr_retv = instr (IContFlow RetV)
 let instr_null = instr (ILitConst Null)
@@ -90,6 +94,7 @@ let instr_issetn = instr (IIsset IssetN)
 let instr_issets = instr (IIsset (IssetS class_ref_rewrite_sentinel))
 let instr_emptys = instr (IIsset (EmptyS class_ref_rewrite_sentinel))
 let instr_emptyn = instr (IIsset EmptyN)
+let instr_emptyg = instr (IIsset EmptyG)
 let instr_emptyl local = instr (IIsset (EmptyL local))
 let instr_cgets =
   instr (IGet (CGetS class_ref_rewrite_sentinel))
@@ -103,6 +108,7 @@ let instr_vgetl local = instr (IGet (VGetL local))
 let instr_vgetn = instr (IGet VGetN)
 let instr_cgetl2 local = instr (IGet (CGetL2 local))
 let instr_cgetquietl local = instr (IGet (CGetQuietL local))
+let instr_cgetquietn = instr (IGet CGetQuietN)
 let instr_cgetn_seq n = gather @@ List.replicate ~num:n instr_cgetn
 let instr_bindn = instr (IMutator BindN)
 let instr_bindl local = instr (IMutator (BindL local))
@@ -110,6 +116,8 @@ let instr_clsrefgetc =
   instr (IGet (ClsRefGetC class_ref_rewrite_sentinel))
 let instr_self =
   instr (IMisc (Self class_ref_rewrite_sentinel))
+let instr_parent =
+  instr (IMisc (Parent class_ref_rewrite_sentinel))
 let instr_fpassl param local = instr (ICall (FPassL (param, local)))
 let instr_fpassr i = instr (ICall (FPassR i))
 let instr_fpassv i = instr (ICall (FPassV i))
@@ -179,6 +187,7 @@ let instr_ismemotype = instr (IMisc IsMemoType)
 let instr_maybememotype = instr (IMisc MaybeMemoType)
 let instr_checkthis = instr (IMisc CheckThis)
 let instr_verifyRetTypeC = instr (IMisc VerifyRetTypeC)
+let instr_verifyRetTypeV = instr (IMisc VerifyRetTypeV)
 let instr_dim op key = instr (IBase (Dim (op, key)))
 let instr_dim_warn_pt key = instr_dim MemberOpMode.Warn (MemberKey.PT key)
 let instr_dim_define_pt key = instr_dim MemberOpMode.Define (MemberKey.PT key)
@@ -205,8 +214,12 @@ let instr_yield = instr (IGenerator Yield)
 let instr_yieldk = instr (IGenerator YieldK)
 let instr_createcont = instr (IGenerator CreateCont)
 
-let instr_static_loc name =
-  instr (IMisc (StaticLoc (Local.Named name,
+let instr_static_loc_check name =
+  instr (IMisc (StaticLocCheck (Local.Named name,
+    Hhbc_string_utils.Locals.strip_dollar name)))
+
+let instr_static_loc_def name =
+  instr (IMisc (StaticLocDef (Local.Named name,
     Hhbc_string_utils.Locals.strip_dollar name)))
 
 let instr_static_loc_init name =
@@ -230,6 +243,11 @@ let instr_defcns s =
 let instr_eval = instr (IIncludeEvalDefine Eval)
 let instr_alias_cls c1 c2 =
   instr (IIncludeEvalDefine (AliasCls (c1, c2)))
+
+let instr_silence_start local =
+  instr (IMisc (Silence (local, Start)))
+let instr_silence_end local =
+  instr (IMisc (Silence (local, End)))
 
 (* Functions on instr_seq that correspond to existing Core.List functions *)
 module InstrSeq = struct
@@ -456,3 +474,67 @@ let rewrite_class_refs instrseq =
       Instr_list (List.rev l), num
   in
   fst @@ aux instrseq (-1)
+
+  let rec can_initialize_static_var e =
+    match snd e with
+    | A.Float _ | A.String _ | A.Int _ | A.Null | A.False | A.True -> true
+    | A.Array es ->
+      List.for_all es ~f:(function
+        | A.AFvalue v ->
+          can_initialize_static_var v
+        | A.AFkvalue (k, v) ->
+          can_initialize_static_var k
+          && can_initialize_static_var v)
+    | A.Darray es ->
+      List.for_all es ~f:(fun (k, v) ->
+        can_initialize_static_var k
+        && can_initialize_static_var v)
+    | A.Varray es ->
+      List.for_all es ~f:can_initialize_static_var
+    | _ -> false
+
+  let rewrite_static_instrseq static_var_map emit_expr env instrseq =
+    let rewrite_static_instr instruction =
+      match instruction with
+      | IMisc (StaticLocInit (Local.Named name, _)) ->
+        begin match (SMap.get name static_var_map) with
+              | None ->
+                failwith "rewrite_static_instr: No value in static map!"
+              | Some None -> gather [instr_null; instr_static_loc_init name;]
+              | Some (Some e) ->
+                if can_initialize_static_var e then
+                  gather [
+                    emit_expr env e;
+                    instr_static_loc_init name;
+                  ]
+                else
+                  let l = Label.next_regular () in
+                  gather [
+                    instr_static_loc_check name;
+                    instr_jmpnz l;
+                    emit_expr env e;
+                    instr_static_loc_def name;
+                    instr_label l;
+                  ]
+        end
+      | _ -> instr instruction
+    in
+    InstrSeq.flat_map_seq instrseq rewrite_static_instr
+
+let first instrs =
+  let rec aux instrs =
+    match instrs with
+    | Instr_list l -> List.hd l
+    | Instr_concat l -> List.find_map ~f:aux l
+    | Instr_try_fault (t, f) -> match aux t with None -> aux f | v -> v
+  in
+  aux instrs
+
+let is_empty instrs =
+  let rec aux instrs =
+    match instrs with
+    | Instr_list l -> List.is_empty l
+    | Instr_concat l -> List.for_all ~f:aux l
+    | Instr_try_fault (t, f) -> aux t && aux f
+  in
+  aux instrs

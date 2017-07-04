@@ -88,18 +88,14 @@ let mixed_syntax =
 let mixed_type =
   make_simple_type_specifier mixed_syntax
 
-(* TODO: Should be CoroutineUnit ? *)
 let unit_syntax =
-  make_token_syntax ~space_after:true TokenKind.Name "Unit"
+  make_token_syntax ~space_after:true TokenKind.Name "CoroutineUnit"
 
-let unit_type =
+let unit_type_syntax =
   make_simple_type_specifier unit_syntax
 
 let int_syntax =
   make_token_syntax ~space_after:true TokenKind.Int "int"
-
-let int_type =
-  make_simple_type_specifier int_syntax
 
 let void_syntax =
   make_token_syntax ~space_after:true TokenKind.Void "void"
@@ -152,8 +148,11 @@ let function_keyword_syntax =
 let goto_keyword_syntax =
   make_token_syntax ~space_after:true TokenKind.Goto "goto"
 
-let implements_syntax =
-  make_token_syntax ~space_after:true TokenKind.Implements "implements"
+let extends_syntax =
+  make_token_syntax ~space_after:true TokenKind.Extends "extends"
+
+let parent_syntax =
+  make_token_syntax TokenKind.Parent "parent"
 
 let return_keyword_syntax =
   make_token_syntax ~space_after:true TokenKind.Return "return"
@@ -182,6 +181,9 @@ let this_syntax =
 let exception_type_syntax =
   make_token_syntax ~space_after:true TokenKind.Classname "Exception"
 
+let constructor_member_name =
+  "__construct"
+
 
 (* Syntax helper functions *)
 
@@ -193,15 +195,35 @@ let rec delimit delimit_syntax = function
 let make_delimited_list delimit_syntax items =
   make_list (delimit delimit_syntax items)
 
+let prepend_to_comma_delimited_syntax_list prepend_syntax syntax_list_syntax =
+  let list_item = make_list_item prepend_syntax comma_syntax in
+  let syntax_list = list_item :: syntax_node_to_list syntax_list_syntax in
+  make_list syntax_list
+
 let get_list_item node =
   match syntax node with
   | ListItem { list_item; _; } -> list_item
   | _ -> failwith "Was not a ListItem"
 
+let get_type_parameter_list node =
+  match syntax node with
+  | TypeParameters { type_parameters_parameters; _; } ->
+      type_parameters_parameters
+        |> syntax_node_to_list
+        |> Core_list.map ~f:get_list_item
+  | Missing -> []
+  | _ -> failwith "Was not a TypeParameters"
+
 let is_static_method { methodish_modifiers; _; } =
   methodish_modifiers
     |> syntax_node_to_list
     |> Core_list.exists ~f:is_static
+
+let string_of_name_token node =
+  match syntax node with
+  | Token { EditableToken.kind = TokenKind.Name; text; _; } -> text
+  | _ -> failwith "Was not a Name Token"
+
 
 (* Syntax creation functions *)
 
@@ -290,17 +312,27 @@ let make_function_call_expression_syntax receiver_syntax argument_list =
     right_paren_syntax
 
 let make_static_function_call_expression_syntax
-    receiver_name
+    receiver_syntax
     member_name
     argument_list =
-  let qualified_receiver_syntax = make_qualified_name_syntax receiver_name in
   let member_syntax = make_token_syntax TokenKind.Name member_name in
   let receiver_syntax =
     make_scope_resolution_expression
-      qualified_receiver_syntax
+      receiver_syntax
       colon_colon_syntax
       member_syntax in
   make_function_call_expression_syntax receiver_syntax argument_list
+
+(**
+ * parent::__construct(argument_list);
+ *)
+let make_construct_parent_syntax argument_list =
+  let expression_syntax =
+    make_static_function_call_expression_syntax
+      parent_syntax
+      constructor_member_name
+      argument_list in
+  make_expression_statement_syntax expression_syntax
 
 let make_member_selection_expression_syntax receiver_syntax member_syntax =
   make_member_selection_expression
@@ -321,31 +353,31 @@ let make_parameter_declaration_syntax
     parameter_variable_syntax
     (* default value *)  (make_missing ())
 
-let make_simple_type_specifier_syntax classname =
-  (* TODO: This isn't right; the "classname" token should be just for the
-  keyword "classname". *)
-  let classname_syntax = make_token_syntax
-    ~space_after:true TokenKind.Classname classname in
-  make_simple_type_specifier classname_syntax
+let make_type_parameters_syntax type_parameter_list =
+  match type_parameter_list with
+  | [] ->
+      make_missing ()
+  | _ ->
+      make_type_parameters
+        left_angle_syntax
+        (make_delimited_list comma_syntax type_parameter_list)
+        right_angle_syntax
 
-let make_generic_type_specifier_syntax classname generic_argument_list =
-  (* TODO: This isn't right; the "classname" token should be just for the
-  keyword "classname". *)
+let make_type_specifier_syntax classname type_parameter_list =
   let classname_syntax = make_token_syntax
-    ~space_after:true TokenKind.Classname classname in
-  let generic_argument_list_syntax =
-    make_delimited_list comma_syntax generic_argument_list in
-  let type_arguments_syntax =
-    make_type_arguments
-      left_angle_syntax
-      generic_argument_list_syntax
-      right_angle_syntax in
-  make_generic_type_specifier classname_syntax type_arguments_syntax
+    ~space_after:true TokenKind.Name classname in
+  let type_parameters_syntax =
+    make_type_parameters_syntax type_parameter_list in
+  if is_missing type_parameters_syntax then
+    make_simple_type_specifier classname_syntax
+  else
+    make_generic_type_specifier classname_syntax type_parameters_syntax
 
 let make_functional_type_syntax argument_types return_type_syntax =
   let argument_types_syntax = make_delimited_list comma_syntax argument_types in
   make_closure_type_specifier
     left_paren_syntax
+    (* coroutine *) (make_missing ())
     function_keyword_syntax
     left_paren_syntax
     argument_types_syntax
@@ -355,24 +387,28 @@ let make_functional_type_syntax argument_types return_type_syntax =
     right_paren_syntax
 
 (* TODO(tingley): Determine if it's worth tightening visibility here. *)
-let make_classish_declaration_syntax classname implements_list classish_body =
+let make_classish_declaration_syntax
+    classname
+    type_parameter_list
+    extends_list
+    classish_body =
   let classname_syntax =
     make_token_syntax ~space_after:true TokenKind.Classname classname in
-  let implements_list_syntax =
-    make_delimited_list comma_syntax implements_list in
+  let extends_list_syntax =
+    make_delimited_list comma_syntax extends_list in
   make_classish_declaration
     (* classish_attribute *) (make_missing ())
     (* classish_modifiers *) (make_missing ())
     class_keyword_syntax
     classname_syntax
-    (* classish_type_parameters *) (make_missing ())
-    (* classish_extends_keyword *) (make_missing ())
-    (* classish_extends_list *) (make_missing ())
-    (if is_missing implements_list_syntax then
+    (make_type_parameters_syntax type_parameter_list)
+    (if is_missing extends_list_syntax then
       make_missing ()
     else
-      implements_syntax)
-    implements_list_syntax
+      extends_syntax)
+    extends_list_syntax
+    (* classish_implements_keyword *) (make_missing ())
+    (* classish_implements_list *) (make_missing ())
     (make_compound_statement_syntax classish_body)
 
 (* TODO(tingley): Determine if it's worth tightening visibility here. *)
@@ -389,8 +425,12 @@ let make_methodish_declaration_with_body_syntax
 
 let make_lambda_signature_syntax lambda_parameters lambda_type =
   let lambda_parameters = make_delimited_list comma_syntax lambda_parameters in
-  make_lambda_signature left_paren_syntax lambda_parameters
-    right_paren_syntax colon_syntax lambda_type
+  make_lambda_signature
+    left_paren_syntax
+    lambda_parameters
+    right_paren_syntax
+    (if is_missing lambda_type then make_missing () else colon_syntax )
+    lambda_type
 
 let make_lambda_syntax lambda_signature lambda_body =
   make_lambda_expression
@@ -504,26 +544,25 @@ let continuation_variable =
 let continuation_variable_syntax =
   make_token_syntax TokenKind.Variable continuation_variable
 
-let make_continuation_type_syntax return_type_syntax =
-  make_generic_type_specifier_syntax
-    "CoroutineContinuation"
-    [return_type_syntax]
+let make_closure_base_type_syntax { function_type; _; } =
+  make_type_specifier_syntax "ClosureBase" [ function_type; ]
+
+let make_continuation_type_syntax function_type =
+  make_type_specifier_syntax "CoroutineContinuation" [ function_type; ]
 
 let make_continuation_parameter_syntax
     ?visibility_syntax
-    return_type_syntax =
+    { function_type; _; } =
   make_parameter_declaration_syntax
     ?visibility_syntax
-    (make_continuation_type_syntax return_type_syntax)
+    (make_continuation_type_syntax function_type)
     continuation_variable
 
-let make_coroutine_result_type_syntax return_type_syntax =
-  make_generic_type_specifier_syntax
-    "CoroutineResult"
-    [return_type_syntax]
+let make_coroutine_result_type_syntax function_type =
+  make_type_specifier_syntax "CoroutineResult" [ function_type; ]
 
-let suspended_coroutine_result_classname =
-  "SuspendedCoroutineResult"
+let suspended_coroutine_result_classname_syntax =
+  make_qualified_name_syntax "SuspendedCoroutineResult"
 
 let suspended_member_name =
   "create"
@@ -540,12 +579,33 @@ let get_result_member_name =
 let get_result_member_syntax =
   make_token_syntax TokenKind.Name get_result_member_name
 
-let make_closure_classname enclosing_classname function_name =
-  Printf.sprintf "%s_%s_GeneratedClosure" enclosing_classname function_name
+(* SuspendedCoroutineResult::create() *)
+let create_suspended_coroutine_result_syntax =
+  make_static_function_call_expression_syntax
+    suspended_coroutine_result_classname_syntax
+    suspended_member_name
+    []
 
-let make_closure_type_syntax enclosing_classname function_name =
-  make_simple_type_specifier_syntax
-    (make_closure_classname enclosing_classname function_name)
+let make_closure_classname { classish_name; _; } { function_name; _; } =
+  Printf.sprintf
+    "%s_%s_GeneratedClosure"
+    (string_of_name_token classish_name)
+    (string_of_name_token function_name)
+
+(**
+ * Given a list of TypeParameters syntaxes, combines them into a single
+ * list of type_parameters.
+ *)
+let make_closure_type_parameters
+    { classish_type_parameters; _; }
+    { function_type_parameter_list; _; } =
+  (get_type_parameter_list classish_type_parameters) @
+    (get_type_parameter_list function_type_parameter_list)
+
+let make_closure_type_syntax class_node header_node =
+  make_type_specifier_syntax
+    (make_closure_classname class_node header_node)
+    (make_closure_type_parameters class_node header_node)
 
 let closure_variable =
   "$closure"
@@ -559,13 +619,10 @@ let closure_name_syntax name =
   let name_syntax = make_token_syntax TokenKind.Name name in
   make_member_selection_expression_syntax closure_variable_syntax name_syntax
 
-let make_closure_parameter_syntax enclosing_classname function_name =
+let make_closure_parameter_syntax class_node function_name =
   make_parameter_declaration_syntax
-    (make_closure_type_syntax enclosing_classname function_name)
+    (make_closure_type_syntax class_node function_name)
     closure_variable
-
-let constructor_member_name =
-  "__construct"
 
 let resume_member_name =
   "resume"
@@ -575,6 +632,12 @@ let resume_member_name_syntax =
 
 let resume_with_exception_member_name =
   "resumeWithException"
+
+let do_resume_member_name =
+  "doResume"
+
+let do_resume_member_name_syntax =
+  make_token_syntax TokenKind.Name do_resume_member_name
 
 let coroutine_data_variable =
   "$coroutineData"
@@ -588,8 +651,16 @@ let coroutine_result_variable =
 let coroutine_result_variable_syntax =
   make_token_syntax TokenKind.Variable coroutine_result_variable
 
+let make_coroutine_result_data_member_name index =
+  Printf.sprintf "coroutineResultData%d" index
+
 let make_coroutine_result_data_variable index =
-  Printf.sprintf "$coroutineResultData%d" index
+  "$" ^ (make_coroutine_result_data_member_name index)
+
+let make_coroutine_result_data_member_name_syntax index =
+  make_token_syntax
+    TokenKind.Name
+    (make_coroutine_result_data_member_name index)
 
 let coroutine_data_type_syntax =
   mixed_syntax
@@ -600,7 +671,7 @@ let coroutine_data_parameter_syntax =
     coroutine_data_variable
 
 let exception_variable =
-  "$exception"
+  "$exception_generated"
 
 let exception_variable_syntax =
   make_token_syntax TokenKind.Variable exception_variable
@@ -640,15 +711,17 @@ let state_machine_variable_name =
 let state_machine_variable_name_syntax =
   make_token_syntax TokenKind.Variable state_machine_variable_name
 
-let make_state_machine_parameter_syntax enclosing_classname function_name =
+let make_state_machine_parameter_syntax
+    enclosing_classname
+    ({ function_type; _; } as header_node) =
   let state_machine_type_syntax =
     make_functional_type_syntax
       [
-        make_closure_type_syntax enclosing_classname function_name;
+        make_closure_type_syntax enclosing_classname header_node;
         mixed_syntax;
         nullable_exception_type_syntax;
       ]
-      (make_coroutine_result_type_syntax mixed_syntax) in
+      (make_coroutine_result_type_syntax function_type) in
   make_parameter_declaration_syntax
     ~visibility_syntax:private_syntax
     state_machine_type_syntax
@@ -665,10 +738,15 @@ let make_member_with_unknown_type_declaration_syntax variable_syntax =
     make_property_declarator variable_syntax (make_missing ()) in
   make_property_declaration_syntax (make_missing ()) declaration_syntax
 
-(* coroutine_unit() *)
+let coroutine_unit_classname_syntax =
+  make_qualified_name_syntax "CoroutineUnit"
+
+(* CoroutineUnit::create() *)
 let coroutine_unit_call_syntax =
-  let name = make_token_syntax TokenKind.Name "coroutine_unit" in
-  make_function_call_expression_syntax name []
+  make_static_function_call_expression_syntax
+    coroutine_unit_classname_syntax
+    "create"
+    []
 
 let next_label =
   "nextLabel"
@@ -680,10 +758,6 @@ let label_syntax =
 (* nextLabel *)
 let label_name_syntax =
   make_token_syntax TokenKind.Name next_label
-
-(* $nextLabel *)
-let label_variable_syntax =
-  make_token_syntax TokenKind.Variable ("$" ^ next_label)
 
 (* $closure->nextLabel = x; *)
 let set_next_label_syntax number =

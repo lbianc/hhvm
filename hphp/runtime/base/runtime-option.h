@@ -463,6 +463,9 @@ struct RuntimeOption {
   F(int, JitWorkerThreads,             Process::GetCPUCount() / 2)      \
   F(bool, RecordSubprocessTimes,       false)                           \
   F(bool, AllowHhas,                   false)                           \
+  F(bool, DisassemblerSourceMapping,   true)                            \
+  F(bool, DisassemblerDocComments,     true)                            \
+  F(bool, LoadFilepathFromUnitCache,   false)                           \
   /* Whether to use hh_single_compile by default if available. */       \
   F(bool, HackCompilerDefault,         false)                           \
   /* The command to invoke to spawn hh_single_compile in server mode. */\
@@ -472,6 +475,9 @@ struct RuntimeOption {
   /* The number of times to retry after an infra failure communicating
      with a compiler process. */                                        \
   F(uint64_t, HackCompilerMaxRetries,  0)                               \
+  /* The number of times to reuse a single hh_single_compile daemons
+     before forcing a restart */                                        \
+  F(uint32_t, HackCompilerReset,       10)                              \
   /* Whether or not to fallback to hphpc if hh_single_compile fails for
      any reason. */                                                     \
   F(bool, HackCompilerFallback,        false)                           \
@@ -482,6 +488,8 @@ struct RuntimeOption {
      the hhas from failing units in the fatal error messages produced by
      bad hh_single_compile units. */                                    \
   F(bool, HackCompilerVerboseErrors,   true)                            \
+  F(bool, PHP7CompilerEnabled,         false)                           \
+  F(string, PHP7CompilerCommand,       "")                              \
   F(bool, EmitSwitch,                  true)                            \
   F(bool, LogThreadCreateBacktraces,   false)                           \
   F(bool, FailJitPrologs,              false)                           \
@@ -528,6 +536,7 @@ struct RuntimeOption {
   F(int32_t, JitNopInterval,           0)                               \
   F(uint32_t, JitMaxTranslations,      10)                              \
   F(uint32_t, JitMaxProfileTranslations, 30)                            \
+  F(uint32_t, JitTraceletGuardsLimit,  5)                               \
   F(uint64_t, JitGlobalTranslationLimit, -1)                            \
   F(int64_t, JitMaxRequestTranslationTime, -1)                          \
   F(uint32_t, JitMaxRegionInstrs,      1347)                            \
@@ -564,6 +573,7 @@ struct RuntimeOption {
   F(bool, HHIREnableGenTimeInlining,   true)                            \
   F(uint32_t, HHIRInliningMaxVasmCost, 370)                             \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 12)                         \
+  F(uint32_t, HHIRInliningMaxReturnLocals, 20)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \
   F(bool, HHIRPartialInlineFrameOpts,  true)                            \
   F(bool, HHIRInlineSingletons,        true)                            \
@@ -590,7 +600,10 @@ struct RuntimeOption {
   F(bool,     JitPGOOnly,              false)                           \
   F(bool,     JitPGOHotOnly,           false)                           \
   F(bool,     JitPGOUsePostConditions, true)                            \
-  F(uint32_t, JitUnlikelyDecRefPercent, 5)                              \
+  F(uint32_t, JitPGOUnlikelyDecRefReleasePercent, 5)                    \
+  F(uint32_t, JitPGOUnlikelyDecRefCountedPercent, 2)                    \
+  F(uint32_t, JitPGOUnlikelyDecRefPersistPercent, 5)                    \
+  F(uint32_t, JitPGOUnlikelyDecRefSurvivePercent, 5)                    \
   F(uint32_t, JitPGOReleaseVVMinPercent, 8)                             \
   F(bool,     JitPGOArrayGetStress,    false)                           \
   F(uint32_t, JitPGOMinBlockCountPercent, 0)                            \
@@ -634,6 +647,8 @@ struct RuntimeOption {
   F(double, GCTriggerPct,              0.5)                             \
   F(bool, RaiseMissingThis,            !EnableHipHopSyntax)             \
   F(bool, QuoteEmptyShellArg,          !EnableHipHopSyntax)             \
+  F(bool, Verify,                      getenv("HHVM_VERIFY"))           \
+  F(bool, VerifyOnly,                  false)                           \
   F(uint32_t, StaticContentsLogRate,   100)                             \
   F(uint32_t, LogUnitLoadRate,         0)                               \
   F(uint32_t, MaxDeferredErrors,       50)                              \
@@ -649,6 +664,7 @@ struct RuntimeOption {
   F(uint32_t, PCRETableSize, kPCREInitialTableSize)                     \
   F(uint64_t, PCREExpireInterval, 2 * 60 * 60)                          \
   F(string, PCRECacheType, std::string("static"))                       \
+  F(bool, EnableCompactBacktrace, true)                                 \
   F(bool, EnableNuma, ServerExecutionMode())                            \
   F(bool, EnableNumaLocal, ServerExecutionMode())                       \
   F(bool, EnableCallBuiltin, true)                                      \
@@ -657,6 +673,7 @@ struct RuntimeOption {
   F(uint32_t, ReusableTCPadding, 128)                                   \
   F(int64_t,  StressUnitCacheFreq, 0)                                   \
   F(int64_t, PerfWarningSampleRate, 1)                                  \
+  F(int64_t, FunctionCallSampleRate, 0)                                 \
   F(double, InitialLoadFactor, 1.0)                                     \
   /* Raise notices on various array operations which may present        \
    * compatibility issues with Hack arrays. */                          \
@@ -673,6 +690,10 @@ struct RuntimeOption {
                                             std::vector<std::string>()) \
   F(std::vector<std::string>, UnixServerAllowedGroups,                  \
                                             std::vector<std::string>()) \
+  /******************                                                   \
+   | ARM   Options. |                                                   \
+   *****************/                                                   \
+  F(bool, JitArmLse, armLseDefault())                                   \
   /******************                                                   \
    | PPC64 Options. |                                                   \
    *****************/                                                   \

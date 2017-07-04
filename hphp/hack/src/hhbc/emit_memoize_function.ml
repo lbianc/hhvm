@@ -13,7 +13,7 @@ open Hhbc_ast.MemberOpMode
 open Core
 open Emit_memoize_helpers
 
-let make_memoize_function_no_params_code renamed_function_id =
+let make_memoize_function_no_params_code ~non_null_return renamed_function_id =
   let local_cache = Local.Unnamed 0 in
   let local_guard = Local.Unnamed 1 in
   let label_0 = Label.Regular 0 in
@@ -22,14 +22,17 @@ let make_memoize_function_no_params_code renamed_function_id =
   let label_3 = Label.Regular 3 in
   let label_4 = Label.Regular 4 in
   let label_5 = Label.Regular 5 in
+  let needs_guard = not non_null_return in
   gather [
-    instr_false;
-    instr_staticlocinit local_guard static_memoize_cache_guard;
+    optional needs_guard [
+      instr_false; instr_staticlocinit local_guard static_memoize_cache_guard;
+    ];
     instr_null;
     instr_staticlocinit local_cache static_memoize_cache;
-    instr_null;
-    instr_ismemotype;
-    instr_jmpnz label_0;
+    optional needs_guard [
+      instr_null;
+      instr_ismemotype;
+      instr_jmpnz label_0];
     instr_cgetl local_cache;
     instr_dup;
     instr_istypec Hhbc_ast.OpNull;
@@ -38,50 +41,52 @@ let make_memoize_function_no_params_code renamed_function_id =
     instr_label label_1;
     instr_popc;
     instr_label label_0;
-    instr_null;
-    instr_maybememotype;
-    instr_jmpz label_2;
-    instr_cgetl local_guard;
-    instr_jmpz label_2;
-    instr_null;
-    instr_retc;
-    instr_label label_2;
-    instr_null;
-    instr_ismemotype;
-    instr_jmpnz label_3;
+    optional needs_guard [
+      instr_null;
+      instr_maybememotype;
+      instr_jmpz label_2;
+      instr_cgetl local_guard;
+      instr_jmpz label_2;
+      instr_null;
+      instr_retc;
+      instr_label label_2;
+      instr_null;
+      instr_ismemotype;
+      instr_jmpnz label_3
+      ];
     instr_fpushfuncd 0 renamed_function_id;
     instr_fcall 0;
     instr_unboxr;
     instr_setl local_cache;
-    instr_jmp label_4;
-    instr_label label_3;
-    instr_fpushfuncd 0 renamed_function_id;
-    instr_fcall 0;
-    instr_unboxr;
-    instr_label label_4;
-    instr_null;
-    instr_maybememotype;
-    instr_jmpz label_5;
-    instr_true;
-    instr_setl local_guard;
-    instr_popc;
-    instr_label label_5;
+    optional needs_guard [
+      instr_jmp label_4;
+      instr_label label_3;
+      instr_fpushfuncd 0 renamed_function_id;
+      instr_fcall 0;
+      instr_unboxr;
+      instr_label label_4;
+      instr_null;
+      instr_maybememotype;
+      instr_jmpz label_5;
+      instr_true;
+      instr_setl local_guard;
+      instr_popc;
+      instr_label label_5;
+      ];
     instr_retc ]
 
-let make_memoize_function_with_params_code env
-  variadic_and_params renamed_method_id =
-  let param_count = List.length variadic_and_params in
+let make_memoize_function_with_params_code env params renamed_method_id =
+  let param_count = List.length params in
   let static_local = Local.Unnamed param_count in
   let label = Label.Regular 0 in
   let first_local = Local.Unnamed (param_count + 1) in
-  let params = List.map variadic_and_params snd in
   let begin_label, default_value_setters =
     (* Default value setters belong in the wrapper function not in the original function *)
     Emit_param.emit_param_default_value_setter env params
   in
   gather [
     begin_label;
-    Emit_body.emit_method_prolog ~params:variadic_and_params ~needs_local_this:false;
+    Emit_body.emit_method_prolog ~params:params ~needs_local_this:false;
     instr_typedvalue (Typed_value.Dict []);
     instr_staticlocinit static_local static_memoize_cache;
     param_code_sets params (param_count + 1);
@@ -104,9 +109,9 @@ let make_memoize_function_with_params_code env
     default_value_setters
   ]
 
-let make_memoize_function_code env params renamed_method_id =
+let make_memoize_function_code ~non_null_return env params renamed_method_id =
   if List.is_empty params
-  then make_memoize_function_no_params_code renamed_method_id
+  then make_memoize_function_no_params_code ~non_null_return renamed_method_id
   else make_memoize_function_with_params_code env params renamed_method_id
 
 (* Construct the wrapper function body *)
@@ -116,7 +121,8 @@ let make_wrapper_body return_type params instrs =
     [] (* decl_vars *)
     true (* is_memoize_wrapper *)
     params
-    return_type
+    (Some return_type)
+    [] (* static_inits: this is intentionally empty *)
 
 let emit_wrapper_function ~original_id ~renamed_id ast_fun =
   if ast_fun.Ast.f_ret_by_ref
@@ -135,14 +141,16 @@ let emit_wrapper_function ~original_id ~renamed_id ast_fun =
   let function_attributes =
     Emit_attribute.from_asts namespace ast_fun.Ast.f_user_attributes in
   let scope = [Ast_scope.ScopeItem.Function ast_fun] in
-  let body_instrs = make_memoize_function_code env params renamed_id in
   let return_type_info =
     Emit_body.emit_return_type_info
       ~scope ~skipawaitable:false ~namespace ast_fun.Ast.f_ret in
+  let non_null_return =
+    cannot_return_null ast_fun.Ast.f_fun_kind ast_fun.Ast.f_ret in
+  let body_instrs = make_memoize_function_code ~non_null_return env params renamed_id in
   let memoized_body =
-    make_wrapper_body return_type_info (List.map params snd) body_instrs in
+    make_wrapper_body return_type_info params body_instrs in
   Hhas_function.make
     function_attributes
     original_id
     memoized_body
-    false false false
+    false false false true

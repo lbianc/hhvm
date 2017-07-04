@@ -19,6 +19,7 @@ open Core
 open Hhbc_ast
 open Local
 open Hhbc_destruct
+module Log = Semdiff_logging
 
 (* Refs storing the adata for the two programs; they're written in semdiff
    and accessed in equiv
@@ -28,9 +29,13 @@ let adata2_ref = ref ([] : Hhas_adata.t list)
 
 (* Ref keeping to-do set for pairs of classes that
    need to be compared. Originally just for closure classes, now
-   for all corresponding pairs *)
+   for all corresponding pairs
+   Also comes with a permutation for matching up properties used in
+   closure classes*)
+type perm = (int * int) list
+module IntIntPermSet = Set.Make(struct type t = int*int*perm let compare = compare end)
 module IntIntSet = Set.Make(struct type t = int*int let compare = compare end)
-let classes_to_check = ref (IntIntSet.empty)
+let classes_to_check = ref (IntIntPermSet.empty)
 let classes_checked = ref (IntIntSet.empty)
 
 let rec lookup_adata id data_dict =
@@ -120,62 +125,53 @@ let make_label_try_maps prog =
      | _ -> loop is (n+1) trycatchstack labelmap trymap) in
   loop prog 0 [] LabelMap.empty IMap.empty
 
-(* Second pass constructs exception table, mapping instruction indices to
-   the index of their closest handler, together with an indication of what kind
-   that is, and also the parent relation
-   Not sure if we need the type of handlers in the parent relation
-   A fault handler can certainly have a catch handler as parent
-   but I don't think catch handlers actually need parents...
+(* Second pass constructs exception table. Revised version maps instruction indices to
+   a list of handler indices. Previous parent relation is removed, as it doesn't track
+   the right information.
+   Still a question mark over whether the whole stack needs to go into the handler lists
+   or if it should be somehow truncated when we reach a catch handler. For now, I'm trying
+   with remembering everything, though I suspect that might lead to runaway stacks.
 *)
 
 let make_exntable prog labelmap trymap =
- let rec loop p n trycatchstack exnmap parents =
+ let rec loop p n trycatchstack exnmap =
   match p with
-  | [] -> (exnmap,parents)
-  | i::is -> (match i with
-    | ITry (TryCatchLegacyBegin l)
-    | ITry (TryFaultBegin l) ->
-     let nl = LabelMap.find l labelmap in
-     let emv = match l with
-      | Label.Catch _ -> Catch_handler nl
-      | Label.Fault _ -> Fault_handler nl
-      | _ -> raise Labelexn in
-       (match trycatchstack with
-         | [] -> loop is (n+1) (emv :: trycatchstack) exnmap parents
-         | (Fault_handler _n2 | Catch_handler _n2 as h2) :: _hs ->
-            loop is (n+1) (emv :: trycatchstack)
-            (IMap.add n h2 exnmap)
-            (IMap.add nl h2 parents))
-              (* parent of l is l2 ONLY FOR FAULTS ?? *)
-     | ITry TryCatchBegin ->
+  | [] -> exnmap
+  | i::is ->
+    let newexnmap = IMap.add n trycatchstack (* <- filter this? *) exnmap in
+   (match i with
+    | ITry (TryCatchLegacyBegin (Label.Catch _ as l)) ->
+       let nl = LabelMap.find l labelmap in
+       loop is (n+1) (Catch_handler nl :: trycatchstack) newexnmap
+
+    | ITry (TryCatchLegacyBegin _) -> raise Labelexn
+
+    | ITry (TryFaultBegin (Label.Fault _ as l)) ->
+       let nl = LabelMap.find l labelmap in
+       loop is (n+1) (Fault_handler nl :: trycatchstack) newexnmap
+
+    | ITry (TryFaultBegin _) -> raise Labelexn
+
+    | ITry TryCatchBegin ->
        let nl = IMap.find n trymap in (* find corresponding middle *)
-       let emv = Catch_handler nl in
+       loop is (n+1) (Catch_handler nl :: trycatchstack) newexnmap
+
+    | ITry TryCatchMiddle ->
         (match trycatchstack with
-          | [] -> loop is (n+1) (emv :: trycatchstack) exnmap parents
-          | (Fault_handler _n2 | Catch_handler _n2 as h2) :: _hs ->
-             loop is (n+1) (emv :: trycatchstack)
-             (IMap.add n h2 exnmap)
-             (IMap.add nl h2 parents))
-               (* parent of l is l2 I SUSPECT THIS IS UNNECESSARY *)
-      | ITry TryCatchMiddle ->
-        (match trycatchstack with
-          | Catch_handler _ :: rest -> loop is (n+1) rest exnmap parents
+          | Catch_handler _ :: rest -> loop is (n+1) rest newexnmap
           | _ -> raise Labelexn)
-      | ITry TryFaultEnd ->
+
+    | ITry TryFaultEnd ->
         (match trycatchstack with
-          | Fault_handler _ :: rest -> loop is (n+1) rest exnmap parents
+          | Fault_handler _ :: rest -> loop is (n+1) rest newexnmap
           | _ -> raise Labelexn)
-      | ITry TryCatchLegacyEnd ->
-       (match trycatchstack with
-         | Catch_handler _ :: rest -> loop is (n+1) rest exnmap parents
-         | _ -> raise Labelexn
-       )
-     | _ -> (match trycatchstack with
-             | [] -> loop is (n+1) trycatchstack exnmap parents
-             | h :: _hs ->
-              loop is (n+1) trycatchstack (IMap.add n h exnmap) parents)
-          )
-   in loop prog 0 [] IMap.empty IMap.empty
+
+    | ITry TryCatchLegacyEnd ->
+        (match trycatchstack with
+          | Catch_handler _ :: rest -> loop is (n+1) rest newexnmap
+          | _ -> raise Labelexn)
+   | _ -> loop is (n+1) trycatchstack newexnmap)
+   in loop prog 0 [] IMap.empty
 
 (* Moving string functions into rhl so that I can use them in debugging *)
 
@@ -344,6 +340,12 @@ let check_instruct_base asn i i' =
   | FPassBaseL (n,l), FPassBaseL (n',l') ->
     if n = n' then reads asn l l'
     else None
+  | Dim (mode,MemberKey.EL l), Dim (mode',MemberKey.EL l')
+  | Dim (mode,MemberKey.PL l), Dim (mode',MemberKey.PL l')
+    when mode=mode' -> reads asn l l'
+    | FPassDim(n,MemberKey.EL l), FPassDim(n',MemberKey.EL l')
+  | FPassDim(n,MemberKey.PL l), FPassDim(n',MemberKey.PL l')
+    when n=n' -> reads asn l l'
   | _, _ -> if i=i' then Some asn else None
 
 let check_instruct_final asn i i' =
@@ -352,7 +354,32 @@ let check_instruct_final asn i i' =
       (match reads asn l1 l1' with
         | None -> None
         | Some newasn -> reads newasn l2 l2')
-  (* I'm guessing wildly here! *)
+   (* TODO: abstraction, we've heard of it *)
+   | QueryM (n,op,MemberKey.EL l), QueryM (n',op',MemberKey.EL l')
+   | QueryM (n,op,MemberKey.PL l), QueryM (n',op',MemberKey.PL l')
+    when n=n' && op=op' -> reads asn l l'
+   | VGetM (n, MemberKey.EL l), VGetM (n', MemberKey.EL l')
+   | VGetM (n, MemberKey.PL l), VGetM (n', MemberKey.PL l')
+    when n=n' -> reads asn l l'
+   | FPassM (m,n,MemberKey.EL l), FPassM (m',n',MemberKey.EL l')
+   | FPassM (m,n,MemberKey.PL l), FPassM (m',n',MemberKey.PL l')
+    when m=m' && n=n' -> reads asn l l'
+   | SetM (n, MemberKey.EL l), SetM (n', MemberKey.EL l')
+   | SetM (n, MemberKey.PL l), SetM (n', MemberKey.PL l')
+    when n=n' -> reads asn l l'
+   | IncDecM (m,op,MemberKey.EL l), IncDecM (m',op',MemberKey.EL l')
+   | IncDecM (m,op,MemberKey.PL l), IncDecM (m',op',MemberKey.PL l')
+    when m=m' && op=op' -> reads asn l l'
+   | SetOpM (m,op,MemberKey.EL l), SetOpM (m',op',MemberKey.EL l')
+   | SetOpM (m,op,MemberKey.PL l), SetOpM (m',op',MemberKey.PL l')
+    when m=m' && op=op' -> reads asn l l'
+   | BindM (n, MemberKey.EL l), BindM (n', MemberKey.EL l')
+   | BindM (n, MemberKey.PL l), BindM (n', MemberKey.PL l')
+    when n=n' -> reads asn l l'
+   | UnsetM (n, MemberKey.EL l), UnsetM (n', MemberKey.EL l')
+   | UnsetM (n, MemberKey.PL l), UnsetM (n', MemberKey.PL l')
+    when n=n' -> reads asn l l'
+    (* I'm guessing a bit here! *)
    | SetWithRefRML l, SetWithRefRML l' -> reads asn l l'
    | _, _ -> if i=i' then Some asn else None
 
@@ -396,7 +423,8 @@ let check_instruct_misc asn i i' =
  match i,i' with
   | InitThisLoc l, InitThisLoc l' ->
       writes asn l l'
-  | StaticLoc (l,str), StaticLoc (l',str')
+  | StaticLocCheck (l,str), StaticLocCheck (l',str')
+  | StaticLocDef (l,str), StaticLocDef (l',str')
   | StaticLocInit (l,str), StaticLocInit (l',str') ->
      if str=str' then writes asn l l'
      else None
@@ -437,7 +465,7 @@ let check_instruct_misc asn i i' =
   | _, MemoGet(_,_,_) -> None (* wimp out again *)
   | CreateCl(npars,cln), CreateCl(npars',cln') ->
    if npars = npars' then
-     (classes_to_check := IntIntSet.add (cln,cln') (!classes_to_check);
+     (classes_to_check := IntIntPermSet.add (cln,cln',[]) (!classes_to_check);
      Some asn)
    else None (* fail in this case *)
   | _, _ -> if i=i' then Some asn else None
@@ -455,12 +483,24 @@ let add_assumption (pc,pc') asn assumed =
   let updated = AsnSet.add asn prev in (* this is a clumsy union *)
   PcpMap.add (pc,pc') updated assumed
 
+(* compute permutation, not very efficiently, but lists should always be very small *)
+let findperm l1 l2 =
+ if List.contains_dup l1 || (List.length l1 != List.length l2)
+ then None
+ else let rec loop n l p =
+        match l with
+         | [] -> Some p
+         | x :: xs -> (match List.findi l2 (fun _i y -> x = y) with
+                        | Some (j,_) -> loop (n+1) xs ((n,j)::p)
+                        | None -> None)
+      in loop 0 l1 []
+
 (* Main entry point for equivalence checking *)
 let equiv prog prog' startlabelpairs =
  let (labelmap, trymap) = make_label_try_maps prog in
- let (exnmap, exnparents) = make_exntable prog labelmap trymap in
+ let exnmap = make_exntable prog labelmap trymap in
  let (labelmap', trymap') = make_label_try_maps prog' in
- let (exnmap', exnparents') = make_exntable prog' labelmap' trymap' in
+ let exnmap' = make_exntable prog' labelmap' trymap' in
  let prog_array = Array.of_list prog in
  let prog_array' = Array.of_list prog' in
 
@@ -474,20 +514,18 @@ let equiv prog prog' startlabelpairs =
     *)
    let exceptional_todo () =
     match IMap.get (ip_of_pc pc) exnmap, IMap.get (ip_of_pc pc') exnmap' with
-     | None, None -> Some todo
-     | Some (Fault_handler h), Some (Fault_handler h') ->
-        let epc = (Fault_handler h :: hs_of_pc pc, h) in
-        let epc' = (Fault_handler h' :: hs_of_pc pc', h') in
+     | None, None -> Some todo (* should the imap be total? *)
+     | Some [], Some [] -> Some todo (* no local handlers, so nothing to do *)
+     | Some (Fault_handler h :: rest), Some (Fault_handler h' :: rest') ->
+        let epc = (Fault_handler h :: (rest @ hs_of_pc pc), h) in
+        let epc' = (Fault_handler h' :: (rest' @ hs_of_pc pc'), h') in
          Some (add_todo (epc,epc') asn todo)
-     | Some (Catch_handler h), Some (Catch_handler h') ->
-       (* So catches aren't going to be left with an unwind, so we don't
-          need to add them to the stack. What I'm not sure about is if the
-          catch handler code will always be covered by all the fault handlers
-          it needs to be, so that we could actually set the stack to []
-          here?
+     | Some (Catch_handler h :: _rest), Some (Catch_handler h' :: _rest') ->
+       (* TODO: I *think* dropping everything except the catch handler at this point is right
+                but am not entirely sure - hs_of_pc pc is just gone
        *)
-        let epc = (hs_of_pc pc, h) in
-        let epc' = (hs_of_pc pc', h') in
+        let epc = ([Catch_handler h], h) in
+        let epc' = ([Catch_handler h'], h') in
          Some (add_todo (epc,epc') asn todo)
      | _,_ -> None
       (* here we've got a mismatch between the handlers on the two sides
@@ -570,42 +608,34 @@ let equiv prog prog' startlabelpairs =
             I'm only dealing with the matching case
             *)
             (match hs_of_pc pc, hs_of_pc pc' with
-               | [],[] -> try_specials () (* unwind not in handler! *)
-               | ((Fault_handler h | Catch_handler h) ::hs),
-                 ((Fault_handler h' | Catch_handler h') ::hs') ->
-                 let leftside = match IMap.get h exnparents with
-                   | None -> hs
-                   | Some h2 -> h2::hs in
-                 let rightside = match IMap.get h' exnparents' with
-                   | None -> hs'
-                   | Some h2' -> h2'::hs' in
-                 (match leftside, rightside with
-                   | [],[] -> donext assumed todo (* both jump out*)
-                   | (hh::_), (hh'::_) ->
-                     check (leftside, ip_of_emv hh)
-                           (rightside,ip_of_emv hh')
-                           asn
-                           (add_assumption (pc,pc') asn assumed)
-                           todo
-                   | _,_ -> try_specials ())
-               | _,_ -> try_specials ()) (* mismatch *)
+               | [],[] -> (Log.debug "unwind not in handler"; try_specials ())
+                                               (* unwind not in handler! should be hard failure? *)
+               | [Fault_handler _h], [Fault_handler _h'] -> donext assumed todo (* both jump out *)
+               | (Fault_handler _h :: nexthandler :: hs),
+                 (Fault_handler _h' :: nexthandler' :: hs') ->
+                  let dest = ip_of_emv nexthandler in
+                  let dest' = ip_of_emv nexthandler' in
+                  check (nexthandler :: hs, dest) (nexthandler' :: hs', dest') asn
+                        (add_assumption (pc,pc') asn assumed) todo
+               | _, _ -> try_specials ())
         | IContFlow Throw, IContFlow Throw ->
             (match IMap.get (ip_of_pc pc) exnmap,
                    IMap.get (ip_of_pc pc') exnmap' with
              | None, None ->  donext assumed todo (* both leave *)
-             | Some (Fault_handler hip as h), Some (Fault_handler hip' as h') ->
-                  let hes = h :: (hs_of_pc pc) in
-                  let hes' = h' :: (hs_of_pc pc') in
-                   check (hes,hip) (hes',hip') asn
-                   (add_assumption (pc,pc') asn assumed)
-                   todo
-             | Some (Catch_handler hip), Some (Catch_handler hip') ->
-                   let hes = (hs_of_pc pc) in
-                   let hes' = (hs_of_pc pc') in
-                    check (hes,hip) (hes',hip') asn
-                    (add_assumption (pc,pc') asn assumed)
+             | Some [], Some [] -> donext assumed todo
+             | Some (Fault_handler h as handler :: rest),
+               Some (Fault_handler h' as handler' :: rest') ->
+              let newstack = handler :: (rest @ hs_of_pc pc) in
+              let newstack' = handler' :: (rest' @ hs_of_pc pc') in
+              check (newstack, h) (newstack', h')
+                    asn (add_assumption (pc,pc') asn assumed)
                     todo
-             | _,_ -> try_specials ()) (* leaves/stays -> mismatch *)
+             | Some (Catch_handler h as handler :: _rest),
+               Some (Catch_handler h' as handler' :: _rest') ->
+               check ([handler],h) ([handler'], h')
+                     asn (add_assumption (pc,pc') asn assumed)
+                     todo
+             | _,_ -> try_specials ())
         | IContFlow (Switch (kind, offset, labs)), IContFlow (Switch (kind', offset', labs'))
           when kind=kind' && offset=offset' ->
            (match List.zip labs labs' with
@@ -673,7 +703,7 @@ let equiv prog prog' startlabelpairs =
            if ins = ins' then nextins()
            else try_specials ()
         | IIncludeEvalDefine (DefCls cid), IIncludeEvalDefine (DefCls cid') ->
-            (classes_to_check := IntIntSet.add (cid,cid') (!classes_to_check);
+            (classes_to_check := IntIntPermSet.add (cid,cid',[]) (!classes_to_check);
             nextins ())
         | IIncludeEvalDefine ins, IIncludeEvalDefine ins' ->
            if ins = ins' then nextins()
@@ -820,6 +850,37 @@ and specials pc pc' ((props,vs,vs') as asn) assumed todo =
                     check (succ pc) (succ pc') newnewasn
                           (add_assumption (pc,pc') asn assumed) todo)) in
 
+        let cugetl_named_pattern =
+           uCUGetL $? (function | Local.Unnamed _ -> false
+                                | Local.Named _ -> true)
+                   $> (function | Local.Unnamed _ -> failwith "unnamed can't happen"
+                                | Local.Named s -> s) in
+        let cugetl_list_pattern = greedy_kleene cugetl_named_pattern in
+        let cugetl_list_createcl_pattern = cugetl_list_pattern $$ uCreateCl
+          $? (fun (cugets,(np,_cn)) -> np >= List.length cugets) in
+        let two_cugetl_list_createcl_pattern =
+           cugetl_list_createcl_pattern $*$ cugetl_list_createcl_pattern $>
+             (fun ((cugets,(np,cn)), (cugets',(np',cn'))) ->
+               (findperm cugets cugets', np, cn, np', cn'))
+           $? (function | (Some _perm, np, _cn, np', _cn') -> np=np' | _ -> false)
+           $> (function | (Some perm,_np,cn,_np',cn') -> (perm,cn,cn')
+                        | _ -> failwith "perms can't happen") in
+        let two_cugetl_list_createcl_action =
+          two_cugetl_list_createcl_pattern $>>
+           (fun (perm,cn,cn') ((_,n),(_,n')) ->
+           ( Log.debug @@ Printf.sprintf "create cl pattern at lines %d, %d" n n';
+             let newpc = (hs_of_pc pc, n) in
+             let newpc' = (hs_of_pc pc', n') in
+               classes_to_check := IntIntPermSet.add (cn,cn',perm) (!classes_to_check);
+               check newpc newpc' asn assumed todo)) in
+
+        let string_fatal_pattern = uString $$ uFatal in
+        let two_string_fatal_pattern =
+          (string_fatal_pattern $*$ string_fatal_pattern) $? (fun ((_s,fop),(_s',fop')) ->
+            fop = fop') in
+        let two_string_fatal_action = two_string_fatal_pattern $>>
+          (fun _ _ -> donext assumed todo) in (* success, nothing more to check here *)
+
         (* last, failure, case for use in bigmatch *)
         let failure_pattern_action =
          parse_any $>> (fun _ _ -> Some (pc, pc', asn, assumed, todo)) in
@@ -830,6 +891,8 @@ and specials pc pc' ((props,vs,vs') as asn) assumed todo =
           notjmp_action;
           concat_string_either_action;
           fpassl_action;
+          two_string_fatal_action;
+          two_cugetl_list_createcl_action;
           failure_pattern_action;
          ] in
         bigmatch_action ((prog_array, ip_of_pc pc),(prog_array', ip_of_pc pc'))

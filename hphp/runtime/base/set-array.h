@@ -20,7 +20,7 @@
 #include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/array-common.h"
 #include "hphp/runtime/base/hash-table.h"
-#include "hphp/runtime/base/member-lval.h"
+#include "hphp/runtime/base/member-val.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/tv-mutate.h"
 #include "hphp/runtime/base/typed-value.h"
@@ -217,7 +217,6 @@ private:
   static SetArray* CopySet(const SetArray& other, AllocMode);
   static SetArray* CopyReserve(const SetArray* src, size_t expectedSize);
   SetArray* copySet() const { return CopySet(*this, AllocMode::Request); }
-  SetArray* copyAndResizeIfNeeded() const;
 
 private:
   SetArray() = delete;
@@ -301,34 +300,23 @@ private:
 
 
   /*
-   * Returns a new set containing all the elements of the current set
-   * with the new specified scale.  The original set must not be used
-   * afterwards.  If the passed scale is smaller than the original
-   * one, grow() can shrink too!
+   * Returns a copy of the set with twice the scale of the original. It
+   * rebuilds the hash table, but it does not compact the elements. If copy is
+   * true, it will copy elements instead of taking ownership of them.
    */
-  SetArray* grow(uint32_t newScale);
+  SetArray* grow(bool copy);
+
+  /*
+   * prepareForInsert ensures that the set has room to insert an element and
+   * has a refcount of 1, copying if requested and growing if needed.
+   */
+  SetArray* prepareForInsert(bool copy);
 
   /*
    * compact() removes all tombstones from the hash table by going
    * through the inner linked list.
    */
   void compact();
-
-  /*
-   * resize() and resizeIfNeeded() will grow the array as necessary to
-   * ensure that there is room for a new element and a new hash entry.
-   *
-   * resize() assumes isFull().  resizeIfNeeded() will first check if
-   * there is room for a new element and hash entry before growing the
-   * array.
-   *
-   * Both functions return the new SetArray* to use (or the old one
-   * if they didn't need to grow).  The old SetArray is left in a
-   * zombie state where the only legal action is to decref and then
-   * throw it away.
-   */
-  SetArray* resize();
-  SetArray* resizeIfNeeded();
 
   /*
    * Zombie arrays!
@@ -373,13 +361,14 @@ public:
    */
 private:
   using ArrayData::exists;
+  using ArrayData::at;
+  using ArrayData::rval;
   using ArrayData::lval;
   using ArrayData::lvalNew;
   using ArrayData::set;
   using ArrayData::setRef;
   using ArrayData::add;
   using ArrayData::remove;
-  using ArrayData::nvGet;
   using ArrayData::release;
 
 //////////////////////////////////////////////////////////////////////
@@ -411,10 +400,19 @@ private:
 // ArrayData API
 
 public:
-  static const TypedValue* NvTryGetInt(const ArrayData*, int64_t);
-  static const TypedValue* NvTryGetStr(const ArrayData*, const StringData*);
+  static member_rval::ptr_u NvTryGetInt(const ArrayData*, int64_t);
+  static member_rval::ptr_u NvTryGetStr(const ArrayData*, const StringData*);
+  static member_rval RvalIntStrict(const ArrayData* ad, int64_t k) {
+    return member_rval { ad, NvTryGetInt(ad, k) };
+  }
+  static member_rval RvalStrStrict(const ArrayData* ad, const StringData* k) {
+    return member_rval { ad, NvTryGetStr(ad, k) };
+  }
+  static member_rval RvalAtPos(const ArrayData* ad, ssize_t pos) {
+    return member_rval { ad, GetValueRef(ad, pos) };
+  }
   static size_t Vsize(const ArrayData*);
-  static const Variant& GetValueRef(const ArrayData*, ssize_t);
+  static member_rval::ptr_u GetValueRef(const ArrayData*, ssize_t);
   static bool IsVectorData(const ArrayData*);
   static bool ExistsInt(const ArrayData*, int64_t);
   static bool ExistsStr(const ArrayData*, const StringData*);
@@ -433,7 +431,6 @@ public:
   static constexpr auto ValidMArrayIter = &ArrayCommon::ValidMArrayIter;
   static bool AdvanceMArrayIter(ArrayData*, MArrayIter&);
   static ArrayData* Copy(const ArrayData*);
-  static ArrayData* CopyWithStrongIterators(const ArrayData*);
   static ArrayData* CopyStatic(const ArrayData*);
   static ArrayData* Append(ArrayData*, Cell, bool);
   static ArrayData* AppendRef(ArrayData*, Variant&, bool);

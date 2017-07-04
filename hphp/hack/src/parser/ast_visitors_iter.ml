@@ -415,6 +415,7 @@ class virtual ['self] iter =
       | Return (c0, c1) -> self#on_Return env c0 c1
       | GotoLabel c0 -> self#on_GotoLabel env c0
       | Goto c0 -> self#on_Goto env c0
+      | Markup (c0, c1) -> self#on_Markup env c0 c1
       | Static_var c0 -> self#on_Static_var env c0
       | Global_var c0 -> self#on_Global_var env c0
       | If (c0, c1, c2) -> self#on_If env c0 c1 c2
@@ -545,7 +546,11 @@ class virtual ['self] iter =
       self#on_import_flavor env c0;
       self#on_expr env c1;
     method on_GotoLabel = self#on_pstring
+    method on_BracedExpr = self#on_expr
     method on_Goto = self#on_pstring
+    method on_Markup env c0 c1 =
+      self#on_pstring env c0;
+      self#on_option self#on_expr env c1;
     method on_expr_ env = function
       | Array c0 -> self#on_Array env c0
       | Darray c0 -> self#on_Darray env c0
@@ -581,6 +586,7 @@ class virtual ['self] iter =
       | Eif (c0, c1, c2) -> self#on_Eif env c0 c1 c2
       | NullCoalesce (c0, c1) -> self#on_NullCoalesce env c0 c1
       | InstanceOf (c0, c1) -> self#on_InstanceOf env c0 c1
+      | BracedExpr c0 -> self#on_BracedExpr env c0 
       | New (c0, c1, c2) -> self#on_New env c0 c1 c2
       | Efun (c0, c1) -> self#on_Efun env c0 c1
       | Lfun c0 -> self#on_Lfun env c0
@@ -626,6 +632,7 @@ class virtual ['self] iter =
     method on_Ltlt env = ()
     method on_Gtgt env = ()
     method on_Percent env = ()
+    method on_LogXor env = ()
     method on_Xor env = ()
     method on_Eq = self#on_option self#on_bop
     method on_bop env = function
@@ -651,6 +658,7 @@ class virtual ['self] iter =
       | Gtgt -> self#on_Gtgt env
       | Cmp -> self#on_Cmp env
       | Percent -> self#on_Percent env
+      | LogXor -> self#on_LogXor env
       | Xor -> self#on_Xor env
       | Eq c0 -> self#on_Eq env c0
     method on_Utild env = ()

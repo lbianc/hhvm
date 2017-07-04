@@ -17,10 +17,10 @@
 #ifndef incl_HPHP_HPHP_ARRAY_H_
 #define incl_HPHP_HPHP_ARRAY_H_
 
-#include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/array-common.h"
+#include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/hash-table.h"
-#include "hphp/runtime/base/member-lval.h"
+#include "hphp/runtime/base/member-val.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/typed-value.h"
 
@@ -291,23 +291,33 @@ struct MixedArray final : ArrayData,
   // from a const Variant& key to int64.
 private:
   using ArrayData::exists;
+  using ArrayData::at;
+  using ArrayData::rval;
   using ArrayData::lval;
   using ArrayData::lvalNew;
   using ArrayData::set;
   using ArrayData::setRef;
   using ArrayData::add;
   using ArrayData::remove;
-  using ArrayData::nvGet;
   using ArrayData::release;
 
 public:
   static Variant CreateVarForUncountedArray(const Variant& source);
 
   static size_t Vsize(const ArrayData*);
-  static const Variant& GetValueRef(const ArrayData*, ssize_t pos);
+  static member_rval::ptr_u GetValueRef(const ArrayData*, ssize_t pos);
   static bool IsVectorData(const ArrayData*);
   static constexpr auto NvTryGetInt = &NvGetInt;
   static constexpr auto NvTryGetStr = &NvGetStr;
+  static member_rval RvalIntStrict(const ArrayData* ad, int64_t k) {
+    return member_rval { ad, NvTryGetInt(ad, k) };
+  }
+  static member_rval RvalStrStrict(const ArrayData* ad, const StringData* k) {
+    return member_rval { ad, NvTryGetStr(ad, k) };
+  }
+  static member_rval RvalAtPos(const ArrayData* ad, ssize_t pos) {
+    return member_rval { ad, GetValueRef(ad, pos) };
+  }
   static bool ExistsInt(const ArrayData*, int64_t k);
   static bool ExistsStr(const ArrayData*, const StringData* k);
   static member_lval LvalInt(ArrayData* ad, int64_t k, bool copy);
@@ -330,7 +340,6 @@ public:
   static ArrayData* RemoveInt(ArrayData*, int64_t k, bool copy);
   static ArrayData* RemoveStr(ArrayData*, const StringData* k, bool copy);
   static ArrayData* Copy(const ArrayData*);
-  static ArrayData* CopyWithStrongIterators(const ArrayData*);
   static ArrayData* CopyStatic(const ArrayData*);
   static ArrayData* Append(ArrayData*, Cell v, bool copy);
   static ArrayData* AppendRef(ArrayData*, Variant& v, bool copy);
@@ -364,10 +373,24 @@ public:
   static bool Usort(ArrayData*, const Variant& cmp_function);
   static bool Uasort(ArrayData*, const Variant& cmp_function);
 
-  static const TypedValue* NvTryGetIntDict(const ArrayData*, int64_t);
+  static member_rval::ptr_u NvTryGetIntDict(const ArrayData*, int64_t);
   static constexpr auto NvGetIntDict = &NvGetInt;
-  static const TypedValue* NvTryGetStrDict(const ArrayData*, const StringData*);
+  static member_rval::ptr_u NvTryGetStrDict(const ArrayData*,
+                                            const StringData*);
   static constexpr auto NvGetStrDict = &NvGetStr;
+  static member_rval RvalIntDict(const ArrayData* ad, int64_t k) {
+    return member_rval { ad, NvGetIntDict(ad, k) };
+  }
+  static member_rval RvalIntStrictDict(const ArrayData* ad, int64_t k) {
+    return member_rval { ad, NvTryGetIntDict(ad, k) };
+  }
+  static member_rval RvalStrDict(const ArrayData* ad, const StringData* k) {
+    return member_rval { ad, NvGetStrDict(ad, k) };
+  }
+  static member_rval RvalStrStrictDict(const ArrayData* ad,
+                                       const StringData* k) {
+    return member_rval { ad, NvTryGetStrDict(ad, k) };
+  }
   static constexpr auto ReleaseDict = &Release;
   static constexpr auto NvGetKeyDict = &NvGetKey;
   static constexpr auto SetIntDict = &SetInt;
@@ -399,7 +422,6 @@ public:
   static constexpr auto UsortDict = &Usort;
   static constexpr auto UasortDict = &Uasort;
   static constexpr auto CopyDict = &Copy;
-  static constexpr auto CopyWithStrongIteratorsDict = &CopyWithStrongIterators;
   static constexpr auto CopyStaticDict = &CopyStatic;
   static constexpr auto AppendDict = &Append;
   static member_lval LvalIntRefDict(ArrayData*, int64_t, bool);
@@ -437,8 +459,6 @@ public:
 
 private:
   MixedArray* copyMixed() const;
-  MixedArray* copyMixedAndResizeIfNeeded() const;
-  MixedArray* copyMixedAndResizeIfNeededSlow() const;
   static ArrayData* MakeReserveImpl(uint32_t capacity, HeaderKind hk);
 
   static bool DictEqualHelper(const ArrayData*, const ArrayData*, bool);
@@ -592,7 +612,7 @@ private:
 
   Elm& addKeyAndGetElem(StringData* key);
 
-  template <class K> member_lval addLvalImpl(K k);
+  template <bool warn, class K> member_lval addLvalImpl(K k);
   template <class K> ArrayData* update(K k, Cell data);
   template <class K> ArrayData* updateRef(K k, Variant& data);
 
@@ -628,11 +648,17 @@ private:
                                            uint32_t mask,
                                            Elm* iter, Elm* stop);
   /*
-   * grow() increases the hash table size and the number of slots for
-   * elements by a factor of 2. grow() rebuilds the hash table, but it
-   * does not compact the elements.
+   * Grow makes a copy of the array with scale = newScale. Grow rebuilds the
+   * hash table, but it does not compact the elements. If copy is true, it
+   * will copy elements instead of taking ownership of them.
    */
-  static MixedArray* Grow(MixedArray* old, uint32_t newScale);
+  static MixedArray* Grow(MixedArray* old, uint32_t newScale, bool copy);
+
+  /*
+   * prepareForInsert ensures that the array has room to insert an element and
+   * has a refcount of 1, copying if requested and growing if needed.
+   */
+  MixedArray* prepareForInsert(bool copy);
 
   /**
    * compact() does not change the hash table size or the number of slots
@@ -640,23 +666,6 @@ private:
    * elements into the slots with lower addresses.
    */
   void compact(bool renumber);
-
-  /*
-   * resize() and resizeIfNeeded() will grow or compact the array as
-   * necessary to ensure that there is room for a new element and a
-   * new hash entry.
-   *
-   * resize() assumes isFull().  resizeIfNeeded() will first check if
-   * there is room for a new element and hash entry before growing or
-   * compacting the array.
-   *
-   * Both functions return the new MixedArray* to use (or the old one
-   * if they didn't need to grow).  The old MixedArray is left in a
-   * zombie state where the only legal action is to decref and then
-   * throw it away.
-   */
-  MixedArray* resize();
-  MixedArray* resizeIfNeeded();
 
   uint32_t capacity() const { return Capacity(m_scale); }
   uint32_t mask() const { return Mask(m_scale); }

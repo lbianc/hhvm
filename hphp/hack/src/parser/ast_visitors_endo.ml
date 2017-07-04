@@ -550,43 +550,55 @@ class virtual ['self] endo =
     method on_fun_ env this =
       let r0 = self#on_FileInfo_mode env this.f_mode in
       let r1 = self#on_list self#on_tparam env this.f_tparams in
-      let r2 = self#on_option self#on_hint env this.f_ret in
-      let r3 = self#on_bool env this.f_ret_by_ref in
-      let r4 = self#on_id env this.f_name in
-      let r5 = self#on_list self#on_fun_param env this.f_params in
-      let r6 = self#on_block env this.f_body in
-      let r7 =
+      let r2 =
+        self#on_list
+          (fun env ((c0, c1, c2) as this) ->
+               let r0 = self#on_hint env c0 in
+               let r1 = self#on_constraint_kind env c1 in
+               let r2 = self#on_hint env c2 in
+               if c0 == r0 && c1 == r1 && c2 == r2
+               then this
+               else (r0, r1, r2)) env this.f_constrs
+      in
+      let r3 = self#on_option self#on_hint env this.f_ret in
+      let r4 = self#on_bool env this.f_ret_by_ref in
+      let r5 = self#on_id env this.f_name in
+      let r6 = self#on_list self#on_fun_param env this.f_params in
+      let r7 = self#on_block env this.f_body in
+      let r8 =
         self#on_list self#on_user_attribute env
           this.f_user_attributes
       in
-      let r8 = self#on_fun_kind env this.f_fun_kind in
-      let r9 = self#on_Namespace_env env this.f_namespace in
-      let r10 = self#on_Pos_t env this.f_span in
+      let r9 = self#on_fun_kind env this.f_fun_kind in
+      let r10 = self#on_Namespace_env env this.f_namespace in
+      let r11 = self#on_Pos_t env this.f_span in
       if  this.f_mode == r0
        && this.f_tparams == r1
-       && this.f_ret == r2
-       && this.f_ret_by_ref == r3
-       && this.f_name == r4
-       && this.f_params == r5
-       && this.f_body == r6
-       && this.f_user_attributes == r7
-       && this.f_fun_kind == r8
-       && this.f_namespace == r9
-       && this.f_span == r10
+       && this.f_constrs == r2
+       && this.f_ret == r3
+       && this.f_ret_by_ref == r4
+       && this.f_name == r5
+       && this.f_params == r6
+       && this.f_body == r7
+       && this.f_user_attributes == r8
+       && this.f_fun_kind == r9
+       && this.f_namespace == r10
+       && this.f_span == r11
       then this
       else
         {
           f_mode = r0;
           f_tparams = r1;
-          f_ret = r2;
-          f_ret_by_ref = r3;
-          f_name = r4;
-          f_params = r5;
-          f_body = r6;
-          f_user_attributes = r7;
-          f_fun_kind = r8;
-          f_namespace = r9;
-          f_span = r10
+          f_constrs = r2;
+          f_ret = r3;
+          f_ret_by_ref = r4;
+          f_name = r5;
+          f_params = r6;
+          f_body = r7;
+          f_user_attributes = r8;
+          f_fun_kind = r9;
+          f_namespace = r10;
+          f_span = r11
         }
     method on_FSync env this = this
     method on_FAsync env this = this
@@ -759,6 +771,11 @@ class virtual ['self] endo =
       then this
       else Def_inline r0
     method on_Noop env this = this
+    method on_Markup env this c0 c1 =
+      let r0 = self#on_pstring env c0 in
+      let r1 = self#on_option self#on_expr env c1 in
+      if c0 = r0 && c1 = r1 then this
+      else Markup (r0, r1)
     method on_stmt env this =
       match this with
       | Unsafe -> self#on_Unsafe env this
@@ -784,6 +801,7 @@ class virtual ['self] endo =
       | Def_inline c0 ->
           self#on_Def_inline env this c0
       | Noop -> self#on_Noop env this
+      | Markup (c0, c1) -> self#on_Markup env this c0 c1
     method on_As_v env this c0 =
       let r0 = self#on_expr env c0 in
       if c0 == r0 then this else As_v r0
@@ -997,6 +1015,9 @@ class virtual ['self] endo =
       let r1 = self#on_expr env c1 in if c0 == r0 && c1 == r1
       then this
       else Import (r0, r1)
+    method on_BracedExpr env this c0 =
+      let r0 = self#on_expr env c0 in
+      if c0 == r0 then this else BracedExpr r0
     method on_GotoLabel env this c0 =
       let r0 = self#on_pstring env c0 in
       if c0 == r0 then this else GotoLabel r0
@@ -1044,6 +1065,7 @@ class virtual ['self] endo =
           self#on_NullCoalesce env this c0 c1
       | InstanceOf (c0, c1) as this ->
           self#on_InstanceOf env this c0 c1
+      | BracedExpr c0 -> self#on_BracedExpr env this c0
       | New (c0, c1, c2) -> self#on_New env this c0 c1 c2
       | Efun (c0, c1) -> self#on_Efun env this c0 c1
       | Lfun c0 -> self#on_Lfun env this c0
@@ -1096,6 +1118,7 @@ class virtual ['self] endo =
     method on_Gtgt env this = this
     method on_Percent env this = this
     method on_Xor env this = this
+    method on_LogXor env this = this
     method on_Eq env this c0 =
       let r0 = self#on_option self#on_bop env c0 in
       if c0 == r0 then this else Eq r0
@@ -1124,6 +1147,7 @@ class virtual ['self] endo =
       | Cmp -> self#on_Cmp env this
       | Percent -> self#on_Percent env this
       | Xor -> self#on_Xor env this
+      | LogXor -> self#on_LogXor env this
       | Eq c0 -> self#on_Eq env this c0
     method on_Utild env this = this
     method on_Unot env this = this

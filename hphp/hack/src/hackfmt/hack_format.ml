@@ -61,11 +61,18 @@ let rec transform node =
     let token = get_end_of_file_children x in
     t token
   | Script x ->
-    let (header, declarations) = get_script_children x in
-    Fmt [
-      t header;
-      handle_possible_list declarations;
-    ]
+    begin match x.script_declarations.syntax with
+    | SyntaxList (header::declarations) when is_markup_section header ->
+      Fmt [
+        t header;
+        Newline;
+        handle_list declarations;
+      ]
+    | _ ->
+      Fmt [
+        handle_possible_list (get_script_children x);
+      ]
+    end
   | LiteralExpression x ->
     (* Double quoted string literals can create a list *)
     let children = get_literal_expression_children x in
@@ -94,6 +101,35 @@ let rec transform node =
         end
       | _ -> failwith "Expected Token or SyntaxList"
     end
+  | MarkupSection x ->
+    let (prefix, text, suffix, _) = get_markup_section_children x in
+    if is_missing prefix
+    then
+      (* leading markup section
+         for hh files - strip leading whitespaces\newlines - they are not
+         emitted and having them in Hack file is illegal anyways *)
+      let is_hh_script = match suffix.syntax with
+        | MarkupSuffix { markup_suffix_name = {
+            syntax = Token t; _
+          }; _ } ->
+          (EditableToken.text t) = "hh"
+        | _ -> false
+      in
+      let rec all_whitespaces s i =
+        i >= String.length s
+        || (match String.get s i with
+            | ' ' | '\t' | '\r' | '\n' -> all_whitespaces s (i + 1)
+            | _ -> false)
+      in
+      let text_contains_only_whitespaces = match text.syntax with
+        | Token t -> all_whitespaces (EditableToken.text t) 0
+        | _ -> false
+      in
+      if is_hh_script && text_contains_only_whitespaces
+      then t suffix
+      else transform_simple node
+    else transform_simple node
+  | MarkupSuffix _
   | SimpleTypeSpecifier _
   | VariableExpression _
   | QualifiedNameExpression _
@@ -115,7 +151,6 @@ let rec transform node =
   | SoftTypeSpecifier _
   | ListItem _ ->
     transform_simple node
-  | ScriptHeader _
   | ExpressionStatement _ ->
     transform_simple_statement node
   | EnumDeclaration x ->
@@ -179,24 +214,9 @@ let rec transform node =
     let (modifiers, prop_type, declarators, semi) =
       get_property_declaration_children x in
     Fmt [
-      handle_possible_list ~after_each:space modifiers;
+      handle_possible_list ~after_each:(fun _ -> Space) modifiers;
       t prop_type;
-      begin match syntax declarators with
-        | Missing -> Nothing
-        | SyntaxList [declarator] ->
-          Nest [
-            Space;
-            SplitWith Cost.Base;
-            t declarator;
-          ];
-        | SyntaxList xs ->
-          WithRule (Rule.Argument, Nest (List.map xs (fun declarator -> Fmt [
-            Space;
-            Split;
-            t declarator;
-          ])));
-        | _ -> failwith "SyntaxList expected"
-      end;
+      handle_declarator_list declarators;
       t semi;
       Newline;
     ]
@@ -228,7 +248,7 @@ let rec transform node =
       Space;
       t use_kind;
       when_present use_kind space;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list clauses ~after_each:after_each_argument;
       ]);
       t semi;
@@ -292,7 +312,7 @@ let rec transform node =
     Fmt [
       t where;
       Space;
-      handle_possible_list constraints ~after_each:space;
+      handle_possible_list constraints ~after_each:(fun _ -> Space);
     ]
   | WhereConstraint x ->
     let (left, op, right) = get_where_constraint_children x in
@@ -312,7 +332,7 @@ let rec transform node =
       when_present attr newline;
       (
         let mods =
-          handle_possible_list ~after_each:space modifiers
+          handle_possible_list ~after_each:(fun _ -> Space) modifiers
         in
         let fn_name, args_and_where = match syntax func_decl with
           | FunctionDeclarationHeader x ->
@@ -363,7 +383,7 @@ let rec transform node =
       t attr;
       when_present attr newline;
       Span [
-        handle_possible_list ~after_each:space modifiers;
+        handle_possible_list ~after_each:(fun _ -> Space) modifiers;
         t kw;
         Space;
         Split;
@@ -376,11 +396,11 @@ let rec transform node =
       when_present extends_kw (fun () -> Fmt [
         Space;
         Split;
-        WithRule (Rule.Argument, Nest [ Span [
+        WithRule (Rule.Parental, Nest [ Span [
           t extends_kw;
           Space;
           Split;
-          WithRule (Rule.Argument, Nest [
+          WithRule (Rule.Parental, Nest [
             handle_possible_list ~after_each:after_each_ancestor extends
           ])
         ]])
@@ -389,11 +409,11 @@ let rec transform node =
       when_present impl_kw (fun () -> Fmt [
         Space;
         Split;
-        WithRule (Rule.Argument, Nest [ Span [
+        WithRule (Rule.Parental, Nest [ Span [
           t impl_kw;
           Space;
           Split;
-          WithRule (Rule.Argument, Nest [
+          WithRule (Rule.Parental, Nest [
             handle_possible_list ~after_each:after_each_ancestor impls
           ])
         ]])
@@ -427,12 +447,12 @@ let rec transform node =
     in
     Fmt [
       t kw;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split elements;
       ]);
       t lb;
       Newline;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split clauses;
       ]);
       Newline;
@@ -442,7 +462,7 @@ let rec transform node =
     let (kw, elements, semi) = get_trait_use_children x in
     Fmt [
       t kw;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split elements;
       ]);
       t semi;
@@ -469,7 +489,7 @@ let rec transform node =
       t kw;
       when_present const_type space;
       t const_type;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split declarators;
       ]);
       t semi;
@@ -521,7 +541,7 @@ let rec transform node =
     t ellipsis;
   | AttributeSpecification x ->
     let (left_da, attrs, right_da) = get_attribute_specification_children x in
-    transform_argish left_da attrs right_da
+    transform_argish ~allow_trailing:false left_da attrs right_da
   | Attribute x ->
     let (name, left_p, values, right_p) = get_attribute_children x in
     Fmt [
@@ -559,7 +579,7 @@ let rec transform node =
       Space;
       t x.while_left_paren;
       Split;
-      WithRule (Rule.Argument, Fmt [
+      WithRule (Rule.Parental, Fmt [
         Nest [t x.while_condition];
         Split;
         t x.while_right_paren;
@@ -615,15 +635,14 @@ let rec transform node =
     Fmt [
       t kw;
       Space;
-      t left_p;
-      Split;
-      Nest [
+      delimited_nest left_p right_p [
         t ex_type;
         Space;
-        t var;
-        Split;
+        SplitWith Cost.Base;
+        Nest [
+          t var;
+        ];
       ];
-      t right_p;
       handle_possible_compound_statement body;
     ]
   | FinallyClause x ->
@@ -653,7 +672,7 @@ let rec transform node =
       t kw;
       Space;
       t left_p;
-      WithRule (Rule.Argument, Fmt [
+      WithRule (Rule.Parental, Fmt [
         Split;
         Nest [
           handle_possible_list init;
@@ -678,20 +697,27 @@ let rec transform node =
     Fmt [
       t kw;
       Space;
-      t left_p;
-      t collection;
-      Space;
-      t await_kw;
-      Space;
-      t as_kw;
-      Space;
-      t key;
-      Space;
-      t arrow;
-      Space;
-      t value;
-      Split;
-      t right_p;
+      delimited_nest left_p right_p [
+        t collection;
+        Space;
+        t await_kw;
+        Space;
+        t as_kw;
+        Space;
+        SplitWith Cost.Base;
+        Nest [
+          Span [
+            t key;
+            Space;
+            t arrow;
+            Space;
+            SplitWith Cost.Base;
+            Nest [
+              t value;
+            ];
+          ];
+        ];
+      ];
       handle_possible_compound_statement body;
       Newline;
     ]
@@ -703,7 +729,7 @@ let rec transform node =
       Space;
       t left_p;
       Split;
-      WithRule (Rule.Argument, Fmt [
+      WithRule (Rule.Parental, Fmt [
         Nest [t expr];
         t right_p;
       ]);
@@ -869,7 +895,7 @@ let rec transform node =
   | ConditionalExpression x ->
     let (test_expr, q_kw, true_expr, c_kw, false_expr) =
       get_conditional_expression_children x in
-    WithLazyRule (Rule.Argument,
+    WithLazyRule (Rule.Parental,
       t test_expr,
       Nest [
         Space;
@@ -920,7 +946,7 @@ let rec transform node =
     Fmt [
       t left_p;
       Split;
-      WithRule (Rule.Argument, Fmt [
+      WithRule (Rule.Parental, Fmt [
         Nest [ t expr; ];
         Split;
         t right_p
@@ -936,7 +962,7 @@ let rec transform node =
         if List.is_empty (trailing_trivia left_b)
         && List.is_empty (trailing_trivia expr)
           then Rule.Simple Cost.Base
-          else Rule.Argument
+          else Rule.Parental
       in
       WithRule (rule, Fmt [
         Nest [t expr];
@@ -1072,7 +1098,7 @@ let rec transform node =
     Fmt [
     t kw;
       (* TODO: Eliminate code duplication *)
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split categories;
       ]);
       t semi;
@@ -1090,7 +1116,7 @@ let rec transform node =
       get_xhp_class_attribute_declaration_children x in
     Fmt [
       t kw;
-      WithRule (Rule.Argument, Nest [
+      WithRule (Rule.Parental, Nest [
         handle_possible_list ~before_each:space_split xhp_attributes;
       ]);
       t semi;
@@ -1127,7 +1153,7 @@ let rec transform node =
         Fmt [
           Space;
           Split;
-          WithRule (Rule.Argument, Fmt [
+          WithRule (Rule.Parental, Fmt [
             Nest [
               handle_possible_list ~after_each:(fun is_last ->
                 if not is_last then space_split () else Nothing
@@ -1230,7 +1256,7 @@ let rec transform node =
     in
 
     let (xhp_open, body, close) = get_xhp_expression_children x in
-    WithPossibleLazyRule (Rule.XHPExpression, t xhp_open,
+    WithPossibleLazyRule (Rule.Parental, t xhp_open,
       let transformed_body, can_split_before_close = handle_xhp_body body in
       Fmt [
         Nest [transformed_body];
@@ -1315,10 +1341,21 @@ let rec transform node =
       transform_argish left_a members right_a;
     ]
   | ClosureTypeSpecifier x ->
-    let (outer_left_p, kw, inner_left_p, param_types, inner_right_p, colon,
-      ret_type, outer_right_p) = get_closure_type_specifier_children x in
+    let (
+      outer_left_p,
+      coroutine,
+      kw,
+      inner_left_p,
+      param_types,
+      inner_right_p,
+      colon,
+      ret_type,
+      outer_right_p
+    ) = get_closure_type_specifier_children x in
     Fmt [
       t outer_left_p;
+      t coroutine;
+      when_present coroutine space;
       t kw;
       transform_argish_with_return_type
         inner_left_p param_types inner_right_p colon ret_type;
@@ -1404,14 +1441,6 @@ and transform_simple_statement node =
   Fmt ((List.map (children node) transform) @ [Newline])
 
 and braced_block_nest open_b close_b nodes =
-  let () = match syntax open_b with
-    | Token open_b -> ()
-    | _ -> failwith "Expected Token"
-  in
-  let () = match syntax close_b with
-    | Token close_b -> ()
-    | _ -> failwith "Expected Token"
-  in
   (* Remove the closing brace's leading trivia and handle it inside the
    * BlockNest, so that comments will be indented correctly. *)
   let leading, close_b = remove_leading_trivia close_b in
@@ -1426,21 +1455,57 @@ and braced_block_nest open_b close_b nodes =
     transform close_b;
   ]
 
+and delimited_nest
+    ?(spaces=false)
+    ?(split_when_children_split=true)
+    left_delim
+    right_delim
+    nodes
+  =
+  let rule =
+    if split_when_children_split
+    then Rule.Parental
+    else Rule.Simple Cost.Base
+  in
+  Span [
+    transform left_delim;
+    WithRule (rule,
+      nest ~spaces right_delim nodes
+    );
+  ]
+
+and nest ?(spaces=false) right_delim nodes =
+  (* Remove the right delimiter's leading trivia and handle it inside the Nest,
+   * so that comments will be indented correctly. *)
+  let leading, right_delim = remove_leading_trivia right_delim in
+  let nested_contents = Nest [Fmt nodes; transform_leading_trivia leading] in
+  let content_present = has_printable_content nested_contents in
+  let maybe_split =
+    match content_present, spaces with
+    | false, _ -> Nothing
+    | true, false -> Split
+    | true, true -> space_split ()
+  in
+  Fmt [
+    maybe_split;
+    nested_contents;
+    maybe_split;
+    transform right_delim;
+  ]
+
 and after_each_argument is_last =
   if is_last then Split else space_split ()
-
-and after_each_literal = space_split
 
 and handle_lambda_body node =
   match syntax node with
   | CompoundStatement x ->
     handle_compound_statement x;
   | _ ->
-    WithRule (Rule.Argument, Fmt [
+    Fmt [
       Space;
-      Split;
+      SplitWith Cost.Base;
       Nest [transform node];
-    ])
+    ]
 
 and handle_possible_compound_statement ?space:(space=true) node =
   match syntax node with
@@ -1466,11 +1531,38 @@ and handle_compound_statement cs =
     ];
   ]
 
-and handle_possible_list
+(**
+ * Special-case handling for lists of declarators, where we want the splits
+ * between declarators to break if their children break, but we want a single
+ * declarator to stay joined with the line preceding it if it fits, even when
+ * its children break.
+ *)
+and handle_declarator_list declarators =
+  match syntax declarators with
+  | Missing -> Nothing
+  | SyntaxList [declarator] ->
+    Nest [
+      Space;
+      (* Use an independent split, so we don't break just because a line break
+       * occurs in the declarator. *)
+      SplitWith Cost.Base;
+      transform declarator;
+    ];
+  | SyntaxList xs ->
+    (* Use Rule.Parental to break each declarator onto its own line if any line
+     * break occurs in a declarator, or if they can't all fit onto one line. *)
+    WithRule (Rule.Parental, Nest (List.map xs (fun declarator -> Fmt [
+      Space;
+      Split;
+      transform declarator;
+    ])));
+  | _ -> failwith "SyntaxList expected"
+
+and handle_list
     ?(before_each=(fun () -> Nothing))
     ?(after_each=(fun is_last -> Nothing))
     ?(handle_last=transform)
-    node =
+    list =
   let rec aux l = (
     match l with
     | hd :: [] ->
@@ -1488,10 +1580,17 @@ and handle_possible_list
       ]
     | [] -> Nothing
   ) in
+  aux list
+
+and handle_possible_list
+    ?(before_each=(fun () -> Nothing))
+    ?(after_each=(fun is_last -> Nothing))
+    ?(handle_last=transform)
+    node =
   match syntax node with
   | Missing -> Nothing
-  | SyntaxList x -> aux x
-  | _ -> aux [node]
+  | SyntaxList x -> handle_list x ~before_each ~after_each ~handle_last
+  | _ -> handle_list [node] ~before_each ~after_each ~handle_last
 
 and handle_xhp_open_right_angle_token attrs t =
   match syntax t with
@@ -1570,7 +1669,7 @@ and handle_possible_chaining (obj, arrow1, member1) argish =
       Nest [transform_chain hd];
     ]
   | hd :: tl ->
-    WithLazyRule (Rule.Argument,
+    WithLazyRule (Rule.Parental,
       Fmt [
         transform obj;
         Split;
@@ -1655,8 +1754,35 @@ and transform_fn_decl_name async coroutine kw amp name type_params leftp =
   ]
 
 and transform_fn_decl_args params rightp colon ret_type where =
-  WithRule (Rule.Argument, Fmt [
-    transform_possible_comma_list params rightp;
+  (* It is a syntax error to follow a variadic parameter with a trailing comma,
+   * so suppress trailing commas in that case. *)
+  let allow_trailing =
+    match syntax params with
+    | SyntaxList params ->
+      let open EditableToken in
+      let open EditableToken.TokenKind in
+      let last_param =
+        match syntax (List.last_exn params) with
+        | ListItem { list_item; _ } -> list_item
+        | _ -> failwith "Expected ListItem"
+      in
+      begin
+        match syntax last_param with
+        | VariadicParameter _
+        | ParameterDeclaration {
+            parameter_name = { syntax = DecoratedExpression {
+              decorated_expression_decorator = {
+                syntax = Token { kind = DotDotDot; _ }; _
+              }; _
+            }; _ }; _
+          } ->
+          false
+        | _ -> true
+      end
+    | _ -> true
+  in
+  WithRule (Rule.Parental, Fmt [
+    transform_possible_comma_list ~allow_trailing params rightp;
     transform colon;
     when_present colon space;
     transform ret_type;
@@ -1668,7 +1794,7 @@ and transform_argish_with_return_type left_p params right_p colon ret_type =
   Fmt [
     transform left_p;
     when_present params split;
-    WithRule (Rule.Argument, Span [
+    WithRule (Rule.Parental, Span [
       Span [ transform_possible_comma_list params right_p ];
       transform colon;
       when_present colon space;
@@ -1678,84 +1804,60 @@ and transform_argish_with_return_type left_p params right_p colon ret_type =
 
 and transform_argish ?(allow_trailing=true) ?(spaces=false)
     left_p arg_list right_p =
-  Fmt [
-    transform left_p;
-    when_present arg_list split;
-    if spaces && is_present arg_list then Space else Nothing;
-    let rule = match syntax arg_list with
-      | SyntaxList [x]
-        when List.is_empty (trailing_trivia left_p)
-          && List.is_empty (trailing_trivia x)
-        -> Rule.Simple Cost.Base
-      | _ -> Rule.Argument
-    in
-    WithRule (rule, Span [
-      transform_possible_comma_list ~allow_trailing ~spaces arg_list right_p
-    ])
+  (* When there is only one argument, with no surrounding whitespace in the
+   * original source, allow that style to be preserved even when there are line
+   * breaks within the argument (normally these would force the splits around
+   * the argument to break). *)
+  let split_when_children_split =
+    match spaces, syntax arg_list with
+    | false, SyntaxList [x] ->
+      not (
+        List.is_empty (trailing_trivia left_p) &&
+        List.is_empty (trailing_trivia x)
+      )
+    | _ -> true
+  in
+  delimited_nest ~spaces ~split_when_children_split left_p right_p [
+    transform_arg_list ~spaces ~allow_trailing arg_list
   ]
 
 and transform_braced_item left_p item right_p =
-  (* Remove the right paren's leading trivia and handle it inside the Nest, so
-   * that comments will be indented correctly. *)
-  let leading, right_p = remove_leading_trivia right_p in
-  Fmt [
-    transform left_p;
-    when_present item split;
-    WithRule (Rule.Argument, Span [
-      Nest [
-        transform item;
-        transform_leading_trivia leading;
-      ];
-      when_present item split;
-      transform right_p;
-    ]);
-  ]
+  delimited_nest left_p right_p [transform item]
+
+and transform_arg_list ?(allow_trailing=true) ?(spaces=false) items =
+  handle_possible_list items
+    ~after_each:after_each_argument
+    ~handle_last:(transform_last_arg ~allow_trailing)
 
 and transform_possible_comma_list ?(allow_trailing=true) ?(spaces=false)
     items right_p =
-  (* Remove the right paren's leading trivia and handle it inside the Nest, so
-   * that comments will be indented correctly. *)
-  let leading, right_p = match syntax right_p with
-    | Missing -> [], right_p
-    | _ -> remove_leading_trivia right_p
-  in
-  Fmt [
-    Nest [
-      handle_possible_list items
-        ~after_each:after_each_argument
-        ~handle_last:(transform_last_arg ~allow_trailing);
-      transform_leading_trivia leading;
-    ];
-    when_present items split;
-    if spaces && is_present items then Space else Nothing;
-    transform right_p;
+  nest ~spaces right_p [
+    transform_arg_list ~spaces ~allow_trailing items
   ]
 
 and remove_leading_trivia node =
-  let leading_token = match Syntax.leading_token node with
-    | Some t -> t
-    | None -> failwith "Expected leading token"
-  in
-  let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
-    match syntax rewrite_node with
-    | Token t when t == leading_token ->
-      Rewriter.Replace (Syntax.make_token {t with EditableToken.leading = []})
-    | _  -> Rewriter.Keep
-  ) node in
-  EditableToken.leading leading_token, rewritten_node
+  match Syntax.leading_token node with
+  | None -> [], node
+  | Some leading_token ->
+    let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
+      match syntax rewrite_node with
+      | Token t when t == leading_token ->
+        Rewriter.Replace (Syntax.make_token {t with EditableToken.leading = []})
+      | _  -> Rewriter.Keep
+    ) node in
+    EditableToken.leading leading_token, rewritten_node
 
 and remove_trailing_trivia node =
-  let trailing_token = match Syntax.trailing_token node with
-    | Some t -> t
-    | None -> failwith "Expected trailing token"
-  in
-  let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
-    match syntax rewrite_node with
-    | Token t when t == trailing_token ->
-      Rewriter.Replace (Syntax.make_token {t with EditableToken.trailing = []})
-    | _  -> Rewriter.Keep
-  ) node in
-  rewritten_node, EditableToken.trailing trailing_token
+  match Syntax.trailing_token node with
+  | None -> node, []
+  | Some trailing_token ->
+    let rewritten_node = Rewriter.rewrite_pre (fun rewrite_node ->
+      match syntax rewrite_node with
+      | Token t when t == trailing_token ->
+        Rewriter.Replace (Syntax.make_token {t with EditableToken.trailing = []})
+      | _  -> Rewriter.Keep
+    ) node in
+    rewritten_node, EditableToken.trailing trailing_token
 
 and transform_last_arg ~allow_trailing node =
   match syntax node with
@@ -1815,9 +1917,7 @@ and transform_keyword_expression_statement kw expr semi =
 and transform_keyword_expr_list_statement kw expr_list semi =
   Fmt [
     transform kw;
-    WithRule (Rule.Argument, Nest [
-      handle_possible_list ~before_each:space_split expr_list;
-    ]);
+    handle_declarator_list expr_list;
     transform semi;
     Newline;
   ]
@@ -1826,7 +1926,7 @@ and transform_condition left_p condition right_p =
   Fmt [
     transform left_p;
     Split;
-    WithRule (Rule.Argument, Fmt [
+    WithRule (Rule.Parental, Fmt [
       Nest [transform condition];
       Split;
       transform right_p;
@@ -1850,7 +1950,7 @@ and transform_binary_expression ~is_nested expr =
   let operator_t = get_operator_type operator in
 
   if Full_fidelity_operator.is_comparison operator_t then
-    WithLazyRule (Rule.Argument,
+    WithLazyRule (Rule.Parental,
       Fmt [
         transform left;
         Space;
@@ -1896,7 +1996,7 @@ and transform_binary_expression ~is_nested expr =
         flatten_expression (make_binary_expression left operator right) in
       match binary_expression_syntax_list with
       | hd :: tl ->
-        WithLazyRule (Rule.Argument,
+        WithLazyRule (Rule.Parental,
           transform_operand hd,
           let expression =
             let last_op = ref (List.hd_exn tl) in
@@ -2004,7 +2104,6 @@ and transform_trivia ~is_leading trivia =
     | TriviaKind.UnsafeExpression
     | TriviaKind.FixMe
     | TriviaKind.IgnoreError
-    | TriviaKind.Markup
     | TriviaKind.DelimitedComment ->
       let preceded_by_whitespace =
         if !currently_leading

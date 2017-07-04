@@ -332,11 +332,6 @@ exceptions depending on how coercion is implemented.
   Returns S0, with Nullptr removed from its type. This instruction currently
   supports a very limited range of types but can be expanded if needed.
 
-| CheckClosureStaticLocInit, ND, S(BoxedCell), B
-
-  Check if the closure static local represented by S0 is initialized, and if
-  not branch to block B.
-
 2. Arithmetic
 
 | AddInt, D(Int), S(Int) S(Int), NF
@@ -1365,15 +1360,15 @@ To string conversions:
 
   Load the length of the string in S0.
 
-| LdClosureStaticLoc, D(BoxedCell), CStr S(FramePtr), NF
+| LdClosureStaticLoc<func,staticLocalName>, D(PtrToPropGen), S(Obj), NF
 
-  Get boxed value to initialize static local named S0 in frame S1, where S1
-  must be either a closure or generatorFromClosure function.
+  Get pointer to static local named 'staticLocName' for function 'func' whose
+  closure object is S0. func must either be a Closure, or generatorFromClosure
 
-| LdStaticLoc<func,staticLocalName>, D(BoxedInitCell), NA, B
+| LdStaticLoc<func,staticLocalName>, D(BoxedInitCell), NA, PRc
 
   Load the address of the static local variable named 'staticLocalName' for
-  function 'func' in RDS. If the variable isn't initialized, branch to B.
+  function 'func' in RDS. The variable must be initialized
 
 8. Allocation
 
@@ -1407,6 +1402,10 @@ To string conversions:
 | DebugBacktrace, D(Arr), S(Int), PRc
 
   Obtain stack trace by calling the debug_backtrace() method.
+
+| DebugBacktraceFast, D(Res), NA, PRc
+
+  Obtain compact stack trace resource that can be expanded lazily.
 
 | InitThrowableFileAndLine, ND, S(Obj), NF
 
@@ -1949,15 +1948,15 @@ To string conversions:
 
   Raises a Hack array compat notice with the text in S0 as its message.
 
-| InitClosureStaticLoc, ND, S(BoxedCell) S(Cell), NF
+| CheckStaticLoc<func,staticLocalName>, ND, NA, B
 
-  Assuming S0 is an uninitialized closure static local, initialize it by
-  setting it to the value in S1.
+  Check whether the static local variable named 'staticLocalName' for
+  function 'func' is initialized in RDS, and branch if not.
 
-| InitStaticLoc<func,staticLocalName>, D(BoxedInitCell), S(Cell), NF
+| InitStaticLoc<func,staticLocalName>, ND, S(Cell), NF
 
   Initialize the static local variable named 'staticLocalName' for
-  function 'func' with S0 and return it.
+  function 'func' with S0.
 
 | InitClsCns<className,constName>, DCns, NA, Er|PRc
 
@@ -2147,9 +2146,15 @@ To string conversions:
   Store one of the closure environment arguments (i.e. from the closure's use
   clause) from S1 into the closure object S0.
 
-| CreateCont, D(Obj), S(FramePtr) C(Int) S(TCA,Nullptr) C(Int), PRc
+| CreateGen, DAllocObj, S(FramePtr) C(Int) S(TCA,Nullptr) C(Int), PRc
 
   Create a Generator object and suspend the ActRec provided by S0 into its
+  embedded ActRec, allocating S1 slots for locals/iterators. Set the native
+  resume address to S2 and resume offset to S3.
+
+| CreateAGen, DAllocObj, S(FramePtr) C(Int) S(TCA,Nullptr) C(Int), PRc
+
+  Create an AsyncGenerator object and suspend the ActRec provided by S0 into its
   embedded ActRec, allocating S1 slots for locals/iterators. Set the native
   resume address to S2 and resume offset to S3.
 
@@ -2186,7 +2191,7 @@ To string conversions:
   cross-scheduler and intra-scheduler cycle detection. Throws if the
   dependency cannot be established.
 
-| ContEnter<spOffset,returnBCOffset>, ND,
+| ContEnter<spOffset,returnBCOffset>, DGenIter,
 |                                     S(StkPtr) S(FramePtr) S(FramePtr) S(TCA),
 |                                     Er
 

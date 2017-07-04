@@ -177,6 +177,7 @@ using FuncTable      = std::vector<FuncEntry>;
 int getLineNumber(const LineTable& table, Offset pc);
 bool getSourceLoc(const SourceLocTable& table, Offset pc, SourceLoc& sLoc);
 void stashLineTable(const Unit* unit, LineTable table);
+void stashExtendedLineTable(const Unit* unit, SourceLocTable table);
 
 const SourceLocTable& getSourceLocTable(const Unit*);
 
@@ -826,6 +827,13 @@ public:
    */
   bool useStrictTypes() const;
 
+  /*
+   * Should calls from this unit to builtins use strict types?
+   *
+   * This is true for PHP7 files with declare(strict_types=1), but not for Hack
+   * files or force_hh */
+  bool useStrictTypesForBuiltins() const;
+
 
   /////////////////////////////////////////////////////////////////////////////
   // Offset accessors.                                                 [static]
@@ -865,6 +873,7 @@ private:
   bool m_interpretOnly : 1;
   bool m_isHHFile : 1;
   bool m_useStrictTypes : 1;
+  bool m_useStrictTypesForBuiltins : 1;
   LowStringPtr m_dirpath{nullptr};
 
   TypedValue m_mainReturn;

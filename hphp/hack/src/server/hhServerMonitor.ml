@@ -72,15 +72,21 @@ let monitor_daemon_main (options: ServerArgs.options) =
         |> State_prefetcher.of_script_opt;
       allow_subscriptions = local_config.ServerLocalConfig.watchman_subscribe;
       use_dummy = local_config.ServerLocalConfig.use_dummy_informant;
+      min_distance_restart =
+        local_config.ServerLocalConfig.informant_min_distance_restart;
     } in
-    SM.start_monitoring ~waiting_client options informant_options
-    ServerMonitorUtils.({
-      socket_file = ServerFiles.socket_file www_root;
-      lock_file = ServerFiles.lock_file www_root;
-      server_log_file = ServerFiles.log_link www_root;
-      monitor_log_file = ServerFiles.monitor_log_link www_root;
-      load_script_log_file = ServerFiles.load_log www_root;
-    })
+    let max_purgatory_clients =
+      local_config.ServerLocalConfig.max_purgatory_clients in
+    SM.start_monitoring ~waiting_client
+      ~max_purgatory_clients
+      options informant_options
+      ServerMonitorUtils.({
+        socket_file = ServerFiles.socket_file www_root;
+        lock_file = ServerFiles.lock_file www_root;
+        server_log_file = ServerFiles.log_link www_root;
+        monitor_log_file = ServerFiles.monitor_log_link www_root;
+        load_script_log_file = ServerFiles.load_log www_root;
+      })
 
 let daemon_entry =
   Daemon.register_entry_point
@@ -103,8 +109,7 @@ let start_daemon options =
   let {Daemon.pid; _} =
     Daemon.spawn (in_fd, out_fd, out_fd) daemon_entry options in
   Printf.eprintf "Spawned %s (child pid=%d)\n" Program.hh_server pid;
-  Printf.eprintf "Logs will go to %s\n%!"
-    (if Sys.win32 then log_file_path else log_link);
+  Printf.eprintf "Logs will go to %s\n%!" log_file_path;
   Exit_status.No_error
 
 (** Either starts a monitor daemon (which will spawn a typechecker daemon),

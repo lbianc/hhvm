@@ -11,8 +11,7 @@
 type kind =
   | Simple of Cost.t
   | Always
-  | Argument
-  | XHPExpression
+  | Parental
 
 type t = {
   id: int;
@@ -21,28 +20,17 @@ type t = {
 
 let null_rule_id = -1
 
-let is_split _rule v =
-  match v with
-    | None
-    | Some 0 -> false
-    | _ -> true
-
 let get_cost kind =
   Cost.get_cost @@ match kind with
     | Simple cost -> cost
     | Always -> Cost.NoCost
-    | Argument
-    | XHPExpression -> Cost.Base
-
-let get_possible_values _id =
-  [1]
+    | Parental -> Cost.Base
 
 let cares_about_children kind =
   match kind with
     | Simple _ -> false
     | Always -> false
-    | Argument -> true
-    | XHPExpression -> true
+    | Parental -> true
 
 let compare r1 r2 = Pervasives.compare r1.id r2.id
 
@@ -50,7 +38,6 @@ let to_string rule =
   let kind = match rule.kind with
     | Simple cost -> Printf.sprintf "Simple %d" @@ Cost.get_cost cost
     | Always -> "Always"
-    | Argument -> "Argument"
-    | XHPExpression -> "XHPExpression"
+    | Parental -> "Parental"
   in
   (string_of_int rule.id) ^ " - " ^ kind

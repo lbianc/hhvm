@@ -10,7 +10,6 @@
 open Core
 open Hhbc_ast
 open Instruction_sequence
-open Emit_type_hint
 module SU = Hhbc_string_utils
 
 let has_type_constraint ti =
@@ -24,8 +23,8 @@ let emit_method_prolog ~params ~needs_local_this =
     then instr (IMisc (InitThisLoc (Local.Named "$this")))
     else empty)
     ::
-    List.filter_map params (fun (is_variadic, p) ->
-    if is_variadic
+    List.filter_map params (fun p ->
+    if Hhas_param.is_variadic p
     then None else
     let param_type_info = Hhas_param.type_info p in
     let param_name = Hhas_param.name p in
@@ -60,20 +59,35 @@ let rec emit_def env def =
     empty
 
 and emit_defs env defs =
+  let rec aux env defs =
+    match defs with
+    | Ast.SetNamespaceEnv ns :: defs ->
+      let env = Emit_env.with_namespace ns env in
+      aux env defs
+    | [] -> Emit_statement.emit_dropthrough_return ()
+    (* emit last statement in the list as final statement *)
+    | [Ast.Stmt s]
+    (* emit statement as final if it is one before the last and last statement is
+       empty markup (which will be no-op) *)
+    | [Ast.Stmt s; Ast.Stmt (Ast.Markup ((_, ""), None))] ->
+      Emit_statement.emit_final_statement env s
+    | [d] ->
+      gather [emit_def env d; Emit_statement.emit_dropthrough_return ()]
+    | d::defs ->
+      let i1 = emit_def env d in
+      let i2 = aux env defs in
+      gather [i1; i2]
+  in
   match defs with
-  | Ast.SetNamespaceEnv ns :: defs ->
-    let env = Emit_env.with_namespace ns env in
-    emit_defs env defs
-  | [] -> Emit_statement.emit_dropthrough_return ()
-  | [Ast.Stmt s] -> Emit_statement.emit_final_statement env s
-  | [d] ->
-    gather [emit_def env d; Emit_statement.emit_dropthrough_return ()]
-  | d::defs ->
-    let i1 = emit_def env d in
-    let i2 = emit_defs env defs in
+  | Ast.Stmt (Ast.Markup ((_, s), echo_expr_opt))::defs ->
+    let i1 =
+      Emit_statement.emit_markup env s echo_expr_opt ~check_for_hashbang:true
+    in
+    let i2 = aux env defs in
     gather [i1; i2]
+  | defs -> aux env defs
 
-let make_body body_instrs decl_vars is_memoize_wrapper params return_type_info =
+let make_body body_instrs decl_vars is_memoize_wrapper params return_type_info static_inits =
   let body_instrs = rewrite_user_labels body_instrs in
   let body_instrs = rewrite_class_refs body_instrs in
   let params, body_instrs =
@@ -88,17 +102,17 @@ let make_body body_instrs decl_vars is_memoize_wrapper params return_type_info =
     is_memoize_wrapper
     params
     return_type_info
+    static_inits
 
 let emit_return_type_info ~scope ~skipawaitable ~namespace ret =
   let tparams =
     List.map (Ast_scope.Scope.get_tparams scope) (fun (_, (_, s), _) -> s) in
   match ret with
   | None ->
-    Some (Hhas_type_info.make (Some "") (Hhas_type_constraint.make None []))
+    Hhas_type_info.make (Some "") (Hhas_type_constraint.make None [])
   | Some h ->
-    Some (hint_to_type_info
-      ~nullable:false
-      ~skipawaitable ~always_extended:true ~tparams ~namespace h)
+    Emit_type_hint.(hint_to_type_info
+      ~kind:Return ~nullable:false ~skipawaitable ~tparams ~namespace h)
 
 let emit_body
   ~scope
@@ -116,10 +130,8 @@ let emit_body
   let return_type_info =
     emit_return_type_info ~scope ~skipawaitable ~namespace ret in
   let verify_return =
-    match return_type_info with
-    | None -> false
-    | Some x when x. Hhas_type_info.type_info_user_type = Some "" -> false
-    | Some x -> Hhas_type_info.has_type_constraint x in
+    return_type_info.Hhas_type_info.type_info_user_type <> Some "" &&
+    Hhas_type_info.has_type_constraint return_type_info in
   Emit_statement.set_verify_return verify_return;
   Emit_statement.set_default_dropthrough default_dropthrough;
   Emit_statement.set_default_return_value return_value;
@@ -130,8 +142,7 @@ let emit_body
   in
   let has_this = Ast_scope.Scope.has_this scope in
   let needs_local_this, decl_vars =
-    Decl_vars.from_ast ~is_closure_body ~has_this
-    ~params:(List.map params snd) body in
+    Decl_vars.from_ast ~is_closure_body ~has_this ~params:params body in
   Local.reset_local (List.length params + List.length decl_vars);
   let env = Emit_env.(
     empty |>
@@ -139,27 +150,52 @@ let emit_body
     with_needs_local_this needs_local_this |>
     with_scope scope) in
   let stmt_instrs = emit_defs env body in
-  let fault_instrs = extract_fault_instructions stmt_instrs in
   let begin_label, default_value_setters =
-    Emit_param.emit_param_default_value_setter env (List.map params snd)
-  in
+    Emit_param.emit_param_default_value_setter env params in
   let is_generator, is_pair_generator = Generator.is_function_generator body in
   let generator_instr =
     if is_generator then gather [instr_createcont; instr_popc] else empty
   in
+  let svar_map = Static_var.make_static_map body in
+  let stmt_instrs =
+    rewrite_static_instrseq svar_map
+                    (Emit_expression.emit_expr ~need_ref:false) env stmt_instrs
+  in
+  let first_instruction_is_label =
+    match Instruction_sequence.first stmt_instrs with
+    | Some (ILabel _) -> true
+    | _ -> false
+  in
+  let header = gather [
+        begin_label;
+        emit_method_prolog ~params ~needs_local_this;
+        generator_instr;
+      ]
+  in
+  (* per comment in emitter.cpp there should be no
+   * jumps to the base of the function - inject EntryNop
+   * if first instruction in the statement list is label
+   * and prologue is empty *)
+  let header =
+    if first_instruction_is_label
+      && Instruction_sequence.is_empty header
+    then instr_entrynop
+    else header
+  in
+  let svar_instrs = SMap.fold (fun name e lst -> (name, e)::lst) svar_map [] in
   let body_instrs = gather [
-    begin_label;
-    emit_method_prolog ~params ~needs_local_this;
-    generator_instr;
+    header;
     stmt_instrs;
     default_value_setters;
-    fault_instrs;
   ] in
+  let fault_instrs = extract_fault_instructions body_instrs in
+  let body_instrs = gather [body_instrs; fault_instrs] in
   make_body
     body_instrs
     decl_vars
     false (*is_memoize_wrapper*)
-    (List.map params snd)
-    return_type_info,
+    params
+    (Some return_type_info)
+    svar_instrs,
     is_generator,
     is_pair_generator

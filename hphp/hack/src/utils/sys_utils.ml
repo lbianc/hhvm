@@ -121,6 +121,19 @@ let exec_read_lines ?(reverse=false) cmd =
   assert (Unix.close_process_in ic = Unix.WEXITED 0);
   if not reverse then List.rev !result else !result
 
+(**
+ * Collects paths that satisfy a predicate, recursively traversing directories.
+ *)
+let rec collect_paths path_predicate path =
+  if Sys.is_directory path then
+    path
+      |> Sys.readdir
+      |> Array.to_list
+      |> List.map ~f:(Filename.concat path)
+      |> List.concat_map ~f:(collect_paths path_predicate)
+  else
+    Utils.singleton_if (path_predicate path) path
+
 (** Deletes the file given by "path". If it is a directory, recursively
  * deletes all its contents then removes the directory itself. *)
 let rec rm_dir_tree path =
@@ -355,6 +368,9 @@ let is_test_mode () =
     ignore @@ Sys.getenv "HH_TEST_MODE";
     true
   with _ -> false
+
+let sleep ~seconds =
+  ignore @@ Unix.select [] [] [] seconds
 
 let symlink =
   (* Dummy implementation of `symlink` on Windows: we create a text

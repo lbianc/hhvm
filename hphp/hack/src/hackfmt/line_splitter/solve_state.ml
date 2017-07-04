@@ -15,7 +15,11 @@ let _LINE_WIDTH = 80
 type t = {
   chunk_group: Chunk_group.t;
   lines: (int * ISet.t) list;
-  rvm: int IMap.t;
+  (* Rule bindings map.
+   * Rules in this map are bound to be broken on or not broken on in this solve
+   * state. Rules not in the map are not yet bound. A rule that is bound to be
+   * broken on will have all its splits broken in the solution. *)
+  rbm: bool IMap.t;
   nesting_set: ISet.t;
   cost: int;
   overflow: int;
@@ -26,20 +30,32 @@ type t = {
   rules_on_partially_bound_lines: ISet.t Lazy.t;
 }
 
-let has_split_before_chunk c rvm =
-  let rule_id = c.Chunk.rule in
-  let value = IMap.get rule_id rvm in
-  Rule.is_split rule_id value
+let chunks t = t.chunk_group.Chunk_group.chunks
 
-let has_comma_after_chunk c rvm =
+let rbm_has_split_before_chunk c rbm =
+  let rule_id = c.Chunk.rule in
+  IMap.get rule_id rbm
+  |> Option.value ~default:false
+
+let rbm_has_comma_after_chunk c rbm =
   Option.value_map c.Chunk.comma_rule ~default:false ~f:(fun rule_id ->
-    let value = IMap.get rule_id rvm in
-    Rule.is_split rule_id value
+    IMap.get rule_id rbm
+    |> Option.value ~default:false
   )
 
-let get_bound_ruleset rvm = ISet.of_list @@ IMap.keys rvm
+let has_split_before_chunk t ~chunk =
+  rbm_has_split_before_chunk chunk t.rbm
+
+let has_comma_after_chunk t ~chunk =
+  rbm_has_comma_after_chunk chunk t.rbm
+
+let get_bound_ruleset rbm = ISet.of_list @@ IMap.keys rbm
 
 let get_overflow len = max (len - _LINE_WIDTH) 0
+
+let get_indent t ~chunk =
+  let block_indentation = t.chunk_group.Chunk_group.block_indentation in
+  block_indentation + Nesting.get_indent chunk.Chunk.nesting t.nesting_set
 
 (**
  * Create a list of lines
@@ -48,7 +64,7 @@ let get_overflow len = max (len - _LINE_WIDTH) 0
  * Which correspond to the overflow and set of rules that correspond to
  * a particular line of output for a given Solve_state
  *)
-let build_lines chunk_group rvm nesting_set =
+let build_lines chunk_group rbm nesting_set =
   let { Chunk_group.chunks; block_indentation; _ } = chunk_group in
 
   let get_text_length chunk ~has_comma =
@@ -68,8 +84,8 @@ let build_lines chunk_group rvm nesting_set =
       | hd :: tl ->
         (* TODO: consider adding parent rules *)
         let rule = hd.Chunk.rule in
-        let is_split = has_split_before_chunk hd rvm in
-        let has_comma = has_comma_after_chunk hd rvm in
+        let is_split = rbm_has_split_before_chunk hd rbm in
+        let has_comma = rbm_has_comma_after_chunk hd rbm in
         let chunk_len = get_text_length hd ~has_comma +
           get_prefix_whitespace_length hd ~is_split in
 
@@ -80,8 +96,8 @@ let build_lines chunk_group rvm nesting_set =
   in
   aux chunks (0, ISet.empty)
 
-let build_candidate_rules_and_update_rvm rvm lines rule_dependency_map =
-  let bound_rules = get_bound_ruleset rvm in
+let build_candidate_rules_and_update_rbm rbm lines rule_dependency_map =
+  let bound_rules = get_bound_ruleset rbm in
   let rec get_candidate_and_dead_rules lines dead_rules =
     match lines with
       | [] -> ISet.empty, dead_rules
@@ -104,12 +120,12 @@ let build_candidate_rules_and_update_rvm rvm lines rule_dependency_map =
   ) base_candidate_rules base_candidate_rules in
 
   let dead_rules = ISet.diff dead_rules candidate_rules in
-  let rvm = ISet.fold (fun r acc ->
-    if not (IMap.mem r rvm)
-    then IMap.add r 0 acc
+  let rbm = ISet.fold (fun r acc ->
+    if not (IMap.mem r rbm)
+    then IMap.add r false acc
     else acc
-  ) dead_rules rvm in
-  candidate_rules, rvm
+  ) dead_rules rbm in
+  candidate_rules, rbm
 
 let calculate_unprocessed_overflow lines bound_ruleset =
   List.fold lines ~init:0 ~f:(fun acc (overflow, rules) ->
@@ -130,7 +146,7 @@ let calculate_rules_on_partially_bound_lines lines bound_ruleset =
   )
 
 
-let make chunk_group rvm =
+let make chunk_group rbm =
   let { Chunk_group.chunks; block_indentation; rule_dependency_map; _ } =
     chunk_group in
 
@@ -142,57 +158,59 @@ let make chunk_group rvm =
         if ISet.mem nid idset then
           nset, idset
         else
-        if has_split_before_chunk c rvm then
+        if rbm_has_split_before_chunk c rbm then
           ISet.add nid nset, ISet.add nid idset
         else
           nset, ISet.add nid idset
       )
   in
 
-  let lines = build_lines chunk_group rvm nesting_set in
+  let lines = build_lines chunk_group rbm nesting_set in
 
   (* calculate the overflow of the last chunk *)
   let overflow = List.fold ~init:0 ~f:(+) @@ List.map ~f:fst lines in
 
-  (* calculate cost of all of the spans that are split *)
-  let span_cost_map = List.fold chunks ~init:IMap.empty ~f:(fun acc c ->
-    if has_split_before_chunk c rvm then
-      List.fold ~init:acc c.Chunk.spans ~f:(fun acc s ->
-        if IMap.mem s.Span.id acc
-        then acc
-        else IMap.add s.Span.id (Cost.get_cost s.Span.cost) acc
-      )
+  (* add to cost the number of spans that are split
+   * (implicitly giving each span a cost of 1) *)
+  let broken_spans = List.fold chunks ~init:ISet.empty ~f:begin fun acc c ->
+    if rbm_has_split_before_chunk c rbm then
+      c.Chunk.spans
+      |> List.map ~f:Span.id
+      |> List.fold_right ~init:acc ~f:ISet.add
     else acc
-  ) in
-  let span_cost = IMap.fold (fun _k v acc -> acc + v) span_cost_map 0 in
+  end in
+  let span_cost = ISet.cardinal broken_spans in
 
   (* add to cost the cost of all rules that are split *)
   let rule_cost = (
     IMap.fold (fun r_id v acc ->
-      if (Rule.is_split r_id (Some v)) then
+      if v then
         acc + (Rule.get_cost (Chunk_group.get_rule_kind chunk_group r_id))
       else
         acc
-    ) rvm 0
+    ) rbm 0
   ) in
   let cost = span_cost + rule_cost in
 
-  (* Precompute candidate_rules and update the rvm by binding unbound rules on
-    lines with 0 overflow to 0 **)
-  let candidate_rules, rvm =
-    build_candidate_rules_and_update_rvm rvm lines rule_dependency_map in
+  (* Precompute candidate_rules and update the rbm by binding unbound rules on
+   * lines with 0 overflow to false *)
+  let candidate_rules, rbm =
+    build_candidate_rules_and_update_rbm rbm lines rule_dependency_map in
 
-  let bound_ruleset = get_bound_ruleset rvm in
+  let bound_ruleset = get_bound_ruleset rbm in
   let unprocessed_overflow =
     lazy (calculate_unprocessed_overflow lines bound_ruleset) in
   let rules_on_partially_bound_lines =
     lazy (calculate_rules_on_partially_bound_lines lines bound_ruleset) in
 
-  { chunk_group; lines; rvm; cost; overflow; nesting_set; candidate_rules;
+  { chunk_group; lines; rbm; cost; overflow; nesting_set; candidate_rules;
     unprocessed_overflow; rules_on_partially_bound_lines; }
 
 let is_rule_bound t rule_id =
-  IMap.mem rule_id t.rvm
+  IMap.mem rule_id t.rbm
+
+let is_rule_unbound t rule_id =
+  not (is_rule_bound t rule_id)
 
 let get_candidate_rules t = t.candidate_rules
 
@@ -215,14 +233,17 @@ let is_overlapping s1 s2 =
     let s1_rules = get_rules_on_partially_bound_lines s1 in
     let s2_rules = get_rules_on_partially_bound_lines s2 in
     ISet.cardinal s1_rules = ISet.cardinal s2_rules &&
-    ISet.for_all (fun s1_key ->
-      IMap.find_unsafe s1_key s1.rvm =
-        try IMap.find_unsafe s1_key s2.rvm with Not_found -> -1) s1_rules
+    ISet.for_all
+      (fun s1_key -> IMap.get s1_key s1.rbm = IMap.get s1_key s2.rbm)
+      s1_rules
 
 let compare_rule_sets s1 s2 =
   let bound_rule_ids = List.sort_uniq ~cmp:Pervasives.compare @@
-    IMap.keys s1.rvm @ IMap.keys s2.rvm in
-  let is_split rule_id state = Rule.is_split () @@ IMap.get rule_id state.rvm in
+    IMap.keys s1.rbm @ IMap.keys s2.rbm in
+  let is_split rule_id state =
+    IMap.get rule_id state.rbm
+    |> Option.value ~default:false
+  in
   let rec aux = function
     | [] -> 0
     | rule_id :: ids ->
@@ -250,8 +271,8 @@ let compare_overlap s1 s2 =
 
 let __debug t =
   (* TODO: make a new rule strings string *)
-  let rule_strings = List.map (IMap.bindings t.rvm) (fun (k, v) ->
-    string_of_int k ^ ": " ^ string_of_int v
+  let rule_strings = List.map (IMap.bindings t.rbm) (fun (k, v) ->
+    string_of_int k ^ ": " ^ string_of_bool v
   ) in
   let rule_count = string_of_int (Chunk_group.get_rule_count t.chunk_group) in
   let rule_str = rule_count ^ " [" ^ (String.concat "," rule_strings) ^ "]" in

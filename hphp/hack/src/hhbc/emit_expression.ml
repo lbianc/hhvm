@@ -12,6 +12,7 @@ open Core
 open Hhbc_ast
 open Instruction_sequence
 open Ast_class_expr
+open Ast_scope
 
 module A = Ast
 module H = Hhbc_ast
@@ -19,6 +20,7 @@ module TC = Hhas_type_constraint
 module SN = Naming_special_names
 module CBR = Continue_break_rewriter
 module SU = Hhbc_string_utils
+module ULS = Unique_list_string
 
 (* Locals, array elements, and properties all support the same range of l-value
  * operations. *)
@@ -40,7 +42,11 @@ let is_special_function e args =
     | "isset" -> n > 0
     | "empty" -> n = 1
     | "tuple" -> true
-    | "define" -> n = 2
+    | "define" ->
+      begin match args with
+      | [_, A.String _; _] -> true
+      | _ -> false
+      end
     | "eval" -> n = 1
     | "idx" -> n = 2 || n = 3
     | "class_alias" ->
@@ -94,6 +100,7 @@ let from_binop op =
   | A.Cmp -> instr (IOp Cmp)
   | A.Percent -> instr (IOp Mod)
   | A.Xor -> instr (IOp BitXor)
+  | A.LogXor -> instr (IOp Xor)
   | A.Eq _ -> emit_nyi "Eq"
   | A.AMpamp
   | A.BArbar ->
@@ -157,13 +164,20 @@ let get_passByRefKind expr =
   let open PassByRefKind in
   let rec from_non_list_assignment permissive_kind expr =
     match snd expr with
-    | A.New _ | A.Lvar _ | A.Clone _ -> AllowCell
+    | A.New _ | A.Lvar _ | A.Clone _
+    | A.Import ((A.Include | A.IncludeOnce), _) -> AllowCell
     | A.Binop(A.Eq None, (_, A.List _), e) ->
       from_non_list_assignment WarnOnCell e
     | A.Array_get(_, Some _) -> permissive_kind
     | A.Binop(A.Eq _, _, _) -> WarnOnCell
-    | A.Unop((A.Uincr | A.Udecr), _) -> WarnOnCell
+    | A.Unop((A.Uincr | A.Udecr | A.Usilence), _) -> WarnOnCell
     | A.Unop((A.Usplat, _)) -> AllowCell
+    | A.Call((_, A.Id (_, "array_key_exists")), [_; _], []) ->
+      AllowCell
+    | A.Call((_, A.Id (_, ("idx"))), ([_; _] | [_; _; _]), []) ->
+      AllowCell
+    | A.Call((_, A.Id (_, ("hphp_array_idx"))), [_; _; _], []) ->
+      AllowCell
     | _ -> ErrorOnCell in
   from_non_list_assignment AllowCell expr
 
@@ -180,10 +194,6 @@ let is_local_this env id =
 let extract_shape_field_name_pstring = function
   | A.SFlit p -> A.String p
   | A.SFclass_const (id, p) -> A.Class_const (id, p)
-
-let extract_shape_field_name = function
-  | A.SFlit (_, s)
-  | A.SFclass_const (_, (_, s)) -> s
 
 let rec expr_and_new env instr_to_add_new instr_to_add = function
   | A.AFvalue e ->
@@ -219,7 +229,7 @@ and emit_local ~notice ~need_ref env x =
   if SN.Superglobals.is_superglobal x
   then gather [
     instr_string (SU.Locals.strip_dollar x);
-    instr (IGet CGetG)
+    instr (IGet (if need_ref then VGetG else CGetG))
   ]
   else
   let local = get_local env x in
@@ -237,7 +247,8 @@ and emit_local ~notice ~need_ref env x =
  * the result will be just below the top of the stack *)
 and emit_first_expr env (_, e as expr) =
   match e with
-  | A.Lvar (_, id) when not (is_local_this env id) ->
+  | A.Lvar (_, id)
+    when not (is_local_this env id || SN.Superglobals.is_superglobal id) ->
     instr_cgetl2 (get_local env id), true
   | _ ->
     emit_expr_and_unbox_if_necessary ~need_ref:false env expr, false
@@ -304,13 +315,38 @@ and emit_box_if_necessary need_ref instr =
   else
     instr
 
+and emit_maybe_classname env (p,name) with_string with_instr =
+  let from_str s =
+    let e_id, _ =
+      Hhbc_id.Class.elaborate_id (Emit_env.get_namespace env) (p,s) in
+    with_string e_id in
+  if name = SN.Classes.cStatic then
+    let get_static =
+      gather [ instr_fcallbuiltin 0 0 "get_called_class"; instr_unboxr_nop ] in
+    with_instr get_static
+  else if name = SN.Classes.cSelf || name = SN.Classes.cParent then
+    let cls = Scope.get_class (Emit_env.get_scope env) in
+    match cls with
+    | Some c when c.A.c_kind = A.Ctrait ->
+      let get_cls =
+        if name = SN.Classes.cSelf then instr_self else instr_parent in
+      with_instr get_cls
+    | Some c when name = SN.Classes.cSelf -> from_str (snd c.A.c_name)
+    | Some c ->
+        begin match c.A.c_extends with
+        | (_, A.Happly ((_, parent), _)) :: _ -> from_str parent
+        | _ -> from_str name
+        end
+    | _ -> from_str name
+  else from_str name
+
 and emit_instanceof env e1 e2 =
   match (e1, e2) with
   | (_, (_, A.Id id)) ->
-    let id, _ = Hhbc_id.Class.elaborate_id (Emit_env.get_namespace env) id in
-    gather [
-      emit_expr ~need_ref:false env e1;
-      instr_instanceofd id ]
+    let lhs = emit_expr ~need_ref:false env e1 in
+    emit_maybe_classname env id
+      (fun id -> gather [ lhs; instr_instanceofd id ])
+      (fun instr -> gather [ lhs; instr; instr_instanceof ])
   | _ ->
     gather [
       emit_expr ~need_ref:false env e1;
@@ -420,7 +456,6 @@ and emit_shape env expr fl =
   emit_expr ~need_ref:false env (p, A.Array fl)
 
 and emit_tuple env p es =
-  (* Did you know that tuples are functions? *)
   let af_list = List.map es ~f:(fun e -> A.AFvalue e) in
   emit_expr ~need_ref:false env (p, A.Array af_list)
 
@@ -451,13 +486,19 @@ and emit_class_expr env cexpr =
   | Class_parent -> instr (IMisc (Parent 0))
   | Class_self -> instr (IMisc (Self 0))
   | Class_id id -> emit_known_class_id env id
-  | Class_expr (_, A.Lvar (_, id)) ->
-    instr (IGet (ClsRefGetL (get_local env id, 0)))
   | Class_expr expr ->
-    gather [
-      emit_expr ~need_ref:false env expr;
-      instr_clsrefgetc
-    ]
+    begin match expr with
+    | (_, A.Lvar _) ->
+      stash_in_local ~always_stash_this:true env expr
+      begin fun temp _ ->
+      instr (IGet (ClsRefGetL (temp, 0)))
+      end
+    | _ ->
+      gather [
+        emit_expr ~need_ref:false env expr;
+        instr_clsrefgetc
+      ]
+    end
 
 and emit_class_get env param_num_opt qop need_ref cid (_, id) =
   let cexpr, _ = expr_to_class_expr ~resolve_self:false
@@ -495,17 +536,6 @@ and emit_class_const env cid (_, id) =
       then instr (IMisc (ClsRefName 0))
       else instr (ILitConst (ClsCns (Hhbc_id.Const.from_ast_name id, 0)))
     ]
-
-and emit_await env e =
-  let after_await = Label.next_regular () in
-  gather [
-    emit_expr ~need_ref:false env e;
-    instr_dup;
-    instr_istypec OpNull;
-    instr_jmpnz after_await;
-    instr_await;
-    instr_label after_await;
-  ]
 
 and emit_yield env = function
   | A.AFvalue e ->
@@ -567,6 +597,8 @@ and emit_id env (p, s as id) =
   | "__NAMESPACE__" ->
     let ns = Emit_env.get_namespace env in
     instr_string (Option.value ~default:"" ns.Namespace_env.ns_name)
+  | ("exit" | "die") ->
+    emit_exit env None
   | _ ->
     let fq_id, id_opt, contains_backslash =
       Hhbc_id.Const.elaborate_id (Emit_env.get_namespace env) id in
@@ -634,7 +666,8 @@ and emit_call_isset_expr env (_, expr_ as expr) =
     emit_class_get env None QueryOp.Isset false cid id
   | A.Obj_get (expr, prop, nullflavor) ->
     emit_obj_get ~need_ref:false env None QueryOp.Isset expr prop nullflavor
-  | A.Lvar (_, id) when is_local_this env id ->
+  | A.Lvar (_, id)
+    when is_local_this env id && not (Emit_env.get_needs_local_this env)->
     gather [
       emit_local ~notice:NoNotice ~need_ref:false env id;
       instr_istypec OpNull;
@@ -660,7 +693,7 @@ and emit_call_empty_expr env (_, expr_ as expr) =
   | A.Array_get((_, A.Lvar (_, x)), Some e) when x = SN.Superglobals.globals ->
     gather [
       emit_expr ~need_ref:false env e;
-      instr (IIsset EmptyG)
+      instr_emptyg
     ]
   | A.Array_get(base_expr, opt_elem_expr) ->
     emit_array_get ~need_ref:false env None QueryOp.Empty base_expr opt_elem_expr
@@ -668,6 +701,11 @@ and emit_call_empty_expr env (_, expr_ as expr) =
     emit_class_get env None QueryOp.Empty false cid id
   | A.Obj_get (expr, prop, nullflavor) ->
     emit_obj_get ~need_ref:false env None QueryOp.Empty expr prop nullflavor
+  | A.Lvar(_, id) when id = SN.Superglobals.globals ->
+    gather [
+      instr_string @@ SU.Locals.strip_dollar SN.Superglobals.globals;
+      instr_emptyg
+    ]
   | A.Lvar(_, id) when not (is_local_this env id) ->
     instr_emptyl (get_local env id)
   | A.Lvarvar(n, (_, id)) ->
@@ -744,6 +782,13 @@ and emit_xhp_obj_get env e s nullflavor =
   let fn = p, A.Call (fn_name, [p, A.String (p, SU.Xhp.clean s)], []) in
   emit_call_expr ~need_ref:false env fn
 
+and emit_get_class_no_args () =
+  gather [
+    instr_fpushfuncd 0 (Hhbc_id.Function.from_raw_string "get_class");
+    instr_fcall 0;
+    instr_unboxr
+  ]
+
 and emit_class_alias es =
   let c1, c2 = match es with
     | (_, A.String (_, c1)) :: (_, A.String (_, c2)) :: _ -> c1, c2
@@ -809,6 +854,7 @@ and emit_expr env expr ~need_ref =
     emit_box_if_necessary need_ref @@ emit_call_isset_exprs env exprs
   | A.Call ((_, A.Id (_, "empty")), [expr], []) ->
     emit_box_if_necessary need_ref @@ emit_call_empty_expr env expr
+  (* Did you know that tuples are functions? *)
   | A.Call ((p, A.Id (_, "tuple")), es, _) ->
     emit_box_if_necessary need_ref @@ emit_tuple env p es
   | A.Call ((_, A.Id (_, "idx")), es, _) ->
@@ -819,6 +865,10 @@ and emit_expr env expr ~need_ref =
     emit_box_if_necessary need_ref @@ emit_eval env expr
   | A.Call ((_, A.Id (_, "class_alias")), es, _) ->
     emit_box_if_necessary need_ref @@ emit_class_alias es
+  | A.Call ((_, A.Id (_, "get_class")), [], _) ->
+    emit_box_if_necessary need_ref @@ emit_get_class_no_args ()
+  | A.Call ((_, A.Id (_, ("exit" | "die"))), es, _) ->
+    emit_exit env (List.hd es)
   | A.Call _ -> emit_call_expr ~need_ref env expr
   | A.New (typeexpr, args, uargs) ->
     emit_box_if_necessary need_ref @@ emit_new env typeexpr args uargs
@@ -839,7 +889,7 @@ and emit_expr env expr ~need_ref =
     emit_box_if_necessary need_ref @@ emit_clone env e
   | A.Shape fl ->
     emit_box_if_necessary need_ref @@ emit_shape env expr fl
-  | A.Await e -> emit_await env e
+  | A.Await _ -> emit_nyi "complex await expression"
   | A.Yield e -> emit_yield env e
   | A.Yield_break ->
     failwith "yield break should be in statement position"
@@ -848,7 +898,7 @@ and emit_expr env expr ~need_ref =
   | A.Efun (fundef, ids) -> emit_lambda env fundef ids
   | A.Class_get (cid, id)  -> emit_class_get env None QueryOp.CGet need_ref cid id
   | A.String2 es -> emit_string2 env es
-  | A.Unsafeexpr e ->
+  | A.BracedExpr e ->
     let instr = emit_expr ~need_ref:false env e in
     if need_ref then
       gather [
@@ -867,29 +917,78 @@ and emit_expr env expr ~need_ref =
   | A.Lvarvar (n, id) -> emit_lvarvar ~need_ref n id
   | A.Id_type_arguments (id, _) -> emit_id env id
   | A.Omitted -> empty
+  | A.Unsafeexpr e -> emit_expr ~need_ref env e
   | A.List _ ->
     failwith "List destructor can only be used as an lvar"
 
 and emit_static_collection ~transform_to_collection tv =
   let transform_instr =
     match transform_to_collection with
-    | Some n -> instr_colfromarray n
-    | None -> empty
+    | Some collection_type -> instr_colfromarray collection_type
+    | _ -> empty
   in
   gather [
     instr (ILitConst (TypedValue tv));
     transform_instr;
   ]
 
-(* transform_to_collection argument keeps track of
- * what collection to transform to *)
-and emit_dynamic_collection ~transform_to_collection env expr es =
+and emit_value_only_collection env es constructor =
+  gather [
+    gather @@
+    List.map es
+      ~f:(function
+        (* Drop the keys *)
+        | A.AFkvalue (_, e)
+        | A.AFvalue e -> emit_expr ~need_ref:false env e);
+    instr @@ ILitConst constructor;
+  ]
+
+and emit_keyvalue_collection name env es constructor =
+  let name = SU.strip_ns name in
+  let transform_instr =
+    if name = "dict" || name = "array" then empty else
+      let collection_type = collection_type name in
+      instr_colfromarray collection_type
+  in
+  let add_elem_instr =
+    if name = "array" then instr_add_new_elemc
+    else gather [instr_dup; instr_add_elemc]
+  in
+  gather [
+    instr (ILitConst constructor);
+    gather (List.map es ~f:(expr_and_new env add_elem_instr instr_add_elemc));
+    transform_instr;
+  ]
+
+and emit_struct_array env es =
+  let es =
+    List.map es
+      ~f:(function A.AFkvalue ((_, A.String (_, s)), v) ->
+         s, emit_expr ~need_ref:false env v
+                 | _ -> failwith "impossible")
+  in
+  gather [
+    gather @@ List.map es ~f:snd;
+    instr_newstructarray @@ List.map es ~f:fst;
+  ]
+
+(* isPackedInit() returns true if this expression list looks like an
+ * array with no keys and no ref values *)
+and is_packed_init ?(check_size = true) es size =
   let is_only_values =
     List.for_all es ~f:(function A.AFkvalue _ -> false | _ -> true)
   in
-  let are_all_keys_strings =
-    List.for_all es ~f:(function A.AFkvalue ((_, A.String (_, _)), _) -> true
-                               | _ -> false)
+  let keys_are_zero_indexed_properly_formed =
+    List.foldi es ~init:true ~f:(fun i b f -> b && match f with
+      | A.AFkvalue ((_, A.Int (_, k)), _) -> int_of_string k = i
+      | A.AFvalue _ -> true
+      | _ -> false)
+  in
+  let stack_limit =
+    Hhbc_options.max_array_elem_size_on_the_stack !Hhbc_options.compiler_options
+  in
+  let should_check_size_positive =
+    if check_size then size <= stack_limit else true
   in
   let has_references =
     (* Reference can only exist as a value *)
@@ -897,62 +996,65 @@ and emit_dynamic_collection ~transform_to_collection env expr es =
       ~f:(function A.AFkvalue (_, e)
                  | A.AFvalue e -> expr_starts_with_ref e)
   in
-  let is_array = match snd expr with A.Array _ -> true | _ -> false in
+  (is_only_values || keys_are_zero_indexed_properly_formed)
+  && not has_references
+  && should_check_size_positive
+
+and is_struct_init es =
+  let has_references =
+    (* Reference can only exist as a value *)
+    List.exists es
+      ~f:(function A.AFkvalue (_, e)
+                 | A.AFvalue e -> expr_starts_with_ref e)
+  in
+  let keys = ULS.empty in
+  let are_all_keys_non_numeric_strings, keys =
+    List.fold_right es ~init:(true, keys) ~f:(fun field (b, keys) ->
+      match field with
+        | A.AFkvalue ((_, A.String (_, s)), _) ->
+          b && (Option.is_none @@ Typed_value.string_to_int_opt s),
+          ULS.add keys s
+        | _ -> false, keys)
+  in
+  let num_keys = List.length es in
+  let has_duplicate_keys =
+    ULS.cardinal keys <> num_keys
+  in
+  are_all_keys_non_numeric_strings
+  && not has_duplicate_keys
+  && not has_references
+  && num_keys <= 64
+  && num_keys != 0
+
+(* transform_to_collection argument keeps track of
+ * what collection to transform to *)
+and emit_dynamic_collection env expr es =
   let count = List.length es in
-  if is_only_values && transform_to_collection = None && not has_references
-  then begin
-    let lit_constructor = match snd expr with
-      | A.Array _ -> NewPackedArray count
-      | A.Collection ((_, "vec"), _) -> NewVecArray count
-      | A.Collection ((_, "keyset"), _) -> NewKeysetArray count
-      | _ ->
-        failwith "emit_dynamic_collection (values only): unexpected expression"
-    in
-    gather [
-      gather @@
-      List.map es
-        ~f:(function
-          | A.AFvalue e -> emit_expr ~need_ref:false env e
-          | _ -> failwith "impossible");
-      instr @@ ILitConst lit_constructor;
-    ]
-  end else if are_all_keys_strings && is_array && not has_references then begin
-    let es =
-      List.map es
-        ~f:(function
-          | A.AFkvalue ((_, A.String (_, s)), v) ->
-            s, emit_expr ~need_ref:false env v
-          | _ -> failwith "impossible")
-    in
-    gather [
-      gather @@ List.map es ~f:snd;
-      instr_newstructarray @@ List.map es ~f:fst;
-    ]
-  end else begin
-    let lit_constructor = match snd expr with
-      | A.Array _ -> NewMixedArray count
-      | A.Collection ((_, ("dict" | "Set" | "ImmSet" | "Map" | "ImmMap")), _) ->
-        NewDictArray count
-      | _ -> failwith "emit_dynamic_collection: unexpected expression"
-    in
-    let transform_instr =
-      match transform_to_collection with
-      | Some n -> instr_colfromarray n
-      | None -> empty
-    in
-    let add_elem_instr =
-      if transform_to_collection = None
-      then instr_add_new_elemc
-      else gather [instr_dup; instr_add_elemc]
-    in
-    gather [
-      instr (ILitConst lit_constructor);
-      gather (List.map es ~f:(expr_and_new env add_elem_instr instr_add_elemc));
-      transform_instr;
-    ]
-  end
+  match snd expr with
+  | A.Collection ((_, "vec"), _) ->
+    emit_value_only_collection env es (NewVecArray count)
+  | A.Collection ((_, "keyset"), _) ->
+    emit_value_only_collection env es (NewKeysetArray count)
+  | A.Collection ((_, name), _)
+    when SU.strip_ns name = "dict"
+      || SU.strip_ns name = "Set"
+      || SU.strip_ns name = "ImmSet"
+      || SU.strip_ns name = "Map"
+      || SU.strip_ns name = "ImmMap" ->
+    emit_keyvalue_collection name env es (NewDictArray count)
+  | _ ->
+  (* From here on, we're only dealing with PHP arrays *)
+  if is_packed_init es count then
+    emit_value_only_collection env es (NewPackedArray count)
+  else if is_struct_init es then
+    emit_struct_array env es
+  else if is_packed_init es count ~check_size:false then
+    emit_keyvalue_collection "array" env es (NewArray count)
+  else
+    emit_keyvalue_collection "array" env es (NewMixedArray count)
 
 and emit_named_collection env expr pos name fields =
+  let name = SU.strip_ns name in
   match name with
   | "dict" | "vec" | "keyset" -> emit_collection env expr fields
   | "Vector" | "ImmVector" ->
@@ -970,7 +1072,6 @@ and emit_named_collection env expr pos name fields =
     then instr_newcol collection_type
     else
       emit_dynamic_collection
-        ~transform_to_collection:(Some collection_type)
         env
         expr
         fields
@@ -998,10 +1099,10 @@ and emit_collection ?(transform_to_collection) env expr es =
   | Some tv ->
     emit_static_collection ~transform_to_collection tv
   | None ->
-    emit_dynamic_collection ~transform_to_collection env expr es
+    emit_dynamic_collection env expr es
 
 and emit_pipe env e1 e2 =
-  stash_in_local env e1
+  stash_in_local ~always_stash:true env e1
   begin fun temp _break_label ->
   let env = Emit_env.with_pipe_var temp env in
   emit_expr ~need_ref:false env e2
@@ -1112,6 +1213,11 @@ and emit_quiet_expr env (_, expr_ as expr) =
   match expr_ with
   | A.Lvar (_, x) when not (is_local_this env x) ->
     instr_cgetquietl (get_local env x)
+  | A.Lvarvar (n, id) ->
+    gather [
+      emit_lvarvar ~need_ref:false (n-1) id;
+      instr_cgetquietn;
+    ]
   | A.Array_get((_, A.Lvar (_, x)), Some e) when x = SN.Superglobals.globals ->
     gather [
       emit_expr ~need_ref:false env e;
@@ -1194,7 +1300,7 @@ and emit_prop_instrs env (_, expr_ as expr) =
   match expr_ with
   (* These all have special inline versions of member keys *)
   | A.Lvar (_, id) when not (is_local_this env id) -> empty, 0
-  | A.Id _ -> empty, 0
+  | A.String _ | A.Id _ -> empty, 0
   | _ -> emit_expr ~need_ref:false env expr, 1
 
 (* Get the member key for an array element expression: the `elem` in
@@ -1221,7 +1327,8 @@ and get_prop_member_key env null_flavor stack_index prop_expr =
   | A.Id (_, id) when String_utils.string_starts_with id "$" ->
     MemberKey.PL (get_local env id)
   (* Special case for known property name *)
-  | A.Id (_, id) ->
+  | A.Id (_, id)
+  | A.String (_, id) ->
     let pid = Hhbc_id.Prop.from_ast_name id in
     begin match null_flavor with
     | Ast.OG_nullthrows -> MemberKey.PT pid
@@ -1384,7 +1491,11 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
      base_expr_instrs,
      instr_basenc base_offset mode,
      1
-
+   | A.BracedExpr e ->
+     let base_expr_instrs = emit_expr ~need_ref:false env e in
+     base_expr_instrs,
+     instr_basenc base_offset mode,
+     1
    | _ ->
      let base_expr_instrs, flavor = emit_flavored_expr env expr in
      (if binary_assignment_rhs_starts_with_ref expr
@@ -1638,8 +1749,8 @@ and emit_call env (_, expr_ as expr) args uargs =
       emit_call_lhs env expr nargs;
       emit_args_and_call env args uargs;
     ], Flavor.ReturnVal in
-  match expr_ with
-  | A.Id (_, id) when id = SN.SpecialFunctions.echo ->
+  match expr_, args with
+  | A.Id (_, id), _ when id = SN.SpecialFunctions.echo ->
     let instrs = gather @@ List.mapi args begin fun i arg ->
          gather [
            emit_expr ~need_ref:false env arg;
@@ -1647,8 +1758,12 @@ and emit_call env (_, expr_ as expr) args uargs =
            if i = nargs-1 then empty else instr_popc
          ] end in
     instrs, Flavor.Cell
-
-  | A.Id (_, id) when
+  | A.Id (_, "array_slice"), [
+    _, A.Call ((_, A.Id (_, "func_get_args")), [], []); (_, A.Int _ as count)
+    ] ->
+    let p = Pos.none in
+    emit_call env (p, A.Id (p, "__SystemLib\\func_slice_args")) [count] []
+  | A.Id (_, id), _ when
     (optimize_cuf ()) && (is_call_user_func id (List.length args)) ->
     if List.length uargs != 0 then
     failwith "Using argument unpacking for a call_user_func is not supported";
@@ -1658,7 +1773,7 @@ and emit_call env (_, expr_ as expr) args uargs =
         emit_call_user_func env id arg args
     end
 
-  | A.Id (_, "invariant") when List.length args > 0 ->
+  | A.Id (_, "invariant"), _ when List.length args > 0 ->
     let e = List.hd_exn args in
     let rest = List.tl_exn args in
     let l = Label.next_regular () in
@@ -1674,7 +1789,7 @@ and emit_call env (_, expr_ as expr) args uargs =
       instr_null;
     ], Flavor.Cell
 
-  | A.Id (_, "assert") ->
+  | A.Id (_, "assert"), _ ->
     let l0 = Label.next_regular () in
     let l1 = Label.next_regular () in
     gather [
@@ -1692,7 +1807,7 @@ and emit_call env (_, expr_ as expr) args uargs =
       instr_label l1;
     ], Flavor.Cell
 
-  | A.Id (_, ("class_exists" | "interface_exists" | "trait_exists" as id))
+  | A.Id (_, ("class_exists" | "interface_exists" | "trait_exists" as id)), _
     when nargs = 1 || nargs = 2 ->
     let class_kind =
       match id with
@@ -1711,7 +1826,10 @@ and emit_call env (_, expr_ as expr) args uargs =
       instr (IMisc (OODeclExists class_kind))
     ], Flavor.Cell
 
-  | A.Id (_, id) ->
+  | A.Id (_, ("exit" | "die")), _ when nargs = 0 || nargs = 1 ->
+    emit_exit env (List.hd args), Flavor.Cell
+
+  | A.Id (_, id), _ ->
     begin match get_call_builtin_func_info id with
     | Some (nargs, i) when nargs = List.length args ->
       gather [
@@ -2111,10 +2229,37 @@ and emit_unop ~need_ref env op e =
   | A.Uref -> emit_expr ~need_ref:true env e
   | A.Usplat ->
     emit_expr ~need_ref:false env e
-  | A.Usilence -> emit_nyi "silence"
+  | A.Usilence ->
+    Local.scope @@ fun () ->
+      let fault_label = Label.next_fault () in
+      let temp_local = Local.get_unnamed_local () in
+      let body = emit_expr ~need_ref:false env e in
+      let start = instr_silence_start temp_local in
+      let cleanup = instr_silence_end temp_local in
+      let fault = gather [cleanup; instr_unwind] in
+      gather [
+        start;
+        instr_try_fault fault_label body fault;
+        cleanup;
+      ]
 
 and emit_exprs env exprs =
   gather (List.map exprs (emit_expr ~need_ref:false env))
+
+and with_temp_local temp f =
+  let break_label = Label.next_regular () in
+  let fault_label = Label.next_fault () in
+  gather [
+    instr_try_fault
+      fault_label
+      (* try block *)
+      (f temp break_label)
+      (* fault block *)
+      (gather [
+        instr_unsetl temp;
+        instr_unwind ]);
+    instr_label break_label;
+  ]
 
 (* Generate code to evaluate `e`, and, if necessary, store its value in a
  * temporary local `temp` (unless it is itself a local). Then use `f` to
@@ -2125,31 +2270,27 @@ and emit_exprs env exprs =
  *  break_label:
  *    push `temp` on stack if `leave_on_stack` is true.
  *)
-and stash_in_local ?(leave_on_stack=false) env e f =
-  let break_label = Label.next_regular () in
+and stash_in_local ?(always_stash=false) ?(leave_on_stack=false)
+                   ?(always_stash_this=false) env e f =
   match e with
-  | (_, A.Lvar (_, id)) when not (is_local_this env id) ->
+  | (_, A.Lvar (_, id)) when not always_stash
+    && not (is_local_this env id &&
+    ((Emit_env.get_needs_local_this env) || always_stash_this)) ->
+    let break_label = Label.next_regular () in
     gather [
       f (get_local env id) break_label;
       instr_label break_label;
       if leave_on_stack then instr_cgetl (get_local env id) else empty;
     ]
   | _ ->
+    let generate_value =
+      Local.scope @@ fun () -> emit_expr ~need_ref:false env e in
     Local.scope @@ fun () ->
       let temp = Local.get_unnamed_local () in
-      let fault_label = Label.next_fault () in
       gather [
-        emit_expr ~need_ref:false env e;
+        generate_value;
         instr_setl temp;
         instr_popc;
-        instr_try_fault
-          fault_label
-          (* try block *)
-          (f temp break_label)
-          (* fault block *)
-          (gather [
-            instr_unsetl temp;
-            instr_unwind ]);
-        instr_label break_label;
+        with_temp_local temp f;
         if leave_on_stack then instr_pushl temp else instr_unsetl temp
       ]

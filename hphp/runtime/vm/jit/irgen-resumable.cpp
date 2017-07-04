@@ -142,11 +142,9 @@ void implAwaitR(IRGS& env, SSATmp* child, Offset resumeOffset) {
 }
 
 void yieldReturnControl(IRGS& env) {
-  auto const retVal = cns(env, TInitNull);
-  push(env, retVal);
-
-  gen(env, RetCtrl, RetCtrlData { spOffBCFromIRSP(env), true },
-      sp(env), fp(env), retVal);
+  auto const spAdjust = offsetFromIRSP(env, BCSPRelOffset{-1});
+  gen(env, RetCtrl, RetCtrlData { spAdjust, true },
+      sp(env), fp(env), cns(env, TInitNull));
 }
 
 void yieldImpl(IRGS& env, Offset resumeOffset) {
@@ -269,7 +267,7 @@ void emitAwait(IRGS& env) {
 }
 
 void emitFCallAwait(IRGS& env,
-                    int32_t numParams,
+                    uint32_t numParams,
                     const StringData*,
                     const StringData*) {
   auto const resumeOffset = nextBcOff(env);
@@ -315,8 +313,6 @@ void emitCreateCont(IRGS& env) {
   assertx(!resumed(env));
   assertx(curFunc(env)->isGenerator());
 
-  if (curFunc(env)->isAsync()) PUNT(CreateCont-AsyncGenerator);
-
   // Create the Generator object. CreateCont takes care of copying local
   // variables and iterators.
   auto const func = curFunc(env);
@@ -325,7 +321,7 @@ void emitCreateCont(IRGS& env) {
   auto const resumeAddr = gen(env, LdBindAddr, bind_data);
   auto const cont =
     gen(env,
-        CreateCont,
+        curFunc(env)->isAsync() ? CreateAGen : CreateGen,
         fp(env),
         cns(env, func->numSlotsInFrame()),
         resumeAddr,
@@ -369,15 +365,17 @@ void emitContEnter(IRGS& env) {
   resumeAddr = gen(env, CheckNonNull, exitSlow, resumeAddr);
 
   auto returnBcOffset = returnOffset - curFunc(env)->base();
-  gen(
+  auto const retVal = gen(
     env,
     ContEnter,
-    ContEnterData { spOffBCFromIRSP(env), returnBcOffset },
+    ContEnterData { spOffBCFromIRSP(env), returnBcOffset, isAsync },
     sp(env),
     fp(env),
     genFp,
     resumeAddr
   );
+
+  push(env, retVal);
 }
 
 void emitContRaise(IRGS& env) { PUNT(ContRaise); }

@@ -10,53 +10,45 @@
 
 open Core
 
-let expand_state state_queue state =
-  let { Solve_state.chunk_group; rvm; _ } = state in
+let expand_state state =
+  let { Solve_state.chunk_group; rbm; _ } = state in
   let rule_ids = ISet.elements @@ Solve_state.get_candidate_rules state in
 
-  let _, next_rvms = List.map_env rvm rule_ids ~f:(fun env_rvm rule_id ->
+  let _, next_rbms = List.map_env rbm rule_ids ~f:(fun env_rbm rule_id ->
     if Solve_state.is_rule_bound state rule_id
-    then env_rvm, []
+    then env_rbm, None
     else begin
-      let possible_values = Rule.get_possible_values rule_id  in
-      let next_rvms = List.filter_map possible_values ~f:(fun v ->
-        let next_rvm = IMap.add rule_id v env_rvm in
-        if Chunk_group.is_rule_value_map_valid chunk_group next_rvm
-        then Some next_rvm
-        else None
-      ) in
-      let env_rvm = if List.length next_rvms = List.length possible_values
-        then IMap.add rule_id 0 env_rvm
-        else env_rvm
+      let next_rbm_opt =
+        Some (IMap.add rule_id true env_rbm)
+          |> Option.filter ~f:(Chunk_group.are_rule_bindings_valid chunk_group)
       in
-      env_rvm, next_rvms
+      let env_rbm = if Option.is_some next_rbm_opt
+        then IMap.add rule_id false env_rbm
+        else env_rbm
+      in
+      env_rbm, next_rbm_opt
     end
   ) in
-  let next_rvms = List.concat next_rvms in
 
-  List.iter next_rvms ~f:(fun rvm ->
-    let st = Solve_state.make state.Solve_state.chunk_group rvm in
-    State_queue.push state_queue st;
-  );
-  state_queue
+  next_rbms
+  |> List.filter_opt
+  |> List.map ~f:(Solve_state.make chunk_group)
 
-
-let find_best_state queue =
-  let best = State_queue.pop queue in
-  let queue = expand_state queue best in
-  let rec aux count acc queue =
+let find_best_state init_state =
+  let queue = State_queue.make_empty 7 in
+  List.iter (expand_state init_state) ~f:(State_queue.push queue);
+  let rec aux count best =
     if
       State_queue.is_empty queue ||
       count > 2000 ||
-      acc.Solve_state.overflow = 0
-    then acc
+      best.Solve_state.overflow = 0
+    then best
     else
-      let state = State_queue.pop queue in
-      let best = Solve_state.pick_best_state state acc in
-      let queue = expand_state queue state in
-      aux (count + 1) best queue;
+      let next_state = State_queue.pop queue in
+      List.iter (expand_state next_state) ~f:(State_queue.push queue);
+      aux (count + 1) (Solve_state.pick_best_state next_state best);
   in
-  aux 0 best queue
+  aux 0 init_state
 
 let find_solve_states ?range chunk_groups =
   let chunk_groups = match range with
@@ -68,10 +60,9 @@ let find_solve_states ?range chunk_groups =
       )
   in
   chunk_groups |> List.map ~f:(fun chunk_group ->
-    let rvm = Chunk_group.get_initial_rule_value_map chunk_group in
-    let init_state = Solve_state.make chunk_group rvm in
-    let state_queue = State_queue.make init_state in
-    find_best_state state_queue
+    let rbm = Chunk_group.get_initial_rule_bindings chunk_group in
+    let init_state = Solve_state.make chunk_group rbm in
+    find_best_state init_state
   )
 
 let print ?range solve_states =

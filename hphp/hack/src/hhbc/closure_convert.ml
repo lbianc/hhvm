@@ -46,6 +46,9 @@ type state = {
   hoisted_functions : fun_ list;
   (* The current namespace environment *)
   namespace: Namespace_env.env;
+  (* Static variables in closures have special properties with mangled names
+   * defined for them *)
+  static_vars : ULS.t;
 }
 
 let initial_state =
@@ -58,6 +61,7 @@ let initial_state =
   hoisted_classes = [];
   hoisted_functions = [];
   namespace = Namespace_env.empty_with_default_popt;
+  static_vars = ULS.empty;
 }
 
 (* Add a variable to the captured variables *)
@@ -112,10 +116,15 @@ let enter_lambda st fd =
     captured_this = false;
     defined_vars =
       SSet.of_list (List.map fd.f_params (fun param -> snd param.param_id));
+    static_vars = ULS.empty;
    }
 
 let add_defined_var st var =
   { st with defined_vars = SSet.add var st.defined_vars }
+
+let add_static_var st var =
+  let st = add_defined_var st var in
+  { st with static_vars = ULS.add st.static_vars var }
 
 let set_namespace st ns =
   { st with namespace = ns }
@@ -172,6 +181,9 @@ let make_closure ~explicit_use ~class_num
   let cvl =
     List.map lambda_vars
     (fun name -> (p, (p, Hhbc_string_utils.Locals.strip_dollar name), None)) in
+  let cvl = cvl @ (List.map (ULS.items st.static_vars)
+    (fun name -> (p, (p,
+     "86static_" ^ (Hhbc_string_utils.Locals.strip_dollar name)), None))) in
   let cd = {
     c_mode = fd.f_mode;
     c_user_attributes = [];
@@ -193,18 +205,32 @@ let make_closure ~explicit_use ~class_num
               f_name = (p, string_of_int class_num) } in
   inline_fundef, cd
 
+let inline_class_name_if_possible env ~trait ~fallback_to_empty_string p pe =
+  let get_class_call =
+    p, Call ((pe, Id (pe, "get_class")), [], [])
+  in
+  let name c = p, String (pe, strip_id c.c_name) in
+  let empty_str = p, String (pe, "") in
+  match Scope.get_class env.scope with
+  | Some c when trait ->
+    if c.c_kind = Ctrait then name c else empty_str
+  | Some c ->
+    if c.c_kind = Ctrait then get_class_call else name c
+  | None ->
+    if fallback_to_empty_string then p, String (pe, "")
+    else get_class_call
+
 (* Translate special identifiers __CLASS__, __METHOD__ and __FUNCTION__ into
  * literal strings. It's necessary to do this before closure conversion
  * because the enclosing class will be changed. *)
 let convert_id (env:env) p (pid, str as id) =
   let return newstr = (p, String (pid, newstr)) in
-  let get_class_name () =
-    match Scope.get_class env.scope with
-    | None -> ""
-    | Some cd -> strip_id cd.c_name in
   match str with
-  | "__CLASS__" ->
-    return (get_class_name ())
+  | "__CLASS__" | "__TRAIT__"->
+    inline_class_name_if_possible
+      ~trait:(str = "__TRAIT__")
+      ~fallback_to_empty_string:true
+      env p pid
   | "__METHOD__" ->
     let prefix =
       match Scope.get_class env.scope with
@@ -224,6 +250,11 @@ let convert_id (env:env) p (pid, str as id) =
     | (ScopeItem.Lambda | ScopeItem.LongLambda _) :: _ -> return "{closure}"
     | _ -> return ""
     end
+  | "__LINE__" ->
+    (* If the expression goes on multi lines, we return the last line *)
+    let pos, _ = id in
+    let _, line, _, _ = Pos.info_pos_extended pos in
+    p, Int (pos, string_of_int line)
   | _ ->
     (p, Id id)
 
@@ -254,6 +285,11 @@ let rec convert_expr env st (p, expr_ as expr) =
     let st, e1 = convert_expr env st e1 in
     let st, opt_e2 = convert_opt_expr env st opt_e2 in
     st, (p, Array_get (e1, opt_e2))
+  | Call ((_, Id (pe, "get_class")), [], []) ->
+    st, inline_class_name_if_possible
+      ~trait:false
+      ~fallback_to_empty_string:false
+      env p pe
   | Call (e, el1, el2) ->
     let st, e = convert_expr env st e in
     let st, el1 = convert_exprs env st el1 in
@@ -320,11 +356,21 @@ let rec convert_expr env st (p, expr_ as expr) =
   | Unsafeexpr e ->
     let st, e = convert_expr env st e in
     st, (p, Unsafeexpr e)
+  | BracedExpr e ->
+    let st, e = convert_expr env st e in
+    st, (p, BracedExpr e)
   | Import(flavor, e) ->
     let st, e = convert_expr env st e in
     st, (p, Import(flavor, e))
   | Id id ->
     st, convert_id env p id
+  | Class_get (cid, _)
+  | Class_const (cid, _) ->
+    let st = begin match (Ast_class_expr.id_to_expr cid) with
+    | _, Lvar (_, id) -> add_var st id
+    | _ -> st
+    end in
+    st, expr
   | _ ->
     st, expr
 
@@ -337,6 +383,7 @@ and convert_lambda env st p fd use_vars_opt =
   let captured_this = st.captured_this in
   let defined_vars = st.defined_vars in
   let total_count = st.total_count in
+  let static_vars = st.static_vars in
   let st = { st with total_count = total_count + 1; } in
   let st = enter_lambda st fd in
   let env = if Option.is_some use_vars_opt
@@ -345,14 +392,23 @@ and convert_lambda env st p fd use_vars_opt =
   let st, block = convert_block env st fd.f_body in
   let st = { st with per_function_count = st.per_function_count + 1 } in
   let lambda_vars = ULS.items st.captured_vars in
-  (* For lambdas without  explicit `use` variables, we ignore the computed
+  (* For lambdas without explicit `use` variables, we ignore the computed
    * capture set and instead use the explicit set *)
   let lambda_vars, use_vars =
     match use_vars_opt with
     | None ->
       lambda_vars, List.map lambda_vars (fun var -> (p, var), false)
     | Some use_vars ->
-      List.map use_vars (fun ((_, var), _ref) -> var), use_vars in
+      (* Remove duplicates (not efficient, but unlikely to be large),
+       * remove variables that are actually just parameters *)
+      let use_vars =
+         (List.fold_right use_vars ~init:[]
+          ~f:(fun ((_, name), _ as use_var) use_vars ->
+            if List.exists use_vars (fun ((_, name'), _) -> name = name')
+            || List.exists fd.f_params (fun p -> name = snd p.param_id)
+            then use_vars else use_var :: use_vars))
+      in
+        List.map use_vars (fun ((_, var), _ref) -> var), use_vars in
   let tparams = Scope.get_tparams env.scope in
   let class_num = List.length st.hoisted_classes + env.defined_class_count in
   let inline_fundef, cd =
@@ -363,7 +419,8 @@ and convert_lambda env st p fd use_vars_opt =
   (* Restore capture and defined set *)
   let st = { st with captured_vars = captured_vars;
                      captured_this = captured_this;
-                     defined_vars = defined_vars; } in
+                     defined_vars = defined_vars;
+                     static_vars = static_vars; } in
   (* Add lambda captured vars to current captured vars *)
   let st = List.fold_left lambda_vars ~init:st ~f:add_var in
   let st = { st with hoisted_classes = cd :: st.hoisted_classes } in
@@ -394,6 +451,13 @@ and convert_stmt env st stmt =
     let st, opt_e = convert_opt_expr env st opt_e in
     st, Return (p, opt_e)
   | Static_var el ->
+    let visit_static_var st e =
+      begin match snd e with
+      | Lvar (_, name)
+      | Binop (Eq None, (_, Lvar (_, name)), _) -> add_static_var st name
+      | _ -> failwith "Static var - impossible"
+      end in
+    let st = List.fold_left el ~init:st ~f:visit_static_var in
     let st, el = convert_exprs env st el in
     st, Static_var el
   | If (e, b1, b2) ->
@@ -531,6 +595,10 @@ and convert_class_var env st (pos, id, expr_opt) =
     let st, expr = convert_expr env st expr in
     st, (pos, id, Some expr)
 
+and convert_class_const env st (id, expr) =
+  let st, expr = convert_expr env st expr in
+  st, (id, expr)
+
 and convert_class_elt env st ce =
   match ce with
   | Method md ->
@@ -543,6 +611,10 @@ and convert_class_elt env st ce =
   | ClassVars (kinds, hint, cvl) ->
     let st, cvl = List.map_env st cvl (convert_class_var env) in
     st, ClassVars (kinds, hint, cvl)
+
+  | Const (ho, iel) ->
+    let st, iel = List.map_env st iel (convert_class_const env) in
+    st, Const (ho, iel)
 
   | _ ->
     st, ce
@@ -557,36 +629,36 @@ and convert_defs env class_count typedef_count st dl =
   | Fun fd :: dl ->
     let st, fd = convert_fun env st fd in
     let st, dl = convert_defs env class_count typedef_count st dl in
-    st, Fun fd :: dl
+    st, (true, Fun fd) :: dl
     (* Convert a top-level class definition into a true class definition and
      * a stub class that just corresponds to the DefCls instruction *)
   | Class cd :: dl ->
     let st, cd = convert_class env st cd in
     let stub_class = make_defcls cd class_count in
     let st, dl = convert_defs env (class_count + 1) typedef_count st dl in
-    st, Class cd :: Stmt (Def_inline (Class stub_class)) :: dl
+    st, (true, Class cd) :: (true, Stmt (Def_inline (Class stub_class))) :: dl
   | Stmt stmt :: dl ->
     let st, stmt = convert_stmt env st stmt in
     let st, dl = convert_defs env class_count typedef_count st dl in
-    st, Stmt stmt :: dl
+    st, (true, Stmt stmt) :: dl
   | Typedef td :: dl ->
     let st, dl = convert_defs env class_count (typedef_count + 1) st dl in
     let stub_td = { td with t_id =
       (fst td.t_id, string_of_int (typedef_count)) } in
-    st, Typedef td :: Stmt (Def_inline (Typedef stub_td)) :: dl
+    st, (true, Typedef td) :: (true, Stmt (Def_inline (Typedef stub_td))) :: dl
   | Constant c :: dl ->
     let st, c = convert_gconst env st c in
     let st, dl = convert_defs env class_count typedef_count st dl in
-    st, Constant c :: dl
+    st, (true, Constant c) :: dl
   | Namespace(_id, dl) :: dl' ->
     convert_defs env class_count typedef_count st (dl @ dl')
   | NamespaceUse x :: dl ->
     let st, dl = convert_defs env class_count typedef_count st dl in
-    st, NamespaceUse x :: dl
+    st, (true, NamespaceUse x) :: dl
   | SetNamespaceEnv ns :: dl ->
     let st = set_namespace st ns in
     let st, dl = convert_defs env class_count typedef_count st dl in
-    st, SetNamespaceEnv ns :: dl
+    st, (true, SetNamespaceEnv ns) :: dl
 
 let count_classes defs =
   List.count defs ~f:(function Class _ -> true | _ -> false)
@@ -614,6 +686,6 @@ let convert_toplevel_prog defs =
    * function and we place hoisted functions just after that *)
   let env = env_toplevel (count_classes defs) 1 in
   let st, p = convert_defs env 0 0 initial_state defs in
-  let fun_defs = List.rev_map st.hoisted_functions (fun fd -> Fun fd) in
-  let class_defs = List.rev_map st.hoisted_classes (fun cd -> Class cd) in
+  let fun_defs = List.rev_map st.hoisted_functions (fun fd -> false, Fun fd) in
+  let class_defs = List.rev_map st.hoisted_classes (fun cd -> false, Class cd) in
   fun_defs @ p @ class_defs

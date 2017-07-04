@@ -38,7 +38,7 @@ class Disassembler: public DecoderVisitor {
  public:
   Disassembler();
   Disassembler(char* text_buffer, int buffer_size);
-  virtual ~Disassembler();
+  ~Disassembler() override;
   char* GetOutput();
 
   // Declare all Visitor functions.
@@ -64,6 +64,7 @@ class Disassembler: public DecoderVisitor {
   int SubstituteBranchTargetField(Instruction* instr, const char* format);
   int SubstituteLSRegOffsetField(Instruction* instr, const char* format);
   int SubstitutePrefetchField(Instruction* instr, const char* format);
+  int SubstituteInstructionAttributes(Instruction* instr, const char* format);
 
   inline bool RdIsZROrSP(Instruction* instr) const {
     return (instr->Rd() == kZeroRegCode);
@@ -104,10 +105,10 @@ class PrintDisassembler: public Disassembler {
       , showEncoding_(showEncoding)
       , color_(color) {
   }
-  ~PrintDisassembler() { }
+  ~PrintDisassembler() override {}
 
  protected:
-  virtual void ProcessOutput(Instruction* instr);
+  void ProcessOutput(Instruction* instr) override;
 
  private:
   std::ostream& stream_;

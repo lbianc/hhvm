@@ -173,35 +173,35 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(Release)
 
   /*
-   * const TypedValue* NvGetInt(const ArrayData*, int64_t key)
+   * member_rval::ptr_u NvGetInt(const ArrayData*, int64_t key)
    *
    *   Lookup a value in an array using an integer key.  Returns nullptr if the
-   *   key is not in the array. Must not throw if key isn't present.
+   *   key is not in the array.  Must not throw if key isn't present.
    */
   DISPATCH(NvGetInt)
 
   /*
-   * const TypedValue* NvTryGetInt(const ArrayData*, int64_t key)
+   * member_rval::ptr_u NvTryGetInt(const ArrayData*, int64_t key)
    *
-   *   Lookup a value in an array using an integer key. Either throws, or
+   *   Lookup a value in an array using an integer key.  Either throws or
    *   returns nullptr if the key is not in the array.
    */
   DISPATCH(NvTryGetInt)
 
   /*
-   * const TypedValue* NvGetStr(const ArrayData*, const StringData*)
+   * member_rval::ptr_u NvGetStr(const ArrayData*, const StringData*)
    *
-   *   Lookup a value in an array using a string key.  The string key
-   *   must not be an integer-like string.  Returns nullptr if the key
-   *   is not in the array.
+   *   Lookup a value in an array using a string key.  The string key must not
+   *   be an integer-like string.  Returns nullptr if the key is not in the
+   *   array.
    */
   DISPATCH(NvGetStr)
 
   /*
-   * const TypedValue* NvTryGetStr(const ArrayData*, const StringData*)
+   * member_rval::ptr_u NvTryGetStr(const ArrayData*, const StringData*)
    *
-   *   Lookup a value in an array using a string key. Either throws, or
-   *   returns nullptr if the key is not in the array.
+   *   Lookup a value in an array using a string key.  Either throws or returns
+   *   nullptr if the key is not in the array.
    */
   DISPATCH(NvTryGetStr)
 
@@ -246,7 +246,7 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(Vsize)
 
   /*
-   * const Variant& GetValueRef(const ArrayData*, ssize_t pos)
+   * member_rval::ptr_u GetValueRef(const ArrayData*, ssize_t pos)
    *
    *   Return a reference to the value at an iterator position.  `pos' must be
    *   a valid position for this array.
@@ -504,16 +504,6 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(Copy)
 
   /*
-   * ArrayData* CopyWithStrongIterators(const ArrayData*)
-   *
-   *   Explicitly request an array be copied, and that any associated
-   *   strong iterators are moved to the new array.  This API does
-   *   /not/ actually guarantee a copy occurs, but if it does any
-   *   assoicated strong iterators must be moved.
-   */
-  DISPATCH(CopyWithStrongIterators)
-
-  /*
    * ArrayData* CopyStatic(const ArrayData*)
    *
    *   Copy an array, allocating the new array with malloc() instead
@@ -751,11 +741,11 @@ ArrayData* ArrayData::Create(TypedValue value) {
 
 ArrayData* ArrayData::Create(TypedValue name, TypedValue value) {
   if (debug) {
-    DEBUG_ONLY int64_t unused;
     DEBUG_ONLY auto const k = tvToCell(name);
-    assertx(isStringType(k.m_type) ?
-              !k.m_data.pstr->isStrictlyInteger(unused) :
-              isIntType(k.m_type));
+    DEBUG_ONLY int64_t unused;
+    assertx(isStringType(k.m_type)
+              ? !k.m_data.pstr->isStrictlyInteger(unused)
+              : isIntType(k.m_type));
   }
 
   ArrayInit init(1, ArrayInit::Map{});
@@ -769,13 +759,16 @@ ArrayData* ArrayData::CreateRef(Variant& value) {
   return pai.create();
 }
 
-ArrayData* ArrayData::CreateRef(const Variant& name, Variant& value) {
-  ArrayInit init(1, ArrayInit::Map{});
-  DEBUG_ONLY int64_t unused;
-  assertx(name.isString() ?
-         !name.getStringData()->isStrictlyInteger(unused) :
-         name.isInteger());
+ArrayData* ArrayData::CreateRef(TypedValue name, Variant& value) {
+  if (debug) {
+    DEBUG_ONLY auto const k = tvToCell(name);
+    DEBUG_ONLY int64_t unused;
+    assertx(isStringType(k.m_type)
+              ? !k.m_data.pstr->isStrictlyInteger(unused)
+              : isIntType(k.m_type));
+  }
 
+  ArrayInit init(1, ArrayInit::Map{});
   init.setRef(name, value, true);
   return init.create();
 }
@@ -1026,13 +1019,6 @@ Variant ArrayData::each() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
-
-const Variant& ArrayData::get(const Variant& k, bool error) const {
-  assert(IsValidKey(k));
-  auto const cell = *k.asCell();
-  return detail::isIntKey(cell) ? get(detail::getIntKey(cell), error)
-                                : get(detail::getStringKey(cell), error);
-}
 
 const Variant& ArrayData::getNotFound(int64_t k) {
   raise_notice("Undefined index: %" PRId64, k);

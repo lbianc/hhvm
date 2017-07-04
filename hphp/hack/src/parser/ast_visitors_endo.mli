@@ -91,6 +91,10 @@ class virtual ['b] endo :
                    Ast_visitors_ancestors.stmt ->
                    Ast_visitors_ancestors.block ->
                    Ast_visitors_ancestors.stmt;
+       on_BracedExpr : 'c ->
+                       Ast_visitors_ancestors.expr_ ->
+                       Ast_visitors_ancestors.expr ->
+                       Ast_visitors_ancestors.expr_;
         on_Break : 'c ->
                    Ast_visitors_ancestors.stmt ->
                    Ast_visitors_ancestors.pos_t ->
@@ -317,6 +321,11 @@ class virtual ['b] endo :
         on_Goto : 'c ->
                 Ast_visitors_ancestors.stmt ->
                 Ast_visitors_ancestors.pstring ->
+                Ast_visitors_ancestors.stmt;
+        on_Markup : 'c ->
+                Ast_visitors_ancestors.stmt ->
+                Ast_visitors_ancestors.pstring ->
+                Ast_visitors_ancestors.expr option ->
                 Ast_visitors_ancestors.stmt;
         on_Gt : 'c ->
                 Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop;
@@ -682,6 +691,8 @@ class virtual ['b] endo :
                  list ->
                  Ast_visitors_ancestors.expr list ->
                  Ast_visitors_ancestors.expr_;
+        on_LogXor: 'c ->
+                 Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop;
         on_Xor : 'c ->
                  Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop;
         on_Yield : 'c ->
@@ -924,6 +935,10 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.stmt ->
       Ast_visitors_ancestors.block -> Ast_visitors_ancestors.stmt
+    method on_BracedExpr :
+      'c ->
+      Ast_visitors_ancestors.expr_ ->
+      Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr_
     method on_Break :
       'c ->
       Ast_visitors_ancestors.stmt ->
@@ -1158,6 +1173,14 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.def ->
       Ast_visitors_ancestors.fun_ -> Ast_visitors_ancestors.def
+    method on_GotoLabel : 'c ->
+            Ast_visitors_ancestors.stmt ->
+            Ast_visitors_ancestors.pstring ->
+            Ast_visitors_ancestors.stmt
+    method on_Goto : 'c ->
+            Ast_visitors_ancestors.stmt ->
+            Ast_visitors_ancestors.pstring ->
+            Ast_visitors_ancestors.stmt
     method on_Gt :
       'c -> Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop
     method on_Gte :
@@ -1544,6 +1567,8 @@ class virtual ['b] endo :
       (Ast_visitors_ancestors.id * Ast_visitors_ancestors.expr) list ->
       Ast_visitors_ancestors.expr list -> Ast_visitors_ancestors.expr_
     method on_Xor :
+      'c -> Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop
+    method on_LogXor :
       'c -> Ast_visitors_ancestors.bop -> Ast_visitors_ancestors.bop
     method on_Yield :
       'c ->

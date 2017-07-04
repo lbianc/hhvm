@@ -76,7 +76,9 @@ let token_to_string node =
 
 let param_name node =
   match syntax node with
-  | ParameterDeclaration { parameter_name; _ } -> token_to_string parameter_name
+  | ListItem { list_item = {
+      syntax = ParameterDeclaration { parameter_name; _ }; _
+    }; _ } -> token_to_string parameter_name
   | _ -> None
 
 let get_params node =

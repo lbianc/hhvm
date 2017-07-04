@@ -389,10 +389,8 @@ struct Variant : private TypedValue {
    * v is referenced, keep the reference.
    */
   Variant& setWithRef(TypedValue v) noexcept {
-    auto const old = *asTypedValue();
-    tvDupWithRef(v, *asTypedValue());
+    tvSetWithRef(v, *asTypedValue());
     if (m_type == KindOfUninit) m_type = KindOfNull;
-    tvDecRefGen(old);
     return *this;
   }
   Variant& setWithRef(const Variant& v) noexcept {
@@ -1395,7 +1393,6 @@ private:
     return &tvAsVariant(static_cast<TypedValue*>(this));
   }
   void checkRefCount() {
-    assert(m_type != KindOfRef);
     assert(isRefcountedType(m_type) ? varNrFlag() == NR_FLAG : true);
 
     switch (m_type) {
@@ -1417,7 +1414,8 @@ private:
         assert(m_data.pres->checkCount());
         return;
       case KindOfRef:
-        break;
+        assert(m_data.pref->checkCount());
+        return;
     }
     not_reached();
   }
@@ -1444,27 +1442,24 @@ void clearBlackHole();
 inline Variant Array::operator[](int key) const {
   return rvalAt(key);
 }
-
 inline Variant Array::operator[](int64_t key) const {
   return rvalAt(key);
 }
-
 inline Variant Array::operator[](const String& key) const {
   return rvalAt(key);
 }
-
 inline Variant Array::operator[](const Variant& key) const {
   return rvalAt(key);
 }
 
-inline void Array::setWithRef(Cell k, TypedValue v, bool isKey) {
-  tvAsVariant(
-    lvalAt(k, isKey ? AccessFlags::Key : AccessFlags::None).tv()
-  ).setWithRef(v);
+inline void Array::append(const Variant& v) {
+  append(*v.asTypedValue());
 }
-
-inline void Array::setWithRef(const Variant& k, const Variant& v, bool isKey) {
-  setWithRef(*k.asCell(), *v.asTypedValue(), isKey);
+inline void Array::appendWithRef(const Variant& v) {
+  appendWithRef(*v.asTypedValue());
+}
+inline void Array::prepend(const Variant& v) {
+  prepend(*v.asTypedValue());
 }
 
 ALWAYS_INLINE Variant uninit_null() {
@@ -1543,8 +1538,8 @@ inline bool isa_non_null(const Variant& v) {
 ALWAYS_INLINE Cell Array::convertKey(Cell k) const {
   return cellToKey(k, m_arr ? m_arr.get() : staticEmptyArray());
 }
-ALWAYS_INLINE VarNR Array::convertKey(const Variant& k) const {
-  return k.toKey(m_arr ? m_arr.get() : staticEmptyArray());
+ALWAYS_INLINE Cell Array::convertKey(const Variant& k) const {
+  return convertKey(*k.asCell());
 }
 
 inline VarNR Variant::toKey(const ArrayData* ad) const {

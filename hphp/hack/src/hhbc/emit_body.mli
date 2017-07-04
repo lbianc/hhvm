@@ -14,6 +14,7 @@ val make_body:
   bool ->
   Hhas_param.t list ->
   Hhas_type_info.t option ->
+  (string * Ast.expr option) list ->
   Hhas_body.t
 
 val emit_body:
@@ -36,8 +37,7 @@ val emit_body:
 val tparams_to_strings : Ast.tparam list -> string list
 
 val emit_method_prolog :
-  (* Boolean is true if this is the variadic parameter *)
-  params:(bool * Hhas_param.t) list ->
+  params: Hhas_param.t list ->
   needs_local_this:bool ->
   Instruction_sequence.t
 
@@ -46,4 +46,4 @@ val emit_return_type_info :
   skipawaitable: bool ->
   namespace: Namespace_env.env ->
   Ast.hint option ->
-  Hhas_type_info.t option
+  Hhas_type_info.t

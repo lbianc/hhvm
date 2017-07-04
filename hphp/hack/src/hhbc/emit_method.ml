@@ -35,11 +35,7 @@ let from_ast_wrapper : bool -> _ ->
   let (_, original_name) = ast_method.Ast.m_name in
   let (_,class_name) = ast_class.Ast.c_name in
   let class_name = Utils.strip_ns class_name in
-  let ret =
-    if original_name = Naming_special_names.Members.__construct
-    || original_name = Naming_special_names.Members.__destruct
-    then None
-    else ast_method.Ast.m_ret in
+  let ret = ast_method.Ast.m_ret in
   let method_id = make_name ast_method.Ast.m_name in
   let method_is_async =
     ast_method.Ast.m_fun_kind = Ast_defs.FAsync
@@ -89,6 +85,8 @@ let from_ast_wrapper : bool -> _ ->
     then List.concat_map ast_class.Ast.c_body (fun item ->
       match item with
       | Ast.ClassVars(_, _, cvl) ->
+        let cvl = List.filter cvl ~f:(fun (_, (_, id), _) ->
+          (String.length id) < 9 || (String.sub id 0 9) <> "86static_") in
         List.map cvl (fun (_, (_,id), _) -> "$" ^ id)
       | _ -> []
       )

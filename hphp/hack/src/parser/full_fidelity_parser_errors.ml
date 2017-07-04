@@ -140,6 +140,10 @@ let token_kind node =
   | Token t -> Some (PositionedToken.kind t)
   | _ -> None
 
+(* Helper function for common code pattern *)
+let is_token_kind node kind =
+  (token_kind node) = Some kind
+
 let rec containing_classish_kind parents =
   match parents with
   | [] -> None
@@ -258,6 +262,18 @@ let methodish_has_body node =
     not (is_missing body)
   | _ -> false
 
+(* By checking the third parent of a methodish node, tests whether the methodish
+ * node is inside an interface. *)
+let methodish_inside_interface parents =
+  match parents with
+  | _ :: _ :: p3 :: _ ->
+    begin match syntax p3 with
+    | ClassishDeclaration { classish_keyword; _ } ->
+      is_token_kind classish_keyword TokenKind.Interface
+    | _ -> false
+    end
+  | _ -> false
+
 (* Test whether node is an abstract method with a body.
  * Here node is the methodish node *)
 let methodish_abstract_with_body node =
@@ -266,11 +282,17 @@ let methodish_abstract_with_body node =
   is_abstract && has_body
 
 (* Test whether node is a non-abstract method without a body.
- * Here node is the methodish node *)
-let methodish_non_abstract_without_body node =
-  let non_abstract = not (methodish_contains_abstract node) in
+ * Here node is the methodish node
+ * And methods inside interfaces are inherently considered abstract *)
+let methodish_non_abstract_without_body node parents =
+  let non_abstract = not (methodish_contains_abstract node
+      || methodish_inside_interface parents) in
   let not_has_body = not (methodish_has_body node) in
   non_abstract && not_has_body
+
+let methodish_in_interface_has_body node parents =
+  methodish_inside_interface parents &&
+      not (is_missing node.methodish_function_body)
 
 (* Test whether node is a method that is both abstract and private
  *)
@@ -355,6 +377,92 @@ let produce_error_for_header acc check node error error_node =
   produce_error_parents acc (function_header_check_helper check) node
     error error_node
 
+(* Given a ClassishDeclaration node, test whether or not it contains
+ * an invalid use of 'implements'. *)
+let classish_invalid_implements_keyword cd_node =
+  (* Invalid if uses 'implements' and isn't a class. *)
+  token_kind cd_node.classish_implements_keyword = Some TokenKind.Implements &&
+    token_kind cd_node.classish_keyword <> Some TokenKind.Class
+
+(* Given a ClassishDeclaration node, test whether or not it's a trait
+ * invoking the 'extends' keyword. *)
+let classish_invalid_extends_keyword cd_node =
+  (* Invalid if uses 'extends' and is a trait. *)
+  token_kind cd_node.classish_extends_keyword = Some TokenKind.Extends &&
+    token_kind cd_node.classish_keyword = Some TokenKind.Trait
+
+(* Given a ClassishDeclaration node, test whether or not length of
+ * extends_list is appropriate for the classish_keyword. *)
+let classish_invalid_extends_list cd_node =
+  (* Invalid if is a class and has list of length greater than one. *)
+  token_kind cd_node.classish_keyword = Some TokenKind.Class &&
+    token_kind cd_node.classish_extends_keyword = Some TokenKind.Extends &&
+    match syntax_to_list_no_separators cd_node.classish_extends_list with
+    | [x1] -> false
+    | _ -> true (* General bc empty list case is already caught by error1007 *)
+
+(* Given a particular TokenKind.(Trait/Interface/Class), tests if a given
+ * classish_declaration node is both of that kind and declared abstract. *)
+let is_classish_kind_declared_abstract classish_kind cd_node =
+  match syntax cd_node with
+  | ClassishDeclaration { classish_keyword; classish_modifiers; _ }
+    when is_token_kind classish_keyword classish_kind ->
+      list_contains_predicate is_abstract classish_modifiers
+  | _ -> false
+
+(* Given a classish_declaration node, returns the 'abstract' keyword node
+ * in its list of classish_modifiers, or None if there isn't one. *)
+let extract_abstract_keyword cd_node =
+  match syntax cd_node with
+  | ClassishDeclaration { classish_modifiers; _ } ->
+    Core.List.find ~f:is_abstract
+        (syntax_to_list_no_separators classish_modifiers)
+  | _ -> None
+
+(* Return, as a string opt, the name of the function with the earliest
+ * declaration node in the list of parents. *)
+let first_function_name parents =
+  Core.List.find_map parents ~f:begin fun node ->
+    let extract_name header_node =
+      (* The '_' arm of this match will never be reached, but the type checker
+       * doesn't allow a direct extraction of function_name from
+       * function_declaration_header. *)
+       begin match syntax header_node with
+        | FunctionDeclarationHeader fdh ->
+            Some (PositionedSyntax.text fdh.function_name)
+        | _ -> None
+       end in
+    match syntax node with
+    | FunctionDeclaration {function_declaration_header ; _ } ->
+        extract_name function_declaration_header
+    | MethodishDeclaration {methodish_function_decl_header; _ } ->
+        extract_name methodish_function_decl_header
+    | _ -> None
+  end
+
+(* Test if (a list_expression is the left child of a binary_expression,
+ * and the operator is '=') *)
+let is_left_of_simple_assignment le_node p1 =
+  match syntax p1 with
+  | BinaryExpression { binary_left_operand; binary_operator; _ } ->
+    le_node == binary_left_operand  &&
+        is_token_kind binary_operator TokenKind.Equal
+  | _ -> false
+
+(* Test if a list_expression is the value clause of a foreach_statement *)
+let is_value_of_foreach le_node p1 =
+  match syntax p1 with
+  | ForeachStatement { foreach_value; _ } -> le_node == foreach_value
+  | _ -> false
+
+let is_invalid_list_expression le_node parents =
+  match parents with
+  | p1 :: _ when is_left_of_simple_assignment le_node p1 -> false
+  | p1 :: _ when is_value_of_foreach le_node p1 -> false
+  (* checking p3 is sufficient to test if le_node is a nested list_expression *)
+  | _ :: _ :: p3 :: _ when is_list_expression p3 -> false
+  | _ -> true (* All other deployments of list_expression are invalid *)
+
 let methodish_errors node parents =
   match syntax node with
   (* TODO how to narrow the range of error *)
@@ -394,7 +502,7 @@ let methodish_errors node parents =
       SyntaxError.error2014 fun_body in
     let fun_semicolon = md.methodish_semicolon in
     let errors =
-      produce_error errors methodish_non_abstract_without_body node
+      produce_error errors (methodish_non_abstract_without_body node) parents
       SyntaxError.error2015 fun_semicolon in
     let errors =
       produce_error errors methodish_abstract_conflict_with_private
@@ -402,6 +510,9 @@ let methodish_errors node parents =
     let errors =
       produce_error errors methodish_abstract_conflict_with_final
       node SyntaxError.error2019 modifiers in
+    let errors =
+      produce_error errors (methodish_in_interface_has_body md) parents
+      SyntaxError.error2041 md.methodish_function_body in
     errors
   | _ -> [ ]
 
@@ -477,7 +588,7 @@ let property_errors node is_strict =
       [ SyntaxError.make s e SyntaxError.error2001 ]
   | _ -> [ ]
 
-let expression_errors node =
+let expression_errors node parents =
   match syntax node with
   | SubscriptExpression { subscript_left_bracket; _}
     when is_left_brace subscript_left_bracket ->
@@ -492,7 +603,21 @@ let expression_errors node =
         [ SyntaxError.make s e SyntaxError.error2033 ]
       | None -> [ ]
     end
-  | _ -> []
+  | ObjectCreationExpression oce ->
+    if is_missing oce.object_creation_left_paren &&
+        is_missing oce.object_creation_right_paren
+    then
+      let s = start_offset oce.object_creation_new_keyword in
+      let e = end_offset oce.object_creation_type in
+      let constructor_name = PositionedSyntax.text oce.object_creation_type in
+      [ SyntaxError.make s e (SyntaxError.error2038 constructor_name)]
+    else
+      [ ]
+  | ListExpression le
+    when (is_invalid_list_expression node parents) ->
+    [ SyntaxError.make (start_offset node) (end_offset node)
+        SyntaxError.error2040 ]
+  | _ -> [ ] (* Other kinds of expressions currently produce no expr errors. *)
 
 let require_errors node parents =
   match syntax node with
@@ -514,13 +639,47 @@ let require_errors node parents =
 
 let classish_errors node parents =
   match syntax node with
-  | ClassishDeclaration c ->
-    begin
-      let modifiers = c.classish_modifiers in
-      let acc = [] in
-      produce_error acc classish_duplicate_modifiers modifiers
-      SyntaxError.error2031 modifiers
-    end
+  | ClassishDeclaration cd ->
+    let errors = [] in
+    let errors =
+      produce_error errors classish_duplicate_modifiers cd.classish_modifiers
+      SyntaxError.error2031 cd.classish_modifiers in
+    let errors =
+      produce_error errors classish_invalid_implements_keyword cd
+      SyntaxError.error2035 cd.classish_implements_keyword in
+    let errors =
+      produce_error errors classish_invalid_extends_keyword cd
+      SyntaxError.error2036 cd.classish_extends_keyword in
+    let errors =
+      produce_error errors classish_invalid_extends_list cd
+      SyntaxError.error2037 cd.classish_extends_list in
+    let errors =
+      (* Extra setup for the the customized error message. *)
+      let keyword_str = Option.value_map (token_kind cd.classish_keyword)
+        ~default:"" ~f:TokenKind.to_string in
+      let declared_name_str = PositionedSyntax.text cd.classish_name in
+      let function_str = Option.value (first_function_name parents)
+        ~default:"" in
+      (* To avoid iterating through the whole parents list again, do a simple
+       * check on function_str rather than a harder one on cd or parents. *)
+      produce_error errors (fun str -> String.length str != 0) function_str
+      (SyntaxError.error2039 keyword_str declared_name_str function_str)
+      cd.classish_keyword in
+    let errors =
+      (* default will never be used, since existence of abstract_keyword is a
+       * necessary condition for the production of an error. *)
+      let abstract_keyword = Option.value (extract_abstract_keyword node)
+        ~default:node in
+      produce_error errors (is_classish_kind_declared_abstract TokenKind.Interface)
+      node SyntaxError.error2042 abstract_keyword in
+    let errors =
+      (* default will never be used, since existence of abstract_keyword is a
+       * necessary condition for the production of an error. *)
+      let abstract_keyword = Option.value (extract_abstract_keyword node)
+        ~default:node in
+      produce_error errors (is_classish_kind_declared_abstract TokenKind.Trait)
+      node SyntaxError.error2043 abstract_keyword in
+    errors
   | _ -> [ ]
 
 let type_errors node parents is_strict =
@@ -531,6 +690,16 @@ let type_errors node parents is_strict =
       t.simple_type_specifier SyntaxError.error2032 t.simple_type_specifier
   | _ -> [ ]
 
+let alias_errors node =
+  match syntax node with
+  | AliasDeclaration {alias_keyword; alias_constraint; _} when
+    token_kind alias_keyword = Some TokenKind.Type &&
+    not (is_missing alias_constraint) ->
+      let s = start_offset alias_keyword in
+      let e = end_offset alias_keyword in
+      [ SyntaxError.make s e SyntaxError.error2034 ]
+  | _ -> [ ]
+
 let find_syntax_errors node is_strict =
   let folder acc node parents =
     let param_errs = parameter_errors node parents is_strict in
@@ -539,13 +708,14 @@ let find_syntax_errors node is_strict =
     let statement_errs = statement_errors node parents in
     let methodish_errs = methodish_errors node parents in
     let property_errs = property_errors node is_strict in
-    let expr_errs = expression_errors node in
+    let expr_errs = expression_errors node parents in
     let require_errs = require_errors node parents in
     let classish_errors = classish_errors node parents in
     let type_errors = type_errors node parents is_strict in
+    let alias_errors = alias_errors node in
     let errors = acc.errors @ param_errs @ func_errs @
       xhp_errs @ statement_errs @ methodish_errs @ property_errs @
-      expr_errs @ require_errs @ classish_errors @ type_errors in
+      expr_errs @ require_errs @ classish_errors @ type_errors @ alias_errors in
     { errors } in
   let acc = SyntaxUtilities.parented_fold_pre folder { errors = [] } node in
   List.sort SyntaxError.compare acc.errors

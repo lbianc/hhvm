@@ -9,7 +9,6 @@
 *)
 
 open Core
-open Emit_type_hint
 open Instruction_sequence
 module A = Ast
 
@@ -33,31 +32,31 @@ let from_ast ~tparams ~namespace ~generate_defaults p =
     | Some (_, A.Null) -> true
     | _ -> false in
   let param_type_info = Option.map param_hint
-    (hint_to_type_info ~skipawaitable:false
-      ~nullable ~always_extended:false ~namespace ~tparams) in
+    Emit_type_hint.(hint_to_type_info
+      ~kind:Param ~skipawaitable:false ~nullable ~namespace ~tparams) in
   let param_default_value =
     if generate_defaults
     then Option.map p.Ast.param_expr ~f:(fun e -> Label.next_default_arg (), e)
     else None
   in
   if param_is_variadic && param_name = "..." then None else
-  Some (param_is_variadic, Hhas_param.make
-    param_name p.A.param_is_reference param_type_info param_default_value)
+  Some (Hhas_param.make param_name p.A.param_is_reference param_is_variadic
+    param_type_info param_default_value)
 
 let rename_params params =
   let names = Core.List.fold_left params
-    ~init:SSet.empty ~f:(fun n (_, p) -> SSet.add (Hhas_param.name p) n) in
-  let rec rename param_counts (is_variadic, param) =
+    ~init:SSet.empty ~f:(fun n p -> SSet.add (Hhas_param.name p) n) in
+  let rec rename param_counts param =
     let name = Hhas_param.name param in
     match SMap.get name param_counts with
     | None ->
-      (SMap.add name 0 param_counts, (is_variadic, param))
+      (SMap.add name 0 param_counts, param)
     | Some count ->
       let param_counts = SMap.add name (count + 1) param_counts in
       let newname = name ^ string_of_int count in
       if SSet.mem newname names
-      then rename param_counts (is_variadic, param)
-      else param_counts, (is_variadic, Hhas_param.with_name newname param)
+      then rename param_counts param
+      else param_counts, (Hhas_param.with_name newname param)
   in
     List.rev (snd (Core.List.map_env SMap.empty (List.rev params) rename))
 

@@ -530,6 +530,13 @@ void stashLineTable(const Unit* unit, LineTable table) {
   }
 }
 
+void stashExtendedLineTable(const Unit* unit, SourceLocTable table) {
+  ExtendedLineInfoCache::accessor acc;
+  if (s_extendedLineInfo.insert(acc, unit)) {
+    acc->second.sourceLocTable = std::move(table);
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Funcs and PreClasses.
 
@@ -975,7 +982,7 @@ const Cell* Unit::lookupCns(const StringData* cnsName) {
     assertx(rds::isPersistentHandle(handle));
   }
   if (UNLIKELY(rds::s_constants().get() != nullptr)) {
-    return rds::s_constants()->nvGet(cnsName);
+    return rds::s_constants()->rval(cnsName).tv_ptr();
   }
   return nullptr;
 }
@@ -1050,7 +1057,7 @@ bool Unit::defCns(const StringData* cnsName, const TypedValue* value,
       rds::s_constants() =
         Array::attach(PackedArray::MakeReserve(PackedArray::SmallSize));
     }
-    auto const existed = !!rds::s_constants()->nvGet(cnsName);
+    auto const existed = !!rds::s_constants()->rval(cnsName);
     if (!existed) {
       rds::s_constants().set(StrNR(cnsName),
         tvAsCVarRef(value), true /* isKey */);
@@ -1850,9 +1857,9 @@ Array getClassesWithAttrInfo(Attr attrs, bool inverse = false) {
   NamedEntity::foreach_cached_class([&](Class* c) {
     if ((c->attrs() & attrs) ? !inverse : inverse) {
       if (c->isBuiltin()) {
-        a.prepend(VarNR(c->name()));
+        a.prepend(make_tv<KindOfPersistentString>(c->name()));
       } else {
-        a.append(VarNR(c->name()));
+        a.append(make_tv<KindOfPersistentString>(c->name()));
       }
     }
   });
@@ -1866,7 +1873,7 @@ Array getFunctions() {
   Array a = Array::Create();
   NamedEntity::foreach_cached_func([&](Func* func) {
     if ((system ^ func->isBuiltin()) || func->isGenerated()) return; //continue
-    a.append(VarNR(HHVM_FN(strtolower)(func->nameStr())));
+    a.append(HHVM_FN(strtolower)(func->nameStr()));
   });
   return a;
 }

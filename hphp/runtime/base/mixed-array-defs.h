@@ -22,10 +22,11 @@
 #include "hphp/runtime/base/array-helpers.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/array-iterator-defs.h"
-#include "hphp/runtime/base/member-lval.h"
+#include "hphp/runtime/base/member-val.h"
 #include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/set-array.h"
 #include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/thread-info.h"
 
 #include "hphp/util/stacktrace-profiler.h"
 #include "hphp/util/word-mem.h"
@@ -52,12 +53,6 @@ inline void MixedArray::scan(type_scan::Scanner& scanner) const {
   if (isZombie()) return;
   auto data = this->data();
   scanner.scan(*data, m_used * sizeof(*data));
-}
-
-inline ArrayData::~ArrayData() {
-  if (UNLIKELY(strong_iterators_exist())) {
-    free_strong_iterators(this);
-  }
 }
 
 ALWAYS_INLINE
@@ -205,11 +200,16 @@ ArrayData* MixedArray::updateRef(K k, Variant& data) {
   return this;
 }
 
-template <class K>
+template <bool warn, class K>
 member_lval MixedArray::addLvalImpl(K k) {
   assert(!isFull());
   auto p = insert(k);
-  if (!p.found) tvWriteNull(&p.tv);
+  if (!p.found) {
+    tvWriteNull(&p.tv);
+    if (warn && RuntimeOption::EvalHackArrCompatNotices) {
+      raise_hackarr_compat_notice("Lval on missing array element");
+    }
+  }
   return member_lval { this, &p.tv };
 }
 

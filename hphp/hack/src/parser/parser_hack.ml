@@ -10,6 +10,7 @@
 open Ast
 open Core
 open Lexer_hack
+open Prim_defs
 
 module L = Lexer_hack
 
@@ -41,7 +42,7 @@ let init_env file lb popt quick = {
 
 type parser_return = {
   file_mode  : FileInfo.mode option; (* None if PHP *)
-  comments   : (Pos.t * string) list;
+  comments   : (Pos.t * comment) list;
   ast        : Ast.program;
   content    : string;
 }
@@ -253,7 +254,7 @@ let rec check_lvalue env = function
   | pos, Array_get ((_, Class_const _), _) ->
       error_at env pos "Array-like class consts are not valid lvalues"
   | _, (Lvar _ | Lvarvar _ | Obj_get _ | Array_get _ | Class_get _ |
-    Unsafeexpr _ | Omitted) -> ()
+    Unsafeexpr _ | Omitted | BracedExpr _) -> ()
   | pos, Call ((_, Id (_, "tuple")), _, _) ->
       error_at env pos
         "Tuple cannot be used as an lvalue. Maybe you meant List?"
@@ -786,6 +787,7 @@ and fun_ fun_start ~attr ~(sync:fun_decl_kind) env =
   let tparams = class_params env in
   let params = parameter_list env in
   let ret = hint_return_opt env in
+  let constrs = where_clause env in
   let is_generator, body_stmts = function_body env in
   let fun_end = Pos.make env.file env.lb in
   { f_name = name;
@@ -794,6 +796,7 @@ and fun_ fun_start ~attr ~(sync:fun_decl_kind) env =
     f_ret = ret;
     f_ret_by_ref = is_ref;
     f_body = body_stmts;
+    f_constrs = constrs;
     f_user_attributes = attr;
     f_fun_kind = fun_kind sync is_generator;
     f_mode = env.mode;
@@ -1843,8 +1846,7 @@ and method_ env method_start ~modifiers ~attrs ~(sync:fun_decl_kind)
 
 and method_implicit_return env (pos, name) ret =
   match name, ret with
-  | ("__construct" | "__destruct"), None ->
-      Some (pos, Happly((pos, "void"), []))
+  | ("__construct" | "__destruct"), None -> ret
   | _, Some (_, Happly ((_, "void"), [])) -> ret
   | "__construct", Some _ ->
       error_at env pos "Constructor return type must be void or elided.";
@@ -2849,6 +2851,7 @@ and lambda_body ~sync env params ret =
   let f = {
     f_name = (Pos.none, ";anonymous");
     f_tparams = [];
+    f_constrs = [];
     f_params = params;
     f_ret = ret;
     f_ret_by_ref = false;
@@ -3366,6 +3369,7 @@ and expr_anon_fun env pos ~(sync:fun_decl_kind) =
   let f = {
     f_name = (Pos.none, ";anonymous");
     f_tparams = [];
+    f_constrs = [];
     f_params = params;
     f_ret = ret;
     f_ret_by_ref = false;
@@ -4263,9 +4267,6 @@ and hint_shape_info_remain env =
           }
 
 and hint_shape_field env =
-  let is_nullable = function
-    | _, Hoption _ -> true
-    | _ -> false in
   (* Consume the next token to determine if we're creating an optional field. *)
   let sf_optional =
     if L.token env.file env.lb = Tqm then
@@ -4278,10 +4279,6 @@ and hint_shape_field env =
   let sf_name = shape_field_name env in
   expect env Tsarrow;
   let sf_hint = hint env in
-  (* TODO(t17492233): Remove this line once shapes use new syntax. *)
-  let sf_optional =
-    sf_optional ||
-      (promote_nullable_to_optional_in_shapes env && is_nullable sf_hint) in
   { sf_optional; sf_name; sf_hint }
 
 (*****************************************************************************)

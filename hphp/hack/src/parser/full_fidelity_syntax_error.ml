@@ -153,3 +153,22 @@ let error2031 =
 let error2032 = "The array type is not allowed in strict mode."
 let error2033 = "A variadic argument ('...') may only appear at the end of " ^
   "an argument list."
+let error2034 = "A type alias declaration cannot both use 'type' and have a " ^
+  "constraint. Did you mean 'newtype'?"
+let error2035 = "Only classes may implement interfaces."
+let error2036 = "Only interfaces and classes may extend other interfaces and "
+  ^ "classes."
+let error2037 = "A class may extend at most one other class."
+let error2038 constructor_name =
+  "A constructor initializing an object must be passed a (possibly empty) " ^
+  "list of arguments. Did you mean 'new " ^ constructor_name ^ "()'?"
+let error2039 classish_keyword classish_name function_name = Printf.sprintf
+  ("Cannot define a class, interface, or trait inside a function. Currently " ^^
+  "%s '%s' is inside function '%s'.") classish_keyword classish_name function_name
+let error2040 = "Invalid use of 'list(...)'. A list expression may only be " ^
+  "used as the left side of a simple assignment, the value clause of a " ^
+  "foreach loop, or a list item nested inside another list expression."
+let error2041 = "Unexpected method body: interfaces may contain only" ^
+  " method signatures, and not method implementations."
+let error2042 = "Interfaces may not be declared 'abstract'."
+let error2043 = "Traits may not be declared 'abstract'."

@@ -8,9 +8,11 @@
  *
 *)
 
-let rec concatstrs l = match l with
- | [] -> ""
- | x ::xs -> x ^ (concatstrs xs)
+(* TODO: change this over to Core *)
+
+module Log = Semdiff_logging
+
+let concatstrs = String.concat ""
 
 let addstring s = "\027[32m+ " ^ s ^ "\n"
 let deletestring s = "\027[31m- " ^ s ^ "\n"
@@ -279,6 +281,7 @@ let alist_comparer value_comparer ktostring = {
              k2only in
   let diffs = joinmap (fun k -> let v1 = List.assoc k al1 in
                                 let v2 = List.assoc k al2 in
+                                Log.debug @@ Printf.sprintf "comparing key %s" (ktostring k);
                                 value_comparer.comparer v1 v2)
                      both in
    joindiffs [dels; adds; diffs]);
@@ -353,9 +356,13 @@ let methods_alist_of_class c =
 let name_comparer = string_comparer
 let param_name_comparer = wrap Hhas_param.name
                                (fun _p s -> s) name_comparer
-let param_reference_comparer = wrap Hhas_param.is_reference
+let param_is_reference_comparer = wrap Hhas_param.is_reference
                                (fun p _s -> if Hhas_param.is_reference p
                                             then "&" else "")
+                               bool_comparer
+let param_is_variadic_comparer = wrap Hhas_param.is_variadic
+                               (fun p _s -> if Hhas_param.is_variadic p
+                                            then "..." else "")
                                bool_comparer
 let tc_flags_comparer = wrap Hhas_type_constraint.flags (fun _c s -> s)
                              (primitive_set_comparer
@@ -376,12 +383,18 @@ let type_info_comparer = join (fun s1 s2 -> "<" ^ s1 ^ " " ^s2 ^ ">")
 let param_type_info_comparer = wrap Hhas_param.type_info
                                     (fun _p s -> s)
                                     (option_comparer type_info_comparer)
-let param_name_reference_comparer = join (fun s1 s2 -> s1 ^ s2)
-                                         param_reference_comparer
-                                         param_name_comparer
-let param_ti_name_reference_comparer = join (fun s1 s2 -> s1 ^ s2)
-                                            param_type_info_comparer
-                                            param_name_reference_comparer
+let param_variadic_type_info_comparer =
+  join (fun s1 s2 -> s1 ^ s2)
+  param_is_variadic_comparer
+  param_type_info_comparer
+let param_name_reference_comparer =
+  join (fun s1 s2 -> s1 ^ s2)
+  param_is_reference_comparer
+  param_name_comparer
+let param_ti_name_reference_comparer =
+  join (fun s1 s2 -> s1 ^ s2)
+  param_variadic_type_info_comparer
+  param_name_reference_comparer
 (* Lifting the above to work on the first component of a pair *)
 let param_ti_name_reference_comparer_lifted =
  wrap fst (fun (_param, (_instrs : Hhbc_ast.instruct list)) s -> s)
@@ -528,11 +541,33 @@ let property_comparer =
   property_is_static_comparer; property_is_deep_init_comparer;
   property_name_comparer; property_initial_value_comparer]
 
-let class_properties_comparer =
- wrap Hhas_class.properties (fun _ s -> s)
-  (list_comparer property_comparer "\n")
+(* apply a permutation to the trailing elements of a list
+   used to reorder the properties of one closure class to
+   match them up with those of a corresponding one *)
+let permute_property_list perm ps =
+ let offset = List.length ps - List.length perm in
+ let sorted_perm = List.sort (fun (a,_) (b,_) -> compare a b) perm in
+ let permuted_tail = List.map (fun (_,i) -> List.nth ps (offset+i)) sorted_perm in
+  Core.List.take ps offset @ permuted_tail
 
+let property_list_comparer perm =
+  let lc = list_comparer property_comparer "\n" in
+{
+  comparer = (fun l1 l2 ->
+  let permuted_l2 = permute_property_list perm l2 in
+  (if perm = [] then ()
+   else let l1names = concatstrs
+             (List.map (fun p -> Hhbc_id.Prop.to_raw_string (Hhas_property.name p)) l1) in
+        let l2names = concatstrs
+             (List.map (fun p -> Hhbc_id.Prop.to_raw_string (Hhas_property.name p)) permuted_l2) in
+        Log.debug @@ Printf.sprintf "properties %s and %s" l1names l2names);
+   lc.comparer l1 permuted_l2);
+  size_of = lc.size_of;
+  string_of = lc.string_of;
+}
 
+let class_properties_comparer perm =
+ wrap Hhas_class.properties (fun _ s -> s) (property_list_comparer perm)
 
 let function_attributes_return_type_comparer =
  join (fun s1 s2 -> s1 ^ s2)
@@ -552,14 +587,33 @@ let method_header_comparer =
     join (fun s1 s2 -> s1 ^ s2) method_attributes_return_type_comparer
                                 method_params_flags_comparer
 
-(* TODO: check that order doesn't matter in declvars
-  Andrew says $0closure variable in closure
-  classes is special, and I'm a bit worried about aliasing
-  between low-numbered unnamed and named - surely that means
-  order does matter? *)
-let body_decl_vars_comparer =
-  wrap Hhas_body.decl_vars (fun _f s -> s)
-                           (primitive_set_comparer (fun s -> s))
+(* checking declvars as a list, not a set, as order does matter
+   we also take a permutation, though this should always be the
+   identity except in the case of a closure class's single
+   method
+ *)
+let permute_decl_list perm ds =
+ if perm = [] then ds
+ else let sorted_perm = List.sort (fun (a,_) (b,_) -> compare a b) perm in
+      let sorted_section = List.map (fun (_,i) -> List.nth ds (1+i)) sorted_perm in
+      (List.hd ds) :: (sorted_section @ Core.List.drop ds (List.length perm + 1))
+
+let decl_list_comparer perm =
+  let lc = list_comparer string_comparer "," in
+  {
+    comparer = (fun l1 l2 ->
+    let permuted_l2 = permute_decl_list perm l2 in
+    (if perm = [] then ()
+     else let l1names = concatstrs l1 in
+          let l2names = concatstrs permuted_l2 in
+          Log.debug @@ Printf.sprintf "declvars %s and %s" l1names l2names);
+     lc.comparer l1 permuted_l2);
+    size_of = lc.size_of;
+    string_of = lc.string_of;
+   }
+
+let body_decl_vars_comparer perm =
+  wrap Hhas_body.decl_vars (fun _f s -> s) (decl_list_comparer perm)
 
 let body_num_iters_comparer =
 wrap Hhas_body.num_iters (fun _ s -> "numiters = " ^ s) int_comparer
@@ -573,10 +627,10 @@ join (fun s1 s2 -> s1 ^ "\n" ^ s2)
  body_num_iters_comparer
  body_num_cls_ref_slots_comparer
 
-let body_iters_cls_ref_slots_decl_vars_comparer =
+let body_iters_cls_ref_slots_decl_vars_comparer perm =
  join (fun s1 s2 -> s1 ^ "\n" ^ s2)
   body_iters_cls_ref_slots_comparer
-  body_decl_vars_comparer
+  (body_decl_vars_comparer perm)
 
 (* string_of_instruction already appends a newline, so remove it *)
 let droplast s = String.sub s 0 (String.length s - 1)
@@ -590,12 +644,12 @@ let instruct_list_comparer = list_comparer instruct_comparer "\n"
 let instruct_list_comparer_with_semdiff = {
   comparer = (fun l1 l2 ->
                   match Rhl.equiv l1 l2 [] with
-                | None -> (prerr_endline "semdiff succeeded";
-                           (0, (List.length l1, "")) )
+                | None -> (Log.debug "Semdiff succeeded";
+                           (0, (List.length l1, "")))
                 | Some (pc,pc',asn,assumed,todo) ->
-                  (prerr_endline "semdiff failed";
-                  Printf.eprintf
-                  "pc=%s, pc'=%s, i=%s i'=%s asn=%s\nassumed=%s\ntodo=%s"
+                  (Log.debug "Semdiff failed";
+                  Log.debug @@ Printf.sprintf
+                  "pc=%s, pc'=%s, i=%s i'=%s asn=%s\nAssumed=\n%s\nTodo=%s"
                   (Rhl.string_of_pc pc) (Rhl.string_of_pc pc')
                   (my_string_of_instruction
                     (List.nth l1 (Rhl.ip_of_pc pc)))
@@ -630,12 +684,12 @@ let body_instrs_comparer = {
       let inss = Instruction_sequence.instr_seq_to_list (Hhas_body.instrs b) in
       let inss' = Instruction_sequence.instr_seq_to_list (Hhas_body.instrs b') in
         match Rhl.equiv inss inss' todo with
-           | None -> (prerr_endline "semdiff succeeded";
+           | None -> (Log.debug "Semdiff succeeded";
                       (0, (List.length inss, "")) )
            | Some (pc,pc',asn,assumed,todo) ->
-             (prerr_endline "semdiff failed";
-             Printf.eprintf
-             "pc=%s, pc'=%s, i=%s i'=%s asn=%s\nassumed=%s\ntodo=%s"
+             (Log.debug "Semdiff failed";
+             Log.debug @@ Printf.sprintf
+             "pc=%s, pc'=%s, i=%s i'=%s asn=%s\nAssumed=\n%s\nTodo=%s"
              (Rhl.string_of_pc pc) (Rhl.string_of_pc pc')
              (my_string_of_instruction
                (List.nth inss (Rhl.ip_of_pc pc)))
@@ -650,49 +704,51 @@ let body_instrs_comparer = {
                  (Instruction_sequence.instr_seq_to_list (Hhas_body.instrs b)));
 }
 
-let body_comparer =
+let body_comparer perm =
  join (fun s1 s2 -> s1 ^ "\n" ^ s2)
-      body_iters_cls_ref_slots_decl_vars_comparer
+      (body_iters_cls_ref_slots_decl_vars_comparer perm)
       body_instrs_comparer
 
 let function_body_comparer =
-  wrap Hhas_function.body (fun _ s -> s) body_comparer
+  wrap Hhas_function.body (fun _ s -> s) (body_comparer [])
 
-let method_body_comparer =
-  wrap Hhas_method.body (fun _ s -> s) body_comparer
+let method_body_comparer perm =
+  wrap Hhas_method.body (fun _ s -> s) (body_comparer perm)
 
 let function_header_body_comparer =
  join (fun s1 s2 -> s1 ^ "{\n" ^ s2 ^ "}\n") function_header_comparer
                                              function_body_comparer
 
-let method_header_body_comparer =
+let method_header_body_comparer perm =
 join (fun s1 s2 -> s1 ^ "{\n" ^ s2 ^ "}\n") method_header_comparer
-                                            method_body_comparer
+                                            (method_body_comparer perm)
 
 let program_main_comparer =
- wrap Hhas_program.main (fun _p s -> s) body_comparer
+ wrap Hhas_program.main (fun _p s -> s) (body_comparer [])
 
 let functions_alist_comparer =
  alist_comparer function_header_body_comparer (fun fname -> fname)
 
-let methods_alist_comparer =
- alist_comparer method_header_body_comparer (fun mname -> mname)
+let methods_alist_comparer perm =
+ alist_comparer (method_header_body_comparer perm) (fun mname -> mname)
 
-let class_methods_comparer = wrap methods_alist_of_class
-                           (fun _c s -> s) methods_alist_comparer
+let class_methods_comparer perm = wrap methods_alist_of_class
+                           (fun _c s -> s) (methods_alist_comparer perm)
 
-let class_properties_methods_comparer =
+let class_properties_methods_comparer perm =
  join (fun s1 s2 -> s1 ^ s2)
-      class_properties_comparer
-      class_methods_comparer
+      (class_properties_comparer perm)
+      (class_methods_comparer perm)
 
-let class_header_properties_methods_comparer =
+let class_header_properties_methods_comparer perm =
  join (fun s1 s2 -> s1 ^ "{\n" ^ s2 ^ "}")
    class_header_comparer
-   class_properties_methods_comparer
+   (class_properties_methods_comparer perm)
+
+
 
 (* TODO: add all the other bits to classes *)
-let class_comparer = class_header_properties_methods_comparer
+let class_comparer perm = class_header_properties_methods_comparer perm
 
 let program_functions_comparer = wrap functions_alist_of_program
                            (fun _p s -> s) functions_alist_comparer
@@ -705,13 +761,13 @@ join (fun s1 s2 -> s1 ^ s2) program_main_comparer program_functions_comparer
    methods therein), rather than by a static association list.
    This should even do the "right" thing in the case that there
    are multiple classes with the same name that are dynamically registered *)
-let todosplitter s = if Rhl.IntIntSet.is_empty s
+let todosplitter s = if Rhl.IntIntPermSet.is_empty s
                      then None
-                     else let iip = Rhl.IntIntSet.choose s in
-                          Some (iip, Rhl.IntIntSet.remove iip s)
+                     else let iip = Rhl.IntIntPermSet.choose s in
+                          Some (iip, Rhl.IntIntPermSet.remove iip s)
 
 let compare_classes_of_programs p p' =
-  let _ = Rhl.classes_to_check := Rhl.IntIntSet.empty in
+  let _ = Rhl.classes_to_check := Rhl.IntIntPermSet.empty in
   let _ = Rhl.classes_checked := Rhl.IntIntSet.empty in
  (* clear ref here to be on the safe side *)
  let (dist, (size,edits)) = program_main_functions_comparer.comparer p p' in
@@ -719,25 +775,28 @@ let compare_classes_of_programs p p' =
   let td = !Rhl.classes_to_check in
    match todosplitter td with
     | None -> (d,(s,e))
-    | Some ((ac,ac'), newtodo) ->
+    | Some ((ac,ac',perm), newtodo) ->
      (Rhl.classes_to_check := newtodo;
       if Rhl.IntIntSet.mem (ac,ac') (!Rhl.classes_checked)
       then loop d s e (* already done this pair *)
       else
        let actual_class = List.nth (Hhas_program.classes p) ac in
        let actual_class' = List.nth (Hhas_program.classes p') ac' in
-       let _ = Rhl.classes_checked := Rhl.IntIntSet.add (ac,ac') (!Rhl.classes_checked) in
-       let (dc, (sc,ec)) = class_comparer.comparer actual_class actual_class' in
+       Rhl.classes_checked := Rhl.IntIntSet.add (ac,ac') (!Rhl.classes_checked);
+       let (dc, (sc,ec)) = (class_comparer perm).comparer actual_class actual_class' in
+       (if perm = [] then ()
+        else Log.debug @@
+             Printf.sprintf "did perm comparison on classes %d and %d, distance was %d" ac ac' dc);
        loop (d+dc) (s+sc) (e ^ ec))
-  in loop dist size edits
+ in loop dist size edits
 
 let program_main_functions_classes_comparer = {
   comparer = compare_classes_of_programs;
   size_of = (fun p -> program_main_functions_comparer.size_of p
-                    + sumsize class_comparer.size_of (Hhas_program.classes p));
+                    + sumsize (class_comparer []).size_of (Hhas_program.classes p));
   string_of = (fun p -> program_main_functions_comparer.string_of p  ^
                String.concat "\n"
-               (List.map class_comparer.string_of (Hhas_program.classes p)));
+               (List.map (class_comparer []).string_of (Hhas_program.classes p)));
 }
 
 (* top level comparison for whole programs *)

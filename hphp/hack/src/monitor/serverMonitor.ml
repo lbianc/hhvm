@@ -31,7 +31,6 @@ exception Send_fd_failure of int
 
 module Make_monitor (SC : ServerMonitorUtils.Server_config)
 (Informant : Informant_sig.S) = struct
-  let max_purgatory_clients = 50;
 
   type env = {
     informant: Informant.t;
@@ -39,6 +38,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
     server_start_options: SC.server_start_options;
     (** How many times have we tried to relaunch it? *)
     retries: int;
+    max_purgatory_clients: int;
     (** After sending a Server_not_alive_dormant during Prehandoff,
      * clients are put here waiting for a server to come alive, at
      * which point they get pushed through the rest of prehandoff and
@@ -129,13 +129,14 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
   let maybe_start_first_server options informant =
     if Informant.should_start_first_server informant then begin
       Hh_logger.log "Starting first server";
+      HackEventLogger.starting_first_server ();
       start_server ~informant_managed:(Informant.is_managing informant)
         options None
     end
     else begin
       Hh_logger.log ("Not starting first server. " ^^
         "Starting will be triggered by informant later.");
-      Informant_killed
+      Not_yet_started
     end
 
   let kill_server_with_check = function
@@ -172,6 +173,8 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
          None, Informant_sig.Server_alive
        | Died_unexpectedly ((Unix.WEXITED c), _) ->
          Some c, Informant_sig.Server_dead
+       | Not_yet_started ->
+         None, Informant_sig.Server_not_yet_started
        | Died_unexpectedly ((Unix.WSIGNALED _| Unix.WSTOPPED _), _)
        | Informant_killed ->
          None, Informant_sig.Server_dead in
@@ -276,9 +279,11 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       (Hh_logger.log "server socket not yet ready. Retrying.";
        hand_off_client_connection_with_retries
          server (retries - 1) client_fd)
-    else
-      (Hh_logger.log
-         "server socket not yet ready. No more retries. Ignoring request.")
+    else begin
+      Hh_logger.log
+        "server socket not yet ready. No more retries. Ignoring request.";
+      Unix.close client_fd
+    end
 
   (** Does not return. *)
   and client_out_of_date_ client_fd _mismatch_info =
@@ -337,6 +342,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       msg_to_channel client_fd (PH.Server_died {PH.status; PH.was_oom});
       (** Next client to connect starts a new server. *)
       Exit_status.exit Exit_status.No_error
+    | Not_yet_started
     | Informant_killed ->
       let env =
         if handoff_options.MonitorRpc.force_dormant_start then begin
@@ -349,7 +355,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
           env
         end
       in
-      if (Queue.length env.purgatory_clients) >= max_purgatory_clients then
+      if (Queue.length env.purgatory_clients) >= env.max_purgatory_clients then
         let () = msg_to_channel
           client_fd PH.Server_dormant_connections_limit_reached in
         env
@@ -387,6 +393,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
     let env = Queue.fold begin
       fun env (handoff_options, client_fd) ->
         try client_prehandoff env handoff_options client_fd with
+        | Unix.Unix_error(Unix.EPIPE, _, _)
         | Unix.Unix_error(Unix.EBADF, _, _) ->
           Hh_logger.log "Purgatory client disconnected. Dropping.";
           env
@@ -399,7 +406,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       env
     | Alive _, _ ->
       push_purgatory_clients env
-    | Informant_killed, _ | Died_unexpectedly _, _ ->
+    | Not_yet_started, _ | Informant_killed, _ | Died_unexpectedly _, _ ->
       env
 
   let rec check_and_run_loop env monitor_config
@@ -450,7 +457,8 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
          "Accepting on socket failed. Ignoring client connection attempt.";
          env)
 
-  let start_monitoring ~waiting_client server_start_options informant_init_env
+  let start_monitoring ~waiting_client ~max_purgatory_clients
+    server_start_options informant_init_env
     monitor_config =
     let socket = Socket.init_unix_socket monitor_config.socket_file in
     (* If the client started the server, it opened an FD before forking, so it
@@ -482,6 +490,7 @@ module Make_monitor (SC : ServerMonitorUtils.Server_config)
       server_start_options informant in
     let env = {
       informant;
+      max_purgatory_clients;
       purgatory_clients = Queue.create ();
       server = server_process;
       server_start_options;

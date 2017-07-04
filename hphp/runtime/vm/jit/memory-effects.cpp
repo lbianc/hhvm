@@ -804,7 +804,20 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     }
 
   case ContEnter:
-    return CallEffects { false, AMIStateAny, AStackAny, AFrameAny, AStackAny };
+    {
+      auto const extra = inst.extra<ContEnter>();
+      return CallEffects {
+        false,
+        // Kills. Everything on the stack below the sent value.
+        stack_below(inst.src(0), extra->spOffset - 1) | AMIStateAny,
+        // Stack. The value being sent, and everything below.
+        stack_below(inst.src(0), extra->spOffset),
+        // Locals.
+        backtrace_locals(inst),
+        // Callee. Stored inside the generator object, not used by ContEnter.
+        AEmpty
+      };
+    }
 
   case Call:
     {
@@ -852,9 +865,10 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   // Resumable suspension takes everything from the frame and moves it into the
   // heap.
+  case CreateGen:
+  case CreateAGen:
   case CreateAFWH:
   case CreateAFWHNoVV:
-  case CreateCont:
     return may_load_store_move(
       AFrameAny | AClsRefSlotAny | ACufIterAny,
       AHeapAny,
@@ -1530,6 +1544,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case IsScalarType:
   case LdMIStateAddr:
   case LdPairBase:
+  case CheckStaticLoc:
   case LdStaticLoc:
   case LdClsCns:
   case CheckCtxThis:
@@ -1706,8 +1721,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     return may_load_store(AEmpty, AEmpty);
 
   // Some that touch memory we might care about later, but currently don't:
-  case CheckClosureStaticLocInit:
-  case InitClosureStaticLoc:
   case InitStaticLoc:
   case ColIsEmpty:
   case ColIsNEmpty:
@@ -1929,6 +1942,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
 
   // debug_backtrace() traverses stack and WaitHandles on the heap.
   case DebugBacktrace:
+  case DebugBacktraceFast:
     return may_load_store(AHeapAny|AFrameAny|AStackAny, AHeapAny);
 
   // These two instructions don't touch memory we track, except that they may

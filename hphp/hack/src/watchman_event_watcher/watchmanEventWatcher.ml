@@ -21,42 +21,60 @@ open Core
  * This is useful to ask the question "is this repo mid-update
  * right now?", which isn't provided by the Mercurial or Watchman
  * APIs.
+ *
+ * Socket can be retrieved by invoking this command with --get-sockname
+ *
+ * Clients get the status by connecting to the socket and reading
+ * newline-terminated messages. The message can be:
+ *   'unknown' - watcher doesn't know what state the repo is in
+ *   'mid_update' - repo is currently undergoing an update
+ *   'settled' - repo is settled (not undergoing an update)
+ *
+ * After sending 'settled' message, the socket is closed.
+ * An 'unknown' or 'mid_updat' message is eventually followed by a
+ * 'settled' message when the repo is settled.
+ *
+ * The Hack Monitor uses the watcher when first starting up to delay
+ * initialization while a repo is in the middle of an update. Initialization
+ * mid-update is undesirable because the wrong saved state will be loaded
+ * (the one corresponding to the revision we are leaving) resulting in
+ * a slow recheck after init.
+ *
+ * Why do we need a socket with a 'settled' notification instead of just
+ * having the Hack Server tail the watcher's logs? Consider the following
+ * race:
+   *
+   * Watcher prints 'mid_update' to logs, Watchman has sent State_leave
+   * event to subscribers before the Hack Monitor's subscription started,
+   * and the Watcher crashes before processing this State_leave.
+   *
+ *
+ * If the Hack Monitor just tailed the watcher logs to see the state of the
+ * repo, it would not start a server, would never get the State_leave watchman
+ * event on its subscription, and would just wait indefinitely.
+ *
+ * The watcher must also be used as the source-of-truth for the repo's
+ * state during startup instead of the Hack Monitor's own subscription.
+ * Consider the following incorrect usage of the Watcher:
+   *
+   * Hack Monitor starts up, starts a Watchman subscription, checks watcher
+   * for repo state and sees 'mid_update', delays starting a server.
+   * Waits on its Watchman subscription for a State_leave before starting a
+   * server.
+   *
+ *
+ * The Monitor could potentially wait forever in this scenario due to a
+ * race condition - Watchman has already sent the State_leave to all
+ * subscriptions before the Monitor's subscription was started, but it
+ * was not yet processed by the Watcher.
+ *
+ * The Hack Monitor should instead be waiting for a 'settled' from the
+ * Watcher.
  *)
 
 module J = Hh_json_helpers
 module Config = WatchmanEventWatcherConfig
-
-module Responses = struct
-
-  exception Invalid_response
-  exception Send_failure
-
-  type t =
-    | Unknown
-    | Mid_update
-    | Settled
-
-  let to_string = function
-    | Unknown -> "unknown"
-    | Mid_update -> "mid_update"
-    | Settled -> "settled"
-
-  let of_string s = match s with
-    | "unknown" -> Unknown
-    | "mid_update" -> Mid_update
-    | "settled" -> Settled
-    | _ -> raise Invalid_response
-
-  let send_to_fd v fd =
-    let str = Printf.sprintf "%s\n" (to_string v) in
-    let bytes = Unix.write fd str 0 (String.length str) in
-    if bytes = (String.length str) then
-      ()
-    else
-      raise Send_failure
-
-end
-
+module Responses = Config.Responses
 
 type state =
   | Unknown
@@ -67,9 +85,52 @@ type state =
 
 type env = {
   watchman : Watchman.watchman_instance;
+  (** Directory we are watching. *)
+  root : Path.t;
   state : state;
   socket : Unix.file_descr;
+  waiting_clients : Unix.file_descr Queue.t;
 }
+
+let ignore_unix_epipe f x =
+  try f x with
+  | Unix.Unix_error (Unix.EPIPE, _, _) ->
+    ()
+
+(**
+ * This allows the repo itself to turn on-or-off this Watchman Event
+ * Watcher service (and send a fake Settled message instead).
+ *
+ * This service has its own deploy/release cycle independent of the
+ * Hack Server. Adding this toggle to the Hack Server wouldn't retroactively
+ * allow us to toggle off this service for older versions of the Hack Server.
+ * Putting it here instead allows us to turn off this service regardless of
+ * what version of the Hack server is running.
+ *)
+let is_enabled env =
+  let enabled_file = Path.concat env.root ".hh_enable_watchman_event_watcher" in
+  Sys.file_exists (Path.to_string enabled_file)
+
+let send_to_fd env v fd =
+  let v = if is_enabled env then
+    v
+  else
+    (Hh_logger.log "Service not enabled. Sending fake Settled message instead";
+    Responses.Settled)
+  in
+  let str = Printf.sprintf "%s\n" (Responses.to_string v) in
+  let bytes = Unix.single_write fd str 0 (String.length str) in
+  (if bytes = (String.length str) then
+    ()
+  else
+    (** We're only writing a few bytes. Not sure what to do here.
+     * Retry later when the pipe has been pumped? *)
+    Hh_logger.log "Failed to write all bytes");
+  match v with
+  | Responses.Settled ->
+    Unix.close fd
+  | Responses.Unknown | Responses.Mid_update ->
+    Queue.add fd env.waiting_clients
 
 let watchman_expression_terms = [
   J.strlist ["type"; "f"];
@@ -84,55 +145,39 @@ type daemon_init_result =
   | Init_failure of init_failure
   | Init_success
 
-module Args = struct
-
-  type t = {
-    root : Path.t;
-    daemonize : bool;
-    get_sockname : bool;
-  }
-
-  let usage = Printf.sprintf
-    "Usage: %s [--daemonize] [REPO DIRECTORY]\n"
-    Sys.argv.(0)
-
-  let parse () =
-    let root = ref None in
-    let daemonize = ref false in
-    let get_sockname = ref false in
-    let options = [
-      "--daemonize", Arg.Set daemonize, "spawn watcher daemon";
-      "--get-sockname", Arg.Set get_sockname, "print socket and exit";
-    ] in
-    let () = Arg.parse options (fun s -> root := (Some s)) usage in
-    match !root with
-    | None ->
-      Printf.eprintf "%s" usage;
-      exit 1
-    | Some root ->
-      {
-        root = Path.make root;
-        daemonize = !daemonize;
-        get_sockname = !get_sockname;
-      }
-
-  let root args = args.root
-
-end;;
-
-
 let process_changes changes env =
+  let notify_client client =
+    (** Notify the client that the repo has settled. *)
+      ignore_unix_epipe (send_to_fd env Responses.Settled) client
+  in
+  let notify_waiting_clients env =
+    let clients = Queue.create () in
+    let () = Queue.transfer env.waiting_clients clients in
+    Queue.fold (fun () client -> notify_client client) () clients
+  in
   let open Watchman in
   match changes with
   | Watchman_unavailable ->
     Hh_logger.log "Watchman unavailable. Exiting";
     exit 1
-  | Watchman_pushed (State_enter (name, _)) ->
+  | Watchman_pushed (State_enter (name, json)) ->
     Hh_logger.log "State_enter %s" name;
+    let (>>=) = Option.(>>=) in
+    let (>>|) = Option.(>>|) in
+    ignore (json >>= Watchman_utils.rev_in_state_change >>| fun hg_rev -> begin
+      Hh_logger.log "Revision: %s" hg_rev
+    end);
     { env with state = Entering_to name; }
-  | Watchman_pushed (State_leave (name, _)) ->
+  | Watchman_pushed (State_leave (name, json)) ->
     Hh_logger.log "State_leave %s" name;
-    { env with state = Left_at name; }
+    let (>>=) = Option.(>>=) in
+    let (>>|) = Option.(>>|) in
+    ignore (json >>= Watchman_utils.rev_in_state_change >>| fun hg_rev -> begin
+      Hh_logger.log "Revision: %s" hg_rev
+    end);
+    let env = { env with state = Left_at name; } in
+    let () = notify_waiting_clients env in
+    env
   | Watchman_pushed (Files_changed set) when (SSet.is_empty set)->
     env
   | Watchman_pushed (Files_changed set) ->
@@ -178,21 +223,20 @@ let get_new_clients socket =
     get_all_clients_nonblocking socket []
 
 let process_client_ env client =
+  (** We allow this to throw Unix_error - this lets us ignore broken
+   * clients instead of adding them to the waiting_clients queue. *)
   (match env.state with
   | Unknown ->
-    Responses.send_to_fd Responses.Unknown client
+    send_to_fd env Responses.Unknown client
   | Entering_to _ ->
-    Responses.send_to_fd Responses.Mid_update client
+    send_to_fd env Responses.Mid_update client
   | Left_at _ ->
-    Responses.send_to_fd Responses.Settled client);
-  Unix.close client;
+    send_to_fd env Responses.Settled client);
   env
 
 let process_client env client =
   try process_client_ env client with
-  | Unix.Unix_error (Unix.EBADF, _, _) ->
-    env
-  | Responses.Send_failure ->
+  | Unix.Unix_error _ ->
     env
 
 let check_new_connections env =
@@ -238,6 +282,8 @@ let init root =
       watchman = Watchman.Watchman_alive wenv;
       state = Unknown;
       socket;
+      root;
+      waiting_clients = Queue.create ();
     }
 
 let to_channel_no_exn oc data =
@@ -245,8 +291,9 @@ let to_channel_no_exn oc data =
   | e ->
     Hh_logger.exc ~prefix:"Warning: writing to channel failed" e
 
-let main args =
-  let result = init args.Args.root in
+let main root =
+  Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let result = init root in
   match result with
   | Result.Ok env -> begin
       try serve env with
@@ -265,8 +312,8 @@ let log_file root =
   Sys_utils.make_link_of_timestamped log_link
 
 
-let daemon_main_ args oc =
-  match init args.Args.root with
+let daemon_main_ root oc =
+  match init root with
   | Result.Ok env ->
     to_channel_no_exn oc Init_success;
     serve env
@@ -279,27 +326,28 @@ let daemon_main_ args oc =
     Hh_logger.log "Daemon already running. Exiting.";
     exit 1
 
-let daemon_main args (_ic, oc) =
-  try daemon_main_ args oc with
+let daemon_main root (_ic, oc) =
+  Sys_utils.set_signal Sys.sigpipe Sys.Signal_ignore;
+  try daemon_main_ root oc with
   | e ->
     HackEventLogger.uncaught_exception e
 
 (** Typechecker canont infer this type since the input channel
  * is never used so its phantom type is never ineferred. We annotate
  * the type manually to "unit" here to help it out. *)
-let daemon_entry : (Args.t, unit, daemon_init_result) Daemon.entry =
+let daemon_entry : (Path.t, unit, daemon_init_result) Daemon.entry =
   Daemon.register_entry_point
   "Watchman_event_watcher_daemon_main"
   daemon_main
 
-let spawn_daemon args =
-  let log_file_path = log_file args.Args.root in
+let spawn_daemon root =
+  let log_file_path = log_file root in
   let in_fd = Daemon.null_fd () in
   let out_fd = Daemon.fd_of_path log_file_path in
   Printf.eprintf
     "Spawning daemon. Its logs will go to: %s\n%!" log_file_path;
   let {Daemon.channels; _; } =
-    Daemon.spawn (in_fd, out_fd, out_fd) daemon_entry args in
+    Daemon.spawn (in_fd, out_fd, out_fd) daemon_entry root in
   let result = Daemon.from_channel (fst channels) in
   match result with
   | Init_success ->
@@ -310,13 +358,3 @@ let spawn_daemon args =
   | Init_failure Failure_watchman_init ->
     Printf.eprintf "Daemon failed to spawn - watchman failure\n%!";
     exit 1
-
-let () =
-  Daemon.check_entry_point ();
-  let args = Args.parse () in
-  if args.Args.get_sockname then
-    Printf.printf "%s%!" (Config.socket_file args.Args.root)
-  else if args.Args.daemonize then
-    spawn_daemon args
-  else
-    main args

@@ -94,6 +94,7 @@ let should_start env =
     force_dormant_start = false;
   } in
   match ServerUtils.connect_to_monitor
+    ~timeout:3
     env.root handoff_options with
   | Result.Ok _conn -> false
   | Result.Error
@@ -105,7 +106,8 @@ let should_start env =
     Printf.eprintf
       "Server already exists but is dormant";
     false
-  | Result.Error SMUtils.Server_busy
+  | Result.Error SMUtils.Monitor_socket_not_ready
+  | Result.Error SMUtils.Monitor_establish_connection_timeout
   | Result.Error SMUtils.Monitor_connection_failure ->
     Printf.eprintf "Replacing unresponsive server for %s\n%!" root_s;
     ClientStop.kill_server env.root;

@@ -417,30 +417,39 @@ class virtual ['self] map =
     method on_fun_ env this =
       let r0 = self#on_FileInfo_mode env this.f_mode in
       let r1 = self#on_list self#on_tparam env this.f_tparams in
-      let r2 = self#on_option self#on_hint env this.f_ret in
-      let r3 = self#on_bool env this.f_ret_by_ref in
-      let r4 = self#on_id env this.f_name in
-      let r5 = self#on_list self#on_fun_param env this.f_params in
-      let r6 = self#on_block env this.f_body in
-      let r7 =
+      let r2 =
+        self#on_list
+          (fun env (c0, c1, c2) ->
+               let r0 = self#on_hint env c0 in
+               let r1 = self#on_constraint_kind env c1 in
+               let r2 = self#on_hint env c2 in (r0, r1, r2)) env
+          this.f_constrs
+      in
+      let r3 = self#on_option self#on_hint env this.f_ret in
+      let r4 = self#on_bool env this.f_ret_by_ref in
+      let r5 = self#on_id env this.f_name in
+      let r6 = self#on_list self#on_fun_param env this.f_params in
+      let r7 = self#on_block env this.f_body in
+      let r8 =
         self#on_list self#on_user_attribute env
           this.f_user_attributes
       in
-      let r8 = self#on_fun_kind env this.f_fun_kind in
-      let r9 = self#on_Namespace_env env this.f_namespace in
-      let r10 = self#on_Pos_t env this.f_span in
+      let r9 = self#on_fun_kind env this.f_fun_kind in
+      let r10 = self#on_Namespace_env env this.f_namespace in
+      let r11 = self#on_Pos_t env this.f_span in
       {
         f_mode = r0;
         f_tparams = r1;
-        f_ret = r2;
-        f_ret_by_ref = r3;
-        f_name = r4;
-        f_params = r5;
-        f_body = r6;
-        f_user_attributes = r7;
-        f_fun_kind = r8;
-        f_namespace = r9;
-        f_span = r10
+        f_constrs = r2;
+        f_ret = r3;
+        f_ret_by_ref = r4;
+        f_name = r5;
+        f_params = r6;
+        f_body = r7;
+        f_user_attributes = r8;
+        f_fun_kind = r9;
+        f_namespace = r10;
+        f_span = r11
       }
     method on_FSync env = FSync
     method on_FAsync env = FAsync
@@ -571,6 +580,7 @@ class virtual ['self] map =
       | Return (c0, c1) -> self#on_Return env c0 c1
       | GotoLabel c0 -> self#on_GotoLabel env c0
       | Goto c0 -> self#on_Goto env c0
+      | Markup (c0, c1) -> self#on_Markup env c0 c1
       | Static_var c0 -> self#on_Static_var env c0
       | Global_var c0 -> self#on_Global_var env c0
       | If (c0, c1, c2) -> self#on_If env c0 c1 c2
@@ -694,6 +704,8 @@ class virtual ['self] map =
     method on_InstanceOf env c0 c1 =
       let r0 = self#on_expr env c0 in
       let r1 = self#on_expr env c1 in InstanceOf (r0, r1)
+    method on_BracedExpr env c0 =
+      let r0 = self#on_expr env c0 in BracedExpr r0
     method on_New env c0 c1 c2 =
       let r0 = self#on_expr env c0 in
       let r1 = self#on_list self#on_expr env c1 in
@@ -731,6 +743,10 @@ class virtual ['self] map =
     method on_Goto env c0 =
       let r0 = self#on_pstring env c0 in
       Goto r0
+    method on_Markup env c0 c1 =
+      let r0 = self#on_pstring env c0 in
+      let r1 = self#on_option self#on_expr env c1 in
+      Markup (r0, r1)
     method on_expr_ env this =
       match this with
       | Array c0 -> self#on_Array env c0
@@ -766,6 +782,7 @@ class virtual ['self] map =
       | Pipe (c0, c1) -> self#on_Pipe env c0 c1
       | Eif (c0, c1, c2) -> self#on_Eif env c0 c1 c2
       | NullCoalesce (c0, c1) -> self#on_NullCoalesce env c0 c1
+      | BracedExpr c0 -> self#on_BracedExpr env c0
       | InstanceOf (c0, c1) -> self#on_InstanceOf env c0 c1
       | New (c0, c1, c2) -> self#on_New env c0 c1 c2
       | Efun (c0, c1) -> self#on_Efun env c0 c1
@@ -815,6 +832,7 @@ class virtual ['self] map =
     method on_Ltlt env = Ltlt
     method on_Gtgt env = Gtgt
     method on_Percent env = Percent
+    method on_LogXor env = LogXor
     method on_Xor env = Xor
     method on_Eq env c0 =
       let r0 = self#on_option self#on_bop env c0 in Eq r0
@@ -842,6 +860,7 @@ class virtual ['self] map =
       | Gtgt -> self#on_Gtgt env
       | Cmp -> self#on_Cmp env
       | Percent -> self#on_Percent env
+      | LogXor -> self#on_LogXor env
       | Xor -> self#on_Xor env
       | Eq c0 -> self#on_Eq env c0
     method on_Utild env = Utild

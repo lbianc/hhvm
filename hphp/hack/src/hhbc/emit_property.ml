@@ -26,6 +26,7 @@ let rec expr_requires_deep_init (_, expr_) =
     List.exists fields aexpr_requires_deep_init
   | A.Varray fields -> List.exists fields expr_requires_deep_init
   | A.Darray fields -> List.exists fields expr_pair_requires_deep_init
+  | A.Id(_, ("__FILE__" | "__DIR__")) -> false
   | _ -> true
 
 and expr_pair_requires_deep_init (expr1, expr2) =
@@ -37,8 +38,8 @@ and aexpr_requires_deep_init aexpr =
   | A.AFkvalue (expr1, expr2) ->
     expr_requires_deep_init expr1 || expr_requires_deep_init expr2
 
-let from_ast ast_class cv_kind_list _type_hint (_, (_, cv_name), initial_value) =
-  (* TODO: Deal with type hint *)
+let from_ast ast_class cv_kind_list type_hint tparams namespace
+             (_, (_, cv_name), initial_value) =
   (* TODO: Hack allows a property to be marked final, which is nonsensical.
   HHVM does not allow this.  Fix this in the Hack parser? *)
   let pid = Hhbc_id.Prop.from_ast_name cv_name in
@@ -55,15 +56,28 @@ let from_ast ast_class cv_kind_list _type_hint (_, (_, cv_name), initial_value) 
     ("Class " ^ Utils.strip_ns (snd ast_class.Ast.c_name) ^
       " contains non-static property declaration"
      ^ " and therefore cannot be declared 'abstract final'");
+  let tinfo =
+    match type_hint with
+    | None ->
+      Hhas_type_info.make (Some "") (Hhas_type_constraint.make None [])
+    | Some h ->
+      Emit_type_hint.(hint_to_type_info
+        ~kind:Property ~nullable:false
+        ~skipawaitable:false ~tparams ~namespace h) in
   let env = Emit_env.make_class_env ast_class in
   let initial_value, is_deep_init, initializer_instrs =
     match initial_value with
     | None -> None, false, None
     | Some expr ->
+      let is_collection_map =
+        match snd expr with
+        | A.Collection ((_, ("Map" | "ImmMap")), _) -> true
+        | _ -> false
+      in
       let deep_init = not is_static && expr_requires_deep_init expr in
       match Ast_constant_folder.expr_to_opt_typed_value
         ast_class.Ast.c_namespace expr with
-      | Some v when not deep_init ->
+      | Some v when not deep_init && not is_collection_map ->
         Some v, false, None
       | _ ->
         let label = Label.next_regular () in
@@ -96,3 +110,4 @@ let from_ast ast_class cv_kind_list _type_hint (_, (_, cv_name), initial_value) 
     pid
     initial_value
     initializer_instrs
+    tinfo

@@ -135,8 +135,14 @@ void nothrow(ISS& env) {
   env.flags.wasPEI = false;
 }
 
-void unreachable(ISS& env)    { env.state.unreachable = true; }
-void constprop(ISS& env)      { env.flags.canConstProp = true; }
+void unreachable(ISS& env) {
+  FTRACE(2, "    unreachable\n");
+  env.state.unreachable = true;
+}
+void constprop(ISS& env) {
+  FTRACE(2, "    constprop\n");
+  env.flags.canConstProp = true;
+}
 
 void jmp_nofallthrough(ISS& env) {
   env.flags.jmpFlag = StepFlags::JmpFlags::Taken;
@@ -172,6 +178,14 @@ void modifyLocalStatic(ISS& env, LocalId id, const Type& t) {
   for (LocalId i = 0; i < env.state.localStaticBindings.size(); i++) {
     modifyOne(i);
   }
+}
+
+void maybeBindLocalStatic(ISS& env, LocalId id) {
+  if (is_volatile_local(env.ctx.func, id)) return;
+  if (env.state.localStaticBindings.size() <= id) return;
+  if (env.state.localStaticBindings[id] != LocalStaticBinding::None) return;
+  env.state.localStaticBindings[id] = LocalStaticBinding::Maybe;
+  return;
 }
 
 void unbindLocalStatic(ISS& env, LocalId id) {
@@ -280,7 +294,8 @@ void specialFunctionEffects(ISS& env, ActRec ar) {
      * forbid this, we have to be pessimistic. Imagine something like
      * Vector::map calling assert.
      */
-    if (!options.DisallowDynamicVarEnvFuncs) {
+    if (!options.DisallowDynamicVarEnvFuncs &&
+        (!ar.func || ar.func->mightBeSkipFrame())) {
       readUnknownLocals(env);
       killLocals(env);
       mayUseVV(env);

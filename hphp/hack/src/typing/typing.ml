@@ -371,7 +371,9 @@ and fun_def tcopt f =
         Phase.localize_generic_parameters_with_bounds env f.f_tparams
                   ~ety_env:(Phase.env_with_self env) in
       let env = add_constraints (fst f.f_name) env constraints in
-
+      let env =
+        localize_where_constraints
+          ~ety_env:(Phase.env_with_self env) env f.f_where_constraints in
       let env, hret =
         match f.f_ret with
         | None -> env, (Reason.Rwitness (fst f.f_name), Tany)
@@ -391,17 +393,19 @@ and fun_def tcopt f =
         bind_param in
       let env, tb = fun_ env hret (fst f.f_name) nb f.f_fun_kind in
       let env = fold_fun_list env env.Env.todo in
-      if Env.is_strict env then begin
-        List.iter2_exn f_params param_tys (check_param env);
-        match f.f_ret with
-          | None -> suggest_return env (fst f.f_name) hret
-          | Some _ -> ()
+      begin match f.f_ret with
+        | None when Env.is_strict env ->
+            List.iter2_exn f_params param_tys (check_param env);
+            suggest_return env (fst f.f_name) hret;
+        | None -> Typing_suggest.save_fun_or_method f.f_name
+        | Some _ -> ();
       end;
       {
         T.f_mode = f.f_mode;
         T.f_ret = f.f_ret;
         T.f_name = f.f_name;
         T.f_tparams = f.f_tparams;
+        T.f_where_constraints = f.f_where_constraints;
         T.f_variadic = T.FVnonVariadic (* TAST: get this right *);
         T.f_params = tparams;
         T.f_fun_kind = f.f_fun_kind;
@@ -888,9 +892,9 @@ and bind_as_expr env ty aexpr =
 and expr env e =
   raw_expr ~in_cond:false env e
 
-and raw_expr ~in_cond ?valkind:(valkind=`other) env e =
+and raw_expr ~in_cond ?lhs_of_null_coalesce ?valkind:(valkind=`other) env e =
   debug_last_pos := fst e;
-  let env, te, ty = expr_ ~in_cond ~valkind env e in
+  let env, te, ty = expr_ ~in_cond ?lhs_of_null_coalesce ~valkind env e in
   let () = match !expr_hook with
     | Some f -> f e (Typing_expand.fully_expand env ty)
     | None -> () in
@@ -910,7 +914,8 @@ and is_pseudo_function s =
  * look for sketchy null checks in the condition. *)
 (* TODO TAST: type refinement should be made explicit in the typed AST *)
 and eif env ~coalesce ~in_cond p c e1 e2 =
-  let env, tc, tyc = raw_expr in_cond env c in
+  let condition = condition ~lhs_of_null_coalesce:coalesce in
+  let env, tc, tyc = raw_expr ~in_cond ~lhs_of_null_coalesce:coalesce env c in
   let parent_lenv = env.Env.lenv in
   let c = if coalesce then (p, Binop (Ast.Diff2, c, (p, Null))) else c in
   let env = condition env true c in
@@ -953,6 +958,7 @@ and exprs env el =
 
 and expr_
   ~in_cond
+  ?lhs_of_null_coalesce
   ~(valkind: [> `lvalue | `lvalue_subexpr | `other ])
   env (p, e) =
   let make_result env te ty =
@@ -1349,11 +1355,13 @@ and expr_
       let env, ty = array_append p env ty1 in
       make_result env (T.Array_get(te1, None)) ty
   | Array_get (e1, Some e2) ->
-      let env, te1, ty1 = update_array_type p env e1 (Some e2) valkind in
+      let env, te1, ty1 =
+        update_array_type ?lhs_of_null_coalesce p env e1 (Some e2) valkind in
       let env, ty1 = TUtils.fold_unresolved env ty1 in
       let env, te2, ty2 = expr env e2 in
       let is_lvalue = (valkind == `lvalue) in
-      let env, ty = array_get is_lvalue p env ty1 e2 ty2 in
+      let env, ty =
+        array_get ?lhs_of_null_coalesce is_lvalue p env ty1 e2 ty2 in
       make_result env (T.Array_get(te1, Some te2)) ty
   | Call (Cnormal, (pos_id, Id ((_, s) as id)), el, [])
       when is_pseudo_function s ->
@@ -2833,7 +2841,7 @@ and fun_type_of_id env x =
  * side of an assignment (example: $x[...] = 0).
  *)
 (*****************************************************************************)
-and array_get is_lvalue p env ty1 e2 ty2 =
+and array_get ?(lhs_of_null_coalesce=false) is_lvalue p env ty1 e2 ty2 =
   (* This is a little weird -- we enforce the right arity when you use certain
    * collections, even in partial mode (where normally completely omitting the
    * type parameter list is admitted). Basically the "omit type parameter"
@@ -3014,7 +3022,8 @@ and array_get is_lvalue p env ty1 e2 ty2 =
           Errors.undefined_field
             p (TUtils.get_printable_shape_field_name field);
           env, (Reason.Rwitness p, Terr)
-        | Some { sft_optional = true; _ } when not is_lvalue ->
+        | Some { sft_optional = true; _ }
+          when not is_lvalue && not lhs_of_null_coalesce ->
           let declared_field =
               List.find_exn
                 ~f:(fun x -> Ast.ShapeField.compare field x = 0)
@@ -3091,7 +3100,7 @@ and array_append p env ty1 =
                type parameters *)
             env, (Reason.Rmap_append p,
               Tclass ((p, SN.Collections.cPair), []))
-        | Tarraykind (AKvec ty) ->
+        | Tarraykind (AKvec ty | AKvarray ty) ->
             env, ty
         | Tobject ->
             if Env.is_strict env
@@ -4115,6 +4124,7 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
       let env = SubType.sub_string p1 env ty1 in
       let env = SubType.sub_string p2 env ty2 in
       make_result env te1 te2 (Reason.Rconcat_ret p, Tprim Tstring)
+  | Ast.LogXor
   | Ast.AMpamp
   | Ast.BArbar ->
       make_result env te1 te2 (Reason.Rlogic_ret p, Tprim Tbool)
@@ -4190,11 +4200,12 @@ and condition_isset env = function
  * Build an environment for the true or false branch of
  * conditional statements.
  *)
-and condition env tparamet =
+and condition ?lhs_of_null_coalesce env tparamet =
   let expr env x =
-    let env, _te, ty = raw_expr ~in_cond:true env x in
+    let env, _te, ty = raw_expr ?lhs_of_null_coalesce ~in_cond:true env x in
     Async.enforce_nullable_or_not_awaitable env (fst x) ty;
     env, ty
+  in let condition = condition ?lhs_of_null_coalesce
   in function
   | _, Expr_list [] -> env
   | _, Expr_list [x] ->
@@ -4876,6 +4887,12 @@ and user_attribute env ua =
     T.ua_params = typed_ua_params;
   }
 
+and make_default_return name
+  = if snd name = SN.Members.__destruct
+    || snd name = SN.Members.__construct
+    then (Reason.Rwitness (fst name), Tprim Tvoid)
+    else (Reason.Rwitness (fst name), Tany)
+
 and method_def env m =
   (* reset the expression dependent display ids for each method body *)
   Reason.expr_display_id_map := IMap.empty;
@@ -4894,7 +4911,7 @@ and method_def env m =
     localize_where_constraints ~ety_env env m.m_where_constraints in
   let env = Env.set_local env this (Env.get_self env) in
   let env, ret = match m.m_ret with
-    | None -> env, (Reason.Rwitness (fst m.m_name), Tany)
+    | None -> env, make_default_return m.m_name
     | Some ret ->
       let ret = TI.instantiable_hint env ret in
       (* If a 'this' type appears it needs to be compatiable with the
@@ -4922,14 +4939,17 @@ and method_def env m =
     fun_ ~abstract:m.m_abstract env ret (fst m.m_name) nb m.m_fun_kind in
   let env =
     List.fold_left (Env.get_todo env) ~f:(fun env f -> f env) ~init:env in
-  (match m.m_ret with
-    | None when Env.is_strict env && snd m.m_name <> SN.Members.__destruct ->
-      (* if we are in strict mode, the only case where we don't want to enforce
-       * a return type is when the method is a destructor
-       *)
-      suggest_return env (fst m.m_name) ret
-    | None
-    | Some _ -> ());
+  let m_ret =
+    match m.m_ret with
+    | None when
+         snd m.m_name = SN.Members.__destruct
+      || snd m.m_name = SN.Members.__construct ->
+      Some (fst m.m_name, Happly((fst m.m_name, "void"), []))
+    | None when Env.is_strict env ->
+      suggest_return env (fst m.m_name) ret; None
+    | None -> Typing_suggest.save_fun_or_method m.m_name; m.m_ret
+    | Some _ -> m.m_ret in
+  let m = { m with m_ret = m_ret; } in
   Typing_hooks.dispatch_exit_method_def_hook m;
   {
     T.m_final = m.m_final;
@@ -5033,7 +5053,7 @@ and overload_function p env class_id method_id el uel f =
    (* TODO TAST: do this right *)
    env, T.make_typed_expr p ty T.Any, ty
 
-and update_array_type p env e1 e2 valkind  =
+and update_array_type ?lhs_of_null_coalesce p env e1 e2 valkind  =
   let access_type = Typing_arrays.static_array_access env e2 in
   let type_mapper =
     Typing_arrays.update_array_type p access_type in
@@ -5051,4 +5071,4 @@ and update_array_type p env e1 e2 valkind  =
         | _ -> env, te1, ty1
       end
     | _ ->
-      expr env e1
+      raw_expr ~in_cond:false ?lhs_of_null_coalesce env e1

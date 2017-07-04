@@ -39,7 +39,6 @@
 #include "hphp/runtime/ext/collections/ext_collections-set.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 #include "hphp/runtime/ext/hh/ext_hh.h"
-#include "hphp/runtime/ext/std/ext_std_closure.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 
 #include "hphp/runtime/vm/act-rec.h"
@@ -65,32 +64,6 @@ namespace HPHP {
 TRACE_SET_MOD(runtime);
 
 //////////////////////////////////////////////////////////////////////
-
-const StaticString s_staticPrefix("86static_");
-
-// Defined here so it can be inlined below.
-RefData* lookupStaticFromClosure(ObjectData* closure,
-                                 const StringData* name,
-                                 bool& inited) {
-  assertx(closure->instanceof(c_Closure::classof()));
-  auto str = String::attach(
-    StringData::Make(s_staticPrefix.slice(), name->slice())
-  );
-  auto const cls = closure->getVMClass();
-  auto const slot = cls->lookupDeclProp(str.get());
-  assertx(slot != kInvalidSlot);
-  auto const val = c_Closure::fromObject(closure)->getStaticVar(slot);
-
-  if (val->m_type == KindOfUninit) {
-    inited = false;
-    val->m_type = KindOfNull;
-    tvBox(val);
-    return val->m_data.pref;
-  }
-  inited = true;
-  assertx(val->m_type == KindOfRef);
-  return val->m_data.pref;
-}
 
 namespace jit {
 
@@ -727,22 +700,10 @@ void VerifyRetTypeFail(TypedValue* tv) {
   tc.verifyReturnFail(func, tv, useStrictTypes);
 }
 
-RefData* ldClosureStaticLoc(StringData* name, ActRec* fp) {
-  auto const func = fp->m_func;
-  assertx(func->isClosureBody());
-  auto const closureLoc = frame_local(fp, func->numParams());
-
-  bool inited;
-  auto const refData = lookupStaticFromClosure(
-    closureLoc->m_data.pobj, name, inited);
-  if (!inited) tvWriteUninit(refData->tv());
-  return refData;
-}
-
 namespace {
 ALWAYS_INLINE
-TypedValue getDefaultIfNullCell(const TypedValue* tv, TypedValue& def) {
-  return UNLIKELY(tv == nullptr) ? def : *tv;
+TypedValue getDefaultIfNullCell(member_rval rval, const TypedValue& def) {
+  return UNLIKELY(!rval) ? def : rval.tv();
 }
 
 template <bool intishWarn>
@@ -752,16 +713,16 @@ TypedValue arrayIdxSiSlow(ArrayData* a, StringData* key, TypedValue def) {
   int64_t i;
   if (UNLIKELY(key->isStrictlyInteger(i))) {
     if (intishWarn) raise_intish_index_cast();
-    return getDefaultIfNullCell(a->nvGet(i), def);
+    return getDefaultIfNullCell(a->rval(i), def);
   } else {
-    return getDefaultIfNullCell(a->nvGet(key), def);
+    return getDefaultIfNullCell(a->rval(key), def);
   }
 }
 
 NEVER_INLINE
 TypedValue arrayIdxSSlow(ArrayData* a, StringData* key, TypedValue def) {
   assertx(a->isPHPArray());
-  return getDefaultIfNullCell(a->nvGet(key), def);
+  return getDefaultIfNullCell(a->rval(key), def);
 }
 
 }
@@ -769,7 +730,7 @@ TypedValue arrayIdxSSlow(ArrayData* a, StringData* key, TypedValue def) {
 TypedValue arrayIdxS(ArrayData* a, StringData* key, TypedValue def) {
   assertx(a->isPHPArray());
   if (UNLIKELY(!a->isMixed())) return arrayIdxSSlow(a, key, def);
-  return getDefaultIfNullCell(MixedArray::NvGetStr(a, key), def);
+  return getDefaultIfNullCell(MixedArray::RvalStr(a, key), def);
 }
 
 template <bool intishWarn>
@@ -779,9 +740,9 @@ TypedValue arrayIdxSi(ArrayData* a, StringData* key, TypedValue def) {
   int64_t i;
   if (UNLIKELY(key->isStrictlyInteger(i))) {
     if (intishWarn) raise_intish_index_cast();
-    return getDefaultIfNullCell(MixedArray::NvGetInt(a, i), def);
+    return getDefaultIfNullCell(MixedArray::RvalInt(a, i), def);
   } else {
-    return getDefaultIfNullCell(MixedArray::NvGetStr(a, key), def);
+    return getDefaultIfNullCell(MixedArray::RvalStr(a, key), def);
   }
 }
 
@@ -790,27 +751,27 @@ template TypedValue arrayIdxSi<true>(ArrayData*, StringData*, TypedValue);
 
 TypedValue arrayIdxI(ArrayData* a, int64_t key, TypedValue def) {
   assertx(a->isPHPArray());
-  return getDefaultIfNullCell(a->nvGet(key), def);
+  return getDefaultIfNullCell(a->rval(key), def);
 }
 
 TypedValue dictIdxI(ArrayData* a, int64_t key, TypedValue def) {
   assertx(a->isDict());
-  return getDefaultIfNullCell(MixedArray::NvGetIntDict(a, key), def);
+  return getDefaultIfNullCell(MixedArray::RvalIntDict(a, key), def);
 }
 
 TypedValue dictIdxS(ArrayData* a, StringData* key, TypedValue def) {
   assertx(a->isDict());
-  return getDefaultIfNullCell(MixedArray::NvGetStrDict(a, key), def);
+  return getDefaultIfNullCell(MixedArray::RvalStrDict(a, key), def);
 }
 
 TypedValue keysetIdxI(ArrayData* a, int64_t key, TypedValue def) {
   assertx(a->isKeyset());
-  return getDefaultIfNullCell(SetArray::NvGetInt(a, key), def);
+  return getDefaultIfNullCell(SetArray::RvalInt(a, key), def);
 }
 
 TypedValue keysetIdxS(ArrayData* a, StringData* key, TypedValue def) {
   assertx(a->isKeyset());
-  return getDefaultIfNullCell(SetArray::NvGetStr(a, key), def);
+  return getDefaultIfNullCell(SetArray::RvalStr(a, key), def);
 }
 
 int32_t arrayVsize(ArrayData* ad) {

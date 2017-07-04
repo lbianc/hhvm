@@ -93,7 +93,7 @@ module ServerInitCommon = struct
           "%s %s %s %s"
           (Filename.quote (Path.to_string cmd))
           (Filename.quote (Path.to_string root))
-          (Filename.quote Build_id.build_revision)
+          (Filename.quote (Build_id.build_revision))
           (Filename.quote load_script_log_file) in
       Hh_logger.log "Running load_mini script: %s\n%!" cmd;
       let ic = Unix.open_process_in cmd in
@@ -354,6 +354,8 @@ module ServerInitCommon = struct
     let fast = extend_fast fast env.files_info to_recheck in
     let result = type_check genv env fast t in
     HackEventLogger.type_check_dirty start_time
+      (Relative_path.Set.cardinal dirty_files);
+    Hh_logger.log "ServerInit type_check_dirty count: %d"
       (Relative_path.Set.cardinal dirty_files);
     result
 

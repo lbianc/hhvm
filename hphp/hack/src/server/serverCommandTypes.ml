@@ -36,7 +36,8 @@ type _ t =
   | AUTOCOMPLETE : string -> AutocompleteService.result t
   | IDENTIFY_FUNCTION : ServerUtils.file_input * int * int ->
       IdentifySymbolService.result t
-  | METHOD_JUMP : (string * bool) -> MethodJumps.result list t
+  | METHOD_JUMP : (string * MethodJumps.filter * bool) ->
+      MethodJumps.result list t
   | FIND_DEPENDENT_FILES: string list -> string list t
   | FIND_REFS : FindRefsService.action -> FindRefsService.result t
   | IDE_FIND_REFS : ServerUtils.file_input * int * int * bool ->
@@ -65,7 +66,7 @@ type _ t =
   | OPEN_FILE : string * string -> unit t
   | CLOSE_FILE : string -> unit t
   | EDIT_FILE : string * (text_edit list) -> unit t
-  | IDE_AUTOCOMPLETE : string * position -> AutocompleteService.result t
+  | IDE_AUTOCOMPLETE : string * position -> AutocompleteService.ide_result t
   | DISCONNECT : unit t
   | SUBSCRIBE_DIAGNOSTIC : int -> unit t
   | UNSUBSCRIBE_DIAGNOSTIC : int -> unit t

@@ -740,9 +740,19 @@ module Make (GetLocals : GetLocals) = struct
       is_static_var env h
 
   and shape_field_to_shape_field_info env { sf_optional; sf_name=_; sf_hint } =
+    (* TODO(t17492233): Remove this line once shapes use new syntax. *)
+    let sfi_optional =
+      if TypecheckerOptions.experimental_feature_enabled
+           (fst env).tcopt
+           TypecheckerOptions.experimental_promote_nullable_to_optional_in_shapes
+      then
+        match sf_hint with
+        | _, Hoption _ -> true
+        | _ -> sf_optional
+      else sf_optional in
     {
-      N.sfi_optional=sf_optional;
-      sfi_hint=hint env sf_hint;
+      N.sfi_optional = sfi_optional;
+      sfi_hint = hint env sf_hint;
     }
 
   and ast_shape_info_to_nast_shape_info
@@ -1646,6 +1656,7 @@ module Make (GetLocals : GetLocals) = struct
     let genv = Env.make_fun_decl_genv nenv tparams f in
     let lenv = Env.empty_local UBMErr in
     let env = genv, lenv in
+    let where_constraints = type_where_constraints env f.f_constrs in
     let h = Option.map f.f_ret (hint ~allow_retonly:true env) in
     let variadicity, paraml = fun_paraml env f.f_params in
     let x = Env.fun_id env f.f_name in
@@ -1670,6 +1681,7 @@ module Make (GetLocals : GetLocals) = struct
       f_ret = h;
       f_name = x;
       f_tparams = f_tparams;
+      f_where_constraints = where_constraints;
       f_params = paraml;
       f_body = body;
       f_fun_kind = f_kind;
@@ -1693,6 +1705,8 @@ module Make (GetLocals : GetLocals) = struct
     | Unsafe               -> assert false
     | Fallthrough          -> N.Fallthrough
     | Noop                 -> N.Noop
+    | Markup (_, None)     -> N.Noop (* ignore markup *)
+    | Markup (_, Some e)   -> N.Expr (expr env e)
     | Break (p, _)              -> N.Break p
     | Continue (p, _)           -> N.Continue p
     | Throw e              -> let terminal = not (fst env).in_try in
@@ -2281,20 +2295,22 @@ module Make (GetLocals : GetLocals) = struct
       N.Xml (Env.type_name env x ~allow_typedef:false, attrl env al,
         exprl env el)
     | Shape fdl ->
-        N.Shape begin List.fold_left fdl ~init:ShapeMap.empty
-          ~f:begin fun fdm (pname, value) ->
-            let pos, name = convert_shape_name env pname in
-            if ShapeMap.mem name fdm
-            then Errors.fd_name_already_bound pos;
-            ShapeMap.add name (expr env value) fdm
-          end
+      N.Shape begin List.fold_left fdl ~init:ShapeMap.empty
+        ~f:begin fun fdm (pname, value) ->
+          let pos, name = convert_shape_name env pname in
+          if ShapeMap.mem name fdm
+          then Errors.fd_name_already_bound pos;
+          ShapeMap.add name (expr env value) fdm
         end
+      end
     | Unsafeexpr _ ->
-        N.Any
+      N.Any
+    | BracedExpr _ ->
+      N.Any
     | Import _ ->
-        N.Any
+      N.Any
     | Omitted ->
-        N.Any
+      N.Any
 
   and expr_lambda env f =
     let h = Option.map f.f_ret (hint ~allow_retonly:true env) in
@@ -2318,6 +2334,7 @@ module Make (GetLocals : GetLocals) = struct
       f_name = f.f_name;
       f_params = paraml;
       f_tparams = [];
+      f_where_constraints = [];
       f_body = body;
       f_fun_kind = f_kind;
       f_variadic = variadicity;

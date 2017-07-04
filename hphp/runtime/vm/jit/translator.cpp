@@ -374,8 +374,10 @@ static const struct {
                    {None,             None,         OutNone         }},
   { OpInitThisLoc,
                    {None,             Local,        OutUnknown      }},
-  { OpStaticLoc,
-                   {None,             Stack1,       OutBoolean      }},
+  { OpStaticLocCheck,
+                   {None,             Stack1|Local, OutBoolean      }},
+  { OpStaticLocDef,
+                   {Stack1,           Local,        OutVUnknown     }},
   { OpStaticLocInit,
                    {Stack1,           Local,        OutVUnknown     }},
   { OpCatch,       {None,             Stack1,       OutObject       }},
@@ -725,7 +727,8 @@ InputInfoVec getInputs(NormalizedInstruction& ni, FPInvOffset bcSPOff) {
   }
   if (flags & StackI) {
     inputs.emplace_back(Location::Stack {
-      BCSPRelOffset{ni.imm[0].u_IVA}.to<FPInvOffset>(bcSPOff)
+      BCSPRelOffset{safe_cast<int32_t>(ni.imm[0].u_IVA)}.
+        to<FPInvOffset>(bcSPOff)
     });
   }
   if (flags & StackN) {
@@ -1004,7 +1007,8 @@ bool dontGuardAnyInputs(Op op) {
   case Op::Shl:
   case Op::Shr:
   case Op::Silence:
-  case Op::StaticLoc:
+  case Op::StaticLocDef:
+  case Op::StaticLocCheck:
   case Op::StaticLocInit:
   case Op::String:
   case Op::This:

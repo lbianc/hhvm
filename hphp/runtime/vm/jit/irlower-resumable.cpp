@@ -81,7 +81,8 @@ ptrdiff_t genOffset(bool isAsync) {
 
 }
 
-IMPL_OPCODE_CALL(CreateCont)
+IMPL_OPCODE_CALL(CreateGen)
+IMPL_OPCODE_CALL(CreateAGen)
 
 void cgContEnter(IRLS& env, const IRInstruction* inst) {
   auto const sp = srcLoc(env, inst, 0).reg();
@@ -108,6 +109,15 @@ void cgContEnter(IRLS& env, const IRInstruction* inst) {
   v << contenter{fp, target, cross_trace_regs_resumed(),
                  {next, label(env, inst->taken())}};
   v = next;
+
+  auto const dst = dstLoc(env, inst, 0);
+  auto const type = inst->dst()->type();
+  if (!type.admitsSingleVal()) {
+    v << defvmretdata{dst.reg(0)};
+  }
+  if (type.needsReg()) {
+    v << defvmrettype{dst.reg(1)};
+  }
 }
 
 void cgContPreNext(IRLS& env, const IRInstruction* inst) {

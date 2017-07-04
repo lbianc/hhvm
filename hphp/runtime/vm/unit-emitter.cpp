@@ -537,6 +537,7 @@ std::unique_ptr<Unit> UnitEmitter::create() {
   u->m_mergeOnly = m_mergeOnly;
   u->m_isHHFile = m_isHHFile;
   u->m_useStrictTypes = m_useStrictTypes;
+  u->m_useStrictTypesForBuiltins = m_useStrictTypesForBuiltins;
   u->m_dirpath = makeStaticString(FileUtil::dirname(StrNR{m_filepath}));
   u->m_md5 = m_md5;
   for (unsigned i = 0; i < m_litstrs.size(); ++i) {
@@ -663,6 +664,14 @@ std::unique_ptr<Unit> UnitEmitter::create() {
     stashLineTable(u.get(), createLineTable(m_sourceLocTab, m_bclen));
   }
 
+  /*
+   * Similarly if we plan to dump hhas we will need the extended line table
+   * information in the output.
+   */
+  if (RuntimeOption::EvalDumpHhas && SystemLib::s_inited) {
+    stashExtendedLineTable(u.get(), createSourceLocTable());
+  }
+
   for (size_t i = 0; i < m_feTab.size(); ++i) {
     auto const past = m_feTab[i].first;
     auto const fe = m_feTab[i].second;
@@ -685,7 +694,8 @@ std::unique_ptr<Unit> UnitEmitter::create() {
 
   m_fMap.clear();
 
-  static const bool kVerify = debug || getenv("HHVM_VERIFY");
+  static const bool kVerify = debug || RuntimeOption::EvalVerify ||
+    RuntimeOption::EvalVerifyOnly;
   static const bool kVerifyVerboseSystem =
     getenv("HHVM_VERIFY_VERBOSE_SYSTEM");
   static const bool kVerifyVerbose =
@@ -711,6 +721,11 @@ std::unique_ptr<Unit> UnitEmitter::create() {
     }
   }
 
+  if (RuntimeOption::EvalVerifyOnly) {
+    std::fflush(stdout);
+    _Exit(0);
+  }
+
   if (RuntimeOption::EvalDumpHhas && SystemLib::s_inited) {
     std::printf("%s", disassemble(u.get()).c_str());
     std::fflush(stdout);
@@ -732,7 +747,13 @@ void UnitEmitter::serdeMetaData(SerDe& sd) {
     (m_isHHFile)
     (m_typeAliases)
     (m_useStrictTypes)
+    (m_useStrictTypesForBuiltins)
     ;
+
+  if (RuntimeOption::EvalLoadFilepathFromUnitCache) {
+    /* May be different than the unit origin: e.g. for hhas files. */
+    sd(m_filepath);
+  }
 }
 
 
@@ -800,7 +821,9 @@ void UnitRepoProxy::createSchema(int repoId, RepoTxn& txn) {
 RepoStatus UnitRepoProxy::loadHelper(UnitEmitter& ue,
                                      const std::string& name,
                                      const MD5& md5) {
-  ue.m_filepath = makeStaticString(name);
+  if (!RuntimeOption::EvalLoadFilepathFromUnitCache) {
+    ue.m_filepath = makeStaticString(name);
+  }
   // Look for a repo that contains a unit with matching MD5.
   int repoId;
   for (repoId = RepoIdCount - 1; repoId >= 0; --repoId) {

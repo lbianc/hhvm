@@ -26,6 +26,10 @@ type t = {
   enable_fuzzy_search: bool;
   lazy_parse: bool;
   lazy_init: bool;
+  (** Limit the number of clients that can sit in purgatory waiting
+   * for a server to be started because we don't want this to grow
+   * unbounded. *)
+  max_purgatory_clients: int;
   search_chunk_size: int;
   io_priority: int;
   cpu_priority: int;
@@ -33,6 +37,7 @@ type t = {
   start_with_recorder_on : bool;
   (** See HhMonitorInformant. *)
   use_dummy_informant : bool;
+  informant_min_distance_restart: int;
   load_script_config: LoadScriptConfig.t;
 }
 
@@ -50,12 +55,14 @@ let default = {
   enable_fuzzy_search = true;
   lazy_parse = false;
   lazy_init = false;
+  max_purgatory_clients = 400;
   search_chunk_size = 0;
   io_priority = 7;
   cpu_priority = 10;
   shm_dirs = [GlobalConfig.shm_dir; GlobalConfig.tmp_dir;];
   start_with_recorder_on = false;
   use_dummy_informant = true;
+  informant_min_distance_restart = 100;
   load_script_config = LoadScriptConfig.default;
 }
 
@@ -89,6 +96,8 @@ let load_ fn ~silent =
     ~default:default.lazy_parse config in
   let lazy_init = bool_ "lazy_init2"
     ~default:default.lazy_init config in
+  let max_purgatory_clients = int_ "max_purgatory_clients"
+    ~default:default.max_purgatory_clients config in
   let search_chunk_size = int_ "search_chunk_size"
     ~default:default.search_chunk_size config in
   let load_mini_script_timeout = int_ "load_mini_script_timeout"
@@ -99,6 +108,8 @@ let load_ fn ~silent =
     ~default:default.start_with_recorder_on config in
   let use_dummy_informant = bool_ "use_dummy_informant"
     ~default:default.use_dummy_informant config in
+  let informant_min_distance_restart = int_ "informant_min_distance_restart"
+    ~default:default.informant_min_distance_restart config in
   let type_decl_bucket_size = int_ "type_decl_bucket_size"
     ~default:default.type_decl_bucket_size config in
   let watchman_init_timeout = int_ "watchman_init_timeout"
@@ -132,6 +143,7 @@ let load_ fn ~silent =
     use_mini_state;
     use_hackfmt;
     load_mini_script_timeout;
+    max_purgatory_clients;
     type_decl_bucket_size;
     enable_on_nfs;
     enable_fuzzy_search;
@@ -143,6 +155,7 @@ let load_ fn ~silent =
     shm_dirs;
     start_with_recorder_on;
     use_dummy_informant;
+    informant_min_distance_restart;
     load_script_config;
   }
 

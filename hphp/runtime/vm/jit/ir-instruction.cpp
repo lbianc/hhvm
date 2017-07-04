@@ -35,7 +35,9 @@
 #include "hphp/runtime/vm/jit/type.h"
 
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_async-generator.h"
 #include "hphp/runtime/ext/asio/ext_static-wait-handle.h"
+#include "hphp/runtime/ext/generator/ext_generator.h"
 
 #include "hphp/util/arena.h"
 
@@ -237,12 +239,18 @@ Type allocObjReturn(const IRInstruction* inst) {
         ? Type::ExactObj(inst->src(0)->clsVal())
         : TObj;
 
-    case CreateSSWH:
-      return Type::ExactObj(c_StaticWaitHandle::classof());
+    case CreateGen:
+      return Type::ExactObj(Generator::getClass());
+
+    case CreateAGen:
+      return Type::ExactObj(AsyncGenerator::getClass());
 
     case CreateAFWH:
     case CreateAFWHNoVV:
       return Type::ExactObj(c_AsyncFunctionWaitHandle::classof());
+
+    case CreateSSWH:
+      return Type::ExactObj(c_StaticWaitHandle::classof());
 
     default:
       always_assert(false && "Invalid opcode returning AllocObj");
@@ -405,6 +413,13 @@ Type callReturn(const IRInstruction* inst) {
   not_reached();
 }
 
+Type genIterReturn(const IRInstruction* inst) {
+  assertx(inst->is(ContEnter));
+  return inst->extra<ContEnter>()->isAsync
+    ? Type::SubObj(c_WaitHandle::classof())
+    : TInitNull;
+}
+
 // Integers get mapped to integer memo keys, everything else gets mapped to
 // strings.
 Type memoKeyReturn(const IRInstruction* inst) {
@@ -460,6 +475,7 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #define DSetElem        return setElemReturn(inst);
 #define DBuiltin        return builtinReturn(inst);
 #define DCall           return callReturn(inst);
+#define DGenIter        return genIterReturn(inst);
 #define DSubtract(n, t) return inst->src(n)->type() - t;
 #define DCns            return TUninit | TInitNull | TBool | \
                                TInt | TDbl | TStr | TArr | \
@@ -497,8 +513,9 @@ Type outputType(const IRInstruction* inst, int dstId) {
 #undef DCtxCls
 #undef DMulti
 #undef DSetElem
-#undef DCall
 #undef DBuiltin
+#undef DCall
+#undef DGenIter
 #undef DSubtract
 #undef DCns
 #undef DUnion

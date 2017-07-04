@@ -62,6 +62,8 @@ module PositionedSyntaxValue = struct
     value.trailing_width
 end
 
+open Core
+
 include SyntaxWithPositionedToken.WithSyntaxValue(PositionedSyntaxValue)
 
 let source_text node =
@@ -207,25 +209,12 @@ module FromMinimal = struct
           EndOfFile
           { end_of_file_token
           }, results
-      | SyntaxKind.ScriptHeader
-      , (  header_language
-        :: header_question
-        :: header_less_than
-        :: results
-        ) ->
-          ScriptHeader
-          { header_less_than
-          ; header_question
-          ; header_language
-          }, results
       | SyntaxKind.Script
       , (  script_declarations
-        :: script_header
         :: results
         ) ->
           Script
-          { script_header
-          ; script_declarations
+          { script_declarations
           }, results
       | SyntaxKind.SimpleTypeSpecifier
       , (  simple_type_specifier
@@ -713,6 +702,28 @@ module FromMinimal = struct
           ExpressionStatement
           { expression_statement_expression
           ; expression_statement_semicolon
+          }, results
+      | SyntaxKind.MarkupSection
+      , (  markup_expression
+        :: markup_suffix
+        :: markup_text
+        :: markup_prefix
+        :: results
+        ) ->
+          MarkupSection
+          { markup_prefix
+          ; markup_text
+          ; markup_suffix
+          ; markup_expression
+          }, results
+      | SyntaxKind.MarkupSuffix
+      , (  markup_suffix_name
+        :: markup_suffix_less_than_question
+        :: results
+        ) ->
+          MarkupSuffix
+          { markup_suffix_less_than_question
+          ; markup_suffix_name
           }, results
       | SyntaxKind.UnsetStatement
       , (  unset_semicolon
@@ -1828,11 +1839,13 @@ module FromMinimal = struct
         :: closure_parameter_types
         :: closure_inner_left_paren
         :: closure_function_keyword
+        :: closure_coroutine
         :: closure_outer_left_paren
         :: results
         ) ->
           ClosureTypeSpecifier
           { closure_outer_left_paren
+          ; closure_coroutine
           ; closure_function_keyword
           ; closure_inner_left_paren
           ; closure_parameter_types
@@ -2027,7 +2040,7 @@ module FromMinimal = struct
       dispatch offset todo (node :: results)
     | { M.syntax = M.SyntaxList l; _ } as minimal_t ->
       let todo = Build (minimal_t, offset, todo) in
-      let todo = List.fold_right (fun n t -> Convert (n,t)) l todo in
+      let todo = List.fold_right ~f:(fun n t -> Convert (n,t)) l ~init:todo in
       dispatch offset todo results
     | { M.syntax = M.EndOfFile
         { M.end_of_file_token
@@ -2035,24 +2048,12 @@ module FromMinimal = struct
       ; _ } as minimal_t ->
         let todo = Build (minimal_t, offset, todo) in
         convert offset todo results end_of_file_token
-    | { M.syntax = M.ScriptHeader
-        { M.header_less_than
-        ; M.header_question
-        ; M.header_language
-        }
-      ; _ } as minimal_t ->
-        let todo = Build (minimal_t, offset, todo) in
-        let todo = Convert (header_language, todo) in
-        let todo = Convert (header_question, todo) in
-        convert offset todo results header_less_than
     | { M.syntax = M.Script
-        { M.script_header
-        ; M.script_declarations
+        { M.script_declarations
         }
       ; _ } as minimal_t ->
         let todo = Build (minimal_t, offset, todo) in
-        let todo = Convert (script_declarations, todo) in
-        convert offset todo results script_header
+        convert offset todo results script_declarations
     | { M.syntax = M.SimpleTypeSpecifier
         { M.simple_type_specifier
         }
@@ -2501,6 +2502,26 @@ module FromMinimal = struct
         let todo = Build (minimal_t, offset, todo) in
         let todo = Convert (expression_statement_semicolon, todo) in
         convert offset todo results expression_statement_expression
+    | { M.syntax = M.MarkupSection
+        { M.markup_prefix
+        ; M.markup_text
+        ; M.markup_suffix
+        ; M.markup_expression
+        }
+      ; _ } as minimal_t ->
+        let todo = Build (minimal_t, offset, todo) in
+        let todo = Convert (markup_expression, todo) in
+        let todo = Convert (markup_suffix, todo) in
+        let todo = Convert (markup_text, todo) in
+        convert offset todo results markup_prefix
+    | { M.syntax = M.MarkupSuffix
+        { M.markup_suffix_less_than_question
+        ; M.markup_suffix_name
+        }
+      ; _ } as minimal_t ->
+        let todo = Build (minimal_t, offset, todo) in
+        let todo = Convert (markup_suffix_name, todo) in
+        convert offset todo results markup_suffix_less_than_question
     | { M.syntax = M.UnsetStatement
         { M.unset_keyword
         ; M.unset_left_paren
@@ -3521,6 +3542,7 @@ module FromMinimal = struct
         convert offset todo results dictionary_type_keyword
     | { M.syntax = M.ClosureTypeSpecifier
         { M.closure_outer_left_paren
+        ; M.closure_coroutine
         ; M.closure_function_keyword
         ; M.closure_inner_left_paren
         ; M.closure_parameter_types
@@ -3538,6 +3560,7 @@ module FromMinimal = struct
         let todo = Convert (closure_parameter_types, todo) in
         let todo = Convert (closure_inner_left_paren, todo) in
         let todo = Convert (closure_function_keyword, todo) in
+        let todo = Convert (closure_coroutine, todo) in
         convert offset todo results closure_outer_left_paren
     | { M.syntax = M.ClassnameTypeSpecifier
         { M.classname_keyword

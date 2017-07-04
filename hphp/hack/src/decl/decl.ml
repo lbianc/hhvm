@@ -20,7 +20,6 @@ open Nast
 open Typing_defs
 open Typing_deps
 
-module DynamicYield = Decl_dynamic_yield
 module Reason = Typing_reason
 module Inst = Decl_instantiate
 module Attrs = Attributes
@@ -196,6 +195,8 @@ and fun_decl_in_env env f =
     | FVnonVariadic -> Fstandard (arity_min, List.length f.f_params)
   in
   let tparams = List.map f.f_tparams (type_param env) in
+  let where_constraints =
+    List.map f.f_where_constraints (where_constraint env) in
   let ft = {
     ft_pos         = fst f.f_name;
     ft_deprecated  =
@@ -203,7 +204,7 @@ and fun_decl_in_env env f =
     ft_abstract    = false;
     ft_arity       = arity;
     ft_tparams     = tparams;
-    ft_where_constraints = [];
+    ft_where_constraints = where_constraints;
     ft_params      = params;
     ft_ret         = ret_ty;
   } in
@@ -366,9 +367,6 @@ and class_decl tcopt c =
   in
   let req_ancestors, req_ancestors_extends =
     Decl_requirements.get_class_requirements env c in
-  let m = if DynamicYield.is_dynamic_yield (snd c.c_name)
-    then DynamicYield.clean_dynamic_yield m
-    else m in
   let ext_strict = List.fold_left c.c_uses
     ~f:(trait_exists env) ~init:ext_strict in
   if not ext_strict &&

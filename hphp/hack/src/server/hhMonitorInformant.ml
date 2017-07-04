@@ -10,6 +10,9 @@
 
 include HhMonitorInformant_sig.Types
 
+module WEWClient = WatchmanEventWatcherClient
+module WEWConfig = WatchmanEventWatcherConfig
+
 
 (**
  * The Revision tracker tracks the latest known SVN Revision of the repo,
@@ -46,21 +49,21 @@ include HhMonitorInformant_sig.Types
  *)
 module Revision_tracker = struct
 
-  (** This is just a heuristic taken by eye-balling some graphs. Can turn
-   * up the sensitivity as the advantage of a fresh server over incremental
-   * typechecking improves. *)
-  let restart_min_svn_distance = 100
-
   type timestamp = float
 
   type repo_transition =
     | State_enter
     | State_leave
 
-  type env = {
+  type init_settings = {
     watchman : Watchman.watchman_instance ref;
     root : Path.t;
     prefetcher : State_prefetcher.t;
+    min_distance_restart : int;
+  }
+
+  type env = {
+    inits : init_settings;
     (** The 'current' base revision (from the tracker's perspective of the
      * repo. This is used to make calculations on distance. This is changed
      * when a State_leave is handled. *)
@@ -96,8 +99,7 @@ module Revision_tracker = struct
   }
 
   type instance =
-    | Initializing of Watchman.watchman_instance *
-      State_prefetcher.t * Path.t * (Hg.svn_rev Future.t)
+    | Initializing of init_settings * (Hg.svn_rev Future.t)
     | Tracking of env
 
   type change =
@@ -108,12 +110,14 @@ module Revision_tracker = struct
    * make it responsible for maintaining its own instance. *)
   type t = instance ref
 
-  let get_root t = match !t with
-    | Initializing (_, _, path, _) -> path
-    | Tracking env -> env.root
-
-  let init watchman prefetcher root =
-    ref @@ Initializing (watchman, prefetcher, root,
+  let init ~min_distance_restart watchman prefetcher root =
+    let init_settings = {
+      watchman = ref watchman;
+      prefetcher;
+      root;
+      min_distance_restart;
+  } in
+    ref @@ Initializing (init_settings,
       Hg.current_working_copy_base_rev (Path.to_string root))
 
   let set_base_revision svn_rev env =
@@ -134,11 +138,9 @@ module Revision_tracker = struct
     end with
     | Future_sig.Process_failure _ -> 0
 
-  let active_env watchman prefetcher root base_svn_rev =
+  let active_env init_settings base_svn_rev =
     {
-      watchman = ref @@ watchman;
-      root;
-      prefetcher;
+      inits = init_settings;
       current_base_revision = ref base_svn_rev;
       queries = Hashtbl.create 200;
       state_changes = Queue.create() ;
@@ -147,10 +149,10 @@ module Revision_tracker = struct
   let get_distance svn_rev env =
     abs @@ svn_rev - !(env.current_base_revision)
 
-  let is_significant distance elapsed_t =
+  let is_significant ~min_distance_restart distance elapsed_t =
     (** Allow up to 2 revisions per second for incremental. More than that,
      * prefer a server restart. *)
-    distance > (float_of_int restart_min_svn_distance)
+    distance > (float_of_int min_distance_restart)
       && (elapsed_t <= 0.0 || ((distance /. elapsed_t) > 2.0))
 
   let cached_svn_rev queries hg_rev =
@@ -173,7 +175,9 @@ module Revision_tracker = struct
     | Some svn_rev ->
       let distance = float_of_int @@ get_distance svn_rev env in
       let elapsed_t = (Unix.time () -. timestamp) in
-      let significant = is_significant distance elapsed_t in
+      let significant = is_significant
+        ~min_distance_restart:env.inits.min_distance_restart
+        distance elapsed_t in
       Some (significant, svn_rev)
 
   (**
@@ -194,7 +198,7 @@ module Revision_tracker = struct
       | Some (significant, svn_rev) ->
         (** We already peeked the value above. Can ignore here. *)
         let _ = Queue.pop env.state_changes in
-        let _ = State_prefetcher.run svn_rev env.prefetcher in
+        let _ = State_prefetcher.run svn_rev env.inits.prefetcher in
         if transition = State_leave
           (** Repo has been moved to a new SVN Rev, so we set this mutable
            * reference. This must be done after computing distance. *)
@@ -204,6 +208,14 @@ module Revision_tracker = struct
   let form_decision has_significant last_transition server_state =
     let open Informant_sig in
     match has_significant, last_transition, server_state with
+    | _, State_leave, Server_not_yet_started ->
+     (** This case should be unreachable since Server_not_yet_started
+      * should be handled by "should_start_first_server" and not by the
+      * revision tracker. Restart anyway which, at worst, could result in a
+      * slow init. *)
+      Hh_logger.log "Hit unreachable Server_not_yet_started match in %s"
+        "Revision_tracker.form_decision";
+      Restart_server
     | _, State_leave, Server_dead ->
       (** Regardless of whether we had a significant change or not, when the
        * server is not alive, we restart it on a state leave.*)
@@ -237,25 +249,12 @@ module Revision_tracker = struct
     with
     | Not_found ->
       let future = Hg.get_closest_svn_ancestor
-        hg_rev (Path.to_string env.root) in
+        hg_rev (Path.to_string env.inits.root) in
       Hashtbl.add env.queries hg_rev future
 
-  let parse_json json = match json with
-    | None -> None
-    | Some json ->
-      let open Hh_json.Access in
-      (return json) >>=
-        get_string "rev" |> function
-        | Result.Error _ ->
-          let () = Hh_logger.log
-            "Revision_tracker failed to get rev in json: %s"
-            (Hh_json.json_to_string json) in
-          None
-        | Result.Ok (v, _) -> Some v
-
   let get_change env =
-    let watchman, change = Watchman.get_changes !(env.watchman) in
-    env.watchman := watchman;
+    let watchman, change = Watchman.get_changes !(env.inits.watchman) in
+    env.inits.watchman := watchman;
     match change with
     | Watchman.Watchman_unavailable
     | Watchman.Watchman_synchronous _ ->
@@ -263,13 +262,17 @@ module Revision_tracker = struct
     | Watchman.Watchman_pushed (Watchman.State_enter (state, json))
         when state = "hg.update" ->
         let open Option in
-        parse_json json >>= fun hg_rev ->
+        json >>= Watchman_utils.rev_in_state_change >>= fun hg_rev -> begin
+          Hh_logger.log "State_enter: %s" hg_rev;
           Some (Hg_update_enter hg_rev)
+        end
     | Watchman.Watchman_pushed (Watchman.State_leave (state, json))
         when state = "hg.update" ->
         let open Option in
-        parse_json json >>= fun hg_rev ->
+        json >>= Watchman_utils.rev_in_state_change >>= fun hg_rev -> begin
+          Hh_logger.log "State_leave: %s" hg_rev;
           Some (Hg_update_exit hg_rev)
+        end
     | Watchman.Watchman_pushed _ ->
       None
 
@@ -279,7 +282,7 @@ module Revision_tracker = struct
       None
     | Some (significant, svn_rev) ->
       if significant
-        then ignore @@ State_prefetcher.run svn_rev env.prefetcher;
+        then ignore @@ State_prefetcher.run svn_rev env.inits.prefetcher;
       let decision = form_decision significant transition server_state in
       Some (decision, svn_rev)
 
@@ -338,13 +341,13 @@ module Revision_tracker = struct
       handle_change_then_churn server_state change env
 
   let make_report server_state t = match !t with
-    | Initializing (watchman, prefetcher, root, future) ->
+    | Initializing (init_settings, future) ->
       if Future.is_ready future
       then
         let svn_rev = svn_rev_of_future future in
         let () = Hh_logger.log "Initialized Revision_tracker to SVN rev: %d"
           svn_rev in
-        let env = active_env watchman prefetcher root svn_rev in
+        let env = active_env init_settings svn_rev in
         let () = t := Tracking env in
         process server_state env
       else
@@ -358,6 +361,7 @@ type env = {
   (** Reports for an Active informant are made by pinging the
    * revision_tracker. *)
   revision_tracker : Revision_tracker.t;
+  watchman_event_watcher : WEWClient.t;
 }
 
 type t =
@@ -368,7 +372,13 @@ type t =
    * or if the informant is disabled in the hhconfig. *)
   | Resigned
 
-let init { root; allow_subscriptions; state_prefetcher; use_dummy } =
+let init {
+  root;
+  allow_subscriptions;
+  state_prefetcher;
+  use_dummy;
+  min_distance_restart;
+} =
   if use_dummy then
     Resigned
   (** Active informant requires Watchman subscriptions. *)
@@ -388,15 +398,12 @@ let init { root; allow_subscriptions; state_prefetcher; use_dummy } =
       Active
       {
         revision_tracker = Revision_tracker.init
+          ~min_distance_restart
           (Watchman.Watchman_alive watchman_env)
           (** TODO: Put the prefetcher here. *)
           state_prefetcher root;
+        watchman_event_watcher = WEWClient.init root;
       }
-
-(** Returns true if we believe the repo is in the middle of an update/rebase. *)
-let repo_is_mid_update root =
-  let sc_path = Path.concat root ".hg" in
-  Sys.file_exists ((Path.to_string sc_path) ^ "/updatestate")
 
 let should_start_first_server t = match t with
   | Resigned ->
@@ -404,18 +411,49 @@ let should_start_first_server t = match t with
      * instance should always be started during startup. *)
     true
   | Active env ->
-    if repo_is_mid_update (Revision_tracker.get_root env.revision_tracker) then
-      (** We shouldn't start the server until we observe that the repo has
-       * settled, via a state-leave event. *)
-      false
-    else
+    let status = WEWClient.get_status env.watchman_event_watcher in
+    begin match status with
+    | None ->
+      (**
+       * Watcher is not running, or connection to watcher collapsed.
+       * So we let the first server start up.
+       *)
+      HackEventLogger.informant_watcher_not_available ();
       true
+    | Some WEWConfig.Responses.Unknown ->
+      (**
+       * Watcher doens't know what state the repo is. We don't
+       * know when the next "hg update" will happen, so we let the
+       * first Hack Server start up to avoid wedging.
+       *)
+      HackEventLogger.informant_watcher_unknown_state ();
+      true
+    | Some WEWConfig.Responses.Mid_update ->
+      (** Wait until the update is finished  *)
+      HackEventLogger.informant_watcher_mid_update_state ();
+      false
+    | Some WEWConfig.Responses.Settled ->
+      HackEventLogger.informant_watcher_settled_state ();
+      true
+  end
 
 let is_managing = function
   | Resigned -> false
   | Active _ -> true
 
-let report informant server_state = match informant with
-  | Resigned -> Informant_sig.Move_along
-  | Active env ->
+let report informant server_state = match informant, server_state with
+  | Resigned, Informant_sig.Server_not_yet_started ->
+    (** Actually, this case should never happen. But we force a restart
+     * to avoid accidental wedged states anyway. *)
+    Informant_sig.Restart_server
+  | Resigned, _ ->
+    Informant_sig.Move_along
+  | Active _, Informant_sig.Server_not_yet_started ->
+    if should_start_first_server informant then begin
+      HackEventLogger.informant_watcher_starting_server_from_settling ();
+      Informant_sig.Restart_server
+    end
+    else
+      Informant_sig.Move_along
+  | Active env, _ ->
     Revision_tracker.make_report server_state env.revision_tracker

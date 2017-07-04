@@ -465,10 +465,10 @@ TCA emitInterpGenRet(CodeBlock& cb, DataBlock& data) {
   alignJmpTarget(cb);
 
   auto const start = vwrap(cb, data, [] (Vout& v) {
+    // Sync return regs before calling native assert function.
+    storeReturnRegs(v);
     assertNativeStackAligned(v);
-    // Note that we don't need to sync the return registers to memory.
-    // Generators pass return values through both the eval stack and the
-    // registers, so the memory location already contains the same value.
+
     loadGenFrame<async>(v, r_svcreq_arg(0));
     v << copy{rvmfp(), r_svcreq_arg(1)};
   });
@@ -1258,6 +1258,22 @@ TCA emitEndCatchHelper(CodeBlock& cb, DataBlock& data, UniqueStubs& us) {
   });
 }
 
+TCA emitUnknownExceptionHandler(CodeBlock& cb,
+                                DataBlock& data,
+                                UniqueStubs& us) {
+  alignJmpTarget(cb);
+
+  CGMeta meta;
+  auto const ret = vwrap(cb, data, meta, [&] (Vout& v) {
+    v << call{
+      TCA(unknownExceptionHandler), {}, &us.unknownExceptionHandlerPast
+    };
+  });
+  meta.process(nullptr);
+
+  return ret;
+}
+
 TCA emitThrowSwitchMode(CodeBlock& cb, DataBlock& data) {
   alignJmpTarget(cb);
 
@@ -1305,8 +1321,9 @@ void UniqueStubs::emitAll(CodeCache& code, Debug::DebugInfo& dbg) {
                                 dbg));
 
   // These guys are required by a number of other stubs.
-  ADD(handleSRHelper, emitHandleSRHelper(cold, data));
+  ADD(handleSRHelper, emitHandleSRHelper(hot(), data));
   ADD(endCatchHelper, emitEndCatchHelper(frozen, data, *this));
+  ADD(unknownExceptionHandler, emitUnknownExceptionHandler(cold, data, *this));
 
   ADD(funcPrologueRedispatch, emitFuncPrologueRedispatch(hot(), data));
   ADD(fcallHelperThunk,       emitFCallHelperThunk(cold, frozen, data));
@@ -1315,10 +1332,10 @@ void UniqueStubs::emitAll(CodeCache& code, Debug::DebugInfo& dbg) {
   ADD(functionSurprisedOrStackOverflow,
       emitFunctionSurprisedOrStackOverflow(cold, frozen, data, *this));
 
-  ADD(retHelper,                  emitInterpRet(cold, data));
+  ADD(retHelper,                  emitInterpRet(hot(), data));
   ADD(genRetHelper,               emitInterpGenRet<false>(cold, data));
-  ADD(asyncGenRetHelper,          emitInterpGenRet<true>(cold, data));
-  ADD(retInlHelper,               emitInterpRet(cold, data));
+  ADD(asyncGenRetHelper,          emitInterpGenRet<true>(hot(), data));
+  ADD(retInlHelper,               emitInterpRet(hot(), data));
   ADD(debuggerRetHelper,          emitDebuggerInterpRet(cold, data));
   ADD(debuggerGenRetHelper,       emitDebuggerInterpGenRet<false>(cold, data));
   ADD(debuggerAsyncGenRetHelper,  emitDebuggerInterpGenRet<true>(cold, data));
@@ -1356,7 +1373,7 @@ void UniqueStubs::emitAll(CodeCache& code, Debug::DebugInfo& dbg) {
 
   ResumeHelperEntryPoints rh;
   add("resumeInterpHelpers",
-      emitResumeInterpHelpers(main, data, *this, rh),
+      emitResumeInterpHelpers(hot(), data, *this, rh),
       code, dbg);
   emitInterpOneCFHelpers(cold, data, *this, rh, code, dbg);
 }

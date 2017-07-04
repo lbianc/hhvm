@@ -152,26 +152,11 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
 
     list(APPEND RELEASE_CXX_OPTIONS
       "-param max-inline-insns-auto=100"
+      "-param early-inlining-insns=200"
+      "-param max-early-inliner-iterations=50"
       "-param=inline-unit-growth=200"
       "-param=large-unit-insns=10000"
     )
-    # The params bellow causes problem on GCC 4.9 and 5.4 on PPC64
-    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=72855
-    if(NOT IS_PPC64)
-      list(APPEND RELEASE_CXX_OPTIONS
-        "-param early-inlining-insns=200"
-        "-param max-early-inliner-iterations=50"
-       )
-    endif()
-
-    # The params bellow causes problem on GCC 4.8 4.8 and 5.4 on PPC64
-    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=72855
-    if(NOT IS_PPC64)
-      list(APPEND RELEASE_CXX_OPTIONS
-        "-param early-inlining-insns=200"
-        "-param max-early-inliner-iterations=50"
-    )
-    endif()
 
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8 OR
        CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.8)
@@ -188,6 +173,8 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9 OR
        CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.9)
       list(APPEND GENERAL_OPTIONS "fno-delete-null-pointer-checks")
+    else()
+       message(FATAL_ERROR "${PROJECT_NAME} requires g++ 4.9 or greater.")
     endif()
 
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 6.0 OR

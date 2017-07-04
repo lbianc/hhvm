@@ -32,8 +32,10 @@ let set_return_by_ref b = return_by_ref := b
 
 let emit_return ~need_ref =
   let ret_instr = if need_ref then instr_retv else instr_retc in
+  let verify_instr =
+    if need_ref then instr_verifyRetTypeV else instr_verifyRetTypeC in
   if !verify_return
-  then gather [instr_verifyRetTypeC; ret_instr]
+  then gather [verify_instr; ret_instr]
   else ret_instr
 
 let emit_def_inline = function
@@ -45,6 +47,52 @@ let emit_def_inline = function
     instr_deftypealias (int_of_string (snd td.Ast.t_id))
   | _ ->
     failwith "Define inline: Invalid inline definition"
+
+let emit_markup env s echo_expr_opt ~check_for_hashbang =
+  let emit_ignored_call_expr f e =
+    let p = Pos.none in
+    let call_expr = p, A.Call ((p, A.Id (p, f)), [e], []) in
+    emit_ignored_expr env call_expr
+  in
+  let emit_ignored_call_for_non_empty_string f s =
+    if String.length s = 0 then empty
+    else emit_ignored_call_expr f (Pos.none, A.String (Pos.none, s))
+  in
+  let markup =
+    if String.length s = 0
+    then empty
+    else
+      let hashbang, tail =
+        if check_for_hashbang
+        then
+          (* if markup text starts with #!
+          - extract a line with hashbang - it will be emitted as a call
+          to print_hashbang function
+          - emit remaining part of text as regular markup *)
+          let r = Str.regexp "^#!.*\n" in
+          if Str.string_match r s 0
+          then
+            let cmd = Str.matched_string s in
+            let tail = String_utils.lstrip s cmd in
+            cmd, tail
+          else "", s
+        else "", s
+      in
+      gather [
+        emit_ignored_call_for_non_empty_string
+          "__SystemLib\\print_hashbang" hashbang;
+        emit_ignored_call_for_non_empty_string SN.SpecialFunctions.echo tail
+      ]
+  in
+  let echo =
+    match echo_expr_opt with
+    | Some e -> emit_ignored_call_expr SN.SpecialFunctions.echo e
+    | None -> empty
+  in
+  gather [
+    markup;
+    echo
+  ]
 
 let rec emit_stmt env st =
   match st with
@@ -65,10 +113,62 @@ let rec emit_stmt env st =
       ], []))
       ->
     empty
-  | A.Expr (_, A.Id (_, "exit")) -> emit_exit env None
-  | A.Expr (_, A.Call ((_, A.Id (_, "exit")), args, []))
-    when List.length args = 0 || List.length args = 1 ->
-    emit_exit env (List.hd args)
+  | A.Return (_, Some (_, A.Await e)) ->
+    gather [
+      emit_await env e;
+      emit_return ~need_ref:false;
+    ]
+  | A.Expr (_, A.Await e) ->
+    gather [
+      emit_await env e;
+      instr_popc;
+    ]
+  | A.Expr
+    (_, A.Binop ((A.Eq None), ((_, A.List l) as e1), (_, A.Await e_await))) ->
+    let has_elements =
+      List.exists l ~f: (function
+        | _, A.Omitted -> false
+        | _ -> true)
+    in
+    if has_elements then
+      Local.scope @@ fun () ->
+        let temp = Local.get_unnamed_local () in
+        gather [
+          emit_await env e_await;
+          instr_setl temp;
+          instr_popc;
+          with_temp_local temp
+          begin fun temp _ ->
+            emit_lval_op_list env (Some temp) [] e1
+          end;
+          instr_pushl temp;
+          instr_popc;
+        ]
+    else
+      Local.scope @@ fun () ->
+        let temp = Local.get_unnamed_local () in
+        gather [
+          emit_await env e_await;
+          instr_setl temp;
+          instr_popc;
+          instr_pushl temp;
+          instr_popc;
+        ]
+  | A.Expr (_, A.Binop (A.Eq None, e_lhs, (_, A.Await e_await))) ->
+    Local.scope @@ fun () ->
+      let temp = Local.get_unnamed_local () in
+      let rhs_instrs = instr_pushl temp in
+      let (lhs, rhs, setop) =
+        emit_lval_op_nonlist_steps env LValOp.Set e_lhs rhs_instrs 1 in
+      gather [
+        emit_await env e_await;
+        instr_setl temp;
+        instr_popc;
+        with_temp_local temp (fun _ _ -> lhs);
+        rhs;
+        setop;
+        instr_popc;
+      ]
   | A.Expr expr ->
     emit_ignored_expr env expr
   | A.Return (_, None) ->
@@ -120,13 +220,26 @@ let rec emit_stmt env st =
   | A.Def_inline def ->
     emit_def_inline def
   | A.Static_var es ->
-    emit_static_var env es
+    emit_static_var es
   | A.Global_var es ->
     emit_global_vars env es
-  (* TODO: What do we do with unsafe? *)
+  | A.Markup ((_, s), echo_expr_opt) ->
+    emit_markup env s echo_expr_opt ~check_for_hashbang:false
+    (* TODO: What do we do with unsafe? *)
   | A.Unsafe
   | A.Fallthrough
   | A.Noop -> empty
+
+and emit_await env e =
+  let after_await = Label.next_regular () in
+  gather [
+    emit_expr ~need_ref:false env e;
+    instr_dup;
+    instr_istypec OpNull;
+    instr_jmpnz after_await;
+    instr_await;
+    instr_label after_await;
+  ]
 
 and emit_if env condition consequence alternative =
   match alternative with
@@ -181,7 +294,7 @@ and emit_global_vars env es =
         instr_bindn;
         instr_popv;
       ]
-    | A.Unsafeexpr e ->
+    | A.BracedExpr e ->
       gather [
         emit_expr ~need_ref:false env e;
         instr_dup;
@@ -193,30 +306,12 @@ and emit_global_vars env es =
       emit_nyi "global expression"
   in gather (List.map es emit_global_var)
 
-and emit_static_var env es =
+and emit_static_var es =
   let emit_static_var_single e =
     match snd e with
-    | A.Lvar (_, name) ->
-      gather [
-        instr_null;
-        instr_static_loc_init name;
-      ]
-    | A.Binop (A.Eq _, (_, A.Lvar (_, name)), (_, A.Id (_, _) as e))
-    | A.Binop (A.Eq _, (_, A.Lvar (_, name)), (_, A.Class_const (_, _) as e)) ->
-      let l = Label.next_regular () in
-      gather [
-        instr_static_loc name;
-        instr_jmpnz l;
-        emit_expr ~need_ref:false env e;
-        instr_setl @@ Local.Named name;
-        instr_popc;
-        instr_label l;
-      ]
-    | A.Binop (A.Eq _, (_, A.Lvar (_, name)), e) ->
-      gather [
-        emit_expr ~need_ref:false env e;
-        instr_static_loc_init name;
-      ]
+    | A.Lvar (_, name)
+    | A.Binop (A.Eq _, (_, A.Lvar (_, name)), _) ->
+      instr_static_loc_init name
     | _ -> failwith "Static var - impossible"
   in
   gather @@ List.map es ~f:emit_static_var_single
@@ -306,13 +401,12 @@ and emit_switch env scrutinee_expr cl =
           | Some e ->
             (* Special case for simple scrutinee *)
             match scrutinee_expr with
-            | (_, A.Lvar _) ->
+            | _, A.Lvar _ ->
+              let eq_expr = Pos.none, A.Binop (A.Eqeq, scrutinee_expr, e) in
               gather [
-                emit_expr ~need_ref:false env e;
-                instr_cgetl2 local;
-                instr_eq;
+                emit_expr ~need_ref:false env eq_expr;
                 instr_jmpnz l
-                ]
+              ]
             | _ ->
               gather [
                 instr_cgetl local;
@@ -348,7 +442,19 @@ and emit_catch env end_label (catch_type, (_, catch_local), b) =
 and emit_catches env catch_list end_label =
   gather (List.map catch_list ~f:(emit_catch env end_label))
 
+and is_empty_block b =
+  match b with
+  | A.Block l -> List.for_all ~f:is_empty_block l
+  | A.Noop -> true
+  | _ -> false
+
 and emit_try_catch env try_block catch_list =
+  Local.scope @@ fun () ->
+    emit_try_catch_ env try_block catch_list
+
+and emit_try_catch_ env try_block catch_list =
+  if is_empty_block try_block then empty
+  else
   let end_label = Label.next_regular () in
   gather [
     instr_try_catch_begin;
@@ -366,6 +472,11 @@ and emit_try_finally env try_block finally_block =
     emit_try_finally_ env try_block finally_block
 
 and emit_try_finally_ env try_block finally_block =
+  let finally_body = emit_stmt env finally_block in
+  let finally_body = CBR.rewrite_in_finally finally_body in
+
+  if is_empty_block try_block then finally_body
+  else
   (*
   We need to generate four things:
   (1) the try-body, which will be followed by
@@ -390,7 +501,6 @@ and emit_try_finally_ env try_block finally_block =
   let try_body = emit_stmt env try_block in
   let temp_local = Local.get_unnamed_local () in
   let finally_start = Label.next_regular () in
-  let finally_end = Label.next_regular () in
   let cont_and_break = CBR.get_continues_and_breaks try_body in
   let try_body = CBR.rewrite_in_try_finally
     try_body cont_and_break temp_local finally_start in
@@ -413,8 +523,10 @@ and emit_try_finally_ env try_block finally_block =
 
   TODO: If we make this illegal at parse time then we can remove this pass.
   *)
-  let finally_body = emit_stmt env finally_block in
-  let finally_body = CBR.rewrite_in_finally finally_body in
+  let finally_body_for_fault =
+    Label_rewriter.clone_with_fresh_regular_labels finally_body
+  in
+  let finally_end = Label.next_regular () in
 
   (* (3) Finally epilogue *)
 
@@ -438,7 +550,7 @@ and emit_try_finally_ env try_block finally_block =
     if cont_and_break = [] then empty else instr_unsetl temp_local in
   let fault_body = gather [
       cleanup_local;
-      finally_body;
+      finally_body_for_fault;
       instr_unwind;
     ] in
   let fault_label = Label.next_fault () in
@@ -463,7 +575,8 @@ and load_lvarvar n id =
 
 and get_id_of_simple_lvar_opt v =
   match v with
-  | A.Lvar (_, id) | A.Unop (A.Uref, (_, A.Lvar (_, id)))-> Some id
+  | A.Lvar (_, id) | A.Unop (A.Uref, (_, A.Lvar (_, id)))
+    when not (SN.Superglobals.is_superglobal id) -> Some id
   | _ -> None
 
 and emit_load_list_elements path vs =
@@ -734,9 +847,7 @@ let emit_dropthrough_return () =
 let rec emit_final_statement env s =
   match s with
   | A.Throw _ | A.Return _ | A.Goto _
-  | A.Expr (_, A.Yield_break)
-  | A.Expr (_, A.Call ((_, A.Id (_, "exit")), _, _))
-  | A.Expr (_, A.Id (_, "exit")) ->
+  | A.Expr (_, A.Yield_break) ->
     emit_stmt env s
   | A.Block b ->
     emit_final_statements env b

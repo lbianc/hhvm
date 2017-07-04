@@ -91,7 +91,7 @@ let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
   let env = ServerEnv.({ env with last_notifier_check_time = 0.0 }) in
 
   let env, _needs_flush = ServerMain.serve_one_iteration
-    ~force_flush:false genv env client_provider in
+    ~iteration_flag:None genv env client_provider in
   SearchServiceRunner.run_completely genv;
   env, {
     did_read_disk_changes = !did_read_disk_changes_ref;
@@ -272,6 +272,17 @@ let assert_autocomplete loop_output expected =
     | _ -> fail "Expected autocomplete response"
   in
   let results = List.map results ~f:(fun x -> x.AutocompleteService.res_name) in
+  let results_as_string = list_to_string results in
+  let expected_as_string = list_to_string expected in
+  assertEqual expected_as_string results_as_string
+
+let assert_ide_autocomplete loop_output expected =
+  let results = match loop_output.persistent_client_response with
+    | Some res -> res
+    | _ -> fail "Expected autocomplete response"
+  in
+  let results = List.map results.AutocompleteService.completions
+    ~f:(fun x -> x.AutocompleteService.res_name) in
   let results_as_string = list_to_string results in
   let expected_as_string = list_to_string expected in
   assertEqual expected_as_string results_as_string

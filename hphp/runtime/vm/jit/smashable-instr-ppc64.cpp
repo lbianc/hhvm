@@ -88,39 +88,38 @@ TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
 
 void smashMovq(TCA inst, uint64_t imm) {
   CodeBlock cb;
-  // Initialize code block cb pointing to li64
-  cb.init(inst, Assembler::kLi64Len, "smashing Movq");
-  CodeCursor cursor { cb, inst };
-  Assembler a { cb };
 
   const DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
+  // Initialize code block cb pointing to li64
+  cb.init(inst, smashableMovqLen(), "smashing Movq");
+  Assembler a { cb };
   a.limmediate(reg, imm, ImmType::TocOnly);
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
-  auto& cb = tc::code().blockFor(inst);
-  CodeCursor cursor { cb, inst };
-  Assembler a { cb };
+  CodeBlock cb;
 
   // the first instruction is a vasm ldimml, which is a li32
   const DecodedInstruction di(inst);
   Reg64 reg = di.getLimmediateReg();
 
+  cb.init(inst, smashableCmpqLen(), "smashing Cmpq");
+  Assembler a { cb };
   a.limmediate(reg, imm, ImmType::TocOnly);
 }
 
 void smashCall(TCA inst, TCA target) {
-  auto& cb = tc::code().blockFor(inst);
-  CodeCursor cursor { cb, inst };
-  Assembler a { cb };
+  CodeBlock cb;
 
   const DecodedInstruction di(inst);
   if (!di.isCall()) {
     always_assert(false && "smashCall has unexpected block");
   }
 
+  cb.init(inst, smashableCallLen(), "smashing Call");
+  Assembler a { cb };
   a.setFrontier(inst);
 
   a.limmediate(rfuncentry(), reinterpret_cast<uint64_t>(target),
@@ -128,10 +127,10 @@ void smashCall(TCA inst, TCA target) {
 }
 
 void smashJmp(TCA inst, TCA target) {
-  auto& cb = tc::code().blockFor(inst);
-  CodeCursor cursor { cb, inst };
-  Assembler a { cb };
+  CodeBlock cb;
 
+  cb.init(inst, smashableJmpLen(), "smashing Jmp");
+  Assembler a { cb };
   if (target > inst && target - inst <= smashableJmpLen()) {
     a.emitNop(target - inst);
   } else {
