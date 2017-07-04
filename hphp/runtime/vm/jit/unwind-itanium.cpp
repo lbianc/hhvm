@@ -478,10 +478,9 @@ void write_tc_cie(EHFrameWriter& ehfw) {
       break;
     case Arch::PPC64:
       // On PPC64, the return address for the current frame is found in the
-      // parent frame. The following expression uses the FP to get the parent
+      // parent frame.  The following expression uses the FP to get the parent
       // frame and recovers the return address from it.
-      // The following expression uses the FP to get the parent frame and
-      // recover the return address from it.
+      //
       // LR is at (*SP) + 2 * data_align
       ehfw.begin_val_expression(dw_reg::IP);
       ehfw.op_breg(dw_reg::FP, 0);

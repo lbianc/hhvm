@@ -16,7 +16,6 @@
 
 #include "hphp/runtime/vm/jit/reg-algorithms.h"
 
-//#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
@@ -185,10 +184,7 @@ jit::vector<MoveInfo> doRegMoves(MovePlan& moves, PhysReg rTmp) {
   {
     PhysReg q[N];
     int qBack = 0;
-    auto enque = [&](PhysReg r) {
-      assertx(qBack < N);
-      q[qBack++] = r;
-    };
+    auto enque = [&](PhysReg r) { assertx(qBack < N); q[qBack++] = r; };
     for (auto node : outDegree) {
       if (outDegree[node] == 0) enque(node);
     }

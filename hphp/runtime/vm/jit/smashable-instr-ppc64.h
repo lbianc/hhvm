@@ -46,6 +46,7 @@ constexpr size_t smashableMovqLen() { return ppc64_asm::Assembler::kLimmLen; }
 constexpr size_t smashableCmpqLen() { return smashableMovqLen() + 3*kStdIns; }
 
 // The following instruction size is from the beginning of the smashableCall
+// to the address the LR saves upon branching with bctrl
 constexpr size_t smashableCallLen() { return ppc64_asm::Assembler::kCallLen; }
 constexpr size_t smashableJccLen()  { return ppc64_asm::Assembler::kJccLen; }
 

@@ -79,7 +79,7 @@ constexpr PhysReg rthreadptr() { return ppc64_asm::reg::r13; }
  * depending on the instruction result, and instructions like "addi" (with
  * immediate) do not set the CR.
  */
-constexpr PhysReg rone()        { return ppc64_asm::reg::r28; }
+constexpr PhysReg rone()       { return ppc64_asm::reg::r28; }
 
 inline RegSet vm_regs_no_sp()   { return rvmfp() | rvmtl(); }
 inline RegSet vm_regs_with_sp() { return vm_regs_no_sp() | rvmsp(); }
