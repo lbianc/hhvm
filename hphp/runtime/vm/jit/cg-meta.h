@@ -23,7 +23,6 @@
 #include "hphp/runtime/vm/jit/trans-rec.h"
 #include "hphp/runtime/vm/jit/types.h"
 
-//#include "hphp/util/hash-map-typedefs.h"
 #include "hphp/util/growable-vector.h"
 
 #include <map>
