@@ -28,7 +28,7 @@ namespace HPHP { namespace jit {
  * Whether we're aligning at a live or a dead code point.
  *
  * Live alignments must use nop gaps; alignment requests in dead contexts are
- * recommended to use various trap instructions.
+ * allowed to use various trap instructions.
  */
 enum class AlignContext : uint32_t { Live, Dead };
 

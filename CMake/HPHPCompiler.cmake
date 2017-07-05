@@ -149,7 +149,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       "fno-canonical-system-headers"
       "Wvla"
     )
-
     list(APPEND RELEASE_CXX_OPTIONS
       "-param max-inline-insns-auto=100"
       "-param early-inlining-insns=200"

@@ -21,8 +21,6 @@
 #include <cassert>
 #include <vector>
 
-#include "hphp/util/asm-x64.h"
-#include "hphp/util/immed.h"
 #include "hphp/util/data-block.h"
 
 #include "hphp/ppc64-asm/branch-ppc64.h"

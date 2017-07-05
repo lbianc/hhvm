@@ -31,8 +31,6 @@ namespace ppc64 {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using ppc64_asm::Assembler;
-
 /*
  * Mirrors the API of smashable-instr.h.
  */

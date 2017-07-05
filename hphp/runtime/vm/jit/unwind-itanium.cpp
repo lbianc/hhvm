@@ -499,6 +499,7 @@ void write_tc_cie(EHFrameWriter& ehfw) {
       ehfw.offset_extended_sf(dw_reg::IP,
                               (record_size - AROFF(m_savedRip)) / 8);
       break;
+
     case Arch::PPC64:
       // On PPC64, the return address for the current frame is found in the
       // parent frame.  The following expression uses the FP to get the parent
