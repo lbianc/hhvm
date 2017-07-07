@@ -83,7 +83,6 @@ TCA bindJmp(TCA toSmash, SrcKey destSk, TransFlags trflags, bool& smashed) {
     sr->chainFrom(IncomingBranch::jccFrom(toSmash));
   } else {
     auto const target = smashableJmpTarget(toSmash);
-    assertx(target);
 
     // Return if already smashed.
     if (!target || target == tDest) return tDest;
