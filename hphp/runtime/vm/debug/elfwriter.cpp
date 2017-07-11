@@ -36,12 +36,6 @@ using namespace HPHP::jit;
 namespace HPHP {
 namespace Debug {
 
-#if defined(__powerpc64__)
-  using namespace ppc64;
-#else
-  using namespace x64;
-#endif
-
 TRACE_SET_MOD(debuginfo);
 static const uint8_t CFA_OFFSET = 16;
 
