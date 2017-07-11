@@ -86,16 +86,18 @@ let make_state_machine_method_reference_syntax
  *)
 
  let rewrite_coroutine_body
-     class_node
+     classish_name
+     classish_type_parameters
      ({ function_parameter_list; _; } as header_node)
      rewritten_body =
    (* $param1, $param2 *)
    let arg_list = parameter_list_to_arg_list function_parameter_list in
 
   (* ($closure, $data, $exception) ==> { body } *)
-  let lambda_signature = make_closure_lambda_signature class_node header_node in
+  let lambda_signature = make_closure_lambda_signature classish_name
+      classish_type_parameters header_node in
   let lambda = make_lambda_syntax lambda_signature rewritten_body in
-  let classname = make_closure_classname class_node header_node in
+  let classname = make_closure_classname classish_name header_node in
   (* $continuation,
     ($closure, $data, $exception) ==> { body },
     $param1, $param2 *)
@@ -125,47 +127,72 @@ let make_state_machine_method_reference_syntax
     make_return_statement_syntax create_suspended_coroutine_result_syntax in
   make_list [resume_statement_syntax; return_syntax]
 
-let try_to_rewrite_coroutine_body
-    class_node
+let rewrite_coroutine_body
+    classish_name
+    classish_type_parameters
     methodish_function_body
     header_node
     rewritten_body =
   match syntax methodish_function_body with
   | CompoundStatement node ->
       let compound_statements = rewrite_coroutine_body
-        class_node
+        classish_name
+        classish_type_parameters
         header_node
         rewritten_body in
 
-      Some (make_syntax (CompoundStatement { node with compound_statements }))
+      make_syntax (CompoundStatement { node with compound_statements })
   | Missing ->
-      Some (methodish_function_body)
+      methodish_function_body
   | _ ->
       (* Unexpected or malformed input, so we won't transform the coroutine. *)
-      None
+      failwith "methodish_function_body wasn't a CompoundStatement"
 
 (**
  * If the provided methodish declaration is for a coroutine, rewrites the
  * declaration header and the function body into a desugared coroutine
  * implementation.
  *)
-let maybe_rewrite_methodish_declaration
-    class_node
+let rewrite_methodish_declaration
+    classish_name
+    classish_type_parameters
     ({ methodish_function_body; _; } as method_node)
     header_node
     rewritten_body =
   let make_syntax method_node =
     make_syntax (MethodishDeclaration method_node) in
-  Option.map
-    (try_to_rewrite_coroutine_body
-      class_node
+  let methodish_function_body =
+    rewrite_coroutine_body
+      classish_name
+      classish_type_parameters
       methodish_function_body
       header_node
-      rewritten_body)
-    ~f:(fun methodish_function_body ->
-      make_syntax
-        { method_node with
-          methodish_function_decl_header =
-            rewrite_function_decl_header header_node;
-          methodish_function_body;
-        })
+      rewritten_body in
+  make_syntax
+    { method_node with
+      methodish_function_decl_header =
+        rewrite_function_decl_header header_node;
+      methodish_function_body;
+    }
+
+let rewrite_function_declaration
+    ({ function_body; _; } as function_node)
+    header_node
+    rewritten_body =
+  (* TODO:Would it be better to have no class name at all? *)
+  let classish_name = global_syntax in
+  let classish_type_parameters = make_missing () in
+  let make_syntax function_node =
+    make_syntax (FunctionDeclaration function_node) in
+  let function_body =
+    rewrite_coroutine_body
+      classish_name
+      classish_type_parameters
+      function_body
+      header_node
+      rewritten_body in
+  make_syntax
+    { function_node with
+      function_declaration_header = rewrite_function_decl_header header_node;
+      function_body;
+    }

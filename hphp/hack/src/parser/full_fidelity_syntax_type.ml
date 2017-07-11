@@ -483,7 +483,8 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     ; simple_initializer_value                           : t
     }
   and anonymous_function =
-    { anonymous_async_keyword                            : t
+    { anonymous_static_keyword                           : t
+    ; anonymous_async_keyword                            : t
     ; anonymous_coroutine_keyword                        : t
     ; anonymous_function_keyword                         : t
     ; anonymous_left_paren                               : t
@@ -543,10 +544,6 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   and yield_expression =
     { yield_keyword                                      : t
     ; yield_operand                                      : t
-    }
-  and print_expression =
-    { print_keyword                                      : t
-    ; print_expression                                   : t
     }
   and prefix_unary_expression =
     { prefix_unary_operator                              : t
@@ -769,12 +766,14 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { vector_type_keyword                                : t
     ; vector_type_left_angle                             : t
     ; vector_type_type                                   : t
+    ; vector_type_trailing_comma                         : t
     ; vector_type_right_angle                            : t
     }
   and keyset_type_specifier =
     { keyset_type_keyword                                : t
     ; keyset_type_left_angle                             : t
     ; keyset_type_type                                   : t
+    ; keyset_type_trailing_comma                         : t
     ; keyset_type_right_angle                            : t
     }
   and tuple_type_explicit_specifier =
@@ -787,7 +786,7 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { varray_keyword                                     : t
     ; varray_left_angle                                  : t
     ; varray_type                                        : t
-    ; varray_optional_comma                              : t
+    ; varray_trailing_comma                              : t
     ; varray_right_angle                                 : t
     }
   and vector_array_type_specifier =
@@ -811,7 +810,7 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     ; darray_key                                         : t
     ; darray_comma                                       : t
     ; darray_value                                       : t
-    ; darray_optional_comma                              : t
+    ; darray_trailing_comma                              : t
     ; darray_right_angle                                 : t
     }
   and map_array_type_specifier =
@@ -843,6 +842,7 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { classname_keyword                                  : t
     ; classname_left_angle                               : t
     ; classname_type                                     : t
+    ; classname_trailing_comma                           : t
     ; classname_right_angle                              : t
     }
   and field_specifier =
@@ -993,7 +993,6 @@ module MakeSyntaxType(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   | SafeMemberSelectionExpression     of safe_member_selection_expression
   | EmbeddedMemberSelectionExpression of embedded_member_selection_expression
   | YieldExpression                   of yield_expression
-  | PrintExpression                   of print_expression
   | PrefixUnaryExpression             of prefix_unary_expression
   | PostfixUnaryExpression            of postfix_unary_expression
   | BinaryExpression                  of binary_expression
@@ -1119,7 +1118,6 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   | ExprSafeMemberSelection          of safe_member_selection_expression
   | ExprEmbeddedMemberSelection      of embedded_member_selection_expression
   | ExprYield                        of yield_expression
-  | ExprPrint                        of print_expression
   | ExprPrefixUnary                  of prefix_unary_expression
   | ExprPostfixUnary                 of postfix_unary_expression
   | ExprBinary                       of binary_expression
@@ -1227,7 +1225,6 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   | LambdaSafeMemberSelection          of safe_member_selection_expression
   | LambdaEmbeddedMemberSelection      of embedded_member_selection_expression
   | LambdaYield                        of yield_expression
-  | LambdaPrint                        of print_expression
   | LambdaPrefixUnary                  of prefix_unary_expression
   | LambdaPostfixUnary                 of postfix_unary_expression
   | LambdaBinary                       of binary_expression
@@ -1273,7 +1270,6 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   | CExprSafeMemberSelection          of safe_member_selection_expression
   | CExprEmbeddedMemberSelection      of embedded_member_selection_expression
   | CExprYield                        of yield_expression
-  | CExprPrint                        of print_expression
   | CExprPrefixUnary                  of prefix_unary_expression
   | CExprPostfixUnary                 of postfix_unary_expression
   | CExprBinary                       of binary_expression
@@ -1714,7 +1710,8 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     ; simple_initializer_value: expression value
     }
   and anonymous_function =
-    { anonymous_async_keyword: Token.t option value
+    { anonymous_static_keyword: Token.t option value
+    ; anonymous_async_keyword: Token.t option value
     ; anonymous_coroutine_keyword: Token.t option value
     ; anonymous_function_keyword: Token.t value
     ; anonymous_left_paren: Token.t value
@@ -1754,7 +1751,7 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   and scope_resolution_expression =
     { scope_resolution_qualifier: expression value
     ; scope_resolution_operator: Token.t value
-    ; scope_resolution_name: Token.t value
+    ; scope_resolution_name: expression value
     }
   and member_selection_expression =
     { member_object: expression value
@@ -1774,10 +1771,6 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
   and yield_expression =
     { yield_keyword: Token.t value
     ; yield_operand: constructor_expression value
-    }
-  and print_expression =
-    { print_keyword: Token.t value
-    ; print_expression: expression value
     }
   and prefix_unary_expression =
     { prefix_unary_operator: Token.t value
@@ -2000,12 +1993,14 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { vector_type_keyword: Token.t value
     ; vector_type_left_angle: Token.t value
     ; vector_type_type: specifier value
+    ; vector_type_trailing_comma: Token.t option value
     ; vector_type_right_angle: Token.t value
     }
   and keyset_type_specifier =
     { keyset_type_keyword: Token.t value
     ; keyset_type_left_angle: Token.t value
     ; keyset_type_type: specifier value
+    ; keyset_type_trailing_comma: Token.t option value
     ; keyset_type_right_angle: Token.t value
     }
   and tuple_type_explicit_specifier =
@@ -2018,7 +2013,7 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { varray_keyword: Token.t value
     ; varray_left_angle: Token.t value
     ; varray_type: simple_type_specifier value
-    ; varray_optional_comma: Token.t option value
+    ; varray_trailing_comma: Token.t option value
     ; varray_right_angle: Token.t value
     }
   and vector_array_type_specifier =
@@ -2042,7 +2037,7 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     ; darray_key: simple_type_specifier value
     ; darray_comma: Token.t value
     ; darray_value: simple_type_specifier value
-    ; darray_optional_comma: Token.t option value
+    ; darray_trailing_comma: Token.t option value
     ; darray_right_angle: Token.t value
     }
   and map_array_type_specifier =
@@ -2074,6 +2069,7 @@ module MakeValidated(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     { classname_keyword: Token.t value
     ; classname_left_angle: Token.t value
     ; classname_type: specifier value
+    ; classname_trailing_comma: Token.t option value
     ; classname_right_angle: Token.t value
     }
   and field_specifier =

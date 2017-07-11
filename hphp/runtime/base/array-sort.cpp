@@ -110,9 +110,8 @@ SortFlavor SetArray::preSort(const AccessorT& acc, bool checkTypes) {
  */
 void MixedArray::postSort(bool resetKeys) {   // nothrow guarantee
   assert(m_size > 0);
-  auto const ht = hashTab();
-  InitHash(ht, m_scale);
-  auto mask = this->mask();
+  auto const ht = initHash(m_scale);
+  auto const mask = this->mask();
   if (resetKeys) {
     for (uint32_t pos = 0; pos < m_used; ++pos) {
       auto& e = data()[pos];
@@ -137,14 +136,14 @@ void MixedArray::postSort(bool resetKeys) {   // nothrow guarantee
  */
 void SetArray::postSort() {   // nothrow guarantee
   assert(m_size > 0);
-  auto const ht = hashTab();
-  InitHash(ht, m_scale);
-  auto elms = this->data();
+  auto const ht = initHash(m_scale);
+  auto const mask = this->mask();
+  auto elms = data();
   assert(m_used == m_size);
   for (uint32_t i = 0; i < m_used; ++i) {
     auto& elm = elms[i];
     assert(!elm.isInvalid());
-    *findForNewInsert(elm.hash()) = i;
+    *findForNewInsert(ht, mask, elm.hash()) = i;
   }
 }
 

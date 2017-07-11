@@ -922,7 +922,8 @@ let schema : schema_node list =
     ; prefix      = "anonymous"
     ; aggregates  = [ Expression; ConstructorExpression; LambdaBody ]
     ; fields =
-      [ "async_keyword", ZeroOrOne Token
+      [ "static_keyword", ZeroOrOne Token
+      ; "async_keyword", ZeroOrOne Token
       ; "coroutine_keyword", ZeroOrOne Token
       ; "function_keyword", Token
       ; "left_paren", Token
@@ -997,7 +998,7 @@ let schema : schema_node list =
     ; fields =
       [ "qualifier", Aggregate Expression
       ; "operator", Token
-      ; "name", Token
+      ; "name", Aggregate Expression
       ]
     }
   ; { kind_name   = "MemberSelectionExpression"
@@ -1045,17 +1046,6 @@ let schema : schema_node list =
     ; fields =
       [ "keyword", Token
       ; "operand", Aggregate ConstructorExpression
-      ]
-    }
-  ; { kind_name   = "PrintExpression"
-    ; type_name   = "print_expression"
-    ; func_name   = "print_expression"
-    ; description = "print_expression"
-    ; prefix      = "print"
-    ; aggregates  = [ Expression; ConstructorExpression; LambdaBody ]
-    ; fields =
-      [ "keyword", Token
-      ; "expression", Aggregate Expression
       ]
     }
   ; { kind_name   = "PrefixUnaryExpression"
@@ -1563,6 +1553,7 @@ let schema : schema_node list =
       [ "keyword", Token
       ; "left_angle", Token
       ; "type", Aggregate Specifier
+      ; "trailing_comma", ZeroOrOne Token
       ; "right_angle", Token
       ]
     }
@@ -1576,6 +1567,7 @@ let schema : schema_node list =
       [ "keyword", Token
       ; "left_angle", Token
       ; "type", Aggregate Specifier
+      ; "trailing_comma", ZeroOrOne Token
       ; "right_angle", Token
       ]
     }
@@ -1602,7 +1594,7 @@ let schema : schema_node list =
       [ "keyword", Token
       ; "left_angle", Token
       ; "type", Just "SimpleTypeSpecifier"
-      ; "optional_comma", ZeroOrOne Token
+      ; "trailing_comma", ZeroOrOne Token
       ; "right_angle", Token
       ]
     }
@@ -1654,7 +1646,7 @@ let schema : schema_node list =
       ; "key", Just "SimpleTypeSpecifier"
       ; "comma", Token
       ; "value", Just "SimpleTypeSpecifier"
-      ; "optional_comma", ZeroOrOne Token
+      ; "trailing_comma", ZeroOrOne Token
       ; "right_angle", Token
       ]
     }
@@ -1714,6 +1706,7 @@ let schema : schema_node list =
       [ "keyword", Token
       ; "left_angle", Token
       ; "type", Aggregate Specifier
+      ; "trailing_comma", ZeroOrOne Token
       ; "right_angle", Token
       ]
     }

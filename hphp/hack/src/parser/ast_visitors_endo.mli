@@ -174,7 +174,7 @@ class virtual ['b] endo :
         on_Class_get : 'c ->
                        Ast_visitors_ancestors.expr_ ->
                        Ast_visitors_ancestors.id ->
-                       Ast_visitors_ancestors.pstring ->
+                       Ast_visitors_ancestors.expr ->
                        Ast_visitors_ancestors.expr_;
         on_Clone : 'c ->
                    Ast_visitors_ancestors.expr_ ->
@@ -435,6 +435,12 @@ class virtual ['b] endo :
                            Ast_visitors_ancestors.trait_req_kind ->
                            Ast_visitors_ancestors.trait_req_kind;
         on_NSClass : 'c ->
+                     Ast_visitors_ancestors.ns_kind ->
+                     Ast_visitors_ancestors.ns_kind;
+        on_NSNamespace:  'c ->
+                     Ast_visitors_ancestors.ns_kind ->
+                     Ast_visitors_ancestors.ns_kind;
+        on_NSClassAndNamespace : 'c ->
                      Ast_visitors_ancestors.ns_kind ->
                      Ast_visitors_ancestors.ns_kind;
         on_NSConst : 'c ->
@@ -1024,7 +1030,7 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.expr_ ->
       Ast_visitors_ancestors.id ->
-      Ast_visitors_ancestors.pstring -> Ast_visitors_ancestors.expr_
+      Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr_
     method on_Clone :
       'c ->
       Ast_visitors_ancestors.expr_ ->
@@ -1296,7 +1302,11 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.trait_req_kind ->
       Ast_visitors_ancestors.trait_req_kind
-    method on_NSClass :
+    method on_NSClass:
+      'c -> Ast_visitors_ancestors.ns_kind -> Ast_visitors_ancestors.ns_kind
+    method on_NSNamespace :
+      'c -> Ast_visitors_ancestors.ns_kind -> Ast_visitors_ancestors.ns_kind
+    method on_NSClassAndNamespace :
       'c -> Ast_visitors_ancestors.ns_kind -> Ast_visitors_ancestors.ns_kind
     method on_NSConst :
       'c -> Ast_visitors_ancestors.ns_kind -> Ast_visitors_ancestors.ns_kind

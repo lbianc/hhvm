@@ -172,11 +172,15 @@ let get_passByRefKind expr =
     | A.Binop(A.Eq _, _, _) -> WarnOnCell
     | A.Unop((A.Uincr | A.Udecr | A.Usilence), _) -> WarnOnCell
     | A.Unop((A.Usplat, _)) -> AllowCell
+    | A.Call((_, A.Id (_, "eval")), [_], []) ->
+      WarnOnCell
     | A.Call((_, A.Id (_, "array_key_exists")), [_; _], []) ->
       AllowCell
     | A.Call((_, A.Id (_, ("idx"))), ([_; _] | [_; _; _]), []) ->
       AllowCell
     | A.Call((_, A.Id (_, ("hphp_array_idx"))), [_; _; _], []) ->
+      AllowCell
+    | A.Xml _ ->
       AllowCell
     | _ -> ErrorOnCell in
   from_non_list_assignment AllowCell expr
@@ -434,7 +438,7 @@ and emit_new env expr args uargs =
     ]
   | _ ->
     gather [
-      emit_class_expr env cexpr;
+      emit_load_class_ref env cexpr;
       instr_fpushctor nargs 0;
       emit_args_and_call env args uargs;
       instr_popr
@@ -480,40 +484,67 @@ and emit_known_class_id env id =
     instr_clsrefgetc;
   ]
 
-and emit_class_expr env cexpr =
+and emit_load_class_ref env cexpr =
   match cexpr with
   | Class_static -> instr (IMisc (LateBoundCls 0))
   | Class_parent -> instr (IMisc (Parent 0))
   | Class_self -> instr (IMisc (Self 0))
   | Class_id id -> emit_known_class_id env id
   | Class_expr expr ->
-    begin match expr with
-    | (_, A.Lvar _) ->
-      stash_in_local ~always_stash_this:true env expr
-      begin fun temp _ ->
-      instr (IGet (ClsRefGetL (temp, 0)))
-      end
-    | _ ->
-      gather [
-        emit_expr ~need_ref:false env expr;
-        instr_clsrefgetc
-      ]
+  begin match expr with
+  | (_, A.Lvar _) ->
+    stash_in_local ~always_stash_this:true env expr
+    begin fun temp _ ->
+    instr (IGet (ClsRefGetL (temp, 0)))
     end
-
-and emit_class_get env param_num_opt qop need_ref cid (_, id) =
-  let cexpr, _ = expr_to_class_expr ~resolve_self:false
-    (Emit_env.get_scope env) (id_to_expr cid) in
+  | _ ->
     gather [
-      (* We need to strip off the initial dollar *)
-      instr_string (SU.Locals.strip_dollar id);
-      emit_class_expr env cexpr;
-      match (param_num_opt, qop) with
-      | (None, QueryOp.CGet) -> if need_ref then instr_vgets else instr_cgets
-      | (None, QueryOp.CGetQuiet) -> failwith "emit_class_get: CGetQuiet"
-      | (None, QueryOp.Isset) -> instr_issets
-      | (None, QueryOp.Empty) -> instr_emptys
-      | (Some i, _) -> instr (ICall (FPassS (i, 0)))
+      emit_expr ~need_ref:false env expr;
+      instr_clsrefgetc
     ]
+  end
+
+and emit_load_class_const env cexpr id =
+  let load_const =
+    if id = SN.Members.mClass then instr (IMisc (ClsRefName 0))
+    else instr (ILitConst (ClsCns (Hhbc_id.Const.from_ast_name id, 0)))
+  in
+  gather [
+    emit_load_class_ref env cexpr;
+    load_const
+  ]
+
+and emit_class_expr env cexpr prop =
+  let load_prop, load_prop_first =
+    match prop with
+    | _, A.Id (_, id) ->
+      instr_string id, true
+    | _, A.Lvar (_, id) ->
+      instr_string (SU.Locals.strip_dollar id), true
+    | _, A.Lvarvar (1, id) ->
+      emit_expr ~need_ref:false env (Pos.none, A.Lvar id), false
+    | _, A.Lvarvar (n, id) ->
+      emit_expr ~need_ref:false env (Pos.none, A.Lvarvar (n - 1, id)), true
+    | _, A.BracedExpr e | e ->
+      emit_expr ~need_ref:false env e, true
+  in
+  let load_cls_ref = emit_load_class_ref env cexpr in
+  if load_prop_first then gather [ load_prop; load_cls_ref ]
+  else gather [ load_cls_ref; load_prop ]
+
+and emit_class_get env param_num_opt qop need_ref cid prop =
+  let cexpr, _ = expr_to_class_expr ~resolve_self:false
+    (Emit_env.get_scope env) (id_to_expr cid)
+  in
+  gather [
+    emit_class_expr env cexpr prop;
+    match (param_num_opt, qop) with
+    | (None, QueryOp.CGet) -> if need_ref then instr_vgets else instr_cgets
+    | (None, QueryOp.CGetQuiet) -> failwith "emit_class_get: CGetQuiet"
+    | (None, QueryOp.Isset) -> instr_issets
+    | (None, QueryOp.Empty) -> instr_emptys
+    | (Some i, _) -> instr (ICall (FPassS (i, 0)))
+  ]
 
 (* Class constant <cid>::<id>.
  * We follow the logic for the Construct::KindOfClassConstantExpression
@@ -530,12 +561,7 @@ and emit_class_const env cid (_, id) =
     then instr_string (Hhbc_id.Class.to_raw_string fq_id)
     else instr (ILitConst (ClsCnsD (Hhbc_id.Const.from_ast_name id, fq_id)))
   | _ ->
-    gather [
-      emit_class_expr env cexpr;
-      if id = SN.Members.mClass
-      then instr (IMisc (ClsRefName 0))
-      else instr (ILitConst (ClsCns (Hhbc_id.Const.from_ast_name id, 0)))
-    ]
+    emit_load_class_const env cexpr id
 
 and emit_yield env = function
   | A.AFvalue e ->
@@ -776,11 +802,17 @@ and emit_eval env e =
     instr_eval;
   ]
 
-and emit_xhp_obj_get env e s nullflavor =
+and emit_xhp_obj_get_raw env e s nullflavor =
   let p = Pos.none in
   let fn_name = p, A.Obj_get (e, (p, A.Id (p, "getAttribute")), nullflavor) in
-  let fn = p, A.Call (fn_name, [p, A.String (p, SU.Xhp.clean s)], []) in
-  emit_call_expr ~need_ref:false env fn
+  let args = [p, A.String (p, SU.Xhp.clean s)] in
+  fst (emit_call env fn_name args [])
+
+and emit_xhp_obj_get ~need_ref env param_num_opt e s nullflavor =
+  let call = emit_xhp_obj_get_raw env e s nullflavor in
+  match param_num_opt with
+  | Some i -> gather [ call; instr_fpassr i ]
+  | None -> gather [ call; if need_ref then instr_boxr else instr_unboxr ]
 
 and emit_get_class_no_args () =
   gather [
@@ -845,8 +877,6 @@ and emit_expr env expr ~need_ref =
   | A.Array_get(base_expr, opt_elem_expr) ->
     let query_op = if need_ref then QueryOp.Empty else QueryOp.CGet in
     emit_array_get ~need_ref env None query_op base_expr opt_elem_expr
-  | A.Obj_get (expr, (_, A.Id (_, s)), nullflavor) when SU.Xhp.is_xhp s ->
-    emit_xhp_obj_get env expr s nullflavor
   | A.Obj_get (expr, prop, nullflavor) ->
     let query_op = if need_ref then QueryOp.Empty else QueryOp.CGet in
     emit_obj_get ~need_ref env None query_op expr prop nullflavor
@@ -896,7 +926,8 @@ and emit_expr env expr ~need_ref =
   | A.Lfun _ ->
     failwith "expected Lfun to be converted to Efun during closure conversion"
   | A.Efun (fundef, ids) -> emit_lambda env fundef ids
-  | A.Class_get (cid, id)  -> emit_class_get env None QueryOp.CGet need_ref cid id
+  | A.Class_get (cid, id)  ->
+    emit_class_get env None QueryOp.CGet need_ref cid id
   | A.String2 es -> emit_string2 env es
   | A.BracedExpr e ->
     let instr = emit_expr ~need_ref:false env e in
@@ -999,6 +1030,7 @@ and is_packed_init ?(check_size = true) es size =
   (is_only_values || keys_are_zero_indexed_properly_formed)
   && not has_references
   && should_check_size_positive
+  && size > 0
 
 and is_struct_init es =
   let has_references =
@@ -1056,7 +1088,9 @@ and emit_dynamic_collection env expr es =
 and emit_named_collection env expr pos name fields =
   let name = SU.strip_ns name in
   match name with
-  | "dict" | "vec" | "keyset" -> emit_collection env expr fields
+  (* TODO (#19893791): It shouldn't be possible to get varray/darray here *)
+  | "dict" | "vec" | "keyset" | "varray" | "darray"
+    -> emit_collection env expr fields
   | "Vector" | "ImmVector" ->
     let collection_type = collection_type name in
     if fields = []
@@ -1095,7 +1129,8 @@ and emit_named_collection env expr pos name fields =
   | _ -> failwith @@ "collection: " ^ name ^ " does not exist"
 
 and emit_collection ?(transform_to_collection) env expr es =
-  match Ast_constant_folder.expr_to_opt_typed_value (Emit_env.get_namespace env) expr with
+  match Ast_constant_folder.expr_to_opt_typed_value ~allow_maps:true
+    (Emit_env.get_namespace env) expr with
   | Some tv ->
     emit_static_collection ~transform_to_collection tv
   | None ->
@@ -1265,28 +1300,32 @@ and emit_array_get ~need_ref env param_num_opt qop base_expr opt_elem_expr =
  * then this is the i'th parameter to a function
  *)
 and emit_obj_get ~need_ref env param_num_opt qop expr prop null_flavor =
-  let mode = get_queryMOpMode need_ref qop in
-  let prop_expr_instrs, prop_stack_size = emit_prop_instrs env prop in
-  let base_expr_instrs, base_setup_instrs, base_stack_size =
-    emit_base ~is_object:true ~notice:Notice env mode prop_stack_size param_num_opt expr in
-  let mk = get_prop_member_key env null_flavor 0 prop in
-  let total_stack_size = prop_stack_size + base_stack_size in
-  let final_instr =
-    instr (IFinal (
-      match param_num_opt with
-      | None ->
-        if need_ref then
-          VGetM (total_stack_size, mk)
-        else
-          QueryM (total_stack_size, qop, mk)
-      | Some i -> FPassM (i, total_stack_size, mk)
-    )) in
-  gather [
-    base_expr_instrs;
-    prop_expr_instrs;
-    base_setup_instrs;
-    final_instr
-  ]
+  match snd prop with
+  | A.Id (_, s) when SU.Xhp.is_xhp s ->
+    emit_xhp_obj_get ~need_ref env param_num_opt expr s null_flavor
+  | _ ->
+    let mode = get_queryMOpMode need_ref qop in
+    let prop_expr_instrs, prop_stack_size = emit_prop_instrs env prop in
+    let base_expr_instrs, base_setup_instrs, base_stack_size =
+      emit_base ~is_object:true ~notice:Notice env mode prop_stack_size param_num_opt expr in
+    let mk = get_prop_member_key env null_flavor 0 prop in
+    let total_stack_size = prop_stack_size + base_stack_size in
+    let final_instr =
+      instr (IFinal (
+        match param_num_opt with
+        | None ->
+          if need_ref then
+            VGetM (total_stack_size, mk)
+          else
+            QueryM (total_stack_size, qop, mk)
+        | Some i -> FPassM (i, total_stack_size, mk)
+      )) in
+    gather [
+      base_expr_instrs;
+      prop_expr_instrs;
+      base_setup_instrs;
+      final_instr
+    ]
 
 and emit_elem_instrs env opt_elem_expr =
   match opt_elem_expr with
@@ -1443,40 +1482,48 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
      total_stack_size
 
    | A.Obj_get(base_expr, prop_expr, null_flavor) ->
-     let prop_expr_instrs, prop_stack_size = emit_prop_instrs env prop_expr in
-     let base_expr_instrs, base_setup_instrs, base_stack_size =
-       emit_base ~notice:Notice ~is_object:true env
-         mode (base_offset + prop_stack_size) param_num_opt base_expr in
-     let mk = get_prop_member_key env null_flavor base_offset prop_expr in
-     let total_stack_size = prop_stack_size + base_stack_size in
-     let final_instr =
-       instr (IBase (
-         match param_num_opt with
-         | None -> Dim (mode, mk)
-         | Some i -> FPassDim (i, mk)
-       )) in
-     gather [
-       base_expr_instrs;
-       prop_expr_instrs;
-     ],
-     gather [
-       base_setup_instrs;
-       final_instr
-     ],
-     total_stack_size
+     begin match snd prop_expr with
+     | A.Id (_, s) when SU.Xhp.is_xhp s ->
+       emit_xhp_obj_get_raw env base_expr s null_flavor,
+       gather [ instr_baser base_offset ],
+       1
+     | _ ->
+       let prop_expr_instrs, prop_stack_size = emit_prop_instrs env prop_expr in
+       let base_expr_instrs, base_setup_instrs, base_stack_size =
+         emit_base ~notice:Notice ~is_object:true env
+           mode (base_offset + prop_stack_size) param_num_opt base_expr in
+       let mk = get_prop_member_key env null_flavor base_offset prop_expr in
+       let total_stack_size = prop_stack_size + base_stack_size in
+       let final_instr =
+         instr (IBase (
+           match param_num_opt with
+           | None -> Dim (mode, mk)
+           | Some i -> FPassDim (i, mk)
+         )) in
+       gather [
+         base_expr_instrs;
+         prop_expr_instrs;
+       ],
+       gather [
+         base_setup_instrs;
+         final_instr
+       ],
+       total_stack_size
+     end
 
-   | A.Class_get(cid, (_, id)) ->
-     let prop_expr_instrs =
-       instr_string (SU.Locals.strip_dollar id) in
+   | A.Class_get(cid, (_, A.Lvarvar (1, (_, id)))) ->
      let cexpr, _ = expr_to_class_expr ~resolve_self:false
        (Emit_env.get_scope env) (id_to_expr cid) in
-     gather [
-       prop_expr_instrs;
-       emit_class_expr env cexpr
-     ],
-     gather [
-       instr_basesc base_offset
-     ],
+     (* special case for $x->$$y: use BaseSL *)
+     emit_load_class_ref env cexpr,
+     instr_basesl (get_local env id),
+     0
+
+   | A.Class_get(cid, prop) ->
+     let cexpr, _ = expr_to_class_expr ~resolve_self:false
+       (Emit_env.get_scope env) (id_to_expr cid) in
+     emit_class_expr env cexpr prop,
+     instr_basesc base_offset,
      1
    | A.Lvarvar (1, (_, id)) ->
      empty,
@@ -1620,19 +1667,19 @@ and emit_call_lhs env (_, expr_ as expr) nargs =
       let fq_cid, _ = Hhbc_id.Class.elaborate_id (Emit_env.get_namespace env) cid in
       instr_fpushclsmethodd nargs method_id fq_cid
     | _ ->
+      let method_name = Hhbc_id.Method.to_raw_string method_id in
       gather [
-        instr_string (Hhbc_id.Method.to_raw_string method_id);
-        emit_class_expr env cexpr;
+        emit_class_expr env cexpr (Pos.none, A.Id (Pos.none, method_name));
         instr_fpushclsmethod ~forward nargs
       ]
     end
 
-  | A.Class_get (cid, (_, id)) when id.[0] = '$' ->
+  | A.Class_get (cid, e) ->
     let cexpr, forward = expr_to_class_expr ~resolve_self:false
       (Emit_env.get_scope env) (id_to_expr cid) in
     gather [
-      emit_local ~notice:Notice ~need_ref:false env id;
-      emit_class_expr env cexpr;
+      emit_expr ~need_ref:false env e;
+      emit_load_class_ref env cexpr;
       instr_fpushclsmethod ~forward nargs
     ]
 
@@ -1762,7 +1809,7 @@ and emit_call env (_, expr_ as expr) args uargs =
     _, A.Call ((_, A.Id (_, "func_get_args")), [], []); (_, A.Int _ as count)
     ] ->
     let p = Pos.none in
-    emit_call env (p, A.Id (p, "__SystemLib\\func_slice_args")) [count] []
+    emit_call env (p, A.Id (p, "\\__SystemLib\\func_slice_args")) [count] []
   | A.Id (_, id), _ when
     (optimize_cuf ()) && (is_call_user_func id (List.length args)) ->
     if List.length uargs != 0 then
@@ -1900,13 +1947,18 @@ and emit_final_global_op op =
   | LValOp.IncDec op -> instr (IMutator (IncDecG op))
   | LValOp.Unset -> instr (IMutator UnsetG)
 
-and emit_final_static_op cid id op =
+and emit_final_static_op cid prop op =
   match op with
   | LValOp.Set -> instr (IMutator (SetS 0))
   | LValOp.SetRef -> instr (IMutator (BindS 0))
   | LValOp.SetOp op -> instr (IMutator (SetOpS (op, 0)))
   | LValOp.IncDec op -> instr (IMutator (IncDecS (op, 0)))
-  | LValOp.Unset -> Emit_fatal.emit_fatal_runtime
+  | LValOp.Unset ->
+    let id =
+      match snd prop with
+      | A.Lvar (_, id) | A.Lvarvar (_, (_, id)) -> id
+      | _ -> "unknown" (* TODO: get text of property name  *)
+    in Emit_fatal.emit_fatal_runtime
       ("Attempt to unset static property " ^ cid ^ "::" ^ id)
 
 (* Given a local $local and a list of integer array indices i_1, ..., i_n,
@@ -2060,6 +2112,28 @@ and emit_lval_op_nonlist env op e rhs_instrs rhs_stack_size =
   ]
 
 and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
+  let handle_lvarvar n id final_op =
+    if n = 1 then
+      let instruction =
+        let local = (get_local env id) in
+        match op with
+        | LValOp.Unset | LValOp.IncDec _ -> instr_cgetl local
+        | _ -> instr_cgetl2 local
+      in
+      empty,
+      rhs_instrs,
+      gather [
+        instruction;
+        final_op op
+      ]
+    else
+      gather [
+        instr_cgetl (get_local env id);
+        instr_cgetn_seq (n - 1);
+      ],
+      rhs_instrs,
+      final_op op
+  in
   match expr_ with
   | A.Lvar (_, id) when SN.Superglobals.is_superglobal id ->
     instr_string @@ SU.Locals.strip_dollar id,
@@ -2072,27 +2146,7 @@ and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
     emit_final_local_op op (get_local env id)
 
   | A.Lvarvar (n, (_, id)) ->
-    if n = 1 then
-      let instruction =
-        let local = (get_local env id) in
-        match op with
-        | LValOp.Unset | LValOp.IncDec _ -> instr_cgetl local
-        | _ -> instr_cgetl2 local
-      in
-
-      empty,
-      rhs_instrs,
-      gather [
-        instruction;
-        emit_final_named_local_op op
-      ]
-    else
-      gather [
-        instr_cgetl (get_local env id);
-        instr_cgetn_seq (n - 1);
-      ],
-      rhs_instrs,
-      emit_final_named_local_op op
+    handle_lvarvar n id emit_final_named_local_op
 
   | A.Array_get ((_, A.Lvar (_, x)), Some e) when x = SN.Superglobals.globals ->
     let final_global_op_instrs = emit_final_global_op op in
@@ -2160,19 +2214,27 @@ and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
       final_instr
     ]
 
-  | A.Class_get (cid, (_, id)) ->
-    let prop_expr_instrs =
-      instr_string (SU.Locals.strip_dollar id) in
+  | A.Class_get (cid, prop) ->
     let cexpr, _ = expr_to_class_expr ~resolve_self:false
       (Emit_env.get_scope env) (id_to_expr cid) in
-    let final_instr = emit_final_static_op (snd cid) id op in
-    gather [
-      prop_expr_instrs;
-      emit_class_expr env cexpr;
-    ],
-    rhs_instrs,
-    final_instr
-
+    begin match snd prop with
+    | A.Lvarvar (_, (_, id)) | A.BracedExpr (_, A.Lvar (_, id))  ->
+      let n = match snd prop with A.Lvarvar (n, _) -> n | _ -> 1 in
+      let lhs, rhs, final =
+        handle_lvarvar n id (emit_final_static_op (snd cid) prop)
+      in
+      gather [
+        lhs;
+        emit_load_class_ref env cexpr;
+      ],
+      rhs,
+      final
+    | _ ->
+      let final_instr = emit_final_static_op (snd cid) prop op in
+      emit_class_expr env cexpr prop,
+      rhs_instrs,
+      final_instr
+    end
   | A.Unop (uop, e) ->
     empty,
     rhs_instrs,
@@ -2248,18 +2310,21 @@ and emit_exprs env exprs =
 
 and with_temp_local temp f =
   let break_label = Label.next_regular () in
-  let fault_label = Label.next_fault () in
-  gather [
-    instr_try_fault
-      fault_label
-      (* try block *)
-      (f temp break_label)
-      (* fault block *)
-      (gather [
-        instr_unsetl temp;
-        instr_unwind ]);
-    instr_label break_label;
-  ]
+  let block = f temp break_label in
+  if is_empty block then block
+  else
+    let fault_label = Label.next_fault () in
+    gather [
+      instr_try_fault
+        fault_label
+        (* try block *)
+        block
+        (* fault block *)
+        (gather [
+          instr_unsetl temp;
+          instr_unwind ]);
+      instr_label break_label;
+    ]
 
 (* Generate code to evaluate `e`, and, if necessary, store its value in a
  * temporary local `temp` (unless it is itself a local). Then use `f` to

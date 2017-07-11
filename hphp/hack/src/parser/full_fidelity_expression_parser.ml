@@ -34,7 +34,8 @@ module WithStatementAndDeclAndTypeParser
     | Prefix_byref_assignment | Prefix_assignment | Prefix_none
 
   let parse_type_specifier parser =
-    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let type_parser = TypeParser.make parser.lexer
+      parser.errors parser.context in
     let (type_parser, node) = TypeParser.parse_type_specifier type_parser in
     let lexer = TypeParser.lexer type_parser in
     let errors = TypeParser.errors type_parser in
@@ -42,7 +43,8 @@ module WithStatementAndDeclAndTypeParser
     (parser, node)
 
   let parse_generic_type_arguments_opt parser =
-    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let type_parser = TypeParser.make parser.lexer
+      parser.errors parser.context in
     let (type_parser, node) =
       TypeParser.parse_generic_type_argument_list_opt type_parser
     in
@@ -52,7 +54,8 @@ module WithStatementAndDeclAndTypeParser
     (parser, node)
 
   let parse_return_type parser =
-    let type_parser = TypeParser.make parser.lexer parser.errors in
+    let type_parser = TypeParser.make parser.lexer
+      parser.errors parser.context in
     let (type_parser, node) = TypeParser.parse_return_type type_parser in
     let lexer = TypeParser.lexer type_parser in
     let errors = TypeParser.errors type_parser in
@@ -60,7 +63,8 @@ module WithStatementAndDeclAndTypeParser
     (parser, node)
 
   let parse_parameter_list_opt parser =
-    let decl_parser = DeclParser.make parser.lexer parser.errors in
+    let decl_parser = DeclParser.make parser.lexer parser.errors
+      parser.context in
     let (decl_parser, right, params, left ) =
       DeclParser.parse_parameter_list_opt decl_parser in
     let lexer = DeclParser.lexer decl_parser in
@@ -69,7 +73,8 @@ module WithStatementAndDeclAndTypeParser
     (parser, right, params, left)
 
   let parse_compound_statement parser =
-    let statement_parser = StatementParser.make parser.lexer parser.errors in
+    let statement_parser = StatementParser.make parser.lexer
+      parser.errors parser.context in
     let (statement_parser, node) =
       StatementParser.parse_compound_statement statement_parser in
     let lexer = StatementParser.lexer statement_parser in
@@ -118,6 +123,16 @@ module WithStatementAndDeclAndTypeParser
       TODO: Create a better error recovery system that does not eat tokens
       that might be eaten by the outer statement / declaration parser. *)
       let parser = with_error parser1 SyntaxError.error1015 in
+      (* D5365950 TESTING: The next few lines were for testing only--they'll
+       * be deleted before landing. (See 'test plan' for more details.) *)
+      (*let do_we_need_the_semicolon_later = PrecedenceParser.expects
+        parser Semicolon in
+      Printf.printf ("Previously, our no-context parser was unaware that " ^^
+        "the semicolon we encountered here was required later in the " ^^
+        "program, and it would therefore eat the semicolon. However, now " ^^
+        "our context knows it is\n %b \nthat we require the semicolon " ^^
+        "later, so in the future we can perform a simple boolean check " ^^
+        "to avoid prematurely eating it.\n") do_we_need_the_semicolon_later;*)
       (parser, make_token token)
 
   and parse_term parser =
@@ -148,10 +163,10 @@ module WithStatementAndDeclAndTypeParser
     | Name
     | QualifiedName -> parse_name_or_collection_literal_expression parser1 token
     | Self
-    | Parent
-    | Static -> parse_scope_resolution_or_name parser
+    | Parent -> parse_scope_resolution_or_name parser
+    | Static ->
+      parse_anon_or_awaitable_or_scope_resolution_or_name parser
     | Yield -> parse_yield_expression parser
-    | Print -> parse_print_expression parser
     | Dollar -> parse_dollar_expression parser
     | Suspend
       (* TODO: The operand to a suspend is required to be a call to a
@@ -165,6 +180,7 @@ module WithStatementAndDeclAndTypeParser
     | Ampersand
     | Await
     | Clone
+    | Print
     | At -> parse_prefix_unary_expression parser
     | LeftParen -> parse_cast_or_parenthesized_or_lambda_expression parser
     | LessThan -> parse_possible_xhp_expression parser
@@ -925,21 +941,6 @@ TODO: This will need to be fixed to allow situations where the qualified name
       parse_array_element_init parser in
     let result = make_yield_expression token operand in
     (parser, result)
-
-  and parse_print_expression parser =
-    (* SPEC:
-      TODO: this is the php spec and the hhvm yac grammar,
-      update the github spec
-
-      print expr
-    *)
-    let (parser, token) = assert_token parser Print in
-    let (parser, expr) =
-      with_numeric_precedence parser Operator.precedence_for_print
-        parse_expression
-    in
-    let syntax = make_print_expression token expr in
-    (parser, syntax)
 
   and parse_cast_or_parenthesized_or_lambda_expression parser =
   (* We need to disambiguate between casts, lambdas and ordinary
@@ -1865,7 +1866,8 @@ TODO: This will need to be fixed to allow situations where the qualified name
     (* Skip any async or coroutine declarations that may be present. When we
        feed the original parser into the syntax parsers. they will take care of
        them as appropriate. *)
-    let (parser1, _) = optional_token parser Async in
+    let (parser1, _) = optional_token parser Static in
+    let (parser1, _) = optional_token parser1 Async in
     let (parser1, _) = optional_token parser1 Coroutine in
     match peek_token_kind parser1 with
     | Function -> parse_anon parser
@@ -1925,7 +1927,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
   and parse_anon parser =
     (* SPEC
       anonymous-function-creation-expression:
-        async-opt  coroutine-opt  function
+        static-opt async-opt coroutine-opt  function
         ( anonymous-function-parameter-list-opt  )
         anonymous-function-return-opt
         anonymous-function-use-clauseopt
@@ -1936,6 +1938,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
        The "..." syntax and trailing commas are supported. We'll simply
        parse an optional parameter list; it already takes care of making the
        type annotations optional. *)
+    let (parser, static) = optional_token parser Static in
     let (parser, async) = optional_token parser Async in
     let (parser, coroutine) = optional_token parser Coroutine in
     let (parser, fn) = assert_token parser Function in
@@ -1946,6 +1949,7 @@ TODO: This will need to be fixed to allow situations where the qualified name
     let (parser, body) = parse_compound_statement parser in
     let result =
       make_anonymous_function
+        static
         async
         coroutine
         fn
@@ -2104,6 +2108,15 @@ TODO: This will need to be fixed to allow situations where the qualified name
       remainder as the right side. We'll go for the former for now. *)
       (with_error parser SyntaxError.error1015, less_than)
 
+  and parse_anon_or_awaitable_or_scope_resolution_or_name parser =
+    (* static is a legal identifier, if next token is scope resolution operatpr
+      - parse expresson as scope resolution operator, otherwise try to interpret
+      it as anonymous function (will fallback to name in case of failure) *)
+    if peek_token_kind ~lookahead:1 parser = ColonColon then
+      parse_scope_resolution_or_name parser
+    else
+      parse_anon_or_lambda_or_awaitable parser
+
   and parse_scope_resolution_or_name parser =
     (* parent, self and static are legal identifiers.  If the next
     thing that follows is a scope resolution operator, parse them as
@@ -2137,7 +2150,13 @@ TODO: This will need to be fixed to allow situations where the qualified name
     that the desired tree topology? Give this more thought; it might impact
     rename refactoring semantics. *)
     let (parser, op) = expect_coloncolon parser in
-    let (parser, name) = expect_name_variable_or_class parser in
+    let (parser, name) =
+      let parser1, token = next_token parser in
+      match Token.kind token with
+      | Class -> parser1, make_token token
+      | Dollar -> parse_dollar_expression parser
+      | _ -> expect_name_or_variable_or_error parser SyntaxError.error1048
+    in
     let result = make_scope_resolution_expression qualifier op name in
     (parser, result)
 end

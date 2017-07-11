@@ -138,6 +138,8 @@ let minimal_tests =
     "test_types_type_const";
     "test_function_call";
     "test_array_expression";
+    "test_varray_darray_expressions";
+    "test_varray_darray_types";
     "test_attribute_spec";
     "test_array_key_value_precedence";
     "test_enum";
@@ -159,6 +161,7 @@ let minimal_tests =
     "test_literals";
     "test_variadic_type_hint";
     "test_tuple_type_keyword";
+    "test_trailing_commas";
   ] ~f:mapper
 
 let error_tests =
@@ -184,6 +187,9 @@ let error_tests =
     "test_list_expression_errors";
     "test_interface_method_errors";
     "test_abstract_classish_errors";
+    "test_abstract_methodish_errors";
+    "test_async_errors";
+    "test_visibility_modifier_errors";
   ] ~f:mapper
 
 let test_data = minimal_tests @ error_tests @

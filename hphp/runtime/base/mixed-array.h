@@ -302,8 +302,6 @@ private:
   using ArrayData::release;
 
 public:
-  static Variant CreateVarForUncountedArray(const Variant& source);
-
   static size_t Vsize(const ArrayData*);
   static member_rval::ptr_u GetValueRef(const ArrayData*, ssize_t pos);
   static bool IsVectorData(const ArrayData*);
@@ -666,10 +664,6 @@ private:
    * elements into the slots with lower addresses.
    */
   void compact(bool renumber);
-
-  uint32_t capacity() const { return Capacity(m_scale); }
-  uint32_t mask() const { return Mask(m_scale); }
-  uint32_t scale() const { return m_scale; }
 
   bool isZombie() const { return m_used + 1 == 0; }
   void setZombie() { m_used = -uint32_t{1}; }

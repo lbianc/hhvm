@@ -25,6 +25,7 @@ not how they look on the page. *)
 | PHPOrOperator
 | PHPExclusiveOrOperator
 | PHPAndOperator
+| PrintOperator
 | LogicalOrOperator
 | ExclusiveOrOperator
 | LogicalAndOperator
@@ -92,7 +93,6 @@ type assoc =
 let precedence operator =
   (* TODO: eval *)
   (* TODO: Comma *)
-  (* TODO: print *)
   (* TODO: elseif *)
   (* TODO: else *)
   (* TODO: endif *)
@@ -103,7 +103,7 @@ let precedence operator =
   | PHPOrOperator -> 2
   | PHPExclusiveOrOperator -> 3
   | PHPAndOperator -> 4
-  (* value 5 is reserved for print *)
+  | PrintOperator -> 5
   | AssignmentOperator | AdditionAssignmentOperator
   | SubtractionAssignmentOperator | MultiplicationAssignmentOperator
   | DivisionAssignmentOperator | ExponentiationAssignmentOperator
@@ -135,16 +135,16 @@ let precedence operator =
   | InstanceofOperator -> 21
   | ExponentOperator -> 22
   | PostfixIncrementOperator | PostfixDecrementOperator -> 23
-  | FunctionCallOperator -> 24
-  | NewOperator | CloneOperator -> 25
-  (* value 26 is reserved for assignment that appear in expressions *)
-  | IndexingOperator -> 27
-  | MemberSelectionOperator | NullSafeMemberSelectionOperator -> 28
-  | ScopeResolutionOperator -> 29
-  | DollarOperator -> 30
+  | CloneOperator -> 24
+  | FunctionCallOperator -> 25
+  | NewOperator -> 26
+  (* value 27 is reserved for assignment that appear in expressions *)
+  | IndexingOperator -> 28
+  | MemberSelectionOperator | NullSafeMemberSelectionOperator -> 29
+  | ScopeResolutionOperator -> 30
+  | DollarOperator -> 31
 
-let precedence_for_print = 5
-let precedence_for_assignment_in_expressions = 26
+let precedence_for_assignment_in_expressions = 27
 
 let associativity operator =
   match operator with
@@ -183,7 +183,7 @@ let associativity operator =
   | RemainderAssignmentOperator | AndAssignmentOperator
   | OrAssignmentOperator | ExclusiveOrAssignmentOperator
   | LeftShiftAssignmentOperator | RightShiftAssignmentOperator
-  (* print *)
+  | PrintOperator
     -> RightAssociative
 
 let prefix_unary_from_token token =
@@ -205,6 +205,7 @@ let prefix_unary_from_token token =
   | Include_once -> IncludeOnceOperator
   | Require -> RequireOperator
   | Require_once -> RequireOnceOperator
+  | Print -> PrintOperator
   | _ -> failwith "not a unary operator"
 
 (* Is this a token that can appear after an expression? *)
@@ -472,3 +473,4 @@ let to_string kind =
   | IncludeOnceOperator -> "include_once"
   | RequireOperator -> "require"
   | RequireOnceOperator -> "require_once"
+  | PrintOperator -> "print"

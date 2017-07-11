@@ -35,20 +35,6 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
-/*
- * Return the payload from a ArrayData* that is kMixedKind.
- */
-ALWAYS_INLINE
-MixedArray::Elm* mixedData(const MixedArray* arr) {
-  return reinterpret_cast<MixedArray::Elm*>(
-    const_cast<MixedArray*>(arr) + 1
-  );
-}
-
-ALWAYS_INLINE int32_t* mixedHash(MixedArray::Elm* data, uint32_t scale) {
-  return reinterpret_cast<int32_t*>(data + static_cast<size_t>(scale) * 3);
-}
-
 inline void MixedArray::scan(type_scan::Scanner& scanner) const {
   if (isZombie()) return;
   auto data = this->data();
@@ -206,9 +192,6 @@ member_lval MixedArray::addLvalImpl(K k) {
   auto p = insert(k);
   if (!p.found) {
     tvWriteNull(&p.tv);
-    if (warn && RuntimeOption::EvalHackArrCompatNotices) {
-      raise_hackarr_compat_notice("Lval on missing array element");
-    }
   }
   return member_lval { this, &p.tv };
 }

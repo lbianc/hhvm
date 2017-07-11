@@ -13,7 +13,6 @@ module CoroutineSyntax = Coroutine_syntax
 module EditableSyntax = Full_fidelity_editable_syntax
 module EditableToken = Full_fidelity_editable_token
 module Rewriter = Full_fidelity_rewriter.WithSyntax(EditableSyntax)
-module TokenKind = Full_fidelity_token_kind
 module Utils = Full_fidelity_syntax_utilities.WithSyntax(EditableSyntax)
 
 open EditableSyntax
@@ -30,7 +29,7 @@ let get_label_string = function
   | LoopLabel number -> Printf.sprintf "loop_label_%d" number
 
 let get_label_name label =
-  make_token_syntax TokenKind.Name (get_label_string label)
+  make_name_syntax (get_label_string label)
 
 let make_label_declaration_syntax label =
   CoroutineSyntax.make_label_declaration_syntax (get_label_name label)
@@ -128,7 +127,7 @@ let gather_locals_and_params node =
   Lambda_analyzer.fold_no_lambdas folder SMap.empty node
 
 let make_local name =
-  make_token_syntax TokenKind.Variable ("$" ^ name)
+  make_variable_syntax ("$" ^ name)
 
 (* $closure->name = $name *)
 let copy_in_syntax variable =
@@ -808,9 +807,9 @@ let unnest_compound_statements node =
     | None -> Rewriter.Result.Keep in
   Rewriter.rewrite_post rewrite node
 
-let lower_body { methodish_function_body; _} =
-  let locals_and_params = gather_locals_and_params methodish_function_body in
-  let body = add_missing_return methodish_function_body in
+let lower_body body =
+  let locals_and_params = gather_locals_and_params body in
+  let body = add_missing_return body in
   let (next_loop_label, body) = rewrite_do 0 body in
   let body = rewrite_while body in
   let (next_loop_label, body) = rewrite_for next_loop_label body in
@@ -823,17 +822,15 @@ let lower_body { methodish_function_body; _} =
     next_loop_label
       |> Core_list.range 1
       |> Core_list.map ~f:make_coroutine_result_data_variable
-      |> Core_list.fold
-        ~f:(fun acc name ->
-            SMap.add name (make_token_syntax TokenKind.Name name) acc)
-        ~init:SMap.empty in
+      |> SMap.from_keys ~f:make_name_syntax in
   let locals_and_params =
     SMap.union locals_and_params coroutine_result_data_variables in
 
   (body, locals_and_params)
 
 let make_closure_lambda_signature
-    class_node
+    classish_name
+    classish_type_parameters
     ({ function_type; _; } as header_node) =
   (*
   ( C_foo_GeneratedClosure $closure,
@@ -842,7 +839,8 @@ let make_closure_lambda_signature
   *)
   make_lambda_signature_syntax
     [
-      make_closure_parameter_syntax class_node header_node;
+      make_closure_parameter_syntax
+        classish_name classish_type_parameters header_node;
       coroutine_data_parameter_syntax;
       nullable_exception_parameter_syntax;
     ]
@@ -893,15 +891,17 @@ let compute_state_machine_data locals_and_params header_node =
  *)
 let generate_coroutine_state_machine
     classish_name
-    method_node
+    classish_type_parameters
+    original_body
     header_node =
-  let body, locals_and_params = lower_body method_node in
+  let new_body, locals_and_params = lower_body original_body in
   let state_machine_data =
     compute_state_machine_data locals_and_params header_node in
   let closure_syntax =
     CoroutineClosureGenerator.generate_coroutine_closure
       classish_name
-      method_node
+      classish_type_parameters
+      original_body
       header_node
       state_machine_data in
-  body, closure_syntax
+  new_body, closure_syntax

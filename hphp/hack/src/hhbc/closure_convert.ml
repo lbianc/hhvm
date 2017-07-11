@@ -166,7 +166,7 @@ let make_closure ~explicit_use ~class_num
       not st.captured_this || is_scope_static scope
     | _ -> false in
   let md = {
-    m_kind = [Public] @ (if is_scope_static env.scope then [Static] else []);
+    m_kind = [Public] @ (if fd.f_static || is_scope_static env.scope then [Static] else []);
     m_tparams = fd.f_tparams;
     m_constrs = [];
     m_name = (fst fd.f_name, "__invoke");
@@ -177,6 +177,7 @@ let make_closure ~explicit_use ~class_num
     m_ret_by_ref = fd.f_ret_by_ref;
     m_fun_kind = fd.f_fun_kind;
     m_span = fd.f_span;
+    m_doc_comment = fd.f_doc_comment;
   } in
   let cvl =
     List.map lambda_vars
@@ -198,6 +199,7 @@ let make_closure ~explicit_use ~class_num
     c_namespace = Namespace_env.empty_with_default_popt;
     c_enum = None;
     c_span = p;
+    c_doc_comment = None;
   } in
   (* Horrid hack: use empty body for implicit closed vars, [Noop] otherwise *)
   let inline_fundef =
@@ -290,6 +292,13 @@ let rec convert_expr env st (p, expr_ as expr) =
       ~trait:false
       ~fallback_to_empty_string:false
       env p pe
+  | Call ((_, (Class_const ((_, cid), _) | Class_get ((_, cid), _))) as e, el1, el2)
+  when cid = "parent" ->
+    let st = add_var st "$this" in
+    let st, e = convert_expr env st e in
+    let st, el1 = convert_exprs env st el1 in
+    let st, el2 = convert_exprs env st el2 in
+    st, (p, Call(e, el1, el2))
   | Call (e, el1, el2) ->
     let st, e = convert_expr env st e in
     let st, el1 = convert_exprs env st el1 in
@@ -362,6 +371,9 @@ let rec convert_expr env st (p, expr_ as expr) =
   | Import(flavor, e) ->
     let st, e = convert_expr env st e in
     st, (p, Import(flavor, e))
+  | Id (_, id) as ast_id when String_utils.string_starts_with id "$" ->
+    let st = add_var st id in
+    st, (p, ast_id)
   | Id id ->
     st, convert_id env p id
   | Class_get (cid, _)
@@ -418,7 +430,7 @@ and convert_lambda env st p fd use_vars_opt =
       p total_count env st lambda_vars tparams fd block in
   (* Restore capture and defined set *)
   let st = { st with captured_vars = captured_vars;
-                     captured_this = captured_this;
+                     captured_this = captured_this || st.captured_this;
                      defined_vars = defined_vars;
                      static_vars = static_vars; } in
   (* Add lambda captured vars to current captured vars *)

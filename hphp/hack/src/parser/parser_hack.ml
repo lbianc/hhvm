@@ -802,6 +802,8 @@ and fun_ fun_start ~attr ~(sync:fun_decl_kind) env =
     f_mode = env.mode;
     f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.btw fun_start fun_end;
+    f_doc_comment = None;
+    f_static = false;
   }
 
 (*****************************************************************************)
@@ -832,7 +834,8 @@ and class_ class_start ~attr ~final ~kind env =
       c_body            = cbody;
       c_namespace       = Namespace_env.empty env.popt;
       c_enum            = None;
-      c_span         = span;
+      c_span            = span;
+      c_doc_comment     = None;
     }
   in
   class_implicit_fields result
@@ -870,6 +873,7 @@ and enum_ class_start ~attr env =
           e_constraint = constraint_;
         };
       c_span         = span;
+      c_doc_comment  = None;
     }
   in
   result
@@ -1838,6 +1842,7 @@ and method_ env method_start ~modifiers ~attrs ~(sync:fun_decl_kind)
     m_user_attributes = attrs;
     m_fun_kind = fun_kind sync is_generator;
     m_span = Pos.btw method_start method_end;
+    m_doc_comment = None;
   }
 
 (*****************************************************************************)
@@ -2861,6 +2866,8 @@ and lambda_body ~sync env params ret =
     f_mode = env.mode;
     f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.none; (* We only care about span of "real" functions *)
+    f_doc_comment = None;
+    f_static = false;
   }
   in Lfun f
 
@@ -3163,8 +3170,8 @@ and expr_colcol env e1 =
 
 and expr_colcol_remain ~allow_class env e1 cname =
   match expr_atomic env ~allow_class ~class_const:true with
-  | _, Lvar x ->
-      btw e1 x, Class_get (cname, x)
+  | (_, Lvar x) as p ->
+      btw e1 x, Class_get (cname, p)
   | _, Id x ->
       btw e1 x, Class_const (cname, x)
   | pos, _ ->
@@ -3379,6 +3386,8 @@ and expr_anon_fun env pos ~(sync:fun_decl_kind) =
     f_mode = env.mode;
     f_namespace = Namespace_env.empty env.popt;
     f_span = Pos.none; (* We only care about span of "real" functions *)
+    f_doc_comment = None;
+    f_static = false;
   }
   in
   pos, Efun (f, use)
@@ -4326,9 +4335,11 @@ and namespace_kind env =
       match Lexing.lexeme env.lb with
         | "function" -> NSFun
         | "const" -> NSConst
-        | _ -> (L.back env.lb; NSClass)
+        | "type" -> NSClass
+        | "namespace" -> NSNamespace
+        | _ -> (L.back env.lb; NSClassAndNamespace)
     end
-    | _ -> (L.back env.lb; NSClass)
+    | _ -> (L.back env.lb; NSClassAndNamespace)
 
 and namespace_use env =
   let kind = namespace_kind env in
@@ -4385,7 +4396,7 @@ and namespace_group_use env kind prefix =
     then String.sub prefix 0 (prefix_len - 1)
     else (error_expect env "group use prefix to end with '\\'"; prefix) in
 
-  let allow_change_kind = (kind = NSClass) in
+  let allow_change_kind = (kind = NSClassAndNamespace) in
   let unprefixed = namespace_use_list env allow_change_kind Trcb kind [] in
   expect env Tsc;
   List.map unprefixed begin fun (kind, (p1, s1), id2) ->

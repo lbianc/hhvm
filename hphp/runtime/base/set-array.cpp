@@ -17,6 +17,7 @@
 #include "hphp/runtime/base/set-array.h"
 
 #include "hphp/runtime/base/apc-array.h"
+#include "hphp/runtime/base/apc-stats.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/array-iterator-defs.h"
@@ -45,8 +46,7 @@ std::aligned_storage<kEmptySetArraySize, 16>::type s_theEmptySetArray;
 struct SetArray::Initializer {
   Initializer() {
     auto const ad = reinterpret_cast<SetArray*>(&s_theEmptySetArray);
-    auto const hash = SetArray::HashTab(ad, SetArray::SmallScale);
-    InitHash(hash, SetArray::SmallScale);
+    ad->initHash(SetArray::SmallScale);
     ad->m_sizeAndPos = 0;
     ad->m_scale_used = SetArray::SmallScale;
     ad->initHeader(HeaderKind::Keyset, StaticValue);
@@ -83,10 +83,9 @@ ArrayData* SetArray::MakeReserveSet(uint32_t size) {
   auto const scale = computeScaleFromSize(size);
   auto const ad    = reqAlloc(scale);
 
-  auto const hash = HashTab(ad, scale);
   assert(ClearElms(Data(ad), Capacity(scale)));
-  InitHash(hash, scale);
 
+  ad->initHash(scale);
   ad->initHeader(HeaderKind::Keyset, 1);
   ad->m_sizeAndPos   = 0;                   // size = 0, pos = 0
   ad->m_scale_used   = scale;               // scale = scale, used = 0
@@ -159,6 +158,9 @@ ArrayData* SetArray::MakeUncounted(ArrayData* array, size_t extra) {
       }
     }
   }
+  if (APCStats::IsCreated()) {
+    APCStats::getAPCStats().addAPCUncountedBlock();
+  }
   return ad;
 }
 
@@ -202,11 +204,13 @@ SetArray* SetArray::CopyReserve(const SetArray* src, size_t expectedSize) {
   auto const ad = asSet(MakeReserveSet(expectedSize));
   auto const used = src->m_used;
   auto const elms = src->data();
+  auto const table = ad->hashTab();
+  auto const mask = ad->mask();
   for (uint32_t i = 0; i < used; ++i) {
     auto& elm = elms[i];
     if (UNLIKELY(elm.isTombstone())) continue;
     assert(!elm.isEmpty());
-    auto const loc = ad->findForNewInsert(elm.hash());
+    auto const loc = ad->findForNewInsert(table, mask, elm.hash());
     auto newElm = ad->allocElm(loc);
     if (elm.hasIntKey()) {
       newElm->setIntKey(elm.intKey(), elm.hash());
@@ -293,6 +297,9 @@ void SetArray::ReleaseUncounted(ArrayData* in, size_t extra) {
     // We better not have strong iterators associated with keysets.
     assert(!has_strong_iterator(ad));
   }
+  if (APCStats::IsCreated()) {
+    APCStats::getAPCStats().removeAPCUncountedBlock();
+  }
   free_huge(reinterpret_cast<char*>(ad) - extra);
 }
 
@@ -375,9 +382,8 @@ SetArray* SetArray::grow(bool copy) {
   memcpy16_inline(Data(ad), data(), sizeof(Elm) * oldUsed);
   assert(ClearElms(Data(ad) + oldUsed, Capacity(newScale) - oldUsed));
 
-  auto table = HashTab(ad, newScale);
-  InitHash(table, newScale);
-  auto mask = ad->mask();
+  auto const table = ad->initHash(newScale);
+  auto const mask = ad->mask();
   auto iter = data();
   auto const stop = iter + oldUsed;
   if (copy) {
@@ -424,7 +430,8 @@ void SetArray::compact() {
     posElm = elms[m_pos];
   }
 
-  InitHash(hashTab(), m_scale);
+  auto const table = initHash(m_scale);
+  auto const mask = this->mask();
   uint32_t j = 0;
   auto const used = m_used;
   for (uint32_t i = 0; i < used; ++i) {
@@ -432,7 +439,7 @@ void SetArray::compact() {
     if (elm.isTombstone()) continue;
     assert(!elm.isEmpty());
     if (j != i) elms[j] = elms[i];
-    *findForNewInsert(elm.hash()) = j;
+    *findForNewInsert(table, mask, elm.hash()) = j;
     ++j;
   }
   assert(ClearElms(elms + j, m_used - j));

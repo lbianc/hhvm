@@ -46,18 +46,20 @@ let float = digit* frac? exp?
 let white = [' ' '\t']+
 let newline = '\r' | '\n' | "\r\n"
 let sillyend = ';' digit+
-let id = ['a'-'z' 'A'-'Z' '_'] (['a'-'z' 'A'-'Z' '0'-'9' '_' '\\' '$' '#'] | "::")* sillyend?
+let id = (digit* ['a'-'z' 'A'-'Z' '_'] (['a'-'z' 'A'-'Z' '0'-'9' '_' '\\' '$' '#'] | "::")* sillyend?)
 let escapequote = "\\\""
 let comment = '#' [^ '\r' '\n']* newline
 let nonquote = [^ '"']
 let quote = '"'
 let nontriple = (nonquote | quote nonquote | quote quote nonquote)* quote? quote?
 let triplequoted = quote quote quote nontriple quote quote quote
+let doccomment = ".doc" white triplequoted ';'
 
 rule read =
   parse
   | white       { read lexbuf }
   | comment     {read lexbuf}
+  | doccomment   {read lexbuf}
   | ".function" {FUNCTIONDIRECTIVE}
   | ".main"     {MAINDIRECTIVE}
   | ".class"    {CLASSDIRECTIVE}

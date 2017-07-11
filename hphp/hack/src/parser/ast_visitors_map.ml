@@ -24,11 +24,15 @@ class virtual ['self] map =
       | Contravariant -> self#on_Contravariant env
       | Invariant -> self#on_Invariant env
     method on_NSClass env = NSClass
+    method on_NSNamespace env = NSNamespace
+    method on_NSClassAndNamespace env = NSClassAndNamespace
     method on_NSFun env = NSFun
     method on_NSConst env = NSConst
     method on_ns_kind env this =
       match this with
       | NSClass -> self#on_NSClass env
+      | NSNamespace -> self#on_NSNamespace env
+      | NSClassAndNamespace -> self#on_NSClassAndNamespace env
       | NSFun -> self#on_NSFun env
       | NSConst -> self#on_NSConst env
     method on_program env = self#on_list self#on_def env
@@ -158,7 +162,8 @@ class virtual ['self] map =
         c_body = r9;
         c_namespace = r10;
         c_enum = r11;
-        c_span = r12
+        c_span = r12;
+        c_doc_comment = this.c_doc_comment
       }
     method on_enum_ env this =
       let r0 = self#on_hint env this.e_base in
@@ -375,7 +380,8 @@ class virtual ['self] map =
         m_ret = r7;
         m_ret_by_ref = r8;
         m_fun_kind = r9;
-        m_span = r10
+        m_span = r10;
+        m_doc_comment = this.m_doc_comment
       }
     method on_typeconst env this =
       let r0 = self#on_bool env this.tconst_abstract in
@@ -437,6 +443,7 @@ class virtual ['self] map =
       let r9 = self#on_fun_kind env this.f_fun_kind in
       let r10 = self#on_Namespace_env env this.f_namespace in
       let r11 = self#on_Pos_t env this.f_span in
+      let r12 = self#on_bool env this.f_static in
       {
         f_mode = r0;
         f_tparams = r1;
@@ -449,7 +456,9 @@ class virtual ['self] map =
         f_user_attributes = r8;
         f_fun_kind = r9;
         f_namespace = r10;
-        f_span = r11
+        f_span = r11;
+        f_doc_comment = this.f_doc_comment;
+        f_static = r12;
       }
     method on_FSync env = FSync
     method on_FAsync env = FAsync
@@ -655,7 +664,7 @@ class virtual ['self] map =
       Array_get (r0, r1)
     method on_Class_get env c0 c1 =
       let r0 = self#on_id env c0 in
-      let r1 = self#on_pstring env c1 in Class_get (r0, r1)
+      let r1 = self#on_expr env c1 in Class_get (r0, r1)
     method on_Class_const env c0 c1 =
       let r0 = self#on_id env c0 in
       let r1 = self#on_pstring env c1 in Class_const (r0, r1)

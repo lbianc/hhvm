@@ -22,6 +22,7 @@
 #include <folly/Likely.h>
 
 #include "hphp/runtime/base/apc-array.h"
+#include "hphp/runtime/base/apc-stats.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-helpers.h"
 #include "hphp/runtime/base/member-val.h"
@@ -140,10 +141,9 @@ MixedArray* PackedArray::ToMixed(ArrayData* old) {
   auto const ad      = ToMixedHeader(old, oldSize + 1);
   auto const mask    = ad->mask();
   auto dstData       = ad->data();
-  auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  ad->InitHash(dstHash, ad->scale());
+  auto const dstHash = ad->initHash(ad->scale());
   for (uint32_t i = 0; i < oldSize; ++i) {
     auto h = hash_int64(i);
     *ad->findForNewInsert(dstHash, mask, h) = i;
@@ -178,10 +178,9 @@ MixedArray* PackedArray::ToMixedCopy(const ArrayData* old) {
   auto const ad      = ToMixedHeader(old, oldSize + 1);
   auto const mask    = ad->mask();
   auto dstData       = ad->data();
-  auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  ad->InitHash(dstHash, ad->scale());
+  auto const dstHash = ad->initHash(ad->scale());
   for (uint32_t i = 0; i < oldSize; ++i) {
     auto h = hash_int64(i);
     *ad->findForNewInsert(dstHash, mask, h) = i;
@@ -208,10 +207,9 @@ MixedArray* PackedArray::ToMixedCopyReserve(const ArrayData* old,
   auto const oldSize = old->m_size;
   auto const mask    = ad->mask();
   auto dstData       = ad->data();
-  auto dstHash       = ad->hashTab();
   auto const srcData = packedData(old);
 
-  ad->InitHash(dstHash, ad->scale());
+  auto const dstHash = ad->initHash(ad->scale());
   for (uint32_t i = 0; i < oldSize; ++i) {
     auto h = hash_int64(i);
     *ad->findForNewInsert(dstHash, mask, h) = i;
@@ -525,6 +523,9 @@ void PackedArray::ReleaseUncounted(ArrayData* ad, size_t extra) {
 
   // We better not have strong iterators associated with uncounted arrays.
   assert(!has_strong_iterator(ad));
+  if (APCStats::IsCreated()) {
+    APCStats::getAPCStats().removeAPCUncountedBlock();
+  }
 
   free_huge(reinterpret_cast<char*>(ad) - extra);
 }
@@ -1177,6 +1178,9 @@ ArrayData* PackedArray::ZAppend(ArrayData* ad, RefData* v, int64_t* key_ptr) {
 ArrayData* PackedArray::MakeUncounted(ArrayData* array, size_t extra) {
   assert(checkInvariants(array));
   assert(!array->empty());
+  if (APCStats::IsCreated()) {
+    APCStats::getAPCStats().addAPCUncountedBlock();
+  }
 
   auto const size = array->m_size;
   auto const sizeIndex = packedArrayCapacityToSizeIndex(size);

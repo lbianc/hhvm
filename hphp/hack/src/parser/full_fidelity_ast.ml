@@ -277,11 +277,11 @@ let syntax_of_token : PositionedToken.t -> node = fun t ->
 
 (* TODO: Clean up string escaping *)
 let prepString2 : node list -> node list =
-  let trimLeft t =
-    PT.({ t with leading_width = t.leading_width + 1; width = t.width - 1 })
+  let trimLeft ~n t =
+    PT.({ t with leading_width = t.leading_width + n; width = t.width - n })
   in
-  let trimRight t =
-    PT.({ t with trailing_width = t.trailing_width + 1; width = t.width - 1 })
+  let trimRight ~n t =
+    PT.({ t with trailing_width = t.trailing_width + n; width = t.width - n })
   in
   function
   | ({ syntax = Token t; _ }::ss)
@@ -289,19 +289,45 @@ let prepString2 : node list -> node list =
     let rec unwind = function
       | [{ syntax = Token t; _ }]
       when t.PT.width > 0 && (PT.text t).[t.PT.width - 1] = '"' ->
-        let s = syntax_of_token (trimRight t) in
+        let s = syntax_of_token (trimRight ~n:1 t) in
         if width s > 0 then [s] else []
       | x :: xs -> x :: unwind xs
       | _ -> raise (Invalid_argument "Malformed String2 SyntaxList")
     in
-    let s = syntax_of_token (trimLeft t) in
+    let s = syntax_of_token (trimLeft ~n:1 t) in
+    if width s > 0 then s :: unwind ss else unwind ss
+  | ({ syntax = Token t; _ }::ss)
+  when t.PT.width > 3 && String.sub (PT.text t) 0 3 = "<<<" ->
+    let rec unwind = function
+      | [{ syntax = Token t; _ }] when t.PT.width > 0 ->
+        let content = PT.text t in
+        let len = t.PT.width in
+        let n = len - (String.rindex_from content (len - 2) '\n') in
+        let s = syntax_of_token (trimRight ~n t) in
+        if width s > 0 then [s] else []
+      | x :: xs -> x :: unwind xs
+      | _ -> raise (Invalid_argument "Malformed String2 SyntaxList")
+    in
+    let content = PT.text t in
+    let n = (String.index content '\n') + 1 in
+    let s = syntax_of_token (trimLeft ~n t) in
     if width s > 0 then s :: unwind ss else unwind ss
   | x -> x (* unchanged *)
 
 let mkStr : (string -> string) -> string -> string = fun unescaper content ->
   let no_quotes = try
       if String.sub content 0 3 = "<<<" (* The heredoc case *)
-      then String.sub content 3 (String.length content - 4)
+      then
+        (* These types of strings begin with an opening line containing <<<
+         * followed by a string to use as a terminator (which is optionally
+         * quoted) and end with a line containing only the terminator and a
+         * semicolon followed by a blank line. We need to drop the opening
+         * line as well as the blank line and preceding terminator line. *)
+        let len = String.length content in
+        let start = (String.index content '\n') + 1 in
+        let end_ = (String.rindex_from content (len - 2) '\n') in
+        let len = end_ - start in
+          String.sub content start len
       else String.sub content 1 (String.length content - 2)
     with
     | Invalid_argument _ -> content
@@ -364,6 +390,8 @@ let fun_template yielding node suspension_kind =
   ; f_fun_kind        = mk_fun_kind suspension_kind yielding
   ; f_namespace       = Namespace_env.empty !(lowerer_state.popt)
   ; f_span            = p
+  ; f_doc_comment     = None
+  ; f_static          = false
   }
 
 let param_template node =
@@ -682,6 +710,16 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       ; _ }
       -> Collection (pos_name kw, couldMap ~f:pAField members env)
 
+    | VarrayIntrinsicExpression { varray_intrinsic_members = members; _ } ->
+      Varray (couldMap ~f:pExpr members env)
+    | DarrayIntrinsicExpression { darray_intrinsic_members = members; _ } ->
+      let pMember node env =
+        match syntax node with
+        | ElementInitializer { element_key; element_value; _ } ->
+          (pExpr element_key env, pExpr element_value env)
+        | _ -> missing_syntax "darray intrinsic expression element" node env
+      in
+      Darray (couldMap ~f:pMember members env)
     | ArrayIntrinsicExpression { array_intrinsic_members = members; _ }
     | ArrayCreationExpression  { array_creation_members  = members; _ }
     ->
@@ -707,10 +745,6 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       ; function_call_argument_list = args
       ; _ }
       -> Call (pExpr recv env, couldMap ~f:pExpr args  env, [])
-
-    | PrintExpression { print_keyword = _recv; print_expression = args } ->
-      (* TODO: Or tie in with FunctionCallExpression et al and post-process *)
-      Call ((pos, Id (pos, "echo")), couldMap ~f:pExpr args env, [])
 
     | QualifiedNameExpression { qualified_name_expression } ->
       Id (pos_name qualified_name_expression)
@@ -778,6 +812,8 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
         | Some TK.At                      -> Unop (Usilence, expr)
         | Some TK.Await                   -> Await expr
         | Some TK.Clone                   -> Clone expr
+        | Some TK.Print                   ->
+          Call ((pos, Id (pos, "echo")), [expr], [])
         | Some TK.Dollar                  ->
           (match snd expr with
           | Lvarvar (n, id) -> Lvarvar (n + 1, id)
@@ -811,12 +847,20 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
 
     | ScopeResolutionExpression
       { scope_resolution_qualifier; scope_resolution_name; _ } ->
-      let (_, n) as name = pos_name scope_resolution_name in
       let qual = pos_name scope_resolution_qualifier in
-      if String.length n > 0 && n.[0] = '$'
-      then Class_get   (qual, name)
-      else Class_const (qual, name)
-
+      begin match syntax scope_resolution_name with
+      | Token { PositionedToken.kind = TK.Variable; _ } ->
+        let name =
+          get_pos scope_resolution_name, Lvar (pos_name scope_resolution_name)
+        in
+        Class_get (qual, name)
+      | _ ->
+        let name = pExpr scope_resolution_name env in
+        begin match snd name with
+        | Id id -> Class_const (qual, id)
+        | _ -> Class_get (qual, name)
+        end
+      end
     | CastExpression { cast_type; cast_operand; _ } ->
       Cast (pHint cast_type env, pExpr cast_operand env)
     | ConditionalExpression
@@ -921,7 +965,8 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       | e -> InstanceOf (e, ty)
       *)
     | AnonymousFunction
-      { anonymous_async_keyword
+      { anonymous_static_keyword
+      ; anonymous_async_keyword
       ; anonymous_coroutine_keyword
       ; anonymous_parameters
       ; anonymous_type
@@ -952,6 +997,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
             f_ret    = mpOptional pHint anonymous_type env
           ; f_params = couldMap ~f:pFunParam anonymous_parameters env
           ; f_body   = mk_noop body
+          ; f_static = not (is_missing anonymous_static_keyword)
           }
         , try pUse anonymous_use env with _ -> []
         )
@@ -1277,14 +1323,19 @@ and pFunHdr : fun_hdr parser = fun node env ->
       let fh_return_type = mpOptional pHint function_type env in
       let fh_suspension_kind =
         mk_suspension_kind function_async function_coroutine in
+      let fh_name = pos_name function_name in
+      let fh_type_parameters = pTParaml function_type_parameter_list env in
+      let fh_param_modifiers =
+        List.filter ~f:(fun p -> Option.is_some p.param_modifier) fh_parameters
+      in
+      let fh_ret_by_ref = is_ret_by_ref function_ampersand in
       { fh_suspension_kind
-      ; fh_name            = pos_name function_name
-      ; fh_type_parameters = pTParaml function_type_parameter_list env
+      ; fh_name
+      ; fh_type_parameters
       ; fh_parameters
       ; fh_return_type
-      ; fh_param_modifiers =
-        List.filter ~f:(fun p -> Option.is_some p.param_modifier) fh_parameters
-      ; fh_ret_by_ref      = is_ret_by_ref function_ampersand
+      ; fh_param_modifiers
+      ; fh_ret_by_ref
       }
   | LambdaSignature { lambda_parameters; lambda_type; _ } ->
     { empty_fun_hdr with
@@ -1294,7 +1345,58 @@ and pFunHdr : fun_hdr parser = fun node env ->
   | Token _ -> empty_fun_hdr
   | _ -> missing_syntax "function header" node env
 
+and extract_docblock = fun node ->
+  let source_text = leading_text node in
+  let parse (str : string) : string option =
+      let length = String.length str in
+      let mk (start : int) (end_ : int) : string =
+        String.sub source_text start (end_ - start + 1)
+      in
+      let rec go start state idx : string option =
+        if idx = length (* finished? *)
+        then None
+        else begin
+          let next = idx + 1 in
+          match state, str.[idx] with
+          | `LineCmt,     '\n' -> go next `Free next
+          | `EndEmbedded, '/'  -> go next `Free next
+          | `EndDoc, '/' -> begin match go next `Free next with
+            | Some doc -> Some doc
+            | None -> Some (mk start idx)
+          end
+          (* PHP has line comments delimited by a # *)
+          | `Free,     '#'              -> go next `LineCmt      next
+          (* All other comment delimiters start with a / *)
+          | `Free,     '/'              -> go idx   `SawSlash    next
+          (* After a / in trivia, we must see either another / or a * *)
+          | `SawSlash, '/'              -> go next  `LineCmt     next
+          | `SawSlash, '*'              -> go start `MaybeDoc    next
+          | `MaybeDoc, '*'              -> go start `MaybeDoc2   next
+          | `MaybeDoc, _                -> go start `EmbeddedCmt next
+          | `MaybeDoc2, '/'             -> go next  `Free        next
+          | `MaybeDoc2, _               -> go start `DocComment  next
+          | `DocComment, '*'            -> go start `EndDoc      next
+          | `DocComment, _              -> go start `DocComment  next
+          | `EndDoc, _                  -> go start `DocComment  next
+          (* A * without a / does not end an embedded comment *)
+          | `EmbeddedCmt, '*'           -> go start `EndEmbedded next
+          | `EndEmbedded, '*'           -> go start `EndEmbedded next
+          | `EndEmbedded,  _            -> go start `EmbeddedCmt next
+          (* Whitespace skips everywhere else *)
+          | _, (' ' | '\t' | '\n')      -> go start state        next
+          (* When scanning comments, anything else is accepted *)
+          | `LineCmt,     _             -> go start state        next
+          | `EmbeddedCmt, _             -> go start state        next
+          (* Anything else; bail *)
+          | _ -> None
+        end
+      in
+      go 0 `Free 0
+  in (* Now that we have a parser *)
+  parse (leading_text node)
+
 and pClassElt : class_elt list parser = fun node env ->
+  let opt_doc_comment = extract_docblock node in
   match syntax node with
   | ConstDeclaration
     { const_abstract; const_type_specifier; const_declarators; _ } ->
@@ -1418,6 +1520,7 @@ and pClassElt : class_elt list parser = fun node env ->
       ; m_ret_by_ref      = hdr.fh_ret_by_ref
       ; m_span            = get_pos node
       ; m_fun_kind        = mk_fun_kind hdr.fh_suspension_kind body_has_yield
+      ; m_doc_comment     = opt_doc_comment
       }]
   | TraitUseConflictResolution {
       trait_use_conflict_resolution_names;
@@ -1530,7 +1633,38 @@ and pXhpChild : xhp_child parser = fun node env ->
 (*****************************************************************************(
  * Parsing definitions (AST's `def`)
 )*****************************************************************************)
+and pNamespaceUseClause ~prefix env kind node =
+  match syntax node with
+  | NamespaceUseClause
+    { namespace_use_name  = name
+    ; namespace_use_alias = alias
+    ; _ } ->
+    let p, n as name =
+      match prefix, pos_name name with
+      | None, (p, n) -> (p, n)
+      | Some prefix, (p, n) -> p, (snd @@ pos_name prefix) ^ n
+    in
+    let x = Str.search_forward (Str.regexp "[^\\\\]*$") n 0 in
+    let key = drop_pstr x name in
+    let kind =
+      match syntax kind with
+      | Token { PT.kind = TK.Namespace; _ } -> NSNamespace
+      | Token { PT.kind = TK.Type     ; _ } -> NSClass
+      | Token { PT.kind = TK.Function ; _ } -> NSFun
+      | Token { PT.kind = TK.Const    ; _ } -> NSConst
+      | Missing                             -> NSClassAndNamespace
+      | _ -> missing_syntax "namespace use kind" kind env
+    in
+    ( kind
+    , (p, if n.[0] = '\\' then n else "\\" ^ n)
+    , if is_missing alias
+      then key
+      else pos_name alias
+    )
+  | _ -> missing_syntax "namespace use clause" node env
+
 and pDef : def parser = fun node env ->
+  let opt_doc_comment = extract_docblock node in
   match syntax node with
   | FunctionDeclaration
     { function_attribute_spec; function_declaration_header; function_body } ->
@@ -1561,6 +1695,7 @@ and pDef : def parser = fun node env ->
         end
       ; f_user_attributes =
         List.concat @@ couldMap ~f:pUserAttribute function_attribute_spec env
+      ; f_doc_comment = opt_doc_comment
       }
   | ClassishDeclaration
     { classish_attribute       = attr
@@ -1590,7 +1725,7 @@ and pDef : def parser = fun node env ->
       ; c_namespace       = Namespace_env.empty !(lowerer_state.popt)
       ; c_enum            = None
       ; c_span            = get_pos node
-      ; c_kind            =
+      ; c_kind            = begin
         let is_abs = Str.(string_match (regexp ".*abstract.*") (text mods) 0) in
         match token_kind kw with
         | Some TK.Class when is_abs -> Cabstract
@@ -1599,6 +1734,8 @@ and pDef : def parser = fun node env ->
         | Some TK.Trait             -> Ctrait
         | Some TK.Enum              -> Cenum
         | _ -> missing_syntax "class kind" kw env
+        end
+      ; c_doc_comment = opt_doc_comment
       }
   | ConstDeclaration
     { const_type_specifier = ty
@@ -1671,6 +1808,7 @@ and pDef : def parser = fun node env ->
         { e_base       = pHint base env
         ; e_constraint = mpOptional pTConstraintTy constr env
         }
+      ; c_doc_comment = opt_doc_comment
       }
   | InclusionDirective
     { inclusion_expression =
@@ -1693,35 +1831,19 @@ and pDef : def parser = fun node env ->
       )
   | NamespaceDeclaration { namespace_name = name; _ } ->
     Namespace (pos_name name, [])
+  | NamespaceGroupUseDeclaration
+    { namespace_group_use_kind = kind
+    ; namespace_group_use_prefix = prefix
+    ; namespace_group_use_clauses = clauses
+    ; _ } ->
+      let f = pNamespaceUseClause env kind ~prefix:(Some prefix) in
+      NamespaceUse (List.map ~f (as_list clauses))
   | NamespaceUseDeclaration
     { namespace_use_kind    = kind
     ; namespace_use_clauses = clauses
     ; _ } ->
-      let f node = match syntax node with
-      | NamespaceUseClause
-        { namespace_use_name  = name
-        ; namespace_use_alias = alias
-        ; _ } ->
-          let (p, n) as name = pos_name name in
-          let x = Str.search_forward (Str.regexp "[^\\\\]*$") n 0 in
-          let key = drop_pstr x name in
-          let kind =
-            match syntax kind with
-            | Missing                            -> NSClass
-            | Token { PT.kind = TK.Function; _ } -> NSFun
-            | Token { PT.kind = TK.Const   ; _ } -> NSConst
-            | _ -> missing_syntax "namespace use kind" kind env
-          in
-          ( kind
-          , (p, if n.[0] = '\\' then n else "\\" ^ n)
-          , if is_missing alias
-            then key
-            else pos_name alias
-          )
-      | _ -> missing_syntax "namespace use clause" node env
-      in
+      let f = pNamespaceUseClause env kind ~prefix:None in
       NamespaceUse (List.map ~f (as_list clauses))
-  | NamespaceGroupUseDeclaration _ -> NamespaceUse []
   (* Fail open, assume top-level statement. Not too nice when reporting bugs,
    * but if this turns out prohibitive, just `try` this and catch-and-correct
    * the raised exception.
@@ -1796,7 +1918,9 @@ let pProgram : program parser = fun node env ->
       ) :: aux env nodel
   | node :: nodel -> pDef node env :: aux env nodel
   in
-  post_process @@ aux env (as_list node)
+  let nodes = as_list node in
+  let nodes = aux env nodes in
+  post_process nodes
 
 let pScript node env =
   match syntax node with
@@ -1926,6 +2050,51 @@ type result =
   ; comments : (Pos.t * comment) list
   }
 
+let lower
+  ?(elaborate_namespaces  = true)
+  ?(include_line_comments = false)
+  ?(keep_errors           = true)
+  ?(ignore_pos            = false)
+  ?(quick                 = false)
+  ?(suppress_output       = false)
+  ?(parser_options        = ParserOptions.default)
+  ~content
+  ~language
+  ~file
+  ~fi_mode
+  ~source_text
+  ~script
+  : result =
+    lowerer_state.language  := language;
+    lowerer_state.filePath  := file;
+    lowerer_state.mode      := fi_mode;
+    lowerer_state.popt      := parser_options;
+    lowerer_state.ignorePos := ignore_pos;
+    lowerer_state.quickMode := quick;
+    lowerer_state.suppress_output := suppress_output;
+    let saw_yield = ref false in
+    let errors = ref [] in (* The top-level error list. *)
+    let max_depth = 42 in (* Filthy hack around OCaml bug *)
+    let ast = runP pScript script { saw_yield; errors; max_depth } in
+    let ast =
+      if elaborate_namespaces
+      then Namespaces.elaborate_defs parser_options ast
+      else ast
+    in
+    let comments, fixmes =
+      if not include_line_comments
+      then [], IMap.empty
+      else
+        let comments = scour_comments file source_text script in
+        let fixmes = IMap.empty (*TODO*) in
+        comments, fixmes
+    in
+    if keep_errors then begin
+      Fixmes.HH_FIXMES.add file fixmes;
+      Option.iter (Core.List.last !errors) Errors.parsing_error
+    end;
+    { fi_mode; ast; content; comments; file }
+
 let from_text
   ?(elaborate_namespaces  = true)
   ?(include_line_comments = false)
@@ -1960,36 +2129,20 @@ let from_text
         | _                -> FileInfo.Mpartial
       )
     in
-    lowerer_state.language  := language tree;
-    lowerer_state.filePath  := file;
-    lowerer_state.mode      := fi_mode;
-    lowerer_state.popt      := parser_options;
-    lowerer_state.ignorePos := ignore_pos;
-    lowerer_state.quickMode := quick;
-    lowerer_state.suppress_output := suppress_output;
-    let saw_yield = ref false in
-    let errors = ref [] in (* The top-level error list. *)
-    let max_depth = 42 in (* Filthy hack around OCaml bug *)
-    let ast = runP pScript script { saw_yield; errors; max_depth } in
-    let ast =
-      if elaborate_namespaces
-      then Namespaces.elaborate_defs parser_options ast
-      else ast
-    in
-    let content = Full_fidelity_source_text.text source_text in
-    let comments, fixmes =
-      if not include_line_comments
-      then [], IMap.empty
-      else
-        let comments = scour_comments file source_text script in
-        let fixmes = IMap.empty (*TODO*) in
-        comments, fixmes
-    in
-    if keep_errors then begin
-      Fixmes.HH_FIXMES.add file fixmes;
-      Option.iter (List.last !errors) Errors.parsing_error
-    end;
-    { fi_mode; ast; content; comments; file }
+    lower
+      ~elaborate_namespaces
+      ~include_line_comments
+      ~keep_errors
+      ~ignore_pos
+      ~quick
+      ~suppress_output
+      ~parser_options
+      ~content:(Full_fidelity_source_text.text source_text)
+      ~language:(language tree)
+      ~file
+      ~fi_mode
+      ~source_text
+      ~script
 
 let from_file
   ?(elaborate_namespaces  = true)
@@ -1997,6 +2150,7 @@ let from_file
   ?(keep_errors           = true)
   ?(ignore_pos            = false)
   ?(quick                 = false)
+  ?(suppress_output       = false)
   ?lower_coroutines
   ?(parser_options        = ParserOptions.default)
   (path : Relative_path.t)
@@ -2007,6 +2161,7 @@ let from_file
       ~keep_errors
       ~ignore_pos
       ~quick
+      ~suppress_output
       ?lower_coroutines
       ~parser_options
       path
@@ -2053,6 +2208,7 @@ let from_file_with_legacy
   ?(keep_errors           = true)
   ?(ignore_pos            = false)
   ?(quick                 = false)
+  ?(suppress_output       = false)
   ?lower_coroutines
   ?(parser_options        = ParserOptions.default)
   (file : Relative_path.t)
@@ -2063,6 +2219,7 @@ let from_file_with_legacy
       ~keep_errors
       ~ignore_pos
       ~quick
+      ~suppress_output
       ?lower_coroutines
       ~parser_options
       file

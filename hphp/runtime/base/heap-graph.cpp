@@ -24,6 +24,7 @@
 #include "hphp/runtime/base/tv-mutate.h"
 #include "hphp/runtime/base/tv-variant.h"
 #include "hphp/util/alloc.h"
+#include "hphp/util/ptr-map.h"
 
 #include <vector>
 #include <folly/Range.h>
@@ -35,17 +36,14 @@ conservativeScan(const void* start, size_t len, Fn fn) {
   const uintptr_t M{7}; // word size - 1
   auto s = (const void**)((uintptr_t(start) + M) & ~M); // round up
   auto e = (const void**)((uintptr_t(start) + len) & ~M); // round down
-  for (; s < e; s++) fn(s, *s);
+  for (; s < e; s++) {
+    // Mask off the upper 16-bits to handle things like
+    // DiscriminatedPtr which stores things up there.
+    fn(s, (const void*)(uintptr_t(*s) & (-1ULL >> 16)));
+  }
 }
 
 namespace {
-template<class F>
-struct PtrFilter: F {
-  template <class... Args> explicit PtrFilter(Args&&... args)
-    : F(std::forward<Args>(args)...) {}
-
-  // end is a partial word, don't scan that word.
-};
 
 // When we don't know the offset. 0 is safe since offset 0 in real
 // objects is the header word, which never contains pointers.
@@ -64,7 +62,7 @@ size_t addPtr(HeapGraph& g, int from, int to, HeapGraph::PtrKind kind,
   return e;
 }
 
-void addRootNode(HeapGraph& g, const PtrMap& blocks,
+void addRootNode(HeapGraph& g, const PtrMap<const HeapObject*>& blocks,
                  type_scan::Scanner& scanner,
                  const void* h, size_t size, type_scan::Index ty) {
   auto from = g.nodes.size();
@@ -121,12 +119,12 @@ std::vector<int> makeParentTree(const HeapGraph& g) {
 // add edges for every known root pointer and every known obj->obj ptr.
 HeapGraph makeHeapGraph(bool include_free) {
   HeapGraph g;
-  PtrMap blocks;
+  PtrMap<const HeapObject*> blocks;
 
   // parse the heap once to create a PtrMap for pointer filtering. Create
   // one node for every parsed block, including NativeData and AsyncFuncFrame
   // blocks. Only include free blocks if requested.
-  MM().forEachHeader([&](Header* h, size_t alloc_size) {
+  MM().forEachHeapObject([&](HeapObject* h, size_t alloc_size) {
     if (h->kind() != HeaderKind::Free || include_free) {
       blocks.insert(h, alloc_size); // adds interval [h, h+alloc_size[
     }
@@ -135,18 +133,18 @@ HeapGraph makeHeapGraph(bool include_free) {
 
   // initialize nodes by iterating over PtrMap's regions
   g.nodes.reserve(blocks.size());
-  blocks.iterate([&](const Header* h, size_t size) {
+  blocks.iterate([&](const HeapObject* h, size_t size) {
     type_scan::Index ty;
     switch (h->kind()) {
       case HeaderKind::NativeData:
-        ty = h->native_.typeIndex();
+        ty = static_cast<const NativeNode*>(h)->typeIndex();
         break;
       case HeaderKind::Resource:
-        ty = h->res_.typeIndex();
+        ty = static_cast<const ResourceHdr*>(h)->typeIndex();
         break;
       case HeaderKind::SmallMalloc:
       case HeaderKind::BigMalloc:
-        ty = h->malloc_.typeIndex();
+        ty = static_cast<const MallocNode*>(h)->typeIndex();
         break;
       default:
         ty = type_scan::kIndexUnknown;
@@ -171,7 +169,7 @@ HeapGraph makeHeapGraph(bool include_free) {
   for (size_t i = 0, n = g.nodes.size(); i < n; i++) {
     if (g.nodes[i].is_root) continue;
     auto h = g.nodes[i].h;
-    scanHeader(h, scanner);
+    scanHeapObject(h, scanner);
     auto from = blocks.index(h);
     assert(from == i);
     scanner.finish(

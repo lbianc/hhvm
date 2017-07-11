@@ -27,11 +27,12 @@ include SimpleParser
 include Full_fidelity_parser_helpers.WithParser(SimpleParser)
 
 let parse_expression parser =
-  let expr_parser = ExpressionParser.make parser.lexer parser.errors in
+  let expr_parser = ExpressionParser.make parser.lexer
+    parser.errors parser.context in
   let (expr_parser, node) = ExpressionParser.parse_expression expr_parser in
   let lexer = ExpressionParser.lexer expr_parser in
   let errors = ExpressionParser.errors expr_parser in
-  let parser = { lexer; errors } in
+  let parser = { parser with lexer; errors } in
   (parser, node)
 
 (* TODO: What about something like for::for? Is that a legal
@@ -58,7 +59,7 @@ let rec parse_type_specifier parser =
   | Self
   | Parent -> parse_simple_type_or_type_constant parser
   | XHPClassName
-  | QualifiedName -> parse_possible_generic_specifier parser
+  | QualifiedName -> parse_possible_generic_specifier_or_type_const parser
   | Array -> parse_array_type_specifier parser
   | Darray -> parse_darray_type_specifier parser
   | Varray -> parse_varray_type_specifier parser
@@ -126,8 +127,19 @@ and parse_simple_type_or_type_constant parser =
 and parse_simple_type_or_type_constant_or_generic parser =
   let (parser0, _) = next_xhp_class_name_or_other parser in
   match peek_token_kind parser0 with
-  | LessThan -> parse_possible_generic_specifier parser
+  | LessThan -> parse_possible_generic_specifier_or_type_const parser
   | _ -> parse_simple_type_or_type_constant parser
+
+and parse_possible_generic_specifier_or_type_const parser =
+  let (parser, name) = next_xhp_class_name_or_other parser in
+  let (parser, arguments) = parse_generic_type_argument_list_opt parser in
+  if (kind arguments) = SyntaxKind.Missing then
+    let token = peek_token parser in
+    match Token.kind token with
+    | ColonColon -> parse_remaining_type_constant parser (make_token name)
+    | _ -> (parser, make_simple_type_specifier (make_token name))
+  else
+    (parser, make_generic_type_specifier (make_token name) arguments)
 
 (* SPEC
   class-interface-trait-specifier:
@@ -377,8 +389,10 @@ and parse_array_type_specifier parser =
     else
       let (parser, left) = expect_left_angle parser in
       let (parser, t) = parse_type_specifier parser in
+      let (parser, optional_comma) = optional_token parser Comma in
       let (parser, right) = expect_right_angle parser in
-      let result = make_vector_type_specifier keyword left t right in
+      let result =
+        make_vector_type_specifier keyword left t optional_comma right in
       (parser, result)
 
   and parse_keyset_type_specifier parser =
@@ -397,8 +411,9 @@ and parse_array_type_specifier parser =
     else
       let (parser, left) = expect_left_angle parser in
       let (parser, t) = parse_type_specifier parser in
+      let (parser, comma) = optional_token parser Comma in
       let (parser, right) = expect_right_angle parser in
-      let result = make_keyset_type_specifier keyword left t right in
+      let result = make_keyset_type_specifier keyword left t comma right in
       (parser, result)
 
   and parse_tuple_type_explicit_specifier parser =
@@ -430,7 +445,6 @@ and parse_array_type_specifier parser =
       dict < type-specifier , type-specifier >
 
       TODO: Add this to the specification
-      TODO: Allow a trailing comma.
 
       Though we require there to be exactly two items, we actually parse
       an arbitrary comma-separated list here.
@@ -576,9 +590,10 @@ and parse_classname_type_specifier parser =
   let classname = make_token classname in
   let (parser, left_angle) = expect_left_angle parser in
   let (parser, classname_type) = parse_type_specifier parser in
+  let (parser, optional_comma) = optional_token parser Comma in
   let (parser, right_angle) = expect_right_angle parser in
   let result = make_classname_type_specifier
-    classname left_angle classname_type right_angle in
+    classname left_angle classname_type optional_comma right_angle in
   (parser, result)
 
 and parse_field_specifier parser =

@@ -847,12 +847,6 @@ let rec get_doc node =
     let y = get_doc x.yield_keyword in
     let o = get_doc x.yield_operand in
     group_doc (y ^| o)
-  | PrintExpression {
-    print_keyword;
-    print_expression } ->
-    let t = get_doc print_keyword in
-    let e = get_doc print_expression in
-    group_doc (t ^| e)
   | CastExpression x ->
     let l = get_doc x.cast_left_paren in
     let t = get_doc x.cast_type in
@@ -882,7 +876,8 @@ let rec get_doc node =
     let ty = get_doc lambda_type in
     group_doc (left ^| params ^| right ^| colon ^| ty)
   | AnonymousFunction
-    { anonymous_async_keyword;
+    { anonymous_static_keyword;
+      anonymous_async_keyword;
       anonymous_coroutine_keyword;
       anonymous_function_keyword;
       anonymous_left_paren;
@@ -892,6 +887,7 @@ let rec get_doc node =
       anonymous_type;
       anonymous_use;
       anonymous_body } ->
+    let static = get_doc anonymous_static_keyword in
     let async = get_doc anonymous_async_keyword in
     let coroutine = get_doc anonymous_coroutine_keyword in
     let fn = get_doc anonymous_function_keyword in
@@ -900,7 +896,7 @@ let rec get_doc node =
     let right = get_doc anonymous_right_paren in
     let colon = get_doc anonymous_colon in
     let return_type = get_doc anonymous_type in
-    let preface = group_doc ( async ^| coroutine ^| fn ) in
+    let preface = group_doc ( static ^| async ^| coroutine ^| fn ) in
     let parameters = indent_block_no_space left params right indt in
     let type_declaration = group_doc (colon ^| return_type) in
     let uses = get_doc anonymous_use in
@@ -1219,13 +1215,13 @@ let rec get_doc node =
       varray_keyword;
       varray_left_angle;
       varray_type;
-      varray_optional_comma;
+      varray_trailing_comma;
       varray_right_angle
     } ->
     let ar = get_doc varray_keyword in
     let la = get_doc varray_left_angle in
     let ty = get_doc varray_type in
-    let oc = get_doc varray_optional_comma in
+    let oc = get_doc varray_trailing_comma in
     let ra = get_doc varray_right_angle in
     ar ^^^ la ^^^ ty ^^^ oc ^^^ ra
   | VectorArrayTypeSpecifier {
@@ -1243,24 +1239,28 @@ let rec get_doc node =
       vector_type_keyword;
       vector_type_left_angle;
       vector_type_type;
-      vector_type_right_angle
+      vector_type_trailing_comma;
+      vector_type_right_angle;
     } ->
     let ar = get_doc vector_type_keyword in
     let la = get_doc vector_type_left_angle in
     let ty = get_doc vector_type_type in
+    let tr = get_doc vector_type_trailing_comma in
     let ra = get_doc vector_type_right_angle in
-    ar ^^^ la ^^^ ty ^^^ ra
+    ar ^^^ la ^^^ ty ^^^ tr ^^^ ra
   | KeysetTypeSpecifier {
       keyset_type_keyword;
       keyset_type_left_angle;
       keyset_type_type;
+      keyset_type_trailing_comma;
       keyset_type_right_angle
     } ->
     let ar = get_doc keyset_type_keyword in
     let la = get_doc keyset_type_left_angle in
     let ty = get_doc keyset_type_type in
+    let tr = get_doc keyset_type_trailing_comma in
     let ra = get_doc keyset_type_right_angle in
-    ar ^^^ la ^^^ ty ^^^ ra
+    ar ^^^ la ^^^ ty ^^^ tr ^^^ ra
   | TupleTypeExplicitSpecifier {
       tuple_type_keyword;
       tuple_type_left_angle;
@@ -1289,7 +1289,7 @@ let rec get_doc node =
       darray_key;
       darray_comma;
       darray_value;
-      darray_optional_comma;
+      darray_trailing_comma;
       darray_right_angle
     } ->
     let ar = get_doc darray_keyword in
@@ -1297,7 +1297,7 @@ let rec get_doc node =
     let kt = get_doc darray_key in
     let co = get_doc darray_comma in
     let vt = get_doc darray_value in
-    let oc = get_doc darray_optional_comma in
+    let oc = get_doc darray_trailing_comma in
     let ra = get_doc darray_right_angle in
     ar ^^^ la ^^^ kt ^^^ co ^| vt ^^^ oc ^^^ ra
   | MapArrayTypeSpecifier {

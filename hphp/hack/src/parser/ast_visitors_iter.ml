@@ -22,10 +22,14 @@ class virtual ['self] iter =
       | Contravariant -> self#on_Contravariant env
       | Invariant -> self#on_Invariant env
     method on_NSClass env = ()
+    method on_NSNamespace env = ()
+    method on_NSClassAndNamespace env = ()
     method on_NSFun env = ()
     method on_NSConst env = ()
     method on_ns_kind env = function
+      | NSClassAndNamespace -> self#on_NSClassAndNamespace env
       | NSClass -> self#on_NSClass env
+      | NSNamespace -> self#on_NSNamespace env
       | NSFun -> self#on_NSFun env
       | NSConst -> self#on_NSConst env
     method on_program env = self#on_list self#on_def env
@@ -479,7 +483,7 @@ class virtual ['self] iter =
       self#on_option self#on_expr env c1;
     method on_Class_get env c0 c1 =
       self#on_id env c0;
-      self#on_pstring env c1;
+      self#on_expr env c1;
     method on_Class_const env c0 c1 =
       self#on_id env c0;
       self#on_pstring env c1;

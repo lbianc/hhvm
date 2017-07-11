@@ -22,12 +22,13 @@
 #include "hphp/runtime/vm/vm-regs.h"
 #include "hphp/util/alloc.h"
 #include "hphp/util/bloom-filter.h"
+#include "hphp/util/cycles.h"
 #include "hphp/util/process.h"
+#include "hphp/util/ptr-map.h"
 #include "hphp/util/struct-log.h"
+#include "hphp/util/timer.h"
 #include "hphp/util/trace.h"
 #include "hphp/util/type-scan.h"
-#include "hphp/util/cycles.h"
-#include "hphp/util/timer.h"
 
 #include <algorithm>
 #include <iterator>
@@ -49,8 +50,15 @@ struct Counter {
   }
 };
 
+bool hasNativeData(const HeapObject* h) {
+  assert(isObjectKind(h->kind()));
+  return static_cast<const ObjectData*>(h)->getAttribute(
+      ObjectData::HasNativeData
+  );
+}
+
 struct Marker {
-  explicit Marker() {}
+  explicit Marker(BigHeap& heap) : heap_(heap) {}
   void init();
   void traceRoots();
   void trace();
@@ -63,42 +71,60 @@ struct Marker {
   void conservativeScan(const void* start, size_t len);
 
   static bool marked(const HeapObject* h) { return h->marks() & GCBits::Mark; }
-  static bool marked(const Header* h) { return marked(&h->hdr_); }
-  bool mark(const void*, GCBits = GCBits::Mark);
+  bool mark(const HeapObject*, GCBits = GCBits::Mark);
   void checkedEnqueue(const void* p, GCBits bits);
   void finish_typescan();
+  HdrBlock find(const void*);
 
-  void enqueue(const Header* h) {
+  void enqueue(const HeapObject* h) {
     assert(h && h->kind() <= HeaderKind::BigMalloc &&
            h->kind() != HeaderKind::AsyncFuncWH &&
            h->kind() != HeaderKind::Closure);
-    assert(!isObjectKind(h->kind()) ||
-           !h->obj_.getAttribute(ObjectData::HasNativeData));
+    assert(!isObjectKind(h->kind()) || !hasNativeData(h));
     work_.push_back(h);
     max_worklist_ = std::max(max_worklist_, work_.size());
   }
 
+  BigHeap& heap_;
   Counter allocd_, marked_, pinned_, unknown_; // bytes
   Counter cscanned_roots_, cscanned_; // bytes
   Counter xscanned_roots_, xscanned_; // bytes
   size_t init_ns_, initfree_ns_, roots_ns_, mark_ns_, sweep_ns_;
   size_t max_worklist_{0}; // max size of work_
   size_t freed_bytes_{0};
-  PtrMap ptrs_;
+  PtrMap<const HeapObject*> ptrs_;
   type_scan::Scanner type_scanner_;
-  std::vector<const Header*> work_;
+  std::vector<const HeapObject*> work_;
 };
 
-// mark the object at p, return true if first time.
-inline bool Marker::mark(const void* p, GCBits marks) {
-  assert(p && ptrs_.isHeader(p));
-  auto h = static_cast<const Header*>(p);
-  assert(h->kind() <= HeaderKind::BigMalloc &&
-         h->kind() != HeaderKind::AsyncFuncWH);
-  return h->hdr_.mark(marks) == GCBits::Unmarked;
+HdrBlock Marker::find(const void* ptr) {
+  if (auto r = ptrs_.region(ptr)) {
+    auto h = const_cast<HeapObject*>(r->first);
+    if (h->kind() == HeaderKind::Slab) {
+      return Slab::fromHeader(h)->find(ptr);
+    }
+    if (h->kind() == HeaderKind::BigObj) {
+      auto h2 = static_cast<MallocNode*>(h) + 1;
+      return ptr >= h2 ? HdrBlock{h2, r->second - sizeof(MallocNode)} :
+             HdrBlock{nullptr, 0};
+    }
+    assert(h->kind() == HeaderKind::BigMalloc);
+    return {h, r->second};
+  }
+  return {nullptr, 0};
 }
 
-DEBUG_ONLY bool checkEnqueuedKind(const Header* h) {
+// Mark the object at h, return true if first time. For allocations that
+// contain prefix data followed by an ObjectData, h should point to the
+// start of the whole allocation, not the interior ObjectData.
+inline bool Marker::mark(const HeapObject* h, GCBits marks) {
+  assert(h->kind() <= HeaderKind::BigMalloc);
+  assert(h->kind() != HeaderKind::AsyncFuncWH);
+  assert(h->kind() != HeaderKind::Closure);
+  return h->mark(marks) == GCBits::Unmarked;
+}
+
+DEBUG_ONLY bool checkEnqueuedKind(const HeapObject* h) {
   switch (h->kind()) {
     case HeaderKind::Apc:
     case HeaderKind::Globals:
@@ -126,7 +152,7 @@ DEBUG_ONLY bool checkEnqueuedKind(const Header* h) {
     case HeaderKind::AwaitAllWH:
       // Object kinds. None of these should have native-data, because if they
       // do, the mapped header should be for the NativeData prefix.
-      assert(!h->obj_.getAttribute(ObjectData::HasNativeData));
+      assert(!hasNativeData(h));
       break;
     case HeaderKind::AsyncFuncFrame:
     case HeaderKind::NativeData:
@@ -138,12 +164,14 @@ DEBUG_ONLY bool checkEnqueuedKind(const Header* h) {
       break;
     case HeaderKind::Closure:
     case HeaderKind::AsyncFuncWH:
+      // These header types should not be found during heap or slab iteration
+      // because they are appended to ClosureHdr or AsyncFuncFrame.
     case HeaderKind::BigObj:
+    case HeaderKind::Slab:
     case HeaderKind::Free:
     case HeaderKind::Hole:
-      // None of these kinds should be encountered because they're either not
-      // interesting to begin with, or are mapped to different headers, so we
-      // shouldn't get these from the pointer map.
+      // These header types are not allocated objects; they are handled
+      // earlier and should never be queued on the gc worklist.
       always_assert(false && "bad header kind");
       break;
   }
@@ -151,13 +179,13 @@ DEBUG_ONLY bool checkEnqueuedKind(const Header* h) {
 }
 
 void Marker::checkedEnqueue(const void* p, GCBits bits) {
-  if (auto r = ptrs_.region(p)) {
+  auto r = find(p);
+  if (auto h = r.ptr) {
     // enqueue h the first time. If it's an object with no pointers (eg String),
     // we'll skip it when we process the queue.
-    auto h = r->first;
     if (mark(h, bits)) {
-      marked_ += r->second;
-      pinned_ += bits == GCBits::Pin ? r->second : 0;
+      marked_ += r.size;
+      pinned_ += bits == GCBits::Pin ? r.size : 0;
       enqueue(h);
       assert(checkEnqueuedKind(h));
     }
@@ -208,20 +236,43 @@ NEVER_INLINE void Marker::init() {
   SCOPE_EXIT { init_ns_ = cpu_ns() - t0; };
   MM().initFree();
   initfree_ns_ = cpu_ns() - t0;
-  MM().iterate([&](Header* h, size_t allocSize) {
-    auto kind = h->kind();
-    if (kind == HeaderKind::Free) return; // continue
-    h->hdr_.clearMarks();
-    allocd_ += allocSize;
-    ptrs_.insert(h, allocSize);
-    if ((kind == HeaderKind::SmallMalloc || kind == HeaderKind::BigMalloc) &&
-        !type_scan::isKnownType(h->malloc_.typeIndex())) {
-      // unknown type for a req::malloc'd block. See rationale above.
-      unknown_ += allocSize;
-      h->hdr_.mark(GCBits::Pin);
-      enqueue(h);
+
+  auto init = [&](HeapObject* h, size_t size) {
+    h->clearMarks();
+    allocd_ += size;
+  };
+
+  auto init_unknown = [&](HeapObject* h, size_t size) {
+    // unknown type for a req::malloc'd block. See rationale above.
+    unknown_ += size;
+    h->mark(GCBits::Pin);
+    enqueue(h);
+  };
+
+  heap_.iterate(
+    [&](HeapObject* h, size_t size) { // onBig
+      ptrs_.insert(h, size);
+      if (h->kind() == HeaderKind::BigObj) {
+        init(static_cast<MallocNode*>(h) + 1, size - sizeof(MallocNode));
+      } else {
+        assert(h->kind() == HeaderKind::BigMalloc);
+        init(h, size);
+        if (!type_scan::isKnownType(static_cast<MallocNode*>(h)->typeIndex())) {
+          init_unknown(h, size);
+        }
+      }
+    },
+    [&](HeapObject* h, size_t size) { // onSlab
+      ptrs_.insert(h, size);
+      Slab::fromHeader(h)->initCrossingMap([&](HeapObject* h, size_t size) {
+        init(h, size);
+        if (h->kind() == HeaderKind::SmallMalloc &&
+            !type_scan::isKnownType(static_cast<MallocNode*>(h)->typeIndex())) {
+          init_unknown(h, size);
+        }
+      });
     }
-  });
+  );
   ptrs_.prepare();
 }
 
@@ -259,7 +310,7 @@ NEVER_INLINE void Marker::trace() {
   while (!work_.empty()) {
     auto h = work_.back();
     work_.pop_back();
-    scanHeader(h, type_scanner_);
+    scanHeapObject(h, type_scanner_);
     finish_typescan();
   }
 }
@@ -280,8 +331,8 @@ NEVER_INLINE void Marker::sweep() {
   };
 
   g_context->sweepDynPropTable([&](const ObjectData* obj) {
-    auto h = ptrs_.header(obj);
-    return !h || !marked(h);
+    auto r = find(obj);
+    return !r.ptr || !marked(r.ptr);
   });
 
   mm.sweepApcArrays([&](APCLocalArray* a) {
@@ -294,14 +345,28 @@ NEVER_INLINE void Marker::sweep() {
 
   mm.initFree();
 
-  ptrs_.iterate([&](const Header* hdr, size_t h_size) {
-    if (!marked(hdr) &&
-        hdr->kind() != HeaderKind::Free &&
-        hdr->kind() != HeaderKind::SmallMalloc &&
-        hdr->kind() != HeaderKind::BigMalloc) {
-      mm.objFree(const_cast<Header*>(hdr), h_size);
+  heap_.iterate(
+    [&](HeapObject* big, size_t big_size) { // onBig
+      if (big->kind() == HeaderKind::BigObj) {
+        big = static_cast<MallocNode*>(big) + 1;
+        if (!marked(big)) {
+          mm.freeBigSize(big, big_size - sizeof(MallocNode));
+        }
+      }
+    },
+    [&](HeapObject* big, size_t big_size) { // onSlab
+      auto slab = Slab::fromHeader(big);
+      slab->find_if((HeapObject*)slab->start(),
+        [&](HeapObject* h, size_t h_size) {
+          if (!marked(h) && !isFreeKind(h->kind()) &&
+              h->kind() != HeaderKind::SmallMalloc) {
+            mm.freeSmallSize(h, h_size);
+          }
+          return false;
+        }
+      );
     }
-  });
+  );
 }
 
 thread_local bool t_eager_gc{false};
@@ -388,7 +453,7 @@ void logCollection(const char* phase, const Marker& mkr) {
   StructuredLog::log("hhvm_gc", sample);
 }
 
-void collectImpl(const char* phase) {
+void collectImpl(BigHeap& heap, const char* phase) {
   VMRegAnchor _;
   if (t_eager_gc && RuntimeOption::EvalFilterGCPoints) {
     t_eager_gc = false;
@@ -406,7 +471,7 @@ void collectImpl(const char* phase) {
   if (t_enable_samples) {
     t_pre_stats = MM().getStatsCopy(); // don't check or trigger OOM
   }
-  Marker mkr;
+  Marker mkr(heap);
   mkr.init();
   mkr.traceRoots();
   mkr.trace();
@@ -458,7 +523,7 @@ void MemoryManager::collect(const char* phase) {
   if (empty()) return;
   t_req_age = cpu_ns()/1000 - m_req_start_micros;
   t_trigger = m_nextGc;
-  collectImpl(phase);
+  collectImpl(m_heap, phase);
   updateNextGc();
 }
 

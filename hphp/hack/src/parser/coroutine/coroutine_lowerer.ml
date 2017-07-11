@@ -50,165 +50,113 @@ open Coroutine_type_lowerer
  *      int,
  *    ): CoroutineResult<int>) { ... }
  *)
-let maybe_rewrite_coroutine_annotations node =
-  match syntax node with
-  | ClosureTypeSpecifier ({
-      closure_coroutine = {
-        syntax = Token { EditableToken.kind = TokenKind.Coroutine; _; };
-        _;
-      };
+let rewrite_coroutine_annotation
+    ({
       closure_parameter_types;
       closure_return_type;
       _;
-    } as node) ->
-      Rewriter.Result.Replace (
-        let closure_return_type =
-          CoroutineTypeLowerer.rewrite_return_type closure_return_type in
-        make_syntax (
-          ClosureTypeSpecifier {
-            node with
-              closure_coroutine = make_missing ();
-              closure_parameter_types =
-                prepend_to_comma_delimited_syntax_list
-                  (make_continuation_type_syntax closure_return_type)
-                  closure_parameter_types;
-              closure_return_type =
-                make_coroutine_result_type_syntax closure_return_type;
-          }
-        )
-      )
-  | _ -> Rewriter.Result.Keep
+    } as original_type) =
+  let new_return_type =
+    CoroutineTypeLowerer.rewrite_return_type closure_return_type in
+  let continuation_type = make_continuation_type_syntax new_return_type in
+  let new_parameter_types = prepend_to_comma_delimited_syntax_list
+    continuation_type closure_parameter_types in
+  let coroutine_return_type =
+    make_coroutine_result_type_syntax new_return_type in
+  make_syntax (
+    ClosureTypeSpecifier {
+      original_type with
+        closure_coroutine = make_missing ();
+        closure_parameter_types = new_parameter_types;
+        closure_return_type = coroutine_return_type;
+    }
+  )
 
-(**
- * Returns the transformed method node and the generated closure's syntax.
- *)
-let maybe_generate_methods_and_closure
-    class_node
-    method_node
-    header_node =
-  let rewritten_body, closure_syntax =
+let rewrite_method_or_function
+    classish_name
+    classish_type_parameters
+    original_header_node
+    original_body =
+  let new_header_node = rewrite_header_node original_header_node in
+  let new_body, closure_syntax =
     CoroutineStateMachineGenerator.generate_coroutine_state_machine
-      class_node
-      method_node
-      header_node in
-  Option.map
-    (CoroutineMethodLowerer.maybe_rewrite_methodish_declaration
-      class_node
-      method_node
-      header_node
-      rewritten_body)
-    (* TODO: The rewritten method syntax is a singleton, not a list, and
-    the set of closures generated could be a list, not a singleton. *)
-    (fun rewritten_method_syntax ->
-      [ rewritten_method_syntax ], closure_syntax)
-
-(* A void function becomes a unit function; if the annotation is missing it
-becomes mixed. *)
-let fix_up_header_node ({ function_colon; function_type; _; } as node) =
-  let function_type = rewrite_return_type function_type in
-  let function_colon =
-    if is_missing function_colon then colon_syntax else function_colon in
-  { node with function_type; function_colon }
+      classish_name
+      classish_type_parameters
+      original_body
+      new_header_node in
+  (new_header_node, new_body, closure_syntax)
 
 (**
- * If the provided function header is for a coroutine, rewrites the declaration
+ * If the function declaration is for a coroutine, rewrites the declaration
  * header and the function body into a desugared coroutine implementation.
  * Also extracts the coroutine's closure.
  *)
-let maybe_generate_methods_and_closure_from_header
-    class_node
-    ({ methodish_function_decl_header; _; } as method_node) =
-  match syntax methodish_function_decl_header with
-  | FunctionDeclarationHeader
-    ({ function_coroutine; _; } as header_node)
-    (* TODO: We need to rewrite non-coroutine functions if they contain
-    coroutine lambdas. *)
-    when not (is_missing function_coroutine) ->
-      maybe_generate_methods_and_closure
-        class_node
-        method_node
-        (fix_up_header_node header_node)
-  | _ ->
-      (* Unexpected or malformed input, so we won't transform the coroutine. *)
-      None
-
-(**
- * If the provided methodish declaration is for a coroutine, generates the
- * appropriate methods and state machine for the coroutine.
- *)
-let maybe_generate_methods_and_closure_from_method class_node node =
-  match syntax node with
-  | MethodishDeclaration node ->
-      maybe_generate_methods_and_closure_from_header class_node node
+let maybe_rewrite_classish_body_element
+    classish_name
+    classish_type_parameters
+    classish_body_element_node =
+  match syntax classish_body_element_node with
+  | MethodishDeclaration ({
+      methodish_function_decl_header = {
+        syntax = FunctionDeclarationHeader ({
+          function_coroutine;
+          _;
+        } as header_node);
+        _;
+      };
+      methodish_function_body;
+      _;
+    } as method_node) when not @@ is_missing function_coroutine ->
+      let (new_header_node, new_body, closure_syntax) =
+        rewrite_method_or_function
+          classish_name
+          classish_type_parameters
+          header_node
+          methodish_function_body in
+      let new_method_syntax =
+        CoroutineMethodLowerer.rewrite_methodish_declaration
+          classish_name
+          classish_type_parameters
+          method_node
+          new_header_node
+          new_body in
+      Some (new_method_syntax, closure_syntax)
   | _ ->
       (* Irrelevant input. *)
       None
 
-(**
- * Accumulates node transforms.
- *
- * Transforms method nodes, accumulating all nodes. Accumulates whether at least
- * one node has been transformed.
- *)
-let rewrite_classish_body_element
-    class_node
-    (classish_body_elements_acc, closures_acc, any_rewritten_acc)
-    classish_body_element_node =
-  Option.value_map
-    (maybe_generate_methods_and_closure_from_method
-      class_node
-      classish_body_element_node)
-    ~default:
-      (classish_body_element_node :: classish_body_elements_acc,
-        closures_acc,
-        any_rewritten_acc)
-    ~f:(fun (method_nodes, closure_node) ->
-      method_nodes @ classish_body_elements_acc,
-      closure_node :: closures_acc,
-      true)
+let compute_body_nodes classish_name classish_type_parameters =
+  let gather_rewritten_syntaxes
+      classish_body_element_node
+      (classish_body_elements_acc, closures_acc, any_rewritten_acc) =
+    Option.value_map
+      (maybe_rewrite_classish_body_element
+        classish_name
+        classish_type_parameters
+        classish_body_element_node)
+      ~default:
+        (classish_body_element_node :: classish_body_elements_acc,
+          closures_acc,
+          any_rewritten_acc)
+      ~f:(fun (rewritten_method_syntax, closure_syntax) ->
+          rewritten_method_syntax :: classish_body_elements_acc,
+          closure_syntax :: closures_acc,
+          true) in
+  List.fold_right ~f:gather_rewritten_syntaxes ~init:([], [], false)
 
 (**
  * Rewrites classish body elements. If at least one element is modified, then
  * returns Some with all of the nodes. Otherwise, returns None.
  *)
 let maybe_rewrite_classish_body_elements
-    class_node classish_body_elemenets_node =
-  match syntax classish_body_elemenets_node with
-  | SyntaxList syntax_list ->
-      let rewritten_nodes, closure_nodes, any_rewritten =
-        List.fold
-          ~f:(rewrite_classish_body_element class_node)
-          ~init:([], [], false)
-          syntax_list in
-      if any_rewritten then
-        let rewritten_nodes = List.rev rewritten_nodes in
-        let closure_nodes = List.rev closure_nodes in
-        Some (make_list rewritten_nodes, closure_nodes)
-      else
-        None
-  | _ ->
-      (* Missing, unexpected, or malformed input, so we won't transform the
-         class. *)
-      None
-
-(**
- * Rewrites the elements of the body.
- *)
-let maybe_rewrite_classish_body ({ classish_body; _; } as class_node) =
-  let make_syntax classish_body_node =
-    make_syntax (ClassishBody classish_body_node) in
-  match syntax classish_body with
-  | ClassishBody ({ classish_body_elements; _; } as classish_body_node) ->
-      Option.map
-        (maybe_rewrite_classish_body_elements
-          class_node
-          classish_body_elements)
-        (fun (classish_body_elements, closure_nodes) ->
-          make_syntax { classish_body_node with classish_body_elements; },
-          closure_nodes)
-  | _ ->
-      (* Unexpected or malformed input, so we won't transform the coroutine. *)
-      None
+    classish_name
+    classish_type_parameters
+    classish_body_elements_node =
+  let rewritten_nodes, closure_nodes, any_rewritten =
+    classish_body_elements_node
+      |> syntax_node_to_list
+      |> compute_body_nodes classish_name classish_type_parameters in
+  Option.some_if any_rewritten (make_list rewritten_nodes, closure_nodes)
 
 (**
  * If the class contains at least one coroutine method, then those methods are
@@ -216,16 +164,28 @@ let maybe_rewrite_classish_body ({ classish_body; _; } as class_node) =
  * class is not transformed.
  *)
 let maybe_rewrite_class node =
-  (* TODO: We need to rewrite top-level coroutine methods *)
-  (* TODO: Do we need to rewrite top-level statements that contain coroutine
-  lambdas? *)
-  let make_syntax node = make_syntax (ClassishDeclaration node) in
   match syntax node with
-  | ClassishDeclaration class_node ->
+  | ClassishDeclaration ({
+      classish_body = {
+        syntax = ClassishBody ({
+          classish_body_elements;
+          _;
+        } as classish_body_node);
+        _;
+      };
+      classish_name;
+      classish_type_parameters;
+      _;
+    } as class_node) ->
       Option.map
-        (maybe_rewrite_classish_body class_node)
-        ~f:(fun (classish_body, closure_nodes) ->
-          make_syntax { class_node with classish_body; },
+        (maybe_rewrite_classish_body_elements
+          classish_name classish_type_parameters classish_body_elements)
+        ~f:(fun (classish_body_elements, closure_nodes) ->
+          make_syntax @@ ClassishDeclaration {
+            class_node with classish_body = make_syntax @@ ClassishBody {
+              classish_body_node with classish_body_elements;
+            };
+          },
           closure_nodes)
   | _ ->
       (* Irrelevant input. *)
@@ -263,10 +223,85 @@ let maybe_rewrite_syntax_list node =
       (* Irrelevant input. *)
       Rewriter.Result.Keep
 
+let lower_coroutine_function original_header original_body original_function =
+  let (new_header_node, new_body, closure_syntax) =
+    rewrite_method_or_function
+      global_syntax
+      (make_missing ())
+      original_header
+      original_body in
+  let new_function_syntax =
+    CoroutineMethodLowerer.rewrite_function_declaration
+      original_function
+      new_header_node
+      new_body in
+  (closure_syntax, new_function_syntax)
+
+let lower_coroutine_functions_and_types
+    parents
+    current_node
+    ((closures, lambda_count) as current_acc) =
+  match syntax current_node with
+  | FunctionDeclaration ({
+      function_declaration_header = {
+        syntax = FunctionDeclarationHeader ({
+          function_coroutine;
+          _;
+        } as header_node);
+        _;
+      };
+      function_body;
+      _;
+    } as function_node) when not @@ is_missing function_coroutine ->
+      let (closure_syntax, new_function_syntax) =
+        lower_coroutine_function header_node function_body function_node in
+      ((closure_syntax :: closures, lambda_count),
+        Rewriter.Result.Replace new_function_syntax)
+  | LambdaExpression {
+    lambda_coroutine;
+    _;
+    } when not @@ is_missing lambda_coroutine ->
+     (* TODO: rewrite lambdas *)
+     (current_acc, Rewriter.Result.Keep)
+  | AnonymousFunction {
+    anonymous_coroutine_keyword;
+    _;
+    }  when not @@ is_missing anonymous_coroutine_keyword ->
+     (* TODO: rewrite anonymous functions *)
+     (current_acc, Rewriter.Result.Keep)
+  | MethodishDeclaration {
+      methodish_function_decl_header = {
+          syntax = FunctionDeclarationHeader {
+          function_coroutine;
+          _;
+        };
+        _;
+      };
+      _;
+    } when not @@ is_missing function_coroutine ->
+      (* TODO: deduce class name and parameters from parents *)
+      (* TODO: rewrite methods *)
+      (current_acc, Rewriter.Result.Keep)
+  | ClosureTypeSpecifier ({ closure_coroutine; _; } as type_node)
+    when not @@ is_missing closure_coroutine ->
+      let new_type_node = rewrite_coroutine_annotation type_node in
+      (current_acc, Rewriter.Result.Replace new_type_node)
+  | _ ->
+    (current_acc, Rewriter.Result.Keep)
+
+let append_to_root closures root =
+  match syntax root with
+    | Script { script_declarations } ->
+      let script_declarations = syntax_node_to_list script_declarations in
+      make_script (make_list (script_declarations @ closures))
+    | _ -> failwith "How did we get a root that is not a script?"
+
 let lower_coroutines syntax_tree =
-  syntax_tree
-    |> from_tree
-    |> Rewriter.rewrite_post maybe_rewrite_coroutine_annotations
+  let root = from_tree syntax_tree in
+  let ((closures, _), root) = Rewriter.parented_aggregating_rewrite_post
+    lower_coroutine_functions_and_types root ([], 0) in
+  root
+    |> append_to_root closures
     |> Rewriter.rewrite_post maybe_rewrite_syntax_list
     |> text
     |> SourceText.make

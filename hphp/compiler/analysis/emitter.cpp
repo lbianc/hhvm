@@ -119,6 +119,7 @@
 #include "hphp/runtime/vm/repo.h"
 #include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/as.h"
+#include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/set-array.h"
 #include "hphp/runtime/base/stats.h"
@@ -9832,7 +9833,8 @@ Id EmitterVisitor::emitClass(Emitter& e,
   }
 
   if (!cNode->getAttribute(ClassScope::HasConstructor) &&
-      !cNode->getAttribute(ClassScope::ClassNameConstructor)) {
+      !cNode->getAttribute(ClassScope::ClassNameConstructor) &&
+      !cNode->isStaticUtil()) {
     // cNode does not have a constructor; synthesize 86ctor() so that the class
     // will always have a method that can be called during construction.
     static const StringData* methName = makeStaticString("86ctor");
@@ -11364,6 +11366,9 @@ Unit* hphp_compiler_parse(const char* code, int codeLen, const MD5& md5,
     TypeConstraint tc;
     return nullptr;
   }
+
+  // Do not count memory used during parsing/emitting towards OOM.
+  MemoryManager::SuppressOOM so(MM());
 
   SCOPE_ASSERT_DETAIL("hphp_compiler_parse") { return filename; };
   std::unique_ptr<Unit> unit;

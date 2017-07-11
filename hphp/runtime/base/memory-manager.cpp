@@ -34,6 +34,7 @@
 #include "hphp/util/alloc.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
+#include "hphp/util/ptr-map.h"
 #include "hphp/util/timer.h"
 #include "hphp/util/trace.h"
 
@@ -134,7 +135,7 @@ MemoryManager::MemoryManager() {
 MemoryManager::~MemoryManager() {
   if (debug) {
     // Check that every allocation in heap has been freed before destruction.
-    forEachHeader([&](Header* h, size_t) {
+    forEachHeapObject([&](HeapObject* h, size_t) {
       assert(h->kind() == HeaderKind::Free);
     });
   }
@@ -145,7 +146,7 @@ void MemoryManager::resetRuntimeOptions() {
   if (debug) {
     checkHeap("resetRuntimeOptions");
     // check that every allocation in heap has been freed before reset
-    iterate([&](Header* h, size_t) {
+    iterate([&](HeapObject* h, size_t) {
       assert(h->kind() == HeaderKind::Free);
     });
   }
@@ -462,7 +463,7 @@ const std::array<char*,NumHeaderKinds> header_names = {{
   "Vector", "Map", "Set", "Pair", "ImmVector", "ImmMap", "ImmSet",
   "AsyncFuncFrame", "NativeData", "ClosureHdr",
   "SmallMalloc", "BigMalloc", "BigObj",
-  "Free", "Hole"
+  "Free", "Hole", "Slab"
 }};
 
 // initialize a Hole header in the unused memory between m_front and m_limit
@@ -521,12 +522,12 @@ void MemoryManager::endQuarantine(FreelistArray&& list) {
 // test iterating objects in slabs
 void MemoryManager::checkHeap(const char* phase) {
   size_t bytes=0;
-  std::vector<Header*> hdrs;
-  PtrMap free_blocks, apc_arrays, apc_strings;
+  std::vector<HeapObject*> hdrs;
+  PtrMap<HeapObject*> free_blocks, apc_arrays, apc_strings;
   size_t counts[NumHeaderKinds];
   for (unsigned i=0; i < NumHeaderKinds; i++) counts[i] = 0;
-  forEachHeader([&](Header* h, size_t alloc_size) {
-    hdrs.push_back(&*h);
+  forEachHeapObject([&](HeapObject* h, size_t alloc_size) {
+    hdrs.push_back(h);
     bytes += alloc_size;
     auto kind = h->kind();
     counts[(int)kind]++;
@@ -535,12 +536,15 @@ void MemoryManager::checkHeap(const char* phase) {
         free_blocks.insert(h, alloc_size);
         break;
       case HeaderKind::Apc:
-        if (h->apc_.m_sweep_index != kInvalidSweepIndex) {
+        if (static_cast<APCLocalArray*>(h)->m_sweep_index !=
+            kInvalidSweepIndex) {
           apc_arrays.insert(h, alloc_size);
         }
         break;
       case HeaderKind::String:
-        if (h->str_.isProxy()) apc_strings.insert(h, alloc_size);
+        if (static_cast<StringData*>(h)->isProxy()) {
+          apc_strings.insert(h, alloc_size);
+        }
         break;
       case HeaderKind::Packed:
       case HeaderKind::Mixed:
@@ -572,7 +576,8 @@ void MemoryManager::checkHeap(const char* phase) {
         break;
       case HeaderKind::BigObj:
       case HeaderKind::Hole:
-        assert(false && "forEachHeader skips these kinds");
+      case HeaderKind::Slab:
+        assert(false && "forEachHeapObject skips these kinds");
         break;
     }
   });
@@ -582,7 +587,7 @@ void MemoryManager::checkHeap(const char* phase) {
   size_t num_free_blocks = 0;
   for (auto i = 0; i < kNumSmallSizes; i++) {
     for (auto n = m_freelists[i].head; n; n = n->next) {
-      assert(free_blocks.isHeader(n));
+      assert(free_blocks.isStart(n));
       ++num_free_blocks;
     }
   }
@@ -592,7 +597,7 @@ void MemoryManager::checkHeap(const char* phase) {
   assert(apc_arrays.size() == m_apc_arrays.size());
   apc_arrays.prepare();
   for (UNUSED auto a : m_apc_arrays) {
-    assert(apc_arrays.isHeader(a));
+    assert(apc_arrays.isStart(a));
   }
 
   // check the apc string list
@@ -602,7 +607,7 @@ void MemoryManager::checkHeap(const char* phase) {
     next = n->next;
     UNUSED auto const s = StringData::node2str(n);
     assert(s->isProxy());
-    assert(apc_strings.isHeader(s));
+    assert(apc_strings.isStart(s));
     ++num_apc_strings;
   }
   assert(num_apc_strings == apc_strings.size());
@@ -677,15 +682,19 @@ NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
   }
   requestGC();
   storeTail(m_front, (char*)m_limit - (char*)m_front);
-  auto slab = m_heap.allocSlab(kSlabSize);
-  assert((uintptr_t(slab.ptr) & kSmallSizeAlignMask) == 0);
-  m_stats.mallocDebt += slab.size;
-  m_stats.capacity += slab.size;
+  auto mem = m_heap.allocSlab(kSlabSize);
+  assert((uintptr_t(mem.ptr) & kSmallSizeAlignMask) == 0);
+  m_stats.mallocDebt += mem.size;
+  m_stats.capacity += mem.size;
   m_stats.peakCap = std::max(m_stats.peakCap, m_stats.capacity);
-  m_front = (void*)(uintptr_t(slab.ptr) + nbytes);
-  m_limit = (void*)(uintptr_t(slab.ptr) + slab.size);
-  FTRACE(3, "newSlab: adding slab at {} to limit {}\n", slab.ptr, m_limit);
-  return slab.ptr;
+  auto slab = static_cast<Slab*>(mem.ptr);
+  auto slab_start = slab->init();
+  m_front = (void*)(slab_start + nbytes); // allocate requested object
+  // we can't use any space after slab->end() even if the allocator allows
+  // (indiciated by mem.size), because of the fixed-sized crossing map.
+  m_limit = slab->end();
+  FTRACE(3, "newSlab: adding slab at {} to limit {}\n", slab_start, m_limit);
+  return slab_start;
 }
 
 /*
@@ -784,7 +793,7 @@ MemBlock MemoryManager::mallocBigSize(size_t bytes, HeaderKind kind,
   auto const delta = Mode == FreeRequested ? bytes : block.size;
   m_stats.mmUsage += delta;
   // Adjust jemalloc otherwise we'll double count the direct allocation.
-  m_stats.mallocDebt += delta;
+  m_stats.mallocDebt += block.size + sizeof(MallocNode);
   m_stats.capacity += block.size + sizeof(MallocNode);
   updateBigStats();
   FTRACE(3, "mallocBigSize: {} ({} requested, {} usable)\n",
@@ -822,9 +831,9 @@ void MemoryManager::freeBigSize(void* vp, size_t bytes) {
   // Since we account for these direct allocations in our usage and adjust for
   // them on allocation, we also need to adjust for them negatively on free.
   m_stats.mmUsage -= bytes;
-  m_stats.mallocDebt -= bytes;
   auto actual = static_cast<MallocNode*>(vp)[-1].nbytes;
   assert(bytes <= actual);
+  m_stats.mallocDebt -= actual;
   m_stats.capacity -= actual;
   FTRACE(3, "freeBigSize: {} ({} bytes)\n", vp, bytes);
   m_heap.freeBig(vp);
@@ -1089,11 +1098,13 @@ void BigHeap::flush() {
 MemBlock BigHeap::allocSlab(size_t size) {
 #ifdef USE_JEMALLOC
   void* slab = mallocx(size, 0);
+  auto usable = sallocx(slab, 0);
 #else
   void* slab = safe_malloc(size);
+  auto usable = size;
 #endif
   m_slabs.push_back({slab, size});
-  return {slab, size};
+  return {slab, usable};
 }
 
 void BigHeap::enlist(MallocNode* n, HeaderKind kind,
@@ -1128,7 +1139,7 @@ MemBlock BigHeap::callocBig(size_t nbytes, HeaderKind kind,
   auto const n = static_cast<MallocNode*>(safe_calloc(cap, 1));
 #endif
   enlist(n, kind, cap, tyindex);
-  return {n + 1, nbytes};
+  return {n + 1, cap - sizeof(MallocNode)};
 }
 
 bool BigHeap::contains(void* ptr) const {
@@ -1201,7 +1212,7 @@ void BigHeap::sortBigs() {
  *
  * If that fails, we return nullptr.
  */
-Header* BigHeap::find(const void* p) {
+HeapObject* BigHeap::find(const void* p) {
   sortSlabs();
   auto const slab = std::lower_bound(
     std::begin(m_slabs), std::end(m_slabs), p,
@@ -1220,7 +1231,7 @@ Header* BigHeap::find(const void* p) {
     while (h < slab_end) {
       auto const hdr = reinterpret_cast<HeapObject*>(h);
       auto const size = allocSize(hdr);
-      if (p < h + size) return reinterpret_cast<Header*>(h);
+      if (p < h + size) return hdr;
       h += size;
     }
     // We know `p' is in the slab, so it must belong to one of the headers.
@@ -1237,12 +1248,12 @@ Header* BigHeap::find(const void* p) {
   );
 
   if (big != std::end(m_bigs) && *big <= p) {
-    auto const hdr = reinterpret_cast<Header*>(*big);
+    auto const hdr = reinterpret_cast<HeapObject*>(*big);
     if (hdr->kind() != HeaderKind::BigObj) {
       // `p' is part of the MallocNode.
       return hdr;
     }
-    auto const sub = reinterpret_cast<Header*>(*big + 1);
+    auto const sub = reinterpret_cast<HeapObject*>(*big + 1);
     return p >= sub ? sub : hdr;
   }
   return nullptr;

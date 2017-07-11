@@ -28,11 +28,15 @@ class virtual ['self] endo =
       | Contravariant -> self#on_Contravariant env this
       | Invariant -> self#on_Invariant env this
     method on_NSClass env this = this
+    method on_NSNamespace env this = this
+    method on_NSClassAndNamespace env this = this
     method on_NSFun env this = this
     method on_NSConst env this = this
     method on_ns_kind env this =
       match this with
+      | NSClassAndNamespace -> self#on_NSClassAndNamespace env this
       | NSClass -> self#on_NSClass env this
+      | NSNamespace -> self#on_NSNamespace env this
       | NSFun -> self#on_NSFun env this
       | NSConst -> self#on_NSConst env this
     method on_program env = self#on_list self#on_def env
@@ -214,7 +218,8 @@ class virtual ['self] endo =
           c_body = r9;
           c_namespace = r10;
           c_enum = r11;
-          c_span = r12
+          c_span = r12;
+          c_doc_comment = this.c_doc_comment
         }
     method on_enum_ env this =
       let r0 = self#on_hint env this.e_base in
@@ -492,7 +497,8 @@ class virtual ['self] endo =
           m_ret = r7;
           m_ret_by_ref = r8;
           m_fun_kind = r9;
-          m_span = r10
+          m_span = r10;
+          m_doc_comment = this.m_doc_comment
         }
     method on_typeconst env this =
       let r0 = self#on_bool env this.tconst_abstract in
@@ -572,6 +578,7 @@ class virtual ['self] endo =
       let r9 = self#on_fun_kind env this.f_fun_kind in
       let r10 = self#on_Namespace_env env this.f_namespace in
       let r11 = self#on_Pos_t env this.f_span in
+      let r12 = self#on_bool env this.f_static in
       if  this.f_mode == r0
        && this.f_tparams == r1
        && this.f_constrs == r2
@@ -584,6 +591,7 @@ class virtual ['self] endo =
        && this.f_fun_kind == r9
        && this.f_namespace == r10
        && this.f_span == r11
+       && this.f_static == r12
       then this
       else
         {
@@ -598,7 +606,9 @@ class virtual ['self] endo =
           f_user_attributes = r8;
           f_fun_kind = r9;
           f_namespace = r10;
-          f_span = r11
+          f_span = r11;
+          f_doc_comment = this.f_doc_comment;
+          f_static = r12;
         }
     method on_FSync env this = this
     method on_FAsync env this = this
@@ -890,7 +900,7 @@ class virtual ['self] endo =
       else Array_get (r0, r1)
     method on_Class_get env this c0 c1 =
       let r0 = self#on_id env c0 in
-      let r1 = self#on_pstring env c1 in if c0 == r0 && c1 == r1
+      let r1 = self#on_expr env c1 in if c0 == r0 && c1 == r1
       then this
       else Class_get (r0, r1)
     method on_Class_const env this c0 c1 =

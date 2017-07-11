@@ -139,7 +139,6 @@ module WithToken(Token: TokenType) = struct
       | SafeMemberSelectionExpression     _ -> SyntaxKind.SafeMemberSelectionExpression
       | EmbeddedMemberSelectionExpression _ -> SyntaxKind.EmbeddedMemberSelectionExpression
       | YieldExpression                   _ -> SyntaxKind.YieldExpression
-      | PrintExpression                   _ -> SyntaxKind.PrintExpression
       | PrefixUnaryExpression             _ -> SyntaxKind.PrefixUnaryExpression
       | PostfixUnaryExpression            _ -> SyntaxKind.PostfixUnaryExpression
       | BinaryExpression                  _ -> SyntaxKind.BinaryExpression
@@ -299,7 +298,6 @@ module WithToken(Token: TokenType) = struct
     let is_safe_member_selection_expression     = has_kind SyntaxKind.SafeMemberSelectionExpression
     let is_embedded_member_selection_expression = has_kind SyntaxKind.EmbeddedMemberSelectionExpression
     let is_yield_expression                     = has_kind SyntaxKind.YieldExpression
-    let is_print_expression                     = has_kind SyntaxKind.PrintExpression
     let is_prefix_unary_expression              = has_kind SyntaxKind.PrefixUnaryExpression
     let is_postfix_unary_expression             = has_kind SyntaxKind.PostfixUnaryExpression
     let is_binary_expression                    = has_kind SyntaxKind.BinaryExpression
@@ -1210,6 +1208,7 @@ module WithToken(Token: TokenType) = struct
     )
 
     let get_anonymous_function_children {
+      anonymous_static_keyword;
       anonymous_async_keyword;
       anonymous_coroutine_keyword;
       anonymous_function_keyword;
@@ -1221,6 +1220,7 @@ module WithToken(Token: TokenType) = struct
       anonymous_use;
       anonymous_body;
     } = (
+      anonymous_static_keyword,
       anonymous_async_keyword,
       anonymous_coroutine_keyword,
       anonymous_function_keyword,
@@ -1331,14 +1331,6 @@ module WithToken(Token: TokenType) = struct
     } = (
       yield_keyword,
       yield_operand
-    )
-
-    let get_print_expression_children {
-      print_keyword;
-      print_expression;
-    } = (
-      print_keyword,
-      print_expression
     )
 
     let get_prefix_unary_expression_children {
@@ -1779,11 +1771,13 @@ module WithToken(Token: TokenType) = struct
       vector_type_keyword;
       vector_type_left_angle;
       vector_type_type;
+      vector_type_trailing_comma;
       vector_type_right_angle;
     } = (
       vector_type_keyword,
       vector_type_left_angle,
       vector_type_type,
+      vector_type_trailing_comma,
       vector_type_right_angle
     )
 
@@ -1791,11 +1785,13 @@ module WithToken(Token: TokenType) = struct
       keyset_type_keyword;
       keyset_type_left_angle;
       keyset_type_type;
+      keyset_type_trailing_comma;
       keyset_type_right_angle;
     } = (
       keyset_type_keyword,
       keyset_type_left_angle,
       keyset_type_type,
+      keyset_type_trailing_comma,
       keyset_type_right_angle
     )
 
@@ -1815,13 +1811,13 @@ module WithToken(Token: TokenType) = struct
       varray_keyword;
       varray_left_angle;
       varray_type;
-      varray_optional_comma;
+      varray_trailing_comma;
       varray_right_angle;
     } = (
       varray_keyword,
       varray_left_angle,
       varray_type,
-      varray_optional_comma,
+      varray_trailing_comma,
       varray_right_angle
     )
 
@@ -1861,7 +1857,7 @@ module WithToken(Token: TokenType) = struct
       darray_key;
       darray_comma;
       darray_value;
-      darray_optional_comma;
+      darray_trailing_comma;
       darray_right_angle;
     } = (
       darray_keyword,
@@ -1869,7 +1865,7 @@ module WithToken(Token: TokenType) = struct
       darray_key,
       darray_comma,
       darray_value,
-      darray_optional_comma,
+      darray_trailing_comma,
       darray_right_angle
     )
 
@@ -1927,11 +1923,13 @@ module WithToken(Token: TokenType) = struct
       classname_keyword;
       classname_left_angle;
       classname_type;
+      classname_trailing_comma;
       classname_right_angle;
     } = (
       classname_keyword,
       classname_left_angle,
       classname_type,
+      classname_trailing_comma,
       classname_right_angle
     )
 
@@ -2065,6 +2063,8 @@ module WithToken(Token: TokenType) = struct
 
 
 
+    (* The order that the children are returned in should match the order
+       that they appear in the source text *)
     let children node =
       match node.syntax with
       | Missing -> []
@@ -2807,6 +2807,7 @@ module WithToken(Token: TokenType) = struct
         simple_initializer_value;
       ]
       | AnonymousFunction {
+        anonymous_static_keyword;
         anonymous_async_keyword;
         anonymous_coroutine_keyword;
         anonymous_function_keyword;
@@ -2818,6 +2819,7 @@ module WithToken(Token: TokenType) = struct
         anonymous_use;
         anonymous_body;
       } -> [
+        anonymous_static_keyword;
         anonymous_async_keyword;
         anonymous_coroutine_keyword;
         anonymous_function_keyword;
@@ -2919,13 +2921,6 @@ module WithToken(Token: TokenType) = struct
       } -> [
         yield_keyword;
         yield_operand;
-      ]
-      | PrintExpression {
-        print_keyword;
-        print_expression;
-      } -> [
-        print_keyword;
-        print_expression;
       ]
       | PrefixUnaryExpression {
         prefix_unary_operator;
@@ -3325,22 +3320,26 @@ module WithToken(Token: TokenType) = struct
         vector_type_keyword;
         vector_type_left_angle;
         vector_type_type;
+        vector_type_trailing_comma;
         vector_type_right_angle;
       } -> [
         vector_type_keyword;
         vector_type_left_angle;
         vector_type_type;
+        vector_type_trailing_comma;
         vector_type_right_angle;
       ]
       | KeysetTypeSpecifier {
         keyset_type_keyword;
         keyset_type_left_angle;
         keyset_type_type;
+        keyset_type_trailing_comma;
         keyset_type_right_angle;
       } -> [
         keyset_type_keyword;
         keyset_type_left_angle;
         keyset_type_type;
+        keyset_type_trailing_comma;
         keyset_type_right_angle;
       ]
       | TupleTypeExplicitSpecifier {
@@ -3358,13 +3357,13 @@ module WithToken(Token: TokenType) = struct
         varray_keyword;
         varray_left_angle;
         varray_type;
-        varray_optional_comma;
+        varray_trailing_comma;
         varray_right_angle;
       } -> [
         varray_keyword;
         varray_left_angle;
         varray_type;
-        varray_optional_comma;
+        varray_trailing_comma;
         varray_right_angle;
       ]
       | VectorArrayTypeSpecifier {
@@ -3400,7 +3399,7 @@ module WithToken(Token: TokenType) = struct
         darray_key;
         darray_comma;
         darray_value;
-        darray_optional_comma;
+        darray_trailing_comma;
         darray_right_angle;
       } -> [
         darray_keyword;
@@ -3408,7 +3407,7 @@ module WithToken(Token: TokenType) = struct
         darray_key;
         darray_comma;
         darray_value;
-        darray_optional_comma;
+        darray_trailing_comma;
         darray_right_angle;
       ]
       | MapArrayTypeSpecifier {
@@ -3462,11 +3461,13 @@ module WithToken(Token: TokenType) = struct
         classname_keyword;
         classname_left_angle;
         classname_type;
+        classname_trailing_comma;
         classname_right_angle;
       } -> [
         classname_keyword;
         classname_left_angle;
         classname_type;
+        classname_trailing_comma;
         classname_right_angle;
       ]
       | FieldSpecifier {
@@ -4328,6 +4329,7 @@ module WithToken(Token: TokenType) = struct
         "simple_initializer_value";
       ]
       | AnonymousFunction {
+        anonymous_static_keyword;
         anonymous_async_keyword;
         anonymous_coroutine_keyword;
         anonymous_function_keyword;
@@ -4339,6 +4341,7 @@ module WithToken(Token: TokenType) = struct
         anonymous_use;
         anonymous_body;
       } -> [
+        "anonymous_static_keyword";
         "anonymous_async_keyword";
         "anonymous_coroutine_keyword";
         "anonymous_function_keyword";
@@ -4440,13 +4443,6 @@ module WithToken(Token: TokenType) = struct
       } -> [
         "yield_keyword";
         "yield_operand";
-      ]
-      | PrintExpression {
-        print_keyword;
-        print_expression;
-      } -> [
-        "print_keyword";
-        "print_expression";
       ]
       | PrefixUnaryExpression {
         prefix_unary_operator;
@@ -4846,22 +4842,26 @@ module WithToken(Token: TokenType) = struct
         vector_type_keyword;
         vector_type_left_angle;
         vector_type_type;
+        vector_type_trailing_comma;
         vector_type_right_angle;
       } -> [
         "vector_type_keyword";
         "vector_type_left_angle";
         "vector_type_type";
+        "vector_type_trailing_comma";
         "vector_type_right_angle";
       ]
       | KeysetTypeSpecifier {
         keyset_type_keyword;
         keyset_type_left_angle;
         keyset_type_type;
+        keyset_type_trailing_comma;
         keyset_type_right_angle;
       } -> [
         "keyset_type_keyword";
         "keyset_type_left_angle";
         "keyset_type_type";
+        "keyset_type_trailing_comma";
         "keyset_type_right_angle";
       ]
       | TupleTypeExplicitSpecifier {
@@ -4879,13 +4879,13 @@ module WithToken(Token: TokenType) = struct
         varray_keyword;
         varray_left_angle;
         varray_type;
-        varray_optional_comma;
+        varray_trailing_comma;
         varray_right_angle;
       } -> [
         "varray_keyword";
         "varray_left_angle";
         "varray_type";
-        "varray_optional_comma";
+        "varray_trailing_comma";
         "varray_right_angle";
       ]
       | VectorArrayTypeSpecifier {
@@ -4921,7 +4921,7 @@ module WithToken(Token: TokenType) = struct
         darray_key;
         darray_comma;
         darray_value;
-        darray_optional_comma;
+        darray_trailing_comma;
         darray_right_angle;
       } -> [
         "darray_keyword";
@@ -4929,7 +4929,7 @@ module WithToken(Token: TokenType) = struct
         "darray_key";
         "darray_comma";
         "darray_value";
-        "darray_optional_comma";
+        "darray_trailing_comma";
         "darray_right_angle";
       ]
       | MapArrayTypeSpecifier {
@@ -4983,11 +4983,13 @@ module WithToken(Token: TokenType) = struct
         classname_keyword;
         classname_left_angle;
         classname_type;
+        classname_trailing_comma;
         classname_right_angle;
       } -> [
         "classname_keyword";
         "classname_left_angle";
         "classname_type";
+        "classname_trailing_comma";
         "classname_right_angle";
       ]
       | FieldSpecifier {
@@ -5973,6 +5975,7 @@ module WithToken(Token: TokenType) = struct
           simple_initializer_value;
         }
       | (SyntaxKind.AnonymousFunction, [
+          anonymous_static_keyword;
           anonymous_async_keyword;
           anonymous_coroutine_keyword;
           anonymous_function_keyword;
@@ -5985,6 +5988,7 @@ module WithToken(Token: TokenType) = struct
           anonymous_body;
         ]) ->
         AnonymousFunction {
+          anonymous_static_keyword;
           anonymous_async_keyword;
           anonymous_coroutine_keyword;
           anonymous_function_keyword;
@@ -6095,14 +6099,6 @@ module WithToken(Token: TokenType) = struct
         YieldExpression {
           yield_keyword;
           yield_operand;
-        }
-      | (SyntaxKind.PrintExpression, [
-          print_keyword;
-          print_expression;
-        ]) ->
-        PrintExpression {
-          print_keyword;
-          print_expression;
         }
       | (SyntaxKind.PrefixUnaryExpression, [
           prefix_unary_operator;
@@ -6542,24 +6538,28 @@ module WithToken(Token: TokenType) = struct
           vector_type_keyword;
           vector_type_left_angle;
           vector_type_type;
+          vector_type_trailing_comma;
           vector_type_right_angle;
         ]) ->
         VectorTypeSpecifier {
           vector_type_keyword;
           vector_type_left_angle;
           vector_type_type;
+          vector_type_trailing_comma;
           vector_type_right_angle;
         }
       | (SyntaxKind.KeysetTypeSpecifier, [
           keyset_type_keyword;
           keyset_type_left_angle;
           keyset_type_type;
+          keyset_type_trailing_comma;
           keyset_type_right_angle;
         ]) ->
         KeysetTypeSpecifier {
           keyset_type_keyword;
           keyset_type_left_angle;
           keyset_type_type;
+          keyset_type_trailing_comma;
           keyset_type_right_angle;
         }
       | (SyntaxKind.TupleTypeExplicitSpecifier, [
@@ -6578,14 +6578,14 @@ module WithToken(Token: TokenType) = struct
           varray_keyword;
           varray_left_angle;
           varray_type;
-          varray_optional_comma;
+          varray_trailing_comma;
           varray_right_angle;
         ]) ->
         VarrayTypeSpecifier {
           varray_keyword;
           varray_left_angle;
           varray_type;
-          varray_optional_comma;
+          varray_trailing_comma;
           varray_right_angle;
         }
       | (SyntaxKind.VectorArrayTypeSpecifier, [
@@ -6624,7 +6624,7 @@ module WithToken(Token: TokenType) = struct
           darray_key;
           darray_comma;
           darray_value;
-          darray_optional_comma;
+          darray_trailing_comma;
           darray_right_angle;
         ]) ->
         DarrayTypeSpecifier {
@@ -6633,7 +6633,7 @@ module WithToken(Token: TokenType) = struct
           darray_key;
           darray_comma;
           darray_value;
-          darray_optional_comma;
+          darray_trailing_comma;
           darray_right_angle;
         }
       | (SyntaxKind.MapArrayTypeSpecifier, [
@@ -6690,12 +6690,14 @@ module WithToken(Token: TokenType) = struct
           classname_keyword;
           classname_left_angle;
           classname_type;
+          classname_trailing_comma;
           classname_right_angle;
         ]) ->
         ClassnameTypeSpecifier {
           classname_keyword;
           classname_left_angle;
           classname_type;
+          classname_trailing_comma;
           classname_right_angle;
         }
       | (SyntaxKind.FieldSpecifier, [
@@ -7747,6 +7749,7 @@ module WithToken(Token: TokenType) = struct
       ]
 
     let make_anonymous_function
+      anonymous_static_keyword
       anonymous_async_keyword
       anonymous_coroutine_keyword
       anonymous_function_keyword
@@ -7759,6 +7762,7 @@ module WithToken(Token: TokenType) = struct
       anonymous_body
     =
       from_children SyntaxKind.AnonymousFunction [
+        anonymous_static_keyword;
         anonymous_async_keyword;
         anonymous_coroutine_keyword;
         anonymous_function_keyword;
@@ -7878,15 +7882,6 @@ module WithToken(Token: TokenType) = struct
       from_children SyntaxKind.YieldExpression [
         yield_keyword;
         yield_operand;
-      ]
-
-    let make_print_expression
-      print_keyword
-      print_expression
-    =
-      from_children SyntaxKind.PrintExpression [
-        print_keyword;
-        print_expression;
       ]
 
     let make_prefix_unary_expression
@@ -8367,12 +8362,14 @@ module WithToken(Token: TokenType) = struct
       vector_type_keyword
       vector_type_left_angle
       vector_type_type
+      vector_type_trailing_comma
       vector_type_right_angle
     =
       from_children SyntaxKind.VectorTypeSpecifier [
         vector_type_keyword;
         vector_type_left_angle;
         vector_type_type;
+        vector_type_trailing_comma;
         vector_type_right_angle;
       ]
 
@@ -8380,12 +8377,14 @@ module WithToken(Token: TokenType) = struct
       keyset_type_keyword
       keyset_type_left_angle
       keyset_type_type
+      keyset_type_trailing_comma
       keyset_type_right_angle
     =
       from_children SyntaxKind.KeysetTypeSpecifier [
         keyset_type_keyword;
         keyset_type_left_angle;
         keyset_type_type;
+        keyset_type_trailing_comma;
         keyset_type_right_angle;
       ]
 
@@ -8406,14 +8405,14 @@ module WithToken(Token: TokenType) = struct
       varray_keyword
       varray_left_angle
       varray_type
-      varray_optional_comma
+      varray_trailing_comma
       varray_right_angle
     =
       from_children SyntaxKind.VarrayTypeSpecifier [
         varray_keyword;
         varray_left_angle;
         varray_type;
-        varray_optional_comma;
+        varray_trailing_comma;
         varray_right_angle;
       ]
 
@@ -8456,7 +8455,7 @@ module WithToken(Token: TokenType) = struct
       darray_key
       darray_comma
       darray_value
-      darray_optional_comma
+      darray_trailing_comma
       darray_right_angle
     =
       from_children SyntaxKind.DarrayTypeSpecifier [
@@ -8465,7 +8464,7 @@ module WithToken(Token: TokenType) = struct
         darray_key;
         darray_comma;
         darray_value;
-        darray_optional_comma;
+        darray_trailing_comma;
         darray_right_angle;
       ]
 
@@ -8526,12 +8525,14 @@ module WithToken(Token: TokenType) = struct
       classname_keyword
       classname_left_angle
       classname_type
+      classname_trailing_comma
       classname_right_angle
     =
       from_children SyntaxKind.ClassnameTypeSpecifier [
         classname_keyword;
         classname_left_angle;
         classname_type;
+        classname_trailing_comma;
         classname_right_angle;
       ]
 
