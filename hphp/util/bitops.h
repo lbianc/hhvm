@@ -68,7 +68,7 @@ inline bool ffs64(I64 input, J64 &out) {
     "cr0"
   );
 #else
-  out = folly::findFirstSet(input)-1;
+  out = folly::findFirstSet(input);
   retval = input != 0;
 #endif
   return retval;

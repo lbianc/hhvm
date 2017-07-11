@@ -41,11 +41,6 @@ void align(CodeBlock& cb, CGMeta* meta,
 
 constexpr size_t cache_line_size() { return 128; }
 
-/*
- * Get the AlignInfo for `alignment'; used by relocation.
- */
-const AlignInfo& alignment_info(Alignment alignment);
-
 ///////////////////////////////////////////////////////////////////////////////
 
 }}}
