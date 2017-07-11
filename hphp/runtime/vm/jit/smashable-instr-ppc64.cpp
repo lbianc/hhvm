@@ -37,6 +37,14 @@ using ppc64_asm::DecodedInstruction;
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// Locks to avoid read/write when smashing instructions
+static folly::MicroSpinLock s_lockMovq;
+static folly::MicroSpinLock s_lockCmpq;
+static folly::MicroSpinLock s_lockCall;
+static folly::MicroSpinLock s_lockJmp;
+static folly::MicroSpinLock s_lockJcc;
+
+///////////////////////////////////////////////////////////////////////////////
 
 #define EMIT_BODY(cb, meta, inst, ...)      \
   ([&] {                                    \
@@ -49,11 +57,13 @@ using ppc64_asm::DecodedInstruction;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
+  folly::MSLGuard g{s_lockMovq};
   return EMIT_BODY(cb, fixups, limmediate, d, imm, ImmType::TocOnly);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
                       PhysReg r, int8_t disp) {
+  folly::MSLGuard g{s_lockCmpq};
   auto const start = cb.frontier();
   fixups.smashableLocations.insert(start);
   Assembler a { cb };
@@ -69,15 +79,18 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target,
     Assembler::CallArg ca) {
+  folly::MSLGuard g{s_lockCall};
   return EMIT_BODY(cb, fixups, call, target, ca);
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
+  folly::MSLGuard g{s_lockJmp};
   return EMIT_BODY(cb, fixups, branchFar, target);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
+  folly::MSLGuard g{s_lockJcc};
   assertx(cc != CC_None);
   return EMIT_BODY(cb, fixups, branchFar, target, cc);
 }
@@ -87,6 +100,7 @@ TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
 ///////////////////////////////////////////////////////////////////////////////
 
 void smashMovq(TCA inst, uint64_t imm) {
+  folly::MSLGuard g{s_lockMovq};
   CodeBlock cb;
 
   const DecodedInstruction di(inst);
@@ -99,6 +113,7 @@ void smashMovq(TCA inst, uint64_t imm) {
 }
 
 void smashCmpq(TCA inst, uint32_t imm) {
+  folly::MSLGuard g{s_lockCmpq};
   CodeBlock cb;
 
   // the first instruction is a vasm ldimml, which is a li32
@@ -111,6 +126,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
 }
 
 void smashCall(TCA inst, TCA target) {
+  folly::MSLGuard g{s_lockCall};
   CodeBlock cb;
 
   const DecodedInstruction di(inst);
@@ -127,6 +143,7 @@ void smashCall(TCA inst, TCA target) {
 }
 
 void smashJmp(TCA inst, TCA target) {
+  folly::MSLGuard g{s_lockJmp};
   CodeBlock cb;
 
   cb.init(inst, smashableJmpLen(), "smashing Jmp");
@@ -139,22 +156,26 @@ void smashJmp(TCA inst, TCA target) {
 }
 
 void smashJcc(TCA inst, TCA target) {
+  folly::MSLGuard g{s_lockJcc};
   Assembler::patchBranch(inst, target);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
+  folly::MSLGuard g{s_lockMovq};
   const DecodedInstruction di(inst);
   return di.immediate();
 }
 
 uint32_t smashableCmpqImm(TCA inst) {
+  folly::MSLGuard g{s_lockCmpq};
   const DecodedInstruction di(inst);
   return static_cast<uint32_t>(di.immediate());
 }
 
 TCA smashableCallTarget(TCA inst) {
+  folly::MSLGuard g{s_lockCall};
   const DecodedInstruction di(inst);
   if (!di.isCall()) return nullptr;
 
@@ -172,14 +193,17 @@ static TCA smashableBranchTarget(TCA inst, bool allowCond) {
 }
 
 TCA smashableJmpTarget(TCA inst) {
+  folly::MSLGuard g{s_lockJmp};
   return smashableBranchTarget(inst, false);
 }
 
 TCA smashableJccTarget(TCA inst) {
+  folly::MSLGuard g{s_lockJcc};
   return smashableBranchTarget(inst, true);
 }
 
 ConditionCode smashableJccCond(TCA inst) {
+  folly::MSLGuard g{s_lockJcc};
   // To analyse the cc, it has to be on the bcctr so we need go backward one
   // instruction.
   uint8_t jccLen = smashableJccLen() - kStdIns;
