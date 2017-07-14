@@ -554,7 +554,7 @@ let equiv prog prog' startlabelpairs =
 
    if List.length (hs_of_pc pc) > 10 (* arbitrary limit *)
    then (Semdiff_logging.error ~level:0 ("runaway: " ^ string_of_pc pc);
-         failwith "Runaway handlerstack")
+         Some (pc, pc', asn, assumed, todo)) (* fail, dump state *)
    else
    let previous_assumptions = lookup_assumption (pc,pc') assumed in
     if AsnSet.exists (fun assasn -> entails_asns asn assasn)
@@ -615,11 +615,13 @@ let equiv prog prog' startlabelpairs =
                | [],[] -> (Log.debug "unwind not in handler"; try_specials ())
                                                (* unwind not in handler! should be hard failure? *)
                | [Fault_handler _h], [Fault_handler _h'] -> donext assumed todo (* both jump out *)
-               | (Fault_handler _h :: nexthandler :: hs),
-                 (Fault_handler _h' :: nexthandler' :: hs') ->
-                  let dest = ip_of_emv nexthandler in
-                  let dest' = ip_of_emv nexthandler' in
-                  check (nexthandler :: hs, dest) (nexthandler' :: hs', dest') asn
+               | (Fault_handler _h :: Fault_handler next :: hs),
+                 (Fault_handler _h' :: Fault_handler next' :: hs') ->
+                 check (Fault_handler next :: hs, next) (Fault_handler next' :: hs', next') asn
+                       (add_assumption (pc,pc') asn assumed) todo
+               | (Fault_handler _h :: Catch_handler next :: _hs),
+                 (Fault_handler _h' :: Catch_handler next' :: _hs') ->
+                  check ([Catch_handler next] , next) ([Catch_handler next'], next') asn
                         (add_assumption (pc,pc') asn assumed) todo
                | _, _ -> try_specials ())
         | IContFlow Throw, IContFlow Throw ->
@@ -985,6 +987,18 @@ and specials pc pc' ((props,vs,vs') as asn) assumed todo =
                 | Some new_asn2 -> continuation new_asn2)
               | _,_ -> failwith "vget cget can't happen") in
 
+        let vget_retv_pattern =
+          vget_unnamed_pattern $$ uRetV $> (fun (n,_) -> n) in
+        let two_vget_retv_pattern = vget_retv_pattern $*$ vget_retv_pattern in
+        let two_vget_retv_pattern_action =
+          two_vget_retv_pattern $>>
+         (fun (n,n') (_,_) ->
+           match reads asn (Local.Unnamed n) (Local.Unnamed n') with
+            | None -> Some(pc,pc',asn,assumed,todo)
+            | Some _new_asn ->
+               donext (add_assumption (pc,pc') asn assumed) todo
+         ) in
+
         (* last, failure, case for use in bigmatch *)
         let failure_pattern_action =
          parse_any $>> (fun _ _ -> Some (pc, pc', asn, assumed, todo)) in
@@ -999,6 +1013,7 @@ and specials pc pc' ((props,vs,vs') as asn) assumed todo =
           two_cugetl_list_createcl_action;
           two_vget_base_action;
           two_vget_cget_bind_action;
+          two_vget_retv_pattern_action;
           failure_pattern_action;
          ] in
         bigmatch_action ((prog_array, ip_of_pc pc),(prog_array', ip_of_pc pc'))

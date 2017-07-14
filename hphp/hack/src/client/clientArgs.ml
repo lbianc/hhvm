@@ -68,6 +68,7 @@ let parse_check_args cmd =
   let output_json = ref false in
   let retry_if_init = ref true in
   let no_load = ref false in
+  let profile_log = ref false in
   let timeout = ref None in
   let autostart = ref true in
   let force_dormant_start = ref false in
@@ -282,6 +283,9 @@ let parse_check_args cmd =
     "--logname",
       Arg.Set logname,
       " (mode) show log filename and exit\n";
+    "--infer-return-type",
+      Arg.String (fun s -> set_mode (MODE_INFER_RETURN_TYPE s) ()),
+       " (mode) infers return type of given function or method\n";
     (* Create a checkpoint which can be used to retrieve changed files later *)
     "--create-checkpoint",
       Arg.String (fun x -> set_mode (MODE_CREATE_CHECKPOINT x) ()),
@@ -329,6 +333,9 @@ let parse_check_args cmd =
     "--no-load",
       Arg.Set no_load,
       " start from a fresh state";
+    "--profile-log",
+      Arg.Set profile_log,
+      " enable profile logging";
     Common_argspecs.from from;
     "--timeout",
       Arg.Float (fun x -> timeout := Some (Unix.time() +. x)),
@@ -401,6 +408,7 @@ let parse_check_args cmd =
     autostart = !autostart;
     force_dormant_start = !force_dormant_start;
     no_load = !no_load;
+    profile_log = !profile_log;
     ai_mode = !ai_mode;
   }
 
@@ -412,6 +420,7 @@ let parse_start_env command =
       WWW-ROOT is assumed to be current directory if unspecified\n"
       Sys.argv.(0) command (String.capitalize_ascii command) in
   let no_load = ref false in
+  let profile_log = ref false in
   let ai_mode = ref None in
   let wait_deprecation_msg () = Printf.eprintf
     "WARNING: --wait is deprecated, does nothing, and will be going away \
@@ -421,6 +430,8 @@ let parse_start_env command =
     " this flag is deprecated and does nothing!";
     "--no-load", Arg.Set no_load,
     " start from a fresh state";
+    "--profile-log", Arg.Set profile_log,
+    " enable profile logging";
     "--ai", Arg.String (fun x -> ai_mode := Some x),
     "  run ai with options ";
   ] in
@@ -436,6 +447,7 @@ let parse_start_env command =
   { ClientStart.
     root = root;
     no_load = !no_load;
+    profile_log = !profile_log;
     ai_mode = !ai_mode;
     silent = false;
     exit_on_failure = true;
@@ -582,12 +594,16 @@ let parse_lsp_args () =
     [experimental] runs a persistent language service\n"
     Sys.argv.(0) in
   let from = ref "" in
+  let use_ffp_autocomplete = ref false in
   let options = [
     Common_argspecs.from from;
+    "--ffp-autocomplete",
+    Arg.Set use_ffp_autocomplete,
+    " [experimental] (mode) use the full-fidelity parser based autocomplete ";
   ] in
   let args = parse_without_command options usage "lsp" in
   match args with
-  | [] -> CLsp { ClientLsp.from = !from }
+  | [] -> CLsp { ClientLsp.from = !from; ClientLsp.use_ffp_autocomplete = !use_ffp_autocomplete }
   | _ -> Printf.printf "%s\n" usage; exit 2
 
 let parse_debug_args () =

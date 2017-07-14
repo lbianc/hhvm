@@ -5512,18 +5512,24 @@ OPTBLD_INLINE void iopVerifyParamType(local_var param) {
   bool useStrictTypes =
     func->unit()->isHHFile() || RuntimeOption::EnableHipHopSyntax ||
     !vmfp()->useWeakTypes();
+  if (UNLIKELY(!RuntimeOption::EvalCheckThisTypeHints && tc.isThis())) {
+    return;
+  }
   if (!tc.isTypeVar() && !tc.isTypeConstant()) {
     tc.verifyParam(param.ptr, func, param.index, useStrictTypes);
   }
 }
 
 OPTBLD_INLINE void implVerifyRetType() {
-  if (LIKELY(!RuntimeOption::EvalCheckReturnTypeHints)) {
+  if (UNLIKELY(!RuntimeOption::EvalCheckReturnTypeHints)) {
     return;
   }
 
   const auto func = vmfp()->m_func;
   const auto tc = func->returnTypeConstraint();
+  if (UNLIKELY(!RuntimeOption::EvalCheckThisTypeHints && tc.isThis())) {
+    return;
+  }
   bool useStrictTypes = func->unit()->useStrictTypes();
   if (!tc.isTypeVar() && !tc.isTypeConstant()) {
     tc.verifyReturn(vmStack().topTV(), func, useStrictTypes);
@@ -6215,14 +6221,19 @@ OPTBLD_INLINE void iopIncStat(intva_t counter, intva_t value) {
 
 OPTBLD_INLINE void iopOODeclExists(OODeclExistsOp subop) {
   TypedValue* aloadTV = vmStack().topTV();
-  tvCastToBooleanInPlace(aloadTV);
-  assert(aloadTV->m_type == KindOfBoolean);
+  if (aloadTV->m_type != KindOfBoolean) {
+    raise_error("OODeclExists: Expected Bool on top of stack, got %s",
+          tname(aloadTV->m_type).c_str());
+  }
+
   bool autoload = aloadTV->m_data.num;
   vmStack().popX();
 
   TypedValue* name = vmStack().topTV();
-  tvCastToStringInPlace(name);
-  assert(isStringType(name->m_type));
+  if (!isStringType(name->m_type)) {
+    raise_error("OODeclExists: Expected String on stack, got %s",
+          tname(aloadTV->m_type).c_str());
+  }
 
   ClassKind kind;
   switch (subop) {

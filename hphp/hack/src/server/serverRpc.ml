@@ -121,6 +121,12 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         let content = File_content.edit_file_unsafe fc edits in
         let completions = ServerAutoComplete.auto_complete env.tcopt content in
         env, { AutocompleteService.completions; char_at_pos; }
+    | IDE_FFP_AUTOCOMPLETE (path, pos) ->
+        let open Ide_api_types in
+        let content = ServerFileSync.get_file_content (ServerUtils.FileName path) in
+        (* TODO: Change autocomplete service to accept the ide type position instead
+          of an int tuple *)
+        env, FfpAutocompleteService.auto_complete content (pos.line, pos.column)
     | DISCONNECT ->
         ServerFileSync.clear_sync_data env, ()
     | SUBSCRIBE_DIAGNOSTIC id ->
@@ -141,3 +147,9 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
       FileOutline.outline env.popt
     | IDE_IDLE ->
       {env with ide_idle = true;}, ()
+    | INFER_RETURN_TYPE id_info ->
+      match id_info with
+      | ServerInferReturnType.Function fun_name ->
+        env, ServerInferReturnType.get_fun_return_ty env.popt fun_name
+      | ServerInferReturnType.Method (class_name, meth_name) ->
+        env, ServerInferReturnType.get_meth_return_ty env.popt class_name meth_name

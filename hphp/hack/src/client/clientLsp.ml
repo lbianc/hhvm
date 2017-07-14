@@ -14,6 +14,12 @@ open Lsp_fmt
 
 (* All hack-specific code relating to LSP goes in here. *)
 
+(* The environment for hh_client with LSP *)
+type env = {
+  from: string; (* The source where the client was spawned from, i.e. nuclide, vim, emacs, etc. *)
+  use_ffp_autocomplete: bool; (* Flag to turn on the (experimental) FFP based autocomplete *)
+}
+
 (************************************************************************)
 (** Conversions - ad-hoc ones written as needed them, not systematic   **)
 (************************************************************************)
@@ -297,7 +303,7 @@ let respond
     (outchan: out_channel)
     (c: ClientMessageQueue.client_message)
     (json: Hh_json.json)
-  : unit =
+  : Hh_json.json option =
   let open ClientMessageQueue in
   let open Hh_json in
   let is_error = (Jget.val_opt (Some json) "code" <> None) in
@@ -309,7 +315,8 @@ let respond
       (if is_error then ["error", json] else ["result", json])
   )
   in
-  response |> Hh_json.json_to_string |> Http_lite.write_message outchan
+  response |> Hh_json.json_to_string |> Http_lite.write_message outchan;
+  Some response
 
 (* notify: produces a Notify message *)
 let notify (outchan: out_channel) (method_: string) (json: Hh_json.json)
@@ -511,7 +518,7 @@ let respond_to_error (event: event option) (e: exn) (stack: string): unit =
   match event with
   | Some (Client_message c)
     when c.ClientMessageQueue.kind = ClientMessageQueue.Request ->
-    print_error e stack |> respond stdout c;
+    print_error e stack |> respond stdout c |> ignore
   | _ -> ()
 
 
@@ -588,7 +595,40 @@ let do_definition (conn: server_conn) (params: Definition.params)
   in
   hack_to_lsp results
 
-let do_completion (conn: server_conn) (params: Completion.params)
+let do_completion_ffp (conn: server_conn) (params: Completion.params) : Completion.result =
+  let open FfpAutocompleteService in
+  let open TextDocumentIdentifier in
+
+  let open Completion in
+  let pos = lsp_position_to_ide params.TextDocumentPositionParams.position in
+  let filename = lsp_uri_to_path params.TextDocumentPositionParams.textDocument.uri in
+  let command = ServerCommandTypes.IDE_FFP_AUTOCOMPLETE (filename, pos) in
+  let result = rpc conn command in
+  let hack_completion_to_lsp (completion: autocomplete_result)
+    : Completion.completionItem =
+    {
+      (* TODO: Actually fill out the rest of these fields *)
+      label = completion.name;
+      kind = None;
+      detail = None;
+      inlineDetail = None;
+      itemType = None;
+      documentation = None;
+      sortText = None;
+      filterText = None;
+      insertText = None;
+      insertTextFormat = PlainText;
+      textEdits = [];
+      command = None;
+      data = None;
+    }
+  in
+  {
+    isIncomplete = false;
+    items = List.map result ~f:hack_completion_to_lsp;
+  }
+
+let do_completion_legacy (conn: server_conn) (params: Completion.params)
   : Completion.result =
   let open TextDocumentIdentifier in
   let open AutocompleteService in
@@ -1062,6 +1102,7 @@ let do_initialize_start
     { ClientStart.
       root;
       no_load = false;
+      profile_log = false;
       ai_mode = None;
       silent = true;
       exit_on_failure = false;
@@ -1090,6 +1131,7 @@ let do_initialize_connect
       expiry = None; (* we can limit retries by time as well as by count *)
       retry_if_init = true; (* not actually used *)
       no_load = false; (* only relevant when autostart=true *)
+      profile_log = false; (* irrelevant *)
       ai_mode = None; (* only relevant when autostart=true *)
       progress_callback = ClientConnect.null_progress_reporter; (* we're fast! *)
       do_post_handoff_handshake = false;
@@ -1268,17 +1310,20 @@ let dismiss_ready_dialog_if_necessary (state: state) (event: event) : state =
 (************************************************************************)
 
 (* handle_event: Process and respond to a message, and update the LSP state
-   machine accordingly. *)
+   machine accordingly. In case the message was a request, it returns the
+   json it responded with, so the caller can log it. *)
 let handle_event
-    (state: state ref)
-    (client: ClientMessageQueue.t)
-    (event: event)
-  : unit =
+    ~(env: env)
+    ~(state: state ref)
+    ~(client: ClientMessageQueue.t)
+    ~(event: event)
+  : Hh_json.json option =
   let open ClientMessageQueue in
   match !state, event with
   (* response *)
   | _, Client_message c when c.kind = ClientMessageQueue.Response ->
-    state := do_response !state c.id c.result c.error
+    state := do_response !state c.id c.result c.error;
+    None
 
   (* exit notification *)
   | _, Client_message c when c.method_ = "exit" ->
@@ -1288,8 +1333,9 @@ let handle_event
   | Pre_init, Client_message c when c.method_ = "initialize" ->
     initialize_params := Some (parse_initialize c.params);
     let (result, new_state) = do_initialize () in
-    print_initialize result |> respond stdout c;
-    state := new_state
+    let response = print_initialize result |> respond stdout c in
+    state := new_state;
+    response
 
   (* any request/notification if we haven't yet initialized *)
   | Pre_init, Client_message _c ->
@@ -1311,16 +1357,19 @@ let handle_event
         raise (Error.RequestCancelled "Server busy")
         (* We deny all other requests. Operation_cancelled is the only *)
         (* error-response that won't produce logs/warnings on most clients. *)
-    end
+    end;
+    None
 
   (* idle tick while waiting for server to complete initialization *)
   | In_init ienv, Tick ->
-    state := In_init (report_progress ienv)
+    state := In_init (report_progress ienv);
+    None
 
   (* server completes initialization *)
   | In_init ienv, Server_hello ->
     do_initialize_after_hello ienv.In_init_env.conn ienv.In_init_env.file_edits;
-    state := report_progress_end ienv
+    state := report_progress_end ienv;
+    None
 
   (* any "hello" from the server when we weren't expecting it. This is so *)
   (* egregious that we can't trust anything more from the server.         *)
@@ -1335,7 +1384,8 @@ let handle_event
     (* then we must let the server know we're idle, so it will be free to     *)
     (* handle command-line requests.                                          *)
     state := Main_loop { menv with needs_idle = false; };
-    rpc menv.conn ServerCommandTypes.IDE_IDLE
+    rpc menv.conn ServerCommandTypes.IDE_IDLE;
+    None
 
   (* textDocument/hover request *)
   | Main_loop menv, Client_message c when c.method_ = "textDocument/hover" ->
@@ -1349,6 +1399,8 @@ let handle_event
 
   (* textDocument/completion request *)
   | Main_loop menv, Client_message c when c.method_ = "textDocument/completion" ->
+    let do_completion =
+      if env.use_ffp_autocomplete then do_completion_ffp else do_completion_legacy in
     cancel_if_stale client c short_timeout;
     parse_completion c.params |> do_completion menv.conn |> print_completion |> respond stdout c
 
@@ -1398,33 +1450,38 @@ let handle_event
 
   (* textDocument/didOpen notification *)
   | Main_loop menv, Client_message c when c.method_ = "textDocument/didOpen" ->
-    parse_didOpen c.params |> do_didOpen menv.conn
+    parse_didOpen c.params |> do_didOpen menv.conn;
+    None
 
   (* textDocument/didClose notification *)
   | Main_loop menv, Client_message c when c.method_ = "textDocument/didClose" ->
-    parse_didClose c.params |> do_didClose menv.conn
+    parse_didClose c.params |> do_didClose menv.conn;
+    None
 
   (* textDocument/didChange notification *)
   | Main_loop menv, Client_message c when c.method_ = "textDocument/didChange" ->
-    parse_didChange c.params |> do_didChange menv.conn
+    parse_didChange c.params |> do_didChange menv.conn;
+    None
 
   (* textDocument/didSave notification *)
   | Main_loop _menv, Client_message c when c.method_ = "textDocument/didSave" ->
-    ()
+    None
 
   (* shutdown request *)
   | Main_loop menv, Client_message c when c.method_ = "shutdown" ->
-    do_shutdown menv.conn |> print_shutdown |> respond stdout c;
-    state := Post_shutdown
+    let response = do_shutdown menv.conn |> print_shutdown |> respond stdout c in
+    state := Post_shutdown;
+    response
 
   (* textDocument/publishDiagnostics notification *)
   | Main_loop menv, Server_message ServerCommandTypes.DIAGNOSTIC (_, errors) ->
     let uris_with_diagnostics = do_diagnostics menv.uris_with_diagnostics errors in
-    state := Main_loop { menv with uris_with_diagnostics; }
+    state := Main_loop { menv with uris_with_diagnostics; };
+    None
 
   (* any server diagnostics that come after we've shut down *)
   | _, Server_message ServerCommandTypes.DIAGNOSTIC _ ->
-    ()
+    None
 
   (* catch-all for client reqs/notifications we haven't yet implemented *)
   | Main_loop _menv, Client_message c ->
@@ -1439,7 +1496,8 @@ let handle_event
   | Main_loop menv, Server_message ServerCommandTypes.NEW_CLIENT_CONNECTED ->
     do_diagnostics_flush menv.uris_with_diagnostics;
     state := dismiss_ready_dialog_if_necessary !state event;
-    state := Lost_server
+    state := Lost_server;
+    None
 
   (* server shut-down request, unexpected *)
   | _, Server_message ServerCommandTypes.NEW_CLIENT_CONNECTED ->
@@ -1453,7 +1511,8 @@ let handle_event
     exit_fail_delay ()
 
   (* idle tick. No-op. *)
-  | _, Tick -> ()
+  | _, Tick ->
+    None
 
   (* client message when we've lost the server *)
   | Lost_server, Client_message _c ->
@@ -1464,11 +1523,6 @@ let handle_event
     let message = "unexpected client message for lost server" in
     let stack = "" in
     raise (Server_fatal_connection_exception { message; stack; })
-
-
-type env = {
-  from: string;
-}
 
 (* main: this is the main loop for processing incoming Lsp client requests,
    and incoming server notifications. Never returns. *)
@@ -1493,17 +1547,22 @@ let main (env: env) : 'a =
       end;
       state := regain_lost_server_if_necessary !state event;
       state := dismiss_ready_dialog_if_necessary !state event;
-      handle_event state client event;
+      let response = handle_event ~env ~state ~client ~event in
       match event with
       | Client_message c -> begin
           let open ClientMessageQueue in
+          let response_for_logging = match response with
+            | None -> ""
+            | Some json -> json |> Hh_json.json_truncate |> Hh_json.json_to_string
+          in
           HackEventLogger.client_lsp_method_handled
             ~root:(get_root ())
             ~method_:(if c.kind = Response then get_outstanding_method_name c.id else c.method_)
             ~kind:(kind_to_string c.kind)
             ~start_queue_t:c.timestamp
             ~start_handle_t
-            ~json:c.message_json_for_logging;
+            ~json:c.message_json_for_logging
+            ~json_response:response_for_logging;
         end
       | _ -> ()
     with

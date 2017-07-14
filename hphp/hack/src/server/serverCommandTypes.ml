@@ -67,11 +67,14 @@ type _ t =
   | CLOSE_FILE : string -> unit t
   | EDIT_FILE : string * (text_edit list) -> unit t
   | IDE_AUTOCOMPLETE : string * position -> AutocompleteService.ide_result t
+  | IDE_FFP_AUTOCOMPLETE : string * position -> FfpAutocompleteService.result t
   | DISCONNECT : unit t
   | SUBSCRIBE_DIAGNOSTIC : int -> unit t
   | UNSUBSCRIBE_DIAGNOSTIC : int -> unit t
   | OUTLINE : string -> FileOutline.outline t
   | IDE_IDLE : unit t
+  | INFER_RETURN_TYPE : ServerInferReturnType.t ->
+      ServerInferReturnType.result t
 
 let is_disconnect_rpc : type a. a t -> bool = function
   | DISCONNECT -> true

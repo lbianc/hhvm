@@ -157,17 +157,6 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang" OR ${CMAKE_CXX_COMPILER_ID} STREQU
       "-param=large-unit-insns=10000"
     )
 
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8 OR
-       CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.8)
-      # FIXME: GCC 4.8+ regressions http://git.io/4r7VCQ
-      list(APPEND GENERAL_OPTIONS
-        "ftrack-macro-expansion=0"
-        "fno-builtin-memcmp"
-      )
-    else()
-       message(FATAL_ERROR "${PROJECT_NAME} requires g++ 4.8 or greater.")
-    endif()
-
     # Fix problem with GCC 4.9, https://kb.isc.org/article/AA-01167
     if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9 OR
        CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL 4.9)

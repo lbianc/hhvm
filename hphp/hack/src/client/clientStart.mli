@@ -11,6 +11,7 @@
 type env = {
   root: Path.t;
   no_load: bool;
+  profile_log : bool;
   silent: bool;
   exit_on_failure: bool;
   ai_mode: string option;

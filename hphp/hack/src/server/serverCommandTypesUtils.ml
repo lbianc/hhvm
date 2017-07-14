@@ -34,11 +34,13 @@ let debug_describe_t : type a. a t -> string = function
   | CLOSE_FILE               _ -> "CLOSE_FILE"
   | EDIT_FILE                _ -> "EDIT_FILE"
   | IDE_AUTOCOMPLETE         _ -> "IDE_AUTOCOMPLETE"
+  | IDE_FFP_AUTOCOMPLETE     _ -> "IDE_FFP_AUTOCOMPLETE"
   | DISCONNECT                 -> "DISCONNECT"
   | SUBSCRIBE_DIAGNOSTIC     _ -> "SUBSCRIBE_DIAGNOSTIC"
   | UNSUBSCRIBE_DIAGNOSTIC   _ -> "UNSUBSCRIBE_DIAGNOSTIC"
   | OUTLINE                  _ -> "OUTLINE"
   | IDE_IDLE                   -> "IDE_IDLE"
+  | INFER_RETURN_TYPE        _ -> "INFER_RETURN_TYPE"
 
 let debug_describe_cmd : type a. a command -> string = function
   | Rpc rpc -> debug_describe_t rpc
