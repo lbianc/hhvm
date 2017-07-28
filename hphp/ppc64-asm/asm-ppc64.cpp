@@ -35,8 +35,18 @@ VMTOC::~VMTOC() {
     std::to_string(m_last_elem_pos));
 }
 
-int64_t VMTOC::pushElem(int64_t elem) {
-  auto offset = allocTOC(elem);
+int64_t VMTOC::pushElem(int64_t elem, bool elemMayChange) {
+  int64_t offset;
+  if(elemMayChange) {
+    offset = allocTOC(elem);
+  }
+  else {
+    auto& map_elem = m_map[elem];
+    if (map_elem) return map_elem;
+    offset = allocTOC(elem);
+    map_elem = offset;
+  }
+
   m_last_elem_pos += 1;
   return offset;
 }
@@ -469,7 +479,7 @@ void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
 #else
       ImmType::AnyFixed
 #endif
-      );
+     ,true);
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
@@ -566,7 +576,8 @@ void Assembler::li32 (const Reg64& rt, int32_t imm32) {
   }
 }
 
-void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
+void Assembler::limmediate(const Reg64& rt, int64_t imm64,
+                           ImmType immt, bool immMayChange) {
   always_assert(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize >= 0 &&
     HPHP::RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
 
@@ -585,7 +596,7 @@ void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
   }
 
   int64_t TOCoffset;
-  TOCoffset = VMTOC::getInstance().pushElem(imm64);
+  TOCoffset = VMTOC::getInstance().pushElem(imm64, immMayChange);
 
   auto const toc_start = frontier();
   if (TOCoffset > INT16_MAX) {
@@ -617,7 +628,8 @@ Label::~Label() {
   }
 }
 
-void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
+void Label::branch(Assembler& a, BranchConditions bc,
+                   LinkReg lr, bool addrMayChange) {
   // Only optimize jump if it'll unlikely going to be patched.
   if (m_address) {
     // if diff is 0, then this is for sure going to be patched.
@@ -653,19 +665,20 @@ void Label::branch(Assembler& a, BranchConditions bc, LinkReg lr) {
     }
   }
   // fallback: use CTR to perform absolute branch up to 64 bits
-  branchFar(a, bc, lr);
+  branchFar(a, bc, lr, ImmType::TocOnly, addrMayChange);
 }
 
 void Label::branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  ImmType immt) {
+                  ImmType immt,
+                  bool immMayChange) {
   // Marking current address for patchAbsolute
   addJump(&a);
 
   // Use reserved function linkage register
   const ssize_t address = ssize_t(m_address);
-  a.limmediate(reg::r12, address, immt);
+  a.limmediate(reg::r12, address, immt, immMayChange);
 
   // When branching to another context, r12 need to keep the target address
   // to correctly set r2 (TOC reference).

@@ -194,11 +194,13 @@ struct Label {
   Label(const Label&) = delete;
   Label& operator=(const Label&) = delete;
 
-  void branch(Assembler& a, BranchConditions bc, LinkReg lr);
+  void branch(Assembler& a, BranchConditions bc,
+              LinkReg lr, bool addrMayChange = false);
   void branchFar(Assembler& a,
                   BranchConditions bc,
                   LinkReg lr,
-                  ImmType immt = ImmType::TocOnly);
+                  ImmType immt = ImmType::TocOnly,
+                  bool immMayChange = false);
   void asm_label(Assembler& a);
 
 private:
@@ -239,7 +241,7 @@ public:
   /*
    * Push a 64 bit element into the stack and return its index.
    */
-  int64_t pushElem(int64_t elem);
+  int64_t pushElem(int64_t elem, bool elemMayChange = false);
 
   /*
    * Get the singleton instance.
@@ -274,6 +276,11 @@ private:
    * Vector position of the last element.
    */
   uint64_t m_last_elem_pos;
+
+  /*
+   * Map used to avoid insertion of duplicates.
+   */
+  std::map<int64_t, uint64_t> m_map;
 
 };
 
@@ -706,15 +713,17 @@ struct Assembler {
 
   void branchAuto(Label& l,
                   BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch) {
-    l.branch(*this, bc, lr);
+                  LinkReg lr = LinkReg::DoNotTouch,
+                  bool addrMayChange = false) {
+    l.branch(*this, bc, lr, addrMayChange);
   }
 
   void branchAuto(CodeAddress c,
                   BranchConditions bc = BranchConditions::Always,
-                  LinkReg lr = LinkReg::DoNotTouch) {
+                  LinkReg lr = LinkReg::DoNotTouch,
+                  bool addrMayChange = false) {
     Label l(c);
-    l.branch(*this, bc, lr);
+    l.branch(*this, bc, lr, addrMayChange);
   }
 
   void branchAuto(CodeAddress c,
@@ -726,29 +735,33 @@ struct Assembler {
   void branchFar(Label& l,
                  BranchConditions bc = BranchConditions::Always,
                  LinkReg lr = LinkReg::DoNotTouch,
-                 ImmType immt = ImmType::TocOnly) {
-    l.branchFar(*this, bc, lr, immt);
+                 ImmType immt = ImmType::TocOnly,
+                 bool immMayChange = false) {
+    l.branchFar(*this, bc, lr, immt, immMayChange);
   }
 
   void branchFar(CodeAddress c,
                  BranchConditions bc = BranchConditions::Always,
                  LinkReg lr = LinkReg::DoNotTouch,
-                 ImmType immt = ImmType::TocOnly) {
+                 ImmType immt = ImmType::TocOnly,
+                 bool immMayChange = false) {
     Label l(c);
-    l.branchFar(*this, bc, lr, immt);
+    l.branchFar(*this, bc, lr, immt, immMayChange);
   }
 
   void branchFar(CodeAddress c,
                  ConditionCode cc,
                  LinkReg lr = LinkReg::DoNotTouch,
-                 ImmType immt = ImmType::TocOnly) {
-    branchFar(c, BranchParams::convertCC(cc), lr, immt);
+                 ImmType immt = ImmType::TocOnly,
+                 bool immMayChange = false) {
+    branchFar(c, BranchParams::convertCC(cc), lr, immt, immMayChange);
   }
 
   void branchFar(CodeAddress c, BranchParams bp,
-                 ImmType immt = ImmType::TocOnly) {
+                 ImmType immt = ImmType::TocOnly,
+                 bool immMayChange = false) {
     LinkReg lr = (bp.savesLR()) ? LinkReg::Save : LinkReg::DoNotTouch;
-    branchFar(c, static_cast<BranchConditions>(bp), lr, immt);
+    branchFar(c, static_cast<BranchConditions>(bp), lr, immt, immMayChange);
   }
 
   // ConditionCode variants
@@ -781,11 +794,11 @@ struct Assembler {
   void call(T& target, CallArg ca = CallArg::Internal) {
     if (CallArg::Internal == ca) {
       // tries best performance possible
-      branchAuto(target, BranchConditions::Always, LinkReg::Save);
+      branchAuto(target, BranchConditions::Always, LinkReg::Save, true);
     } else {
       // branchFar is not only smashable but also it will use r12 so an
       // external branch can correctly set its TOC address appropriately.
-      branchFar(target, BranchConditions::Always, LinkReg::Save);
+      branchFar(target, BranchConditions::Always, LinkReg::Save, ImmType::TocOnly, true);
     }
     callEpilogue(ca);
   }
@@ -803,7 +816,8 @@ struct Assembler {
 
   void limmediate(const Reg64& rt,
                   int64_t imm64,
-                  ImmType immt = ImmType::AnyCompact);
+                  ImmType immt = ImmType::AnyCompact,
+                  bool immMayChange = false);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);

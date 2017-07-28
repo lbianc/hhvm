@@ -48,7 +48,7 @@ using ppc64_asm::DecodedInstruction;
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
                       PhysReg d) {
-  return EMIT_BODY(cb, fixups, limmediate, d, imm, ImmType::TocOnly);
+  return EMIT_BODY(cb, fixups, limmediate, d, imm, ImmType::TocOnly, true);
 }
 
 TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
@@ -59,7 +59,7 @@ TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
 
   // don't use cmpqim because of smashableCmpqImm implementation. A "load 32bits
   // immediate" is mandatory
-  a.limmediate (rfuncln(), imm, ImmType::TocOnly);
+  a.limmediate (rfuncln(), imm, ImmType::TocOnly, true);
   a.lwz  (rAsm, r[disp]); // base + displacement
   a.extsw(rAsm, rAsm);
   a.cmpd (rfuncln(), rAsm);
@@ -72,13 +72,15 @@ TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target,
 }
 
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
-  return EMIT_BODY(cb, fixups, branchFar, target);
+  return EMIT_BODY(cb, fixups, branchFar, target, ppc64_asm::BranchConditions::Always,
+                   ppc64_asm::LinkReg::DoNotTouch, ppc64_asm::ImmType::TocOnly, true);
 }
 
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
   assertx(cc != CC_None);
-  return EMIT_BODY(cb, fixups, branchFar, target, cc);
+  return EMIT_BODY(cb, fixups, branchFar, target, cc, ppc64_asm::LinkReg::DoNotTouch,
+                   ppc64_asm::ImmType::TocOnly, true);
 }
 
 #undef EMIT_BODY

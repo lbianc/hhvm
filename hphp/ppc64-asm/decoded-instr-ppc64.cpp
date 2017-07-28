@@ -141,7 +141,7 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
 #else
       ImmType::AnyFixed
 #endif
-      );
+      , true);
 
     // refresh m_size and other parameters
     decode();
@@ -217,7 +217,7 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target, bool smashable) {
 #else
       ImmType::AnyFixed
 #endif
-      );
+      , smashable);
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {
