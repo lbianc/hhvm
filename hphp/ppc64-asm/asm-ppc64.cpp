@@ -19,33 +19,25 @@
 #include "hphp/ppc64-asm/decoder-ppc64.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/util/trace.h"
+#include <folly/MicroSpinLock.h>
 
 TRACE_SET_MOD(asmppc64);
 
 namespace ppc64_asm {
+
+// Lock to protect TOC when writing.
+static folly::MicroSpinLock s_TOC;
+
+//////////////////////////////////////////////////////////////////////
+
 VMTOC::~VMTOC() {
-  FTRACE(1, "Number of values stored in TOC: {}\n",
+  FTRACE(1, "Number of values if 64bits stored in TOC: {}\n",
     std::to_string(m_last_elem_pos));
 }
 
 int64_t VMTOC::pushElem(int64_t elem) {
-  auto& map_elem = m_map[elem];
-  if (map_elem) return map_elem;
-
-  auto offset = allocTOC(static_cast<int32_t>(elem & 0xffffffff), true);
-  map_elem = offset;
-  allocTOC(static_cast<int32_t>((elem & 0xffffffff00000000) >> 32));
-  m_last_elem_pos += 2;
-  return offset;
-}
-
-int64_t VMTOC::pushElem(int32_t elem) {
-  auto& map_elem = m_map[elem];
-  if (map_elem) return map_elem;
-
   auto offset = allocTOC(elem);
-  map_elem = offset;
-  m_last_elem_pos++;
+  m_last_elem_pos += 1;
   return offset;
 }
 
@@ -70,15 +62,15 @@ int64_t VMTOC::getValue(int64_t index, bool qword) {
   return ret_val;
 }
 
-int64_t VMTOC::allocTOC(int32_t target, bool align) {
-  HPHP::Address addr = m_tocvector->frontier();
-  if (align) {
-    forceAlignment(addr);
-    always_assert(reinterpret_cast<uintptr_t>(addr) % 8 == 0);
-  }
+uint64_t* VMTOC::getAddr(int64_t index) {
+  return reinterpret_cast<uint64_t*>(
+      static_cast<intptr_t>(index) + getPtrVector());
+}
 
-  m_tocvector->assertCanEmit(sizeof(int32_t));
-  m_tocvector->dword(target);
+int64_t VMTOC::allocTOC(int64_t target) {
+  folly::MSLGuard g{s_TOC};
+  HPHP::Address addr = m_tocvector->frontier();
+  m_tocvector->qword(target);
   return addr - (m_tocvector->base() + INT16_MAX + 1);
 }
 
@@ -92,6 +84,7 @@ void VMTOC::setTOCDataBlock(HPHP::DataBlock *db) {
 }
 
 void VMTOC::forceAlignment(HPHP::Address& addr) {
+  folly::MSLGuard g{s_TOC};
   // keep 8-byte alignment
   while (reinterpret_cast<uintptr_t>(addr) % 8 != 0) {
     uint8_t fill_byte = 0xf0;
@@ -591,14 +584,8 @@ void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
     return;
   }
 
-  bool fits32 = fits(imm64, 32);
   int64_t TOCoffset;
-  if (fits32) {
-    TOCoffset = VMTOC::getInstance().pushElem(
-        static_cast<int32_t>(UINT32_MAX & imm64));
-  } else {
-    TOCoffset = VMTOC::getInstance().pushElem(imm64);
-  }
+  TOCoffset = VMTOC::getInstance().pushElem(imm64);
 
   auto const toc_start = frontier();
   if (TOCoffset > INT16_MAX) {
@@ -607,11 +594,9 @@ void Assembler::limmediate(const Reg64& rt, int64_t imm64, ImmType immt) {
     // complement.
     if ((TOCoffset & UINT16_MAX) > INT16_MAX) complement = 1;
     addis(rt, reg::r2, static_cast<int16_t>((TOCoffset >> 16) + complement));
-    if (fits32) lwz(rt, rt[TOCoffset & UINT16_MAX]);
-    else        ld (rt, rt[TOCoffset & UINT16_MAX]);
+    ld (rt, rt[TOCoffset & UINT16_MAX]);
   } else {
-    if (fits32) lwz(rt, reg::r2[TOCoffset]);
-    else        ld (rt, reg::r2[TOCoffset]);
+    ld (rt, reg::r2[TOCoffset]);
   }
   bool toc_may_grow = HPHP::RuntimeOption::EvalJitRelocationSize != 0;
   auto const toc_max_size = (immt == ImmType::AnyFixed) ? kLi64Len

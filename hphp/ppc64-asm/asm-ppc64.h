@@ -242,11 +242,6 @@ public:
   int64_t pushElem(int64_t elem);
 
   /*
-   * Push a 32 bit element into the stack and return its index.
-   */
-  int64_t pushElem(int32_t elem);
-
-  /*
    * Get the singleton instance.
    */
   static VMTOC& getInstance();
@@ -263,8 +258,14 @@ public:
    */
   int64_t getValue(int64_t index, bool qword = false);
 
+  /*
+   * Return the memory address of the index.
+   */
+  uint64_t* getAddr(int64_t index);
+
 private:
-  int64_t allocTOC (int32_t target, bool align = false);
+  //int64_t allocTOC (int32_t target, bool align = false);
+  int64_t allocTOC (int64_t target);
   void forceAlignment(HPHP::Address& addr);
 
   HPHP::DataBlock *m_tocvector;
@@ -274,10 +275,6 @@ private:
    */
   uint64_t m_last_elem_pos;
 
-  /*
-   * Map used to avoid insertion of duplicates.
-   */
-  std::map<int64_t, uint64_t> m_map;
 };
 
 struct Assembler {

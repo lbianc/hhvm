@@ -114,6 +114,11 @@ struct DecodedInstruction {
   // Retrieve the register used by li32 instruction
   HPHP::jit::Reg64 getLi32Reg() const { return getLi64Reg(); }
 
+  // Check if is loading data from TOC
+  bool isLoadingTOC() const;
+
+  uint64_t* decodeTOCAddress() const;
+
 private:
   // Initialize m_dinfo and m_size up to m_max_size
   void decode();
