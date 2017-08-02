@@ -53,9 +53,6 @@ constexpr uint8_t toc_position_on_frame     = 3 * 8;
 // Currently it skips a "nop" or a "ld 2,24(1)"
 constexpr uint8_t call_skip_bytes_for_ret   = 1 * instr_size_in_bytes;
 
-// Allow TOC usage on branches.
-#define USE_TOC_ON_BRANCH
-
 //////////////////////////////////////////////////////////////////////
 
 enum class RegNumber : uint32_t {};
@@ -258,12 +255,17 @@ public:
   /*
    * Return a value previously pushed.
    */
-  int64_t getValue(int64_t index, bool qword = false);
+  int64_t getValue(int64_t index, bool qword = true);
 
   /*
    * Return the memory address of the index.
    */
   uint64_t* getAddr(int64_t index);
+
+  /*
+   * Return TOC index of the element.
+   */
+  int64_t getIndex(uint64_t elem);
 
 private:
   //int64_t allocTOC (int32_t target, bool align = false);
@@ -383,14 +385,8 @@ struct Assembler {
   // TOC emit length: (ld/lwz + nop) or (addis + ld/lwz)
   static const uint8_t kTocLen = instr_size_in_bytes * 2;
 
-  // Compile time switch for using TOC or not on branches
-  static const uint8_t kLimmLen =
-#ifdef USE_TOC_ON_BRANCH
-    kTocLen
-#else
-    kLi64Len
-#endif
-    ;
+  // Define using TOC on branches
+  static const uint8_t kLimmLen = kTocLen;
 
   // Jcc using TOC length: toc/li64 + mtctr + nop + nop + bcctr
   static const uint8_t kJccLen = kLimmLen + instr_size_in_bytes * 4;
@@ -798,7 +794,8 @@ struct Assembler {
     } else {
       // branchFar is not only smashable but also it will use r12 so an
       // external branch can correctly set its TOC address appropriately.
-      branchFar(target, BranchConditions::Always, LinkReg::Save, ImmType::TocOnly, true);
+      branchFar(target, BranchConditions::Always, LinkReg::Save,
+                ImmType::TocOnly, true);
     }
     callEpilogue(ca);
   }
@@ -816,11 +813,15 @@ struct Assembler {
 
   void limmediate(const Reg64& rt,
                   int64_t imm64,
-                  ImmType immt = ImmType::AnyCompact,
+                  ImmType immt = ImmType::TocOnly,
                   bool immMayChange = false);
 
   // Auxiliary for loading a complete 64bits immediate into a register
   void li64(const Reg64& rt, int64_t imm64, bool fixedSize = false);
+
+  // Auxiliary for loading a complete 64bits immediate into a register from TOC
+  void li64TOC (const Reg64& rt, int64_t imm64,
+                ImmType immt, bool immMayChange);
 
   // Auxiliary for loading a 32bits immediate into a register
   void li32 (const Reg64& rt, int32_t imm32);

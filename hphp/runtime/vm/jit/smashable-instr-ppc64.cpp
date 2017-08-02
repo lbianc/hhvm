@@ -90,7 +90,7 @@ TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
 void smashMovq(TCA inst, uint64_t imm) {
   // Smash TOC value
   const DecodedInstruction di(inst);
-  assertx(di.isLoadingTOC());
+  assertx(di.isLoadingTOC() && di.isSmashable(imm));
   uint64_t* imm_address = di.decodeTOCAddress();
   *imm_address = imm;
 }
@@ -98,7 +98,7 @@ void smashMovq(TCA inst, uint64_t imm) {
 void smashCmpq(TCA inst, uint32_t imm) {
   // Smash TOC value
   const DecodedInstruction di(inst);
-  assertx(di.isLoadingTOC());
+  assertx(di.isLoadingTOC() && di.isSmashable(imm));
   uint64_t* imm_address = di.decodeTOCAddress();
   *imm_address = imm;
 }
@@ -106,7 +106,7 @@ void smashCmpq(TCA inst, uint32_t imm) {
 void smashCall(TCA inst, TCA target) {
   // Smash TOC value
   const DecodedInstruction di(inst);
-  assertx(di.isLoadingTOC());
+  assertx(di.isLoadingTOC() && di.isSmashable(reinterpret_cast<uint64_t>(target)));
   uint64_t* imm_address = di.decodeTOCAddress();
   *imm_address = reinterpret_cast<uint64_t>(target);
 }
@@ -114,7 +114,7 @@ void smashCall(TCA inst, TCA target) {
 void smashJmp(TCA inst, TCA target) {
   // Smash TOC value
   const DecodedInstruction di(inst);
-  assertx(di.isLoadingTOC());
+  assertx(di.isLoadingTOC() && di.isSmashable(reinterpret_cast<uint64_t>(target)));
   uint64_t* imm_address = di.decodeTOCAddress();
   if(imm_address) *imm_address = reinterpret_cast<uint64_t>(target);
 }
@@ -122,7 +122,7 @@ void smashJmp(TCA inst, TCA target) {
 void smashJcc(TCA inst, TCA target) {
   // Smash TOC value
   const DecodedInstruction di(inst);
-  assertx(di.isLoadingTOC());
+  assertx(di.isLoadingTOC() && di.isSmashable(reinterpret_cast<uint64_t>(target)));
   uint64_t* imm_address = di.decodeTOCAddress();
   *imm_address = reinterpret_cast<uint64_t>(target);
 }

@@ -104,6 +104,14 @@ void VMTOC::forceAlignment(HPHP::Address& addr) {
   }
 }
 
+int64_t VMTOC::getIndex(uint64_t elem) {
+  auto pos = m_map.find(elem);
+  if (pos != m_map.end()) {
+    return pos->second;
+  }
+  return 0x8000000000000000;
+}
+
 void BranchParams::decodeInstr(const PPC64Instr* const pinstr) {
   const DecoderInfo dinfo = Decoder::GetDecoder().decode(pinstr);
   switch (dinfo.opcode_name()) {
@@ -473,13 +481,7 @@ void Assembler::patchAbsolute(CodeAddress jmp, CodeAddress dest) {
   HPHP::CodeBlock cb;
   cb.init(jmp, Assembler::kLimmLen, "patched bctr");
   Assembler a{ cb };
-  a.limmediate(reg::r12, ssize_t(dest),
-#ifdef USE_TOC_ON_BRANCH
-      ImmType::TocOnly
-#else
-      ImmType::AnyFixed
-#endif
-     ,true);
+  a.limmediate(reg::r12, ssize_t(dest), ImmType::TocOnly, true);
 }
 
 void Assembler::patchBranch(CodeAddress jmp, CodeAddress dest) {
@@ -576,29 +578,11 @@ void Assembler::li32 (const Reg64& rt, int32_t imm32) {
   }
 }
 
-void Assembler::limmediate(const Reg64& rt, int64_t imm64,
-                           ImmType immt, bool immMayChange) {
-  always_assert(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize >= 0 &&
-    HPHP::RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
-
-  auto fits = [](int64_t imm, uint16_t shift_n) {
-     return (static_cast<uint64_t>(imm) >> shift_n) == 0 ? true : false;
-  };
-
-  if (
-#ifndef USE_TOC_ON_BRANCH
-      1 ||
-#endif
-      (fits(imm64, HPHP::RuntimeOption::EvalPPC64MinTOCImmSize)
-      && (immt != ImmType::TocOnly))) {
-    li64(rt, imm64, immt != ImmType::AnyCompact);
-    return;
-  }
-
+void Assembler::li64TOC (const Reg64& rt, int64_t imm64,
+                         ImmType immt, bool immMayChange) {
   int64_t TOCoffset;
   TOCoffset = VMTOC::getInstance().pushElem(imm64, immMayChange);
 
-  auto const toc_start = frontier();
   if (TOCoffset > INT16_MAX) {
     int16_t complement = 0;
     // If last four bytes is still bigger than a signed 16bits, uses as two
@@ -608,14 +592,17 @@ void Assembler::limmediate(const Reg64& rt, int64_t imm64,
     ld (rt, rt[TOCoffset & UINT16_MAX]);
   } else {
     ld (rt, reg::r2[TOCoffset]);
+    emitNop(instr_size_in_bytes);
   }
-  bool toc_may_grow = HPHP::RuntimeOption::EvalJitRelocationSize != 0;
-  auto const toc_max_size = (immt == ImmType::AnyFixed) ? kLi64Len
-    : ((immt == ImmType::TocOnly) || toc_may_grow) ? kTocLen
-    : 0;
-  if (toc_max_size) {
-    emitNop(toc_max_size - (frontier() - toc_start));
-  }
+}
+
+void Assembler::limmediate(const Reg64& rt, int64_t imm64,
+                           ImmType immt, bool immMayChange) {
+  always_assert(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize >= 0 &&
+    HPHP::RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
+
+  if (immt != ImmType::TocOnly) li64(rt, imm64, immt != ImmType::AnyCompact);
+  else li64TOC (rt, imm64, immt, immMayChange);
 }
 
 //////////////////////////////////////////////////////////////////////

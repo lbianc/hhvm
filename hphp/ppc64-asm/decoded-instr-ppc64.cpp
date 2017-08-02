@@ -75,13 +75,7 @@ bool DecodedInstruction::setImmediate(int64_t value) {
   HPHP::CodeCursor cursor { cb, m_ip };
   Assembler a{ cb };
 
-  a.limmediate(getLimmediateReg(), ssize_t(value),
-#ifdef USE_TOC_ON_BRANCH
-      ImmType::TocOnly
-#else
-      ImmType::AnyFixed
-#endif
-      );
+  a.limmediate(getLimmediateReg(), ssize_t(value), ImmType::TocOnly);
 
   // refresh m_imm and other parameters
   decode();
@@ -135,13 +129,7 @@ void DecodedInstruction::widenBranch(uint8_t* target) {
     cb.init(m_ip, block_size, "widenBranch relocation");
     HPHP::CodeCursor cursor { cb, m_ip };
     Assembler a { cb };
-    a.branchFar(target, bp,
-#ifdef USE_TOC_ON_BRANCH
-      ImmType::TocOnly
-#else
-      ImmType::AnyFixed
-#endif
-      , true);
+    a.branchFar(target, bp, ImmType::TocOnly, true);
 
     // refresh m_size and other parameters
     decode();
@@ -212,13 +200,7 @@ bool DecodedInstruction::setFarBranchTarget(uint8_t* target,
   HPHP::CodeBlock cb;
   cb.init(m_ip, block_size, "setFarBranchTarget");
   Assembler a{ cb };
-  a.branchFar(target, bp,
-#ifdef USE_TOC_ON_BRANCH
-      ImmType::TocOnly
-#else
-      ImmType::AnyFixed
-#endif
-      , smashable);
+  a.branchFar(target, bp, ImmType::TocOnly, smashable);
 
   // Check if something was overwritten
   if ((a.frontier() - m_ip) > m_size) {
@@ -299,6 +281,12 @@ void DecodedInstruction::decode() {
   }
 }
 
+int64_t DecodedInstruction::calcIndex (int16_t indexBigTOC, 
+                                       int16_t indexTOC) const {
+  return static_cast<int64_t>(static_cast<int64_t>(indexTOC) +
+static_cast<int64_t>(indexBigTOC << 16));
+}
+
 /*
  * Reads back the immediate when emmited with (without nops) and return the
  * number of bytes read for this immediate decoding.
@@ -307,11 +295,6 @@ uint8_t DecodedInstruction::decodeImm() {
   // Functions that detect if @dinfo is exactly the instructions flavor that
   // our limmediate uses. Also the target register to be modified has to be
   // the same.
-
-  auto calcIndex = [&](int16_t indexBigTOC, int16_t indexTOC) {
-    return static_cast<int64_t>(static_cast<int64_t>(indexTOC) +
-              static_cast<int64_t>(indexBigTOC << 16));
-  };
 
   if (m_dinfo.isLd(true)) {
     m_imm = VMTOC::getInstance().getValue(calcIndex(0, m_dinfo.offsetDS()),
@@ -428,12 +411,7 @@ uint8_t DecodedInstruction::decodeImm() {
 }
 
 uint64_t* DecodedInstruction::decodeTOCAddress() const{
-  auto calcIndex = [&](int16_t indexBigTOC, int16_t indexTOC) {
-    return static_cast<int64_t>(static_cast<int64_t>(indexTOC) +
-              static_cast<int64_t>(indexBigTOC << 16));
-  };
-
-  if (m_dinfo.isLd(true)) {
+ if (m_dinfo.isLd(true)) {
     return VMTOC::getInstance().getAddr(calcIndex(0, m_dinfo.offsetDS()));
   } else if (m_dinfo.isLwz(true)) {
     return VMTOC::getInstance().getAddr(calcIndex(0, m_dinfo.offsetD()));
@@ -450,6 +428,31 @@ uint64_t* DecodedInstruction::decodeTOCAddress() const{
     }
   }
   return 0;
+}
+
+int64_t DecodedInstruction::decodeTOCOffset() const {
+ if (m_dinfo.isLd(true)) {
+    return calcIndex(0, m_dinfo.offsetDS());
+  } else if (m_dinfo.isLwz(true)) {
+    return calcIndex(0, m_dinfo.offsetD());
+  } else if (m_dinfo.isAddis(true)) {
+    auto bigIndexTOC = m_dinfo.offsetD();
+    // Get next instruction
+    auto di = Decoder::GetDecoder().decode(m_ip+4);
+    if (di.isLd()) {
+      return calcIndex(bigIndexTOC, di.offsetDS());
+    } else if (di.isLwz()) {
+      return calcIndex(bigIndexTOC, di.offsetD());
+    }
+  }
+  return 0;
+
+}
+
+bool DecodedInstruction::isSmashable(uint64_t elem) const {
+  auto elemOffset = decodeTOCOffset();
+  auto offset = VMTOC::getInstance().getIndex(elem);
+  return offset!=elemOffset;
 }
 
 bool DecodedInstruction::fitsOnNearBranch(ptrdiff_t diff, bool uncond) const {
