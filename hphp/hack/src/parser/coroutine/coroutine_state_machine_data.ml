@@ -17,10 +17,6 @@ module EditableSyntax = Full_fidelity_editable_syntax
  * Data extracted during the state machine generation step.
  *)
 type t = {
-
-  (**
-   * Variable name -> syntax
-   *)
-  local_variables: EditableSyntax.t SMap.t;
+  properties: string list;
   parameters: EditableSyntax.parameter_declaration list;
 }

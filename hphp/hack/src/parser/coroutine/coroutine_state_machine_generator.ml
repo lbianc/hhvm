@@ -37,6 +37,27 @@ let make_label_declaration_syntax label =
 let make_goto_statement_syntax label =
   CoroutineSyntax.make_goto_statement_syntax (get_label_name label)
 
+(* checks if one of node's parents is a try-block of try-statement
+   NOTE: this function relies on physical identity of nodes being the same *)
+let rec is_in_try_block node parents =
+  match parents with
+  | [] -> false
+  | { syntax = TryStatement { try_compound_statement; _ }; _ } :: _
+      when node == try_compound_statement ->
+    true
+  | x :: xs -> is_in_try_block x xs
+
+(* given a node an a list of its ancestors [p1; p2; p3; ...]
+   checks nodes pairwise (node, p1), (p1, p2), (p2, p3) to make sure that
+   first node in the pair appear in the tail position within a second node*)
+let rec is_in_tail_position node parents =
+  match parents with
+  | [] -> true
+  | { syntax = ParenthesizedExpression {
+        parenthesized_expression_expression = e; _
+      }; _
+    } as n :: xs when node == e -> is_in_tail_position n xs
+  | _ -> false
 
 (*
 Consider a coroutine such as
@@ -113,41 +134,38 @@ let add_missing_return body =
 * Unused parameters are not included.
 * Locals are stripped of their initial $
 * TODO: We could further filter these down to only locals that are used
-        across a suspend.
+        across a suspend. If we do, rename this method, as it will then
+        no longer do what it says on the tin.
+* TODO: Locals used in PHP style constructs like "${x}" are not captured.
 *)
-let gather_locals_and_params node =
+let all_used_locals node =
   let folder acc node =
     match syntax node with
     | Token { EditableToken.kind = TokenKind.Variable; text; _; } ->
-      let text = String_utils.lstrip text "$" in
       (* "$this" is treated as a local, but obviously we don't want to copy
       it in or out. *)
-      if text = "this" then acc else SMap.add text node acc
+      if text = "$this" then acc else SSet.add text acc
     | _ -> acc in
-  Lambda_analyzer.fold_no_lambdas folder SMap.empty node
-
-let make_local name =
-  make_variable_syntax ("$" ^ name)
+  let locals = Lambda_analyzer.fold_no_lambdas folder SSet.empty node in
+  locals (* TODO: Return a list *)
 
 (* $closure->name = $name *)
 let copy_in_syntax variable =
+  let field_name = String_utils.lstrip variable "$" in
   make_assignment_syntax_variable
-    (closure_name_syntax variable)
-    (make_local variable)
+    (closure_name_syntax field_name)
+    (make_variable_syntax variable)
 
 (* $name = $closure->name *)
 let copy_out_syntax variable =
+  let field_name = String_utils.lstrip variable "$" in
   make_assignment_syntax_variable
-    (make_local variable)
-    (closure_name_syntax variable)
+    (make_variable_syntax variable)
+    (closure_name_syntax field_name)
 
-let add_try_finally locals_and_params body =
-  let copy_in = locals_and_params
-    |> SMap.keys (* TODO: Is this sorted? *)
-    |> Core_list.map ~f:copy_in_syntax in
-  let copy_out = locals_and_params
-    |> SMap.keys(* TODO: Is this sorted? *)
-    |> Core_list.map ~f:copy_out_syntax in
+let add_try_finally used_locals body =
+  let copy_in = Core_list.map ~f:copy_in_syntax used_locals in
+  let copy_out = Core_list.map ~f:copy_out_syntax used_locals in
   let copy_out = make_compound_statement_syntax copy_out in
   let copy_in = make_compound_statement_syntax copy_in in
   let try_body = make_compound_statement_syntax [ body ] in
@@ -399,10 +417,11 @@ let rewrite_for next_loop_label node =
  * been used, for earlier garbage collection. This can be done with a list of
  * statements to be executed *after* the rewritten variable.
  *)
-let extract_suspend_statements node next_label =
+let extract_suspend_statements ~parented_by_return_in_tail_position node next_label =
   let rewrite_suspends_and_gather_prefix_code
+      parents
       node
-      (next_label, prefix_statements_acc) =
+      (next_label, has_suspend_in_tail_position, prefix_statements_acc) =
     match syntax node with
     | PrefixUnaryExpression {
         prefix_unary_operator = {
@@ -417,6 +436,22 @@ let extract_suspend_statements node next_label =
           _;
         };
       } ->
+        if parented_by_return_in_tail_position && is_in_tail_position node parents
+        then
+          (* coroutine is in tail position - can call it and pass continuation
+            from the enclosing function *)
+          let function_call_argument_list =
+            prepend_to_comma_delimited_syntax_list
+              continuation_variable_syntax
+              function_call_argument_list in
+          let invoke_coroutine =
+            FunctionCallExpression {
+              function_call_expression with function_call_argument_list
+            } in
+          let invoke_coroutine_syntax = make_syntax invoke_coroutine in
+          (next_label, true, prefix_statements_acc),
+          Rewriter.Result.Replace invoke_coroutine_syntax
+        else
         let update_next_label_syntax = set_next_label_syntax next_label in
 
         let function_call_argument_list =
@@ -492,14 +527,15 @@ let extract_suspend_statements node next_label =
           throw_if_exception_not_null_syntax;
         ] in
 
-        (next_label + 1, prefix_statements_acc @ statements),
+        (next_label + 1, has_suspend_in_tail_position, prefix_statements_acc @ statements),
         Rewriter.Result.Replace coroutine_result_data_variable_syntax
     | _ ->
-        (next_label, prefix_statements_acc), Rewriter.Result.Keep in
-  Rewriter.aggregating_rewrite_post
+        (next_label, has_suspend_in_tail_position, prefix_statements_acc),
+        Rewriter.Result.Keep in
+  Rewriter.parented_aggregating_rewrite_post
     rewrite_suspends_and_gather_prefix_code
     node
-    (next_label, [])
+    (next_label, false, [])
 
 let get_token node =
   match EditableSyntax.get_token node with
@@ -516,8 +552,10 @@ let rec rewrite_if_statement next_label if_stmt =
     $t = suspend x();
     if ($t) a; else b;
   *)
-    let (next_label, prefix_statements), if_condition =
-      extract_suspend_statements if_condition next_label in
+    let (next_label, _, prefix_statements), if_condition =
+      extract_suspend_statements
+        ~parented_by_return_in_tail_position:false
+        if_condition next_label in
     let new_if = make_syntax (IfStatement { if_stmt with if_condition; }) in
     let statements = prefix_statements @ [ new_if ] in
     let statements = make_compound_statement_syntax statements in
@@ -608,8 +646,10 @@ let extract_suspend_statements_and_gather_rewrite_data_for_expressions
   let extract_suspend_statements_and_gather_rewrite_data
       expression
       (next_label, prefix_statements_acc, expressions_acc) =
-    let (next_label, prefix_statements), expression =
-      extract_suspend_statements expression next_label in
+    let (next_label, _, prefix_statements), expression =
+      extract_suspend_statements
+        ~parented_by_return_in_tail_position:false
+        expression next_label in
     next_label,
     prefix_statements @ prefix_statements_acc,
     expression :: expressions_acc in
@@ -643,8 +683,27 @@ let rewrite_suspends node =
     else
       match syntax node with
       | ReturnStatement { return_expression; _; } ->
-          let (next_label, prefix_statements), return_expression =
-            extract_suspend_statements return_expression next_label in
+          let in_tail_position = not (is_in_try_block node ancestors) in
+          let (next_label, has_suspend_in_tail_position, prefix_statements),
+            return_expression =
+            extract_suspend_statements
+              ~parented_by_return_in_tail_position:in_tail_position
+              return_expression next_label in
+          if has_suspend_in_tail_position
+          then
+            (* special case for tail positioned:
+                  return suspend someCoroutine()
+               replace it with
+                  return <rewritten return expression>
+            *)
+            let return_statement =
+              make_return_statement_syntax return_expression in
+            let statements =
+              let statements = prefix_statements @ [return_statement] in
+              make_compound_statement_syntax statements
+            in
+            next_label, Rewriter.Result.Replace statements
+          else
           let return_expression =
             if is_missing return_expression then coroutine_unit_call_syntax
             else return_expression in
@@ -659,8 +718,9 @@ let rewrite_suspends node =
         let (next_label, statements) = rewrite_if_statement next_label node in
         next_label, Rewriter.Result.Replace statements
       | ExpressionStatement ({ expression_statement_expression; _; } as node) ->
-          let (next_label, prefix_statements), expression_statement_expression =
+          let (next_label, _, prefix_statements), expression_statement_expression =
             extract_suspend_statements
+              ~parented_by_return_in_tail_position:false
               expression_statement_expression
               next_label in
           let new_expression_statement =
@@ -671,24 +731,30 @@ let rewrite_suspends node =
           let statements = make_compound_statement_syntax statements in
           next_label, Rewriter.Result.Replace statements
       | SwitchStatement ({ switch_expression; _; } as node) ->
-          let (next_label, prefix_statements), switch_expression =
-            extract_suspend_statements switch_expression next_label in
+          let (next_label, _, prefix_statements), switch_expression =
+            extract_suspend_statements
+              ~parented_by_return_in_tail_position:false
+              switch_expression next_label in
           let new_switch_statement =
             make_syntax (SwitchStatement { node with switch_expression; }) in
           let statements = prefix_statements @ [ new_switch_statement; ] in
           let statements = make_compound_statement_syntax statements in
           next_label, Rewriter.Result.Replace statements
       | ThrowStatement ({ throw_expression; _; } as node) ->
-          let (next_label, prefix_statements), throw_expression =
-            extract_suspend_statements throw_expression next_label in
+          let (next_label, _, prefix_statements), throw_expression =
+            extract_suspend_statements
+              ~parented_by_return_in_tail_position:false
+              throw_expression next_label in
           let new_throw_statement =
             make_syntax (ThrowStatement { node with throw_expression; }) in
           let statements = prefix_statements @ [ new_throw_statement; ] in
           let statements = make_compound_statement_syntax statements in
           next_label, Rewriter.Result.Replace statements
       | ForeachStatement ({ foreach_collection; _; } as node) ->
-          let (next_label, prefix_statements), foreach_collection =
-            extract_suspend_statements foreach_collection next_label in
+          let (next_label, _, prefix_statements), foreach_collection =
+            extract_suspend_statements
+              ~parented_by_return_in_tail_position:false
+              foreach_collection next_label in
           let new_foreach_collection=
             make_syntax (ForeachStatement { node with foreach_collection; }) in
           let statements = prefix_statements @ [ new_foreach_collection; ] in
@@ -808,30 +874,25 @@ let unnest_compound_statements node =
   Rewriter.rewrite_post rewrite node
 
 let lower_body body =
-  let locals_and_params = gather_locals_and_params body in
+  let used_locals = all_used_locals body in
+  let used_locals = SSet.elements used_locals in
   let body = add_missing_return body in
   let (next_loop_label, body) = rewrite_do 0 body in
   let body = rewrite_while body in
   let (next_loop_label, body) = rewrite_for next_loop_label body in
   let (next_loop_label, body) = rewrite_suspends body in
   let body = add_switch (next_loop_label, body) in
-  let body = add_try_finally locals_and_params body in
+  let body = add_try_finally used_locals body in
   let body = unnest_compound_statements body in
-
   let coroutine_result_data_variables =
     next_loop_label
       |> Core_list.range 1
-      |> Core_list.map ~f:make_coroutine_result_data_variable
-      |> SMap.from_keys ~f:make_name_syntax in
-  let locals_and_params =
-    SMap.union locals_and_params coroutine_result_data_variables in
-
-  (body, locals_and_params)
+      |> Core_list.map ~f:make_coroutine_result_data_variable in
+  (body, coroutine_result_data_variables)
 
 let make_closure_lambda_signature
-    classish_name
-    classish_type_parameters
-    ({ function_type; _; } as header_node) =
+    context
+    function_type =
   (*
   ( C_foo_GeneratedClosure $closure,
     mixed $coroutineData,
@@ -839,14 +900,13 @@ let make_closure_lambda_signature
   *)
   make_lambda_signature_syntax
     [
-      make_closure_parameter_syntax
-        classish_name classish_type_parameters header_node;
+      make_closure_parameter_syntax context;
       coroutine_data_parameter_syntax;
       nullable_exception_parameter_syntax;
     ]
     (make_coroutine_result_type_syntax function_type)
 
-let extract_parameter_declarations { function_parameter_list; _; } =
+let extract_parameter_declarations function_parameter_list =
   function_parameter_list
     |> syntax_node_to_list
     |> Core_list.map ~f:syntax
@@ -858,31 +918,39 @@ let extract_parameter_declarations { function_parameter_list; _; } =
       | _ -> failwith "Parameter had unexpected type."
       end
 
-let compute_state_machine_data locals_and_params header_node =
-  let parameters = extract_parameter_declarations header_node in
-  let parameter_names =
-    parameters
-      |> Core_list.map ~f:
-        begin
-        function
-        | {
-            parameter_name =
-              {
-                syntax =
-                  Token { EditableToken.kind = TokenKind.Variable; text; _; };
-                _;
-              };
-            _;
-          } ->
-            text
-        | _ -> failwith "Parameter had unexpected token."
-        end
-      |> SSet.of_list in
-  let local_variables =
-    SMap.filter
-      (fun k _ -> not (SSet.mem ("$" ^ k) parameter_names))
-      locals_and_params in
-  CoroutineStateMachineData.{ local_variables; parameters; }
+let make_outer_param outer_variable =
+  {
+    parameter_attribute = make_missing();
+    parameter_visibility = public_syntax;
+    parameter_type = make_missing();
+    parameter_name = make_variable_syntax outer_variable;
+    parameter_default_value = make_missing();
+  }
+
+let make_outer_params outer_variables =
+  Core_list.map ~f:make_outer_param outer_variables
+
+let compute_state_machine_data
+    (inner_variables, outer_variables, _used_params)
+    coroutine_result_data_variables
+    function_parameter_list =
+  (* TODO: Add a test case for "..." param. *)
+  (* TODO: Right now we get this wrong; the outer variables have to be
+  on the parameters list, and not the properties list.  That means that
+  we'll need to fix up create_closure_invocation to pass in the outer
+  variables. When that happens, fix this code too. *)
+
+  (* TODO: Don't put the outer variables in the property list. *)
+  let properties = SSet.union inner_variables outer_variables in
+  let properties = SSet.elements properties in
+  let properties = properties @ coroutine_result_data_variables in
+
+  let parameters = extract_parameter_declarations function_parameter_list in
+  (* TODO: Add the outer_variables to the params as follows. *)
+  (* let outer_variables = SSet.elements outer_variables in
+  let outer_variable_params = make_outer_params outer_variables in
+  let parameters = outer_variable_params @ parameters in *)
+  CoroutineStateMachineData.{ properties; parameters; }
 
 (**
  * If the provided methodish declaration is for a coroutine, rewrites the
@@ -890,18 +958,22 @@ let compute_state_machine_data locals_and_params header_node =
  * implementation.
  *)
 let generate_coroutine_state_machine
-    classish_name
-    classish_type_parameters
+    context
     original_body
-    header_node =
-  let new_body, locals_and_params = lower_body original_body in
-  let state_machine_data =
-    compute_state_machine_data locals_and_params header_node in
+    function_type
+    function_parameter_list =
+  let new_body, coroutine_result_data_variables =
+    lower_body original_body in
+  let used_locals = Lambda_analyzer.partition_used_locals
+    context.Coroutine_context.parents function_parameter_list original_body in
+  let state_machine_data = compute_state_machine_data
+    used_locals
+    coroutine_result_data_variables
+    function_parameter_list in
   let closure_syntax =
     CoroutineClosureGenerator.generate_coroutine_closure
-      classish_name
-      classish_type_parameters
+      context
       original_body
-      header_node
+      function_type
       state_machine_data in
   new_body, closure_syntax

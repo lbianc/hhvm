@@ -77,11 +77,9 @@ AliasClass pointee(
 
     auto ret = AEmpty;
     sinst->block()->forEachSrc(
-      dstIdx,
-      [&] (const IRInstruction* jmp, const SSATmp* thePtr) {
+      dstIdx, [&](const IRInstruction* /*jmp*/, const SSATmp* thePtr) {
         ret = ret | pointee(thePtr, visited_labels);
-      }
-    );
+      });
     return ret;
   }
 
@@ -1547,6 +1545,10 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CheckStaticLoc:
   case LdStaticLoc:
   case LdClsCns:
+  case LdSubClsCns:
+  case CheckSubClsCns:
+  case LdClsCnsVecLen:
+  case ProfileSubClsCns:
   case CheckCtxThis:
   case CheckFuncStatic:
   case LdARNumParams:

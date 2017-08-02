@@ -37,6 +37,7 @@ namespace HPHP {
 struct APCString;
 struct Array;
 struct String;
+struct APCHandle;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -201,6 +202,12 @@ struct StringData final : MaybeCountable,
   void destructUncounted();
 
   /*
+   * root is the address of the top-level APCHandle which contains this string
+   * register {allocation, root} with APCGCManager
+   */
+  void registerUncountedAllocation(APCHandle* rootAPCHandle);
+
+  /*
    * Reference-counting related.
    */
   ALWAYS_INLINE void decRefAndRelease() {
@@ -289,10 +296,17 @@ struct StringData final : MaybeCountable,
   void checkStack() const;
 
   /*
-   * Access to the string's data as a character array.
+   * Access to the string's data as a null-terminated character array.
    *
-   * Please try to prefer slice() in new code, instead of assuming
-   * this is null terminated.
+   * Please try to prefer slice() in new code.
+   *
+   * The following extensions depend on the null terminator for correctness,
+   * and the lack of implicit copying (not perfect for Strings, but
+   * best-effort):
+   *
+   * - libsodium
+   * - mcrypt
+   * - openssl
    */
   const char* data() const;
 

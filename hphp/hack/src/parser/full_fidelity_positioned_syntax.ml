@@ -516,16 +516,29 @@ module FromMinimal = struct
           ; classish_body_elements
           ; classish_body_right_brace
           }, results
-      | SyntaxKind.TraitUseConflictResolutionItem
-      , (  trait_use_conflict_resolution_item_aliased_name
-        :: trait_use_conflict_resolution_item_aliasing_keyword
-        :: trait_use_conflict_resolution_item_aliasing_name
+      | SyntaxKind.TraitUsePrecedenceItem
+      , (  trait_use_precedence_item_removed_names
+        :: trait_use_precedence_item_keyword
+        :: trait_use_precedence_item_name
         :: results
         ) ->
-          TraitUseConflictResolutionItem
-          { trait_use_conflict_resolution_item_aliasing_name
-          ; trait_use_conflict_resolution_item_aliasing_keyword
-          ; trait_use_conflict_resolution_item_aliased_name
+          TraitUsePrecedenceItem
+          { trait_use_precedence_item_name
+          ; trait_use_precedence_item_keyword
+          ; trait_use_precedence_item_removed_names
+          }, results
+      | SyntaxKind.TraitUseAliasItem
+      , (  trait_use_alias_item_aliased_name
+        :: trait_use_alias_item_visibility
+        :: trait_use_alias_item_keyword
+        :: trait_use_alias_item_aliasing_name
+        :: results
+        ) ->
+          TraitUseAliasItem
+          { trait_use_alias_item_aliasing_name
+          ; trait_use_alias_item_keyword
+          ; trait_use_alias_item_visibility
+          ; trait_use_alias_item_aliased_name
           }, results
       | SyntaxKind.TraitUseConflictResolution
       , (  trait_use_conflict_resolution_right_brace
@@ -1214,6 +1227,17 @@ module FromMinimal = struct
           YieldExpression
           { yield_keyword
           ; yield_operand
+          }, results
+      | SyntaxKind.YieldFromExpression
+      , (  yield_from_operand
+        :: yield_from_from_keyword
+        :: yield_from_yield_keyword
+        :: results
+        ) ->
+          YieldFromExpression
+          { yield_from_yield_keyword
+          ; yield_from_from_keyword
+          ; yield_from_operand
           }, results
       | SyntaxKind.PrefixUnaryExpression
       , (  prefix_unary_operand
@@ -2330,16 +2354,28 @@ module FromMinimal = struct
         let todo = Convert (classish_body_right_brace, todo) in
         let todo = Convert (classish_body_elements, todo) in
         convert offset todo results classish_body_left_brace
-    | { M.syntax = M.TraitUseConflictResolutionItem
-        { M.trait_use_conflict_resolution_item_aliasing_name
-        ; M.trait_use_conflict_resolution_item_aliasing_keyword
-        ; M.trait_use_conflict_resolution_item_aliased_name
+    | { M.syntax = M.TraitUsePrecedenceItem
+        { M.trait_use_precedence_item_name
+        ; M.trait_use_precedence_item_keyword
+        ; M.trait_use_precedence_item_removed_names
         }
       ; _ } as minimal_t ->
         let todo = Build (minimal_t, offset, todo) in
-        let todo = Convert (trait_use_conflict_resolution_item_aliased_name, todo) in
-        let todo = Convert (trait_use_conflict_resolution_item_aliasing_keyword, todo) in
-        convert offset todo results trait_use_conflict_resolution_item_aliasing_name
+        let todo = Convert (trait_use_precedence_item_removed_names, todo) in
+        let todo = Convert (trait_use_precedence_item_keyword, todo) in
+        convert offset todo results trait_use_precedence_item_name
+    | { M.syntax = M.TraitUseAliasItem
+        { M.trait_use_alias_item_aliasing_name
+        ; M.trait_use_alias_item_keyword
+        ; M.trait_use_alias_item_visibility
+        ; M.trait_use_alias_item_aliased_name
+        }
+      ; _ } as minimal_t ->
+        let todo = Build (minimal_t, offset, todo) in
+        let todo = Convert (trait_use_alias_item_aliased_name, todo) in
+        let todo = Convert (trait_use_alias_item_visibility, todo) in
+        let todo = Convert (trait_use_alias_item_keyword, todo) in
+        convert offset todo results trait_use_alias_item_aliasing_name
     | { M.syntax = M.TraitUseConflictResolution
         { M.trait_use_conflict_resolution_keyword
         ; M.trait_use_conflict_resolution_names
@@ -2974,6 +3010,16 @@ module FromMinimal = struct
         let todo = Build (minimal_t, offset, todo) in
         let todo = Convert (yield_operand, todo) in
         convert offset todo results yield_keyword
+    | { M.syntax = M.YieldFromExpression
+        { M.yield_from_yield_keyword
+        ; M.yield_from_from_keyword
+        ; M.yield_from_operand
+        }
+      ; _ } as minimal_t ->
+        let todo = Build (minimal_t, offset, todo) in
+        let todo = Convert (yield_from_operand, todo) in
+        let todo = Convert (yield_from_from_keyword, todo) in
+        convert offset todo results yield_from_yield_keyword
     | { M.syntax = M.PrefixUnaryExpression
         { M.prefix_unary_operator
         ; M.prefix_unary_operand

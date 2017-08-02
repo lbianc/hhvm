@@ -45,7 +45,8 @@ struct Block {
     bc::RetC,
     bc::RetV,
     bc::Unwind,
-    bc::Throw
+    bc::Throw,
+    bc::Fatal
   >;
 
   void emit(bc::Jmp&&) = delete;
@@ -58,6 +59,7 @@ struct Block {
   void emit(bc::RetV&&) = delete;
   void emit(bc::Unwind&&) = delete;
   void emit(bc::Throw&&) = delete;
+  void emit(bc::Fatal&&) = delete;
   void emit(ExitOp&& op) = delete;
 
   void emit(Bytecode&& bc) {
@@ -83,6 +85,11 @@ struct Block {
 std::vector<Block*> serializeControlFlowGraph(Block* entry);
 
 struct Function {
+  struct Param {
+    std::string name;
+    bool byRef;
+  };
+
   explicit Function(Unit* parent,
       const std::string& name);
 
@@ -96,6 +103,7 @@ struct Function {
   Block* entry;
   Unit* parent;
   std::vector<std::unique_ptr<Block>> blocks;
+  std::vector<Param> params;
   std::unordered_set<std::string> locals;
 };
 
@@ -107,10 +115,18 @@ struct Unit {
     return pseudomain.get();
   }
 
+  Function* makeFunction(const std::string& name) {
+    functions.emplace_back(std::make_unique<Function>(this, name));
+    return functions.back().get();
+  }
+
   std::string name;
   std::unique_ptr<Function> pseudomain;
   std::vector<std::unique_ptr<Function>> functions;
 };
+
+std::unique_ptr<Unit> makeFatalUnit(const std::string& filename,
+                                    const std::string& msg);
 
 
 }} // HPHP::php7

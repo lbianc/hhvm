@@ -400,24 +400,12 @@ let serve genv env in_fd _ =
   done
 
 let program_init genv =
-  (* Before starting the init make sure we are not in the middle of a
-   * checkout. If this happens, we get that the svn rev of the merge base
-   * to be the old version, whereas, we need the new version so that
-   * we can get a proper saved state. This also affects changed files in
-   * the same way.
-   * This solution is not fully correct. Checkout can still happen between
-   * this call and the next but it minimizes the damage.
-   * *)
-  let repo_wait_success =
-    MercurialUtils.wait_until_stable_repository (ServerArgs.root genv.options)
-  in
-  let env, init_type =
+  let env, init_type, state_distance =
     (* If we are saving, always start from a fresh state -- just in case
      * incremental mode introduces any errors. *)
     if genv.local_config.ServerLocalConfig.use_mini_state &&
       not (ServerArgs.no_load genv.options) &&
-      ServerArgs.save_filename genv.options = None &&
-      repo_wait_success then
+      ServerArgs.save_filename genv.options = None then
       let load_mini_approach = match
         (ServerConfig.load_mini_script genv.config),
         (ServerArgs.with_mini_state genv.options) with
@@ -436,21 +424,23 @@ let program_init genv =
       match load_mini_approach with
       | None ->
         let env, _ = ServerInit.init genv in
-        env, "fresh"
+        env, "fresh", None
       | Some load_mini_approach ->
-        let env, did_load = ServerInit.init ~load_mini_approach genv in
-        env, if did_load then "mini_load" else "mini_load_fail"
+        let env, init_result = ServerInit.init ~load_mini_approach genv in
+        match init_result with
+          | ServerInit.Mini_load distance -> env, "mini_load", distance
+          | ServerInit.Mini_load_failed err -> env, err, None
     else
       let env, _ = ServerInit.init genv in
-      env, if repo_wait_success then "fresh" else "fresh_repo_wait_fail"
+      env, "fresh", None
   in
   let timeout = genv.local_config.ServerLocalConfig.load_mini_script_timeout in
   EventLogger.set_init_type init_type;
-  HackEventLogger.init_end init_type timeout;
+  HackEventLogger.init_end ~state_distance init_type timeout;
   Hh_logger.log "Waiting for daemon(s) to be ready...";
   genv.wait_until_ready ();
   ServerStamp.touch_stamp ();
-  HackEventLogger.init_really_end init_type;
+  HackEventLogger.init_really_end ~state_distance init_type;
   env
 
 let setup_server ~informant_managed options handle =

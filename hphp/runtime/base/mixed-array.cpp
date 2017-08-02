@@ -1273,7 +1273,7 @@ ArrayData* MixedArray::ArrayPlusEqGeneric(ArrayData* ad,
 
   for (ArrayIter it(elems); !it.end(); it.next()) {
     Variant key = it.first();
-    const Variant& value = it.secondRef();
+    auto const value = it.secondVal();
 
     if (UNLIKELY(ret->isFull())) {
       assert(ret == ad);
@@ -1346,7 +1346,7 @@ ArrayData* MixedArray::ArrayMergeGeneric(MixedArray* ret,
                                          const ArrayData* elems) {
   for (ArrayIter it(elems); !it.end(); it.next()) {
     Variant key = it.first();
-    const Variant& value = it.secondRef();
+    auto const value = it.secondVal();
     if (key.asTypedValue()->m_type == KindOfInt64) {
       ret->nextInsertWithRef(value);
     } else {
@@ -1446,7 +1446,7 @@ ArrayData* MixedArray::Dequeue(ArrayData* adInput, Variant& value) {
   return a;
 }
 
-ArrayData* MixedArray::Prepend(ArrayData* adInput, Cell v, bool copy) {
+ArrayData* MixedArray::Prepend(ArrayData* adInput, Cell v, bool /*copy*/) {
   // TODO: why is this ignoring the copy param and calling cowCheck?
   auto a = asMixed(adInput)->prepareForInsert(adInput->cowCheck());
 

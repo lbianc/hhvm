@@ -14,78 +14,140 @@ module SyntaxKind = Full_fidelity_syntax_kind
 module SyntaxTree = Full_fidelity_syntax_tree
 module TokenKind = Full_fidelity_token_kind
 
+open Core
+
 module Container = struct
   (* Set of mutually exclusive contexts. *)
   type t =
-  | ClassBody
-  | TypeSpecifier
-  | TopLevel
-  | LambdaBodyExpression
-  | CompoundStatement
+  | AfterDoubleColon
+  | AfterRightArrow
   | BinaryExpression
+  | ClassBody
+  | ClassHeader
+  | CompoundStatement
+  | ConstantDeclarator
+  | FunctionHeader
+  | FunctionParameterList
+  | LambdaBodyExpression
+  | TopLevel
+  | TypeSpecifier
   | NoContainer
 end
-open Container
 
-type predecessor =
+module Predecessor = struct
+  type t =
+  | ClassBodyDeclaration
+  | ClassName
   | IfWithoutElse
-  | TryWithoutFinally
+  | ImplementsList
+  | ExtendsList
+  | KeywordAbstract
+  | KeywordAsync
+  | KeywordClass
+  | KeywordConst
+  | KeywordExtends
+  | KeywordFinal
+  | KeywordImplements
+  | KeywordStatic
+  | MarkupSection
   | OpenBrace
-  | Statement
+  | OpenParenthesis
+  | TokenColon
+  | TokenComma
+  | TokenLessThan
+  | TryWithoutFinally
+  | VisibilityModifier
   | NoPredecessor
+end
 
 type context = {
   closest_parent_container: Container.t;
-  predecessor: predecessor;
+  predecessor: Predecessor.t;
   inside_switch_body: bool;
   inside_loop_body: bool;
   inside_async_function: bool;
+  inside_class_body: bool;
 }
 
 let initial_context = {
-  closest_parent_container = NoContainer;
-  predecessor = NoPredecessor;
+  closest_parent_container = Container.NoContainer;
+  predecessor = Predecessor.NoPredecessor;
   inside_switch_body = false;
   inside_loop_body = false;
   inside_async_function = false;
+  inside_class_body = false;
 }
 
-let is_function_async (function_object:PositionedSyntax.t) : bool =
+let is_function_async (function_object:PositionedSyntax.syntax) : bool =
   let open PositionedSyntax in
   let open PositionedToken in
   let open TokenKind in
-  match function_object.syntax with
+  match function_object with
   | FunctionDeclaration {
       function_declaration_header = { syntax = FunctionDeclarationHeader {
-        function_async = { syntax = Token {
-          kind = Async; _
-        }; _ }; _
+        function_async = async; _
       }; _ }; _
     }
-  | LambdaExpression {
-      lambda_async = { syntax = Token {
-        kind = Async; _ }; _
-      }; _
-    } -> true
+  | LambdaExpression { lambda_async = async; _ } ->
+    is_specific_token Async async
   | _ -> false
 
-let validate_predecessor (predecessor:PositionedSyntax.t list) : predecessor =
+let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
   let open PositionedSyntax in
   let open PositionedToken in
   let open TokenKind in
-  let rec aux path acc = match path with
-    | [] -> acc
-    | { syntax = IfStatement { if_else_clause = {
-          syntax = Missing; _
-      }; _ }; _ } :: t -> aux t IfWithoutElse
-    | { syntax = TryStatement { try_finally_clause = {
-          syntax = Missing; _
-      }; _ }; _ } :: t -> aux t TryWithoutFinally
-    | { syntax = MethodishDeclaration _; _ } :: t -> aux t Statement
-    | { syntax = Token { kind = LeftBrace; _ }; _ } :: t -> aux t OpenBrace
-    | _ :: t -> aux t acc
+  let open Predecessor in
+  let classify_syntax_as_predecessor node = match syntax node with
+    | ClassishDeclaration {
+        classish_implements_list = { syntax = SyntaxList _; _ }; _
+      } -> Some ImplementsList
+    | ClassishDeclaration {
+        classish_extends_list = { syntax = SyntaxList _; _ };
+        classish_implements_keyword = { syntax = Missing; _ };
+        classish_implements_list = { syntax = Missing; _ };
+        _
+      } -> Some ExtendsList
+    | ClassishDeclaration {
+        classish_name = { syntax = Token _ ; _ };
+        classish_type_parameters = { syntax = Missing; _ };
+        classish_extends_keyword = { syntax = Missing; _ };
+        classish_extends_list = { syntax = Missing; _ };
+        classish_implements_keyword = { syntax = Missing; _ };
+        classish_implements_list = { syntax = Missing; _ };
+        _
+      } -> Some ClassName
+    | PositionedSyntax.MarkupSection _ -> Some Predecessor.MarkupSection
+    | IfStatement { if_else_clause = {
+        syntax = Missing; _
+      }; _ } -> Some IfWithoutElse
+    | ConstDeclaration _
+    | PropertyDeclaration _
+    | MethodishDeclaration _
+    | TypeConstDeclaration _  -> Some ClassBodyDeclaration
+    | TryStatement { try_finally_clause = {
+        syntax = Missing; _
+      }; _ } -> Some TryWithoutFinally
+    | Token { kind = Abstract; _ } -> Some KeywordAbstract
+    | Token { kind = Async; _ } -> Some KeywordAsync
+    | Token { kind = Class; _ } -> Some KeywordClass
+    | Token { kind = Colon; _ } -> Some TokenColon
+    | Token { kind = Comma; _ } -> Some TokenComma
+    | Token { kind = Const; _ } -> Some KeywordConst
+    | Token { kind = Extends; _ } -> Some KeywordExtends
+    | Token { kind = Final; _ } -> Some KeywordFinal
+    | Token { kind = Implements; _ } -> Some KeywordImplements
+    | Token { kind = LeftBrace; _ } -> Some OpenBrace
+    | Token { kind = LeftParen; _ } -> Some OpenParenthesis
+    | Token { kind = LessThan; _ } -> Some TokenLessThan
+    | Token { kind = Public; _ }
+    | Token { kind = Private; _ }
+    | Token { kind = Protected; _ } -> Some VisibilityModifier
+    | Token { kind = Static; _ } -> Some KeywordStatic
+    | _ -> None
   in
-  aux predecessor NoPredecessor
+  predecessor
+  |> List.find_map ~f:classify_syntax_as_predecessor
+  |> Option.value ~default:NoPredecessor
 
 let make_context
   ~(full_path:PositionedSyntax.t list)
@@ -93,75 +155,94 @@ let make_context
   : context =
   let predecessor = validate_predecessor predecessor in
   let open PositionedSyntax in
-  let rec aux path acc = match path with
-    | [] -> acc
-    | { syntax = SimpleTypeSpecifier _; _} :: _ ->
+  let open Container in
+  let open PositionedToken in
+  let open TokenKind in
+  let check_node node acc = match syntax node with
+    | SimpleTypeSpecifier _ ->
       { acc with closest_parent_container = TypeSpecifier }
-    | { syntax = Script _; _} :: t ->
-      aux t { acc with closest_parent_container = TopLevel }
-    | { syntax = ClassishBody _; _} :: t ->
-      aux t { acc with closest_parent_container = ClassBody }
-    | { syntax = ForStatement _; _} :: t
-    | { syntax = ForeachStatement _; _} :: t
-    | { syntax = WhileStatement _; _} :: t
-    | { syntax = DoStatement _; _} :: t ->
-      aux t { acc with inside_loop_body = true }
-    | { syntax = SwitchSection _; _} :: t ->
-      aux t { acc with inside_switch_body = true }
-    | { syntax = FunctionDeclaration _; _}  as h :: t ->
-      aux t { acc with inside_async_function = is_function_async h }
-    | { syntax = LambdaExpression _; _} as h :: t ->
-      (* If we see a lambda, almost all context is reset, so each field should get consideration
-      on if its context flows into the lambda *)
-      let acc = {
+    | Script _ ->
+      { acc with closest_parent_container = TopLevel }
+    | ClassishDeclaration _ ->
+      { acc with closest_parent_container = ClassHeader }
+    | ClassishBody _ ->
+      { acc with closest_parent_container = ClassBody;
+        inside_class_body = true }
+    | PositionedSyntax.ConstantDeclarator _ ->
+      { acc with closest_parent_container = Container.ConstantDeclarator }
+    | ForStatement _
+    | ForeachStatement _
+    | WhileStatement _
+    | DoStatement _ ->
+      { acc with inside_loop_body = true }
+    | SwitchSection _ ->
+      { acc with inside_switch_body = true }
+    | FunctionDeclaration _ as func ->
+      { acc with inside_async_function = is_function_async func }
+    | FunctionDeclarationHeader _ ->
+      { acc with closest_parent_container = FunctionHeader }
+    | LambdaExpression _ as lambda ->
+      (* If we see a lambda, almost all context is reset, so each field should
+      get consideration on if its context flows into the lambda *)
+      {
         closest_parent_container = LambdaBodyExpression;
         predecessor = predecessor;
         inside_switch_body = false;
         inside_loop_body = false;
-        inside_async_function = is_function_async h;
+        inside_class_body = false;
+        inside_async_function = is_function_async lambda;
       }
-      in
-      aux t acc
-    | { syntax = PositionedSyntax.CompoundStatement _; _} :: t ->
-      aux t { acc with closest_parent_container = Container.CompoundStatement }
-    | _ :: t -> aux t acc
+    | PositionedSyntax.CompoundStatement _ ->
+      { acc with closest_parent_container = Container.CompoundStatement }
+    | Token { kind = ColonColon; _ } ->
+      { acc with closest_parent_container = AfterDoubleColon }
+    | Token { kind = MinusGreaterThan; _ } ->
+      { acc with closest_parent_container = AfterRightArrow }
+    | _ -> acc
   in
-  aux full_path { initial_context with predecessor }
+  List.fold_right
+    ~f:check_node
+    ~init:{ initial_context with predecessor }
+    full_path
 
-let get_context_and_stub (syntax_tree:SyntaxTree.t) (offset:int) : context * string =
-  let build_context
-    ~(parentage:PositionedSyntax.t list)
-    ~(predecessor:PositionedSyntax.t list)
-    =
-    let parentage = List.rev parentage in
-    let predecessor = List.rev predecessor in
-    make_context ~full_path:parentage ~predecessor
-  in
+type autocomplete_location_classification =
+  | InLeadingTrivia
+  | InToken
+  | InTrailingTrivia
 
+let classify_autocomplete_location
+  (parents:PositionedSyntax.t list) (offset:int)
+  : autocomplete_location_classification =
+  let open PositionedSyntax in
+  match parents with
+  | [] -> failwith "Empty parentage (this should never happen)"
+  | parent :: _ when offset < start_offset parent -> InLeadingTrivia
+  | parent :: _ when offset <= trailing_start_offset parent -> InToken
+  | _ -> InTrailingTrivia
+
+let get_context_and_stub (syntax_tree:SyntaxTree.t) (offset:int)
+  : context * string =
   let open PositionedSyntax in
   let positioned_tree = from_tree syntax_tree in
-  let offset = if offset == width positioned_tree then offset - 1 else offset in
-  let autocomplete_node_parentage = parentage positioned_tree offset in
-  let previous_offset = match autocomplete_node_parentage with
-    | [] -> offset - 1
-    | autocomplete_child :: _ -> leading_start_offset autocomplete_child - 1
+  (* If the offset is the same as the width of the whole tree, then the cursor is at the end of
+  file, so we move our position to before the last character of the file so that our cursor is
+  considered to be in the leading trivia of the end of file character. This guarantees our parentage
+  is not empty. *)
+  let offset =
+    if offset >= full_width positioned_tree then full_width positioned_tree - 1
+    else offset
   in
+  let ancestry = parentage positioned_tree offset in
+  let location = classify_autocomplete_location ancestry offset in
+  let autocomplete_leaf_node = List.hd_exn ancestry in
+  let node_text =
+    if location = InToken then text autocomplete_leaf_node else ""
+  in
+  let previous_offset = leading_start_offset autocomplete_leaf_node - 1 in
   let predecessor_parentage = parentage positioned_tree previous_offset in
-  match autocomplete_node_parentage with
-  | [] -> (* This case occurs iff the completion location is the last character in the file *)
-    (build_context ~parentage:predecessor_parentage ~predecessor:predecessor_parentage, "")
-  | autocomplete_child :: _ ->
-    let token_start_offset = start_offset autocomplete_child in
-    let token_end_offset = trailing_start_offset autocomplete_child in
-    if offset < token_start_offset then
-      (* This case handles when the completion location is in the leading trivia of a node *)
-      (build_context ~parentage:predecessor_parentage ~predecessor:predecessor_parentage, "")
-    else if offset <= token_end_offset then
-      (* This case handles when the completion location is in the main token of a node *)
-      (build_context ~parentage:autocomplete_node_parentage ~predecessor:predecessor_parentage,
-      text autocomplete_child)
-    else (* This case handles when the completion location is in the trailing trivia of a node *)
-      (build_context
-        ~parentage:autocomplete_node_parentage
-        ~predecessor:autocomplete_node_parentage,
-        "")
+  let (full_path, predecessor) = match location with
+    | InLeadingTrivia -> predecessor_parentage, predecessor_parentage
+    | InToken -> ancestry, predecessor_parentage
+    | InTrailingTrivia -> ancestry, ancestry
+  in
+  (make_context ~full_path ~predecessor, node_text)

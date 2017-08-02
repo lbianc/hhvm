@@ -1188,6 +1188,7 @@ module Make (GetLocals : GetLocals) = struct
     | ClassUse h ->
       hint ~allow_typedef:false env h :: acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | ClassVars _ -> acc
@@ -1204,6 +1205,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse h ->
       hint ~allow_typedef:false env h :: acc
     | ClassTraitRequire _ -> acc
@@ -1221,6 +1223,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | ClassVars _ -> acc
@@ -1240,6 +1243,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire (MustExtend, h)
         when c_kind <> Ast.Ctrait && c_kind <> Ast.Cinterface ->
@@ -1267,6 +1271,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | ClassVars _ -> acc
@@ -1288,6 +1293,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst (h, x) -> abs_const_def env h x :: acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | ClassVars _ -> acc
@@ -1302,6 +1308,7 @@ module Make (GetLocals : GetLocals) = struct
     | Attributes _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | Const _ -> acc
@@ -1328,6 +1335,7 @@ module Make (GetLocals : GetLocals) = struct
     | Attributes _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | Const _ -> acc
@@ -1388,6 +1396,7 @@ module Make (GetLocals : GetLocals) = struct
     | Attributes _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | Const _ -> acc
@@ -1406,6 +1415,7 @@ module Make (GetLocals : GetLocals) = struct
     | Attributes _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | Const _ -> acc
@@ -1428,6 +1438,7 @@ module Make (GetLocals : GetLocals) = struct
     | AbsConst _ -> acc
     | ClassUse _ -> acc
     | ClassUseAlias _ -> acc
+    | ClassUsePrecedence _ -> acc
     | XhpAttrUse _ -> acc
     | ClassTraitRequire _ -> acc
     | ClassVars _ -> acc
@@ -1726,7 +1737,7 @@ module Make (GetLocals : GetLocals) = struct
     | Try (b, cl, fb)      -> try_stmt env st b cl fb
     | Def_inline _ ->
       failwith "Naming of inlined definitions not (yet) supported."
-    | Expr (cp, Call ((p, Id (fp, fn)), el, uel))
+    | Expr (cp, Call ((p, Id (fp, fn)), hl, el, uel))
         when fn = SN.SpecialFunctions.invariant ->
       (* invariant is subject to a source-code transform in the HHVM
        * runtime: the arguments to invariant are lazily evaluated only in
@@ -1746,7 +1757,7 @@ module Make (GetLocals : GetLocals) = struct
           N.Expr (cp, N.Any)
         | (cond_p, cond) :: el ->
           let violation = (cp, Call
-            ((p, Id (fp, "\\"^SN.SpecialFunctions.invariant_violation)), el,
+            ((p, Id (fp, "\\"^SN.SpecialFunctions.invariant_violation)), hl, el,
              uel)) in
           if cond <> False then
             let b1, b2 = [Expr violation], [Noop] in
@@ -2013,18 +2024,18 @@ module Make (GetLocals : GetLocals) = struct
         N.Typename (Env.type_name env x1 ~allow_typedef:true)
       else
         N.Class_const (make_class_id env x1 [], x2)
-    | Call ((_, Id (p, pseudo_func)), el, uel)
+    | Call ((_, Id (p, pseudo_func)), _, el, uel)
         when pseudo_func = SN.SpecialFunctions.echo ->
         arg_unpack_unexpected uel ;
         N.Call (N.Cnormal, (p, N.Id (p, pseudo_func)), exprl env el, [])
-    | Call ((p, Id (_, cn)), el, uel)
+    | Call ((p, Id (_, cn)), _, el, uel)
       when cn = SN.SpecialFunctions.call_user_func ->
         arg_unpack_unexpected uel ;
         (match el with
         | [] -> Errors.naming_too_few_arguments p; N.Any
         | f :: el -> N.Call (N.Cuser_func, expr env f, exprl env el, [])
         )
-    | Call ((p, Id (_, cn)), el, uel) when cn = SN.SpecialFunctions.fun_ ->
+    | Call ((p, Id (_, cn)), _, el, uel) when cn = SN.SpecialFunctions.fun_ ->
         arg_unpack_unexpected uel ;
         (match el with
         | [] -> Errors.naming_too_few_arguments p; N.Any
@@ -2036,7 +2047,7 @@ module Make (GetLocals : GetLocals) = struct
             N.Any
         | _ -> Errors.naming_too_many_arguments p; N.Any
         )
-    | Call ((p, Id (_, cn)), el, uel)
+    | Call ((p, Id (_, cn)), _, el, uel)
       when cn = SN.SpecialFunctions.inst_meth ->
         arg_unpack_unexpected uel ;
         (match el with
@@ -2049,7 +2060,7 @@ module Make (GetLocals : GetLocals) = struct
           N.Any
         | _ -> Errors.naming_too_many_arguments p; N.Any
         )
-    | Call ((p, Id (_, cn)), el, uel)
+    | Call ((p, Id (_, cn)), _, el, uel)
       when cn = SN.SpecialFunctions.meth_caller ->
         arg_unpack_unexpected uel ;
         (match el with
@@ -2068,7 +2079,7 @@ module Make (GetLocals : GetLocals) = struct
             )
         | _ -> Errors.naming_too_many_arguments p; N.Any
         )
-    | Call ((p, Id (_, cn)), el, uel)
+    | Call ((p, Id (_, cn)), _, el, uel)
       when cn = SN.SpecialFunctions.class_meth ->
         arg_unpack_unexpected uel ;
         (match el with
@@ -2101,20 +2112,20 @@ module Make (GetLocals : GetLocals) = struct
             )
         | _ -> Errors.naming_too_many_arguments p; N.Any
         )
-    | Call ((p, Id (_, cn)), el, uel) when cn = SN.SpecialFunctions.assert_ ->
+    | Call ((p, Id (_, cn)), _, el, uel) when cn = SN.SpecialFunctions.assert_ ->
         arg_unpack_unexpected uel ;
         if List.length el <> 1
         then Errors.assert_arity p;
         N.Assert (N.AE_assert (
           Option.value_map (List.hd el) ~default:(p, N.Any) ~f:(expr env)
         ))
-    | Call ((p, Id (_, cn)), el, uel) when cn = SN.SpecialFunctions.tuple ->
+    | Call ((p, Id (_, cn)), _, el, uel) when cn = SN.SpecialFunctions.tuple ->
         arg_unpack_unexpected uel ;
         (match el with
         | [] -> Errors.naming_too_few_arguments p; N.Any
         | el -> N.List (exprl env el)
         )
-    | Call ((p, Id f), el, uel) ->
+    | Call ((p, Id f), _, el, uel) ->
         let qualified = Env.fun_id env f in
         let cn = snd qualified in
         (* The above special cases (fun, inst_meth, meth_caller, class_meth,
@@ -2149,7 +2160,7 @@ module Make (GetLocals : GetLocals) = struct
        for both instance property access and instance method calls, we need
        to match the entire "Call(Obj_get(..), ..)" pattern here so that we
        only match instance method calls *)
-    | Call ((p, Obj_get (e1, e2, OG_nullsafe)), el, uel) ->
+    | Call ((p, Obj_get (e1, e2, OG_nullsafe)), _, el, uel) ->
         N.Call
           (N.Cnormal,
            (p, N.Obj_get (expr env e1,
@@ -2157,7 +2168,7 @@ module Make (GetLocals : GetLocals) = struct
            exprl env el, exprl env uel)
     (* Handle all kinds of calls that weren't handled by any of
        the cases above *)
-    | Call (e, el, uel) ->
+    | Call (e, _, el, uel) ->
         N.Call (N.Cnormal, expr env e, exprl env el, exprl env uel)
     | Yield_break -> N.Yield_break
     | Yield e -> N.Yield (afield env e)
@@ -2313,6 +2324,9 @@ module Make (GetLocals : GetLocals) = struct
     | Unsafeexpr _ ->
       N.Any
     | BracedExpr _ ->
+      N.Any
+    | Yield_from _ ->
+      Errors.unimplemented_feature p "yield from expressions";
       N.Any
     | Import _ ->
       N.Any

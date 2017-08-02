@@ -440,15 +440,15 @@ void ObjectData::o_setArray(const Array& properties) {
       k = k.substr(subLen);
     }
 
-    const Variant& secondRef = iter.secondRef();
+    auto const rval = iter.secondRval();
     setProp(ctx,
             k.get(),
             // Set prop is happening with WithRef semantics---we only
             // use a binding assignment if it was already KindOfRef,
             // so despite the const_cast here we're safely not
             // modifying the original Variant.
-            const_cast<TypedValue*>(secondRef.asTypedValue()),
-            secondRef.isReferenced());
+            const_cast<TypedValue*>(rval.tv_ptr()),
+            rval.type() == KindOfRef && rval.val().pref->isReferenced());
   }
 }
 
@@ -485,7 +485,7 @@ void ObjectData::o_getArray(Array& props, bool pubOnly /* = false */) const {
     auto& dynProps = dynPropArray();
     if (!dynProps.empty()) {
       for (ArrayIter it(dynProps.get()); !it.end(); it.next()) {
-        props.setWithRef(it.first(), it.secondRef(), true);
+        props.setWithRef(it.first(), it.secondVal(), true);
       }
     }
   }
@@ -1050,10 +1050,10 @@ namespace {
 
 __thread ObjectData::PropRecurInfo propRecurInfo;
 
-template<class Invoker>
-InvokeResult magic_prop_impl(const StringData* key,
-                             const ObjectData::PropAccessInfo& info,
-                             Invoker invoker) {
+template <class Invoker>
+InvokeResult
+magic_prop_impl(const StringData* /*key*/,
+                const ObjectData::PropAccessInfo& info, Invoker invoker) {
   if (UNLIKELY(propRecurInfo.activePropInfo != nullptr)) {
     if (!propRecurInfo.activeSet) {
       propRecurInfo.activeSet =

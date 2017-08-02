@@ -291,8 +291,7 @@ let methodish_non_abstract_without_body node parents =
   non_abstract && not_has_body
 
 let methodish_in_interface_has_body node parents =
-  methodish_inside_interface parents &&
-      not (is_missing node.methodish_function_body)
+  methodish_inside_interface parents && methodish_has_body node
 
 (* Test whether node is a method that is both abstract and private
  *)
@@ -619,7 +618,7 @@ let methodish_errors node parents =
       produce_error errors methodish_abstract_conflict_with_final
       node SyntaxError.error2019 modifiers in
     let errors =
-      produce_error errors (methodish_in_interface_has_body md) parents
+      produce_error errors (methodish_in_interface_has_body node) parents
       SyntaxError.error2041 md.methodish_function_body in
     let errors =
       let class_name = Option.value (first_parent_class_name parents)
@@ -723,7 +722,7 @@ let property_errors node is_strict =
       [ SyntaxError.make s e SyntaxError.error2001 ]
   | _ -> [ ]
 
-let expression_errors node parents =
+let expression_errors node parents is_hack =
   match syntax node with
   | SubscriptExpression { subscript_left_bracket; _}
     when is_left_brace subscript_left_bracket ->
@@ -738,7 +737,7 @@ let expression_errors node parents =
         [ SyntaxError.make s e SyntaxError.error2033 ]
       | None -> [ ]
     end
-  | ObjectCreationExpression oce ->
+  | ObjectCreationExpression oce when is_hack ->
     if is_missing oce.object_creation_left_paren &&
         is_missing oce.object_creation_right_paren
     then
@@ -835,7 +834,7 @@ let alias_errors node =
       [ SyntaxError.make s e SyntaxError.error2034 ]
   | _ -> [ ]
 
-let find_syntax_errors node is_strict =
+let find_syntax_errors node is_strict is_hack =
   let folder acc node parents =
     let param_errs = parameter_errors node parents is_strict in
     let func_errs = function_errors node parents is_strict in
@@ -843,7 +842,7 @@ let find_syntax_errors node is_strict =
     let statement_errs = statement_errors node parents in
     let methodish_errs = methodish_errors node parents in
     let property_errs = property_errors node is_strict in
-    let expr_errs = expression_errors node parents in
+    let expr_errs = expression_errors node parents is_hack in
     let require_errs = require_errors node parents in
     let classish_errors = classish_errors node parents in
     let type_errors = type_errors node parents is_strict in

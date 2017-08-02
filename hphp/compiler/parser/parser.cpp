@@ -1062,7 +1062,7 @@ void Parser::onUserAttribute(Token &out, Token *attrList, Token &name,
   out->exp = expList;
 }
 
-void Parser::onConst(Token &out, Token &name, Token &value) {
+void Parser::onConst(Token& /*out*/, Token& name, Token& value) {
   // Convert to a define call
   Token sname;   onScalar(sname, T_CONSTANT_ENCAPSED_STRING, name);
 
@@ -1077,7 +1077,7 @@ void Parser::onConst(Token &out, Token &name, Token &value) {
   m_cnstTable.insert(name.text());
 }
 
-void Parser::onClassConst(Token &out, Token &cls, Token &name, bool text) {
+void Parser::onClassConst(Token& out, Token& cls, Token& name, bool /*text*/) {
   if (!cls->exp) {
     cls->exp = NEW_EXP(ScalarExpression, T_STRING, cls->text());
   }
@@ -1126,7 +1126,7 @@ void Parser::onFunctionStart(Token &name, bool doPushComment /* = true */) {
   m_staticVars.emplace_back();
 }
 
-void Parser::onMethodStart(Token &name, Token &mods,
+void Parser::onMethodStart(Token& name, Token& /*mods*/,
                            bool doPushComment /* = true */) {
   onFunctionStart(name, doPushComment);
 }
@@ -1908,7 +1908,7 @@ void Parser::onBreakContinue(Token &out, bool isBreak, Token* expr) {
   }
 }
 
-void Parser::setHasNonEmptyReturn(ConstructPtr blame) {
+void Parser::setHasNonEmptyReturn(ConstructPtr /*blame*/) {
   if (m_funcContexts.empty()) {
     return;
   }
@@ -2285,7 +2285,7 @@ void Parser::onLabel(Token &out, Token &label) {
   out->stmt = NEW_STMT(LabelStatement, label.text());
 }
 
-void Parser::onGoto(Token &out, Token &label, bool limited) {
+void Parser::onGoto(Token& out, Token& label, bool /*limited*/) {
   out->stmt = NEW_STMT(GotoStatement, label.text());
 }
 
@@ -2822,8 +2822,20 @@ void Parser::useClassAndNamespace(const std::string &ns,
 void Parser::useNamespace(const std::string &ns, const std::string &as) {
   auto const key = fully_qualified_name_as_alias_key(ns, as);
 
-  if (m_nsAliasTable.isAliased(key)
-      && m_nsAliasTable.getType(key) != AliasType::AUTO_USE) {
+  /* We check both AUTO_USE and NONE as getType() returns NONE for auto
+   * uses that haven't been looked up yet, though isAliased() still returns
+   * true.
+   *
+   * if isAliased() and getType() === None, it's an AUTO_USE.
+   *
+   * getType() can't be changed to return AUTO_USE as that breaks defining
+   * auto-imported names.
+   *
+   * We can't call getName() first as it marks the alias as in-use.
+   */
+  if (m_nsAliasTable.isAliased(key) &&
+      m_nsAliasTable.getType(key) != AliasType::AUTO_USE &&
+      m_nsAliasTable.getType(key) != AliasType::NONE) {
     error("Cannot use namespace %s as %s because the name is already in use",
           ns.c_str(), key.c_str());
     return;

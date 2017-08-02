@@ -200,8 +200,10 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
   } in
   let retries, conn =
     let start_t = Unix.gettimeofday () in
+    let timeout = (Option.value retries ~default:30) + 1 in
     let conn = ServerUtils.connect_to_monitor
-      ~timeout:(Option.value retries ~default:30) env.root
+      ~timeout
+      env.root
       handoff_options in
     let elapsed_t = int_of_float (Unix.gettimeofday () -. start_t) in
     let retries = Option.map retries
@@ -220,7 +222,7 @@ let rec connect ?(first_attempt=false) env retries start_time tail_env =
         | Server_hung_up ->
           (Printf.eprintf "hh_server died unexpectedly. Maybe you recently \
           launched a different version of hh_server. Now exiting hh_client.";
-          Exit_status.exit Exit_status.No_server_running)
+          raise Exit_status.(Exit_with No_server_running))
       end;
       (ic, oc)
   | Result.Error e ->

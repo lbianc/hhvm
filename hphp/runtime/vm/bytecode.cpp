@@ -1239,7 +1239,7 @@ static NEVER_INLINE void shuffleMagicArrayArgs(ActRec* ar, const Cell args,
       assert(stack.top() == (void*) ar);
       stack.pushStringNoRc(invName);
       for (ArrayIter iter(args); iter; ++iter) {
-        ai.appendWithRef(iter.secondRefPlus());
+        ai.appendWithRef(iter.secondValPlus());
       }
       stack.pushArrayNoRc(ai.create());
     }
@@ -1274,14 +1274,13 @@ bool prepareArrayArgs(ActRec* ar, const Cell args, Stack& stack,
   ArrayIter iter(args);
   if (LIKELY(nextra_regular == 0)) {
     for (int i = nregular; iter && (i < nparams); ++i, ++iter) {
-      TypedValue* from = const_cast<TypedValue*>(
-        iter.secondRefPlus().asTypedValue());
+      auto const from = iter.secondValPlus();
       TypedValue* to = stack.allocTV();
       if (LIKELY(!f->byRef(i))) {
-        cellDup(*tvToCell(from), *to);
-      } else if (LIKELY(from->m_type == KindOfRef &&
-                        from->m_data.pref->hasMultipleRefs())) {
-        refDup(*from, *to);
+        cellDup(tvToCell(from), *to);
+      } else if (LIKELY(from.m_type == KindOfRef &&
+                        from.m_data.pref->hasMultipleRefs())) {
+        refDup(from, *to);
       } else {
         if (doCufRefParamChecks && f->mustBeRef(i)) {
           try {
@@ -1302,7 +1301,7 @@ bool prepareArrayArgs(ActRec* ar, const Cell args, Stack& stack,
             return false;
           }
         }
-        cellDup(*tvToCell(from), *to);
+        cellDup(tvToCell(from), *to);
       }
     }
 
@@ -1367,10 +1366,10 @@ bool prepareArrayArgs(ActRec* ar, const Cell args, Stack& stack,
     }
     for (int i = nextra_regular; i < extra; ++i, ++iter) {
       TypedValue* to = extraArgs->getExtraArg(i);
-      const TypedValue* from = iter.secondRefPlus().asTypedValue();
-      tvDupWithRef(*from, *to);
+      auto const from = iter.secondValPlus();
+      tvDupWithRef(from, *to);
       if (hasVarParam) {
-        ai.appendWithRef(iter.secondRefPlus());
+        ai.appendWithRef(from);
       }
     }
     assert(!iter); // iter should now be exhausted
@@ -1404,7 +1403,7 @@ bool prepareArrayArgs(ActRec* ar, const Cell args, Stack& stack,
       for (int i = nextra_regular; i < extra; ++i, ++iter) {
         // appendWithRef bumps the refcount to compensate for the
         // eventual decref of arrayArgs.
-        ai.appendWithRef(iter.secondRefPlus());
+        ai.appendWithRef(iter.secondValPlus());
       }
       assert(!iter); // iter should now be exhausted
       auto const ad = ai.create();
@@ -1689,19 +1688,15 @@ static inline void lookupd_var(ActRec* fp,
   }
 }
 
-static inline void lookup_gbl(ActRec* fp,
-                              StringData*& name,
-                              TypedValue* key,
-                              TypedValue*& val) {
+static inline void lookup_gbl(ActRec* /*fp*/, StringData*& name,
+                              TypedValue* key, TypedValue*& val) {
   name = lookup_name(key);
   assert(g_context->m_globalVarEnv);
   val = g_context->m_globalVarEnv->lookup(name);
 }
 
-static inline void lookupd_gbl(ActRec* fp,
-                               StringData*& name,
-                               TypedValue* key,
-                               TypedValue*& val) {
+static inline void lookupd_gbl(ActRec* /*fp*/, StringData*& name,
+                               TypedValue* key, TypedValue*& val) {
   name = lookup_name(key);
   assert(g_context->m_globalVarEnv);
   VarEnv* varEnv = g_context->m_globalVarEnv;
@@ -4881,7 +4876,7 @@ OPTBLD_INLINE void iopFCall(PC& pc, intva_t numArgs) {
 }
 
 OPTBLD_FLT_INLINE
-void iopFCallD(PC& pc, intva_t numArgs, const StringData* clsName,
+void iopFCallD(PC& pc, intva_t numArgs, const StringData* /*clsName*/,
                const StringData* funcName) {
   auto ar = arFromSp(numArgs);
   if (!RuntimeOption::EvalJitEnableRenameFunction &&
@@ -4895,8 +4890,8 @@ void iopFCallD(PC& pc, intva_t numArgs, const StringData* clsName,
 }
 
 OPTBLD_INLINE
-void iopFCallAwait(PC& pc, intva_t numArgs,
-                   const StringData* clsName, const StringData* funcName) {
+void iopFCallAwait(PC& pc, intva_t numArgs, const StringData* /*clsName*/,
+                   const StringData* funcName) {
   auto ar = arFromSp(numArgs);
   if (!RuntimeOption::EvalJitEnableRenameFunction &&
       !(ar->m_func->attrs() & AttrInterceptable)) {
@@ -5086,7 +5081,7 @@ void iopIterInitK(PC& pc, Iter* it, PC targetpc, local_var val, local_var key) {
 OPTBLD_INLINE void iopWIterInit(PC& pc, Iter* it, PC targetpc, local_var val) {
   Cell* c1 = vmStack().topC();
   if (initIterator(pc, targetpc, it, c1)) {
-    tvAsVariant(val.ptr).setWithRef(it->arr().secondRefPlus());
+    tvAsVariant(val.ptr).setWithRef(it->arr().secondValPlus());
   }
 }
 
@@ -5094,7 +5089,7 @@ OPTBLD_INLINE void
 iopWIterInitK(PC& pc, Iter* it, PC targetpc, local_var val, local_var key) {
   Cell* c1 = vmStack().topC();
   if (initIterator(pc, targetpc, it, c1)) {
-    tvAsVariant(val.ptr).setWithRef(it->arr().secondRefPlus());
+    tvAsVariant(val.ptr).setWithRef(it->arr().secondValPlus());
     tvAsVariant(key.ptr) = it->arr().first();
   }
 }
@@ -5152,7 +5147,7 @@ OPTBLD_INLINE void iopWIterNext(PC& pc, Iter* it, PC targetpc, local_var val) {
   jmpSurpriseCheck(targetpc - pc);
   if (it->next()) {
     pc = targetpc;
-    tvAsVariant(val.ptr).setWithRef(it->arr().secondRefPlus());
+    tvAsVariant(val.ptr).setWithRef(it->arr().secondValPlus());
   }
 }
 
@@ -5161,7 +5156,7 @@ iopWIterNextK(PC& pc, Iter* it, PC targetpc, local_var val, local_var key) {
   jmpSurpriseCheck(targetpc - pc);
   if (it->next()) {
     pc = targetpc;
-    tvAsVariant(val.ptr).setWithRef(it->arr().secondRefPlus());
+    tvAsVariant(val.ptr).setWithRef(it->arr().secondValPlus());
     tvAsVariant(key.ptr) = it->arr().first();
   }
 }
@@ -5339,8 +5334,7 @@ OPTBLD_INLINE void iopAliasCls(const StringData* original,
   vmStack().pushBool(Unit::aliasClass(original, alias, autoload));
 }
 
-OPTBLD_INLINE void iopDefClsNop(intva_t cid) {
-}
+OPTBLD_INLINE void iopDefClsNop(intva_t /*cid*/) {}
 
 OPTBLD_INLINE void iopDefTypeAlias(intva_t tid) {
   vmfp()->func()->unit()->defTypeAlias(tid);
@@ -6163,7 +6157,11 @@ TCA suspendStack(PC &pc) {
 
 OPTBLD_INLINE void iopWHResult() {
   // we should never emit this bytecode for non-waithandle
-  auto const wh = c_WaitHandle::fromCellAssert(vmStack().topC());
+  auto const wh = c_WaitHandle::fromCell(vmStack().topC());
+  if (UNLIKELY(!wh)) {
+    raise_error("WHResult input was not a subclass of WaitHandle");
+  }
+
   // the failure condition is likely since we punt to this opcode
   // in the JIT when the state is failed.
   if (wh->isFailed()) {
@@ -6319,7 +6317,7 @@ void PrintTCCallerInfo() {
 static __thread Unit* s_prev_unit;
 static __thread int s_prev_line;
 
-void recordCodeCoverage(PC pc) {
+void recordCodeCoverage(PC /*pc*/) {
   Unit* unit = vmfp()->m_func->unit();
   assert(unit != nullptr);
   if (unit == SystemLib::s_nativeFuncUnit ||
@@ -6372,8 +6370,7 @@ TCA iopWrapper(Op, TCA(*fn)(PC& pc), PC& pc) {
   return fn(pc);
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op, void(*fn)(), PC& pc) {
+OPTBLD_INLINE static TCA iopWrapper(Op, void (*fn)(), PC& /*pc*/) {
   fn();
   return nullptr;
 }
@@ -6496,23 +6493,23 @@ TCA iopWrapper(Op op, void(*fn)(ActRec*,intva_t,local_var), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,local_var), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, local_var), PC& pc) {
   auto n = decode_intva(pc);
   auto var = decode_local(pc);
   fn(n, var);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(PC&,intva_t), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(PC&, intva_t), PC& pc) {
   auto n = decode_intva(pc);
   fn(pc, n);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,const StringData*,Id), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, const StringData*, Id), PC& pc) {
   auto n = decode_intva(pc);
   auto s = decode_litstr(pc);
   auto i = decode<Id>(pc);
@@ -6727,40 +6724,40 @@ TCA iopWrapper(Op op, void(*fn)(PC&,PC,int,imm_array<IterBreakElem>),
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,MOpMode), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, MOpMode), PC& pc) {
   auto n = decode_intva(pc);
   auto mode = decode<MOpMode>(pc);
   fn(n, mode);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(local_var,MOpMode), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(local_var, MOpMode), PC& pc) {
   auto local = decode_local(pc);
   auto mode = decode<MOpMode>(pc);
   fn(local, mode);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(const StringData*, int32_t), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(const StringData*, int32_t), PC& pc) {
   auto str = decode_litstr(pc);
   auto n = decode<int32_t>(pc);
   fn(str, n);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(MOpMode,MemberKey), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(MOpMode, MemberKey), PC& pc) {
   auto mode = decode_oa<MOpMode>(pc);
   auto mk = decode_member_key(pc, liveUnit());
   fn(mode, mk);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,MemberKey), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, MemberKey), PC& pc) {
   auto n = decode_intva(pc);
   auto mk = decode_member_key(pc, liveUnit());
   fn(n, mk);
@@ -6785,8 +6782,8 @@ TCA iopWrapper(Op, void(*fn)(intva_t,intva_t,MemberKey), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,QueryMOp,MemberKey), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, QueryMOp, MemberKey), PC& pc) {
   auto n = decode_intva(pc);
   auto subop = decode_oa<QueryMOp>(pc);
   auto mk = decode_member_key(pc, liveUnit());
@@ -6794,8 +6791,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,QueryMOp,MemberKey), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,IncDecOp,MemberKey), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, IncDecOp, MemberKey), PC& pc) {
   auto n = decode_intva(pc);
   auto subop = decode_oa<IncDecOp>(pc);
   auto mk = decode_member_key(pc, liveUnit());
@@ -6803,8 +6800,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,IncDecOp,MemberKey), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,SetOpOp,MemberKey), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, SetOpOp, MemberKey), PC& pc) {
   auto n = decode_intva(pc);
   auto subop = decode_oa<SetOpOp>(pc);
   auto mk = decode_member_key(pc, liveUnit());
@@ -6812,8 +6809,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,SetOpOp,MemberKey), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(local_var,RepoAuthType), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(local_var, RepoAuthType), PC& pc) {
   auto var = decode_local(pc);
   if (debug) {
     auto rat = decodeRAT(vmfp()->m_func->unit(), pc);
@@ -6825,8 +6822,8 @@ TCA iopWrapper(Op op, void(*fn)(local_var,RepoAuthType), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,RepoAuthType), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, RepoAuthType), PC& pc) {
   auto n = decode_intva(pc);
   if (debug) {
     auto rat = decodeRAT(vmfp()->m_func->unit(), pc);
@@ -6838,16 +6835,16 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,RepoAuthType), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,int), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, int), PC& pc) {
   auto n = decode_intva(pc);
   auto sa = decode<int>(pc);
   fn(n, sa);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,intva_t,int), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, intva_t, int), PC& pc) {
   auto n1 = decode_intva(pc);
   auto n2 = decode_intva(pc);
   auto sa = decode<int>(pc);
@@ -6855,8 +6852,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,intva_t,int), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,int,int), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, int, int), PC& pc) {
   auto n = decode_intva(pc);
   auto sa1 = decode<int>(pc);
   auto sa2 = decode<int>(pc);
@@ -6864,8 +6861,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,int,int), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(intva_t,ObjMethodOp), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(intva_t, ObjMethodOp), PC& pc) {
   auto n = decode_intva(pc);
   auto subop = decode_oa<ObjMethodOp>(pc);
   fn(n, subop);
@@ -6873,7 +6870,8 @@ TCA iopWrapper(Op op, void(*fn)(intva_t,ObjMethodOp), PC& pc) {
 }
 
 OPTBLD_INLINE static TCA
-iopWrapper(Op op, void(*fn)(intva_t,const StringData*,ObjMethodOp), PC& pc) {
+iopWrapper(Op /*op*/, void (*fn)(intva_t, const StringData*, ObjMethodOp),
+           PC& pc) {
   auto n = decode_intva(pc);
   auto s = decode_litstr(pc);
   auto subop = decode_oa<ObjMethodOp>(pc);
@@ -6881,9 +6879,10 @@ iopWrapper(Op op, void(*fn)(intva_t,const StringData*,ObjMethodOp), PC& pc) {
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op,
-  void(*fn)(PC&,intva_t,const StringData*,const StringData*), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/,
+           void (*fn)(PC&, intva_t, const StringData*, const StringData*),
+           PC& pc) {
   auto n = decode_intva(pc);
   auto s1 = decode_litstr(pc);
   auto s2 = decode_litstr(pc);
@@ -6891,16 +6890,16 @@ TCA iopWrapper(Op op,
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(local_var,const StringData*), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(local_var, const StringData*), PC& pc) {
   auto loc = decode_local(pc);
   auto s = decode_litstr(pc);
   fn(loc, s);
   return nullptr;
 }
 
-OPTBLD_INLINE static
-TCA iopWrapper(Op op, void(*fn)(const StringData*,InitPropOp), PC& pc) {
+OPTBLD_INLINE static TCA
+iopWrapper(Op /*op*/, void (*fn)(const StringData*, InitPropOp), PC& pc) {
   auto s = decode_litstr(pc);
   auto subop = decode_oa<InitPropOp>(pc);
   fn(s, subop);

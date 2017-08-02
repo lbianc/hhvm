@@ -185,7 +185,8 @@ Type returnTypeAwaited(SSATmp* retVal) {
 }
 
 void emitWHResult(IRGS& env) {
-  assertx(topC(env)->isA(TObj));
+  if (!topC(env)->isA(TObj)) PUNT(WHResult-NonObject);
+
   auto const exitSlow = makeExitSlow(env);
   auto const child = popC(env);
   // In most conditions, this will be optimized out by the simplifier.
@@ -378,7 +379,9 @@ void emitContEnter(IRGS& env) {
   push(env, retVal);
 }
 
-void emitContRaise(IRGS& env) { PUNT(ContRaise); }
+void emitContRaise(IRGS& /*env*/) {
+  PUNT(ContRaise);
+}
 
 void emitYield(IRGS& env) {
   auto const resumeOffset = nextBcOff(env);

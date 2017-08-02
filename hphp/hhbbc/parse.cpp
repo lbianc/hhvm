@@ -274,6 +274,7 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
     auto node = std::make_unique<php::ExnNode>();
     node->id = nextExnNode++;
     node->parent = nullptr;
+    node->depth = 1; // 0 depth means no ExnNode
 
     switch (eh.m_type) {
     case EHEnt::Type::Fault:
@@ -298,6 +299,7 @@ ExnTreeInfo build_exn_tree(const FuncEmitter& fe,
       auto it = ret.ehMap.find(&fe.ehtab[eh.m_parentIndex]);
       assert(it != end(ret.ehMap));
       node->parent = it->second;
+      node->depth = node->parent->depth + 1;
       it->second->children.emplace_back(std::move(node));
     } else {
       func.exnNodes.emplace_back(std::move(node));
@@ -338,11 +340,9 @@ void add_factored_exits(php::Block& blk,
  * control flow through any parent protected regions of the region(s)
  * that pointed at each fault handler.
  */
-template<class BlockStarts, class FindBlock>
-void find_fault_funclets(ExnTreeInfo& tinfo,
-                         const php::Func& func,
-                         const BlockStarts& blockStarts,
-                         FindBlock findBlock) {
+template <class BlockStarts, class FindBlock>
+void find_fault_funclets(ExnTreeInfo& tinfo, const php::Func& /*func*/,
+                         const BlockStarts& blockStarts, FindBlock findBlock) {
   auto sectionId = uint32_t{1};
 
   for (auto funcletStartIt = begin(tinfo.faultFuncletStarts);
@@ -393,7 +393,7 @@ template<class T> void decode(PC& pc, T& val) {
   val = decode<T>(pc);
 }
 
-MKey make_mkey(const php::Func& func, MemberKey mk) {
+MKey make_mkey(const php::Func& /*func*/, MemberKey mk) {
   switch (mk.mcode) {
     case MEL: case MPL:
       return MKey{mk.mcode, static_cast<LocalId>(mk.iva)};
@@ -811,7 +811,7 @@ void add_frame_variables(php::Func& func, const FuncEmitter& fe) {
   func.staticLocals.reserve(fe.staticVars.size());
   for (auto& sv : fe.staticVars) {
     func.staticLocals.push_back(
-      php::StaticLocalInfo { sv.name, sv.phpCode }
+      php::StaticLocalInfo { sv.name }
     );
   }
 }

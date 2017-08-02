@@ -1702,7 +1702,7 @@ void parse_try_catch(AsmState& as, int nestLevel) {
  * Record that subsequent bytecodes are at the source location indicated by the
  * range of inline numbers and character positions specified.
  */
-void parse_srcloc(AsmState& as, int nestLevel) {
+void parse_srcloc(AsmState& as, int /*nestLevel*/) {
   auto const line0 = as.in.readint();
   as.in.expectWs(':');
   auto const char0 = as.in.readint();
@@ -1728,11 +1728,9 @@ void parse_static(AsmState& as) {
   String init;
 
   as.in.expectWs('$');
-  if (!as.in.readname(name)) {
+  if (!as.in.readword(name)) {
     as.error("Statics must be named");
   }
-  as.in.expectWs('=');
-  svInfo.phpCode = makeStaticString(parse_long_string(as));
   svInfo.name = makeStaticString(name);
   as.fe->staticVars.push_back(svInfo);
 

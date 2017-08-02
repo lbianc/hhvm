@@ -357,12 +357,12 @@ SSATmp* opt_in_array(IRGS& env, const ParamPrep& params) {
   ArrayInit flipped{haystack->size(), ArrayInit::Map{}};
 
   for (auto iter = ArrayIter{haystack}; iter; ++iter) {
-    auto const& key = iter.secondRef();
+    auto const key = tvToCell(iter.secondRval());
     int64_t ignoredInt;
     double ignoredDbl;
 
-    if (!key.isString() ||
-        key.asCStrRef().get()
+    if (!isStringType(key.type()) ||
+        key.val().pstr
           ->isNumericWithVal(ignoredInt, ignoredDbl, false) != KindOfNull) {
       // Numeric strings will complicate matters because the loose comparisons
       // done with array keys are not quite the same as loose comparisons done
@@ -372,7 +372,7 @@ SSATmp* opt_in_array(IRGS& env, const ParamPrep& params) {
       return nullptr;
     }
 
-    flipped.set(key.asCStrRef(), init_null_variant);
+    flipped.set(StrNR(key.val().pstr), init_null_variant);
   }
 
   auto const needle = params[0].value;
@@ -799,15 +799,11 @@ Type param_coerce_type(const Func* callee, uint32_t paramIdx) {
  * need to be passed through the eval stack, and which ones will need
  * conversions.
  */
-template<class LoadParam>
-ParamPrep prepare_params(IRGS& env,
-                         const Func* callee,
-                         SSATmp* thiz,
-                         SSATmp* numArgsExpr,
-                         uint32_t numArgs,
-                         uint32_t numNonDefault,
-                         Block* coerceFailure,
-                         LoadParam loadParam) {
+template <class LoadParam>
+ParamPrep
+prepare_params(IRGS& /*env*/, const Func* callee, SSATmp* thiz,
+               SSATmp* numArgsExpr, uint32_t numArgs, uint32_t numNonDefault,
+               Block* coerceFailure, LoadParam loadParam) {
   auto ret = ParamPrep(numArgs);
   ret.thiz = thiz;
   ret.count = numArgsExpr;
@@ -1485,19 +1481,14 @@ void emitFCallBuiltin(IRGS& env,
   if (!callee) PUNT(Missing-builtin);
 
   auto params = prepare_params(
-    env,
-    callee,
-    nullptr,  // no $this; FCallBuiltin never happens for methods
-    nullptr,  // count is constant numNonDefault
-    numArgs,
-    numNonDefault,
-    nullptr,
-    [&] (uint32_t i, const Type ty) {
+    env, callee,
+    nullptr, // no $this; FCallBuiltin never happens for methods
+    nullptr, // count is constant numNonDefault
+    numArgs, numNonDefault, nullptr, [&](uint32_t /*i*/, const Type ty) {
       auto specificity =
         ty == TBottom ? DataTypeGeneric : DataTypeSpecific;
       return pop(env, specificity);
-    }
-  );
+    });
 
   auto const catcher = CatchMaker {
     env,

@@ -1156,7 +1156,8 @@ AddNewElemV    [C V]  ->  [C:Arr]
 NewCol <coll type>    []  ->  [C:Obj]
 
   New collection. Creates a empty new collection of type %1, and pushes it
-  onto the stack. %1 cannot be Pair.
+  onto the stack. %1 must be one of the values of the CollectionType enum other
+  than Pair.
 
 NewPair    [C C] -> [C:Obj]
 
@@ -1168,10 +1169,11 @@ NewPair    [C C] -> [C:Obj]
 ColFromArray <coll type>    [C:Arr]  ->  [C:Obj]
 
   Create a collection of type %1 from array $1, and pushes the collection onto
-  the stack. %1 cannot be Pair. The array will be used to implement the
-  collection without conversion or duplication, thus it should not to contain
-  references. $1 must be in packed mode if %1 is Vector or ImmVector, and must
-  be in mixed mode otherwise.
+  the stack. %1 must be one of the values of the CollectionType enum other
+  than Pair. The array will be used to implement the collection without
+  conversion or duplication, thus it should not contain references. $1 must be
+  in packed mode if %1 is Vector or ImmVector, and must be in mixed mode
+  otherwise.
 
   Note that integer-like string keys are converted to integers in array, but
   not in collections; thus not all collections can be created using this
@@ -4093,6 +4095,15 @@ Silence  <local id> <Start|End>   []  ->  []
   With %2 = End, if the error reporting level is 0, restores the error
   reporting level to the previous value (stored in local variable %1); if the
   error reporting level is not 0, does nothing.
+
+  The verifier requires that all code paths to an End on local variable %1
+  contain a Start on %1, and that all code paths with a Start lead to an End on
+  the same variable.  It additionally requires that none of these paths store
+  any value in %1 between the Start and End operations. Lastly, the set of
+  variables storing the error reporting state must be consistent across block
+  boundaries.
+
+  In either case, the local variable %1 must be an unnamed local.
 
 GetMemoKeyL  <local id>  [] ->  [C:<Int/String>]
 

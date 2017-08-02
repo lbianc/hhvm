@@ -34,6 +34,7 @@
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
+#include "hphp/runtime/vm/jit/cls-cns-profile.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
@@ -319,6 +320,61 @@ void cgLdClsCns(IRLS& env, const IRInstruction* inst) {
   fwdJcc(v, env, CC_NE, sf, inst->taken());
   v << lea{rvmtl()[link.handle()], dst};
 }
+
+void cgLdSubClsCns(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<LdSubClsCns>();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  auto const slot = extra->slot;
+  auto const tmp = v.makeReg();
+  v << load{srcLoc(env, inst, 0).reg()[Class::constantsVecOff()], tmp};
+  v << lea{tmp[slot * sizeof(Class::Const) + offsetof(Class::Const, val)], dst};
+}
+
+void cgCheckSubClsCns(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<CheckSubClsCns>();
+  auto& v = vmain(env);
+
+  auto const slot = extra->slot;
+  auto const tmp = v.makeReg();
+  auto const sf = v.makeReg();
+  v << load{srcLoc(env, inst, 0).reg()[Class::constantsVecOff()], tmp};
+  emitCmpLowPtr<StringData>(v, sf, v.cns(extra->cnsName),
+                            tmp[slot * sizeof(Class::Const) +
+                                offsetof(Class::Const, name)]);
+  fwdJcc(v, env, CC_NE, sf, inst->taken());
+}
+
+void cgLdClsCnsVecLen(IRLS& env, const IRInstruction* inst) {
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const cls = srcLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  auto const off = Class::constantsVecLenOff();
+
+  static_assert(
+    Class::constantsVecLenSize() == 4,
+    "Class::constantsVecLenSize() must be 4 bytes "
+    "(if you changed it, fix the following code)");
+
+  v << loadzlq{cls[off], dst};
+}
+
+void cgProfileSubClsCns(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<ProfileSubClsCns>();
+
+  auto const args = argGroup(env, inst)
+    .addr(rvmtl(), safe_cast<int32_t>(extra->handle))
+    .ssa(0)
+    .imm(extra->cnsName);
+
+  auto const dst = dstLoc(env, inst, 0).reg();
+
+  cgCallHelper(vmain(env), env, CallSpec::method(&ClsCnsProfile::reportClsCns),
+               callDest(dst), SyncOptions::None, args);
+}
+
 
 Cell lookupClsCnsHelper(TypedValue* cache, const NamedEntity* ne,
                         const StringData* cls, const StringData* cns) {

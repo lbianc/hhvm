@@ -744,7 +744,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       { function_call_receiver      = recv
       ; function_call_argument_list = args
       ; _ }
-      -> Call (pExpr recv env, couldMap ~f:pExpr args  env, [])
+      -> Call (pExpr recv env, [], couldMap ~f:pExpr args  env, [])
 
     | QualifiedNameExpression { qualified_name_expression } ->
       Id (pos_name qualified_name_expression)
@@ -813,7 +813,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
         | Some TK.Await                   -> Await expr
         | Some TK.Clone                   -> Clone expr
         | Some TK.Print                   ->
-          Call ((pos, Id (pos, "echo")), [expr], [])
+          Call ((pos, Id (pos, "echo")), [], [expr], [])
         | Some TK.Dollar                  ->
           (match snd expr with
           | Lvarvar (n, id) -> Lvarvar (n + 1, id)
@@ -841,9 +841,13 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
     | YieldExpression { yield_operand; _ } ->
       env.saw_yield := true;
       Yield (pAField yield_operand env)
+    | YieldFromExpression { yield_from_operand; _ } ->
+      env.saw_yield := true;
+      Yield_from (pExpr yield_from_operand env)
 
     | DefineExpression { define_keyword; define_argument_list; _ } -> Call
       ( (let name = pos_name define_keyword in fst name, Id name)
+      , []
       , List.map ~f:(fun x -> pExpr x env) (as_list define_argument_list)
       , []
       )
@@ -928,13 +932,18 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       (match syntax expr with
       | Token _ ->
         let s = text expr in
+        (* We allow underscores while lexing the integer literals. This function gets
+         * rid of them before the literal is created. *)
+        let eliminate_underscores s = s
+                                      |> Str.split (Str.regexp "_")
+                                      |> String.concat "" in
         (* TODO(17796330): Get rid of linter functionality in the lowerer *)
         if s <> String.lowercase s then Lint.lowercase_constant pos s;
         (match token_kind expr with
         | Some TK.DecimalLiteral
         | Some TK.OctalLiteral
         | Some TK.HexadecimalLiteral
-        | Some TK.BinaryLiteral             -> Int    (pos, s)
+        | Some TK.BinaryLiteral             -> Int    (pos, eliminate_underscores s)
         | Some TK.FloatingLiteral           -> Float  (pos, s)
         | Some TK.SingleQuotedStringLiteral -> String (pos, mkStr unesc_sgl s)
         | Some TK.DoubleQuotedStringLiteral
@@ -1013,7 +1022,7 @@ and pExpr ?top_level:(top_level=true) : expr parser = fun node env ->
       let body =
         { (fun_template yld node suspension_kind) with f_body = mk_noop blk }
       in
-      Call ((get_pos node, Lfun body), [], [])
+      Call ((get_pos node, Lfun body), [], [], [])
     | XHPExpression
       { xhp_open =
         { syntax = XHPOpen { xhp_open_name; xhp_open_attributes; _ }; _ }
@@ -1234,6 +1243,7 @@ and pStmt : stmt parser = fun node env ->
             -> let name = pos_name kw in fst name, Id name
           | _ -> missing_syntax "id" kw env
           )
+        , []
         , couldMap ~f:pExpr exprs env
         , []
       ))
@@ -1525,37 +1535,55 @@ and pClassElt : class_elt list parser = fun node env ->
       ; m_fun_kind        = mk_fun_kind hdr.fh_suspension_kind body_has_yield
       ; m_doc_comment     = opt_doc_comment
       }]
-  | TraitUseConflictResolution {
-      trait_use_conflict_resolution_names;
-      trait_use_conflict_resolution_clauses;
-      _
+  | TraitUseConflictResolution
+    { trait_use_conflict_resolution_names
+    ; trait_use_conflict_resolution_clauses
+    ; _
     } ->
     let pTraitUseConflictResolutionItem node env =
       match syntax node with
-      | TraitUseConflictResolutionItem
-        { trait_use_conflict_resolution_item_aliasing_name = aliasing_name;
-          trait_use_conflict_resolution_item_aliasing_keyword = alias_kw;
-          trait_use_conflict_resolution_item_aliased_name = aliased_name;
-          _
+      | TraitUsePrecedenceItem
+        { trait_use_precedence_item_name = name
+        ; trait_use_precedence_item_removed_names = removed_names
+        ; _
         } ->
-        let aliasing_name, opt_scope_resolution_name =
-          match syntax aliasing_name with
+        let qualifier, name =
+          match syntax name with
           | ScopeResolutionExpression
             { scope_resolution_qualifier; scope_resolution_name; _ } ->
             pos_name scope_resolution_qualifier,
-            Some (pos_name scope_resolution_name)
-          | _ -> pos_name aliasing_name, None
+            pos_name scope_resolution_name
+          | _ -> missing_syntax "trait use precedence item" node env
         in
-        let alias_type =
-          match token_kind alias_kw with
-          | Some TK.As -> CU_as
-          | Some TK.Insteadof -> CU_insteadof
-          | _ ->
-            missing_syntax "trait use conflict resolution item" alias_kw env
+        let removed_names =
+          couldMap ~f:(fun n _e -> pos_name n) removed_names env
         in
-        ClassUseAlias ((aliasing_name, opt_scope_resolution_name),
-                        pos_name aliased_name,
-                        alias_type)
+        ClassUsePrecedence (qualifier, name, removed_names)
+      | TraitUseAliasItem
+        { trait_use_alias_item_aliasing_name = aliasing_name
+        ; trait_use_alias_item_visibility = visibility
+        ; trait_use_alias_item_aliased_name = aliased_name
+        ; _
+        } ->
+        let qualifier, name =
+          match syntax aliasing_name with
+          | ScopeResolutionExpression
+            { scope_resolution_qualifier; scope_resolution_name; _ } ->
+            Some (pos_name scope_resolution_qualifier),
+            pos_name scope_resolution_name
+          | _ -> None, pos_name aliasing_name
+        in
+        let visibility = Option.map (token_kind visibility)
+          ~f:begin function
+          | TK.Private   -> Private
+          | TK.Public    -> Public
+          | TK.Protected -> Protected
+          | _ -> missing_syntax "trait use alias item" node env end
+        in
+        let aliased_name =
+          if is_missing aliased_name then None else Some (pos_name aliased_name)
+        in
+        ClassUseAlias (qualifier, name, aliased_name, visibility)
       | _ -> missing_syntax "trait use conflict resolution item" node env
     in
     (couldMap ~f:(fun n e ->
@@ -1874,6 +1902,7 @@ let pProgram : program parser = fun node env ->
     | (Stmt Noop::el) -> post_process el
     | ((Stmt (Expr (_, (Call
         ( (_, (Id (_, "define")))
+        , []
         , [ (_, (String name))
           ; value
           ]
@@ -1917,7 +1946,7 @@ let pProgram : program parser = fun node env ->
         }
       | args ->
         let name = pos_name define_keyword in
-        Stmt (Expr (fst name, Call ((fst name, Id name), args, [])))
+        Stmt (Expr (fst name, Call ((fst name, Id name), [], args, [])))
       ) :: aux env nodel
   | node :: nodel -> pDef node env :: aux env nodel
   in

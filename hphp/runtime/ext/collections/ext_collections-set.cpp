@@ -32,32 +32,30 @@ void BaseSet::addAllKeysOf(const Cell container) {
   assert(isContainer(container));
 
   decltype(cap()) oldCap = 0;
-  bool ok = IterateKV(
-    container,
-    [&](ArrayData* adata) {
-      auto sz = adata->size();
-      if (!sz) return true;
-      if (m_size) {
-        oldCap = cap(); // assume minimal collisions
-      }
-      reserve(m_size + sz);
-      mutateAndBump();
-      return false;
-    },
-    [this](const TypedValue* key, const TypedValue* value) {
-      addRaw(tvAsCVarRef(key));
-    },
-    [this](ObjectData* coll) {
-      if (!m_size && coll->collectionType() == CollectionType::Set) {
-        auto hc = static_cast<HashCollection*>(coll);
-        replaceArray(hc->arrayData());
-        return true;
-      }
-      if (coll->collectionType() == CollectionType::Pair) {
-        mutateAndBump();
-      }
-      return false;
-    });
+  bool ok =
+    IterateKV(container,
+              [&](ArrayData* adata) {
+                auto sz = adata->size();
+                if (!sz) return true;
+                if (m_size) {
+                  oldCap = cap(); // assume minimal collisions
+                }
+                reserve(m_size + sz);
+                mutateAndBump();
+                return false;
+              },
+              [this](Cell k, TypedValue /*v*/) { addRaw(k); },
+              [this](ObjectData* coll) {
+                if (!m_size && coll->collectionType() == CollectionType::Set) {
+                  auto hc = static_cast<HashCollection*>(coll);
+                  replaceArray(hc->arrayData());
+                  return true;
+                }
+                if (coll->collectionType() == CollectionType::Pair) {
+                  mutateAndBump();
+                }
+                return false;
+              });
 
   if (UNLIKELY(!ok)) {
     throw_invalid_collection_parameter();
@@ -82,8 +80,8 @@ void BaseSet::addAll(const Variant& t) {
       mutateAndBump();
       return false;
     },
-    [this](const TypedValue* value) {
-      addRaw(tvAsCVarRef(value));
+    [this](TypedValue v) {
+      addRaw(tvToCell(v));
     },
     [this](ObjectData* coll) {
       if (!m_size && coll->collectionType() == CollectionType::Set) {

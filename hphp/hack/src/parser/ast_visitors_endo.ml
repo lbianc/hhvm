@@ -279,19 +279,19 @@ class virtual ['self] endo =
     method on_ClassUse env this c0 =
       let r0 = self#on_hint env c0 in
       if c0 == r0 then this else ClassUse r0
-    method on_ClassUseAlias env this c0 c1 c2 =
-      let r0 =
-        (fun env ((c0, c1) as this) ->
-          let r0 = self#on_id env c0 in
-          let r1 = self#on_option self#on_pstring env c1 in
-          if c0 == r0 && c1 == r1
-          then this
-          else (r0, r1)) env c0
-      in
-      let r1 = self#on_id env c1 in
-      let r2 = self#on_cu_alias_type env c2 in
+    method on_ClassUseAlias env this c0 c1 c2 c3 =
+      let r0 = self#on_option self#on_id env c0 in
+      let r1 = self#on_pstring env c1 in
+      let r2 = self#on_option self#on_id env c2 in
+      let r3 = self#on_option self#on_kind env c3 in
+      if c0 == r0 && c1 == r1 && c2 == r2 && c3 == r3
+      then this else ClassUseAlias (r0, r1, r2, r3)
+    method on_ClassUsePrecedence env this c0 c1 c2 =
+      let r0 = self#on_id env c0 in
+      let r1 = self#on_pstring env c1 in
+      let r2 = self#on_list self#on_id env c2 in
       if c0 == r0 && c1 == r1 && c2 == r2
-      then this else ClassUseAlias (r0, r1, r2)
+      then this else ClassUsePrecedence (r0, r1, r2)
     method on_XhpAttrUse env this c0 =
       let r0 = self#on_hint env c0 in
       if c0 == r0 then this else XhpAttrUse r0
@@ -368,11 +368,6 @@ class virtual ['self] endo =
     method on_ChildPlus env this = this
     method on_ChildQuestion env this = this
 
-    method on_cu_alias_type env this =
-      match this with
-      | CU_as
-      | CU_insteadof -> this
-
     method on_class_elt env this =
       match this with
       | Const (c0, c1) -> self#on_Const env this c0 c1
@@ -380,7 +375,10 @@ class virtual ['self] endo =
       | Attributes c0 -> self#on_Attributes env this c0
       | TypeConst c0 -> self#on_TypeConst env this c0
       | ClassUse c0 -> self#on_ClassUse env this c0
-      | ClassUseAlias (c0, c1, at) -> self#on_ClassUseAlias env this c0 c1 at
+      | ClassUseAlias (c0, c1, c2, c3) ->
+        self#on_ClassUseAlias env this c0 c1 c2 c3
+      | ClassUsePrecedence (c0, c1, c2) ->
+        self#on_ClassUsePrecedence env this c0 c1 c2
       | XhpAttrUse c0 -> self#on_XhpAttrUse env this c0
       | ClassTraitRequire (c0, c1) as this ->
           self#on_ClassTraitRequire env this c0 c1
@@ -908,13 +906,14 @@ class virtual ['self] endo =
       let r1 = self#on_pstring env c1 in if c0 == r0 && c1 == r1
       then this
       else Class_const (r0, r1)
-    method on_Call env this c0 c1 c2 =
+    method on_Call env this c0 c1 c2 c3 =
       let r0 = self#on_expr env c0 in
-      let r1 = self#on_list self#on_expr env c1 in
+      let r1 = self#on_list self#on_hint env c1 in
       let r2 = self#on_list self#on_expr env c2 in
-      if c0 == r0 && c1 == r1 && c2 == r2
+      let r3 = self#on_list self#on_expr env c3 in
+      if c0 == r0 && c1 == r1 && c2 == r2 && c3 == r3
       then this
-      else Call (r0, r1, r2)
+      else Call (r0, r1, r2, r3)
     method on_Int env this c0 =
       let r0 = self#on_pstring env c0 in
       if c0 == r0 then this else Int r0
@@ -931,6 +930,9 @@ class virtual ['self] endo =
       let r0 = self#on_afield env c0 in
       if c0 == r0 then this else Yield r0
     method on_Yield_break env this = this
+    method on_Yield_from env this c0 =
+      let r0 = self#on_expr env c0 in
+      if c0 == r0 then this else Yield_from r0
     method on_Await env this c0 =
       let r0 = self#on_expr env c0 in
       if c0 == r0 then this else Await r0
@@ -1056,12 +1058,13 @@ class virtual ['self] endo =
       | Class_get (c0, c1) -> self#on_Class_get env this c0 c1
       | Class_const (c0, c1) as this ->
           self#on_Class_const env this c0 c1
-      | Call (c0, c1, c2) -> self#on_Call env this c0 c1 c2
+      | Call (c0, c1, c2, c3) -> self#on_Call env this c0 c1 c2 c3
       | Int c0 -> self#on_Int env this c0
       | Float c0 -> self#on_Float env this c0
       | String c0 -> self#on_String env this c0
       | String2 c0 -> self#on_String2 env this c0
       | Yield c0 -> self#on_Yield env this c0
+      | Yield_from c0 -> self#on_Yield_from env this c0
       | Yield_break -> self#on_Yield_break env this
       | Await c0 -> self#on_Await env this c0
       | List c0 -> self#on_List env this c0

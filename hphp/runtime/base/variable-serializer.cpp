@@ -735,12 +735,12 @@ void VariableSerializer::writeOverflow(const TypedValue& tv) {
       int optId = m_refs[tv].m_id;
       assert(optId != NO_ID);
       bool isObject = tv.m_type == KindOfResource || tv.m_type == KindOfObject;
-      if (isObject) {
-        m_buf->append("r:");
+      if (wasRef) {
+        m_buf->append("R:");
         m_buf->append(optId);
         m_buf->append(';');
-      } else if (wasRef) {
-        m_buf->append("R:");
+      } else if (isObject) {
+        m_buf->append("r:");
         m_buf->append(optId);
         m_buf->append(';');
       } else {
@@ -1451,9 +1451,9 @@ void VariableSerializer::serializeArrayImpl(const ArrayData* arr) {
 
   IterateKV(
     arr,
-    [&](const TypedValue* k, const TypedValue* v) {
-      writeArrayKey(tvAsCVarRef(k), kind);
-      writeArrayValue(tvAsCVarRef(v), kind);
+    [&](Cell k, TypedValue v) {
+      writeArrayKey(VarNR(k), kind);
+      writeArrayValue(VarNR(v), kind);
     }
   );
 
@@ -1569,7 +1569,7 @@ Array VariableSerializer::getSerializeProps(const ObjectData* obj) const {
         } while (key[sizeToCut] != '\0');
         key = key.substr(sizeToCut+1);
       }
-      props.setWithRef(key, iter.secondRef());
+      props.setWithRef(key, iter.secondVal());
     }
     return props;
   }

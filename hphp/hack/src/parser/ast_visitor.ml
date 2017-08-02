@@ -31,7 +31,7 @@ class type ['a] ast_visitor_type = object
   method on_pipe : 'a -> expr -> expr -> 'a
   method on_block : 'a -> block -> 'a
   method on_break : 'a -> Pos.t -> int option -> 'a
-  method on_call : 'a -> expr -> expr list -> expr list -> 'a
+  method on_call : 'a -> expr -> hint list -> expr list -> expr list -> 'a
   method on_case : 'a -> case -> 'a
   method on_cast : 'a -> hint -> expr -> 'a
   method on_catch : 'a -> catch -> 'a
@@ -100,6 +100,7 @@ class type ['a] ast_visitor_type = object
   method on_while : 'a -> expr -> block -> 'a
   method on_xml : 'a -> id -> (pstring * expr) list -> expr list -> 'a
   method on_yield : 'a -> afield -> 'a
+  method on_yield_from : 'a -> expr -> 'a
   method on_yield_break : 'a -> 'a
 
 
@@ -111,9 +112,10 @@ class type ['a] ast_visitor_type = object
   method on_class_elt: 'a -> class_elt -> 'a
   method on_classTraitRequire: 'a -> trait_req_kind -> hint -> 'a
   method on_classUse: 'a -> hint -> 'a
-  method on_cu_alias_type: 'a -> cu_alias_type -> 'a
   method on_classUseAlias: 'a ->
-                           (id * pstring option) -> id -> cu_alias_type -> 'a
+                           id option -> pstring ->
+                           id option -> kind option -> 'a
+  method on_classUsePrecedence: 'a -> id -> pstring -> id list -> 'a
   method on_classVars: 'a -> kind list -> hint option -> class_var list -> 'a
   method on_const: 'a -> hint option -> (id * expr) list -> 'a
   method on_constant: 'a -> gconst -> 'a
@@ -305,6 +307,7 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
    | Lvarvar (n, id)  -> this#on_lvarvar acc n id
    | Yield_break -> this#on_yield_break acc
    | Yield e     -> this#on_yield acc e
+   | Yield_from e -> this#on_yield_from acc e
    | Await e     -> this#on_await acc e
    | List el     -> this#on_list acc el
    | Clone e     -> this#on_clone acc e
@@ -313,7 +316,7 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
    | Array_get   (e1, e2)    -> this#on_array_get acc e1 e2
    | Class_get   (id, p)   -> this#on_class_get acc id p
    | Class_const (id, pstr)   -> this#on_class_const acc id pstr
-   | Call        (e, el, uel) -> this#on_call acc e el uel
+   | Call        (e, hl, el, uel) -> this#on_call acc e hl el uel
    | String2     el           -> this#on_string2 acc el
    | Cast        (hint, e)   -> this#on_cast acc hint e
    | Unop        (uop, e)         -> this#on_unop acc uop e
@@ -379,8 +382,9 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
     let acc = this#on_pstring acc pstr in
     acc
 
-  method on_call acc e el uel =
+  method on_call acc e hl el uel =
     let acc = this#on_expr acc e in
+    let acc = List.fold_left this#on_hint acc hl in
     let acc = List.fold_left this#on_expr acc el in
     let acc = List.fold_left this#on_expr acc uel in
     acc
@@ -408,6 +412,7 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
 
   method on_yield_break acc = acc
   method on_yield acc e = this#on_afield acc e
+  method on_yield_from acc e = this#on_expr acc e
   method on_await acc e = this#on_expr acc e
   method on_list acc el = List.fold_left this#on_expr acc el
 
@@ -600,17 +605,16 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
       | None -> acc in
     acc
 
-  method on_cu_alias_type acc = function
-    | CU_as
-    | CU_insteadof -> acc
-
   method on_class_elt acc = function
     | Const (hopt, iel) -> this#on_const acc hopt iel
     | AbsConst (h, a) -> this#on_absConst acc h a
     | Attributes cl -> this#on_attributes acc cl
     | TypeConst t -> this#on_typeConst acc t
     | ClassUse h -> this#on_classUse acc h
-    | ClassUseAlias (id1, id2, at) -> this#on_classUseAlias acc id1 id2 at
+    | ClassUseAlias (ido1, ps, ido2, ko) ->
+      this#on_classUseAlias acc ido1 ps ido2 ko
+    | ClassUsePrecedence (id, ps, ids) ->
+      this#on_classUsePrecedence acc id ps ids
     | XhpAttrUse h -> this#on_xhpAttrUse acc h
     | XhpCategory cs -> this#on_xhpCategory acc cs
     | XhpChild c -> this#on_xhp_child acc c
@@ -648,13 +652,19 @@ class virtual ['a] ast_visitor: ['a] ast_visitor_type = object(this)
   method on_classUse acc h =
     let acc = this#on_hint acc h in
     acc
-  method on_classUseAlias acc (id1, po) id2 at =
-    let acc = this#on_id acc id1 in
-    let acc = match po with
-      | Some p -> this#on_pstring acc p
+  method on_classUseAlias acc ido1 ps ido2 _ =
+    let acc = match ido1 with
+      | Some id -> this#on_id acc id
       | None -> acc in
-    let acc = this#on_id acc id2 in
-    let acc = this#on_cu_alias_type acc at in
+    let acc = this#on_pstring acc ps in
+    let acc = match ido2 with
+      | Some id -> this#on_id acc id
+      | None -> acc in
+    acc
+  method on_classUsePrecedence acc id ps ids =
+    let acc = this#on_id acc id in
+    let acc = this#on_pstring acc ps in
+    let acc = List.fold_left this#on_id acc ids in
     acc
   method on_xhpAttrUse acc h =
     let acc = this#on_hint acc h in

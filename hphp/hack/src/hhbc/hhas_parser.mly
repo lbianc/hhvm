@@ -43,6 +43,7 @@ open Hhas_parser_actions
 %token CATCHDIRECTIVE
 %token ALIASDIRECTIVE
 %token STRICTDIRECTIVE
+%token AS INSTEADOF
 
 %start program
 %type <Hhas_program.t> program
@@ -62,11 +63,12 @@ aliasdecl:
       {Hhas_typedef.make (Hhbc_id.Class.from_raw_string $2)  $4 None}
 ;
 maindecl:
-    | MAINDIRECTIVE LBRACE nl numiters numclsrefslots declvars statics nl functionbody RBRACE nl
-      {Hhas_body.make $9(*instrs*)
-        $6(*declvars*) $4(*numiters*)
-        $5(*numclsrefslots*) false(*ismemoizewrapper*)
-        [](*params*) None(*return type*) $7(*static_inits*) None (* doc *)}
+    | MAINDIRECTIVE LBRACE nl numiters ismemoizewrapper numclsrefslots declvars statics nl
+      functionbody RBRACE nl
+      {Hhas_body.make $10(*instrs*)
+        $7(*declvars*) $4(*numiters*)
+        $6(*numclsrefslots*) $5(*ismemoizewrapper*)
+        [](*params*) None(*return type*) $8 (*static_inits*) None (* doc *)}
 ;
 numiters:
     | /* empty */ {0}
@@ -115,8 +117,8 @@ declvars:
 ;
 statics:
     | /* empty */ { [] }
-    | STATICDIRECTIVE DOLLAR ID EQUALS TRIPLEQUOTEDSTRING SEMI nl statics
-      { ($3, Some (Pos.none, Ast.String(Pos.none, $5))) :: $8 }
+    | STATICDIRECTIVE DOLLAR ID SEMI nl statics
+      { $3 :: $6 }
 ;
 requires:
     | /* empty */ { [] }
@@ -195,8 +197,9 @@ classdecl:
           (List.mem "trait"     attrs) (*istrait*)
           false (*isxhp*)
           (not (List.mem "nontop" attrs)) (*istop*)
-          (fst $7)(*uses*)
-          (snd $7)(*use_alises*)
+          ((fun (x, _, _) -> x) $7)(*uses*)
+          ((fun (_, x, _) -> x) $7)(*use_alises*)
+          ((fun (_, _, x) -> x) $7)(*use_precedences*)
           $8(*enumtype*)
           $12(*methods*)
           $11(*properties*)
@@ -329,23 +332,31 @@ classenumty:
   | ENUMTYDIRECTIVE enumtypeinfo SEMI nl {Some $2}
 ;
 classuses:
-  | /* empty */ {[], []}
-  | USESDIRECTIVE idlist SEMI nl {$2, []}
-  | USESDIRECTIVE idlist LBRACE nl classaliaslist nl RBRACE nl {$2, $5}
+  | /* empty */ {[], [], []}
+  | USESDIRECTIVE idlist SEMI nl {$2, [], []}
+  | USESDIRECTIVE idlist LBRACE nl classconflictlist nl RBRACE nl {$2, fst $5, snd $5}
 ;
-classaliaslist:
-  | /* empty */ {[]}
-  | classalias nl classaliaslist {$1 :: $3}
+classconflictlist:
+  | /* empty */ {[], []}
+  | classalias nl classconflictlist {$1 :: fst $3, snd $3}
+  | classprecedence nl classconflictlist {fst $3, $1 :: snd $3}
 ;
 classalias:
-  | ID classaliastype ID SEMI {($1, None, $3, $2)}
-  | ID COLONCOLON ID classaliastype ID SEMI {($1, Some $3, $5, $4)}
+  | ID AS ID {(None, $1, Some $3, None)}
+  | ID AS visibility {(None, $1, None, Some $3)}
+  | ID COLONCOLON ID AS visibility {(Some $1, $3, None, Some $5)}
+  | ID COLONCOLON ID AS ID {(Some $1, $3, Some $5, None)}
+  | ID COLONCOLON ID AS visibility ID {(Some $1, $3, Some $6, Some $5)}
 ;
-classaliastype:
+classprecedence:
+  | ID COLONCOLON ID INSTEADOF idlist SEMI {($1, $3, $5)}
+;
+visibility:
   | ID {match $1 with
-        | "as" -> Ast.CU_as
-        | "insteadof" -> Ast.CU_insteadof
-        | _ -> report_error "incorrect class alias type"}
+        | "public" -> Ast.Public
+        | "private" -> Ast.Private
+        | "protected" -> Ast.Protected
+        | _ -> report_error "incorrect visibility type"}
 ;
 extendsimplements:
   | /* empty */ {(None,[])}
@@ -418,6 +429,10 @@ enumtypeinfo:
 ;
 functionbody:
     | /* empty */ {Instruction_sequence.empty}
+    | NEWLINE functionbody { $2 }
+    | /* Label: Instruction */ ID COLON functionbody {
+      Instruction_sequence.gather
+        [Instruction_sequence.instr (makelabelinst $1); $3]}
     | instruction NEWLINE functionbody {
         Instruction_sequence.gather [Instruction_sequence.instr $1; $3]}
     | TRYFAULTDIRECTIVE ID LBRACE NEWLINE functionbody nl RBRACE nl

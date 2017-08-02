@@ -60,8 +60,8 @@ let instr_jmpz label = instr (IContFlow (JmpZ label))
 let instr_jmpnz label = instr (IContFlow (JmpNZ label))
 let instr_jmpns label = instr (IContFlow (JmpNS label))
 let instr_label label = instr (ILabel label)
-let instr_continue level = instr (ISpecialFlow (Continue (level, level)))
-let instr_break level = instr (ISpecialFlow (Break (level, level, [])))
+let instr_continue level = instr (ISpecialFlow (Continue level))
+let instr_break level = instr (ISpecialFlow (Break level))
 let instr_iter_break label itrs =
   instr (IIterator (IterBreak (label, itrs)))
 let instr_unwind = instr (IContFlow Unwind)
@@ -253,6 +253,17 @@ let instr_silence_start local =
   instr (IMisc (Silence (local, Start)))
 let instr_silence_end local =
   instr (IMisc (Silence (local, End)))
+
+let instr_contAssignDelegate iter =
+  instr (IGenDelegation (ContAssignDelegate iter))
+let instr_contEnterDelegate =
+  instr (IGenDelegation ContEnterDelegate)
+let instr_yieldFromDelegate iter l =
+  instr (IGenDelegation (YieldFromDelegate (iter, l)))
+let instr_contUnsetDelegate_free iter =
+  instr (IGenDelegation (ContUnsetDelegate (FreeIter, iter)))
+let instr_contUnsetDelegate_ignore iter =
+  instr (IGenDelegation (ContUnsetDelegate (IgnoreIter, iter)))
 
 (* Functions on instr_seq that correspond to existing Core.List functions *)
 module InstrSeq = struct

@@ -209,7 +209,7 @@ let make_closure ~explicit_use ~class_num
 
 let inline_class_name_if_possible env ~trait ~fallback_to_empty_string p pe =
   let get_class_call =
-    p, Call ((pe, Id (pe, "get_class")), [], [])
+    p, Call ((pe, Id (pe, "get_class")), [], [], [])
   in
   let name c = p, String (pe, strip_id c.c_name) in
   let empty_str = p, String (pe, "") in
@@ -226,6 +226,7 @@ let inline_class_name_if_possible env ~trait ~fallback_to_empty_string p pe =
  * literal strings. It's necessary to do this before closure conversion
  * because the enclosing class will be changed. *)
 let convert_id (env:env) p (pid, str as id) =
+  let str = String.uppercase_ascii str in
   let return newstr = (p, String (pid, newstr)) in
   match str with
   | "__CLASS__" | "__TRAIT__"->
@@ -254,9 +255,8 @@ let convert_id (env:env) p (pid, str as id) =
     end
   | "__LINE__" ->
     (* If the expression goes on multi lines, we return the last line *)
-    let pos, _ = id in
-    let _, line, _, _ = Pos.info_pos_extended pos in
-    p, Int (pos, string_of_int line)
+    let _, line, _, _ = Pos.info_pos_extended pid in
+    p, Int (pid, string_of_int line)
   | _ ->
     (p, Id id)
 
@@ -298,23 +298,23 @@ let rec convert_expr env st (p, expr_ as expr) =
     let st, e1 = convert_expr env st e1 in
     let st, opt_e2 = convert_opt_expr env st opt_e2 in
     st, (p, Array_get (e1, opt_e2))
-  | Call ((_, Id (pe, "get_class")), [], []) ->
+  | Call ((_, Id (pe, "get_class")), _, [], []) ->
     st, inline_class_name_if_possible
       ~trait:false
       ~fallback_to_empty_string:false
       env p pe
-  | Call ((_, (Class_const ((_, cid), _) | Class_get ((_, cid), _))) as e, el1, el2)
+  | Call ((_, (Class_const ((_, cid), _) | Class_get ((_, cid), _))) as e, el1, el2, el3)
   when cid = "parent" ->
     let st = add_var st "$this" in
     let st, e = convert_expr env st e in
-    let st, el1 = convert_exprs env st el1 in
     let st, el2 = convert_exprs env st el2 in
-    st, (p, Call(e, el1, el2))
-  | Call (e, el1, el2) ->
+    let st, el3 = convert_exprs env st el3 in
+    st, (p, Call(e, el1, el2, el3))
+  | Call (e, el1, el2, el3) ->
     let st, e = convert_expr env st e in
-    let st, el1 = convert_exprs env st el1 in
     let st, el2 = convert_exprs env st el2 in
-    st, (p, Call(e, el1, el2))
+    let st, el3 = convert_exprs env st el3 in
+    st, (p, Call(e, el1, el2, el3))
   | String2 el ->
     let st, el = convert_exprs env st el in
     st, (p, String2 el)

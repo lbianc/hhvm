@@ -80,7 +80,7 @@ void truncateMap(Container& c, SrcKey final) {
 
 //////////////////////////////////////////////////////////////////////
 
-PGORegionMode pgoRegionMode(const Func& func) {
+PGORegionMode pgoRegionMode(const Func& /*func*/) {
   auto& s = RuntimeOption::EvalJitPGORegionSelector;
   if (s == "hottrace") return PGORegionMode::Hottrace;
   if (s == "hotblock") return PGORegionMode::Hotblock;
@@ -411,6 +411,30 @@ RegionDesc::BlockId findFirstInSet(const Chain& c, RegionDesc::BlockIdSet s) {
   always_assert(0);
 }
 
+/**
+ * Returns true iff all the block ids in `chains' are in the `validBlockIds'
+ * set.
+ */
+bool chainsAreValid(const jit::vector<Chain>& chains,
+                    const jit::hash_set<RegionDesc::BlockId>& validBlockIds) {
+  for (auto& chain : chains) {
+    for (auto bid : chain.blocks) {
+      if (validBlockIds.find(bid) == validBlockIds.end()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+std::string show(const jit::vector<Chain>& chains) {
+  std::string ret;
+  for (auto& chain : chains) {
+    folly::format(&ret, "[{}]: {}\n", chain.id, folly::join(",", chain.blocks));
+  }
+  return ret;
+}
+
 }
 
 /**
@@ -421,6 +445,7 @@ void RegionDesc::chainRetransBlocks() {
   jit::vector<Chain> chains;
   BlockToChainMap block2chain;
   SCOPE_ASSERT_DETAIL("RegionDesc::chainRetransBlocks") { return show(*this); };
+  jit::hash_set<RegionDesc::BlockId> blockIds;
 
   // 1. Initially assign each region block to its own chain.
   for (auto b : blocks()) {
@@ -428,7 +453,9 @@ void RegionDesc::chainRetransBlocks() {
     auto cid = chains.size();
     chains.push_back({cid, {bid}});
     block2chain[bid] = cid;
+    blockIds.insert(bid);
   }
+  always_assert_flog(chainsAreValid(chains, blockIds), show(chains));
 
   // 2. For each block, if it has 2 successors with the same SrcKey,
   //    then merge the successors' chains into one.
@@ -447,6 +474,7 @@ void RegionDesc::chainRetransBlocks() {
       }
     }
   }
+  always_assert_flog(chainsAreValid(chains, blockIds), show(chains));
 
   // 3. Sort each chain.  In general, we want to sort each chain in
   //    decreasing order of profile weights.  However, note that this
@@ -492,6 +520,7 @@ void RegionDesc::chainRetransBlocks() {
       FTRACE(1, "\n");
     }
   }
+  always_assert_flog(chainsAreValid(chains, blockIds), show(chains));
 
   // 4. Set the nextRetrans blocks according to the computed chains.
   for (auto& c : chains) {
@@ -718,7 +747,7 @@ void RegionDesc::Block::checkMetadata() const {
     }
   };
 
-  auto checkTypedLocations = [&](const char* msg, const TypedLocVec& vec) {
+  auto checkTypedLocations = [&](const char* /*msg*/, const TypedLocVec& vec) {
     for (auto& typedLoc : vec) {
       auto& loc = typedLoc.location;
       switch (loc.tag()) {
@@ -735,7 +764,8 @@ void RegionDesc::Block::checkMetadata() const {
     }
   };
 
-  auto checkGuardedLocations = [&](const char* msg, const GuardedLocVec& vec) {
+  auto checkGuardedLocations = [&](const char* /*msg*/,
+                                   const GuardedLocVec& vec) {
     for (auto& guardedLoc : vec) {
       assertx(guardedLoc.type.isSpecialized() ||
               typeFitsConstraint(guardedLoc.type, guardedLoc.category));

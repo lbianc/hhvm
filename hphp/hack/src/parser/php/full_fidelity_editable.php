@@ -143,6 +143,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return IgnoreError::from_json($json, $position, $source);
     case 'fall_through':
       return FallThrough::from_json($json, $position, $source);
+    case 'extra_token_error':
+      return ExtraTokenError::from_json($json, $position, $source);
 
     case 'missing':
       return Missing::missing();
@@ -196,8 +198,10 @@ abstract class EditableSyntax implements ArrayAccess {
       return ClassishDeclaration::from_json($json, $position, $source);
     case 'classish_body':
       return ClassishBody::from_json($json, $position, $source);
-    case 'trait_use_conflict_resolution_item':
-      return TraitUseConflictResolutionItem::from_json($json, $position, $source);
+    case 'trait_use_precedence_item':
+      return TraitUsePrecedenceItem::from_json($json, $position, $source);
+    case 'trait_use_alias_item':
+      return TraitUseAliasItem::from_json($json, $position, $source);
     case 'trait_use_conflict_resolution':
       return TraitUseConflictResolution::from_json($json, $position, $source);
     case 'trait_use':
@@ -306,6 +310,8 @@ abstract class EditableSyntax implements ArrayAccess {
       return EmbeddedMemberSelectionExpression::from_json($json, $position, $source);
     case 'yield_expression':
       return YieldExpression::from_json($json, $position, $source);
+    case 'yield_from_expression':
+      return YieldFromExpression::from_json($json, $position, $source);
     case 'prefix_unary_expression':
       return PrefixUnaryExpression::from_json($json, $position, $source);
     case 'postfix_unary_expression':
@@ -849,6 +855,8 @@ abstract class EditableToken extends EditableSyntax {
        return new ForToken($leading, $trailing);
     case 'foreach':
        return new ForeachToken($leading, $trailing);
+    case 'from':
+       return new FromToken($leading, $trailing);
     case 'function':
        return new FunctionToken($leading, $trailing);
     case 'global':
@@ -1841,6 +1849,21 @@ final class ForeachToken extends EditableToken {
 
   public function with_trailing(EditableSyntax $trailing): ForeachToken {
     return new ForeachToken($this->leading(), $trailing);
+  }
+}
+final class FromToken extends EditableToken {
+  public function __construct(
+    EditableSyntax $leading,
+    EditableSyntax $trailing) {
+    parent::__construct('from', $leading, $trailing, 'from');
+  }
+
+  public function with_leading(EditableSyntax $leading): FromToken {
+    return new FromToken($leading, $this->trailing());
+  }
+
+  public function with_trailing(EditableSyntax $trailing): FromToken {
+    return new FromToken($this->leading(), $trailing);
   }
 }
 final class FunctionToken extends EditableToken {
@@ -4287,6 +4310,8 @@ abstract class EditableTrivia extends EditableSyntax {
         return new IgnoreError($trivia_text);
       case 'fall_through':
         return new FallThrough($trivia_text);
+      case 'extra_token_error':
+        return new ExtraTokenError($trivia_text);
 
       default:
         throw new Exception('unexpected json kind: ' . $json->kind);
@@ -4380,6 +4405,15 @@ class FallThrough extends EditableTrivia {
   }
   public function with_text(string $text): FallThrough {
     return new FallThrough($text);
+  }
+}
+
+class ExtraTokenError extends EditableTrivia {
+  public function __construct(string $text) {
+    parent::__construct('extra_token_error', $text);
+  }
+  public function with_text(string $text): ExtraTokenError {
+    return new ExtraTokenError($text);
   }
 }
 
@@ -7240,44 +7274,145 @@ final class ClassishBody extends EditableSyntax {
     yield break;
   }
 }
-final class TraitUseConflictResolutionItem extends EditableSyntax {
+final class TraitUsePrecedenceItem extends EditableSyntax {
+  private EditableSyntax $_name;
+  private EditableSyntax $_keyword;
+  private EditableSyntax $_removed_names;
+  public function __construct(
+    EditableSyntax $name,
+    EditableSyntax $keyword,
+    EditableSyntax $removed_names) {
+    parent::__construct('trait_use_precedence_item');
+    $this->_name = $name;
+    $this->_keyword = $keyword;
+    $this->_removed_names = $removed_names;
+  }
+  public function name(): EditableSyntax {
+    return $this->_name;
+  }
+  public function keyword(): EditableSyntax {
+    return $this->_keyword;
+  }
+  public function removed_names(): EditableSyntax {
+    return $this->_removed_names;
+  }
+  public function with_name(EditableSyntax $name): TraitUsePrecedenceItem {
+    return new TraitUsePrecedenceItem(
+      $name,
+      $this->_keyword,
+      $this->_removed_names);
+  }
+  public function with_keyword(EditableSyntax $keyword): TraitUsePrecedenceItem {
+    return new TraitUsePrecedenceItem(
+      $this->_name,
+      $keyword,
+      $this->_removed_names);
+  }
+  public function with_removed_names(EditableSyntax $removed_names): TraitUsePrecedenceItem {
+    return new TraitUsePrecedenceItem(
+      $this->_name,
+      $this->_keyword,
+      $removed_names);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $name = $this->name()->rewrite($rewriter, $new_parents);
+    $keyword = $this->keyword()->rewrite($rewriter, $new_parents);
+    $removed_names = $this->removed_names()->rewrite($rewriter, $new_parents);
+    if (
+      $name === $this->name() &&
+      $keyword === $this->keyword() &&
+      $removed_names === $this->removed_names()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new TraitUsePrecedenceItem(
+        $name,
+        $keyword,
+        $removed_names), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $name = EditableSyntax::from_json(
+      $json->trait_use_precedence_item_name, $position, $source);
+    $position += $name->width();
+    $keyword = EditableSyntax::from_json(
+      $json->trait_use_precedence_item_keyword, $position, $source);
+    $position += $keyword->width();
+    $removed_names = EditableSyntax::from_json(
+      $json->trait_use_precedence_item_removed_names, $position, $source);
+    $position += $removed_names->width();
+    return new TraitUsePrecedenceItem(
+        $name,
+        $keyword,
+        $removed_names);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_name;
+    yield $this->_keyword;
+    yield $this->_removed_names;
+    yield break;
+  }
+}
+final class TraitUseAliasItem extends EditableSyntax {
   private EditableSyntax $_aliasing_name;
-  private EditableSyntax $_aliasing_keyword;
+  private EditableSyntax $_keyword;
+  private EditableSyntax $_visibility;
   private EditableSyntax $_aliased_name;
   public function __construct(
     EditableSyntax $aliasing_name,
-    EditableSyntax $aliasing_keyword,
+    EditableSyntax $keyword,
+    EditableSyntax $visibility,
     EditableSyntax $aliased_name) {
-    parent::__construct('trait_use_conflict_resolution_item');
+    parent::__construct('trait_use_alias_item');
     $this->_aliasing_name = $aliasing_name;
-    $this->_aliasing_keyword = $aliasing_keyword;
+    $this->_keyword = $keyword;
+    $this->_visibility = $visibility;
     $this->_aliased_name = $aliased_name;
   }
   public function aliasing_name(): EditableSyntax {
     return $this->_aliasing_name;
   }
-  public function aliasing_keyword(): EditableSyntax {
-    return $this->_aliasing_keyword;
+  public function keyword(): EditableSyntax {
+    return $this->_keyword;
+  }
+  public function visibility(): EditableSyntax {
+    return $this->_visibility;
   }
   public function aliased_name(): EditableSyntax {
     return $this->_aliased_name;
   }
-  public function with_aliasing_name(EditableSyntax $aliasing_name): TraitUseConflictResolutionItem {
-    return new TraitUseConflictResolutionItem(
+  public function with_aliasing_name(EditableSyntax $aliasing_name): TraitUseAliasItem {
+    return new TraitUseAliasItem(
       $aliasing_name,
-      $this->_aliasing_keyword,
+      $this->_keyword,
+      $this->_visibility,
       $this->_aliased_name);
   }
-  public function with_aliasing_keyword(EditableSyntax $aliasing_keyword): TraitUseConflictResolutionItem {
-    return new TraitUseConflictResolutionItem(
+  public function with_keyword(EditableSyntax $keyword): TraitUseAliasItem {
+    return new TraitUseAliasItem(
       $this->_aliasing_name,
-      $aliasing_keyword,
+      $keyword,
+      $this->_visibility,
       $this->_aliased_name);
   }
-  public function with_aliased_name(EditableSyntax $aliased_name): TraitUseConflictResolutionItem {
-    return new TraitUseConflictResolutionItem(
+  public function with_visibility(EditableSyntax $visibility): TraitUseAliasItem {
+    return new TraitUseAliasItem(
       $this->_aliasing_name,
-      $this->_aliasing_keyword,
+      $this->_keyword,
+      $visibility,
+      $this->_aliased_name);
+  }
+  public function with_aliased_name(EditableSyntax $aliased_name): TraitUseAliasItem {
+    return new TraitUseAliasItem(
+      $this->_aliasing_name,
+      $this->_keyword,
+      $this->_visibility,
       $aliased_name);
   }
 
@@ -7288,39 +7423,47 @@ final class TraitUseConflictResolutionItem extends EditableSyntax {
     $new_parents = $parents ?? [];
     array_push($new_parents, $this);
     $aliasing_name = $this->aliasing_name()->rewrite($rewriter, $new_parents);
-    $aliasing_keyword = $this->aliasing_keyword()->rewrite($rewriter, $new_parents);
+    $keyword = $this->keyword()->rewrite($rewriter, $new_parents);
+    $visibility = $this->visibility()->rewrite($rewriter, $new_parents);
     $aliased_name = $this->aliased_name()->rewrite($rewriter, $new_parents);
     if (
       $aliasing_name === $this->aliasing_name() &&
-      $aliasing_keyword === $this->aliasing_keyword() &&
+      $keyword === $this->keyword() &&
+      $visibility === $this->visibility() &&
       $aliased_name === $this->aliased_name()) {
       return $rewriter($this, $parents ?? []);
     } else {
-      return $rewriter(new TraitUseConflictResolutionItem(
+      return $rewriter(new TraitUseAliasItem(
         $aliasing_name,
-        $aliasing_keyword,
+        $keyword,
+        $visibility,
         $aliased_name), $parents ?? []);
     }
   }
 
   public static function from_json(mixed $json, int $position, string $source) {
     $aliasing_name = EditableSyntax::from_json(
-      $json->trait_use_conflict_resolution_item_aliasing_name, $position, $source);
+      $json->trait_use_alias_item_aliasing_name, $position, $source);
     $position += $aliasing_name->width();
-    $aliasing_keyword = EditableSyntax::from_json(
-      $json->trait_use_conflict_resolution_item_aliasing_keyword, $position, $source);
-    $position += $aliasing_keyword->width();
+    $keyword = EditableSyntax::from_json(
+      $json->trait_use_alias_item_keyword, $position, $source);
+    $position += $keyword->width();
+    $visibility = EditableSyntax::from_json(
+      $json->trait_use_alias_item_visibility, $position, $source);
+    $position += $visibility->width();
     $aliased_name = EditableSyntax::from_json(
-      $json->trait_use_conflict_resolution_item_aliased_name, $position, $source);
+      $json->trait_use_alias_item_aliased_name, $position, $source);
     $position += $aliased_name->width();
-    return new TraitUseConflictResolutionItem(
+    return new TraitUseAliasItem(
         $aliasing_name,
-        $aliasing_keyword,
+        $keyword,
+        $visibility,
         $aliased_name);
   }
   public function children(): Generator<string, EditableSyntax, void> {
     yield $this->_aliasing_name;
-    yield $this->_aliasing_keyword;
+    yield $this->_keyword;
+    yield $this->_visibility;
     yield $this->_aliased_name;
     yield break;
   }
@@ -13279,6 +13422,91 @@ final class YieldExpression extends EditableSyntax {
   }
   public function children(): Generator<string, EditableSyntax, void> {
     yield $this->_keyword;
+    yield $this->_operand;
+    yield break;
+  }
+}
+final class YieldFromExpression extends EditableSyntax {
+  private EditableSyntax $_yield_keyword;
+  private EditableSyntax $_from_keyword;
+  private EditableSyntax $_operand;
+  public function __construct(
+    EditableSyntax $yield_keyword,
+    EditableSyntax $from_keyword,
+    EditableSyntax $operand) {
+    parent::__construct('yield_from_expression');
+    $this->_yield_keyword = $yield_keyword;
+    $this->_from_keyword = $from_keyword;
+    $this->_operand = $operand;
+  }
+  public function yield_keyword(): EditableSyntax {
+    return $this->_yield_keyword;
+  }
+  public function from_keyword(): EditableSyntax {
+    return $this->_from_keyword;
+  }
+  public function operand(): EditableSyntax {
+    return $this->_operand;
+  }
+  public function with_yield_keyword(EditableSyntax $yield_keyword): YieldFromExpression {
+    return new YieldFromExpression(
+      $yield_keyword,
+      $this->_from_keyword,
+      $this->_operand);
+  }
+  public function with_from_keyword(EditableSyntax $from_keyword): YieldFromExpression {
+    return new YieldFromExpression(
+      $this->_yield_keyword,
+      $from_keyword,
+      $this->_operand);
+  }
+  public function with_operand(EditableSyntax $operand): YieldFromExpression {
+    return new YieldFromExpression(
+      $this->_yield_keyword,
+      $this->_from_keyword,
+      $operand);
+  }
+
+  public function rewrite(
+    ( function
+      (EditableSyntax, ?array<EditableSyntax>): ?EditableSyntax ) $rewriter,
+    ?array<EditableSyntax> $parents = null): ?EditableSyntax {
+    $new_parents = $parents ?? [];
+    array_push($new_parents, $this);
+    $yield_keyword = $this->yield_keyword()->rewrite($rewriter, $new_parents);
+    $from_keyword = $this->from_keyword()->rewrite($rewriter, $new_parents);
+    $operand = $this->operand()->rewrite($rewriter, $new_parents);
+    if (
+      $yield_keyword === $this->yield_keyword() &&
+      $from_keyword === $this->from_keyword() &&
+      $operand === $this->operand()) {
+      return $rewriter($this, $parents ?? []);
+    } else {
+      return $rewriter(new YieldFromExpression(
+        $yield_keyword,
+        $from_keyword,
+        $operand), $parents ?? []);
+    }
+  }
+
+  public static function from_json(mixed $json, int $position, string $source) {
+    $yield_keyword = EditableSyntax::from_json(
+      $json->yield_from_yield_keyword, $position, $source);
+    $position += $yield_keyword->width();
+    $from_keyword = EditableSyntax::from_json(
+      $json->yield_from_from_keyword, $position, $source);
+    $position += $from_keyword->width();
+    $operand = EditableSyntax::from_json(
+      $json->yield_from_operand, $position, $source);
+    $position += $operand->width();
+    return new YieldFromExpression(
+        $yield_keyword,
+        $from_keyword,
+        $operand);
+  }
+  public function children(): Generator<string, EditableSyntax, void> {
+    yield $this->_yield_keyword;
+    yield $this->_from_keyword;
     yield $this->_operand;
     yield break;
   }

@@ -153,10 +153,9 @@ struct Func final {
    * Static variable info.
    */
   struct SVInfo {
-    template<class SerDe> void serde(SerDe& sd) { sd(name)(phpCode); }
+    template<class SerDe> void serde(SerDe& sd) { sd(name); }
 
     LowStringPtr name;
-    LowStringPtr phpCode; // Eval'able PHP code.
   };
 
   using ParamInfoVec = FixedVector<ParamInfo>;
@@ -985,12 +984,25 @@ struct Func final {
   const EHEnt* findEH(Offset o) const;
 
   /*
+   * Find the first EHEnt that covers a given handler, or return null.
+   */
+  const EHEnt* findEHbyHandler(Offset o) const;
+
+  /*
    * Same as non-static findEH(), but takes as an operand any ehtab-like
    * container.
    */
   template<class Container>
   static const typename Container::value_type*
   findEH(const Container& ehtab, Offset o);
+
+  /*
+   * Same as non-static findEHbyHandler(), but takes as an operand any
+   * ehtab-like container.
+   */
+  template<class Container>
+  static const typename Container::value_type*
+  findEHbyHandler(const Container& ehtab, Offset o);
 
   /*
    * Locate FPI regions by offset.

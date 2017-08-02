@@ -493,7 +493,7 @@ folly::Optional<DArrLikePacked> toDArrLikePacked(SArray ar) {
     if (key.m_type != KindOfInt64) return folly::none;
     if (key.m_data.num != idx)     return folly::none;
     elems.push_back(
-      from_cell(*iter.secondRef().asTypedValue())
+      from_cell(iter.secondVal())
     );
   }
 
@@ -509,7 +509,7 @@ folly::Optional<DArrLikePackedN> toDArrLikePackedN(SArray ar) {
     auto const key = *iter.first().asTypedValue();
     if (key.m_type != KindOfInt64) return folly::none;
     if (key.m_data.num != idx)     return folly::none;
-    t |= from_cell(*iter.secondRef().asTypedValue());
+    t |= from_cell(iter.secondVal());
   }
 
   return DArrLikePackedN { std::move(t) };
@@ -527,7 +527,7 @@ folly::Optional<DArrLikeMap> toDArrLikeMap(SArray ar) {
       packed = isIntType(key.m_type) && key.m_data.num == idx;
       ++idx;
     }
-    auto const value = *iter.secondRef().asTypedValue();
+    auto const value = iter.secondVal();
     map.emplace_back(key, from_cell(value));
   }
   if (packed) return folly::none;
@@ -544,7 +544,7 @@ folly::Optional<DArrLikeMapN> toDArrLikeMapN(SArray ar) {
   for (ArrayIter iter(ar); iter; ++iter) {
     auto const key = *iter.first().asTypedValue();
     k |= from_cell(key);
-    v |= from_cell(*iter.secondRef().asTypedValue());
+    v |= from_cell(iter.secondVal());
     if (packed) {
       packed = isIntType(key.m_type) && key.m_data.num == idx;
       ++idx;
@@ -685,22 +685,24 @@ struct DualDispatchEqImpl {
     return m && a.map == m->map;
   }
 
-  bool operator()(const DArrLikePackedN& a, SArray b) const {
+  bool operator()(const DArrLikePackedN& /*a*/, SArray /*b*/) const {
     return false;
   }
-  bool operator()(const DArrLikeMapN& a, SArray b) const {
+  bool operator()(const DArrLikeMapN& /*a*/, SArray /*b*/) const {
     return false;
   }
-  bool operator()(const DArrLikePacked& a, const DArrLikePackedN& b) const {
+  bool
+  operator()(const DArrLikePacked& /*a*/, const DArrLikePackedN& /*b*/) const {
     return false;
   }
-  bool operator()(const DArrLikePacked& a, const DArrLikeMap& b) const {
+  bool operator()(const DArrLikePacked& /*a*/, const DArrLikeMap& /*b*/) const {
     return false;
   }
   bool operator()(const DArrLikePacked&, const DArrLikeMapN&) const {
     return false;
   }
-  bool operator()(const DArrLikePackedN& a, const DArrLikeMap& b) const {
+  bool
+  operator()(const DArrLikePackedN& /*a*/, const DArrLikeMap& /*b*/) const {
     return false;
   }
   bool operator()(const DArrLikePackedN&, const DArrLikeMapN&) const {
@@ -739,8 +741,8 @@ struct DualDispatchCouldBeImpl {
     bool bad = false;
     IterateKV(
       b,
-      [&] (const Cell* k, const TypedValue* v) {
-        bad |= !(a.key.couldBe(from_cell(*k)) && a.val.couldBe(from_cell(*v)));
+      [&] (Cell k, TypedValue v) {
+        bad |= !(a.key.couldBe(from_cell(k)) && a.val.couldBe(from_cell(v)));
         return bad;
       }
     );
@@ -766,7 +768,7 @@ struct DualDispatchCouldBeImpl {
     return true;
   }
 
-  bool operator()(const DArrLikePacked& a, const DArrLikeMap& b) const {
+  bool operator()(const DArrLikePacked& /*a*/, const DArrLikeMap& /*b*/) const {
     // Map does not contain any packed arrays.
     return false;
   }
@@ -777,7 +779,8 @@ struct DualDispatchCouldBeImpl {
     }
     return true;
   }
-  bool operator()(const DArrLikePackedN& a, const DArrLikeMap& b) const {
+  bool
+  operator()(const DArrLikePackedN& /*a*/, const DArrLikeMap& /*b*/) const {
     // Map does not contain any packed arrays.
     return false;
   }
@@ -982,8 +985,8 @@ struct DualDispatchSubtype {
     bool bad = false;
     IterateKV(
       a,
-      [&] (const Cell* k, const TypedValue* v) {
-        bad |= !(b.key.couldBe(from_cell(*k)) && b.val.couldBe(from_cell(*v)));
+      [&] (Cell k, TypedValue v) {
+        bad |= !(b.key.couldBe(from_cell(k)) && b.val.couldBe(from_cell(v)));
         return bad;
       }
     );
@@ -1013,15 +1016,16 @@ struct DualDispatchSubtype {
     // just a single array.
     return false;
   }
-  bool operator()(const DArrLikeMap& a, const DArrLikePacked& b) const {
+  bool operator()(const DArrLikeMap& /*a*/, const DArrLikePacked& /*b*/) const {
     // Map does not contain any packed arrays.
     return false;
   }
-  bool operator()(const DArrLikeMap& a, const DArrLikePackedN& b) const {
+  bool
+  operator()(const DArrLikeMap& /*a*/, const DArrLikePackedN& /*b*/) const {
     // Map does not contain any packed arrays.
     return false;
   }
-  bool operator()(const DArrLikePacked& a, const DArrLikeMap& b) const {
+  bool operator()(const DArrLikePacked& /*a*/, const DArrLikeMap& /*b*/) const {
     // Map does not contain any packed arrays.
     return false;
   }
@@ -1196,10 +1200,12 @@ struct Type::DDHelperFn {
                           !Function::disjoint, Ret>::type
   operator()(const Y& y) const { return f(t, y); }
 
-  template<class Y>
-  typename std::enable_if<std::is_same<Y,T>::value &&
-                          Function::disjoint, Ret>::type
-  operator()(const Y& y) const { not_reached(); }
+  template <class Y>
+  typename std::enable_if<std::is_same<Y, T>::value && Function::disjoint,
+                          Ret>::type
+  operator()(const Y& /*y*/) const {
+    not_reached();
+  }
   Ret operator()() const { return f(); }
   Function f;
   const T& t;
@@ -1403,6 +1409,9 @@ bool Type::couldBeData(const Type& o) const {
 }
 
 bool Type::operator==(const Type& o) const {
+  // NB: We don't assert checkInvariants() here because this can be called from
+  // checkInvariants() and it all takes too long if the type is deeply nested.
+
   if (m_bits != o.m_bits) return false;
   if (hasData() != o.hasData()) return false;
   if (!hasData() && !o.hasData()) return true;
@@ -1429,6 +1438,9 @@ size_t Type::hash() const {
 }
 
 bool Type::subtypeOf(const Type& o) const {
+  // NB: We don't assert checkInvariants() here because this can be called from
+  // checkInvariants() and it all takes too long if the type is deeply nested.
+
   if (is_specialized_wait_handle(*this)) {
     if (is_specialized_wait_handle(o)) {
       return
@@ -1515,6 +1527,9 @@ bool Type::checkInvariants() const {
   assert(isPredefined(m_bits));
   assert(!hasData() || mayHaveData(m_bits));
 
+  // NB: Avoid copying non-trivial types in here to avoid recursive calls to
+  // checkInvariants() which can cause exponential time blow-ups.
+
   DEBUG_ONLY auto const& keyType = (m_bits & BSArrLike) == m_bits
     ? TUncArrKey : TArrKey;
   DEBUG_ONLY auto const& valType = (m_bits & BOptArr) == m_bits
@@ -1538,14 +1553,9 @@ bool Type::checkInvariants() const {
   case DataTag::Int:    break;
   case DataTag::RefInner:
     assert(!m_data.inner->couldBe(TRef));
-    assert(m_data.inner->checkInvariants());
     break;
   case DataTag::Cls:    break;
-  case DataTag::Obj:
-    if (auto t = m_data.dobj.whType.get()) {
-      t->checkInvariants();
-    }
-    break;
+  case DataTag::Obj:    break;
   case DataTag::ArrLikeVal:
     assert(m_data.aval->isStatic());
     assert(!m_data.aval->empty());
@@ -1559,7 +1569,6 @@ bool Type::checkInvariants() const {
     DEBUG_ONLY auto idx = size_t{0};
     for (DEBUG_ONLY auto const& v : m_data.packed->elems) {
       assert(v.subtypeOf(valType) && v != TBottom);
-      assert(v.checkInvariants());
       assert(!isKeyset || v == ival(idx++));
     }
     break;
@@ -1574,7 +1583,6 @@ bool Type::checkInvariants() const {
       assert(isIntType(kv.first.m_type) ||
              kv.first.m_type == KindOfPersistentString);
       assert(kv.second.subtypeOf(valType) && kv.second != TBottom);
-      assert(kv.second.checkInvariants());
       assert(!isKeyset || from_cell(kv.first) == kv.second);
       if (packed) {
         packed = isIntType(kv.first.m_type) && kv.first.m_data.num == idx;
@@ -1589,7 +1597,6 @@ bool Type::checkInvariants() const {
   case DataTag::ArrLikePackedN:
     assert(m_data.packedn->type.subtypeOf(valType));
     assert(m_data.packedn->type != TBottom);
-    assert(m_data.packedn->type.checkInvariants());
     assert(!isKeyset || m_data.packedn->type == TInt);
     break;
   case DataTag::ArrLikeMapN:
@@ -1597,12 +1604,10 @@ bool Type::checkInvariants() const {
     assert(m_data.mapn->key.subtypeOf(keyType));
     // MapN shouldn't have a specialized key. If it does, then that implies it
     // only contains arrays of size 1, which means it should be Map instead.
-    assert(!tv(m_data.mapn->key));
+    assert(m_data.mapn->key.m_dataTag == DataTag::None);
     assert(m_data.mapn->val.subtypeOf(valType));
     assert(m_data.mapn->key != TBottom);
     assert(m_data.mapn->val != TBottom);
-    assert(m_data.mapn->key.checkInvariants());
-    assert(m_data.mapn->val.checkInvariants());
     assert(!isKeyset || m_data.mapn->key == m_data.mapn->val);
     break;
   }
@@ -2059,8 +2064,8 @@ Type::ArrayCat categorize_array(const Type& t) {
   switch (t.m_dataTag) {
     case DataTag::ArrLikeVal:
       IterateKV(t.m_data.aval,
-                [&] (const Cell* key, const TypedValue*) {
-                  return checkKey(*key);
+                [&] (Cell k, TypedValue) {
+                  return checkKey(k);
                 });
       break;
 
@@ -2104,9 +2109,9 @@ CompactVector<LSString> get_string_keys(const Type& t) {
   switch (t.m_dataTag) {
     case DataTag::ArrLikeVal:
       IterateKV(t.m_data.aval,
-                [&] (const Cell* key, const TypedValue*) {
-                  assert(isStringType(key->m_type));
-                  strs.push_back(key->m_data.pstr);
+                [&] (Cell k, TypedValue) {
+                  assert(isStringType(k.m_type));
+                  strs.push_back(k.m_data.pstr);
                 });
       break;
 
@@ -2570,28 +2575,88 @@ Type stack_flav(Type a) {
   always_assert(0 && "stack_flav passed invalid type");
 }
 
-Type loosen_statics(Type a) {
-  // TODO(#3696042): this should be modified to keep specialized array
-  // information, including whether the array is possibly empty.
-  if (a.couldBe(TSStr))    a |= TStr;
-  if (a.couldBe(TSArr))    a |= TArr;
-  if (a.couldBe(TSVec))    a |= TVec;
-  if (a.couldBe(TSDict))   a |= TDict;
-  if (a.couldBe(TSKeyset)) a |= TKeyset;
+Type loosen_staticness(Type t) {
+  auto const check = [&](trep a){
+    if (t.m_bits & a) t.m_bits = static_cast<trep>(t.m_bits | a);
+  };
+  // Need to remove any constant value from a string because a TStr cannot have
+  // one.
+  if (t.couldBe(TStr)) t |= TStr;
+  check(BArrE);
+  check(BArrN);
+  check(BVecE);
+  check(BVecN);
+  check(BDictE);
+  check(BDictN);
+  check(BKeysetE);
+  check(BKeysetN);
+  return t;
+}
+
+Type loosen_arrays(Type a) {
+  if (a.couldBe(TArr))    a |= TArr;
+  if (a.couldBe(TVec))    a |= TVec;
+  if (a.couldBe(TDict))   a |= TDict;
+  if (a.couldBe(TKeyset)) a |= TKeyset;
   return a;
 }
 
 Type loosen_values(Type a) {
-  return a.strictSubtypeOf(TInt) ? TInt :
-         a.strictSubtypeOf(TDbl) ? TDbl :
-         a.strictSubtypeOf(TBool) ? TBool :
-         a.strictSubtypeOf(TSStr) ? TSStr :
-         a.strictSubtypeOf(TSArr) ? TSArr :
-         a.strictSubtypeOf(TSVec) ? TSVec :
-         a.strictSubtypeOf(TSDict) ? TSDict :
-         a.strictSubtypeOf(TSKeyset) ? TSKeyset :
-         a == TOptFalse || a == TOptTrue ? TOptBool :
-         a;
+  auto t = [&]{
+    switch (a.m_dataTag) {
+    case DataTag::Str:
+    case DataTag::Int:
+    case DataTag::Dbl:
+    case DataTag::RefInner:
+    case DataTag::ArrLikeVal:
+    case DataTag::ArrLikePacked:
+    case DataTag::ArrLikePackedN:
+    case DataTag::ArrLikeMap:
+    case DataTag::ArrLikeMapN:
+      return Type { a.m_bits };
+    case DataTag::None:
+    case DataTag::Obj:
+    case DataTag::Cls:
+      return a;
+    }
+    not_reached();
+  }();
+  if (t.couldBe(TFalse) || t.couldBe(TTrue)) t |= TBool;
+  return t;
+}
+
+Type loosen_emptiness(Type t) {
+  auto const check = [&](trep a){
+    if (t.m_bits & a) t.m_bits = static_cast<trep>(t.m_bits | a);
+  };
+  check(BSArr);
+  check(BCArr);
+  check(BSVec);
+  check(BCVec);
+  check(BSDict);
+  check(BCDict);
+  check(BSKeyset);
+  check(BCKeyset);
+  return t;
+}
+
+Type loosen_all(Type t) {
+  return loosen_staticness(loosen_emptiness(loosen_values(std::move(t))));
+}
+
+Type add_nonemptiness(Type t) {
+  auto const check = [&](trep a, trep b){
+    if (t.m_bits & a) t.m_bits = static_cast<trep>(t.m_bits | b);
+  };
+  check(BSArrE, BSArrN);
+  check(BCArrE, BCArrN);
+  check(BSVecE, BSVecN);
+  check(BCVecE, BCVecN);
+  check(BSDictE, BSDictN);
+  check(BCDictE, BCDictN);
+  check(BSKeysetE, BSKeysetN);
+  check(BCKeysetE, BCKeysetN);
+  return t;
 }
 
 Type remove_uninit(Type t) {
@@ -2777,9 +2842,9 @@ std::pair<Type,bool> arr_val_elem(const Type& aval, const ArrKey& key) {
   auto const couldBeInt = key.type.couldBe(TInt);
   auto const couldBeStr = key.type.couldBe(TStr);
   auto ty = isPhpArray ? TInitNull : TBottom;
-  IterateKV(ad, [&] (const TypedValue* k, const TypedValue* v) {
-      if (isStringType(k->m_type) ? couldBeStr : couldBeInt) {
-        ty |= from_cell(*v);
+  IterateKV(ad, [&] (Cell k, TypedValue v) {
+      if (isStringType(k.m_type) ? couldBeStr : couldBeInt) {
+        ty |= from_cell(v);
         return TInitCell.subtypeOf(ty);
       }
       return false;
@@ -3536,8 +3601,7 @@ keyset_elem(const Type& keyset, const Type& undisectedKey) {
   return array_like_elem(keyset, key);
 }
 
-std::pair<Type, bool>
-keyset_set(Type keyset, const Type&, const Type&) {
+std::pair<Type, bool> keyset_set(Type /*keyset*/, const Type&, const Type&) {
   // The set operation on keysets is not allowed.
   return {TBottom, false};
 }

@@ -367,8 +367,8 @@ void BaseVector::addAllImpl(const Variant& t) {
       reserve(m_size + adata->size());
       return false;
     },
-    [this](const TypedValue* item) {
-      addRaw(tvAsCVarRef(item));
+    [this](TypedValue v) {
+      addRaw(tvToCell(v));
     },
     [&, this](ObjectData* coll) {
       if (coll->collectionType() == CollectionType::Pair) {
@@ -791,7 +791,7 @@ void c_Vector::OffsetSet(ObjectData* obj, const TypedValue* key,
   static_cast<c_Vector*>(obj)->set(key, val);
 }
 
-void c_Vector::OffsetUnset(ObjectData* obj, const TypedValue* key) {
+void c_Vector::OffsetUnset(ObjectData* /*obj*/, const TypedValue* /*key*/) {
   SystemLib::throwRuntimeExceptionObject(
     "Cannot unset an element of a Vector");
 }

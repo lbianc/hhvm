@@ -32,7 +32,6 @@ type const_id = Hhbc_id.Const.t
 type prop_id = Hhbc_id.Prop.t
 type num_params = int
 type classref_id = int
-type collection_type = int
 (* Conventionally this is "A_" followed by an integer *)
 type adata_id = string
 
@@ -86,6 +85,27 @@ module QueryOp = struct
   | Empty -> "Empty"
 
 end (* of QueryOp *)
+
+module CollectionType = struct
+  type t =
+  | Vector
+  | Map
+  | Set
+  | Pair
+  | ImmVector
+  | ImmMap
+  | ImmSet
+
+  let to_string = function
+  | Vector      -> "Vector"
+  | Map         -> "Map"
+  | Set         -> "Set"
+  | Pair        -> "Pair"
+  | ImmVector   -> "ImmVector"
+  | ImmMap      -> "ImmMap"
+  | ImmSet      -> "ImmSet"
+
+end (* of CollectionType *)
 
 module FatalOp = struct
   type t =
@@ -160,8 +180,8 @@ type instruct_lit_const =
   | AddElemV
   | AddNewElemC
   | AddNewElemV
-  | NewCol of collection_type
-  | ColFromArray of collection_type
+  | NewCol of CollectionType.t
+  | ColFromArray of CollectionType.t
   | MapAddElemC
   | Cns of const_id
   | CnsE of const_id
@@ -242,26 +262,8 @@ type instruct_control_flow =
 type iterator_list = (bool * Iterator.t) list
 
 type instruct_special_flow =
-  | Continue of int * int  (* This will be rewritten *)
-  | Break of int * int * iterator_list (* This will be rewritten *)
-  (* These two constructors are used to represent ret* instructions
-     that might be emitted in try region - these returns should be
-     rewritten as jumps to a finally prologue. In addition if ret* instruction
-     is enclosed in foreach body then jump should be emitted as IterBreak
-     to cleanup the iterator - list is necessary since there might be multiple
-     enclising foreach statements:
-     try {
-       foreach ($c2 as $v1) {
-         foreach ($c2 as $v2) {
-           return 1; // jump to finally prologue should release both iterators
-         }
-       }
-     }
-    finally {
-
-    } *)
-  | SF_RetC of iterator_list (* This will be rewritten *)
-  | SF_RetV of iterator_list (* This will be rewritten *)
+  | Continue of int
+  | Break of int
 
 type instruct_get =
   | CGetL of local_id
@@ -524,10 +526,10 @@ type gen_creation_execution =
   | ContGetReturn
 
 type gen_delegation =
-  | ContAssignDelegate
+  | ContAssignDelegate of Iterator.t
   | ContEnterDelegate
-  | YieldFromDelegate
-  | ContUnsetDelegate of free_iterator
+  | YieldFromDelegate of Iterator.t * Label.t
+  | ContUnsetDelegate of free_iterator * Iterator.t
 
 type async_functions =
   | WHResult
@@ -561,4 +563,5 @@ type instruct =
   | IComment of string
   | IAsync of async_functions
   | IGenerator of gen_creation_execution
+  | IGenDelegation of gen_delegation
   | IIncludeEvalDefine of instruct_include_eval_define

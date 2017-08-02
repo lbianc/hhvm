@@ -194,6 +194,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | Syntax.SafeMemberSelectionExpression _ -> tag validate_safe_member_selection_expression (fun x -> ExprSafeMemberSelection x) x
     | Syntax.EmbeddedMemberSelectionExpression _ -> tag validate_embedded_member_selection_expression (fun x -> ExprEmbeddedMemberSelection x) x
     | Syntax.YieldExpression _ -> tag validate_yield_expression (fun x -> ExprYield x) x
+    | Syntax.YieldFromExpression _ -> tag validate_yield_from_expression (fun x -> ExprYieldFrom x) x
     | Syntax.PrefixUnaryExpression _ -> tag validate_prefix_unary_expression (fun x -> ExprPrefixUnary x) x
     | Syntax.PostfixUnaryExpression _ -> tag validate_postfix_unary_expression (fun x -> ExprPostfixUnary x) x
     | Syntax.BinaryExpression _ -> tag validate_binary_expression (fun x -> ExprBinary x) x
@@ -241,6 +242,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | ExprSafeMemberSelection          thing -> invalidate_safe_member_selection_expression (value, thing)
     | ExprEmbeddedMemberSelection      thing -> invalidate_embedded_member_selection_expression (value, thing)
     | ExprYield                        thing -> invalidate_yield_expression               (value, thing)
+    | ExprYieldFrom                    thing -> invalidate_yield_from_expression          (value, thing)
     | ExprPrefixUnary                  thing -> invalidate_prefix_unary_expression        (value, thing)
     | ExprPostfixUnary                 thing -> invalidate_postfix_unary_expression       (value, thing)
     | ExprBinary                       thing -> invalidate_binary_expression              (value, thing)
@@ -425,6 +427,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | Syntax.SafeMemberSelectionExpression _ -> tag validate_safe_member_selection_expression (fun x -> LambdaSafeMemberSelection x) x
     | Syntax.EmbeddedMemberSelectionExpression _ -> tag validate_embedded_member_selection_expression (fun x -> LambdaEmbeddedMemberSelection x) x
     | Syntax.YieldExpression _ -> tag validate_yield_expression (fun x -> LambdaYield x) x
+    | Syntax.YieldFromExpression _ -> tag validate_yield_from_expression (fun x -> LambdaYieldFrom x) x
     | Syntax.PrefixUnaryExpression _ -> tag validate_prefix_unary_expression (fun x -> LambdaPrefixUnary x) x
     | Syntax.PostfixUnaryExpression _ -> tag validate_postfix_unary_expression (fun x -> LambdaPostfixUnary x) x
     | Syntax.BinaryExpression _ -> tag validate_binary_expression (fun x -> LambdaBinary x) x
@@ -473,6 +476,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | LambdaSafeMemberSelection          thing -> invalidate_safe_member_selection_expression (value, thing)
     | LambdaEmbeddedMemberSelection      thing -> invalidate_embedded_member_selection_expression (value, thing)
     | LambdaYield                        thing -> invalidate_yield_expression               (value, thing)
+    | LambdaYieldFrom                    thing -> invalidate_yield_from_expression          (value, thing)
     | LambdaPrefixUnary                  thing -> invalidate_prefix_unary_expression        (value, thing)
     | LambdaPostfixUnary                 thing -> invalidate_postfix_unary_expression       (value, thing)
     | LambdaBinary                       thing -> invalidate_binary_expression              (value, thing)
@@ -519,6 +523,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | Syntax.SafeMemberSelectionExpression _ -> tag validate_safe_member_selection_expression (fun x -> CExprSafeMemberSelection x) x
     | Syntax.EmbeddedMemberSelectionExpression _ -> tag validate_embedded_member_selection_expression (fun x -> CExprEmbeddedMemberSelection x) x
     | Syntax.YieldExpression _ -> tag validate_yield_expression (fun x -> CExprYield x) x
+    | Syntax.YieldFromExpression _ -> tag validate_yield_from_expression (fun x -> CExprYieldFrom x) x
     | Syntax.PrefixUnaryExpression _ -> tag validate_prefix_unary_expression (fun x -> CExprPrefixUnary x) x
     | Syntax.PostfixUnaryExpression _ -> tag validate_postfix_unary_expression (fun x -> CExprPostfixUnary x) x
     | Syntax.BinaryExpression _ -> tag validate_binary_expression (fun x -> CExprBinary x) x
@@ -567,6 +572,7 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
     | CExprSafeMemberSelection          thing -> invalidate_safe_member_selection_expression (value, thing)
     | CExprEmbeddedMemberSelection      thing -> invalidate_embedded_member_selection_expression (value, thing)
     | CExprYield                        thing -> invalidate_yield_expression               (value, thing)
+    | CExprYieldFrom                    thing -> invalidate_yield_from_expression          (value, thing)
     | CExprPrefixUnary                  thing -> invalidate_prefix_unary_expression        (value, thing)
     | CExprPostfixUnary                 thing -> invalidate_postfix_unary_expression       (value, thing)
     | CExprBinary                       thing -> invalidate_binary_expression              (value, thing)
@@ -1053,19 +1059,37 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
       }
     ; Syntax.value = v
     }
-  and validate_trait_use_conflict_resolution_item : trait_use_conflict_resolution_item validator = function
-  | { Syntax.syntax = Syntax.TraitUseConflictResolutionItem x; value = v } -> v,
-    { trait_use_conflict_resolution_item_aliased_name = validate_token x.Syntax.trait_use_conflict_resolution_item_aliased_name
-    ; trait_use_conflict_resolution_item_aliasing_keyword = validate_token x.Syntax.trait_use_conflict_resolution_item_aliasing_keyword
-    ; trait_use_conflict_resolution_item_aliasing_name = validate_specifier x.Syntax.trait_use_conflict_resolution_item_aliasing_name
+  and validate_trait_use_precedence_item : trait_use_precedence_item validator = function
+  | { Syntax.syntax = Syntax.TraitUsePrecedenceItem x; value = v } -> v,
+    { trait_use_precedence_item_removed_names = validate_list_with (validate_specifier) x.Syntax.trait_use_precedence_item_removed_names
+    ; trait_use_precedence_item_keyword = validate_token x.Syntax.trait_use_precedence_item_keyword
+    ; trait_use_precedence_item_name = validate_specifier x.Syntax.trait_use_precedence_item_name
     }
-  | s -> validation_fail SyntaxKind.TraitUseConflictResolutionItem s
-  and invalidate_trait_use_conflict_resolution_item : trait_use_conflict_resolution_item invalidator = fun (v, x) ->
+  | s -> validation_fail SyntaxKind.TraitUsePrecedenceItem s
+  and invalidate_trait_use_precedence_item : trait_use_precedence_item invalidator = fun (v, x) ->
     { Syntax.syntax =
-      Syntax.TraitUseConflictResolutionItem
-      { Syntax.trait_use_conflict_resolution_item_aliasing_name = invalidate_specifier x.trait_use_conflict_resolution_item_aliasing_name
-      ; Syntax.trait_use_conflict_resolution_item_aliasing_keyword = invalidate_token x.trait_use_conflict_resolution_item_aliasing_keyword
-      ; Syntax.trait_use_conflict_resolution_item_aliased_name = invalidate_token x.trait_use_conflict_resolution_item_aliased_name
+      Syntax.TraitUsePrecedenceItem
+      { Syntax.trait_use_precedence_item_name = invalidate_specifier x.trait_use_precedence_item_name
+      ; Syntax.trait_use_precedence_item_keyword = invalidate_token x.trait_use_precedence_item_keyword
+      ; Syntax.trait_use_precedence_item_removed_names = invalidate_list_with (invalidate_specifier) x.trait_use_precedence_item_removed_names
+      }
+    ; Syntax.value = v
+    }
+  and validate_trait_use_alias_item : trait_use_alias_item validator = function
+  | { Syntax.syntax = Syntax.TraitUseAliasItem x; value = v } -> v,
+    { trait_use_alias_item_aliased_name = validate_option_with (validate_specifier) x.Syntax.trait_use_alias_item_aliased_name
+    ; trait_use_alias_item_visibility = validate_option_with (validate_token) x.Syntax.trait_use_alias_item_visibility
+    ; trait_use_alias_item_keyword = validate_token x.Syntax.trait_use_alias_item_keyword
+    ; trait_use_alias_item_aliasing_name = validate_specifier x.Syntax.trait_use_alias_item_aliasing_name
+    }
+  | s -> validation_fail SyntaxKind.TraitUseAliasItem s
+  and invalidate_trait_use_alias_item : trait_use_alias_item invalidator = fun (v, x) ->
+    { Syntax.syntax =
+      Syntax.TraitUseAliasItem
+      { Syntax.trait_use_alias_item_aliasing_name = invalidate_specifier x.trait_use_alias_item_aliasing_name
+      ; Syntax.trait_use_alias_item_keyword = invalidate_token x.trait_use_alias_item_keyword
+      ; Syntax.trait_use_alias_item_visibility = invalidate_option_with (invalidate_token) x.trait_use_alias_item_visibility
+      ; Syntax.trait_use_alias_item_aliased_name = invalidate_option_with (invalidate_specifier) x.trait_use_alias_item_aliased_name
       }
     ; Syntax.value = v
     }
@@ -2024,6 +2048,22 @@ module Make(Token : TokenType)(SyntaxValue : SyntaxValueType) = struct
       Syntax.YieldExpression
       { Syntax.yield_keyword = invalidate_token x.yield_keyword
       ; Syntax.yield_operand = invalidate_constructor_expression x.yield_operand
+      }
+    ; Syntax.value = v
+    }
+  and validate_yield_from_expression : yield_from_expression validator = function
+  | { Syntax.syntax = Syntax.YieldFromExpression x; value = v } -> v,
+    { yield_from_operand = validate_expression x.Syntax.yield_from_operand
+    ; yield_from_from_keyword = validate_token x.Syntax.yield_from_from_keyword
+    ; yield_from_yield_keyword = validate_token x.Syntax.yield_from_yield_keyword
+    }
+  | s -> validation_fail SyntaxKind.YieldFromExpression s
+  and invalidate_yield_from_expression : yield_from_expression invalidator = fun (v, x) ->
+    { Syntax.syntax =
+      Syntax.YieldFromExpression
+      { Syntax.yield_from_yield_keyword = invalidate_token x.yield_from_yield_keyword
+      ; Syntax.yield_from_from_keyword = invalidate_token x.yield_from_from_keyword
+      ; Syntax.yield_from_operand = invalidate_expression x.yield_from_operand
       }
     ; Syntax.value = v
     }

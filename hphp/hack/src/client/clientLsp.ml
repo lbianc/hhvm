@@ -596,20 +596,35 @@ let do_definition (conn: server_conn) (params: Definition.params)
   hack_to_lsp results
 
 let do_completion_ffp (conn: server_conn) (params: Completion.params) : Completion.result =
-  let open FfpAutocompleteService in
+  let open AutocompleteTypes in
   let open TextDocumentIdentifier in
-
   let open Completion in
   let pos = lsp_position_to_ide params.TextDocumentPositionParams.position in
   let filename = lsp_uri_to_path params.TextDocumentPositionParams.textDocument.uri in
   let command = ServerCommandTypes.IDE_FFP_AUTOCOMPLETE (filename, pos) in
   let result = rpc conn command in
-  let hack_completion_to_lsp (completion: autocomplete_result)
+  let hack_to_kind (completion: complete_autocomplete_result)
+    : Completion.completionItemKind option =
+    match completion.res_kind with
+    | Abstract_class_kind
+    | Class_kind -> Some Completion.Class
+    | Method_kind -> Some Completion.Method
+    | Function_kind -> Some Completion.Function
+    | Variable_kind -> Some Completion.Variable
+    | Property_kind -> Some Completion.Property
+    | Class_constant_kind -> Some Completion.Value (* a bit off, but the best we can do *)
+    | Interface_kind
+    | Trait_kind -> Some Completion.Interface
+    | Enum_kind -> Some Completion.Enum
+    | Namespace_kind -> Some Completion.Module
+    | Constructor_kind -> Some Completion.Constructor
+    | Keyword_kind -> Some Completion.Keyword
+  in
+  let hack_completion_to_lsp (completion: complete_autocomplete_result)
     : Completion.completionItem =
     {
-      (* TODO: Actually fill out the rest of these fields *)
-      label = completion.name;
-      kind = None;
+      label = completion.res_name;
+      kind = hack_to_kind completion;
       detail = None;
       inlineDetail = None;
       itemType = None;
@@ -637,7 +652,8 @@ let do_completion_legacy (conn: server_conn) (params: Completion.params)
   in
   let pos = lsp_position_to_ide params.TextDocumentPositionParams.position in
   let filename = lsp_uri_to_path params.TextDocumentPositionParams.textDocument.uri in
-  let command = ServerCommandTypes.IDE_AUTOCOMPLETE (filename, pos) in
+  let delimit_on_namespaces = true in
+  let command = ServerCommandTypes.IDE_AUTOCOMPLETE (filename, pos, delimit_on_namespaces) in
   let result = rpc conn command in
 
   (* We use snippets to provide parentheses+arguments when autocompleting     *)
@@ -647,12 +663,12 @@ let do_completion_legacy (conn: server_conn) (params: Completion.params)
   let client_supports_snippets = Option.value_map !initialize_params
       ~default:false ~f:(fun params ->
       params.client_capabilities.textDocument.completion.completionItem.snippetSupport) in
-  let snippets_okay = is_caret_followed_by_whitespace && client_supports_snippets in
 
   let rec hack_completion_to_lsp (completion: complete_autocomplete_result)
     : Completion.completionItem =
+    let (insertText, insertTextFormat) = hack_to_insert completion in
     {
-      label = completion.res_name; (* TODO: check that label replaces the right range *)
+      label = completion.res_name ^ (if completion.res_kind = Namespace_kind then "\\" else "");
       kind = hack_to_kind completion;
       detail = Some (hack_to_detail completion);
       inlineDetail = Some (hack_to_inline_detail completion);
@@ -660,17 +676,28 @@ let do_completion_legacy (conn: server_conn) (params: Completion.params)
       documentation = None; (* TODO: provide doc-comments *)
       sortText = None;
       filterText = None;
-      insertText = Some (hack_to_snippet completion);
-      insertTextFormat = if snippets_okay then SnippetFormat else PlainText;
+      insertText = Some insertText;
+      insertTextFormat = insertTextFormat;
       textEdits = [];
       command = None;
       data = None;
     }
   and hack_to_kind (completion: complete_autocomplete_result)
     : Completion.completionItemKind option =
-    (* TODO: change hh_server to return richer 'kind' information *)
-    (* For now we just return either 'Function' or 'None'. *)
-    Option.map completion.func_details ~f:(fun _ -> Completion.Function)
+    match completion.res_kind with
+    | Abstract_class_kind
+    | Class_kind -> Some Completion.Class
+    | Method_kind -> Some Completion.Method
+    | Function_kind -> Some Completion.Function
+    | Variable_kind -> Some Completion.Variable
+    | Property_kind -> Some Completion.Property
+    | Class_constant_kind -> Some Completion.Value (* a bit off, but the best we can do *)
+    | Interface_kind
+    | Trait_kind -> Some Completion.Interface
+    | Enum_kind -> Some Completion.Enum
+    | Namespace_kind -> Some Completion.Module
+    | Constructor_kind -> Some Completion.Constructor
+    | Keyword_kind -> Some Completion.Keyword
   and hack_to_itemType (completion: complete_autocomplete_result) : string option =
     (* TODO: we're using itemType (left column) for function return types, and *)
     (* the inlineDetail (right column) for variable/field types. Is that good? *)
@@ -691,20 +718,18 @@ let do_completion_legacy (conn: server_conn) (params: Completion.params)
       let f param = Printf.sprintf "%s %s" param.param_ty param.param_name in
       let params = String.concat ", " (List.map details.params ~f) in
       Printf.sprintf "(%s)" params
-  and hack_to_snippet (completion: complete_autocomplete_result) : string =
+  and hack_to_insert (completion: complete_autocomplete_result) : (string * insertTextFormat) =
     match completion.func_details with
-    | Some details when snippets_okay ->
+    | Some details when is_caret_followed_by_whitespace && client_supports_snippets ->
       (* "method(${1:arg1}, ...)" but for args we just use param names. *)
       let f i param = Printf.sprintf "${%i:%s}" (i + 1) param.param_name in
       let params = String.concat ", " (List.mapi details.params ~f) in
-      Printf.sprintf "%s(%s)" completion.res_name params
+      (Printf.sprintf "%s(%s)" completion.res_name params, SnippetFormat)
     | _ ->
-      (* the name alone is a valid snippet and a valid plain-text *)
-      completion.res_name
+      (completion.res_name, PlainText)
   in
   {
-    (* TODO: get isIncomplete flag from hh_server *)
-    isIncomplete = false;
+    isIncomplete = not result.is_complete;
     items = List.map result.completions ~f:hack_completion_to_lsp;
   }
 
@@ -1247,8 +1272,8 @@ let do_initialize ()
       };
       hoverProvider = true;
       completionProvider = Some {
-        resolveProvider = true;
-        completion_triggerCharacters = ["-"; ">"; "\\"];
+        resolveProvider = false;
+        completion_triggerCharacters = ["$"; ">"; "\\"; ":"];
       };
       signatureHelpProvider = None;
       definitionProvider = true;

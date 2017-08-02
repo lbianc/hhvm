@@ -108,15 +108,18 @@ ArrayData* ArrayData::GetScalarArray(ArrayData* arr,
 
 //////////////////////////////////////////////////////////////////////
 
-static ArrayData* ZSetIntThrow(ArrayData* ad, int64_t k, RefData* v) {
+static ArrayData*
+ZSetIntThrow(ArrayData* /*ad*/, int64_t /*k*/, RefData* /*v*/) {
   raise_fatal_error("Unimplemented ArrayData::ZSetInt");
 }
 
-static ArrayData* ZSetStrThrow(ArrayData* ad, StringData* k, RefData* v) {
+static ArrayData*
+ZSetStrThrow(ArrayData* /*ad*/, StringData* /*k*/, RefData* /*v*/) {
   raise_fatal_error("Unimplemented ArrayData::ZSetStr");
 }
 
-static ArrayData* ZAppendThrow(ArrayData* ad, RefData* v, int64_t* key_ptr) {
+static ArrayData*
+ZAppendThrow(ArrayData* /*ad*/, RefData* /*v*/, int64_t* /*key_ptr*/) {
   raise_fatal_error("Unimplemented ArrayData::ZAppend");
 }
 
@@ -796,17 +799,18 @@ bool ArrayData::EqualHelper(const ArrayData* ad1, const ArrayData* ad2,
   if (strict) {
     for (ArrayIter iter1{ad1}, iter2{ad2}; iter1; ++iter1, ++iter2) {
       assert(iter2);
-      if (!same(iter1.first(), iter2.first())
-          || !same(iter1.second(), iter2.secondRef())) return false;
+      if (!same(iter1.first(), iter2.first()) ||
+          !tvSame(iter1.secondVal(), iter2.secondVal())) {
+        return false;
+      }
     }
     return true;
   } else {
     bool equal = true;
     IterateKV(
       ad1,
-      [&](const TypedValue* k, const TypedValue* v) {
-        if (!ad2->exists(tvAsCVarRef(k)) ||
-            !tvEqual(*v, *ad2->get(tvAsCVarRef(k)).asTypedValue())) {
+      [&](Cell k, TypedValue v) {
+        if (!ad2->exists(k) || !tvEqual(v, *ad2->get(k).asTypedValue())) {
           equal = false;
           return true;
         }
@@ -833,12 +837,12 @@ int64_t ArrayData::CompareHelper(const ArrayData* ad1, const ArrayData* ad2) {
   int result = 0;
   IterateKV(
     ad1,
-    [&](const TypedValue* k, const TypedValue* v) {
-      if (!ad2->exists(tvAsCVarRef(k))) {
+    [&](Cell k, TypedValue v) {
+      if (!ad2->exists(k)) {
         result = 1;
         return true;
       }
-      auto const cmp = tvCompare(*v, *ad2->get(tvAsCVarRef(k)).asTypedValue());
+      auto const cmp = tvCompare(v, *ad2->get(k).asTypedValue());
       if (cmp != 0) {
         result = cmp;
         return true;
@@ -1043,16 +1047,6 @@ const Variant& ArrayData::getNotFound(int64_t k, bool error) const {
 const Variant& ArrayData::getNotFound(const StringData* k, bool error) const {
   return error && kind() != kGlobalsKind ? getNotFound(k) :
          uninit_variant;
-}
-
-const Variant& ArrayData::getNotFound(const String& k) {
-  raise_notice("Undefined index: %s", k.data());
-  return uninit_variant;
-}
-
-const Variant& ArrayData::getNotFound(const Variant& k) {
-  raise_notice("Undefined index: %s", k.toString().data());
-  return uninit_variant;
 }
 
 const char* ArrayData::kindToString(ArrayKind kind) {

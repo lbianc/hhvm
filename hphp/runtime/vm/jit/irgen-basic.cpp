@@ -38,7 +38,7 @@ void implClsRefGet(IRGS& env, SSATmp* classSrc, uint32_t slot) {
 }
 
 const StaticString s_FATAL_NULL_THIS(Strings::FATAL_NULL_THIS);
-bool checkThis(IRGS& env, SSATmp* ctx) {
+bool checkThis(IRGS& env, SSATmp* /*ctx*/) {
   if (hasThis(env)) return true;
   auto const err = cns(env, s_FATAL_NULL_THIS.get());
   gen(env, RaiseError, err);
@@ -449,7 +449,9 @@ void emitCastVec(IRGS& env) {
       if (src->isA(TDbl))    return raise("Double");
       if (src->isA(TStr))    return raise("String");
       if (src->isA(TRes))    return raise("Resource");
-      always_assert_flog(false, "Unexpected {} in emitCastVec", src->type());
+      // Unexpected types may only be seen in unreachable code.
+      gen(env, Unreachable);
+      return cns(env, TBottom);
     }()
   );
 }
@@ -483,7 +485,9 @@ void emitCastDict(IRGS& env) {
       if (src->isA(TDbl))     return raise("Double");
       if (src->isA(TStr))     return raise("String");
       if (src->isA(TRes))     return raise("Resource");
-      always_assert_flog(false, "Unexpected {} in emitCastDict", src->type());
+      // Unexpected types may only be seen in unreachable code.
+      gen(env, Unreachable);
+      return cns(env, TBottom);
     }()
   );
 }
@@ -517,7 +521,9 @@ void emitCastKeyset(IRGS& env) {
       if (src->isA(TDbl))     return raise("Double");
       if (src->isA(TStr))     return raise("String");
       if (src->isA(TRes))     return raise("Resource");
-      always_assert_flog(false, "Unexpected {} in emitCastKeyset", src->type());
+      // Unexpected types may only be seen in unreachable code.
+      gen(env, Unreachable);
+      return cns(env, TBottom);
     }()
   );
 }

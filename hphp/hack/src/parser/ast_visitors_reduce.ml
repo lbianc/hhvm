@@ -169,12 +169,17 @@ class virtual ['self] reduce =
     method on_Attributes = self#on_list self#on_class_attr
     method on_TypeConst = self#on_typeconst
     method on_ClassUse = self#on_hint
-    method on_ClassUseAlias env (c0, c1) c2 c3 =
-      let r0 = self#on_id env c0 in
-      let r1 = self#on_option self#on_pstring env c1 in
-      let r2 = self#on_id env c2 in
-      let r3 = self#on_cu_alias_type env c3 in
+    method on_ClassUseAlias env c0 c1 c2 c3 =
+      let r0 = self#on_option self#on_id env c0 in
+      let r1 = self#on_pstring env c1 in
+      let r2 = self#on_option self#on_id env c2 in
+      let r3 = self#on_option self#on_kind env c3 in
       self#sum [ r0; r1; r2; r3 ]
+    method on_ClassUsePrecedence env c0 c1 c2 =
+      let r0 = self#on_id env c0 in
+      let r1 = self#on_pstring env c1 in
+      let r2 = self#on_list self#on_id env c2 in
+      self#sum [ r0; r1; r2 ]
     method on_XhpAttrUse = self#on_hint
     method on_ClassTraitRequire env c0 c1 =
       let r0 = self#on_trait_req_kind env c0 in
@@ -227,15 +232,15 @@ class virtual ['self] reduce =
     method on_ChildPlus _ = self#e
     method on_ChildQuestion _ = self#e
 
-    method on_cu_alias_type _ _ = self#e
-
     method on_class_elt env = function
       | Const (c0, c1) -> self#on_Const env c0 c1
       | AbsConst (c0, c1) -> self#on_AbsConst env c0 c1
       | Attributes c0 -> self#on_Attributes env c0
       | TypeConst c0 -> self#on_TypeConst env c0
       | ClassUse c0 -> self#on_ClassUse env c0
-      | ClassUseAlias (c0, c1, c2) -> self#on_ClassUseAlias env c0 c1 c2
+      | ClassUseAlias (c0, c1, c2, c3) -> self#on_ClassUseAlias env c0 c1 c2 c3
+      | ClassUsePrecedence (c0, c1, c2) ->
+        self#on_ClassUsePrecedence env c0 c1 c2
       | XhpAttrUse c0 -> self#on_XhpAttrUse env c0
       | ClassTraitRequire (c0, c1) ->
           self#on_ClassTraitRequire env c0 c1
@@ -541,17 +546,19 @@ class virtual ['self] reduce =
       let r0 = self#on_id env c0 in
       let r1 = self#on_pstring env c1 in
       self#add r0 r1
-    method on_Call env c0 c1 c2 =
+    method on_Call env c0 c1 c2 c3 =
       let r0 = self#on_expr env c0 in
-      let r1 = self#on_list self#on_expr env c1 in
+      let r1 = self#on_list self#on_hint env c1 in
       let r2 = self#on_list self#on_expr env c2 in
-      self#add (self#add r0 r1) r2
+      let r3 = self#on_list self#on_expr env c3 in
+      self#add (self#add (self#add r0 r1) r2) r3
     method on_Int = self#on_pstring
     method on_Float = self#on_pstring
     method on_String = self#on_pstring
     method on_String2 = self#on_list self#on_expr
     method on_Yield = self#on_afield
     method on_Yield_break _ = self#e
+    method on_Yield_from = self#on_expr
     method on_Await = self#on_expr
     method on_List = self#on_list self#on_expr
     method on_Expr_list = self#on_list self#on_expr
@@ -642,12 +649,13 @@ class virtual ['self] reduce =
       | Array_get (c0, c1) -> self#on_Array_get env c0 c1
       | Class_get (c0, c1) -> self#on_Class_get env c0 c1
       | Class_const (c0, c1) -> self#on_Class_const env c0 c1
-      | Call (c0, c1, c2) -> self#on_Call env c0 c1 c2
+      | Call (c0, c1, c2, c3) -> self#on_Call env c0 c1 c2 c3
       | Int c0 -> self#on_Int env c0
       | Float c0 -> self#on_Float env c0
       | String c0 -> self#on_String env c0
       | String2 c0 -> self#on_String2 env c0
       | Yield c0 -> self#on_Yield env c0
+      | Yield_from c0 -> self#on_Yield_from env c0
       | Yield_break -> self#on_Yield_break env
       | Await c0 -> self#on_Await env c0
       | List c0 -> self#on_List env c0

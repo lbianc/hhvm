@@ -35,6 +35,7 @@ namespace jit {
 struct ArrayOffsetProfile;
 }
 struct APCArray;
+struct APCHandle;
 
 struct SetArrayElm {
   using hash_t = strhash_t;
@@ -194,6 +195,11 @@ public:
 
   static void Release(ArrayData*);
   static void ReleaseUncounted(ArrayData*, size_t);
+  /*
+   * Recursively register {allocation, rootAPCHandle} with APCGCManager
+   */
+  static void RegisterUncountedAllocations(ArrayData* ad,
+                                              APCHandle* rootAPCHandle);
 
   /*
    * Safe downcast helpers.
@@ -240,7 +246,7 @@ public:
     auto const* elm = a->data();
     for (auto i = a->m_used; i--; elm++) {
       if (LIKELY(!elm->isTombstone())) {
-        if (ArrayData::call_helper(fn, &elm->tv)) break;
+        if (ArrayData::call_helper(fn, elm->tv)) break;
       }
     }
   }

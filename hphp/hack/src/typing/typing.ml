@@ -364,7 +364,7 @@ and fun_def tcopt f =
   NastCheck.fun_ env f nb;
   (* Fresh type environment is actually unnecessary, but I prefer to
    * have a guarantee that we are using a clean typing environment. *)
-  let tfun_def = Env.fresh_tenv env (
+  let tfun_def, tenv = Env.fresh_tenv env (
     fun env ->
       let env = Env.set_mode env f.f_mode in
       let env, constraints =
@@ -393,12 +393,12 @@ and fun_def tcopt f =
         bind_param in
       let env, tb = fun_ env hret (fst f.f_name) nb f.f_fun_kind in
       let env = Env.check_todo env in
+      if Env.is_strict env then
+      List.iter2_exn f_params param_tys (check_param env);
       begin match f.f_ret with
-        | None when Env.is_strict env ->
-            List.iter2_exn f_params param_tys (check_param env);
-            suggest_return env (fst f.f_name) hret;
+        | None when Env.is_strict env -> suggest_return env (fst f.f_name) hret
         | None -> Typing_suggest.save_fun_or_method f.f_name
-        | Some _ -> ();
+        | Some _ -> ()
       end;
       {
         T.f_mode = f.f_mode;
@@ -414,10 +414,11 @@ and fun_def tcopt f =
           T.fnb_nast = tb;
           T.fnb_unsafe = false (* TAST get this right *)
         }
-      }
+      },
+      env
   ) in
   Typing_hooks.dispatch_exit_fun_def_hook f;
-  tfun_def
+  tfun_def, tenv
 
 (*****************************************************************************)
 (* function used to type closures, functions and methods *)
@@ -487,11 +488,11 @@ and stmt env = function
        * lenv *)
       let parent_lenv = env.Env.lenv in
       let env   = condition env true e in
-      let env, tb2 = block env b1 in
+      let env, tb1 = block env b1 in
       let lenv1 = env.Env.lenv in
       let env   = { env with Env.lenv = parent_lenv } in
       let env   = condition env false e in
-      let env, tb1 = block env b2 in
+      let env, tb2 = block env b2 in
       let lenv2 = env.Env.lenv in
       let terminal1 = Nast_terminality.Terminal.block env b1 in
       let terminal2 = Nast_terminality.Terminal.block env b2 in
@@ -722,16 +723,18 @@ and try_catch env tb cl =
   let env = Env.freeze_local_env env in
   let env, ttb = block env tb in
   let after_try = env.Env.lenv in
-  let env, term_lenv_l = List.map_env env cl
+  let env, term_lenv_tcb_l = List.map_env env cl
     begin fun env (_, _, b as catch_block) ->
-      let env, lenv = catch parent_lenv after_try env catch_block in
+      let env, lenv, tcb = catch parent_lenv after_try env catch_block in
       let term = Nast_terminality.Terminal.block env b in
-      env, (term, lenv)
+      env, (term, lenv, tcb)
     end in
+  let term_lenv_l = List.map term_lenv_tcb_l (fun (a, b, _) -> (a, b)) in
+  let tcb_l = List.map term_lenv_tcb_l (fun (_, _, a) -> a) in
   let term_lenv_l =
     (Nast_terminality.Terminal.block env tb, after_try) :: term_lenv_l in
   let env = LEnv.intersect_list env parent_lenv term_lenv_l in
-  env, ttb, [] (* TODO TAST tcl *)
+  env, ttb, tcb_l
 
 and drop_dead_code_after_break_block = function
   | [] -> [], false
@@ -828,19 +831,19 @@ and case_list_ parent_lenv ty env = function
         | _ -> LEnv.intersect env parent_lenv lenv1 env.Env.lenv in
       case_list_ parent_lenv ty env rl
 
-and catch parent_lenv after_try env (ety, exn, b) =
+and catch parent_lenv after_try env (sid, exn, b) =
   let env = { env with Env.lenv = after_try } in
   let env = LEnv.fully_integrate env parent_lenv in
-  let cid = CI (ety, []) in
-  let ety_p = (fst ety) in
+  let cid = CI (sid, []) in
+  let ety_p = (fst sid) in
   TUtils.process_class_id cid;
   let env, _, _ = instantiable_cid ety_p env cid in
   let env, _te, ety = static_class_id ety_p env cid in
   let env = exception_ty ety_p env ety in
   let env = Env.set_local env (snd exn) ety in
-  let env, _tb = block env b in
+  let env, tb = block env b in
   (* Only keep the local bindings if this catch is non-terminal *)
-  env, env.Env.lenv
+  env, env.Env.lenv, (sid, exn, tb)
 
 and as_expr env pe =
 let make_result ty = env, ty in
@@ -944,7 +947,8 @@ and eif env ~coalesce ~in_cond p c e1 e2 =
   let env, ty1 = TUtils.unresolved env ty1 in
   let env, ty2 = TUtils.unresolved env ty2 in
   let env, ty = Unify.unify env ty1 ty2 in
-  env, T.make_typed_expr p ty (T.Eif(tc, te1, te2)), ty
+  let te = if coalesce then T.NullCoalesce(tc, te2) else T.Eif(tc, te1, te2) in
+  env, T.make_typed_expr p ty te, ty
 
 and exprs env el =
   match el with
@@ -4608,6 +4612,16 @@ and class_def tcopt c =
   let filename = Pos.filename (fst c.Nast.c_name) in
   let dep = Dep.Class (snd c.c_name) in
   let env = Env.empty tcopt filename (Some dep) in
+  (* Set up self identifier and type *)
+  let env = Env.set_self_id env (snd c.c_name) in
+  let self = get_self_from_c c in
+  (* For enums, localize makes self:: into an abstract type, which we don't
+   * want *)
+  let env, self = match c.c_kind with
+    | Ast.Cenum -> env, (fst self, Tclass (c.c_name, []))
+    | Ast.Cinterface | Ast.Cabstract | Ast.Ctrait
+    | Ast.Cnormal -> Phase.localize_with_self env self in
+  let env = Env.set_self env self in
   let c = TNBody.class_meth_bodies tcopt c in
   if not !auto_complete then begin
     NastCheck.class_ env c;
@@ -4646,17 +4660,6 @@ and class_def_ env c tc =
   let env = add_constraints (fst c.c_name) env constraints in
   Typing_variance.class_ (Env.get_options env) (snd c.c_name) tc impl;
   List.iter impl (check_implements_tparaml env);
-
-  (* Set up self identifier and type *)
-  let env = Env.set_self_id env (snd c.c_name) in
-  let self = get_self_from_c c in
-  (* For enums, localize makes self:: into an abstract type, which we don't
-   * want *)
-  let env, self = match c.c_kind with
-    | Ast.Cenum -> env, (fst self, Tclass (c.c_name, []))
-    | Ast.Cinterface | Ast.Cabstract | Ast.Ctrait
-    | Ast.Cnormal -> Phase.localize_with_self env self in
-  let env = Env.set_self env self in
 
   let env, parent_id, parent = class_def_parent env c tc in
   let is_final = tc.tc_final in
@@ -4717,7 +4720,7 @@ and class_def_ env c tc =
     T.c_methods = typed_methods;
     T.c_user_attributes = List.map c.c_user_attributes (user_attribute env);
     T.c_enum = c.c_enum;
-  }
+  }, env
 
 and check_static_method obj method_name static_method =
   if SMap.mem method_name obj
@@ -5014,28 +5017,28 @@ and typedef_def tcopt typedef  =
 
 and gconst_def cst tcopt =
   Typing_hooks.dispatch_global_const_hook cst.cst_name;
-  let typed_cst_value =
+  let filename = Pos.filename (fst cst.cst_name) in
+  let dep = Typing_deps.Dep.GConst (snd cst.cst_name) in
+  let env = Typing_env.empty tcopt filename (Some dep) in
+  let env = Typing_env.set_mode env cst.cst_mode in
+  let typed_cst_value, tenv =
     match cst.cst_value with
-    | None -> None
+    | None -> None, env
     | Some value ->
-      let filename = Pos.filename (fst cst.cst_name) in
-      let dep = Typing_deps.Dep.GConst (snd cst.cst_name) in
-      let env =
-        Typing_env.empty tcopt filename (Some dep) in
-      let env = Typing_env.set_mode env cst.cst_mode in
       let env, te, value_type = expr env value in
-      begin match cst.cst_type with
+      match cst.cst_type with
       | Some hint ->
         let ty = TI.instantiable_hint env hint in
         let env, dty = Phase.localize_with_self env ty in
-        ignore @@ Typing_utils.sub_type env value_type dty
-      | None -> () end;
-      Some te in
+        let env = Typing_utils.sub_type env value_type dty in
+        Some te, env
+      | None -> Some te, env
+  in
   { T.cst_mode = cst.cst_mode;
     T.cst_name = cst.cst_name;
     T.cst_type = cst.cst_type;
     T.cst_value = typed_cst_value
-  }
+  }, tenv
 
 (* Calls the method of a class, but allows the f callback to override the
  * return value type *)

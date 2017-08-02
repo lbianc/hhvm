@@ -429,14 +429,28 @@ let rec transform node =
       ];
       Newline;
     ]
-  | TraitUseConflictResolutionItem x ->
-    let (aliasing_name, kw, aliased_name) =
-      get_trait_use_conflict_resolution_item_children x
+  | TraitUsePrecedenceItem x ->
+    let (name, kw, removed_names) =
+      get_trait_use_precedence_item_children x
+    in
+    Fmt [
+      t name;
+      Space;
+      t kw;
+      Space;
+      t removed_names;
+      Newline;
+    ]
+  | TraitUseAliasItem x ->
+    let (aliasing_name, kw, visibility, aliased_name) =
+      get_trait_use_alias_item_children x
     in
     Fmt [
       t aliasing_name;
       Space;
       t kw;
+      Space;
+      t visibility;
       Space;
       t aliased_name;
       Newline;
@@ -862,6 +876,16 @@ let rec transform node =
       SplitWith Cost.Base;
       Nest [t operand];
     ]
+  | YieldFromExpression x ->
+    let (yield_kw, from_kw, operand) = get_yield_from_expression_children x in
+    Fmt [
+      t yield_kw;
+      Space;
+      t from_kw;
+      Space;
+      SplitWith Cost.Base;
+      Nest [t operand];
+    ]
   | PrefixUnaryExpression x ->
     let (operator, operand) = get_prefix_unary_expression_children x in
     Fmt [
@@ -990,11 +1014,7 @@ let rec transform node =
     let (name, left_b, initializers, right_b) =
       get_collection_literal_expression_children x
     in
-    Fmt [
-      t name;
-      Space;
-      transform_argish ~spaces:true left_b initializers right_b;
-    ]
+    transform_container_literal ~spaces:true name left_b initializers right_b
   | ObjectCreationExpression x ->
     let (kw, obj_type, left_p, arg_list, right_p) =
       get_object_creation_expression_children x
@@ -1012,48 +1032,30 @@ let rec transform node =
     let (kw, left_p, members, right_p) =
       get_array_intrinsic_expression_children x
     in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | DarrayIntrinsicExpression x ->
     let (kw, left_p, members, right_p) =
       get_darray_intrinsic_expression_children x in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | DictionaryIntrinsicExpression x ->
     let (kw, left_p, members, right_p) =
       get_dictionary_intrinsic_expression_children x
     in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | KeysetIntrinsicExpression x ->
     let (kw, left_p, members, right_p) =
       get_keyset_intrinsic_expression_children x
     in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | VarrayIntrinsicExpression x ->
     let (kw, left_p, members, right_p) =
       get_varray_intrinsic_expression_children x in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | VectorIntrinsicExpression x ->
     let (kw, left_p, members, right_p) =
       get_vector_intrinsic_expression_children x
     in
-    Fmt [
-      t kw;
-      transform_argish left_p members right_p;
-    ]
+    transform_container_literal kw left_p members right_p
   | ElementInitializer x ->
     let (key, arrow, value) = get_element_initializer_children x in
     transform_mapish_entry key arrow value
@@ -1113,9 +1115,14 @@ let rec transform node =
       get_xhp_class_attribute_declaration_children x in
     Fmt [
       t kw;
-      WithRule (Rule.Parental, Nest [
-        handle_possible_list ~before_each:space_split xhp_attributes;
-      ]);
+      (match syntax xhp_attributes with
+      | Missing -> Nothing
+      | SyntaxList [attr] ->
+        WithRule (Rule.Parental, Nest [Space; Split; t attr])
+      | SyntaxList attrs ->
+        Nest [handle_list ~before_each:newline attrs]
+      | _ -> failwith "Expected SyntaxList"
+      );
       t semi;
       Newline;
     ]
@@ -1386,14 +1393,8 @@ let rec transform node =
         let missing_separator = make_missing () in
         let ellipsis_list = [make_list_item ellipsis missing_separator] in
         make_list (children type_fields @ ellipsis_list) in
-    Fmt [
-      t shape_kw;
-      transform_argish
-        ~allow_trailing:(is_missing ellipsis)
-        left_p
-        fields
-        right_p;
-    ]
+    transform_container_literal
+      ~allow_trailing:(is_missing ellipsis) shape_kw left_p fields right_p
   | ShapeExpression x ->
     let (shape_kw, left_p, fields, right_p) = get_shape_expression_children x in
     Fmt [
@@ -1492,8 +1493,13 @@ and nest ?(spaces=false) right_delim nodes =
     transform right_delim;
   ]
 
-and after_each_argument is_last =
-  if is_last then Split else space_split ()
+and after_each_argument ?(force_newlines=false) is_last =
+  if force_newlines
+  then Newline
+  else
+    if is_last
+    then Split
+    else space_split ()
 
 and handle_lambda_body node =
   match syntax node with
@@ -1801,7 +1807,8 @@ and transform_argish_with_return_type left_p params right_p colon ret_type =
     ])
   ]
 
-and transform_argish ?(allow_trailing=true) ?(spaces=false)
+and transform_argish
+    ?(allow_trailing=true) ?(force_newlines=false) ?(spaces=false)
     left_p arg_list right_p =
   (* When there is only one argument, with no surrounding whitespace in the
    * original source, allow that style to be preserved even when there are line
@@ -1810,14 +1817,39 @@ and transform_argish ?(allow_trailing=true) ?(spaces=false)
   let split_when_children_split =
     match spaces, syntax arg_list with
     | false, SyntaxList [x] ->
-      not (
-        List.is_empty (trailing_trivia left_p) &&
-        List.is_empty (trailing_trivia x)
+      let has_surrounding_whitespace =
+        not (
+          List.is_empty (trailing_trivia left_p) &&
+          List.is_empty (trailing_trivia x)
+        )
+      in
+      let item =
+        match syntax x with
+        | ListItem x -> fst (get_list_item_children x)
+        | _ -> failwith "Expected ListItem"
+      in
+      (* Blacklist constructs which look ugly when we try to preserve the
+       * lack-of-whitespace style. *)
+      (match syntax item with
+      | LambdaExpression { lambda_body = { syntax = CompoundStatement _; _ }; _ } ->
+        has_surrounding_whitespace
+      | FunctionCallExpression { function_call_receiver; _ } ->
+        Syntax.is_member_selection_expression function_call_receiver ||
+          has_surrounding_whitespace
+      | ConditionalExpression _
+      | BinaryExpression _
+      | MemberSelectionExpression _
+      | FieldSpecifier _
+      | FieldInitializer _
+      | ElementInitializer _
+      | LambdaExpression _
+        -> true
+      | _ -> has_surrounding_whitespace
       )
     | _ -> true
   in
   delimited_nest ~spaces ~split_when_children_split left_p right_p [
-    transform_arg_list ~spaces ~allow_trailing arg_list
+    transform_arg_list ~allow_trailing ~force_newlines arg_list
   ]
 
 and transform_braced_item left_p item right_p =
@@ -1854,15 +1886,29 @@ and transform_braced_item_with_trailer left_p item comma right_p =
        trailing commas in all these places reach end-of-life. *)
     [transform_trailing_comma ~allow_trailing:false item comma]
 
-and transform_arg_list ?(allow_trailing=true) ?(spaces=false) items =
+and transform_arg_list ?(allow_trailing=true) ?(force_newlines=false) items =
   handle_possible_list items
-    ~after_each:after_each_argument
+    ~after_each:(after_each_argument ~force_newlines)
     ~handle_last:(transform_last_arg ~allow_trailing)
 
 and transform_possible_comma_list ?(allow_trailing=true) ?(spaces=false)
     items right_p =
   nest ~spaces right_p [
-    transform_arg_list ~spaces ~allow_trailing items
+    transform_arg_list ~allow_trailing items
+  ]
+
+and transform_container_literal
+    ?(spaces=false) ?allow_trailing kw left_p members right_p =
+  let force_newlines =
+    let trivia = trailing_trivia left_p in
+    List.exists trivia
+      ~f:(fun x -> Full_fidelity_editable_trivia.kind x = TriviaKind.EndOfLine)
+  in
+  Fmt [
+    transform kw;
+    if spaces then Space else Nothing;
+    transform_argish
+      ~spaces ~force_newlines ?allow_trailing left_p members right_p;
   ]
 
 and remove_leading_trivia node =
@@ -2106,6 +2152,7 @@ and transform_trivia ~is_leading trivia =
   in
   List.iter trivia ~f:(fun triv ->
     match Trivia.kind triv with
+    | TriviaKind.ExtraTokenError
     | TriviaKind.UnsafeExpression
     | TriviaKind.FixMe
     | TriviaKind.IgnoreError

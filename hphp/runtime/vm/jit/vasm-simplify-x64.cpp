@@ -29,8 +29,10 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template<typename Inst>
-bool simplify(Env&, const Inst& inst, Vlabel b, size_t i) { return false; }
+template <typename Inst>
+bool simplify(Env&, const Inst& /*inst*/, Vlabel /*b*/, size_t /*i*/) {
+  return false;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -79,10 +81,13 @@ struct CmpUseChecker {
 
   template<class T> void imm(const T&) {}
   template<class T> void def(T) {}
-  template<class T, class H> void defHint(T r, H) {}
+  template <class T, class H>
+  void defHint(T /*r*/, H) {}
   template<class T> void use(T) {}
-  template<class T, class H> void useHint(T r, H) {}
-  template<class T> void across(T r) {}
+  template <class T, class H>
+  void useHint(T /*r*/, H) {}
+  template <class T>
+  void across(T /*r*/) {}
 
   VregSF target;
   folly::Optional<bool> cc_result;
@@ -137,6 +142,11 @@ auto get_cmp_zero_reg(Env& env, const In& inst) -> decltype(inst.s0) {
 bool simplify(Env& env, const cmpb& inst, Vlabel b, size_t i) {
   auto const reg = get_cmp_zero_reg(env, inst);
   return reg.isValid() ? cmp_zero_impl<testb>(env, inst, reg, b, i) : false;
+}
+
+bool simplify(Env& env, const cmpw& inst, Vlabel b, size_t i) {
+  auto const reg = get_cmp_zero_reg(env, inst);
+  return reg.isValid() ? cmp_zero_impl<testw>(env, inst, reg, b, i) : false;
 }
 
 bool simplify(Env& env, const cmpl& inst, Vlabel b, size_t i) {

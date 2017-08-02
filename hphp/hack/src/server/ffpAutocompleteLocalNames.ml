@@ -8,15 +8,15 @@
  *
  *)
 
-module ContextParser = FfpAutocompleteContextParser
-module MinimalSyntax = Full_fidelity_minimal_syntax
 module EditableSyntax = Full_fidelity_editable_syntax
+module MinimalSyntax = Full_fidelity_minimal_syntax
 module SyntaxTree = Full_fidelity_syntax_tree
-open ContextParser
+open FfpAutocompleteContextParser
 open Core
 open String_utils
 
 (* TODO: Ensure this covers all cases *)
+(* TODO: Add in "$this" when it's valid *)
 let local_variable_valid_in_context (context:context) (stub:string) : bool =
   let open Container in
   (context.closest_parent_container = LambdaBodyExpression ||
@@ -29,8 +29,8 @@ let local_variable_valid_in_context (context:context) (stub:string) : bool =
    functorized to accept any tree with the ability to get the text of a
    token, this may be able to accept something other than a minimal tree that
    is converted to an editable tree. *)
-let autocomplete_local (context:context) (stub:string) (tree:SyntaxTree.t) (offset:int)
-  : string list =
+let autocomplete_local (context:context) (stub:string) (tree:SyntaxTree.t)
+  (offset:int) : string list =
   if local_variable_valid_in_context context stub then
     let open EditableSyntax in
     let editable_tree = from_tree tree in

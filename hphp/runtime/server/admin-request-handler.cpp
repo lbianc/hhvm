@@ -82,6 +82,9 @@
 
 #if defined(FACEBOOK) || defined(HAVE_LIBSODIUM)
 #include <sodium.h>
+#ifdef crypto_pwhash_STRBYTES
+#define HAVE_CRYPTO_PWHASH_STR
+#endif
 #endif
 
 #ifdef GOOGLE_CPU_PROFILER
@@ -212,10 +215,6 @@ InitFiniNode s_traceRequestStart([]() {
   }
 }, InitFiniNode::When::RequestStart, "trace");
 
-std::string getTraceOutputFile() {
-  return folly::sformat("{}/hphp.{}.log",
-                        RuntimeOption::RemoteTraceOutputDir, (int64_t)getpid());
-}
 } // namespace
 #endif // HPHP_TRACE
 
@@ -225,7 +224,7 @@ void AdminRequestHandler::logToAccessLog(Transport* transport) {
   WarnIfNotOK(transport);
 }
 
-void AdminRequestHandler::setupRequest(Transport* transport) {
+void AdminRequestHandler::setupRequest(Transport* /*transport*/) {
   g_context.getCheck();
   GetAccessLog().onNewRequest();
 }
@@ -327,7 +326,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         "      time        optional, default 20 (seconds)\n"
 #ifdef HPHP_TRACE
         "/trace-request:   write trace for next request(s) to "
-        + getTraceOutputFile() + "\n"
+        + RuntimeOption::getTraceOutputFile() + "\n"
         "    spec          module:level,... spec; see hphp/util/trace.h\n"
         "    count         optional, total requests to trace (default: 1)\n"
         "    url           optional, trace only if URL contains \'url\'\n"
@@ -344,7 +343,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         "/vm-dump-tc:      dump translation cache to /tmp/tc_dump_a and\n"
         "                  /tmp/tc_dump_astub\n"
         "/vm-namedentities:show size of the NamedEntityTable\n"
-        "/thread-mem-usage:show memory usage per thread\n"
+        "/thread-mem:      show memory usage per thread\n"
         "/proxy:           set up request proxy\n"
         "    origin        URL to proxy requests to\n"
         "    percentage    percentage of requests to proxy\n"
@@ -419,7 +418,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
 
     if (needs_password && !RuntimeOption::HashedAdminPasswords.empty()) {
       bool matched = false;
-#if defined(FACEBOOK) || defined(HAVE_LIBSODIUM)
+#ifdef HAVE_CRYPTO_PWHASH_STR
       const auto password = transport->getParam("auth");
       for (const std::string& hash : RuntimeOption::HashedAdminPasswords) {
         if (crypto_pwhash_str_verify(hash.data(),
@@ -529,7 +528,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
     }
 #ifdef HPHP_TRACE
     if (cmd == "trace-request") {
-      Trace::ensureInit(getTraceOutputFile());
+      Trace::ensureInit(RuntimeOption::getTraceOutputFile());
       // Just discard any existing task.
       delete s_traceTask.exchange(
         new TraceTask{transport->getParam("spec"),
@@ -1292,9 +1291,7 @@ std::string formatStaticString(StringData* str) {
 }
 
 bool AdminRequestHandler::handleDumpStaticStringsRequest(
-  const std::string& cmd,
-  const std::string& filename
-) {
+  const std::string& /*cmd*/, const std::string& filename) {
   std::vector<StringData*> list = lookupDefinedStaticStrings();
   std::ofstream out(filename.c_str());
   SCOPE_EXIT { out.close(); };
@@ -1318,9 +1315,7 @@ bool AdminRequestHandler::handleDumpStaticStringsRequest(
 }
 
 bool AdminRequestHandler::handleRandomStaticStringsRequest(
-  const std::string& cmd,
-  Transport* transport
-) {
+  const std::string& /*cmd*/, Transport* transport) {
   size_t count = 1;
   auto countParam = transport->getParam("count");
   if (countParam != "") {
@@ -1373,7 +1368,7 @@ bool AdminRequestHandler::handleVMRequest(const std::string &cmd,
   return false;
 }
 
-void AdminRequestHandler::handleProxyRequest(const std::string& cmd,
+void AdminRequestHandler::handleProxyRequest(const std::string& /*cmd*/,
                                              Transport* transport) {
   try {
     auto const percentStr = transport->getParam("percentage");
@@ -1430,8 +1425,8 @@ bool AdminRequestHandler::handleDumpCacheRequest(const std::string &cmd,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool AdminRequestHandler::handleRandomApcRequest(const std::string &cmd,
-                                                 Transport *transport){
+bool AdminRequestHandler::handleRandomApcRequest(const std::string& /*cmd*/,
+                                                 Transport* transport) {
   std::ostringstream out;
   uint32_t keyCount = 1;
   std::string count = transport->getParam("count");

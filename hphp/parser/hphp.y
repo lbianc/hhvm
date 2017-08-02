@@ -808,6 +808,14 @@ top_statement:
     '{' use_declarations '}' ';'       { _p->onGroupUse($3.text(), $5,
                                            &Parser::useConst);
                                          _p->nns(T_USE); $$.reset();}
+  | T_USE T_NAMESPACE group_use_prefix
+    '{' use_declarations '}' ';'       { _p->onGroupUse($3.text(), $5,
+                                           &Parser::useNamespace);
+                                         _p->nns(T_USE); $$.reset();}
+  | T_USE T_TYPE group_use_prefix
+    '{' use_declarations '}' ';'       { _p->onGroupUse($3.text(), $5,
+                                           &Parser::useClass);
+                                         _p->nns(T_USE); $$.reset();}
   | constant_declaration ';'           { _p->nns();
                                          _p->finishStatement($$, $1); $$ = 1;}
 ;
@@ -1147,7 +1155,8 @@ function_declaration_statement:
                                          _p->pushLabelInfo();}
     '(' parameter_list ')'
     opt_return_type
-    function_body                      { _p->onFunction($$,nullptr,$8,$2,$3,$6,$9,nullptr);
+    opt_type_constraint_where_clause
+    function_body                      { _p->onFunction($$,nullptr,$8,$2,$3,$6,$10,nullptr);
                                          _p->popLabelInfo();
                                          _p->popTypeScope();
                                          _p->onCompleteLabelScope(true);}
@@ -1160,7 +1169,8 @@ function_declaration_statement:
                                          _p->pushLabelInfo();}
     '(' parameter_list ')'
     opt_return_type
-    function_body                      { _p->onFunction($$,&$1,$9,$3,$4,$7,$10,nullptr);
+    opt_type_constraint_where_clause
+    function_body                      { _p->onFunction($$,&$1,$9,$3,$4,$7,$11,nullptr);
                                          _p->popLabelInfo();
                                          _p->popTypeScope();
                                          _p->onCompleteLabelScope(true);}

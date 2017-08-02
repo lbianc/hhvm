@@ -397,6 +397,9 @@ bool canDCE(IRInstruction* inst) {
   case LookupCnsU:
   case LdClsCns:
   case InitClsCns:
+  case LdSubClsCns:
+  case CheckSubClsCns:
+  case LdClsCnsVecLen:
   case LookupClsMethodFCache:
   case LookupClsMethodCache:
   case LookupClsMethod:
@@ -629,6 +632,7 @@ bool canDCE(IRInstruction* inst) {
   case ProfileArrayKind:
   case ProfileType:
   case ProfileMethod:
+  case ProfileSubClsCns:
   case CheckPackedArrayDataBounds:
   case LdVectorSize:
   case VectorDoCow:
@@ -897,7 +901,7 @@ IRSPRelOffset locToStkOff(IRInstruction& inst) {
  * caller's frame pointer, skipping frames marked as dead.
  */
 template <typename F>
-void rewriteToParentFrameImpl(IRUnit& unit, IRInstruction& inst, F dead) {
+void rewriteToParentFrameImpl(IRUnit& /*unit*/, IRInstruction& inst, F dead) {
   assertx(inst.is(LdClsRef, StClsRef, KillClsRef));
 
   auto fp = inst.src(0);

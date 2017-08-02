@@ -109,12 +109,12 @@ void Array::escalate() {
 Array Array::values() const {
   PackedArrayInit ai(size());
   for (ArrayIter iter(*this); iter; ++iter) {
-    ai.appendWithRef(iter.secondRef());
+    ai.appendWithRef(iter.secondVal());
   }
   return ai.toArray();
 }
 
-ArrayIter Array::begin(const String& context /* = null_string */) const {
+ArrayIter Array::begin(const String& /*context*/ /* = null_string */) const {
   return ArrayIter(*this);
 }
 
@@ -178,7 +178,8 @@ Array Array::intersect(const Variant& array, bool by_key, bool by_value,
                   value_cmp_function, value_data);
 }
 
-static int CompareAsStrings(const Variant& v1, const Variant& v2, const void *data) {
+static int
+CompareAsStrings(const Variant& v1, const Variant& v2, const void* /*data*/) {
   return HPHP::same(v1.toString(), v2.toString()) ? 0 : -1;
 }
 
@@ -201,12 +202,15 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
     // Fast case
     for (ArrayIter iter(*this); iter; ++iter) {
       Variant key(iter.first());
-      const Variant& value(iter.secondRef());
+      auto const value = iter.secondVal();
       bool found = false;
       if (array->exists(key)) {
         if (by_value) {
           found = value_cmp_as_string_function(
-            value, array.rvalAt(key, AccessFlags::Key), value_data) == 0;
+            VarNR(value),
+            array.rvalAt(key, AccessFlags::Key),
+            value_data
+          ) == 0;
         } else {
           found = true;
         }
@@ -267,7 +271,7 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
     if (min < max) { // found
       // if checking both, check value
       if (by_key && by_value) {
-        const Variant& val(iter.secondRef());
+        auto const val = iter.secondVal();
         // Have to look up and down for matches
         for (int i = mid; i < max; i++) {
           ssize_t pos = opaque1.positions[perm1[i]];
@@ -275,7 +279,7 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
             break;
           }
           if (value_cmp_as_string_function(
-                val,
+                VarNR(val),
                 VarNR(array->atPos(pos)),
                 value_data
               ) == 0) {
@@ -290,7 +294,7 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
               break;
             }
             if (value_cmp_as_string_function(
-                  val,
+                  VarNR(val),
                   VarNR(array->atPos(pos)),
                   value_data
                 ) == 0) {
@@ -306,7 +310,7 @@ Array Array::diffImpl(const Array& array, bool by_key, bool by_value, bool match
     }
 
     if (found == match) {
-      ret.setWithRef(iter.first(), iter.secondRef(), true);
+      ret.setWithRef(iter.first(), iter.secondVal(), true);
     }
   }
   return ret;
@@ -417,7 +421,7 @@ bool Array::same(const Array& v2) const {
   not_reached();
 }
 
-bool Array::same(const Object& v2) const {
+bool Array::same(const Object& /*v2*/) const {
   return false;
 }
 
@@ -1136,20 +1140,20 @@ bool Array::MultiSort(std::vector<SortData> &data, bool renumber) {
 }
 
 int Array::SortRegularAscending(const Variant& v1, const Variant& v2,
-                                const void *data) {
+                                const void* /*data*/) {
   if (HPHP::less(v1, v2)) return -1;
   if (tvEqual(*v1.asTypedValue(), *v2.asTypedValue())) return 0;
   return 1;
 }
 int Array::SortRegularDescending(const Variant& v1, const Variant& v2,
-                                 const void *data) {
+                                 const void* /*data*/) {
   if (HPHP::less(v1, v2)) return 1;
   if (tvEqual(*v1.asTypedValue(), *v2.asTypedValue())) return 0;
   return -1;
 }
 
 int Array::SortNumericAscending(const Variant& v1, const Variant& v2,
-                                const void *data) {
+                                const void* /*data*/) {
   double d1 = v1.toDouble();
   double d2 = v2.toDouble();
   if (d1 < d2) return -1;
@@ -1157,7 +1161,7 @@ int Array::SortNumericAscending(const Variant& v1, const Variant& v2,
   return 1;
 }
 int Array::SortNumericDescending(const Variant& v1, const Variant& v2,
-                                 const void *data) {
+                                 const void* /*data*/) {
   double d1 = v1.toDouble();
   double d2 = v2.toDouble();
   if (d1 < d2) return 1;
@@ -1166,35 +1170,35 @@ int Array::SortNumericDescending(const Variant& v1, const Variant& v2,
 }
 
 int Array::SortStringAscending(const Variant& v1, const Variant& v2,
-                               const void *data) {
+                               const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_strcmp(s1.data(), s1.size(), s2.data(), s2.size());
 }
 
 int Array::SortStringAscendingCase(const Variant& v1, const Variant& v2,
-                                   const void *data) {
+                                   const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return bstrcasecmp(s1.data(), s1.size(), s2.data(), s2.size());
 }
 
 int Array::SortStringDescending(const Variant& v1, const Variant& v2,
-                                const void *data) {
+                                const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_strcmp(s2.data(), s2.size(), s1.data(), s1.size());
 }
 
 int Array::SortStringDescendingCase(const Variant& v1, const Variant& v2,
-                                    const void *data) {
+                                    const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return bstrcasecmp(s2.data(), s2.size(), s1.data(), s1.size());
 }
 
 int Array::SortLocaleStringAscending(const Variant& v1, const Variant& v2,
-                                     const void *data) {
+                                     const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
 
@@ -1202,7 +1206,7 @@ int Array::SortLocaleStringAscending(const Variant& v1, const Variant& v2,
 }
 
 int Array::SortLocaleStringDescending(const Variant& v1, const Variant& v2,
-                                      const void *data) {
+                                      const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
 
@@ -1210,28 +1214,28 @@ int Array::SortLocaleStringDescending(const Variant& v1, const Variant& v2,
 }
 
 int Array::SortNaturalAscending(const Variant& v1, const Variant& v2,
-                                const void *data) {
+                                const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_natural_cmp(s1.data(), s1.size(), s2.data(), s2.size(), 0);
 }
 
 int Array::SortNaturalDescending(const Variant& v1, const Variant& v2,
-                                 const void *data) {
+                                 const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_natural_cmp(s2.data(), s2.size(), s1.data(), s1.size(), 0);
 }
 
 int Array::SortNaturalCaseAscending(const Variant& v1, const Variant& v2,
-                                    const void *data) {
+                                    const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_natural_cmp(s1.data(), s1.size(), s2.data(), s2.size(), 1);
 }
 
 int Array::SortNaturalCaseDescending(const Variant& v1, const Variant& v2,
-                                     const void *data) {
+                                     const void* /*data*/) {
   String s1 = v1.toString();
   String s2 = v2.toString();
   return string_natural_cmp(s2.data(), s2.size(), s1.data(), s1.size(), 1);

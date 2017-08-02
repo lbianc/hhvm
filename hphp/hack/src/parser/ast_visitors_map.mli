@@ -88,6 +88,7 @@ class virtual ['c] map :
         on_Cabstract : 'd -> Ast_visitors_ancestors.class_kind;
         on_Call : 'd ->
                   Ast_visitors_ancestors.expr ->
+                  Ast_visitors_ancestors.hint list ->
                   Ast_visitors_ancestors.expr list ->
                   Ast_visitors_ancestors.expr list ->
                   Ast_visitors_ancestors.expr_;
@@ -109,13 +110,16 @@ class virtual ['c] map :
         on_ClassUse : 'd ->
                       Ast_visitors_ancestors.hint ->
                       Ast_visitors_ancestors.class_elt;
-        on_cu_alias_type : 'd ->
-                           Ast_visitors_ancestors.cu_alias_type ->
-                           Ast_visitors_ancestors.cu_alias_type;
         on_ClassUseAlias : 'd ->
-                           (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+                            Ast_visitors_ancestors.id option ->
+                            Ast_visitors_ancestors.pstring ->
+                            Ast_visitors_ancestors.id option ->
+                            Ast_visitors_ancestors.kind option ->
+                            Ast_visitors_ancestors.class_elt;
+        on_ClassUsePrecedence : 'd ->
                             Ast_visitors_ancestors.id ->
-                            Ast_visitors_ancestors.cu_alias_type ->
+                            Ast_visitors_ancestors.pstring ->
+                            Ast_visitors_ancestors.id list ->
                             Ast_visitors_ancestors.class_elt;
         on_ClassVars : 'd ->
                        Ast_visitors_ancestors.kind list ->
@@ -486,6 +490,9 @@ class virtual ['c] map :
         on_Yield : 'd ->
                    Ast_visitors_ancestors.afield ->
                    Ast_visitors_ancestors.expr_;
+        on_Yield_from : 'd ->
+                    Ast_visitors_ancestors.expr ->
+                    Ast_visitors_ancestors.expr_;
         on_Yield_break : 'd -> Ast_visitors_ancestors.expr_;
         on_afield : 'd ->
                     Ast_visitors_ancestors.afield ->
@@ -719,6 +726,7 @@ class virtual ['c] map :
     method on_Call :
       'd ->
       Ast_visitors_ancestors.expr ->
+      Ast_visitors_ancestors.hint list ->
       Ast_visitors_ancestors.expr list ->
       Ast_visitors_ancestors.expr list -> Ast_visitors_ancestors.expr_
     method on_Case :
@@ -739,14 +747,17 @@ class virtual ['c] map :
       Ast_visitors_ancestors.hint -> Ast_visitors_ancestors.class_elt
     method on_ClassUse :
       'd -> Ast_visitors_ancestors.hint -> Ast_visitors_ancestors.class_elt
-    method on_cu_alias_type:
-      'd -> Ast_visitors_ancestors.cu_alias_type ->
-      Ast_visitors_ancestors.cu_alias_type
     method on_ClassUseAlias :
       'd ->
-      (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.kind option -> Ast_visitors_ancestors.class_elt
+    method on_ClassUsePrecedence :
+      'd ->
       Ast_visitors_ancestors.id ->
-      Ast_visitors_ancestors.cu_alias_type -> Ast_visitors_ancestors.class_elt
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id list -> Ast_visitors_ancestors.class_elt
     method on_ClassVars :
       'd ->
       Ast_visitors_ancestors.kind list ->
@@ -1109,6 +1120,8 @@ class virtual ['c] map :
     method on_Xor : 'd -> Ast_visitors_ancestors.bop
     method on_Yield :
       'd -> Ast_visitors_ancestors.afield -> Ast_visitors_ancestors.expr_
+    method on_Yield_from :
+      'd -> Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr_
     method on_Yield_break : 'd -> Ast_visitors_ancestors.expr_
     method on_afield :
       'd -> Ast_visitors_ancestors.afield -> Ast_visitors_ancestors.afield

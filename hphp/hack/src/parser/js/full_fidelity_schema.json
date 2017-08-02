@@ -1,6 +1,6 @@
 { "description" :
   "Auto-generated JSON schema of the Hack Full Fidelity Parser AST",
-  "version" : "2017-07-07-0001",
+  "version" : "2017-07-24-0001",
   "trivia" : [
     { "trivia_kind_name" : "WhiteSpace",
       "trivia_type_name" : "whitespace" },
@@ -19,7 +19,9 @@
     { "trivia_kind_name" : "IgnoreError",
       "trivia_type_name" : "ignore_error" },
     { "trivia_kind_name" : "FallThrough",
-      "trivia_type_name" : "fall_through" } ],
+      "trivia_type_name" : "fall_through" },
+    { "trivia_kind_name" : "ExtraTokenError",
+      "trivia_type_name" : "extra_token_error" } ],
   "tokens" : [
     { "token_kind" : "Abstract",
       "token_text" : "abstract" },
@@ -103,6 +105,8 @@
       "token_text" : "for" },
     { "token_kind" : "Foreach",
       "token_text" : "foreach" },
+    { "token_kind" : "From",
+      "token_text" : "from" },
     { "token_kind" : "Function",
       "token_text" : "function" },
     { "token_kind" : "Global",
@@ -652,13 +656,23 @@
         { "field_name" : "elements" },
         { "field_name" : "right_brace" }
       ] },
-    { "kind_name" : "TraitUseConflictResolutionItem",
-      "type_name" : "trait_use_conflict_resolution_item",
-      "description" : "trait_use_conflict_resolution_item",
-      "prefix" : "trait_use_conflict_resolution_item",
+    { "kind_name" : "TraitUsePrecedenceItem",
+      "type_name" : "trait_use_precedence_item",
+      "description" : "trait_use_precedence_item",
+      "prefix" : "trait_use_precedence_item",
+      "fields" : [
+        { "field_name" : "name" },
+        { "field_name" : "keyword" },
+        { "field_name" : "removed_names" }
+      ] },
+    { "kind_name" : "TraitUseAliasItem",
+      "type_name" : "trait_use_alias_item",
+      "description" : "trait_use_alias_item",
+      "prefix" : "trait_use_alias_item",
       "fields" : [
         { "field_name" : "aliasing_name" },
-        { "field_name" : "aliasing_keyword" },
+        { "field_name" : "keyword" },
+        { "field_name" : "visibility" },
         { "field_name" : "aliased_name" }
       ] },
     { "kind_name" : "TraitUseConflictResolution",
@@ -1192,6 +1206,15 @@
       "prefix" : "yield",
       "fields" : [
         { "field_name" : "keyword" },
+        { "field_name" : "operand" }
+      ] },
+    { "kind_name" : "YieldFromExpression",
+      "type_name" : "yield_from_expression",
+      "description" : "yield_from_expression",
+      "prefix" : "yield_from",
+      "fields" : [
+        { "field_name" : "yield_keyword" },
+        { "field_name" : "from_keyword" },
         { "field_name" : "operand" }
       ] },
     { "kind_name" : "PrefixUnaryExpression",

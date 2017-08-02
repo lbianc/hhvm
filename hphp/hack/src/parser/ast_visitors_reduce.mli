@@ -47,6 +47,7 @@ class virtual ['b] reduce :
         on_Cabstract : 'c -> 'd;
         on_Call : 'c ->
                   Ast_visitors_ancestors.expr ->
+                  Ast_visitors_ancestors.hint list ->
                   Ast_visitors_ancestors.expr list ->
                   Ast_visitors_ancestors.expr list -> 'd;
         on_Case : 'c ->
@@ -61,12 +62,17 @@ class virtual ['b] reduce :
                                Ast_visitors_ancestors.trait_req_kind ->
                                Ast_visitors_ancestors.hint -> 'd;
         on_ClassUse : 'c -> Ast_visitors_ancestors.hint -> 'd;
-        on_cu_alias_type : 'c -> Ast_visitors_ancestors.cu_alias_type -> 'd;
         on_ClassUseAlias : 'c ->
-                           (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
-                            Ast_visitors_ancestors.id ->
-                            Ast_visitors_ancestors.cu_alias_type ->
+                            Ast_visitors_ancestors.id option ->
+                            Ast_visitors_ancestors.pstring ->
+                            Ast_visitors_ancestors.id option ->
+                            Ast_visitors_ancestors.kind option ->
                            'd;
+        on_ClassUsePrecedence : 'c ->
+                           Ast_visitors_ancestors.id ->
+                           Ast_visitors_ancestors.pstring ->
+                           Ast_visitors_ancestors.id list ->
+                          'd;
         on_ClassVars : 'c ->
                        Ast_visitors_ancestors.kind list ->
                        Ast_visitors_ancestors.hint option ->
@@ -280,6 +286,7 @@ class virtual ['b] reduce :
         on_LogXor : 'c -> 'd;
         on_Xor : 'c -> 'd;
         on_Yield : 'c -> Ast_visitors_ancestors.afield -> 'd;
+        on_Yield_from : 'c -> Ast_visitors_ancestors.expr -> 'd;
         on_Yield_break : 'c -> 'd;
         on_afield : 'c -> Ast_visitors_ancestors.afield -> 'd;
         on_any : 'c -> Ast_visitors_ancestors.any -> 'd;
@@ -385,6 +392,7 @@ class virtual ['b] reduce :
     method on_Call :
       'c ->
       Ast_visitors_ancestors.expr ->
+      Ast_visitors_ancestors.hint list ->
       Ast_visitors_ancestors.expr list ->
       Ast_visitors_ancestors.expr list -> 'd
     method on_Case :
@@ -399,12 +407,18 @@ class virtual ['b] reduce :
       Ast_visitors_ancestors.trait_req_kind ->
       Ast_visitors_ancestors.hint -> 'd
     method on_ClassUse : 'c -> Ast_visitors_ancestors.hint -> 'd
-    method on_cu_alias_type : 'c -> Ast_visitors_ancestors.cu_alias_type -> 'd
     method on_ClassUseAlias :
       'c ->
-      (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.kind option ->
+      'd
+    method on_ClassUsePrecedence :
+      'c ->
       Ast_visitors_ancestors.id ->
-      Ast_visitors_ancestors.cu_alias_type ->
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id list ->
       'd
     method on_ClassVars :
       'c ->
@@ -649,6 +663,7 @@ class virtual ['b] reduce :
     method on_LogXor : 'c -> 'd
     method on_Xor : 'c -> 'd
     method on_Yield : 'c -> Ast_visitors_ancestors.afield -> 'd
+    method on_Yield_from : 'c -> Ast_visitors_ancestors.expr -> 'd
     method on_Yield_break : 'c -> 'd
     method on_afield : 'c -> Ast_visitors_ancestors.afield -> 'd
     method on_any : 'c -> Ast_visitors_ancestors.any -> 'd

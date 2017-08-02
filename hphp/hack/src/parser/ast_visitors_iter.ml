@@ -153,11 +153,15 @@ class virtual ['self] iter =
     method on_Attributes = self#on_list self#on_class_attr
     method on_TypeConst = self#on_typeconst
     method on_ClassUse = self#on_hint
-    method on_ClassUseAlias env (c0, c1) c2 c3 =
+    method on_ClassUseAlias env c0 c1 c2 c3 =
+      self#on_option self#on_id env c0;
+      self#on_pstring env c1;
+      self#on_option self#on_id env c2;
+      self#on_option self#on_kind env c3;
+    method on_ClassUsePrecedence env c0 c1 c2 =
       self#on_id env c0;
-      self#on_option self#on_pstring env c1;
-      self#on_id env c2;
-      self#on_cu_alias_type env c3;
+      self#on_pstring env c1;
+      self#on_list self#on_id env c2;
     method on_XhpAttrUse = self#on_hint
     method on_ClassTraitRequire env c0 c1 =
       self#on_trait_req_kind env c0;
@@ -205,17 +209,15 @@ class virtual ['self] iter =
     method on_ChildPlus env = ()
     method on_ChildQuestion env = ()
 
-    method on_cu_alias_type env = function
-      | CU_as
-      | CU_insteadof -> ()
-
     method on_class_elt env = function
       | Const (c0, c1) -> self#on_Const env c0 c1
       | AbsConst (c0, c1) -> self#on_AbsConst env c0 c1
       | Attributes c0 -> self#on_Attributes env c0
       | TypeConst c0 -> self#on_TypeConst env c0
       | ClassUse c0 -> self#on_ClassUse env c0
-      | ClassUseAlias (c0, c1, c2) -> self#on_ClassUseAlias env c0 c1 c2
+      | ClassUseAlias (c0, c1, c2, c3) -> self#on_ClassUseAlias env c0 c1 c2 c3
+      | ClassUsePrecedence (c0, c1, c2) ->
+        self#on_ClassUsePrecedence env c0 c1 c2
       | XhpAttrUse c0 -> self#on_XhpAttrUse env c0
       | ClassTraitRequire (c0, c1) ->
           self#on_ClassTraitRequire env c0 c1
@@ -487,15 +489,17 @@ class virtual ['self] iter =
     method on_Class_const env c0 c1 =
       self#on_id env c0;
       self#on_pstring env c1;
-    method on_Call env c0 c1 c2 =
+    method on_Call env c0 c1 c2 c3 =
       self#on_expr env c0;
-      self#on_list self#on_expr env c1;
+      self#on_list self#on_hint env c1;
       self#on_list self#on_expr env c2;
+      self#on_list self#on_expr env c3;
     method on_Int = self#on_pstring
     method on_Float = self#on_pstring
     method on_String = self#on_pstring
     method on_String2 = self#on_list self#on_expr
     method on_Yield = self#on_afield
+    method on_Yield_from = self#on_expr
     method on_Yield_break env = ()
     method on_Await = self#on_expr
     method on_List = self#on_list self#on_expr
@@ -573,12 +577,13 @@ class virtual ['self] iter =
       | Array_get (c0, c1) -> self#on_Array_get env c0 c1
       | Class_get (c0, c1) -> self#on_Class_get env c0 c1
       | Class_const (c0, c1) -> self#on_Class_const env c0 c1
-      | Call (c0, c1, c2) -> self#on_Call env c0 c1 c2
+      | Call (c0, c1, c2, c3) -> self#on_Call env c0 c1 c2 c3
       | Int c0 -> self#on_Int env c0
       | Float c0 -> self#on_Float env c0
       | String c0 -> self#on_String env c0
       | String2 c0 -> self#on_String2 env c0
       | Yield c0 -> self#on_Yield env c0
+      | Yield_from c0 -> self#on_Yield_from env c0
       | Yield_break -> self#on_Yield_break env
       | Await c0 -> self#on_Await env c0
       | List c0 -> self#on_List env c0
@@ -590,7 +595,7 @@ class virtual ['self] iter =
       | Eif (c0, c1, c2) -> self#on_Eif env c0 c1 c2
       | NullCoalesce (c0, c1) -> self#on_NullCoalesce env c0 c1
       | InstanceOf (c0, c1) -> self#on_InstanceOf env c0 c1
-      | BracedExpr c0 -> self#on_BracedExpr env c0 
+      | BracedExpr c0 -> self#on_BracedExpr env c0
       | New (c0, c1, c2) -> self#on_New env c0 c1 c2
       | Efun (c0, c1) -> self#on_Efun env c0 c1
       | Lfun c0 -> self#on_Lfun env c0

@@ -715,7 +715,7 @@ struct RetCtrlData : IRExtraData {
 };
 
 /*
- * Name of a class constant.
+ * Name of a class constant in a known class
  */
 struct ClsCnsName : IRExtraData {
   explicit ClsCnsName(const StringData* cls, const StringData* cns)
@@ -729,6 +729,40 @@ struct ClsCnsName : IRExtraData {
 
   const StringData* clsName;
   const StringData* cnsName;
+};
+
+/*
+ * Name of a class constant in an unknown class.
+ */
+struct LdSubClsCnsData : IRExtraData {
+  explicit LdSubClsCnsData(const StringData* cns, Slot s)
+    : cnsName(cns)
+    , slot(s)
+  {}
+
+  std::string show() const {
+    return folly::sformat("<cls>::{}({})", cnsName, slot);
+  }
+
+  const StringData* cnsName;
+  Slot slot;
+};
+
+/*
+ * Name and handle of profiled class constant
+ */
+struct ProfileSubClsCnsData : IRExtraData {
+  explicit ProfileSubClsCnsData(const StringData* cns, rds::Handle h)
+    : cnsName(cns)
+    , handle(h)
+  {}
+
+  std::string show() const {
+    return folly::to<std::string>("<cls>::", cnsName->data());
+  }
+
+  const StringData* cnsName;
+  rds::Handle handle;
 };
 
 /*
@@ -1106,8 +1140,8 @@ struct ContEnterData : IRExtraData {
 };
 
 struct NewColData : IRExtraData {
-  explicit NewColData(uint32_t itype)
-    : type(static_cast<CollectionType>(itype))
+  explicit NewColData(CollectionType itype)
+    : type(itype)
   {}
 
   std::string show() const {
@@ -1313,6 +1347,9 @@ X(CheckStaticLoc,               StaticLocName);
 X(InitStaticLoc,                StaticLocName);
 X(LdClsCns,                     ClsCnsName);
 X(InitClsCns,                   ClsCnsName);
+X(LdSubClsCns,                  LdSubClsCnsData);
+X(CheckSubClsCns,               LdSubClsCnsData);
+X(ProfileSubClsCns,             ProfileSubClsCnsData);
 X(LdFuncCached,                 LdFuncCachedData);
 X(LdFuncCachedSafe,             LdFuncCachedData);
 X(LdFuncCachedU,                LdFuncCachedUData);

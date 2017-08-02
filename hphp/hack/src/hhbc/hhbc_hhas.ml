@@ -15,6 +15,7 @@ module SS = String_sequence
 module SU = Hhbc_string_utils
 module SN = Naming_special_names
 module TV = Typed_value
+module ULS = Unique_list_string
 open H
 
 (* Generic helpers *)
@@ -68,7 +69,7 @@ let string_of_adata_id id = "@" ^ id
 
 let string_of_param_id x =
   match x with
-  | Param_unnamed i -> string_of_int i
+  | Param_unnamed i -> "_" ^ string_of_int i
   | Param_named s -> s
 
 let string_of_param_num i = string_of_int i
@@ -93,8 +94,8 @@ let string_of_lit_const instruction =
     | Keyset id         -> sep ["Keyset"; string_of_adata_id id]
     | Vec id            -> sep ["Vec"; string_of_adata_id id]
     | TypedValue _tv    -> failwith "string_of_lit_const: TypedValue"
-    | ColFromArray i    -> sep ["ColFromArray"; string_of_int i]
-    | NewCol i          -> sep ["NewCol"; string_of_int i]
+    | ColFromArray t    -> sep ["ColFromArray"; CollectionType.to_string t]
+    | NewCol t          -> sep ["NewCol"; CollectionType.to_string t]
     | NewDictArray i    -> sep ["NewDictArray"; string_of_int i]
     | NewKeysetArray i  -> sep ["NewKeysetArray"; string_of_int i]
     | NewVecArray i     -> sep ["NewVecArray"; string_of_int i]
@@ -292,7 +293,7 @@ let string_of_label label =
     | Label.Catch id -> "C" ^ (string_of_int id)
     | Label.Fault id -> "F" ^ (string_of_int id)
     | Label.DefaultArg id -> "DV" ^ (string_of_int id)
-    | Label.Named _ -> failwith "Label should be rewritten before this point"
+    | Label.Named id -> id
 
 let string_of_switch_kind kind =
   match kind with
@@ -640,6 +641,19 @@ let string_of_include_eval_define = function
   | DefCns id -> sep ["DefCns"; string_of_const_id id]
   | DefTypeAlias id -> sep ["DefTypeAlias"; string_of_typedef_num id]
 
+let string_of_free_iterator = function
+  | IgnoreIter -> "IgnoreIter"
+  | FreeIter -> "FreeIter"
+
+let string_of_gen_delegation = function
+  | ContAssignDelegate i -> sep ["ContAssignDelegate"; string_of_iterator_id i]
+  | ContEnterDelegate -> "ContEnterDelegate"
+  | YieldFromDelegate (i, l) ->
+    sep ["YieldFromDelegate"; string_of_iterator_id i; string_of_label l]
+  | ContUnsetDelegate (free, i) ->
+    sep ["ContUnsetDelegate";
+         string_of_free_iterator free;
+         string_of_iterator_id i]
 
 let string_of_instruction instruction =
   let s = match instruction with
@@ -661,6 +675,7 @@ let string_of_instruction instruction =
   | IAsync               i -> string_of_async i
   | IGenerator           i -> string_of_generator i
   | IIncludeEvalDefine   i -> string_of_include_eval_define i
+  | IGenDelegation       i -> string_of_gen_delegation i
   | _ -> failwith "invalid instruction" in
   s ^ "\n"
 
@@ -917,7 +932,7 @@ and string_of_param_default_value expr =
     let e2 = string_of_param_default_value e2 in
     e1 ^ " " ^ bop ^ " " ^ e2
   | A.New (e, es, ues)
-  | A.Call (e, es, ues) ->
+  | A.Call (e, _, es, ues) ->
     let e = String_utils.lstrip (string_of_param_default_value e) "\\\\" in
     let es = List.map string_of_param_default_value (es @ ues) in
     let prefix = match snd expr with A.New (_, _, _) -> "new " | _ -> "" in
@@ -1001,6 +1016,7 @@ and string_of_param_default_value expr =
     failwith "expected Lfun to be converted to Efun during closure conversion"
   | A.Yield _
   | A.Yield_break
+  | A.Yield_from _
   | A.Await _
   | A.List _
   | A.Omitted
@@ -1049,25 +1065,18 @@ let add_num_iters buf indent num_iters =
   then add_indented_line buf indent
     (Printf.sprintf ".numiters %d;" num_iters)
 
-let add_static_default_value_option buf indent label opt_expr =
-  let val_str = match opt_expr with
-  | None ->
-    " = \"\"\"null\"\"\""
-  | Some expr ->
-    " = \"\"\""
-    ^ (string_of_param_default_value expr)
-    ^ "\"\"\"" in
-  add_indented_line buf indent (".static " ^ label ^ val_str ^ ";")
+let add_static_default_value_option buf indent label =
+  add_indented_line buf indent (".static " ^ label ^ ";")
 
 let add_static_values buf indent lst =
   Core.List.iter lst
-    (fun (label, e) -> add_static_default_value_option buf indent label e)
+    (fun label -> add_static_default_value_option buf indent label)
 
 let add_doc buf doc_comment =
   match doc_comment with
   | Some cmt ->
     B.add_string buf @@
-      Printf.sprintf "\n.doc \"\"\"%s\"\"\";" (Php_escaping.escape cmt)
+      Printf.sprintf "\n  .doc \"\"\"%s\"\"\";" (Php_escaping.escape cmt)
   | None -> ()
 
 let add_body buf indent body =
@@ -1267,37 +1276,42 @@ let add_enum_ty buf c =
     B.add_string buf ";"
   | _ -> ()
 
-let add_use_alias buf (id1, id_o, id2, flavor) =
-  let aliasing_id = match id_o with
-    | None -> id1
-    | Some id -> id1 ^ "::" ^ id
+let add_use_precedence buf (id1, id2, ids) =
+  let name = id1 ^ "::" ^ id2 in
+  let unique_ids = List.fold_left ULS.add ULS.empty ids in
+  let ids = String.concat " " @@ ULS.items unique_ids in
+  B.add_string buf @@ Printf.sprintf "\n    %s insteadof %s;" name ids
+
+let add_use_alias buf (ido1, id, ido2, kindo) =
+  let aliasing_id =
+    Option.value_map ~f:(fun id1 -> id1 ^ "::" ^ id) ~default:id ido1
   in
-  let flavor = match flavor with
-    | Ast.CU_as -> "as"
-    | Ast.CU_insteadof -> "insteadof"
+  let kind =
+    Option.map kindo ~f:(fun kind -> "[" ^ Ast.string_of_kind kind ^ "]")
   in
-  B.add_string buf @@ Printf.sprintf "\n    %s %s %s;" aliasing_id flavor id2
+  let rest = Option.merge kind ido2 ~f:(fun x y -> x ^ " " ^ y) in
+  let rest = Option.value ~default:"" rest in
+  B.add_string buf @@ Printf.sprintf "\n    %s as %s;" aliasing_id rest
 
 let add_uses buf c =
   let use_l = Hhas_class.class_uses c in
   let use_alias_list = Hhas_class.class_use_aliases c in
+  let use_precedence_list = Hhas_class.class_use_precedences c in
   if use_l = [] then () else
     begin
-      B.add_string buf @@ Printf.sprintf "\n  .use %s"
-        @@ String.concat " " @@ List.map Utils.strip_ns use_l;
-        if use_alias_list = [] then B.add_char buf ';' else
-          (* HHVM emits insteadof aliases in front of as aliases *)
-          let as_aliases, insteadof_aliases =
-            List.partition
-              (fun (_, _, _, flavor) -> flavor = Ast.CU_as)
-              use_alias_list
-          in
-          begin
-            B.add_string buf " {";
-            List.iter (add_use_alias buf) (insteadof_aliases @ as_aliases);
-            B.add_string buf "\n  }";
-
-          end
+      let unique_ids =
+        List.fold_left (fun l e -> ULS.add l (Utils.strip_ns e)) ULS.empty use_l
+      in
+      let use_l = String.concat " " @@ ULS.items unique_ids in
+      B.add_string buf @@ Printf.sprintf "\n  .use %s" use_l;
+      if use_alias_list = [] && use_precedence_list = []
+      then B.add_char buf ';' else
+      begin
+        B.add_string buf " {";
+        List.iter (add_use_precedence buf) use_precedence_list;
+        List.iter (add_use_alias buf) use_alias_list;
+        B.add_string buf "\n  }";
+      end
     end
 
 let add_class_def buf class_def =

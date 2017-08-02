@@ -466,7 +466,7 @@ IniSettingMap::IniSettingMap() {
   m_map = Variant(Array::Create());
 }
 
-IniSettingMap::IniSettingMap(Type t) : IniSettingMap() {}
+IniSettingMap::IniSettingMap(Type /*t*/) : IniSettingMap() {}
 
 IniSettingMap::IniSettingMap(const IniSettingMap& i) {
   m_map = i.m_map;
@@ -491,14 +491,15 @@ IniSettingMap& IniSettingMap::operator=(const IniSettingMap& i) {
 }
 
 namespace {
-void mergeSettings(Variant& curval, const Variant& v) {
-  if (v.isArray() && curval.isArray()) {
-    for (auto i = v.toCArrRef().begin(); !i.end(); i.next()) {
-      mergeSettings(curval.toArrRef().lvalAt(i.first()),
-                    i.secondRef());
+void mergeSettings(Variant& curval, TypedValue v) {
+  auto const cell = tvToCell(v);
+
+  if (isArrayLikeType(cell.m_type) && curval.isArray()) {
+    for (auto i = ArrayIter(cell.m_data.parr); !i.end(); i.next()) {
+      mergeSettings(curval.toArrRef().lvalAt(i.first()), i.secondVal());
     }
   } else {
-    curval = v;
+    curval = VarNR(v);
   }
 }
 }
@@ -506,17 +507,19 @@ void mergeSettings(Variant& curval, const Variant& v) {
 void IniSettingMap::set(const String& key, const Variant& v) {
   assert(this->isArray());
   auto& curval = m_map.toArrRef().lvalAt(key);
-  mergeSettings(curval, v);
+  mergeSettings(curval, *v.asTypedValue());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // callbacks for creating arrays out of ini
 
-void IniSetting::ParserCallback::onSection(const std::string &name, void *arg) {
+void IniSetting::ParserCallback::onSection(const std::string& /*name*/,
+                                           void* /*arg*/) {
   // do nothing
 }
 
-void IniSetting::ParserCallback::onLabel(const std::string &name, void *arg) {
+void IniSetting::ParserCallback::onLabel(const std::string& /*name*/,
+                                         void* /*arg*/) {
   // do nothing
 }
 
@@ -829,7 +832,7 @@ Variant IniSetting::Unbox(const Variant& boxed, std::set<ArrayData*>& seen,
       // asserting here to ensure that key is  a scalar type that can be
       // converted to a string.
       assert(key.isScalar());
-      auto& elem = it.secondRef();
+      auto& elem = tvAsCVarRef(it.secondRval().tv_ptr());
       unboxed.asArrRef().set(
         key,
         elem.isArray() ? Unbox(elem, seen, use_defaults, key.toString()) : elem

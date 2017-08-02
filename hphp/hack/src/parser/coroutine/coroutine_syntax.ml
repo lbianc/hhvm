@@ -206,7 +206,7 @@ let prepend_to_comma_delimited_syntax_list prepend_syntax syntax_list_syntax =
 let get_list_item node =
   match syntax node with
   | ListItem { list_item; _; } -> list_item
-  | _ -> failwith "Was not a ListItem"
+  | _ -> failwith "get_list_item: Was not a ListItem"
 
 let get_type_parameter_list node =
   match syntax node with
@@ -215,7 +215,7 @@ let get_type_parameter_list node =
         |> syntax_node_to_list
         |> Core_list.map ~f:get_list_item
   | Missing -> []
-  | _ -> failwith "Was not a TypeParameters"
+  | _ -> failwith "get_type_parameter_list: Was not a TypeParameters"
 
 let is_static_method { methodish_modifiers; _; } =
   methodish_modifiers
@@ -225,7 +225,7 @@ let is_static_method { methodish_modifiers; _; } =
 let string_of_name_token node =
   match syntax node with
   | Token { EditableToken.kind = TokenKind.Name; text; _; } -> text
-  | _ -> failwith "Was not a Name Token"
+  | _ -> failwith "string_of_name_token: Was not a Name Token"
 
 
 (* Syntax creation functions *)
@@ -414,12 +414,11 @@ let make_classish_declaration_syntax
 
 (* TODO(tingley): Determine if it's worth tightening visibility here. *)
 let make_methodish_declaration_with_body_syntax
-    ?(methodish_modifiers = [])
     function_decl_header_syntax
     function_body =
   make_methodish_declaration
     (* methodish_attribute *) (make_missing ())
-    (make_list methodish_modifiers)
+    (make_list [public_syntax])
     function_decl_header_syntax
     function_body
     (* methodish_semicolon *) (make_missing ())
@@ -442,11 +441,9 @@ let make_lambda_syntax lambda_signature lambda_body =
     lambda_body
 
 let make_methodish_declaration_syntax
-    ?methodish_modifiers
     function_decl_header_syntax
     function_body =
   make_methodish_declaration_with_body_syntax
-    ?methodish_modifiers
     function_decl_header_syntax
     (make_compound_statement_syntax function_body)
 
@@ -545,7 +542,7 @@ let continuation_variable =
 let continuation_variable_syntax =
   make_variable_syntax continuation_variable
 
-let make_closure_base_type_syntax { function_type; _; } =
+let make_closure_base_type_syntax function_type =
   make_type_specifier_syntax "ClosureBase" [ function_type; ]
 
 let make_continuation_type_syntax function_type =
@@ -553,7 +550,7 @@ let make_continuation_type_syntax function_type =
 
 let make_continuation_parameter_syntax
     ?visibility_syntax
-    { function_type; _; } =
+    function_type =
   make_parameter_declaration_syntax
     ?visibility_syntax
     (make_continuation_type_syntax function_type)
@@ -587,29 +584,43 @@ let create_suspended_coroutine_result_syntax =
     suspended_member_name
     []
 
-let make_closure_classname classish_name { function_name; _; } =
+(* ClassName_FunctionName_Lambda_1_GeneratedClosure *)
+let make_closure_classname context =
+  let classish_name = context.Coroutine_context.classish_name in
+  (* TODO: Is there a better thing to do for coroutines that are inside no
+  class? *)
+  let classish_name = if is_missing classish_name then
+    global_syntax else classish_name in
+  let function_name = context.Coroutine_context.function_name in
+  let lambda_name = match context.Coroutine_context.lambda_count with
+    | None -> ""
+    | Some c -> Printf.sprintf "Lambda_%i_" c in
   Printf.sprintf
-    "%s_%s_GeneratedClosure"
+    "%s_%s_%sGeneratedClosure"
     (string_of_name_token classish_name)
     (string_of_name_token function_name)
+    lambda_name
 
 (**
  * Given a list of TypeParameters syntaxes, combines them into a single
  * list of type_parameters.
+ TODO: What if there is a name collision?
  *)
-let make_closure_type_parameters
-    classish_type_parameters
-    { function_type_parameter_list; _; } =
+let make_closure_type_parameters context =
+  let classish_type_parameters =
+    context.Coroutine_context.classish_type_parameters in
+  let function_type_parameter_list =
+    context.Coroutine_context.function_type_parameter_list in
   (get_type_parameter_list classish_type_parameters) @
     (get_type_parameter_list function_type_parameter_list)
 
-let make_closure_type_syntax
-    classish_name
-    classish_type_parameters
-    header_node =
+(*
+    ClassName_FunctionName_GeneratedClosure<TClass, TFunc>
+*)
+let make_closure_type_syntax context =
   make_type_specifier_syntax
-    (make_closure_classname classish_name header_node)
-    (make_closure_type_parameters classish_type_parameters header_node)
+    (make_closure_classname context)
+    (make_closure_type_parameters context)
 
 let closure_variable =
   "$closure"
@@ -623,13 +634,9 @@ let closure_name_syntax name =
   let name_syntax = make_name_syntax name in
   make_member_selection_expression_syntax closure_variable_syntax name_syntax
 
-let make_closure_parameter_syntax
-    classish_name
-    classish_type_parameters
-    function_name =
+let make_closure_parameter_syntax context =
   make_parameter_declaration_syntax
-    (make_closure_type_syntax
-        classish_name classish_type_parameters function_name)
+    (make_closure_type_syntax context)
     closure_variable
 
 let resume_member_name =
@@ -717,15 +724,11 @@ let state_machine_variable_name =
 let state_machine_variable_name_syntax =
   make_variable_syntax state_machine_variable_name
 
-let make_state_machine_parameter_syntax
-    classish_name
-    classish_type_parameters
-    ({ function_type; _; } as header_node) =
+let make_state_machine_parameter_syntax context function_type =
   let state_machine_type_syntax =
     make_functional_type_syntax
       [
-        make_closure_type_syntax
-          classish_name classish_type_parameters header_node;
+        make_closure_type_syntax context;
         mixed_syntax;
         nullable_exception_type_syntax;
       ]
@@ -741,7 +744,8 @@ let inst_meth_syntax =
 let class_meth_syntax =
   make_qualified_name_syntax "class_meth"
 
-let make_member_with_unknown_type_declaration_syntax variable_syntax =
+let make_member_with_unknown_type_declaration_syntax variable_name =
+  let variable_syntax = make_variable_syntax variable_name in
   let declaration_syntax =
     make_property_declarator variable_syntax (make_missing ()) in
   make_property_declaration_syntax (make_missing ()) declaration_syntax

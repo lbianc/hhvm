@@ -65,6 +65,7 @@ struct State {
   int fpilen;       // length of FPI stack.
   bool mbr_live;    // liveness of member base register
   folly::Optional<MOpMode> mbr_mode; // mode of member base register
+  boost::dynamic_bitset<> silences; // set of silenced local variables
 };
 
 /**
@@ -414,7 +415,7 @@ bool FuncChecker::checkLocal(PC pc, int k) {
   return true;
 }
 
-bool FuncChecker::checkString(PC pc, Id id) {
+bool FuncChecker::checkString(PC /*pc*/, Id id) {
   return unit()->isLitstrId(id);
 }
 
@@ -430,15 +431,15 @@ bool FuncChecker::checkImmVec(PC& pc, size_t elemSize) {
   return true;
 }
 
-bool FuncChecker::checkImmBLA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmBLA(PC& pc, PC const /*instr*/) {
   return checkImmVec(pc, sizeof(Offset));
 }
 
-bool FuncChecker::checkImmSLA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmSLA(PC& pc, PC const /*instr*/) {
   return checkImmVec(pc, sizeof(Id) + sizeof(Offset));
 }
 
-bool FuncChecker::checkImmILA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmILA(PC& pc, PC const /*instr*/) {
   auto ids = iterBreakIds(pc);
   if (ids.size() < 1) {
     error("invalid length of immediate vector %lu at Offset %d\n",
@@ -471,7 +472,7 @@ bool FuncChecker::checkImmIVA(PC& pc, PC const instr) {
   return true;
 }
 
-bool FuncChecker::checkImmI64A(PC& pc, PC const instr) {
+bool FuncChecker::checkImmI64A(PC& pc, PC const /*instr*/) {
   pc += sizeof(int64_t);
   return true;
 }
@@ -517,17 +518,17 @@ bool FuncChecker::checkImmCAW(PC& pc, PC const instr) {
   return true;
 }
 
-bool FuncChecker::checkImmDA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmDA(PC& pc, PC const /*instr*/) {
   pc += sizeof(double);
   return true;
 }
 
-bool FuncChecker::checkImmSA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmSA(PC& pc, PC const /*instr*/) {
   auto const id = decodeId(&pc);
   return checkString(pc, id);
 }
 
-bool FuncChecker::checkImmAA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmAA(PC& pc, PC const /*instr*/) {
   auto const id = decodeId(&pc);
   if (id < 0 || id >= (Id)unit()->numArrays()) {
     error("invalid array id %d\n", id);
@@ -536,7 +537,7 @@ bool FuncChecker::checkImmAA(PC& pc, PC const instr) {
   return true;
 }
 
-bool FuncChecker::checkImmRATA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmRATA(PC& pc, PC const /*instr*/) {
   // Nothing to check at the moment.
   pc += encodedRATSize(pc);
   return true;
@@ -550,7 +551,7 @@ bool FuncChecker::checkImmBA(PC& pc, PC const instr) {
   return true;
 }
 
-bool FuncChecker::checkImmVSA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmVSA(PC& pc, PC const /*instr*/) {
   auto const len = decode_raw<int32_t>(pc);
   if (len < 1 || len > MixedArray::MaxStructMakeSize) {
     error("invalid length of immedate VSA vector %d at offset %d\n",
@@ -566,8 +567,8 @@ bool FuncChecker::checkImmVSA(PC& pc, PC const instr) {
   return ok;
 }
 
-template<typename Subop>
-bool FuncChecker::checkImmOAImpl(PC& pc, PC const instr) {
+template <typename Subop>
+bool FuncChecker::checkImmOAImpl(PC& pc, PC const /*instr*/) {
   auto const subop = decode_oa<Subop>(pc);
   if (!subopValid(subop)) {
     ferror("Invalid subop {}\n", size_t(subop));
@@ -576,7 +577,7 @@ bool FuncChecker::checkImmOAImpl(PC& pc, PC const instr) {
   return true;
 }
 
-bool FuncChecker::checkImmKA(PC& pc, PC const instr) {
+bool FuncChecker::checkImmKA(PC& pc, PC const /*instr*/) {
   auto const mcode = decode_raw<MemberCode>(pc);
   if (mcode < 0 || mcode >= NumMemberCodes) {
     ferror("Invalid MemberCode {}\n", uint8_t{mcode});
@@ -890,9 +891,10 @@ bool FuncChecker::checkInputs(State* cur, PC pc, Block* b) {
 
   if (cur->fpilen > 0 && isJmp(op)) {
     auto offset = getImm(pc, 0).u_BA;
-    if(offset < 0){
+    if (offset < 0) {
       error("FPI contains backwards jump at %s\n",
             opcodeToName(op));
+      ok = false;
     }
   }
 
@@ -915,7 +917,7 @@ bool FuncChecker::checkTerminal(State* cur, PC pc) {
   return true;
 }
 
-bool FuncChecker::checkFpi(State* cur, PC pc, Block* b) {
+bool FuncChecker::checkFpi(State* cur, PC pc, Block* /*b*/) {
   if (cur->fpilen <= 0) {
     error("%s", "cannot access empty FPI stack\n");
     return false;
@@ -995,9 +997,8 @@ bool FuncChecker::checkIter(State* cur, PC const pc) {
     }
   } else {
     if (!cur->iters[id]) {
-      // TODO(#2608280): we produce incorrect bytecode for iterators still
-      //error("Cannot access un-initialized iter %d\n", id);
-      //ok = false;
+      error("Cannot access un-initialized iter %d\n", id);
+      ok = false;
     }
     if (op == Op::IterFree ||
         op == Op::MIterFree ||
@@ -1038,6 +1039,65 @@ std::array<int32_t, 4> getWrittenClsRefSlots(PC pc) {
   return ret;
 }
 
+/* Returns a set of the immediates to op that are a local id */
+std::set<int> localImmediates(Op op) {
+  std::set<int> imms;
+  switch (op) {
+#define NA
+#define ONE(a) a(0)
+#define TWO(a, b) ONE(a) b(1)
+#define THREE(a, b, c) TWO(a, b) c(2)
+#define FOUR(a, b, c, d) THREE(a, b, c) d(3)
+#define LA(n) imms.insert(n);
+#define MA(n)
+#define BLA(n)
+#define SLA(n)
+#define ILA(n)
+#define IVA(n)
+#define I64A(n)
+#define IA(n)
+#define CAR(n)
+#define CAW(n)
+#define DA(n)
+#define SA(n)
+#define AA(n)
+#define RATA(n)
+#define BA(n)
+#define OA(op)
+#define VSA(n)
+#define KA(n)
+#define LAR(n)
+#define O(name, imm, in, out, flags) case Op::name: imm; break;
+    OPCODES
+#undef NA
+#undef ONE
+#undef TWO
+#undef THREE
+#undef FOUR
+#undef LA
+#undef MA
+#undef BLA
+#undef SLA
+#undef ILA
+#undef IVA
+#undef I64A
+#undef IA
+#undef CAR
+#undef CAW
+#undef DA
+#undef SA
+#undef AA
+#undef RATA
+#undef BA
+#undef OA
+#undef VSA
+#undef KA
+#undef LAR
+#undef O
+  }
+  return imms;
+}
+
 bool FuncChecker::checkClsRefSlots(State* cur, PC const pc) {
   bool ok = true;
 
@@ -1069,6 +1129,21 @@ bool FuncChecker::checkClsRefSlots(State* cur, PC const pc) {
 
 bool FuncChecker::checkOp(State* cur, PC pc, Op op, Block* b) {
   switch (op) {
+    case Op::InitProp:
+    case Op::CheckProp: {
+        auto const prop = m_func->unit()->lookupLitstrId(getImm(pc, 0).u_SA);
+        auto fname = m_func->name()->toCppString();
+        if (fname.compare("86pinit") != 0 && fname.compare("86sinit") != 0) {
+          ferror("{} cannot appear in {} function\n", opcodeToName(op), fname);
+          return false;
+        }
+        if (!m_func->preClass() || !m_func->preClass()->hasProp(prop)){
+             ferror("{} references non-existent property {}\n",
+                    opcodeToName(op), prop);
+             return false;
+        }
+        break;
+    }
     case Op::DefCls:
     case Op::DefClsNop:
     case Op::CreateCl: {
@@ -1105,12 +1180,25 @@ bool FuncChecker::checkOp(State* cur, PC pc, Op op, Block* b) {
     case Op::GetMemoKeyL:
     case Op::MemoGet:
     case Op::MemoSet:
+    case Op::MaybeMemoType:
+    case Op::IsMemoType:
       if (!m_func->isMemoizeWrapper()) {
         ferror("{} can only appear within memoize wrappers\n",
                opcodeToName(op));
         return false;
       }
       break;
+    case Op::NewCol:
+    case Op::ColFromArray: {
+      auto new_pc = pc;
+      decode_op(new_pc);
+      auto colType = decode_oa<CollectionType>(new_pc);
+      if (colType == CollectionType::Pair) {
+        ferror("Immediate of {} must not be a pair\n", opcodeToName(op));
+        return false;
+      }
+      break;
+    }
     case Op::AssertRATL:
     case Op::AssertRATStk: {
       if (pc == b->last){
@@ -1134,9 +1222,41 @@ bool FuncChecker::checkOp(State* cur, PC pc, Op op, Block* b) {
       }
       break;
     }
+    case Op::Silence: {
+      auto new_pc = pc;
+      decode_op(new_pc);
+      auto const local = decode_iva(new_pc);
+      if (local < m_func->numNamedLocals()) {
+        ferror("Cannot store error reporting value in named local\n");
+        return false;
+      }
+
+      auto const silence = decode_oa<SilenceOp>(new_pc);
+      if (local + 1 > cur->silences.size()) cur->silences.resize(local + 1);
+      if (silence == SilenceOp::End && !cur->silences[local]) {
+        ferror("Silence ended on local variable {} with no start\n", local);
+        return false;
+      }
+
+      cur->silences[local] = silence == SilenceOp::Start ? 1 : 0;
+      break;
+    }
     default:
       break;
   }
+
+  if (op != Op::Silence && !isTypeAssert(op)) {
+    for (int imm : localImmediates(op)) {
+      auto local = getImm(pc, imm).u_LA;
+      if (cur->silences.size() > local && cur->silences[local]) {
+        ferror("{} at PC {} affected a local variable ({}) which was reserved "
+               "for storing the error reporting level\n",
+               opcodeToName(op), offset(pc), local);
+        return false;
+      }
+    }
+  }
+
   return true;
 }
 
@@ -1147,9 +1267,8 @@ bool FuncChecker::checkIterBreak(State* cur, PC pc) {
   decode_raw<Offset>(pc); // skip target offset
   for (auto& iter : iterBreakIds(pc)) {
     if (!cur->iters[iter.id]) {
-      // TODO(#2608280): we produce incorrect bytecode for iterators still
-      //error("Cannot access un-initialized iter %d\n", iter.id);
-      //return false;
+      error("Cannot access un-initialized iter %d\n", iter.id);
+      return false;
     }
     // IterBreak has no fall-through path, so don't change iter.id's current
     // state; instead it will be done in checkSuccEdges.
@@ -1307,6 +1426,7 @@ void FuncChecker::initState(State* s) {
   s->fpilen = 0;
   s->mbr_live = false;
   s->mbr_mode.clear();
+  s->silences.clear();
 }
 
 void FuncChecker::copyState(State* to, const State* from) {
@@ -1320,6 +1440,7 @@ void FuncChecker::copyState(State* to, const State* from) {
   to->fpilen = from->fpilen;
   to->mbr_live = from->mbr_live;
   to->mbr_mode = from->mbr_mode;
+  to->silences = from->silences;
 }
 
 /**
@@ -1352,6 +1473,26 @@ bool FuncChecker::checkFlow() {
                      instrToString(pc, unit()) << std::endl;
       }
       auto const op = peek_op(pc);
+
+      // Reachable catch blocks and fault funclets have an empty stack and
+      // non-initialized class-ref slots. Checking an edge to the fault
+      // handler right before every instruction is unnecessary since
+      // not every instruction can throw; there is room for improvement
+      // here if we want to note in the bytecode table which instructions
+      // can actually throw to the fault handler.
+      if (b->exn) {
+        int save_stklen = cur.stklen;
+        int save_fpilen = cur.fpilen;
+        auto save_slots = cur.clsRefSlots;
+        cur.stklen = 0;
+        cur.fpilen = 0;
+        cur.clsRefSlots.reset();
+        ok &= checkEdge(b, cur, b->exn);
+        cur.stklen = save_stklen;
+        cur.fpilen = save_fpilen;
+        cur.clsRefSlots = std::move(save_slots);
+      }
+
       if (isMemberFinalOp(op)) ok &= checkMemberKey(&cur, pc, op);
       ok &= checkOp(&cur, pc, op, b);
       ok &= checkInputs(&cur, pc, b);
@@ -1371,26 +1512,15 @@ bool FuncChecker::checkFlow() {
       ok &= checkEHStack(handler, builder.at(handler.m_base));
     }
   }
+
   return ok;
 }
 
 bool FuncChecker::checkSuccEdges(Block* b, State* cur) {
   bool ok = true;
-  // Reachable catch blocks and fault funclets have an empty stack and
-  // non-initialized class-ref slots.
-  if (b->exn) {
-    int save_stklen = cur->stklen;
-    int save_fpilen = cur->fpilen;
-    auto save_slots = cur->clsRefSlots;
-    cur->stklen = 0;
-    cur->fpilen = 0;
-    cur->clsRefSlots.reset();
-    ok &= checkEdge(b, *cur, b->exn);
-    cur->stklen = save_stklen;
-    cur->fpilen = save_fpilen;
-    cur->clsRefSlots = std::move(save_slots);
-  }
-  if (isIter(b->last) && numSuccBlocks(b) == 2) {
+  int succs = numSuccBlocks(b);
+
+  if (isIter(b->last) && succs == 2) {
     // IterInit* and IterNext*, Both implicitly free their iterator variable
     // on the loop-exit path.  Compute the iterator state on the "taken" path;
     // the fall-through path has the opposite state.
@@ -1436,10 +1566,16 @@ bool FuncChecker::checkSuccEdges(Block* b, State* cur) {
     ok = false;
   }
 
+  if (succs == 0 && cur->silences.find_first() != cur->silences.npos &&
+      !b->exn) {
+    error("Error reporting was silenced at end of terminal block B%d\n", b->id);
+    return false;
+  }
+
   return ok;
 }
 
-bool FuncChecker::checkEHStack(const EHEnt& handler, Block* b) {
+bool FuncChecker::checkEHStack(const EHEnt& /*handler*/, Block* b) {
   const State& state = m_info[b->id].state_in;
   if (!state.stk) return true; // ignore unreachable block
   if (state.fpilen != 0) {
@@ -1461,6 +1597,21 @@ bool FuncChecker::checkEdge(Block* b, const State& cur, Block *t) {
     copyState(&state, &cur);
     return true;
   }
+
+  // An empty bitset should be considered equivalent to a bitset of all 0s
+  if (cur.silences.size() != state.silences.size()) {
+    state.silences.resize(cur.silences.size());
+  }
+
+  if (cur.silences != state.silences) {
+    std::string current, target;
+    boost::to_string(cur.silences, current);
+    boost::to_string(state.silences, target);
+    error("Silencer state mismatch on edge B%d->B%d: B%d had state %s, "
+          "B%d had state %s\n", b->id, t->id, b->id, current.c_str(),
+          t->id, target.c_str());
+  }
+
   // Check stack.
   if (state.stklen != cur.stklen) {
     reportStkMismatch(b, t, cur);
@@ -1520,7 +1671,7 @@ void FuncChecker::reportStkUnderflow(Block*, const State& cur, PC pc) {
          offset(pc), min);
 }
 
-void FuncChecker::reportStkOverflow(Block*, const State& cur, PC pc) {
+void FuncChecker::reportStkOverflow(Block*, const State& /*cur*/, PC pc) {
   error("Rule2: Stack overflow at PC %d\n", offset(pc));
 }
 

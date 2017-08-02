@@ -512,7 +512,7 @@ void ServerStats::ReportStatus(std::string& output, Writer::Format format) {
       w->writeEntry("current alloc", stats.capacity);
       w->writeEntry("peak usage", stats.peakUsage);
       w->writeEntry("peak alloc", stats.peakCap);
-      w->writeEntry("limit", stats.limit);
+      w->writeEntry("limit", ts.m_mm->getMemoryLimit());
       w->writeEntry("current mm usage", stats.mmUsage);
       w->endObject("memory");
     }
@@ -635,7 +635,7 @@ int64_t ServerStats::get(const std::string& name) {
   return 0;
 }
 
-void ServerStats::logPage(const string& url, int code) {
+void ServerStats::logPage(const string& /*url*/, int /*code*/) {
   int64_t now = time(nullptr) / RuntimeOption::StatsSlotDuration;
   int slot = now % RuntimeOption::StatsMaxSlot;
 
@@ -849,7 +849,7 @@ ServerStatsHelper::~ServerStatsHelper() {
 #endif
 
     if (m_track & TRACK_MEMORY) {
-      auto const stats = MM().getStats();
+      auto const stats = MM().getStatsCopy();
       ServerStats::Log(string("mem.") + m_section, stats.peakUsage);
       ServerStats::Log(string("mem.allocated.") + m_section,
                        stats.peakCap);

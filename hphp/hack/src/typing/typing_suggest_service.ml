@@ -42,7 +42,7 @@ let resolve_types tcopt acc collated_values =
   List.iter collated_values begin fun ((fn, line, kind), envl_tyl) ->
   Timeout.with_timeout
     ~timeout:t
-    ~on_timeout:(fun () -> raise Timeout.Timeout)
+    ~on_timeout:(fun () -> ())
     ~do_:begin fun t ->
     let open Timeout in
     let env = Env.empty tcopt fn ~droot:None in
@@ -79,7 +79,9 @@ let resolve_types tcopt acc collated_values =
             Typing_ops.unify Pos.none ureason env ty1 ty2 in
           List.fold_left tyl ~f:unify ~init:(env, any)
         end (fun _ -> raise Exit)
-      with Timeout -> raise Timeout | _ -> try Errors.try_ begin fun () ->
+      with
+      | exn when Timeout.is_timeout_exn t exn -> raise exn
+      | _ -> try Errors.try_ begin fun () ->
         let sub ty1 env ty2 =
           Typing_ops.sub_type Pos.none ureason env ty2 ty1 in
 
@@ -95,7 +97,9 @@ let resolve_types tcopt acc collated_values =
               Errors.try_ begin fun () ->
                 List.fold_left tyl ~f:(sub guess) ~init:env, guess
               end (fun _ -> raise Exit)
-            with Timeout -> raise Timeout | _ -> guess_super env tyl guesses in
+            with
+            | exn when Timeout.is_timeout_exn t exn -> raise exn
+            | _ -> guess_super env tyl guesses in
 
         let xhp = reason, Typing_defs.Tclass ((Pos.none, "\\:xhp"), []) in
         let xhp_option = reason, Typing_defs.Toption xhp in
@@ -126,7 +130,9 @@ let resolve_types tcopt acc collated_values =
         in
         guess_super env tyl guesses
         end (fun _ -> raise Exit)
-      with Timeout -> raise Timeout | _ ->
+      with
+      | exn when Timeout.is_timeout_exn t exn -> raise exn
+      | _ ->
         env, any
     in
     (* We don't suggest shape type hints yet, so downgrading all
@@ -190,29 +196,30 @@ let keys map = Relative_path.Map.fold map ~init:[] ~f:(fun x _ y -> x :: y)
 
 (* Typecheck a part of the codebase, in order to record the type suggestions in
  * Type_suggest.types. *)
+
 let suggest_files tcopt fnl =
-  SharedMem.invalidate_caches();
-  Typing_defs.is_suggest_mode := true;
-  Typing_suggest.types := [];
-  Typing_suggest.funs_and_methods := [];
-  Typing_suggest.initialized_members := SMap.empty;
-  List.iter fnl begin fun fn ->
-    let tcopt = TypecheckerOptions.make_permissive tcopt in
-    match Parser_heap.ParserHeap.get fn with
-    | Some (ast, _) ->
-      let nast = Naming.program tcopt ast in
-      List.iter nast begin function
-        | Nast.Fun f -> ignore (Typing.fun_def tcopt f)
-        | Nast.Class c -> ignore (Typing.class_def tcopt c)
-        | _ -> ()
-      end
-    | None -> ()
-  end;
-  let result = !Typing_suggest.types in
-  Typing_defs.is_suggest_mode := false;
-  Typing_suggest.types := [];
-  Typing_suggest.initialized_members := SMap.empty;
-  result
+ SharedMem.invalidate_caches();
+ Typing_defs.is_suggest_mode := true;
+ Typing_suggest.types := [];
+ Typing_suggest.funs_and_methods := [];
+ Typing_suggest.initialized_members := SMap.empty;
+ List.iter fnl begin fun fn ->
+   let tcopt = TypecheckerOptions.make_permissive tcopt in
+   match Parser_heap.ParserHeap.get fn with
+   | Some (ast, _) ->
+     let nast = Naming.program tcopt ast in
+     List.iter nast begin function
+       | Nast.Fun f -> ignore (Typing.fun_def tcopt f)
+       | Nast.Class c -> ignore (Typing.class_def tcopt c)
+       | _ -> ()
+     end
+   | None -> ()
+ end;
+ let result = !Typing_suggest.types in
+ Typing_defs.is_suggest_mode := false;
+ Typing_suggest.types := [];
+ Typing_suggest.initialized_members := SMap.empty;
+ result
 
 let suggest_files_worker tcopt acc fnl  =
   let types = suggest_files tcopt fnl  in

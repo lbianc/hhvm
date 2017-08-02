@@ -84,7 +84,8 @@ module WithToken(Token: TokenType) = struct
       | MethodishDeclaration              _ -> SyntaxKind.MethodishDeclaration
       | ClassishDeclaration               _ -> SyntaxKind.ClassishDeclaration
       | ClassishBody                      _ -> SyntaxKind.ClassishBody
-      | TraitUseConflictResolutionItem    _ -> SyntaxKind.TraitUseConflictResolutionItem
+      | TraitUsePrecedenceItem            _ -> SyntaxKind.TraitUsePrecedenceItem
+      | TraitUseAliasItem                 _ -> SyntaxKind.TraitUseAliasItem
       | TraitUseConflictResolution        _ -> SyntaxKind.TraitUseConflictResolution
       | TraitUse                          _ -> SyntaxKind.TraitUse
       | RequireClause                     _ -> SyntaxKind.RequireClause
@@ -139,6 +140,7 @@ module WithToken(Token: TokenType) = struct
       | SafeMemberSelectionExpression     _ -> SyntaxKind.SafeMemberSelectionExpression
       | EmbeddedMemberSelectionExpression _ -> SyntaxKind.EmbeddedMemberSelectionExpression
       | YieldExpression                   _ -> SyntaxKind.YieldExpression
+      | YieldFromExpression               _ -> SyntaxKind.YieldFromExpression
       | PrefixUnaryExpression             _ -> SyntaxKind.PrefixUnaryExpression
       | PostfixUnaryExpression            _ -> SyntaxKind.PostfixUnaryExpression
       | BinaryExpression                  _ -> SyntaxKind.BinaryExpression
@@ -243,7 +245,8 @@ module WithToken(Token: TokenType) = struct
     let is_methodish_declaration                = has_kind SyntaxKind.MethodishDeclaration
     let is_classish_declaration                 = has_kind SyntaxKind.ClassishDeclaration
     let is_classish_body                        = has_kind SyntaxKind.ClassishBody
-    let is_trait_use_conflict_resolution_item   = has_kind SyntaxKind.TraitUseConflictResolutionItem
+    let is_trait_use_precedence_item            = has_kind SyntaxKind.TraitUsePrecedenceItem
+    let is_trait_use_alias_item                 = has_kind SyntaxKind.TraitUseAliasItem
     let is_trait_use_conflict_resolution        = has_kind SyntaxKind.TraitUseConflictResolution
     let is_trait_use                            = has_kind SyntaxKind.TraitUse
     let is_require_clause                       = has_kind SyntaxKind.RequireClause
@@ -298,6 +301,7 @@ module WithToken(Token: TokenType) = struct
     let is_safe_member_selection_expression     = has_kind SyntaxKind.SafeMemberSelectionExpression
     let is_embedded_member_selection_expression = has_kind SyntaxKind.EmbeddedMemberSelectionExpression
     let is_yield_expression                     = has_kind SyntaxKind.YieldExpression
+    let is_yield_from_expression                = has_kind SyntaxKind.YieldFromExpression
     let is_prefix_unary_expression              = has_kind SyntaxKind.PrefixUnaryExpression
     let is_postfix_unary_expression             = has_kind SyntaxKind.PostfixUnaryExpression
     let is_binary_expression                    = has_kind SyntaxKind.BinaryExpression
@@ -689,14 +693,26 @@ module WithToken(Token: TokenType) = struct
       classish_body_right_brace
     )
 
-    let get_trait_use_conflict_resolution_item_children {
-      trait_use_conflict_resolution_item_aliasing_name;
-      trait_use_conflict_resolution_item_aliasing_keyword;
-      trait_use_conflict_resolution_item_aliased_name;
+    let get_trait_use_precedence_item_children {
+      trait_use_precedence_item_name;
+      trait_use_precedence_item_keyword;
+      trait_use_precedence_item_removed_names;
     } = (
-      trait_use_conflict_resolution_item_aliasing_name,
-      trait_use_conflict_resolution_item_aliasing_keyword,
-      trait_use_conflict_resolution_item_aliased_name
+      trait_use_precedence_item_name,
+      trait_use_precedence_item_keyword,
+      trait_use_precedence_item_removed_names
+    )
+
+    let get_trait_use_alias_item_children {
+      trait_use_alias_item_aliasing_name;
+      trait_use_alias_item_keyword;
+      trait_use_alias_item_visibility;
+      trait_use_alias_item_aliased_name;
+    } = (
+      trait_use_alias_item_aliasing_name,
+      trait_use_alias_item_keyword,
+      trait_use_alias_item_visibility,
+      trait_use_alias_item_aliased_name
     )
 
     let get_trait_use_conflict_resolution_children {
@@ -1331,6 +1347,16 @@ module WithToken(Token: TokenType) = struct
     } = (
       yield_keyword,
       yield_operand
+    )
+
+    let get_yield_from_expression_children {
+      yield_from_yield_keyword;
+      yield_from_from_keyword;
+      yield_from_operand;
+    } = (
+      yield_from_yield_keyword,
+      yield_from_from_keyword,
+      yield_from_operand
     )
 
     let get_prefix_unary_expression_children {
@@ -2333,14 +2359,25 @@ module WithToken(Token: TokenType) = struct
         classish_body_elements;
         classish_body_right_brace;
       ]
-      | TraitUseConflictResolutionItem {
-        trait_use_conflict_resolution_item_aliasing_name;
-        trait_use_conflict_resolution_item_aliasing_keyword;
-        trait_use_conflict_resolution_item_aliased_name;
+      | TraitUsePrecedenceItem {
+        trait_use_precedence_item_name;
+        trait_use_precedence_item_keyword;
+        trait_use_precedence_item_removed_names;
       } -> [
-        trait_use_conflict_resolution_item_aliasing_name;
-        trait_use_conflict_resolution_item_aliasing_keyword;
-        trait_use_conflict_resolution_item_aliased_name;
+        trait_use_precedence_item_name;
+        trait_use_precedence_item_keyword;
+        trait_use_precedence_item_removed_names;
+      ]
+      | TraitUseAliasItem {
+        trait_use_alias_item_aliasing_name;
+        trait_use_alias_item_keyword;
+        trait_use_alias_item_visibility;
+        trait_use_alias_item_aliased_name;
+      } -> [
+        trait_use_alias_item_aliasing_name;
+        trait_use_alias_item_keyword;
+        trait_use_alias_item_visibility;
+        trait_use_alias_item_aliased_name;
       ]
       | TraitUseConflictResolution {
         trait_use_conflict_resolution_keyword;
@@ -2921,6 +2958,15 @@ module WithToken(Token: TokenType) = struct
       } -> [
         yield_keyword;
         yield_operand;
+      ]
+      | YieldFromExpression {
+        yield_from_yield_keyword;
+        yield_from_from_keyword;
+        yield_from_operand;
+      } -> [
+        yield_from_yield_keyword;
+        yield_from_from_keyword;
+        yield_from_operand;
       ]
       | PrefixUnaryExpression {
         prefix_unary_operator;
@@ -3855,14 +3901,25 @@ module WithToken(Token: TokenType) = struct
         "classish_body_elements";
         "classish_body_right_brace";
       ]
-      | TraitUseConflictResolutionItem {
-        trait_use_conflict_resolution_item_aliasing_name;
-        trait_use_conflict_resolution_item_aliasing_keyword;
-        trait_use_conflict_resolution_item_aliased_name;
+      | TraitUsePrecedenceItem {
+        trait_use_precedence_item_name;
+        trait_use_precedence_item_keyword;
+        trait_use_precedence_item_removed_names;
       } -> [
-        "trait_use_conflict_resolution_item_aliasing_name";
-        "trait_use_conflict_resolution_item_aliasing_keyword";
-        "trait_use_conflict_resolution_item_aliased_name";
+        "trait_use_precedence_item_name";
+        "trait_use_precedence_item_keyword";
+        "trait_use_precedence_item_removed_names";
+      ]
+      | TraitUseAliasItem {
+        trait_use_alias_item_aliasing_name;
+        trait_use_alias_item_keyword;
+        trait_use_alias_item_visibility;
+        trait_use_alias_item_aliased_name;
+      } -> [
+        "trait_use_alias_item_aliasing_name";
+        "trait_use_alias_item_keyword";
+        "trait_use_alias_item_visibility";
+        "trait_use_alias_item_aliased_name";
       ]
       | TraitUseConflictResolution {
         trait_use_conflict_resolution_keyword;
@@ -4443,6 +4500,15 @@ module WithToken(Token: TokenType) = struct
       } -> [
         "yield_keyword";
         "yield_operand";
+      ]
+      | YieldFromExpression {
+        yield_from_yield_keyword;
+        yield_from_from_keyword;
+        yield_from_operand;
+      } -> [
+        "yield_from_yield_keyword";
+        "yield_from_from_keyword";
+        "yield_from_operand";
       ]
       | PrefixUnaryExpression {
         prefix_unary_operator;
@@ -5456,15 +5522,27 @@ module WithToken(Token: TokenType) = struct
           classish_body_elements;
           classish_body_right_brace;
         }
-      | (SyntaxKind.TraitUseConflictResolutionItem, [
-          trait_use_conflict_resolution_item_aliasing_name;
-          trait_use_conflict_resolution_item_aliasing_keyword;
-          trait_use_conflict_resolution_item_aliased_name;
+      | (SyntaxKind.TraitUsePrecedenceItem, [
+          trait_use_precedence_item_name;
+          trait_use_precedence_item_keyword;
+          trait_use_precedence_item_removed_names;
         ]) ->
-        TraitUseConflictResolutionItem {
-          trait_use_conflict_resolution_item_aliasing_name;
-          trait_use_conflict_resolution_item_aliasing_keyword;
-          trait_use_conflict_resolution_item_aliased_name;
+        TraitUsePrecedenceItem {
+          trait_use_precedence_item_name;
+          trait_use_precedence_item_keyword;
+          trait_use_precedence_item_removed_names;
+        }
+      | (SyntaxKind.TraitUseAliasItem, [
+          trait_use_alias_item_aliasing_name;
+          trait_use_alias_item_keyword;
+          trait_use_alias_item_visibility;
+          trait_use_alias_item_aliased_name;
+        ]) ->
+        TraitUseAliasItem {
+          trait_use_alias_item_aliasing_name;
+          trait_use_alias_item_keyword;
+          trait_use_alias_item_visibility;
+          trait_use_alias_item_aliased_name;
         }
       | (SyntaxKind.TraitUseConflictResolution, [
           trait_use_conflict_resolution_keyword;
@@ -6099,6 +6177,16 @@ module WithToken(Token: TokenType) = struct
         YieldExpression {
           yield_keyword;
           yield_operand;
+        }
+      | (SyntaxKind.YieldFromExpression, [
+          yield_from_yield_keyword;
+          yield_from_from_keyword;
+          yield_from_operand;
+        ]) ->
+        YieldFromExpression {
+          yield_from_yield_keyword;
+          yield_from_from_keyword;
+          yield_from_operand;
         }
       | (SyntaxKind.PrefixUnaryExpression, [
           prefix_unary_operator;
@@ -7185,15 +7273,28 @@ module WithToken(Token: TokenType) = struct
         classish_body_right_brace;
       ]
 
-    let make_trait_use_conflict_resolution_item
-      trait_use_conflict_resolution_item_aliasing_name
-      trait_use_conflict_resolution_item_aliasing_keyword
-      trait_use_conflict_resolution_item_aliased_name
+    let make_trait_use_precedence_item
+      trait_use_precedence_item_name
+      trait_use_precedence_item_keyword
+      trait_use_precedence_item_removed_names
     =
-      from_children SyntaxKind.TraitUseConflictResolutionItem [
-        trait_use_conflict_resolution_item_aliasing_name;
-        trait_use_conflict_resolution_item_aliasing_keyword;
-        trait_use_conflict_resolution_item_aliased_name;
+      from_children SyntaxKind.TraitUsePrecedenceItem [
+        trait_use_precedence_item_name;
+        trait_use_precedence_item_keyword;
+        trait_use_precedence_item_removed_names;
+      ]
+
+    let make_trait_use_alias_item
+      trait_use_alias_item_aliasing_name
+      trait_use_alias_item_keyword
+      trait_use_alias_item_visibility
+      trait_use_alias_item_aliased_name
+    =
+      from_children SyntaxKind.TraitUseAliasItem [
+        trait_use_alias_item_aliasing_name;
+        trait_use_alias_item_keyword;
+        trait_use_alias_item_visibility;
+        trait_use_alias_item_aliased_name;
       ]
 
     let make_trait_use_conflict_resolution
@@ -7882,6 +7983,17 @@ module WithToken(Token: TokenType) = struct
       from_children SyntaxKind.YieldExpression [
         yield_keyword;
         yield_operand;
+      ]
+
+    let make_yield_from_expression
+      yield_from_yield_keyword
+      yield_from_from_keyword
+      yield_from_operand
+    =
+      from_children SyntaxKind.YieldFromExpression [
+        yield_from_yield_keyword;
+        yield_from_from_keyword;
+        yield_from_operand;
       ]
 
     let make_prefix_unary_expression

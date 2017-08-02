@@ -121,6 +121,7 @@ class virtual ['b] endo :
         on_Call : 'c ->
                   Ast_visitors_ancestors.expr_ ->
                   Ast_visitors_ancestors.expr ->
+                  Ast_visitors_ancestors.hint list ->
                   Ast_visitors_ancestors.expr list ->
                   Ast_visitors_ancestors.expr list ->
                   Ast_visitors_ancestors.expr_;
@@ -151,14 +152,18 @@ class virtual ['b] endo :
                       Ast_visitors_ancestors.class_elt ->
                       Ast_visitors_ancestors.hint ->
                       Ast_visitors_ancestors.class_elt;
-        on_cu_alias_type : 'c ->
-                      Ast_visitors_ancestors.cu_alias_type ->
-                      Ast_visitors_ancestors.cu_alias_type;
         on_ClassUseAlias : 'c ->
                       Ast_visitors_ancestors.class_elt ->
-                      (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+                      Ast_visitors_ancestors.id option ->
+                      Ast_visitors_ancestors.pstring ->
+                      Ast_visitors_ancestors.id option ->
+                      Ast_visitors_ancestors.kind option ->
+                      Ast_visitors_ancestors.class_elt;
+        on_ClassUsePrecedence : 'c ->
+                      Ast_visitors_ancestors.class_elt ->
                       Ast_visitors_ancestors.id ->
-                      Ast_visitors_ancestors.cu_alias_type ->
+                      Ast_visitors_ancestors.pstring ->
+                      Ast_visitors_ancestors.id list ->
                       Ast_visitors_ancestors.class_elt;
         on_ClassVars : 'c ->
                        Ast_visitors_ancestors.class_elt ->
@@ -705,6 +710,10 @@ class virtual ['b] endo :
                    Ast_visitors_ancestors.expr_ ->
                    Ast_visitors_ancestors.afield ->
                    Ast_visitors_ancestors.expr_;
+        on_Yield_from : 'c ->
+                    Ast_visitors_ancestors.expr_ ->
+                    Ast_visitors_ancestors.expr ->
+                    Ast_visitors_ancestors.expr_;
         on_Yield_break : 'c ->
                          Ast_visitors_ancestors.expr_ ->
                          Ast_visitors_ancestors.expr_;
@@ -973,8 +982,10 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.expr_ ->
       Ast_visitors_ancestors.expr ->
+      Ast_visitors_ancestors.hint list ->
       Ast_visitors_ancestors.expr list ->
-      Ast_visitors_ancestors.expr list -> Ast_visitors_ancestors.expr_
+      Ast_visitors_ancestors.expr list ->
+      Ast_visitors_ancestors.expr_
     method on_Case :
       'c ->
       Ast_visitors_ancestors.case ->
@@ -1004,15 +1015,20 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.class_elt ->
       Ast_visitors_ancestors.hint -> Ast_visitors_ancestors.class_elt
-    method on_cu_alias_type :
-      'c -> Ast_visitors_ancestors.cu_alias_type ->
-      Ast_visitors_ancestors.cu_alias_type
     method on_ClassUseAlias :
       'c ->
       Ast_visitors_ancestors.class_elt ->
-      (Ast_visitors_ancestors.id * Ast_visitors_ancestors.pstring option) ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id option ->
+      Ast_visitors_ancestors.kind option ->
+      Ast_visitors_ancestors.class_elt
+    method on_ClassUsePrecedence :
+      'c ->
+      Ast_visitors_ancestors.class_elt ->
       Ast_visitors_ancestors.id ->
-      Ast_visitors_ancestors.cu_alias_type ->
+      Ast_visitors_ancestors.pstring ->
+      Ast_visitors_ancestors.id list ->
       Ast_visitors_ancestors.class_elt
     method on_ClassVars :
       'c ->
@@ -1584,6 +1600,10 @@ class virtual ['b] endo :
       'c ->
       Ast_visitors_ancestors.expr_ ->
       Ast_visitors_ancestors.afield -> Ast_visitors_ancestors.expr_
+    method on_Yield_from :
+      'c ->
+      Ast_visitors_ancestors.expr_ ->
+      Ast_visitors_ancestors.expr -> Ast_visitors_ancestors.expr_
     method on_Yield_break :
       'c -> Ast_visitors_ancestors.expr_ -> Ast_visitors_ancestors.expr_
     method on_afield :

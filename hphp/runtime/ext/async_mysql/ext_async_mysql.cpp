@@ -198,9 +198,11 @@ static void HHVM_METHOD(
     const Array& attrs) {
   auto* data = Native::data<AsyncMysqlConnectionOptions>(this_);
 
-  IterateKV(attrs.get(), [&](const TypedValue* k, const TypedValue* v) {
+  IterateKV(attrs.get(), [&](Cell k, TypedValue v) {
     data->m_conn_opts.setConnectionAttribute(
-        tvCastToString(*k)->toCppString(), tvCastToString(*v)->toCppString());
+      String::attach(tvCastToString(k)).toCppString(),
+      String::attach(tvCastToString(v)).toCppString()
+    );
   });
 }
 
@@ -261,7 +263,7 @@ static Object newAsyncMysqlConnectEvent(
     std::shared_ptr<am::AsyncMysqlClient> clientPtr) {
   auto event = new AsyncMysqlConnectEvent(op);
   try {
-    op->setCallback([event, clientPtr](am::ConnectOperation& op) {
+    op->setCallback([event, clientPtr](am::ConnectOperation& /*op*/) {
       // Get current stats
       event->setClientStats(clientPtr->collectPerfStats());
 

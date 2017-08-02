@@ -15,10 +15,9 @@ module EditableSyntax = Full_fidelity_editable_syntax
 open EditableSyntax
 open CoroutineSyntax
 
-let generate_hoisted_locals { CoroutineStateMachineData.local_variables; _; } =
-  local_variables
-    |> SMap.values
-    |> Core_list.map ~f:make_member_with_unknown_type_declaration_syntax
+let generate_closure_properties { CoroutineStateMachineData.properties; _; } =
+  Core_list.map ~f:make_member_with_unknown_type_declaration_syntax
+    properties
 
 let make_parameters_public_and_untyped
     { CoroutineStateMachineData.parameters; _; } =
@@ -35,18 +34,16 @@ let make_parameters_public_and_untyped
       end
 
 let generate_constructor_method
-    classish_name
-    classish_type_parameters
-    header_node
+    context
+    function_type
     state_machine_data =
   let function_parameter_list =
     make_parameters_public_and_untyped state_machine_data in
   let cont_param =
     make_continuation_parameter_syntax
       ~visibility_syntax:private_syntax
-      header_node in
-  let sm_param = make_state_machine_parameter_syntax
-      classish_name classish_type_parameters header_node in
+      function_type in
+  let sm_param = make_state_machine_parameter_syntax context function_type in
   let function_parameter_list =
     cont_param :: sm_param :: function_parameter_list in
   let ctor = make_constructor_decl_header_syntax
@@ -77,7 +74,7 @@ let do_resume_body =
     make_return_statement_syntax call_state_machine_syntax;
   ]
 
-let generate_do_resume_method { function_type; _; } =
+let generate_do_resume_method function_type =
   make_methodish_declaration_syntax
     (make_function_decl_header_syntax
       do_resume_member_name
@@ -86,18 +83,13 @@ let generate_do_resume_method { function_type; _; } =
     do_resume_body
 
 let generate_closure_body
-    classish_name
-    classish_type_parameters
-    header_node
+    context
+    function_type
     state_machine_data =
-  generate_hoisted_locals state_machine_data
+  generate_closure_properties state_machine_data
     @ [
-      generate_constructor_method
-        classish_name
-        classish_type_parameters
-        header_node
-        state_machine_data;
-      generate_do_resume_method header_node;
+      generate_constructor_method context function_type state_machine_data;
+      generate_do_resume_method function_type;
     ]
 
 (**
@@ -106,20 +98,18 @@ let generate_closure_body
  * implementation.
  *)
 let generate_coroutine_closure
-    classish_name
-    classish_type_parameters
+    context
     body
-    header_node
+    function_type
     state_machine_data =
   if is_missing body then
     body
   else
     make_classish_declaration_syntax
-      (make_closure_classname classish_name header_node)
-      (make_closure_type_parameters classish_type_parameters header_node)
-      [ make_closure_base_type_syntax header_node ]
+      (make_closure_classname context)
+      (make_closure_type_parameters context)
+      [ make_closure_base_type_syntax function_type ]
       (generate_closure_body
-        classish_name
-        classish_type_parameters
-        header_node
+        context
+        function_type
         state_machine_data)

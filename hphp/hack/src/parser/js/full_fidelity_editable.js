@@ -80,6 +80,8 @@ class EditableSyntax
       return IgnoreError.from_json(json, position, source);
     case 'fall_through':
       return FallThrough.from_json(json, position, source);
+    case 'extra_token_error':
+      return ExtraTokenError.from_json(json, position, source);
 
     case 'missing':
       return Missing.missing;
@@ -133,8 +135,10 @@ class EditableSyntax
       return ClassishDeclaration.from_json(json, position, source);
     case 'classish_body':
       return ClassishBody.from_json(json, position, source);
-    case 'trait_use_conflict_resolution_item':
-      return TraitUseConflictResolutionItem.from_json(json, position, source);
+    case 'trait_use_precedence_item':
+      return TraitUsePrecedenceItem.from_json(json, position, source);
+    case 'trait_use_alias_item':
+      return TraitUseAliasItem.from_json(json, position, source);
     case 'trait_use_conflict_resolution':
       return TraitUseConflictResolution.from_json(json, position, source);
     case 'trait_use':
@@ -243,6 +247,8 @@ class EditableSyntax
       return EmbeddedMemberSelectionExpression.from_json(json, position, source);
     case 'yield_expression':
       return YieldExpression.from_json(json, position, source);
+    case 'yield_from_expression':
+      return YieldFromExpression.from_json(json, position, source);
     case 'prefix_unary_expression':
       return PrefixUnaryExpression.from_json(json, position, source);
     case 'postfix_unary_expression':
@@ -744,6 +750,8 @@ class EditableToken extends EditableSyntax
        return new ForToken(leading, trailing);
     case 'foreach':
        return new ForeachToken(leading, trailing);
+    case 'from':
+       return new FromToken(leading, trailing);
     case 'function':
        return new FunctionToken(leading, trailing);
     case 'global':
@@ -1394,6 +1402,13 @@ class ForeachToken extends EditableToken
   constructor(leading, trailing)
   {
     super('foreach', leading, trailing, 'foreach');
+  }
+}
+class FromToken extends EditableToken
+{
+  constructor(leading, trailing)
+  {
+    super('from', leading, trailing, 'from');
   }
 }
 class FunctionToken extends EditableToken
@@ -2624,6 +2639,8 @@ class EditableTrivia extends EditableSyntax
         return new IgnoreError(trivia_text);
       case 'fall_through':
         return new FallThrough(trivia_text);
+      case 'extra_token_error':
+        return new ExtraTokenError(trivia_text);
 
       default: throw 'unexpected json kind: ' + json.kind; // TODO: Better error
     }
@@ -2717,6 +2734,15 @@ class FallThrough extends EditableTrivia
   with_text(text)
   {
     return new FallThrough(text);
+  }
+}
+
+class ExtraTokenError extends EditableTrivia
+{
+  constructor(text) { super('extra_token_error', text); }
+  with_text(text)
+  {
+    return new ExtraTokenError(text);
   }
 }
 
@@ -5449,37 +5475,133 @@ class ClassishBody extends EditableSyntax
     return ClassishBody._children_keys;
   }
 }
-class TraitUseConflictResolutionItem extends EditableSyntax
+class TraitUsePrecedenceItem extends EditableSyntax
+{
+  constructor(
+    name,
+    keyword,
+    removed_names)
+  {
+    super('trait_use_precedence_item', {
+      name: name,
+      keyword: keyword,
+      removed_names: removed_names });
+  }
+  get name() { return this.children.name; }
+  get keyword() { return this.children.keyword; }
+  get removed_names() { return this.children.removed_names; }
+  with_name(name){
+    return new TraitUsePrecedenceItem(
+      name,
+      this.keyword,
+      this.removed_names);
+  }
+  with_keyword(keyword){
+    return new TraitUsePrecedenceItem(
+      this.name,
+      keyword,
+      this.removed_names);
+  }
+  with_removed_names(removed_names){
+    return new TraitUsePrecedenceItem(
+      this.name,
+      this.keyword,
+      removed_names);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var name = this.name.rewrite(rewriter, new_parents);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var removed_names = this.removed_names.rewrite(rewriter, new_parents);
+    if (
+      name === this.name &&
+      keyword === this.keyword &&
+      removed_names === this.removed_names)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new TraitUsePrecedenceItem(
+        name,
+        keyword,
+        removed_names), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let name = EditableSyntax.from_json(
+      json.trait_use_precedence_item_name, position, source);
+    position += name.width;
+    let keyword = EditableSyntax.from_json(
+      json.trait_use_precedence_item_keyword, position, source);
+    position += keyword.width;
+    let removed_names = EditableSyntax.from_json(
+      json.trait_use_precedence_item_removed_names, position, source);
+    position += removed_names.width;
+    return new TraitUsePrecedenceItem(
+        name,
+        keyword,
+        removed_names);
+  }
+  get children_keys()
+  {
+    if (TraitUsePrecedenceItem._children_keys == null)
+      TraitUsePrecedenceItem._children_keys = [
+        'name',
+        'keyword',
+        'removed_names'];
+    return TraitUsePrecedenceItem._children_keys;
+  }
+}
+class TraitUseAliasItem extends EditableSyntax
 {
   constructor(
     aliasing_name,
-    aliasing_keyword,
+    keyword,
+    visibility,
     aliased_name)
   {
-    super('trait_use_conflict_resolution_item', {
+    super('trait_use_alias_item', {
       aliasing_name: aliasing_name,
-      aliasing_keyword: aliasing_keyword,
+      keyword: keyword,
+      visibility: visibility,
       aliased_name: aliased_name });
   }
   get aliasing_name() { return this.children.aliasing_name; }
-  get aliasing_keyword() { return this.children.aliasing_keyword; }
+  get keyword() { return this.children.keyword; }
+  get visibility() { return this.children.visibility; }
   get aliased_name() { return this.children.aliased_name; }
   with_aliasing_name(aliasing_name){
-    return new TraitUseConflictResolutionItem(
+    return new TraitUseAliasItem(
       aliasing_name,
-      this.aliasing_keyword,
+      this.keyword,
+      this.visibility,
       this.aliased_name);
   }
-  with_aliasing_keyword(aliasing_keyword){
-    return new TraitUseConflictResolutionItem(
+  with_keyword(keyword){
+    return new TraitUseAliasItem(
       this.aliasing_name,
-      aliasing_keyword,
+      keyword,
+      this.visibility,
+      this.aliased_name);
+  }
+  with_visibility(visibility){
+    return new TraitUseAliasItem(
+      this.aliasing_name,
+      this.keyword,
+      visibility,
       this.aliased_name);
   }
   with_aliased_name(aliased_name){
-    return new TraitUseConflictResolutionItem(
+    return new TraitUseAliasItem(
       this.aliasing_name,
-      this.aliasing_keyword,
+      this.keyword,
+      this.visibility,
       aliased_name);
   }
   rewrite(rewriter, parents)
@@ -5489,47 +5611,55 @@ class TraitUseConflictResolutionItem extends EditableSyntax
     let new_parents = parents.slice();
     new_parents.push(this);
     var aliasing_name = this.aliasing_name.rewrite(rewriter, new_parents);
-    var aliasing_keyword = this.aliasing_keyword.rewrite(rewriter, new_parents);
+    var keyword = this.keyword.rewrite(rewriter, new_parents);
+    var visibility = this.visibility.rewrite(rewriter, new_parents);
     var aliased_name = this.aliased_name.rewrite(rewriter, new_parents);
     if (
       aliasing_name === this.aliasing_name &&
-      aliasing_keyword === this.aliasing_keyword &&
+      keyword === this.keyword &&
+      visibility === this.visibility &&
       aliased_name === this.aliased_name)
     {
       return rewriter(this, parents);
     }
     else
     {
-      return rewriter(new TraitUseConflictResolutionItem(
+      return rewriter(new TraitUseAliasItem(
         aliasing_name,
-        aliasing_keyword,
+        keyword,
+        visibility,
         aliased_name), parents);
     }
   }
   static from_json(json, position, source)
   {
     let aliasing_name = EditableSyntax.from_json(
-      json.trait_use_conflict_resolution_item_aliasing_name, position, source);
+      json.trait_use_alias_item_aliasing_name, position, source);
     position += aliasing_name.width;
-    let aliasing_keyword = EditableSyntax.from_json(
-      json.trait_use_conflict_resolution_item_aliasing_keyword, position, source);
-    position += aliasing_keyword.width;
+    let keyword = EditableSyntax.from_json(
+      json.trait_use_alias_item_keyword, position, source);
+    position += keyword.width;
+    let visibility = EditableSyntax.from_json(
+      json.trait_use_alias_item_visibility, position, source);
+    position += visibility.width;
     let aliased_name = EditableSyntax.from_json(
-      json.trait_use_conflict_resolution_item_aliased_name, position, source);
+      json.trait_use_alias_item_aliased_name, position, source);
     position += aliased_name.width;
-    return new TraitUseConflictResolutionItem(
+    return new TraitUseAliasItem(
         aliasing_name,
-        aliasing_keyword,
+        keyword,
+        visibility,
         aliased_name);
   }
   get children_keys()
   {
-    if (TraitUseConflictResolutionItem._children_keys == null)
-      TraitUseConflictResolutionItem._children_keys = [
+    if (TraitUseAliasItem._children_keys == null)
+      TraitUseAliasItem._children_keys = [
         'aliasing_name',
-        'aliasing_keyword',
+        'keyword',
+        'visibility',
         'aliased_name'];
-    return TraitUseConflictResolutionItem._children_keys;
+    return TraitUseAliasItem._children_keys;
   }
 }
 class TraitUseConflictResolution extends EditableSyntax
@@ -11239,6 +11369,89 @@ class YieldExpression extends EditableSyntax
         'keyword',
         'operand'];
     return YieldExpression._children_keys;
+  }
+}
+class YieldFromExpression extends EditableSyntax
+{
+  constructor(
+    yield_keyword,
+    from_keyword,
+    operand)
+  {
+    super('yield_from_expression', {
+      yield_keyword: yield_keyword,
+      from_keyword: from_keyword,
+      operand: operand });
+  }
+  get yield_keyword() { return this.children.yield_keyword; }
+  get from_keyword() { return this.children.from_keyword; }
+  get operand() { return this.children.operand; }
+  with_yield_keyword(yield_keyword){
+    return new YieldFromExpression(
+      yield_keyword,
+      this.from_keyword,
+      this.operand);
+  }
+  with_from_keyword(from_keyword){
+    return new YieldFromExpression(
+      this.yield_keyword,
+      from_keyword,
+      this.operand);
+  }
+  with_operand(operand){
+    return new YieldFromExpression(
+      this.yield_keyword,
+      this.from_keyword,
+      operand);
+  }
+  rewrite(rewriter, parents)
+  {
+    if (parents == undefined)
+      parents = [];
+    let new_parents = parents.slice();
+    new_parents.push(this);
+    var yield_keyword = this.yield_keyword.rewrite(rewriter, new_parents);
+    var from_keyword = this.from_keyword.rewrite(rewriter, new_parents);
+    var operand = this.operand.rewrite(rewriter, new_parents);
+    if (
+      yield_keyword === this.yield_keyword &&
+      from_keyword === this.from_keyword &&
+      operand === this.operand)
+    {
+      return rewriter(this, parents);
+    }
+    else
+    {
+      return rewriter(new YieldFromExpression(
+        yield_keyword,
+        from_keyword,
+        operand), parents);
+    }
+  }
+  static from_json(json, position, source)
+  {
+    let yield_keyword = EditableSyntax.from_json(
+      json.yield_from_yield_keyword, position, source);
+    position += yield_keyword.width;
+    let from_keyword = EditableSyntax.from_json(
+      json.yield_from_from_keyword, position, source);
+    position += from_keyword.width;
+    let operand = EditableSyntax.from_json(
+      json.yield_from_operand, position, source);
+    position += operand.width;
+    return new YieldFromExpression(
+        yield_keyword,
+        from_keyword,
+        operand);
+  }
+  get children_keys()
+  {
+    if (YieldFromExpression._children_keys == null)
+      YieldFromExpression._children_keys = [
+        'yield_keyword',
+        'from_keyword',
+        'operand'];
+    return YieldFromExpression._children_keys;
   }
 }
 class PrefixUnaryExpression extends EditableSyntax
@@ -17599,6 +17812,7 @@ exports.FinalToken = FinalToken;
 exports.FinallyToken = FinallyToken;
 exports.ForToken = ForToken;
 exports.ForeachToken = ForeachToken;
+exports.FromToken = FromToken;
 exports.FunctionToken = FunctionToken;
 exports.GlobalToken = GlobalToken;
 exports.GotoToken = GotoToken;
@@ -17761,6 +17975,7 @@ exports.UnsafeExpression = UnsafeExpression;
 exports.FixMe = FixMe;
 exports.IgnoreError = IgnoreError;
 exports.FallThrough = FallThrough;
+exports.ExtraTokenError = ExtraTokenError;
 
 exports.EndOfFile = EndOfFile;
 exports.Script = Script;
@@ -17787,7 +18002,8 @@ exports.WhereConstraint = WhereConstraint;
 exports.MethodishDeclaration = MethodishDeclaration;
 exports.ClassishDeclaration = ClassishDeclaration;
 exports.ClassishBody = ClassishBody;
-exports.TraitUseConflictResolutionItem = TraitUseConflictResolutionItem;
+exports.TraitUsePrecedenceItem = TraitUsePrecedenceItem;
+exports.TraitUseAliasItem = TraitUseAliasItem;
 exports.TraitUseConflictResolution = TraitUseConflictResolution;
 exports.TraitUse = TraitUse;
 exports.RequireClause = RequireClause;
@@ -17842,6 +18058,7 @@ exports.MemberSelectionExpression = MemberSelectionExpression;
 exports.SafeMemberSelectionExpression = SafeMemberSelectionExpression;
 exports.EmbeddedMemberSelectionExpression = EmbeddedMemberSelectionExpression;
 exports.YieldExpression = YieldExpression;
+exports.YieldFromExpression = YieldFromExpression;
 exports.PrefixUnaryExpression = PrefixUnaryExpression;
 exports.PostfixUnaryExpression = PostfixUnaryExpression;
 exports.BinaryExpression = BinaryExpression;

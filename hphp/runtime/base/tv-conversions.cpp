@@ -431,6 +431,50 @@ StringData* tvCastToString(TypedValue tv) {
   not_reached();
 }
 
+ArrayData* tvCastToArrayLike(TypedValue tv) {
+  assert(tvIsPlausible(tv));
+  if (tv.m_type == KindOfRef) {
+    tv = *tv.m_data.pref->tv();
+  }
+
+  switch (tv.m_type) {
+    case KindOfUninit:
+    case KindOfNull:
+      return ArrayData::Create();
+
+    case KindOfBoolean:
+    case KindOfInt64:
+    case KindOfDouble:
+    case KindOfPersistentString:
+    case KindOfString:
+    case KindOfResource:
+      return ArrayData::Create(tv);
+
+    case KindOfPersistentVec:
+    case KindOfVec:
+    case KindOfPersistentDict:
+    case KindOfDict:
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:
+    case KindOfPersistentArray:
+    case KindOfArray: {
+      auto const ad = tv.m_data.parr;
+      ad->incRefCount();
+      return ad;
+    }
+
+    case KindOfObject: {
+      auto ad = tv.m_data.pobj->toArray();
+      assertx(ad->isPHPArray());
+      return ad.detach();
+    }
+
+    case KindOfRef:
+      break;
+  }
+  not_reached();
+}
+
 void tvCastToArrayInPlace(TypedValue* tv) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
@@ -1058,6 +1102,52 @@ void tvCastToDArrayInPlace(TypedValue* tv) {
   assert(cellIsPlausible(*tv));
 }
 
+ObjectData* tvCastToObject(TypedValue tv) {
+  assert(tvIsPlausible(tv));
+  if (tv.m_type == KindOfRef) {
+    tv = *tv.m_data.pref->tv();
+  }
+
+  switch (tv.m_type) {
+    case KindOfUninit:
+    case KindOfNull:
+      return SystemLib::AllocStdClassObject().detach();
+
+    case KindOfBoolean:
+    case KindOfInt64:
+    case KindOfDouble:
+    case KindOfPersistentString:
+    case KindOfString:
+    case KindOfResource: {
+      auto o = SystemLib::AllocStdClassObject();
+      o->o_set(s_scalar, VarNR(tv));
+      return o.detach();
+    }
+
+    case KindOfPersistentVec:
+    case KindOfVec:
+    case KindOfPersistentDict:
+    case KindOfDict:
+    case KindOfPersistentKeyset:
+    case KindOfKeyset: {
+      auto const arr = Array::attach(tv.m_data.parr->toPHPArray(true));
+      return ObjectData::FromArray(arr.get()).detach();
+    }
+
+    case KindOfPersistentArray:
+    case KindOfArray:
+      return ObjectData::FromArray(tv.m_data.parr).detach();
+
+    case KindOfObject:
+      tv.m_data.pobj->incRefCount();
+      return tv.m_data.pobj;
+
+    case KindOfRef:
+      break;
+  }
+  not_reached();
+}
+
 void tvCastToObjectInPlace(TypedValue* tv) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
@@ -1322,8 +1412,7 @@ bool tvCoerceParamToStringInPlace(TypedValue* tv,
   not_reached();
 }
 
-bool tvCoerceParamToArrayInPlace(TypedValue* tv,
-                                 bool builtin) {
+bool tvCoerceParamToArrayInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
 
@@ -1362,8 +1451,7 @@ bool tvCoerceParamToArrayInPlace(TypedValue* tv,
   not_reached();
 }
 
-bool tvCoerceParamToVecInPlace(TypedValue* tv,
-                               bool builtin) {
+bool tvCoerceParamToVecInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
 
@@ -1395,8 +1483,7 @@ bool tvCoerceParamToVecInPlace(TypedValue* tv,
   not_reached();
 }
 
-bool tvCoerceParamToDictInPlace(TypedValue* tv,
-                                bool builtin) {
+bool tvCoerceParamToDictInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
 
@@ -1428,8 +1515,7 @@ bool tvCoerceParamToDictInPlace(TypedValue* tv,
   not_reached();
 }
 
-bool tvCoerceParamToKeysetInPlace(TypedValue* tv,
-                                  bool builtin) {
+bool tvCoerceParamToKeysetInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
 
@@ -1461,15 +1547,13 @@ bool tvCoerceParamToKeysetInPlace(TypedValue* tv,
   not_reached();
 }
 
-bool tvCoerceParamToObjectInPlace(TypedValue* tv,
-                                  bool builtin) {
+bool tvCoerceParamToObjectInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
   return tv->m_type == KindOfObject;
 }
 
-bool tvCoerceParamToNullableObjectInPlace(TypedValue* tv,
-                                          bool builtin) {
+bool tvCoerceParamToNullableObjectInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
   if (isNullType(tv->m_type)) {
@@ -1480,8 +1564,7 @@ bool tvCoerceParamToNullableObjectInPlace(TypedValue* tv,
   return tv->m_type == KindOfObject;
 }
 
-bool tvCoerceParamToResourceInPlace(TypedValue* tv,
-                                    bool builtin) {
+bool tvCoerceParamToResourceInPlace(TypedValue* tv, bool /*builtin*/) {
   assert(tvIsPlausible(*tv));
   tvUnboxIfNeeded(tv);
   return tv->m_type == KindOfResource;

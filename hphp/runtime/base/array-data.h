@@ -509,9 +509,9 @@ public:
   }
 
   template <typename B, class... Args>
-  ALWAYS_INLINE
-  static typename std::enable_if<std::is_same<B, bool>::value, bool>::type
-  call_helper(B f, Args&&... args) {
+  ALWAYS_INLINE static
+    typename std::enable_if<std::is_same<B, bool>::value, bool>::type
+    call_helper(B f, Args&&... /*args*/) {
     return f;
   }
 
@@ -527,8 +527,6 @@ protected:
   static const Variant& getNotFound(const StringData* k);
   const Variant& getNotFound(int64_t k, bool error) const;
   const Variant& getNotFound(const StringData* k, bool error) const;
-  static const Variant& getNotFound(const String& k);
-  static const Variant& getNotFound(const Variant& k);
 
   static bool IsValidKey(Cell k);
   static bool IsValidKey(const Variant& k);

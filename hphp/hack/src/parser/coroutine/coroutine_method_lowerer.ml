@@ -21,9 +21,11 @@ open Coroutine_state_machine_generator
  * To avoid conflicting with variadic function types, the contination parameter
  * is generated at the beginning rather than the end of the parameter list.
  *)
-let compute_parameter_list ({ function_parameter_list; _; } as header_node) =
+(* TODO: Consider packaging parameter-list-and-return-type into a "signature"
+object *)
+let compute_parameter_list function_parameter_list function_type =
   let coroutine_parameter_syntax =
-    make_continuation_parameter_syntax header_node in
+    make_continuation_parameter_syntax function_type in
   prepend_to_comma_delimited_syntax_list
     coroutine_parameter_syntax
     function_parameter_list
@@ -32,13 +34,17 @@ let compute_parameter_list ({ function_parameter_list; _; } as header_node) =
  * If the provided function declaration header is for a coroutine, rewrites the
  * parameter list and return type as necessary to implement the coroutine.
  *)
-let rewrite_function_decl_header ({ function_type; _; } as header_node) =
+let rewrite_function_decl_header header_node =
   let make_syntax node = make_syntax (FunctionDeclarationHeader node) in
+  let function_type =
+    make_coroutine_result_type_syntax header_node.function_type in
+  let function_parameter_list = compute_parameter_list
+    header_node.function_parameter_list header_node.function_type in
   make_syntax
     { header_node with
       function_coroutine = make_missing ();
-      function_type = make_coroutine_result_type_syntax function_type;
-      function_parameter_list = compute_parameter_list header_node;
+      function_type;
+      function_parameter_list;
     }
 
 let parameter_to_arg param =
@@ -84,20 +90,17 @@ let make_state_machine_method_reference_syntax
  * coroutine, pass in or set any necessary variables, and return the result from
  * invoking resume (with a null argument).
  *)
-
- let rewrite_coroutine_body
-     classish_name
-     classish_type_parameters
-     ({ function_parameter_list; _; } as header_node)
+let create_closure_invocation
+     context
+     function_parameter_list
+     function_type
      rewritten_body =
-   (* $param1, $param2 *)
-   let arg_list = parameter_list_to_arg_list function_parameter_list in
-
+  (* $param1, $param2 *)
+  let arg_list = parameter_list_to_arg_list function_parameter_list in
   (* ($closure, $data, $exception) ==> { body } *)
-  let lambda_signature = make_closure_lambda_signature classish_name
-      classish_type_parameters header_node in
+  let lambda_signature = make_closure_lambda_signature context function_type in
   let lambda = make_lambda_syntax lambda_signature rewritten_body in
-  let classname = make_closure_classname classish_name header_node in
+  let classname = make_closure_classname context in
   (* $continuation,
     ($closure, $data, $exception) ==> { body },
     $param1, $param2 *)
@@ -129,20 +132,17 @@ let make_state_machine_method_reference_syntax
     make_return_statement_syntax create_suspended_coroutine_result_syntax in
   make_list [resume_statement_syntax; return_syntax]
 
+(* TODO: Why does this take the body twice? *)
 let rewrite_coroutine_body
-    classish_name
-    classish_type_parameters
+    context
     methodish_function_body
-    header_node
+    function_parameter_list
+    function_type
     rewritten_body =
   match syntax methodish_function_body with
   | CompoundStatement node ->
-      let compound_statements = rewrite_coroutine_body
-        classish_name
-        classish_type_parameters
-        header_node
-        rewritten_body in
-
+      let compound_statements = create_closure_invocation
+        context function_parameter_list function_type rewritten_body in
       make_syntax (CompoundStatement { node with compound_statements })
   | Missing ->
       methodish_function_body
@@ -156,19 +156,18 @@ let rewrite_coroutine_body
  * implementation.
  *)
 let rewrite_methodish_declaration
-    classish_name
-    classish_type_parameters
+    context
     ({ methodish_function_body; _; } as method_node)
-    header_node
+    ({ function_parameter_list; function_type; _; } as header_node)
     rewritten_body =
   let make_syntax method_node =
     make_syntax (MethodishDeclaration method_node) in
   let methodish_function_body =
     rewrite_coroutine_body
-      classish_name
-      classish_type_parameters
+      context
       methodish_function_body
-      header_node
+      function_parameter_list
+      function_type
       rewritten_body in
   make_syntax
     { method_node with
@@ -178,23 +177,72 @@ let rewrite_methodish_declaration
     }
 
 let rewrite_function_declaration
+    context
     ({ function_body; _; } as function_node)
-    header_node
+    ({ function_type; function_parameter_list; _; } as header_node)
     rewritten_body =
-  (* TODO:Would it be better to have no class name at all? *)
-  let classish_name = global_syntax in
-  let classish_type_parameters = make_missing () in
   let make_syntax function_node =
     make_syntax (FunctionDeclaration function_node) in
   let function_body =
     rewrite_coroutine_body
-      classish_name
-      classish_type_parameters
+      context
       function_body
-      header_node
+      function_parameter_list
+      function_type
       rewritten_body in
   make_syntax
     { function_node with
       function_declaration_header = rewrite_function_decl_header header_node;
       function_body;
     }
+
+let rewrite_anon
+    context
+    ({ anonymous_parameters; anonymous_type; anonymous_body; _; } as anon) =
+  let make_syntax node =
+    make_syntax (AnonymousFunction node) in
+  let anonymous_body =
+    rewrite_coroutine_body
+      context
+      anonymous_body
+      anonymous_parameters
+      anonymous_type
+      anonymous_body in
+  let anonymous_parameters = compute_parameter_list
+    anonymous_parameters anonymous_type in
+  let anonymous_type = make_coroutine_result_type_syntax anonymous_type in
+  make_syntax
+    { anon with
+      anonymous_coroutine_keyword = make_missing();
+      anonymous_parameters;
+      anonymous_type;
+      anonymous_body }
+
+let rewrite_lambda
+    context
+    ({ lambda_parameters; lambda_type; _; } as lambda_signature)
+    ({ lambda_body; _; } as lambda) =
+  let make_lambda node =
+    make_syntax (LambdaExpression node) in
+  let make_sig node =
+    make_syntax (LambdaSignature node) in
+  let lambda_body =
+    rewrite_coroutine_body
+      context
+      lambda_body
+      lambda_parameters
+      lambda_type
+      lambda_body in (* TODO: Why do we take the body twice? *)
+  let lambda_parameters = compute_parameter_list
+    lambda_parameters lambda_type in
+  let lambda_type = make_coroutine_result_type_syntax lambda_type in
+  let lambda_signature = make_sig
+    { lambda_signature with
+      lambda_parameters;
+      lambda_type } in
+  make_lambda { lambda with
+    lambda_coroutine = make_missing();
+    (* TODO: This loses trivia on the original keyword. *)
+    lambda_signature;
+    lambda_body
+  }

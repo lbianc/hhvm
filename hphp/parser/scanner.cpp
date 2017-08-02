@@ -656,6 +656,10 @@ bool Scanner::tryParseShapeMemberList(TokenStore::iterator& pos) {
   assert(pos->t != ')'); // already determined to be nonempty
 
   for (;;) {
+    if (nextIfToken(pos, T_ELLIPSIS)) {
+      return pos->t == ')';
+    }
+    nextIfToken(pos, '?');
     if (!nextIfToken(pos, T_CONSTANT_ENCAPSED_STRING) &&
         !tryParseClassConstant(pos)) {
       return false;
@@ -817,7 +821,7 @@ void Scanner::warn(const char* fmt, ...) {
                   m_filename.c_str(), m_loc->r.line0, m_loc->r.char0);
 }
 
-void Scanner::incLoc(const char *rawText, int rawLeng, int type) {
+void Scanner::incLoc(const char* rawText, int rawLeng, int /*type*/) {
   assert(rawText);
   assert(rawLeng > 0);
 

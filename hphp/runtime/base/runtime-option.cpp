@@ -357,6 +357,7 @@ std::string RuntimeOption::CoreDumpReportDirectory =
 std::string RuntimeOption::StackTraceFilename;
 int RuntimeOption::StackTraceTimeout = 0; // seconds; 0 means unlimited
 std::string RuntimeOption::RemoteTraceOutputDir = "/tmp";
+std::set<std::string, stdltistr> RuntimeOption::TraceFunctions{};
 
 bool RuntimeOption::EnableStats = false;
 bool RuntimeOption::EnableAPCStats = false;
@@ -541,6 +542,11 @@ static inline int retranslateAllRequestDefault() {
 
 uint64_t ahotDefault() {
   return RuntimeOption::RepoAuthoritative ? 4 << 20 : 0;
+}
+
+std::string RuntimeOption::getTraceOutputFile() {
+  return folly::sformat("{}/hphp.{}.log",
+                        RuntimeOption::RemoteTraceOutputDir, (int64_t)getpid());
 }
 
 const uint64_t kEvalVMStackElmsDefault =
@@ -1703,8 +1709,8 @@ void RuntimeOption::Load(
     Config::Bind(StaticFileExtensions, ini, config, "StaticFile.Extensions",
                  staticFileDefault);
 
-    auto matches_callback = [] (const IniSettingMap &ini_m, const Hdf &hdf_m,
-                                const std::string &ini_m_key) {
+    auto matches_callback = [](const IniSettingMap& ini_m, const Hdf& hdf_m,
+                               const std::string& /*ini_m_key*/) {
       FilesMatches.push_back(std::make_shared<FilesMatch>(ini_m, hdf_m));
     };
     Config::Iterate(matches_callback, ini, config, "StaticFile.FilesMatch");
@@ -1773,6 +1779,8 @@ void RuntimeOption::Load(
     Config::Bind(StackTraceTimeout, ini, config, "Debug.StackTraceTimeout", 0);
     Config::Bind(RemoteTraceOutputDir, ini, config,
                  "Debug.RemoteTraceOutputDir", "/tmp");
+    Config::Bind(TraceFunctions, ini, config,
+                 "Debug.TraceFunctions", TraceFunctions);
 
     {
       // Debug SimpleCounter
@@ -1980,29 +1988,25 @@ void RuntimeOption::Load(
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_SYSTEM,
                    "allow_url_fopen",
                    IniSetting::SetAndGet<std::string>(
-                     [](const std::string& value) { return false; },
+                     [](const std::string& /*value*/) { return false; },
                      []() { return "1"; }));
 
   // HPHP specific
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_NONE,
                    "hphp.compiler_id",
                    IniSetting::SetAndGet<std::string>(
-                     [](const std::string& value) { return false; },
-                     []() { return compilerId().begin(); }
-                   ));
+                     [](const std::string& /*value*/) { return false; },
+                     []() { return compilerId().begin(); }));
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_NONE,
                    "hphp.compiler_version",
                    IniSetting::SetAndGet<std::string>(
-                     [](const std::string& value) { return false; },
-                     []() { return getHphpCompilerVersion(); }
-                   ));
-  IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_NONE,
-                   "hphp.build_id",
-                   IniSetting::SetAndGet<std::string>(
-                     [](const std::string& value) { return false; },
-                     nullptr
-                   ),
-                   &RuntimeOption::BuildId);
+                     [](const std::string& /*value*/) { return false; },
+                     []() { return getHphpCompilerVersion(); }));
+  IniSetting::Bind(
+    IniSetting::CORE, IniSetting::PHP_INI_NONE, "hphp.build_id",
+    IniSetting::SetAndGet<std::string>(
+      [](const std::string& /*value*/) { return false; }, nullptr),
+    &RuntimeOption::BuildId);
   IniSetting::Bind(IniSetting::CORE, IniSetting::PHP_INI_SYSTEM,
                    "notice_frequency",
                    &RuntimeOption::NoticeFrequency);
@@ -2032,6 +2036,10 @@ void RuntimeOption::Load(
 
   ExtensionRegistry::moduleLoad(ini, config);
   initialize_apc();
+
+  if (TraceFunctions.size()) {
+    Trace::ensureInit(getTraceOutputFile());
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

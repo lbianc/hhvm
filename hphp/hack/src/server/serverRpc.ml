@@ -11,6 +11,7 @@
 open Core
 open ServerEnv
 open ServerCommandTypes
+open Utils
 
 let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
   fun genv env ~is_stale -> function
@@ -26,13 +27,13 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         env, ServerInferType.go env (fn, line, char)
     | AUTOCOMPLETE content ->
         let result = try
-          ServerAutoComplete.auto_complete env.tcopt content
+          ServerAutoComplete.auto_complete ~tcopt:env.tcopt ~delimit_on_namespaces:false content
           with Decl.Decl_not_found s ->
             let s = s ^ "-- Autocomplete File contents: " ^ content in
             Printexc.print_backtrace stderr;
             raise (Decl.Decl_not_found s)
         in
-        env, result
+        env, result.With_complete_flag.value
     | IDENTIFY_FUNCTION (file_input, line, char) ->
         let content = ServerFileSync.get_file_content file_input in
         env, ServerIdentifyFunction.go_absolute content line char env.tcopt
@@ -112,21 +113,22 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
         ServerFileSync.close_file env path, ()
     | EDIT_FILE (path, edits) ->
         ServerFileSync.edit_file env path edits, ()
-    | IDE_AUTOCOMPLETE (path, pos) ->
+    | IDE_AUTOCOMPLETE (path, pos, delimit_on_namespaces) ->
         let open Ide_api_types in
+        let open With_complete_flag in
         let fc = ServerFileSync.get_file_content (ServerUtils.FileName path) in
         let offset = File_content.get_offset fc pos in (* will raise if out of bounds *)
         let char_at_pos = File_content.get_char fc offset in
         let edits = [{range = Some {st = pos; ed = pos}; text = "AUTO332"}] in
         let content = File_content.edit_file_unsafe fc edits in
-        let completions = ServerAutoComplete.auto_complete env.tcopt content in
-        env, { AutocompleteService.completions; char_at_pos; }
+        let results =
+          ServerAutoComplete.auto_complete ~tcopt:env.tcopt ~delimit_on_namespaces content in
+        let completions = results.value in
+        let is_complete = results.is_complete in
+        env, { AutocompleteTypes.completions; char_at_pos; is_complete; }
     | IDE_FFP_AUTOCOMPLETE (path, pos) ->
-        let open Ide_api_types in
         let content = ServerFileSync.get_file_content (ServerUtils.FileName path) in
-        (* TODO: Change autocomplete service to accept the ide type position instead
-          of an int tuple *)
-        env, FfpAutocompleteService.auto_complete content (pos.line, pos.column)
+        env, FfpAutocompleteService.auto_complete env.tcopt content pos ~filter_by_token:false
     | DISCONNECT ->
         ServerFileSync.clear_sync_data env, ()
     | SUBSCRIBE_DIAGNOSTIC id ->
@@ -149,7 +151,9 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
       {env with ide_idle = true;}, ()
     | INFER_RETURN_TYPE id_info ->
       match id_info with
-      | ServerInferReturnType.Function fun_name ->
-        env, ServerInferReturnType.get_fun_return_ty env.popt fun_name
-      | ServerInferReturnType.Method (class_name, meth_name) ->
-        env, ServerInferReturnType.get_meth_return_ty env.popt class_name meth_name
+      | InferReturnTypeService.Function fun_name ->
+        env, InferReturnTypeService.get_fun_return_ty
+          env.tcopt env.popt fun_name
+      | InferReturnTypeService.Method (class_name, meth_name) ->
+        env, InferReturnTypeService.get_meth_return_ty
+          env.tcopt env.popt class_name meth_name

@@ -776,6 +776,7 @@ struct MemoryManager {
    * Update the request-memory limit.
    */
   void setMemoryLimit(size_t limit);
+  int64_t getMemoryLimit() const;
 
   /*
    * Update the tracked stats in the MemoryManager object, then return
@@ -941,7 +942,7 @@ struct MemoryManager {
 
   struct FreeList {
     void* maybePop();
-    void push(void*, size_t size);
+    void push(void*);
     FreeNode* head{nullptr};
   };
   using FreelistArray = std::array<FreeList,kNumSmallSizes>;
@@ -1003,10 +1004,10 @@ private:
   static void threadStatsInit();
   static void threadStats(uint64_t*&, uint64_t*&);
   void refreshStats();
-  template<bool live> void refreshStatsImpl(MemoryUsageStats& stats);
+  void refreshStatsImpl(MemoryUsageStats& stats);
   void refreshStatsHelperExceeded();
-
-  void resetStatsImpl(bool isInternalCall);
+  void resetAllStats();
+  void traceStats(const char* when);
 
   static void initHole(void* ptr, uint32_t size);
   void initHole();
@@ -1026,6 +1027,7 @@ private:
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   int64_t m_nextGc; // request gc when heap usage reaches this size
+  int64_t m_usageLimit; // OOM when m_stats.usage() > m_usageLimit
   MemoryUsageStats m_stats;
   BigHeap m_heap;
   std::vector<NativeNode*> m_natives;
@@ -1038,6 +1040,7 @@ private:
   bool m_couldOOM{true};
   bool m_bypassSlabAlloc;
   bool m_gc_enabled{RuntimeOption::EvalEnableGC};
+  bool m_enableStatsSync{false};
 
   ReqProfContext m_profctx;
   static std::atomic<ReqProfContext*> s_trigger;
@@ -1047,19 +1050,16 @@ private:
 
   static void* TlsInitSetup;
 
-#ifdef USE_JEMALLOC
   // pointers to jemalloc-maintained allocation counters
   uint64_t* m_allocated;
   uint64_t* m_deallocated;
-  size_t* m_cactive;
 
-  // previous values of *m_[de]allocated from last refreshStats()
-  uint64_t m_prevAllocated;
-  uint64_t m_prevDeallocated;
+  // previous values of *m_[de]allocated from last resetStats()
+  uint64_t m_resetAllocated;
+  uint64_t m_resetDeallocated;
 
-  bool m_enableStatsSync;
-  static bool s_statsEnabled; // true if mallctlnametomib() setup succeeded.
-#endif
+  // true if mallctlnametomib() setup succeeded, which requires jemalloc
+  static bool s_statsEnabled;
 
   int64_t m_req_start_micros;
 

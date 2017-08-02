@@ -15,6 +15,15 @@ open Sys_utils
 
 module TNBody       = Typing_naming_body
 
+module StringAnnotation = struct
+  type t = string
+  let pp fmt str = Format.pp_print_string fmt str
+end
+module TASTMapper = Aast_mapper.MapAnnotatedAST (Tast.AnnotationType)
+  (StringAnnotation)
+module StringNAST = Nast.AnnotatedAST(StringAnnotation)
+
+
 (*****************************************************************************)
 (* Types, constants *)
 (*****************************************************************************)
@@ -35,10 +44,13 @@ type mode =
   | Identify_symbol of int * int
   | Find_local of int * int
   | Outline
+  | Dump_nast
+  | Dump_tast
   | Find_refs of int * int
   | Highlight_refs of int * int
   | Decl_compare
   | Infer_return_types
+  | Least_upper_bound
 
 type options = {
   filename : string;
@@ -47,170 +59,29 @@ type options = {
   tcopt : GlobalOptions.t;
 }
 
-let builtins_filename =
-  Relative_path.create Relative_path.Dummy "builtins.hhi"
+(* Canonical builtins from our hhi library *)
+let hhi_builtins = Hhi.get_raw_hhi_contents ()
 
-let builtins =
-  "<?hh // decl\n"^
-  "interface Traversable<+Tv> {}\n"^
-  "interface Container<+Tv> extends Traversable<Tv> {}\n"^
-  "interface Iterator<+Tv> extends Traversable<Tv> {}\n"^
-  "interface Iterable<+Tv> extends Traversable<Tv> {}\n"^
-  "interface KeyedTraversable<+Tk, +Tv> extends Traversable<Tv> {}\n"^
-  "interface KeyedContainer<+Tk, +Tv> extends Container<Tv>, KeyedTraversable<Tk,Tv> {}\n"^
-  "interface KeyedIterator<+Tk, +Tv> extends KeyedTraversable<Tk, Tv>, Iterator<Tv> {}\n"^
-  "interface KeyedIterable<Tk, +Tv> extends KeyedTraversable<Tk, Tv>, Iterable<Tv> {}\n"^
-  "interface Awaitable<+T> {"^
-  "  public function getWaitHandle(): WaitHandle<T>;"^
-  "}\n"^
-  "interface WaitHandle<+T> extends Awaitable<T> {}\n"^
-  "interface ConstVector<+Tv> extends KeyedIterable<int, Tv>, KeyedContainer<int, Tv>{"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): ConstVector<Tu>;"^
-  "}\n"^
-  "interface ConstSet<+Tv> extends KeyedIterable<mixed, Tv>, Container<Tv>{}\n"^
-  "interface ConstMap<Tk, +Tv> extends KeyedIterable<Tk, Tv>, KeyedContainer<Tk, Tv>{"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): ConstMap<Tk, Tu>;"^
-  "  public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): ConstMap<Tk, Tu>;"^
-  "}\n"^
-  "final class Vector<Tv> implements ConstVector<Tv>{\n"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): Vector<Tu>;\n"^
-  "  public function filter((function(Tv): bool) $callback): Vector<Tv>;\n"^
-  "  public function reserve(int $sz): void;"^
-  "  public function add(Tv $value): Vector<Tv>;"^
-  "  public function addAll(?Traversable<Tv> $it): Vector<Tv>;"^
-  "}\n"^
-  "final class ImmVector<+Tv> implements ConstVector<Tv> {"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): ImmVector<Tu>;"^
-  "}\n"^
-  "final class Map<Tk, Tv> implements ConstMap<Tk, Tv> {"^
-  "  /* HH_FIXME[3007]: This is intentional; not a constructor */"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): Map<Tk, Tu>;"^
-  "  public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): Map<Tk, Tu>;"^
-  "  public function contains<Tu super Tk>(Tu $k): bool;"^
-  "}\n"^
-  "final class ImmMap<Tk, +Tv> implements ConstMap<Tk, Tv>{"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): ImmMap<Tk, Tu>;"^
-  "  public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): ImmMap<Tk, Tu>;"^
-  "}\n"^
-  "final class StableMap<Tk, Tv> implements ConstMap<Tk, Tv> {"^
-  "  public function map<Tu>((function(Tv): Tu) $callback): StableMap<Tk, Tu>;"^
-  "  public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): StableMap<Tk, Tu>;"^
-  "}\n"^
-  "final class Set<Tv> implements ConstSet<Tv> {}\n"^
-  "final class ImmSet<+Tv> implements ConstSet<Tv> {}\n"^
-  "class Exception {"^
-  "  public function __construct(string $x) {}"^
-  "  public function getMessage(): string;"^
-  "}\n"^
-  "class Generator<Tk, +Tv, -Ts> implements KeyedIterator<Tk, Tv> {\n"^
-  "  public function next(): void;\n"^
-  "  public function current(): Tv;\n"^
-  "  public function key(): Tk;\n"^
-  "  public function rewind(): void;\n"^
-  "  public function valid(): bool;\n"^
-  "  public function send(?Ts $v): void;\n"^
-  "}\n"^
-  "final class Pair<+Tk, +Tv> implements KeyedContainer<int,mixed> {public function isEmpty(): bool {}}\n"^
-  "interface Stringish {public function __toString(): string {}}\n"^
-  "interface XHPChild {}\n"^
-  "function hh_show($val) {}\n"^
-  "function hh_show_env() {}\n"^
-  "interface Countable { public function count(): int; }\n"^
-  "interface AsyncIterator<+Tv> {}\n"^
-  "interface AsyncKeyedIterator<+Tk, +Tv> extends AsyncIterator<Tv> {}\n"^
-  "class AsyncGenerator<Tk, +Tv, -Ts> implements AsyncKeyedIterator<Tk, Tv> {\n"^
-  "  public function next(): Awaitable<?(Tk, Tv)> {}\n"^
-  "  public function send(?Ts $v): Awaitable<?(Tk, Tv)> {}\n"^
-  "  public function raise(Exception $e): Awaitable<?(Tk, Tv)> {}"^
-  "}\n"^
-  "function isset($x): bool;"^
-  "function empty($x): bool;"^
-  "function unset($x): void;"^
-  "namespace HH {\n"^
-  "abstract class BuiltinEnum<T> {\n"^
-  "  final public static function getValues(): array<string, T>;\n"^
-  "  final public static function getNames(): array<T, string>;\n"^
-  "  final public static function coerce(mixed $value): ?T;\n"^
-  "  final public static function assert(mixed $value): T;\n"^
-  "  final public static function isValid(mixed $value): bool;\n"^
-  "  final public static function assertAll(Traversable<mixed> $values): Container<T>;\n"^
-  "}\n"^
-  "}\n"^
-  "function array_map($x, $y, ...);\n"^
-  "function idx<Tk, Tv>(?KeyedContainer<Tk, Tv> $c, $i, $d = null) {}\n"^
-  "final class stdClass {}\n" ^
-  "function rand($x, $y): int;\n" ^
-  "function invariant($x, ...): void;\n" ^
-  "function exit(int $exit_code_or_message = 0): noreturn;\n" ^
-  "function invariant_violation(...): noreturn;\n" ^
-  "function get_called_class(): string;\n" ^
-  "abstract final class Shapes {\n" ^
-  "  public static function idx(shape(...) $shape, arraykey $index, $default = null) {}\n" ^
-  "  public static function keyExists(shape(...) $shape, arraykey $index): bool {}\n" ^
-  "  public static function removeKey(shape(...) $shape, arraykey $index): void {}\n" ^
-  "  public static function toArray(shape(...) $shape): array<arraykey, mixed> {}\n" ^
-  "}\n" ^
-  "newtype typename<+T> as string = string;\n"^
-  "newtype classname<+T> as typename<T> = typename<T>;\n" ^
- "function var_dump($x): void;\n" ^
-  "function gena();\n" ^
-  "function genva();\n" ^
-  "function gen_array_rec();\n"^
-  "function is_int(mixed $x): bool {}\n"^
-  "function is_bool(mixed $x): bool {}\n"^
-  "function is_float(mixed $x): bool {}\n"^
-  "function is_string(mixed $x): bool {}\n"^
-  "function is_null(mixed $x): bool {}\n"^
-  "function is_array(mixed $x): bool {}\n"^
-  "function is_vec(mixed $x): bool {}\n"^
-  "function is_dict(mixed $x): bool {}\n"^
-  "function is_keyset(mixed $x): bool {}\n"^
-  "function is_resource(mixed $x): bool {}\n"^
-  "interface IMemoizeParam {\n"^
-  "  public function getInstanceKey(): string;\n"^
-  "}\n"^
-  "newtype TypeStructure<T> as shape(\n"^
-  "  'kind'=> int,\n"^
-  "  'nullable'=>?bool,\n"^
-  "  'classname'=>?classname<T>,\n"^
-  "  'elem_types' => ?array,\n"^
-  "  'param_types' => ?array,\n"^
-  "  'return_type' => ?array,\n"^
-  "  'generic_types' => ?array,\n"^
-  "  'fields' => ?array,\n"^
-  "  'name' => ?string,\n"^
-  "  'alias' => ?string,\n"^
-  ") = shape(\n"^
-  "  'kind'=> int,\n"^
-  "  'nullable'=>?bool,\n"^
-  "  'classname'=>?classname<T>,\n"^
-  "  'elem_types' => ?array,\n"^
-  "  'param_types' => ?array,\n"^
-  "  'return_type' => ?array,\n"^
-  "  'generic_types' => ?array,\n"^
-  "  'fields' => ?array,\n"^
-  "  'name' => ?string,\n"^
-  "  'alias' => ?string,\n"^
-  ");\n"^
-  "function type_structure($x, $y);\n"^
-  "const int __LINE__ = 0;\n"^
-  "const string __CLASS__ = '';\n"^
-  "const string __TRAIT__ = '';\n"^
-  "const string __FILE__ = '';\n"^
-  "const string __DIR__ = '';\n"^
-  "const string __FUNCTION__ = '';\n"^
-  "const string __METHOD__ = '';\n"^
-  "const string __NAMESPACE__ = '';\n"^
-  "interface Indexish<+Tk, +Tv> extends KeyedContainer<Tk, Tv> {}\n"^
-  "abstract final class dict<+Tk, +Tv> implements Indexish<Tk, Tv> {}\n"^
-  "function dict<Tk, Tv>(KeyedTraversable<Tk, Tv> $arr): dict<Tk, Tv> {}\n"^
-  "abstract final class keyset<+T as arraykey> implements Indexish<T, T> {}\n"^
-  "abstract final class vec<+Tv> implements Indexish<int, Tv> {}\n"^
-  "function meth_caller(string $cls_name, string $meth_name);\n"^
-  "namespace HH\\Asio {"^
-  "  function va(...$args);\n"^
-  "}\n"^
-  "function hh_log_level(int $level) {}\n"
+(* All of the stuff that hh_single_type_check relies on is sadly not contained
+ * in the hhi library, so we include a very small number of magic builtins *)
+let magic_builtins = [|
+  (
+    "hh_single_type_check_magic.hhi",
+    "<?hh // decl\n" ^
+    "function gena();\n" ^
+    "function genva();\n" ^
+    "function gen_array_rec();\n" ^
+    "function hh_show($val) {}\n" ^
+    "function hh_show_env() {}\n"
+  )
+|]
+
+(* Take the builtins (file, contents) array and create relative paths *)
+let builtins = Array.fold_left begin fun acc (f, src) ->
+  Relative_path.Map.add acc
+    ~key:(Relative_path.create Relative_path.Dummy f)
+    ~data:src
+end Relative_path.Map.empty (Array.append magic_builtins hhi_builtins)
 
 (*****************************************************************************)
 (* Helpers *)
@@ -293,6 +164,12 @@ let parse_options () =
     "--outline",
       Arg.Unit (set_mode Outline),
       " Print file outline";
+    "--nast",
+      Arg.Unit (set_mode Dump_nast),
+      " Print out the named AST";
+    "--tast",
+      Arg.Unit (set_mode Dump_tast),
+      " Print out the typed AST";
     "--find-refs",
       Arg.Tuple ([
         Arg.Int (fun x -> line := x);
@@ -319,7 +196,10 @@ let parse_options () =
       of array<int, T>.";
     "--infer-return-types",
       Arg.Unit (set_mode Infer_return_types),
-      " Infers return types of functions and methods."
+      " Infers return types of functions and methods.";
+    "--least-upper-bound",
+        Arg.Unit (set_mode Least_upper_bound),
+        " Gets the least upper bound of a list of types.";
   ] in
   let options = Arg.align ~limit:25 options in
   Arg.parse options (fun fn -> fn_ref := Some fn) usage;
@@ -337,66 +217,46 @@ let parse_options () =
     tcopt;
   }
 
-let infer_return tcopt fn { FileInfo.funs; classes; typedefs; consts; _ } =
-  let make_set =
-    List.fold_left ~f: (fun acc (_, x) -> SSet.add x acc) ~init: SSet.empty
-  in
-  let n_funs = make_set funs in
-  let n_classes = make_set classes in
-  let n_types = make_set typedefs in
-  let n_consts = make_set consts in
-  let names = { FileInfo.n_funs; n_classes; n_types; n_consts } in
-  let fast = Relative_path.Map.singleton fn names in
-  let inferred_types =
-    Typing_suggest_service.suggest_files
-      tcopt (Typing_suggest_service.keys fast)
-  in
-  let funs_and_methods = !Typing_suggest.funs_and_methods in
-  let () = Typing_suggest.funs_and_methods := [] in
-  let funs_and_methods =
-    List.filter
-      ~f:(fun (pos, _) -> Relative_path.Map.mem fast (Pos.filename pos))
-      funs_and_methods
-  in
-  let inferred_types =
-    List.filter
-      ~f:(fun (_, pos, kind, _) ->
-        (Relative_path.Map.mem fast (Pos.filename pos))
-        && (kind == Typing_suggest.Kreturn))
-      inferred_types
-  in
-  let inferred_types =
-    List.sort
-      ~cmp: (fun (_, p1, _, _) (_ , p2, _, _) -> Pos.compare p1 p2)
-      inferred_types
-  in
-  let funs_and_methods =
-    List.sort
-      ~cmp: (fun (p1, _) (p2, _) -> Pos.compare p1 p2) funs_and_methods
-  in
-  let rec print_returns_with_funs ts fs  =
-    match ts, fs with
-    | [], _
-    | _, [] -> ()
-    | (tenv, p1, _, ty) :: ts_, (p2, id) :: fs_ ->
-      begin match Pos.compare p1 p2 with
-        | 0 -> Printf.printf "%s : %s \n" id (Typing_print.full tenv ty);
-               print_returns_with_funs ts_ fs_
-        | x when x > 0 -> print_returns_with_funs ts_ fs
-        | _ -> print_returns_with_funs ts fs_
+let compute_least_type tcopt popt fn =
+  let tenv = Typing_infer_return.typing_env_from_file tcopt fn in
+  Option.iter (Parser_heap.find_fun_in_file popt fn "\\test")
+    ~f:begin fun f ->
+      let f = Naming.fun_ tcopt f in
+      let {Nast.fnb_nast; _} = Typing_naming_body.func_body tcopt f in
+      let types =
+        Nast.(List.fold fnb_nast ~init:[]
+          ~f:begin fun acc stmt ->
+            match stmt with
+            | Expr (_, New (CI ((_, "\\least_upper_bound"), hints), _, _)) ->
+              (List.map hints
+                (fun h -> snd (Typing_infer_return.type_from_hint tcopt fn h)))
+              :: acc
+            | _ -> acc
+          end)
+      in
+      let types = List.rev types in
+      List.iter types
+        ~f:(begin fun tys ->
+          let tyop = Typing_ops.LeastUpperBound.full tenv tys in
+          let least_ty =
+            Option.value_map tyop ~default:""
+              ~f:(Typing_infer_return.print_type_locl tenv)
+          in
+          let str_tys =
+            Typing_infer_return.(print_list ~f:(print_type_locl tenv) tys)
+          in
+          Printf.printf "Least upper bound of %s is %s \n" str_tys least_ty
+        end)
       end
-in
-print_returns_with_funs inferred_types funs_and_methods
 
-let suggest_and_print tcopt fn { FileInfo.funs; classes; typedefs; consts; _ } =
-  let make_set =
-    List.fold_left ~f: (fun acc (_, x) -> SSet.add x acc) ~init: SSet.empty
-  in
-  let n_funs = make_set funs in
-  let n_classes = make_set classes in
-  let n_types = make_set typedefs in
-  let n_consts = make_set consts in
-  let names = { FileInfo.n_funs; n_classes; n_types; n_consts } in
+let infer_return tcopt fn info  =
+  let names = FileInfo.simplify info in
+  let fast = Relative_path.Map.singleton fn names in
+  let files = Typing_suggest_service.keys fast in
+  Typing_infer_return.(get_inferred_types tcopt files ~process:format_types)
+
+let suggest_and_print tcopt fn info =
+  let names = FileInfo.simplify info in
   let fast = Relative_path.Map.singleton fn names in
   let patch_map = Typing_suggest_service.go None fast tcopt in
   match Relative_path.Map.get patch_map fn with
@@ -488,6 +348,61 @@ let check_errors opts errors files_info =
     errors @ Errors.get_error_list
         (Typing_check_utils.check_defs opts fn fileinfo)
   end ~init:errors
+
+let create_nasts opts files_info =
+  let open Result in
+  let open Nast in
+  let build_nast fn {FileInfo.funs; classes; typedefs; consts; _} =
+    List.map ~f:Result.ok_or_failwith (
+      List.map funs begin fun (_, x) ->
+        Parser_heap.find_fun_in_file ~full:true opts fn x
+        |> Result.of_option ~error:(Printf.sprintf "Couldn't find function %s" x)
+        >>| Naming.fun_ opts
+        >>| (fun f -> {f with f_body = (NamedBody (Typing_naming_body.func_body opts f))})
+        >>| (fun f -> Nast.Fun f)
+      end
+      @
+      List.map classes begin fun (_, x) ->
+        Parser_heap.find_class_in_file ~full:true opts fn x
+        |> Result.of_option ~error:(Printf.sprintf "Couldn't find class %s" x)
+        >>| Naming.class_ opts
+        >>| Typing_naming_body.class_meth_bodies opts
+        >>| (fun c -> Nast.Class c)
+      end
+      @
+      List.map typedefs begin fun (_, x) ->
+        Parser_heap.find_typedef_in_file ~full:true opts fn x
+        |> Result.of_option ~error:(Printf.sprintf "Couldn't find typedef %s" x)
+        >>| Naming.typedef opts
+        >>| (fun t -> Nast.Typedef t)
+      end
+      @
+      List.map consts begin fun (_, x) ->
+        Parser_heap.find_const_in_file ~full:true opts fn x
+        |> Result.of_option ~error:(Printf.sprintf "Couldn't find const %s" x)
+        >>| Naming.global_const opts
+        >>| fun g -> Nast.Constant g
+      end
+    )
+  in Relative_path.Map.mapi (build_nast) files_info
+
+let nast_to_tast_tenv opts nast =
+  let open Result in
+  let open Nast in
+  let def_conv = function
+    | Fun f -> Ok f
+      >>| Typing.fun_def opts
+      >>| (fun (f, tenv) -> Tast.Fun f, tenv)
+    | Class c -> Ok c
+      >>| Typing.class_def opts
+      >>= of_option ~error:(Printf.sprintf "Error with class %s definition" (snd c.c_name))
+      >>| (fun (c, tenv) -> Tast.Class c, tenv)
+    | Constant gc -> Ok gc
+      >>| (fun x -> Typing.gconst_def x opts)
+      >>| (fun (gc, tenv) -> Tast.Constant gc, tenv)
+    | Typedef td -> Error "Typedef not yet supported in TAST."
+  in
+  List.map nast (Fn.compose Result.ok_or_failwith def_conv)
 
 let with_named_body opts n_fun =
   (** In the naming heap, the function bodies aren't actually named yet, so
@@ -592,7 +507,10 @@ let test_decl_compare filename popt files_contents tcopt files_info =
   if (Relative_path.suffix filename) = "capitalization3.php" then () else
   if (Relative_path.suffix filename) = "capitalization4.php" then () else
   (* do not analyze builtins over and over *)
-  let files_info = Relative_path.Map.remove files_info builtins_filename in
+  let files_info = Relative_path.Map.fold builtins
+    ~f:begin fun k _ acc -> Relative_path.Map.remove acc k end
+    ~init:files_info
+  in
 
   let files = Relative_path.Map.fold files_info
     ~f:(fun k _ acc -> Relative_path.Set.add acc k)
@@ -623,43 +541,50 @@ let test_decl_compare filename popt files_contents tcopt files_info =
   List.iter2_exn classes1 classes2 compare_classes;
   ()
 
+(* Strip output of position information *)
+let filter_positions s = (Str.global_replace
+  (Str.regexp "\\[L[0-9]+:[0-9]+-L[0-9]+:[0-9]+\\]") "<p>" s)
+
 let handle_mode mode filename opts popt files_contents files_info errors =
   match mode with
   | Ai _ -> ()
   | Autocomplete ->
       let file = cat (Relative_path.to_absolute filename) in
       let result =
-        ServerAutoComplete.auto_complete opts file in
+        ServerAutoComplete.auto_complete ~tcopt:opts ~delimit_on_namespaces:false file in
       List.iter ~f: begin fun r ->
         let open AutocompleteService in
         Printf.printf "%s %s\n" r.res_name r.res_ty
-      end result
+      end result.Utils.With_complete_flag.value
   | Ffp_autocomplete ->
       let file_text = cat (Relative_path.to_absolute filename) in
       (* TODO: Use a magic word/symbol to identify autocomplete location instead *)
-      let args_regex = Str.regexp "AUTOCOMPLETE [1-9][0-9]* [0-9]*" in
-      let (row, col) = try
+      let args_regex = Str.regexp "AUTOCOMPLETE [1-9][0-9]* [1-9][0-9]*" in
+      let open Ide_api_types in
+      let position = try
         let _ = Str.search_forward args_regex file_text 0 in
         let raw_flags = Str.matched_string file_text in
         match split ' ' raw_flags with
-        | [ _; row; column] -> (int_of_string row, int_of_string column)
+        | [ _; row; column] ->
+          { line = int_of_string row; column = int_of_string column }
         | _ -> failwith "Invalid test file: no flags found"
       with
         Not_found -> failwith "Invalid test file: no flags found"
       in
       let result =
-        FfpAutocompleteService.auto_complete file_text (row, col)
+        FfpAutocompleteService.auto_complete opts file_text position
+        ~filter_by_token:true
       in begin
         match result with
         | [] -> Printf.printf "No result found\n"
         | res -> List.iter res ~f:begin fun r ->
-            let open FfpAutocompleteService in
-            Printf.printf "%s\n" r.name
+            let open AutocompleteTypes in
+            Printf.printf "%s\n" r.res_name
           end
       end
   | Color ->
       Relative_path.Map.iter files_info begin fun fn fileinfo ->
-        if fn = builtins_filename then () else begin
+        if Relative_path.Map.mem builtins fn then () else begin
           let result = ServerColorFile.get_level_list begin fun () ->
             ignore @@ Typing_check_utils.check_defs opts fn fileinfo;
             fn
@@ -669,7 +594,7 @@ let handle_mode mode filename opts popt files_contents files_info errors =
       end
   | Coverage ->
       Relative_path.Map.iter files_info begin fun fn fileinfo ->
-        if fn = builtins_filename then () else begin
+        if Relative_path.Map.mem builtins fn then () else begin
           let type_acc =
             ServerCoverageMetric.accumulate_types fn fileinfo opts in
           print_coverage fn type_acc;
@@ -710,7 +635,7 @@ let handle_mode mode filename opts popt files_contents files_info errors =
   | Dump_inheritance ->
     Typing_deps.update_files files_info;
     Relative_path.Map.iter files_info begin fun fn fileinfo ->
-      if fn = builtins_filename then () else begin
+      if Relative_path.Map.mem builtins fn then () else begin
         List.iter fileinfo.FileInfo.classes begin fun (_p, class_) ->
           Printf.printf "Ancestors of %s and their overridden methods:\n"
             class_;
@@ -746,6 +671,20 @@ let handle_mode mode filename opts popt files_contents files_info errors =
     let file = cat (Relative_path.to_absolute filename) in
     let results = FileOutline.outline popt file in
     FileOutline.print ~short_pos:true results
+  | Dump_nast ->
+    let nasts = create_nasts opts files_info in
+    let nast = Relative_path.Map.find filename nasts in
+    Printf.printf "%s\n" (filter_positions (Nast.show_program nast))
+  | Dump_tast ->
+    let nasts = create_nasts opts files_info in
+    let nast = Relative_path.Map.find filename nasts in
+    let tast_tenv = nast_to_tast_tenv opts nast in
+    let type_to_string tenv (_, ty) = match ty with
+      | None -> "None"
+      | Some ty -> "(Some " ^ Typing_print.full tenv ty ^ ")" in
+    let program = List.map tast_tenv
+      (fun (def, tenv) -> TASTMapper.map_def (type_to_string tenv) def) in
+    Printf.printf "%s\n" (filter_positions (StringNAST.show_program program))
   | Find_refs (line, column) ->
     Typing_deps.update_files files_info;
     let genv = ServerEnvBuild.default_genv in
@@ -765,11 +704,18 @@ let handle_mode mode filename opts popt files_contents files_info errors =
   | Suggest
   | Infer_return_types
   | Errors ->
+      (* Don't typecheck builtins *)
+      let files_info = Relative_path.Map.fold builtins
+        ~f:begin fun k _ acc -> Relative_path.Map.remove acc k end
+        ~init:files_info
+      in
       let errors = check_errors opts errors files_info in
       if mode = Suggest
       then Relative_path.Map.iter files_info (suggest_and_print opts);
       if mode = Infer_return_types
-      then Relative_path.Map.iter files_info (infer_return opts);
+      then
+        Option.iter ~f:(infer_return opts filename)
+          (Relative_path.Map.get files_info filename);
       if errors <> []
       then (error (List.hd_exn errors); exit 2)
       else Printf.printf "No errors\n"
@@ -780,6 +726,7 @@ let handle_mode mode filename opts popt files_contents files_info errors =
       else Printf.printf "No errors\n"
   | Decl_compare ->
     test_decl_compare filename popt files_contents opts files_info
+  | Least_upper_bound-> compute_least_type opts popt filename
 
 (*****************************************************************************)
 (* Main entry point *)
@@ -789,11 +736,14 @@ let decl_and_run_mode {filename; mode; no_builtins; tcopt} popt =
   if mode = Dump_deps then Typing_deps.debug_trace := true;
   Local_id.track_names := true;
   Ident.track_names := true;
-  let builtins = if no_builtins then "" else builtins in
+  let builtins = if no_builtins then Relative_path.Map.empty else builtins in
   let filename = Relative_path.create Relative_path.Dummy filename in
   let files_contents = file_to_files filename in
-  let files_contents_with_builtins = Relative_path.Map.add files_contents
-    ~key:builtins_filename ~data:builtins in
+  (* Merge in builtins *)
+  let files_contents_with_builtins = Relative_path.Map.fold builtins
+    ~f:begin fun k src acc -> Relative_path.Map.add acc ~key:k ~data:src end
+    ~init:files_contents
+  in
 
   let errors, files_info, _ =
     parse_name_and_decl popt files_contents_with_builtins tcopt in

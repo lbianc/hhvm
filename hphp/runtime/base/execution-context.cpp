@@ -35,6 +35,7 @@
 #include "hphp/runtime/base/debuggable.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/array-iterator-defs.h"
+#include "hphp/runtime/base/apc-gc-manager.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/sweepable.h"
 #include "hphp/runtime/base/builtin-functions.h"
@@ -537,7 +538,7 @@ bool ExecutionContext::removeShutdownFunction(const Variant& function,
 
   for (ArrayIter iter(funcs); iter; ++iter) {
     if (!same(iter.second().toArray()[s_name], function)) {
-      newFuncs.appendWithRef(iter.secondRef());
+      newFuncs.appendWithRef(iter.secondVal());
     } else {
       ret = true;
     }
@@ -1712,7 +1713,7 @@ TypedValue ExecutionContext::invokeFuncFew(const Func* f,
     return false;
   };
 
-  auto const doInitArgs = [&] (ActRec* ar, TypedValue&) {
+  auto const doInitArgs = [&](ActRec* /*ar*/, TypedValue&) {
     for (ssize_t i = 0; i < argc; ++i) {
       const TypedValue *from = &argv[i];
       TypedValue *to = vmStack().allocTV();
@@ -1954,6 +1955,11 @@ void ExecutionContext::clearLastError() {
 
 void ExecutionContext::enqueueAPCHandle(APCHandle* handle, size_t size) {
   assert(handle->isUncounted());
+  if (RuntimeOption::EvalGCForAPC) {
+    // Register handle with APCGCManager
+    // And resursively find all allocations belong to handle, register them too
+    APCGCManager::getInstance().registerPendingDeletion(handle, size);
+  }
   m_apcHandles.push_back(handle);
   m_apcMemSize += size;
 }
@@ -1965,8 +1971,13 @@ struct FreedAPCHandle {
     : m_memSize(size), m_apcHandles(std::move(shandles))
   {}
   void operator()() {
-    for (auto handle : m_apcHandles) {
-      APCTypedValue::fromHandle(handle)->deleteUncounted();
+    if (RuntimeOption::EvalGCForAPC) {
+      // Treadmill ask APCGCManager to free the handles
+      APCGCManager::getInstance().freeAPCHandles(m_apcHandles);
+    } else {
+      for (auto handle : m_apcHandles) {
+        APCTypedValue::fromHandle(handle)->deleteUncounted();
+      }
     }
     APCStats::getAPCStats().removePendingDelete(m_memSize);
   }

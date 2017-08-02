@@ -48,26 +48,29 @@ inline bool BigHeap::empty() const {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct MemoryManager::MaskAlloc {
-  explicit MaskAlloc(MemoryManager& mm) : m_mm(mm) {
+  explicit MaskAlloc(MemoryManager& mm)
+    : m_mm(mm)
+    , startAlloc(s_statsEnabled ? *mm.m_allocated : 0)
+    , startDealloc(s_statsEnabled ? *mm.m_deallocated : 0)
+  {
     // capture all mallocs prior to construction
     FTRACE(1, "MaskAlloc()\n");
     m_mm.refreshStats();
   }
+
   ~MaskAlloc() {
     FTRACE(1, "~MaskAlloc()\n");
-#ifdef USE_JEMALLOC
     // exclude mallocs and frees since construction
     if (s_statsEnabled) {
-      FTRACE(1, "old: prev alloc: {}\nprev dealloc: {}\n",
-        m_mm.m_prevAllocated, m_mm.m_prevDeallocated);
+      FTRACE(1, "old: reset alloc: {} reset dealloc: {}\n",
+        m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
 
-      m_mm.m_prevAllocated = *m_mm.m_allocated;
-      m_mm.m_prevDeallocated = *m_mm.m_deallocated;
+      m_mm.m_resetAllocated += *m_mm.m_allocated - startAlloc;
+      m_mm.m_resetDeallocated += *m_mm.m_deallocated - startDealloc;
 
-      FTRACE(1, "new: prev alloc: {}\nprev dealloc: {}\n\n",
-        m_mm.m_prevAllocated, m_mm.m_prevDeallocated);
+      FTRACE(1, "new: reset alloc: {} prev dealloc: {}\n\n",
+        m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
     }
-#endif
   }
 
   MaskAlloc(const MaskAlloc&) = delete;
@@ -75,18 +78,20 @@ struct MemoryManager::MaskAlloc {
 
 private:
   MemoryManager& m_mm;
+  const uint64_t startAlloc;
+  const uint64_t startDealloc;
 };
 
 struct MemoryManager::SuppressOOM {
   explicit SuppressOOM(MemoryManager& mm)
       : m_mm(mm)
       , m_savedCouldOOM(mm.m_couldOOM) {
-    FTRACE(1, "SuppressOOM() [couldOOM was {}]\n", m_savedCouldOOM);
+    FTRACE(2, "SuppressOOM() [couldOOM was {}]\n", m_savedCouldOOM);
     m_mm.m_couldOOM = false;
   }
 
   ~SuppressOOM() {
-    FTRACE(1, "~SuppressOOM() [couldOOM is {}]\n", m_savedCouldOOM);
+    FTRACE(2, "~SuppressOOM() [couldOOM is {}]\n", m_savedCouldOOM);
     m_mm.m_couldOOM = m_savedCouldOOM;
   }
 
@@ -127,11 +132,8 @@ FreeNode::UninitFrom(void* addr, FreeNode* next) {
   return node;
 }
 
-inline void MemoryManager::FreeList::push(void* val, size_t size) {
-  FTRACE(4, "FreeList::push({}, {}), prev head = {}\n", val, size, head);
-  auto constexpr kMaxFreeSize = std::numeric_limits<uint32_t>::max();
-  static_assert(kMaxSmallSize <= kMaxFreeSize, "");
-  assert(size > 0 && size <= kMaxFreeSize);
+inline void MemoryManager::FreeList::push(void* val) {
+  FTRACE(4, "FreeList::push({}), prev head = {}\n", val, head);
   head = FreeNode::UninitFrom(val, head);
 }
 
@@ -281,7 +283,7 @@ inline void MemoryManager::freeSmallIndex(void* ptr, size_t index) {
 
   FTRACE(3, "freeSmallIndex({}, {}), freelist {}\n", ptr, bytes, index);
 
-  m_freelists[index].push(ptr, bytes);
+  m_freelists[index].push(ptr);
   m_stats.mmUsage -= bytes;
 
   FTRACE(3, "freeSmallIndex: {} ({} bytes)\n", ptr, bytes);
@@ -299,7 +301,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, size_t bytes) {
   auto const i = smallSize2Index(bytes);
   FTRACE(3, "freeSmallSize({}, {}), freelist {}\n", ptr, bytes, i);
 
-  m_freelists[i].push(ptr, bytes);
+  m_freelists[i].push(ptr);
   m_stats.mmUsage -= bytes;
 
   FTRACE(3, "freeSmallSize: {} ({} bytes)\n", ptr, bytes);
@@ -334,21 +336,20 @@ void MemoryManager::objFreeIndex(void* ptr, size_t index) {
 ///////////////////////////////////////////////////////////////////////////////
 
 inline int64_t MemoryManager::getAllocated() const {
-#ifdef USE_JEMALLOC
-  assert(m_allocated);
-  return *m_allocated;
-#else
+  if (use_jemalloc) {
+    assert(m_allocated);
+    return *m_allocated;
+  }
   return 0;
-#endif
 }
 
 inline int64_t MemoryManager::getDeallocated() const {
-#ifdef USE_JEMALLOC
-  assert(m_deallocated);
-  return *m_deallocated;
-#else
-  return 0;
-#endif
+  if (use_jemalloc) {
+    assert(m_deallocated);
+    return *m_deallocated;
+  } else {
+    return 0;
+  }
 }
 
 inline int64_t MemoryManager::currentUsage() const {
@@ -362,20 +363,17 @@ inline MemoryUsageStats MemoryManager::getStats() {
 
 inline MemoryUsageStats MemoryManager::getStatsCopy() {
   auto copy = m_stats;
-  refreshStatsImpl<false>(copy);
+  refreshStatsImpl(copy);
   return copy;
-}
-
-inline void MemoryManager::refreshStats() {
-  refreshStatsImpl<true>(m_stats);
 }
 
 inline bool MemoryManager::startStatsInterval() {
   auto ret = !m_statsIntervalActive;
-  refreshStats();
+  // Fetch current stats without changing m_stats or triggering OOM.
+  auto stats = getStatsCopy();
   // For the reasons stated below in refreshStatsImpl, usage can potentially be
   // negative. Make sure that doesn't occur here.
-  m_stats.peakIntervalUsage = std::max<int64_t>(0, m_stats.usage());
+  m_stats.peakIntervalUsage = std::max<int64_t>(0, stats.usage());
   m_stats.peakIntervalCap = m_stats.capacity;
   assert(m_stats.peakIntervalCap >= 0);
   m_statsIntervalActive = true;
@@ -390,10 +388,17 @@ inline bool MemoryManager::stopStatsInterval() {
   return ret;
 }
 
+inline int64_t MemoryManager::getMemoryLimit() const {
+  return m_usageLimit;
+}
+
 inline bool MemoryManager::preAllocOOM(int64_t size) {
-  if (m_couldOOM && m_stats.usage() + size > m_stats.limit) {
-    refreshStatsHelperExceeded();
-    return true;
+  if (m_couldOOM) {
+    auto stats = getStatsCopy();
+    if (stats.usage() + size > m_usageLimit) {
+      refreshStatsHelperExceeded();
+      return true;
+    }
   }
   return false;
 }
@@ -403,8 +408,6 @@ inline void MemoryManager::forceOOM() {
     refreshStatsHelperExceeded();
   }
 }
-
-inline void MemoryManager::resetExternalStats() { resetStatsImpl(false); }
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -416,7 +419,7 @@ inline bool MemoryManager::contains(void* p) const {
   return m_heap.contains(p);
 }
 
-inline bool MemoryManager::checkContains(void* p) const {
+inline bool MemoryManager::checkContains(DEBUG_ONLY void* p) const {
   // Be conservative if the small-block allocator is disabled.
   assert(RuntimeOption::DisableSmallAllocator || m_bypassSlabAlloc ||
          contains(p));

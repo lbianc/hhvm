@@ -37,8 +37,28 @@ let rewrite_return_type return_type =
  * A void function becomes a unit function; if the annotation is missing it is
  * added.
  *)
-let rewrite_header_node ({ function_colon; function_type; _; } as node) =
+let rewrite_function_header_return_type
+    ({ function_colon; function_type; _; } as node) =
   let function_type = rewrite_return_type function_type in
   let function_colon =
     if is_missing function_colon then colon_syntax else function_colon in
   { node with function_type; function_colon; }
+
+(* TODO: We might consider making anonymous function expressions have the same
+structure as a nominal function, with a header production. *)
+let rewrite_anon_function_return_type
+    ({ anonymous_colon; anonymous_type; _; } as node) =
+  let anonymous_type = rewrite_return_type anonymous_type in
+  let anonymous_colon =
+    if is_missing anonymous_colon then colon_syntax else anonymous_colon in
+  { node with anonymous_type; anonymous_colon; }
+
+(* TODO: We might consider making the "colon ; return-type ;" pattern into its
+own parse tree node, since it crops up in a lot of places. *)
+(* TODO: If the lambda return type is missing, could we just keep it missing? *)
+let rewrite_lambda_return_type
+    ({ lambda_colon; lambda_type; _; } as node) =
+  let lambda_type = rewrite_return_type lambda_type in
+  let lambda_colon =
+    if is_missing lambda_colon then colon_syntax else lambda_colon in
+  { node with lambda_type; lambda_colon; }

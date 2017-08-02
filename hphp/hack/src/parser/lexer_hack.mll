@@ -302,10 +302,14 @@ let ctag = '<' '/' (alphanumeric | ':' | '-')+ '>'
 let lvar = ['$']+ varname
 let ws = [' ' '\t' '\r' '\x0c']
 let hex = digit | ['a'-'f''A'-'F']
-let hex_number = '0' 'x' hex+
-let bin_number = '0' 'b' ['0'-'1']+
-let decimal_number = '0' | ['1'-'9'] digit*
-let octal_number = '0' ['0'-'7']+
+let hex_with_underscore = '_' hex+
+let hex_number = '0' 'x' hex+ hex_with_underscore*
+let bin_with_underscore = '_' ['0'-'1']+
+let bin_number = '0' 'b' ['0'-'1']+ bin_with_underscore*
+let decimal_with_underscore = '_' digit+
+let decimal_number = '0' | (['1'-'9'] digit* decimal_with_underscore*)
+let octal_with_underscore = '_' ['0'-'7']+
+let octal_number = '0' ['0'-'7']+ octal_with_underscore*
 let int = decimal_number | hex_number | bin_number | octal_number
 let float =
   (digit* ('.' digit+) ((('e'|'E') ('+'?|'-') digit+))?) |
@@ -573,6 +577,15 @@ and gt_or_comma file = parse
   | eof                { Terror }
   | ws+                { gt_or_comma file lexbuf }
   | '\n'               { Lexing.new_line lexbuf; gt_or_comma file lexbuf }
+  | fixme_start        { let fixme_pos = Pos.make file lexbuf in
+                         let fixme = fixme_state0 file lexbuf in
+                         let end_fixme_pos = Pos.make file lexbuf in
+                         let tok = gt_or_comma file lexbuf in
+                         (match fixme with
+                           | Some err_nbr -> add_fixme err_nbr (Pos.btw fixme_pos end_fixme_pos) (Pos.make file lexbuf)
+                           | None -> ());
+                         tok
+                       }
   | "/*"               { ignore (comment (Buffer.create 256) file lexbuf);
                          gt_or_comma file lexbuf
                        }
