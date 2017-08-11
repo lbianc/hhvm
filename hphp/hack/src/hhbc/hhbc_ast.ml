@@ -234,6 +234,8 @@ type instruct_operator =
   | CastVec
   | CastDict
   | CastKeyset
+  | CastVArray
+  | CastDArray
   | InstanceOf
   | InstanceOfD of class_id
   | Print
@@ -561,6 +563,7 @@ type instruct =
   | ILabel of Label.t
   | ITry of instruct_try
   | IComment of string
+  | ISrcLoc of Pos.t
   | IAsync of async_functions
   | IGenerator of gen_creation_execution
   | IGenDelegation of gen_delegation

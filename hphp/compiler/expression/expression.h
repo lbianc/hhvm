@@ -34,7 +34,6 @@
 #define EXPRESSION_CONSTRUCTOR_DERIVED_PARAMETER_VALUES                 \
   scope, r
 #define DECLARE_BASE_EXPRESSION_VIRTUAL_FUNCTIONS                       \
-  void analyzeProgram(AnalysisResultPtr ar) override;                   \
   ExpressionPtr clone() override;                                       \
   void outputPHP(CodeGenerator &cg, AnalysisResultPtr ar) override;
 #define DECLARE_EXPRESSION_VIRTUAL_FUNCTIONS                            \
@@ -71,7 +70,6 @@ public:
     RValue       = 0,
     LValue       = 1,            // assignment exp; foreach stmt
     Declaration  = LValue | 2,   // global or static stmt, or delayed var
-    NoLValueWrapper = 4,         // ok to not have lval() wrapper
     RefValue  = 8,               // &exp
     // Unused       0x10,
     ObjectContext = 0x20,        // $obj->
@@ -113,7 +111,7 @@ public:
   };
 
 protected:
-  Expression(EXPRESSION_CONSTRUCTOR_BASE_PARAMETERS);
+  explicit Expression(EXPRESSION_CONSTRUCTOR_BASE_PARAMETERS);
 
 public:
 
@@ -191,8 +189,6 @@ public:
   virtual void addElement(ExpressionPtr exp);
   virtual void insertElement(ExpressionPtr exp, int index = 0);
 
-  void analyzeProgram(AnalysisResultPtr ar) override;
-
   /**
    * Called before type inference.
    */
@@ -208,9 +204,6 @@ public:
                                             BlockScopePtr scope,
                                             const Location::Range& r,
                                             const Variant &value);
-
-  static bool CheckNeededRHS(ExpressionPtr value);
-  static bool CheckNeeded(ExpressionPtr variable, ExpressionPtr value);
 
   bool isUnused() const { return m_unused; }
   void setUnused(bool u) { m_unused = u; }

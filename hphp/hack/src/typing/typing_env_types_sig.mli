@@ -52,6 +52,8 @@ type local_env = {
 
 type env = {
   pos     : Pos.t      ;
+  outer_pos : Pos.t    ;
+  outer_reason  : Typing_reason.ureason;
   tenv    : locl ty IMap.t ;
   subst   : int IMap.t ;
   lenv    : local_env  ;
@@ -80,6 +82,6 @@ and genv = {
 (* An anonymous function
  * the environment + the fun parameters + the captured identifiers
 *)
-and anon = env -> locl fun_params -> env * locl ty
+and anon = env -> locl fun_params -> env * Tast.expr * locl ty
 and tfun = env -> env * bool
 end

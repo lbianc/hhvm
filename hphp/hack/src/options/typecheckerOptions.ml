@@ -26,6 +26,8 @@ let experimental_optional_shape_field =
 let experimental_darray_and_varray =
   GlobalOptions.tco_experimental_darray_and_varray
 let experimental_goto = GlobalOptions.tco_experimental_goto
+let experimental_tconst_on_generics =
+  GlobalOptions.tco_experimental_tconst_on_generics
 let experimental_shape_idx_relaxed =
   GlobalOptions.tco_experimental_shape_idx_relaxed
 let experimental_disable_shape_and_tuple_arrays =
@@ -36,5 +38,7 @@ let experimental_stronger_shape_idx_ret =
   GlobalOptions.tco_experimental_stronger_shape_idx_ret
 let experimental_annotate_function_calls =
   GlobalOptions.tco_experimental_annotate_function_calls
+let experimental_unresolved_fix =
+  GlobalOptions.tco_experimental_unresolved_fix
 let experimental_all = GlobalOptions.tco_experimental_all
 let migration_flags_all = GlobalOptions.tco_migration_flags_all

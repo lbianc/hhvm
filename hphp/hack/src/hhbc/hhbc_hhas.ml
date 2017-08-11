@@ -37,6 +37,11 @@ let string_of_function_num id =
   string_of_int id
 let string_of_typedef_num id =
   string_of_int id
+let string_of_pos pos =
+  let line_begin, line_end, col_begin, col_end = Pos.info_pos_extended pos in
+  Printf.sprintf "%d:%d,%d:%d" line_begin col_begin line_end col_end
+let string_of_span (line_begin, line_end) =
+  Printf.sprintf "(%d,%d)" line_begin line_end
 
 (* Naming convention for functions below:
  *   string_of_X converts an X to a string
@@ -169,6 +174,8 @@ let string_of_operator instruction =
     | CastVec -> "CastVec"
     | CastDict -> "CastDict"
     | CastKeyset -> "CastKeyset"
+    | CastVArray -> "CastVArray"
+    | CastDArray -> "CastDArray"
     | InstanceOf -> "InstanceOf"
     | InstanceOfD id -> sep ["InstanceOfD"; string_of_class_id id]
     | Print -> "Print"
@@ -672,6 +679,7 @@ let string_of_instruction instruction =
   | IFinal               i -> string_of_final i
   | ITry                 i -> string_of_try i
   | IComment             s -> "# " ^ s
+  | ISrcLoc              p -> ".srcloc " ^ string_of_pos p ^ ";"
   | IAsync               i -> string_of_async i
   | IGenerator           i -> string_of_generator i
   | IIncludeEvalDefine   i -> string_of_include_eval_define i
@@ -705,7 +713,7 @@ let add_instruction_list buffer indent instructions =
     | [] -> ()
     | ISpecialFlow _ :: t ->
       let fatal =
-        Emit_fatal.emit_fatal_runtime "Cannot break/continue 1 level"
+        Emit_fatal.emit_fatal_runtime Pos.none "Cannot break/continue 1 level"
       in
       let fatal = Instruction_sequence.instr_seq_to_list fatal in
       aux fatal indent;
@@ -1046,9 +1054,9 @@ let string_of_params ps =
 
 let add_indent buf indent = B.add_string buf (String.make indent ' ')
 let add_indented_line buf indent str =
+  B.add_string buf "\n";
   add_indent buf indent;
-  B.add_string buf str;
-  B.add_string buf "\n"
+  B.add_string buf str
 
 let add_num_cls_ref_slots buf indent num_cls_ref_slots =
   if num_cls_ref_slots <> 0
@@ -1072,21 +1080,22 @@ let add_static_values buf indent lst =
   Core.List.iter lst
     (fun label -> add_static_default_value_option buf indent label)
 
-let add_doc buf doc_comment =
+let add_doc buf indent doc_comment =
   match doc_comment with
   | Some cmt ->
-    B.add_string buf @@
-      Printf.sprintf "\n  .doc \"\"\"%s\"\"\";" (Php_escaping.escape cmt)
+    add_indented_line buf indent @@
+      Printf.sprintf ".doc \"\"\"%s\"\"\";" (Php_escaping.escape cmt)
   | None -> ()
 
 let add_body buf indent body =
+  add_doc buf indent (Hhas_body.doc_comment body);
   add_num_iters buf indent (Hhas_body.num_iters body);
   if Hhas_body.is_memoize_wrapper body
   then add_indented_line buf indent ".ismemoizewrapper;";
   add_num_cls_ref_slots buf indent (Hhas_body.num_cls_ref_slots body);
   add_decl_vars buf indent (Hhas_body.decl_vars body);
   add_static_values buf indent (Hhas_body.static_inits body);
-  add_doc buf (Hhas_body.doc_comment body);
+  B.add_string buf "\n";
   add_instruction_list buf indent
     (Instruction_sequence.instr_seq_to_list (Hhas_body.instrs body))
 
@@ -1101,6 +1110,7 @@ let function_attributes f =
 let add_fun_def buf fun_def =
   let function_name = Hhas_function.name fun_def in
   let function_body = Hhas_function.body fun_def in
+  let function_span = Hhas_function.span fun_def in
   let function_return_type = Hhas_body.return_type function_body in
   let function_params = Hhas_body.params function_body in
   let function_is_async = Hhas_function.is_async fun_def in
@@ -1108,13 +1118,15 @@ let add_fun_def buf fun_def =
   let function_is_pair_generator = Hhas_function.is_pair_generator fun_def in
   B.add_string buf "\n.function ";
   B.add_string buf (function_attributes fun_def);
+  if Hhbc_options.source_mapping !Hhbc_options.compiler_options
+  then B.add_string buf (string_of_span function_span ^ " ");
   B.add_string buf (string_of_type_info_option function_return_type);
   B.add_string buf (Hhbc_id.Function.to_raw_string function_name);
   B.add_string buf (string_of_params function_params);
   if function_is_generator then B.add_string buf " isGenerator";
   if function_is_async then B.add_string buf " isAsync";
   if function_is_pair_generator then B.add_string buf " isPairGenerator";
-  B.add_string buf " {\n";
+  B.add_string buf " {";
   add_body buf 2 function_body;
   B.add_string buf "}\n"
 
@@ -1137,12 +1149,15 @@ let add_method_def buf method_def =
   let method_body = Hhas_method.body method_def in
   let method_return_type = Hhas_body.return_type method_body in
   let method_params = Hhas_body.params method_body in
+  let method_span = Hhas_method.span method_def in
   let method_is_async = Hhas_method.is_async method_def in
   let method_is_generator = Hhas_method.is_generator method_def in
   let method_is_pair_generator = Hhas_method.is_pair_generator method_def in
   let method_is_closure_body = Hhas_method.is_closure_body method_def in
   B.add_string buf "\n  .method ";
   B.add_string buf (method_attributes method_def);
+  if Hhbc_options.source_mapping !Hhbc_options.compiler_options
+  then B.add_string buf (string_of_span method_span ^ " ");
   B.add_string buf (string_of_type_info_option method_return_type);
   B.add_string buf (Hhbc_id.Method.to_raw_string method_name);
   B.add_string buf (string_of_params method_params);
@@ -1150,7 +1165,7 @@ let add_method_def buf method_def =
   if method_is_async then B.add_string buf " isAsync";
   if method_is_pair_generator then B.add_string buf " isPairGenerator";
   if method_is_closure_body then B.add_string buf " isClosureBody";
-  B.add_string buf " {\n";
+  B.add_string buf " {";
   add_body buf 4 method_body;
   B.add_string buf "  }"
 
@@ -1320,12 +1335,15 @@ let add_class_def buf class_def =
   B.add_string buf "\n.class ";
   B.add_string buf (class_special_attributes class_def);
   B.add_string buf (Hhbc_id.Class.to_raw_string class_name);
+  (*if Hhbc_options.source_mapping !Hhbc_options.compiler_options
+  then B.add_string buf (" " ^ string_of_span (Hhas_class.span class_def));
+  *)
   add_extends buf (Hhas_class.base class_def);
   add_implements buf (Hhas_class.implements class_def);
   B.add_string buf " {";
+  add_doc buf 2 (Hhas_class.doc_comment class_def);
   add_uses buf class_def;
   add_enum_ty buf class_def;
-  add_doc buf (Hhas_class.doc_comment class_def);
   List.iter (add_constant buf) (Hhas_class.constants class_def);
   List.iter (add_type_constant buf) (Hhas_class.type_constants class_def);
   List.iter (add_requirement buf) (Hhas_class.requirements class_def);
@@ -1347,7 +1365,7 @@ let add_data_region buf adata =
   B.add_string buf "\n"
 
 let add_top_level buf body =
-  B.add_string buf ".main {\n";
+  B.add_string buf ".main {";
   add_body buf 2 body;
   B.add_string buf "}\n"
 

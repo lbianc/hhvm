@@ -30,6 +30,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include <tbb/concurrent_hash_map.h>
+#include <tbb/concurrent_unordered_map.h>
 
 #include <folly/Format.h>
 #include <folly/Hash.h>
@@ -113,8 +114,6 @@ template<class T> using ISStringToOneT =
  * and the values are some kind of borrowed_ptr.
  */
 template<class T> using ISStringToOne = ISStringToOneT<borrowed_ptr<T>>;
-
-using G = std::lock_guard<std::mutex>;
 
 template<class MultiMap>
 folly::Range<typename MultiMap::const_iterator>
@@ -262,12 +261,6 @@ struct FuncInfoValue {
   uint32_t returnRefinments{0};
 
   /*
-   * Whether $this can be null or not on entry to the method. Only applies
-   * to method and it's always false for functions.
-   */
-  bool thisAvailable = false;
-
-  /*
    * Call-context sensitive return types are cached here.  This is not
    * an optimization.
    *
@@ -286,9 +279,6 @@ struct FuncInfoValue {
    */
   CompactVector<Type> localStaticTypes;
 };
-
-using FuncInfoMap = std::unordered_map<borrowed_ptr<const php::Func>,
-                                       FuncInfoValue>;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -334,7 +324,7 @@ struct FuncFamily {
 
 //////////////////////////////////////////////////////////////////////
 
-struct FuncInfo : FuncInfoMap::value_type {};
+struct FuncInfo : std::pair<borrowed_ptr<const php::Func>, FuncInfoValue> {};
 
 /*
  * Known information about a particular possible instantiation of a
@@ -655,8 +645,10 @@ bool Func::mightReadCallerFrame() const {
   return match<bool>(
     val,
     // Only non-method builtins can read the caller's frame and builtins are
-    // always uniquely resolvable.
-    [&](FuncName /*s*/) { return false; },
+    // always uniquely resolvable in repo mode.
+    [&](FuncName /*s*/) {
+      return !RuntimeOption::RepoAuthoritative;
+    },
     [&](MethodName /*s*/) { return false; },
     [&](borrowed_ptr<FuncInfo> fi) {
       return fi->first->attrs & AttrReadsCallerFrame;
@@ -673,8 +665,10 @@ bool Func::mightWriteCallerFrame() const {
   return match<bool>(
     val,
     // Only non-method builtins can write to the caller's frame and builtins are
-    // always uniquely resolvable.
-    [&](FuncName /*s*/) { return false; },
+    // always uniquely resolvable in repo mode.
+    [&](FuncName /*s*/) {
+      return !RuntimeOption::RepoAuthoritative;
+    },
     [&](MethodName /*s*/) { return false; },
     [&](borrowed_ptr<FuncInfo> fi) {
       return fi->first->attrs & AttrWritesCallerFrame;
@@ -776,8 +770,7 @@ struct IndexData {
   std::vector<std::unique_ptr<ClassInfo>>  allClassInfos;
   std::vector<std::unique_ptr<FuncFamily>> funcFamilies;
 
-  std::mutex funcInfoLock;
-  FuncInfoMap funcInfo;
+  std::vector<FuncInfo> funcInfo;
 
   // Private instance and static property types are stored separately
   // from ClassInfo, because you don't need to resolve a class to get
@@ -839,22 +832,21 @@ void add_dependency(IndexData& data,
   current = current | newMask;
 }
 
-// Caller must ensure we are synchronized (either hold funcInfoLock or
-// be in a single threaded situation).
 borrowed_ptr<FuncInfo> create_func_info(IndexData& data,
                                         borrowed_ptr<const php::Func> f) {
-  auto val = data.funcInfo.emplace(f, FuncInfoValue{});
-  auto& ret = static_cast<FuncInfo&>(*val.first);
-  if (val.second) {
+  auto fi = &data.funcInfo[f->idx];
+  if (UNLIKELY(fi->first == nullptr)) {
     if (f->nativeInfo) {
       // We'd infer this anyway when we look at the bytecode body
       // (NativeImpl) for the HNI function, but just initializing it
       // here saves on whole-program iterations.
-      ret.second.returnTy = native_function_return_type(f);
+      fi->second.returnTy = native_function_return_type(f);
     }
-    ret.second.thisAvailable = false;
+    fi->first = f;
   }
-  return &ret;
+
+  assert(fi->first == f);
+  return fi;
 }
 
 void find_deps(IndexData& data,
@@ -1079,6 +1071,10 @@ void add_unit_to_index(IndexData& index, const php::Unit& unit) {
         cur <<= 1;
       }
       if (anyByRef) {
+        // Multiple methods with the same name will be combined in
+        // the same cell, thus we use |=. This only makes sense in
+        // WholeProgram mode since we use this field to check that no functions
+        // uses its n-th parameter byref, which requires global knowledge.
         index.method_ref_params_by_name[m->name] |= refs;
       }
       if (m->attrs & AttrInterceptable) {
@@ -1865,6 +1861,14 @@ PrepKind func_param_prep(borrowed_ptr<const php::Func> func,
 
 template<class PossibleFuncRange>
 PrepKind prep_kind_from_set(PossibleFuncRange range, uint32_t paramId) {
+
+  /*
+   * In sinlge-unit mode, the range is not complete. Without konwing all
+   * possible resolutions, HHBBC cannot deduce anything about by-ref vs by-val.
+   * So the caller should make sure not calling this in single-unit mode.
+   */
+  assert(RuntimeOption::RepoAuthoritative);
+
   if (begin(range) == end(range)) {
     /*
      * We can assume it's by value, because either we're calling a function
@@ -1972,6 +1976,8 @@ Index::Index(borrowed_ptr<php::Program> program)
   : m_data(std::make_unique<IndexData>())
 {
   trace_time tracer("create index");
+
+  m_data->funcInfo.resize(program->nextFuncId);
 
   m_data->arrTableBuilder.reset(new ArrayTypeTable::Builder());
 
@@ -2773,15 +2779,16 @@ Index::lookup_closure_use_vars(borrowed_ptr<const php::Func> func) const {
 }
 
 Type Index::lookup_return_type_raw(borrowed_ptr<const php::Func> f) const {
-  auto it = m_data->funcInfo.find(f);
-  if (it != end(m_data->funcInfo)) return it->second.returnTy;
+  auto it = &m_data->funcInfo[f->idx];
+  if (it->first) {
+    assertx(it->first == f);
+    return it->second.returnTy;
+  }
   return TInitGen;
 }
 
 bool Index::lookup_this_available(borrowed_ptr<const php::Func> f) const {
-  G g(m_data->funcInfoLock);
-  auto it = m_data->funcInfo.find(f);
-  return it != end(m_data->funcInfo) ? it->second.thisAvailable : false;
+  return (f->attrs & AttrRequiresThis) && !f->isClosureBody;
 }
 
 PrepKind Index::lookup_param_prep(Context /*ctx*/, res::Func rfunc,
@@ -2789,9 +2796,11 @@ PrepKind Index::lookup_param_prep(Context /*ctx*/, res::Func rfunc,
   return match<PrepKind>(
     rfunc.val,
     [&] (res::Func::FuncName s) {
+      if (!RuntimeOption::RepoAuthoritative) return PrepKind::Unknown;
       return prep_kind_from_set(find_range(m_data->funcs, s.name), paramId);
     },
     [&] (res::Func::MethodName s) {
+      if (!RuntimeOption::RepoAuthoritative) return PrepKind::Unknown;
       auto const it = m_data->method_ref_params_by_name.find(s.name);
       if (it == end(m_data->method_ref_params_by_name)) {
         // There was no entry, so no method by this name takes a parameter
@@ -2809,8 +2818,9 @@ PrepKind Index::lookup_param_prep(Context /*ctx*/, res::Func rfunc,
       );
       /*
        * If we think it's supposed to be PrepKind::Ref, we still can't be sure
-       * unless we go through some effort to guarantee that it can't be going to
-       * an __call function magically (which will never take anything by ref).
+       * unless we go through some effort to guarantee that it can't be going
+       * to an __call function magically (which will never take anything by
+       * ref).
        */
       return kind == PrepKind::Ref ? PrepKind::Unknown : kind;
     },
@@ -2818,6 +2828,7 @@ PrepKind Index::lookup_param_prep(Context /*ctx*/, res::Func rfunc,
       return func_param_prep(finfo->first, paramId);
     },
     [&] (borrowed_ptr<FuncFamily> fam) {
+      assert(RuntimeOption::RepoAuthoritative);
       return prep_kind_from_set(fam->possibleFuncs, paramId);
     }
   );
@@ -3188,7 +3199,6 @@ std::unique_ptr<ArrayTypeTable::Builder>& Index::array_table_builder() const {
 //////////////////////////////////////////////////////////////////////
 
 res::Func Index::do_resolve(borrowed_ptr<const php::Func> f) const {
-  G g(m_data->funcInfoLock);
   auto const finfo = create_func_info(*m_data, f);
   return res::Func { this, finfo };
 };

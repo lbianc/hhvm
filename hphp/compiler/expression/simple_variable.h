@@ -31,6 +31,7 @@ struct SimpleVariable : Expression {
                  const std::string &docComment = "");
 
   DECLARE_BASE_EXPRESSION_VIRTUAL_FUNCTIONS;
+  void analyzeProgram(AnalysisResultPtr ar) override;
   int getLocalEffects() const override;
   bool isThis() const override { return m_this;}
   bool isSuperGlobal() const { return m_superGlobal || m_globals; }
@@ -47,7 +48,6 @@ struct SimpleVariable : Expression {
   Symbol *getSymbol() const { return m_sym; }
 
   bool isHidden() const;
-  bool checkUnused() const;
   bool getAlwaysStash() const { return m_alwaysStash; }
   void setAlwaysStash() { m_alwaysStash = true; }
   void updateSymbol(SimpleVariablePtr src);

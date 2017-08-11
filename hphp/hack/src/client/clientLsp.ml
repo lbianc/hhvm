@@ -20,6 +20,21 @@ type env = {
   use_ffp_autocomplete: bool; (* Flag to turn on the (experimental) FFP based autocomplete *)
 }
 
+(* This LSP server uses progress to indicate its lazy initialization: the     *)
+(* lifetime of each progress indicator starts with do_initialize and ends     *)
+(* when the hello message is received from hh_server. That will happen upon   *)
+(* first initialization, and also in case the persistent connection is lost   *)
+(* it will happen when it's subsequently regained. In any case, the lifetimes *)
+(* of our progress notifications are non-overlapping, so we can use a single  *)
+(* constant id for all of them.                                               *)
+let progress_id_initialize = 1
+(* Progress and action-required is also used to report hh_server's typecheck  *)
+(* status from ServerCommandTypes.busy_status: whether it's ready, or doing   *)
+(* a local typecheck, or doing a global typecheck, etc. Again the lifetimes   *)
+(* of these are non-overlapping so again we use constant ids.                 *)
+let progress_id_server_status = 2
+let action_id_server_status = 3
+
 (************************************************************************)
 (** Conversions - ad-hoc ones written as needed them, not systematic   **)
 (************************************************************************)
@@ -172,7 +187,6 @@ module In_init_env = struct
   type t = {
     conn: server_conn;
     start_time : float;
-    last_progress_report_time : float;
     busy_dialog_cancel: (unit -> unit) option; (* "hack server is busy" dialog *)
     file_edits : ClientMessageQueue.client_message ImmQueue.t;
     tail_env: Tail.env;
@@ -250,6 +264,7 @@ let event_to_string (event: event) : string =
   match event with
   | Server_hello -> "Server hello"
   | Server_message ServerCommandTypes.DIAGNOSTIC _ -> "Server DIAGNOSTIC"
+  | Server_message ServerCommandTypes.BUSY_STATUS _ -> "Server BUSY_STATUS"
   | Server_message ServerCommandTypes.NEW_CLIENT_CONNECTED -> "Server NEW_CLIENT_CONNECTED"
   | Server_message ServerCommandTypes.FATAL_EXCEPTION _ -> "Server FATAL_EXCEPTION"
   | Client_message c -> Printf.sprintf "Client %s %s" (kind_to_string c.kind) c.method_
@@ -275,6 +290,18 @@ let get_root () : Path.t option =
       | None -> params.rootPath
     in
     Some (ClientArgsUtils.get_root path)
+
+
+let supports_progress () : bool =
+  let open Lsp.Initialize in
+  Option.value_map !initialize_params
+    ~default:false ~f:(fun params -> params.client_capabilities.window.progress)
+
+
+let supports_actionRequired () : bool =
+  let open Lsp.Initialize in
+  Option.value_map !initialize_params
+    ~default:false ~f:(fun params -> params.client_capabilities.window.actionRequired)
 
 
 let rpc
@@ -587,13 +614,37 @@ let do_definition (conn: server_conn) (params: Definition.params)
   let (file, line, column) = lsp_file_position_to_hack params in
   let command = ServerCommandTypes.IDENTIFY_FUNCTION (ServerUtils.FileName file, line, column) in
   let results = rpc conn command in
+  (* What's it like when we return multiple definitions? For instance, if you ask *)
+  (* for the definition of "new C()" then we've now got the definition of the     *)
+  (* class "\C" and also of the constructor "\\C::__construct". I think that      *)
+  (* users would be happier to only have the definition of the constructor, so    *)
+  (* as to jump straight to it without the fuss of clicking to select which one.  *)
+  (* That indeed is what Typescript does -- it only gives the constructor.        *)
+  (* (VSCode displays multiple definitions with a peek view of them all;          *)
+  (*  Atom displays them with a small popup showing just file+line of each).      *)
+  (* There's one subtlety. If you declare a base class "B" with a constructor,    *)
+  (* and a derived class "C" without a constructor, and click on "new C()", then  *)
+  (* both Hack and Typescript will take you to the constructor of B. As desired!  *)
+  (* Conclusion: given a class+method, we'll return only the method.              *)
+  let result_is (kind: SymbolDefinition.kind) (result: IdentifySymbolService.single_result): bool =
+    match result with
+    | (_, None) -> false
+    | (_, Some definition) -> definition.SymbolDefinition.kind = kind
+  in
+  let has_class = List.exists results ~f:(result_is SymbolDefinition.Class) in
+  let has_method = List.exists results ~f:(result_is SymbolDefinition.Method) in
+  let filtered_results = if has_class && has_method then
+    List.filter results ~f:(result_is SymbolDefinition.Method)
+  else
+    results
+  in
   let rec hack_to_lsp = function
     | [] -> []
     | (_occurrence, None) :: l -> hack_to_lsp l
     | (_occurrence, Some definition) :: l ->
       (hack_symbol_definition_to_lsp_location definition ~default_path:file) :: (hack_to_lsp l)
   in
-  hack_to_lsp results
+  hack_to_lsp filtered_results
 
 let do_completion_ffp (conn: server_conn) (params: Completion.params) : Completion.result =
   let open AutocompleteTypes in
@@ -968,6 +1019,21 @@ let do_documentFormatting
   do_formatting_common conn action
 
 
+(* do_server_busy: controls the progress / action-required indicator          *)
+let do_server_busy (status: ServerCommandTypes.busy_status) : unit =
+let open ServerCommandTypes in
+  let (progress, action) = match status with
+    | Needs_local_typecheck -> (Some "Hack: preparing to check edits", None)
+    | Doing_local_typecheck -> (Some "Hack: checking edits", None)
+    | Done_local_typecheck -> (None, Some "Hack: save any file to do a whole-program check")
+    | Doing_global_typecheck -> (Some "Hack: checking entire project", None)
+    | Done_global_typecheck -> (None, None)
+  in
+  print_progress progress_id_server_status progress |> notify stdout "window/progress";
+  print_actionRequired action_id_server_status action |> notify stdout "window/actionRequired";
+  ()
+
+
 (* do_diagnostics: sends notifications for all reported diagnostics; also     *)
 (* returns an updated "files_with_diagnostics" set of all files for which     *)
 (* our client currently has non-empty diagnostic reports.                     *)
@@ -1024,28 +1090,34 @@ let do_diagnostics_flush
 
 let report_progress
     (ienv: In_init_env.t)
-  : In_init_env.t =
+  : unit =
   (* Our goal behind progress reporting is to let the user know when things   *)
   (* won't be instantaneous, and to show that things are working as expected. *)
-  (* We eagerly show a "please wait" dialog box after a few seconds into      *)
-  (* progress reporting. And we'll log to the console every 10 seconds. When  *)
-  (* it completes, if any progress has so far been shown to the user, then    *)
-  (* we'll log completion to the console. Except if it took a long time, like *)
-  (* 60 seconds or more, we'll show completion with a dialog box instead.     *)
-  (*                                                                          *)
+  (* We already eagerly showed a "please wait" dialog box as soon as we gave  *)
+  (* do_initialize learned that it hadn't gotten a "hello" back immediately   *)
+  (* from the server. This report_progress is called once a second and will   *)
+  (* update the busy-tooltip. And once we do get the "hello", either close    *)
+  (* the busy indicator (if the client supports one), or log to the console   *)
+  (* (if the client doesn't), or show a completion dialog box (if we'd taken  *)
+  (* 30 seconds or more).                                                     *)
   let open In_init_env in
-  let time = Unix.time () in
-  let ienv = ref ienv in
-
-  let delay_in_secs = int_of_float (time -. !ienv.start_time) in
-  if (delay_in_secs mod 10 = 0 && time -. !ienv.last_progress_report_time >= 5.0) then begin
-    ienv := {!ienv with last_progress_report_time = time};
-    let _load_state_not_found, tail_msg =
-      ClientConnect.open_and_get_tail_msg !ienv.start_time !ienv.tail_env in
-    let msg = Printf.sprintf "Still waiting after %i seconds: %s..." delay_in_secs tail_msg in
-    print_logMessage MessageType.LogMessage msg |> notify stdout "window/logMessage"
-  end;
-  !ienv
+  if supports_progress () then begin
+    let time = Unix.time () in
+    let delay_in_secs = int_of_float (time -. ienv.start_time) in
+    (* TODO: better to report time that hh_server has spent initializing *)
+    let load_state_not_found, tail_msg =
+      ClientConnect.open_and_get_tail_msg ienv.start_time ienv.tail_env in
+    let msg = if load_state_not_found then
+      Printf.sprintf
+        "hh_server initializing (load-state not found - will take a while): %s [%i seconds]"
+        tail_msg delay_in_secs
+    else
+      Printf.sprintf
+        "hh_server initializing: %s [%i seconds]"
+        tail_msg delay_in_secs
+    in
+    print_progress progress_id_initialize (Some msg) |> notify stdout "window/progress"
+  end
 
 
 let report_progress_end
@@ -1062,14 +1134,14 @@ let report_progress_end
   in
   (* dismiss the "busy..." dialog if present *)
   Option.call ~f:ienv.busy_dialog_cancel ();
+  (* dismiss the "hh_server initializing" spinner if present *)
+  if supports_progress () then
+    print_progress progress_id_initialize None |> notify stdout "window/progress";
   (* and alert the user that hack is ready, either by console log or by dialog *)
   let time = Unix.time () in
   let seconds = int_of_float (time -. ienv.start_time) in
-  let msg = Printf.sprintf "Hack is now ready, after %i seconds." seconds in
-  if (time -. ienv.start_time < 60.0) then begin
-    print_logMessage MessageType.InfoMessage msg |> notify stdout "window/logMessage";
-    Main_loop menv
-  end else begin
+  let msg = Printf.sprintf "hh_server is now ready, after %i seconds." seconds in
+  if (time -. ienv.start_time > 30.0) then begin
     let clear_cancel_flag state = match state with
       | Main_loop menv -> Main_loop {menv with ready_dialog_cancel = None}
       | _ -> state
@@ -1079,7 +1151,11 @@ let report_progress_end
     let req = print_showMessageRequest MessageType.InfoMessage msg [] in
     let cancel = request stdout handle_result handle_error "window/showMessageRequest" req in
     Main_loop {menv with ready_dialog_cancel = Some cancel;}
-  end
+  end else if (not (supports_progress ())) then begin
+    print_logMessage MessageType.InfoMessage msg |> notify stdout "window/logMessage";
+    Main_loop menv
+  end else
+    Main_loop menv
 
 
 let do_initialize_after_hello
@@ -1246,13 +1322,16 @@ let do_initialize ()
       let handle_result ~state ~result:_ = clear_cancel_flag state in
       let handle_error ~state ~code:_ ~message:_ ~data:_ = clear_cancel_flag state in
       let req = print_showMessageRequest MessageType.InfoMessage
-          "Waiting for Hack server to be ready. See console for further details." [] in
+          "Waiting for Hack server to be ready..." [] in
       let cancel = request stdout handle_result handle_error "window/showMessageRequest" req in
+      if supports_progress () then begin
+        let progress = "hh_server initializing" in
+        print_progress progress_id_initialize (Some progress) |> notify stdout "window/progress"
+      end;
       let ienv =
         { In_init_env.
           conn = server_conn;
           start_time;
-          last_progress_report_time = start_time;
           busy_dialog_cancel = Some cancel;
           file_edits = ImmQueue.empty;
           tail_env = Tail.create_env log_file;
@@ -1387,7 +1466,7 @@ let handle_event
 
   (* idle tick while waiting for server to complete initialization *)
   | In_init ienv, Tick ->
-    state := In_init (report_progress ienv);
+    report_progress ienv;
     None
 
   (* server completes initialization *)
@@ -1497,6 +1576,11 @@ let handle_event
     let response = do_shutdown menv.conn |> print_shutdown |> respond stdout c in
     state := Post_shutdown;
     response
+
+  (* server busy status *)
+  | _, Server_message ServerCommandTypes.BUSY_STATUS status ->
+    do_server_busy status;
+    None
 
   (* textDocument/publishDiagnostics notification *)
   | Main_loop menv, Server_message ServerCommandTypes.DIAGNOSTIC (_, errors) ->

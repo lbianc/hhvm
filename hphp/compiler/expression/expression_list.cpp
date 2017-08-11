@@ -61,7 +61,6 @@ void ExpressionList::setContext(Context context) {
       if (m_exps[i]) {
         m_exps[i]->setContext(UnsetContext);
         m_exps[i]->setContext(LValue);
-        m_exps[i]->setContext(NoLValueWrapper);
       }
     }
   }
@@ -278,12 +277,6 @@ void ExpressionList::setCollectionElems() {
 ExpressionPtr &ExpressionList::operator[](int index) {
   assert(index >= 0 && index < getCount());
   return m_exps[index];
-}
-
-void ExpressionList::analyzeProgram(AnalysisResultPtr ar) {
-  for (unsigned int i = 0; i < m_exps.size(); i++) {
-    if (m_exps[i]) m_exps[i]->analyzeProgram(ar);
-  }
 }
 
 bool ExpressionList::kidUnused(int i) const {

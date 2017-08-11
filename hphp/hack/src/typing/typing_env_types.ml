@@ -53,6 +53,9 @@ type local_env = {
 
 type env = {
   pos     : Pos.t      ;
+  (* Position and reason information on entry to a subtype or unification check *)
+  outer_pos : Pos.t;
+  outer_reason : Typing_reason.ureason;
   tenv    : locl ty IMap.t ;
   subst   : int IMap.t ;
   lenv    : local_env  ;
@@ -82,7 +85,7 @@ and genv = {
 (* An anonymous function
  * the environment + the fun parameters + the captured identifiers
 *)
-and anon = env -> locl fun_params -> env * locl ty
+and anon = env -> locl fun_params -> env * Tast.expr * locl ty
 
 (* A deferred check; return true if the check should now be removed from the list *)
 and tfun = env -> env * bool

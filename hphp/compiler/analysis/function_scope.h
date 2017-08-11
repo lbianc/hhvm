@@ -113,6 +113,7 @@ struct FunctionScope : BlockScope,
   bool isParamCoerceMode() const;
   bool mayContainThis();
   bool isClosure() const;
+  bool isLambdaClosure() const;
   bool isGenerator() const { return m_generator; }
   void setGenerator(bool f) { m_generator = f; }
   bool isAsync() const { return m_async; }
@@ -146,6 +147,8 @@ struct FunctionScope : BlockScope,
   void addClonedTraitOuterScope(FunctionScopePtr scope) {
     m_clonedTraitOuterScope.push_back(scope);
   }
+
+  FunctionScopeRawPtr findClonedTraitInFile(FileScopeRawPtr fs);
 
   /**
    * Get/set original name of the function, without case being lowered.
@@ -186,7 +189,7 @@ struct FunctionScope : BlockScope,
   /**
    * Whether this function contains a usage of $this
    */
-  bool containsThis() const { return m_containsThis;}
+  bool containsThis() const { return m_containsThis; }
   void setContainsThis(bool f = true);
   bool containsBareThis() const { return m_containsBareThis; }
   bool containsRefThis() const { return m_containsBareThis & 2; }
@@ -245,10 +248,6 @@ struct FunctionScope : BlockScope,
 
   bool inPseudoMain() const override {
     return m_pseudoMain;
-  }
-
-  void setClosureVars(ExpressionListPtr closureVars) {
-    m_closureVars = closureVars;
   }
 
   void addCaller(BlockScopePtr caller, bool careAboutReturn = true);
@@ -330,7 +329,7 @@ private:
   unsigned m_persistent : 1;
   unsigned m_pseudoMain : 1;
   unsigned m_system : 1;
-  unsigned m_containsThis : 1; // contains a usage of $this?
+  unsigned m_containsThis : 1;     // contains a usage of $this?
   unsigned m_containsBareThis : 2; // $this outside object-context,
                                    // 2 if in reference context
   unsigned m_generator : 1;
@@ -343,8 +342,6 @@ private:
   int m_redeclaring; // multiple definition of the same function
   int m_inlineIndex;
   FunctionOptPtr m_optFunction;
-  ExpressionListPtr m_closureVars;
-  ExpressionListPtr m_closureValues;
   std::list<FunctionScopeRawPtr> m_clonedTraitOuterScope;
 
   // holds the fact that defining this function is a fatal error

@@ -40,6 +40,7 @@ struct UnitChecker {
   bool checkBytecode();
   bool checkMetadata();
   bool checkStructor(Func* structor, PreClass* preclass);
+  bool checkClosure(PreClass* closure);
 
  private:
   template<class... Args>
@@ -57,6 +58,8 @@ struct UnitChecker {
   const Unit* m_unit;
   ErrorMode m_errmode;
 };
+
+const StaticString s_invoke("__invoke");
 
 bool checkUnit(const Unit* unit, ErrorMode mode) {
   if (mode == kVerbose) {
@@ -153,6 +156,30 @@ bool UnitChecker::checkStructor(Func* structor, PreClass* preclass) {
   return ok;
 }
 
+bool UnitChecker::checkClosure(PreClass* cls){
+  bool ok = true;
+  if (!(cls->attrs() & AttrUnique)) {
+    error("Closure %s must be uniquely named\n", cls->name()->data());
+    ok = false;
+  }
+
+  if (cls->allMethods().size() != 1 || !cls->hasMethod(s_invoke.get()) ||
+      !cls->lookupMethod(s_invoke.get())->isPublic()) {
+    error("Closure %s must have a single public method named __invoke\n",
+          cls->name()->data());
+    ok = false;
+  }
+
+  if (cls->hasMethod(s_invoke.get()) &&
+      !(cls->lookupMethod(s_invoke.get())->isClosureBody())) {
+    error("Closure %s __invoke method must be a closure body\n",
+          cls->name()->data());
+    ok = false;
+  }
+
+  return ok;
+}
+
 /* Check the following conditions:
    - All constructors/destructors are non-static and not closure bodies
    - Properties/Methods have exactly one access modifier
@@ -168,7 +195,12 @@ bool UnitChecker::checkPreClasses() {
     auto classAttrs = preclass->attrs();
     bool hasConstructor = !preclass->parent()->empty() &&
       preclass->parent()->toCppString() == std::string("Closure");
-      //Closures don't need constructors
+      // Closures don't need constructors
+
+    if (preclass->parent()->toCppString() == std::string("Closure")) {
+      hasConstructor = true;
+      ok &= checkClosure(preclass.get());
+    }
 
     if (!preclass->parent()->empty() &&
           preclass->name()->equal(preclass->parent())) {
@@ -227,7 +259,19 @@ bool UnitChecker::checkPreClasses() {
       std::transform(className.begin(), className.end(), className.begin(),
                       ::tolower);
 
-      if(name == std::string("__construct") || name == std::string("86ctor") ||
+      if (name == std::string("86ctor")) {
+        hasConstructor = true;
+        ok &= checkStructor(method, preclass.get());
+        if ((attributes & ~(AttrBuiltin | AttrAbstract | AttrHot |
+                            AttrInterceptable | AttrMayUseVV)) !=
+            (AttrPublic|AttrNoInjection|AttrPhpLeafFn)) {
+              error("86ctor in class %s has illegal attribute\n",
+                    preclass->name()->data());
+              ok = false;
+           }
+      }
+
+      if(name == std::string("__construct") ||
          name == className) {
             hasConstructor = true;
             ok &= checkStructor(method, preclass.get());

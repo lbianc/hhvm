@@ -20,6 +20,7 @@
 #include "hphp/compiler/expression/expression.h"
 #include <set>
 #include "hphp/parser/parser.h"
+#include "hphp/util/compact-vector.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,6 +48,7 @@ struct ClosureExpression : Expression {
   ConstructPtr getNthKid(int n) const override;
   void setNthKid(int n, ConstructPtr cp) override;
   int getKidCount() const override;
+  void analyzeProgram(AnalysisResultPtr ar) override;
 
   FunctionStatementPtr getClosureFunction() { return m_func; }
   ExpressionListPtr getClosureVariables() { return m_vars; }
@@ -54,6 +56,9 @@ struct ClosureExpression : Expression {
   bool hasStaticLocals();
   ClosureType type() const { return m_type; }
   std::set<std::string> collectParamNames() const;
+
+  static void processLambdas(AnalysisResultPtr ar,
+                             CompactVector<ClosureExpressionRawPtr>&& lambdas);
 
   /*
    * Initialize the capture list for a closure that uses automatic
@@ -69,6 +74,7 @@ private:
   void initializeValuesFromVars();
   void analyzeVars(AnalysisResultPtr);
   bool hasStaticLocalsImpl(ConstructPtr root);
+  void processLambda(AnalysisResultPtr ar);
 
 private:
   ClosureType m_type;

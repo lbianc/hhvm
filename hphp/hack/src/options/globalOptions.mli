@@ -89,10 +89,12 @@ val tco_experimental_instanceof : string
 val tco_experimental_optional_shape_field : string
 val tco_experimental_darray_and_varray : string
 val tco_experimental_goto : string
+val tco_experimental_tconst_on_generics : string
 val tco_experimental_shape_idx_relaxed : string
 val tco_experimental_disable_shape_and_tuple_arrays : string
 val tco_experimental_promote_nullable_to_optional_in_shapes : string
 val tco_experimental_stronger_shape_idx_ret : string
+val tco_experimental_unresolved_fix : string
 val tco_experimental_annotate_function_calls : string
 val tco_experimental_all : SSet.t
 val tco_migration_flags_all : SSet.t

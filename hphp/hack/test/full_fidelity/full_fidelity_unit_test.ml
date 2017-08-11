@@ -163,7 +163,8 @@ let minimal_tests =
     "test_variadic_type_hint";
     "test_tuple_type_keyword";
     "test_trailing_commas";
-    "context/test_extra_error_trivia"
+    "context/test_extra_error_trivia";
+    "test_funcall_with_type_arguments";
   ] ~f:mapper
 
 let error_tests =
@@ -201,6 +202,8 @@ let error_tests =
     "context/test_recovery_to_classish2";
     "context/test_recovery_to_classish3";
     "context/test_single_extra_token_recovery";
+    "context/test_missing_foreach_value";
+    "test_namespace_error_recovery";
   ] ~f:mapper
 
 let test_data = minimal_tests @ error_tests @

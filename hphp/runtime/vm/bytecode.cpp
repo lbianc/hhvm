@@ -2087,6 +2087,15 @@ OPTBLD_INLINE void iopColFromArray(intva_t type) {
   auto const cType = static_cast<CollectionType>(type.n);
   assertx(cType != CollectionType::Pair);
   auto const c1 = vmStack().topC();
+  if (cType == CollectionType::Vector || cType == CollectionType::ImmVector) {
+     if (UNLIKELY(!isVecType(c1->m_type))) {
+       raise_error("ColFromArray: $1 must be a Vec when creating an "
+                   "(Imm)Vector");
+     }
+   } else if (UNLIKELY(!isDictType(c1->m_type))) {
+       raise_error("ColFromArray: $1 must be a Dict when creating an (Imm)Set "
+                   "or an (Imm)Map");
+   }
   // This constructor reassociates the ArrayData with the collection, so no
   // inc/decref is needed for the array. The collection object itself is
   // increfed.
@@ -6089,7 +6098,7 @@ OPTBLD_INLINE void asyncSuspendR(PC& pc) {
 
 OPTBLD_INLINE TCA iopAwait(PC& pc) {
   auto const awaitable = vmStack().topC();
-  auto wh = c_WaitHandle::fromCell(awaitable);
+  auto wh = c_WaitHandle::fromCell(*awaitable);
   if (UNLIKELY(wh == nullptr)) {
     if (LIKELY(awaitable->m_type == KindOfObject)) {
       auto const obj = awaitable->m_data.pobj;
@@ -6100,7 +6109,7 @@ OPTBLD_INLINE TCA iopAwait(PC& pc) {
             g_context->invokeFuncFew(func, obj, nullptr, 0, nullptr)
         );
         cellSet(*tvToCell(ret.asTypedValue()), *vmStack().topC());
-        wh = c_WaitHandle::fromCell(vmStack().topC());
+        wh = c_WaitHandle::fromCell(*vmStack().topC());
       }
     }
 
@@ -6157,7 +6166,7 @@ TCA suspendStack(PC &pc) {
 
 OPTBLD_INLINE void iopWHResult() {
   // we should never emit this bytecode for non-waithandle
-  auto const wh = c_WaitHandle::fromCell(vmStack().topC());
+  auto const wh = c_WaitHandle::fromCell(*vmStack().topC());
   if (UNLIKELY(!wh)) {
     raise_error("WHResult input was not a subclass of WaitHandle");
   }

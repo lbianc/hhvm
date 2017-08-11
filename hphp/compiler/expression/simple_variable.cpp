@@ -38,7 +38,6 @@ SimpleVariable::SimpleVariable
     m_sym(nullptr), m_originalSym(nullptr),
     m_this(false), m_globals(false),
     m_superGlobal(false), m_alwaysStash(false) {
-  setContext(Expression::NoLValueWrapper);
 }
 
 ExpressionPtr SimpleVariable::clone() {
@@ -68,10 +67,6 @@ void SimpleVariable::setContext(Context context) {
 }
 
 int SimpleVariable::getLocalEffects() const {
-  if (m_context == Declaration &&
-      m_sym && m_sym->isShrinkWrapped()) {
-    return LocalEffect;
-  }
   return NoEffect;
 }
 
@@ -105,17 +100,12 @@ void SimpleVariable::analyzeProgram(AnalysisResultPtr ar) {
           bool unset = hasAllContext(UnsetContext | LValue);
           func->setContainsBareThis(
             true,
-            hasAnyContext(RefValue | RefAssignmentLHS) ||
-            m_sym->isRefClosureVar() || unset);
+            hasAnyContext(RefValue | RefAssignmentLHS) || unset);
           if (variables->getAttribute(VariableTable::ContainsDynamicVariable)) {
             variables->add(m_sym, true, ar, shared_from_this(),
                            ModifierExpressionPtr());
           }
         }
-      }
-      if (m_sym && !(m_context & AssignmentLHS) &&
-          !((m_context & UnsetContext) && (m_context & LValue))) {
-        m_sym->setUsed();
       }
     }
   } else if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
@@ -137,20 +127,8 @@ void SimpleVariable::analyzeProgram(AnalysisResultPtr ar) {
           }
         }
       }
-      // check function parameter that can occur in lval context
-      if (m_sym->isParameter() &&
-          m_context & (LValue | RefValue | DeepReference |
-                       UnsetContext | InvokeArgument | OprLValue |
-                       DeepOprLValue)) {
-        m_sym->setLvalParam();
-      }
     }
   }
-}
-
-bool SimpleVariable::checkUnused() const {
-  return !m_superGlobal && !m_globals &&
-    getScope()->getVariables()->checkUnused(m_sym);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

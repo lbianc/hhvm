@@ -98,6 +98,7 @@ val get_lower_bounds : env -> string -> tparam_bounds
 val get_upper_bounds : env -> string -> tparam_bounds
 val add_upper_bound : env -> string -> locl ty -> env
 val add_lower_bound : env -> string -> locl ty -> env
+val get_equal_bounds : env -> string -> tparam_bounds
 val union_global_tpenv : tpenv -> tpenv -> tpenv
 val add_upper_bound_global : env -> string -> locl ty -> env
 val add_lower_bound_global : env -> string -> locl ty -> env
@@ -110,7 +111,7 @@ val get_tpenv_size : env -> int
 val freeze_local_env : env -> env
 val env_with_locals :
   env -> local_types -> local_history Local_id.Map.t -> env
-val anon : local_env -> env -> (env -> env * locl ty) -> env * locl ty
+val anon : local_env -> env -> (env -> env * Tast.expr * locl ty) -> env * Tast.expr * locl ty
 val in_loop : env -> (env -> env * 'a) -> env * 'a
 val merge_locals_and_history : local_env -> old_local Local_id.Map.t
 val separate_locals_and_history :

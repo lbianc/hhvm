@@ -165,10 +165,6 @@ void FunctionCall::markRefParams(FunctionScopePtr func,
       if (i < mpc ? func->isRefParam(i) :
           func->isReferenceVariableArgument()) {
         p->setContext(Expression::RefValue);
-      } else if (i < mpc && p->hasContext(RefParameter)) {
-        Symbol *sym = func->getVariables()->addSymbol(func->getParamName(i));
-        sym->setLvalParam();
-        sym->setCallTimeRef();
       }
     }
   } else if (Option::WholeProgram && !m_origName.empty()) {
@@ -192,10 +188,8 @@ void FunctionCall::markRefParams(FunctionScopePtr func,
 }
 
 void FunctionCall::analyzeProgram(AnalysisResultPtr ar) {
-  if (m_class) m_class->analyzeProgram(ar);
-  if (m_nameExp) m_nameExp->analyzeProgram(ar);
-  if (m_params) {
-    m_params->analyzeProgram(ar);
+  if (isParent()) {
+    getFunctionScope()->setContainsThis();
   }
 }
 

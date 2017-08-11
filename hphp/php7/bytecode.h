@@ -19,12 +19,22 @@
 
 #include "hphp/runtime/vm/hhbc.h"
 
+#include <boost/variant.hpp>
+
 #include <unordered_map>
 #include <vector>
 
 namespace HPHP { namespace php7 {
 
 struct Block;
+
+enum Flavor {
+  Drop,
+  Cell,
+  Ref,
+  Return,
+  FuncParam,
+};
 
 namespace bc {
 
@@ -37,6 +47,41 @@ struct StringOffsetVector {
 struct Local {
   std::string name;
 };
+
+enum MemberType {
+  Property,
+  Element,
+};
+
+struct LocalMember {
+  MemberType type;
+  Local local;
+};
+
+struct CellMember {
+  MemberType type;
+  uint32_t location;
+};
+
+struct ImmMember {
+  MemberType type;
+  std::string name;
+};
+
+struct ImmIntElem {
+  int64_t val;
+};
+
+struct NewElem {};
+
+typedef boost::variant<
+  CellMember,
+  LocalMember,
+  ImmMember,
+  ImmIntElem,
+  NewElem
+  // null-safe access (MQT) is left out since PHP doesn't have this feature
+> MemberKey;
 
 // void* immediate types just aren't being used right now
 #define IMM_TYPE_BLA std::vector<Block*>
@@ -54,7 +99,7 @@ struct Local {
 #define IMM_TYPE_RATA void*
 #define IMM_TYPE_BA Block*
 #define IMM_TYPE_OA(subtype) subtype
-#define IMM_TYPE_KA void*
+#define IMM_TYPE_KA MemberKey
 #define IMM_TYPE_LAR void*
 #define IMM_TYPE_VSA void*
 
@@ -82,6 +127,11 @@ struct Local {
     \
     template<class Visitor> \
     void visit_imms(Visitor&& v) const { \
+      IMM_VISIT_ ## imms \
+    } \
+    \
+    template<class Visitor> \
+    void visit_imms(Visitor&& v) { \
       IMM_VISIT_ ## imms \
     } \
   };
@@ -190,6 +240,15 @@ OPCODES
     }
   }
 
+  template<class Visitor>
+  void visit(Visitor&& visit) {
+    switch (code) {
+#define O(opcode, ...) case Op::opcode: visit.bytecode(opcode); break;
+      OPCODES
+#undef O
+    }
+  }
+
  private:
   void destroy_op() {
     using namespace bc;
@@ -208,6 +267,30 @@ OPCODES
 #undef O
   };
 };
+
+// these are the last instructions in the block, they must be jumps or leave
+// the current function i.e. only these instructions:
+#define EXIT_OPS \
+  EXIT(Jmp) \
+  EXIT(JmpNS) \
+  EXIT(JmpZ) \
+  EXIT(JmpNZ) \
+  EXIT(Switch) \
+  EXIT(SSwitch) \
+  EXIT(RetC) \
+  EXIT(RetV) \
+  EXIT(Unwind) \
+  EXIT(Throw) \
+  EXIT_LAST(Fatal)
+
+#define EXIT(name) bc::name,
+#define EXIT_LAST(name) bc::name
+typedef boost::variant<
+  EXIT_OPS
+> ExitOp;
+#undef EXIT
+#undef EXIT_LAST
+
 
 
 }}  // HPHP::php7

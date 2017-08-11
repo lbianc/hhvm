@@ -110,8 +110,62 @@ struct InstrVisitor {
     }
   }
 
-  template <class T>
-  void imm(const T& /*imm*/) {
+  void imm(QueryMOp op) {
+    out.append(" ");
+    switch (op) {
+#define OP(name) case QueryMOp::name: out.append( #name ); break;
+      QUERY_M_OPS
+#undef OP
+    }
+  }
+
+  void imm(MOpMode op) {
+    out.append(" ");
+    switch (op) {
+#define MODE(name) case MOpMode::name: out.append( #name ); break;
+      M_OP_MODES
+#undef MODE
+    }
+  }
+
+  void imm(const bc::MemberKey& mk) {
+    using namespace bc;
+    out.append(" ");
+
+    const auto writeType = [&] (MemberType t) {
+      switch (t) {
+        case MemberType::Element:
+          out.append("E");
+          return;
+        case MemberType::Property:
+          out.append("P");
+          return;
+      }
+    };
+
+    match<void>(mk,
+      [&](const CellMember& m) {
+        writeType(m.type);
+        folly::format(&out, "C:{}", m.location);
+      },
+      [&](const LocalMember& m) {
+        writeType(m.type);
+        folly::format(&out, "L:${}", m.local.name);
+      },
+      [&](const ImmMember& m) {
+        writeType(m.type);
+        folly::format(&out, "T:\"{}\"", folly::cEscape<std::string>(m.name));
+      },
+      [&](const ImmIntElem& m) {
+        folly::format(&out, "EI:{}", m.val);
+      },
+      [&](const NewElem& m) {
+        out.append("W");
+      });
+  }
+
+  template<class T>
+  void imm(const T& /* imm */) {
     out.append(" <immediate>");
   }
 
@@ -161,7 +215,7 @@ struct CFGVisitor : public boost::static_visitor<void> {
     bc.visit(instr);
   }
 
-  void exit(const Block::ExitOp& exit) {
+  void exit(const ExitOp& exit) {
     boost::apply_visitor(*this, exit);
   }
 
@@ -174,7 +228,7 @@ std::string dump_pseudomain(const Function& func) {
   std::string out;
   out.append(".main {\n");
   out.append(dump_declvars(func.locals));
-  out.append(dump_blocks(serializeControlFlowGraph(func.entry)));
+  out.append(dump_blocks(serializeControlFlowGraph(func.cfg.entry())));
   out.append("}\n\n");
   return out;
 }
@@ -191,7 +245,7 @@ std::string dump_function(const Function& func) {
   }
   out.append(") {\n");
   out.append(dump_declvars(func.locals));
-  out.append(dump_blocks(serializeControlFlowGraph(func.entry)));
+  out.append(dump_blocks(serializeControlFlowGraph(func.cfg.entry())));
   out.append("}\n\n");
   return out;
 

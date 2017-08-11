@@ -15,23 +15,25 @@
 */
 
 #include "hphp/compiler/expression/assignment_expression.h"
-#include "hphp/compiler/expression/array_element_expression.h"
-#include "hphp/compiler/expression/object_property_expression.h"
-#include "hphp/compiler/analysis/code_error.h"
-#include "hphp/compiler/expression/constant_expression.h"
-#include "hphp/compiler/expression/simple_variable.h"
+
 #include "hphp/compiler/analysis/block_scope.h"
-#include "hphp/compiler/analysis/variable_table.h"
+#include "hphp/compiler/analysis/class_scope.h"
+#include "hphp/compiler/analysis/code_error.h"
 #include "hphp/compiler/analysis/constant_table.h"
 #include "hphp/compiler/analysis/file_scope.h"
-#include "hphp/compiler/expression/unary_op_expression.h"
-#include "hphp/parser/hphp.tab.hpp"
-#include "hphp/compiler/option.h"
-#include "hphp/compiler/analysis/class_scope.h"
 #include "hphp/compiler/analysis/function_scope.h"
-#include "hphp/compiler/expression/scalar_expression.h"
+#include "hphp/compiler/analysis/variable_table.h"
+#include "hphp/compiler/expression/array_element_expression.h"
+#include "hphp/compiler/expression/class_constant_expression.h"
+#include "hphp/compiler/expression/constant_expression.h"
 #include "hphp/compiler/expression/expression_list.h"
+#include "hphp/compiler/expression/object_property_expression.h"
+#include "hphp/compiler/expression/scalar_expression.h"
 #include "hphp/compiler/expression/simple_function_call.h"
+#include "hphp/compiler/expression/simple_variable.h"
+#include "hphp/compiler/expression/unary_op_expression.h"
+#include "hphp/compiler/option.h"
+#include "hphp/parser/hphp.tab.hpp"
 
 #include "hphp/runtime/base/execution-context.h"
 
@@ -50,7 +52,6 @@ AssignmentExpression::AssignmentExpression
   m_variable->setContext(Expression::DeepAssignmentLHS);
   m_variable->setContext(Expression::AssignmentLHS);
   m_variable->setContext(Expression::LValue);
-  m_variable->setContext(Expression::NoLValueWrapper);
   m_value->setContext(Expression::AssignmentRHS);
   if (ref) {
     m_variable->setContext(Expression::RefAssignmentLHS);
@@ -95,24 +96,34 @@ int AssignmentExpression::getLocalEffects() const {
   return AssignEffect;
 }
 
-void AssignmentExpression::analyzeProgram(AnalysisResultPtr ar) {
-  m_variable->analyzeProgram(ar);
-  m_value->analyzeProgram(ar);
-  if (ar->getPhase() == AnalysisResult::AnalyzeAll) {
-    if (m_ref && m_variable->is(Expression::KindOfSimpleVariable)) {
-      auto var = dynamic_pointer_cast<SimpleVariable>(m_variable);
-      const auto& name = var->getName();
-      VariableTablePtr variables = getScope()->getVariables();
-      variables->addUsed(name);
+void recordClassConstDependencies(ConstantTablePtr constants,
+                                  Symbol* sym,
+                                  ExpressionPtr e) {
+  if (!e) return;
+  if (e->is(Expression::KindOfClassConstantExpression)) {
+    auto cc = static_pointer_cast<ClassConstantExpression>(e);
+    if (auto ccCls = cc->resolveClass()) {
+      constants->recordDependency(sym, ccCls, cc->getConName());
     }
-  } else if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
-    if (m_variable->is(Expression::KindOfConstantExpression)) {
-      auto exp = dynamic_pointer_cast<ConstantExpression>(m_variable);
-      if (!m_value->isScalar()) {
-        getScope()->getConstants()->setDynamic(ar, exp->getName());
+  } else {
+    for (auto i = 0, n = e->getKidCount(); i < n; i++) {
+      recordClassConstDependencies(constants, sym, e->getNthExpr(i));
+    }
+  }
+}
+
+void AssignmentExpression::analyzeProgram(AnalysisResultPtr ar) {
+  if (m_variable->is(Expression::KindOfConstantExpression)) {
+    auto exp = dynamic_pointer_cast<ConstantExpression>(m_variable);
+    if (!m_value->isScalar()) {
+      auto constants = getScope()->getConstants();
+      if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
+        constants->setDynamic(ar, exp->getName());
+      } else if (ar->getPhase() == AnalysisResult::AnalyzeAll) {
+        if (auto const sym = constants->getSymbol(exp->getName())) {
+          recordClassConstDependencies(constants, sym, m_value);
+        }
       }
-    } else {
-      CheckNeeded(m_variable, m_value);
     }
   }
 }
@@ -165,20 +176,6 @@ bool AssignmentExpression::isSimpleGlobalAssign(StringData **name,
     *tv = *v.asTypedValue();
   }
   return true;
-}
-
-ExpressionPtr AssignmentExpression::optimize(AnalysisResultConstPtr /*ar*/) {
-  if (m_variable->is(Expression::KindOfSimpleVariable)) {
-    auto var = dynamic_pointer_cast<SimpleVariable>(m_variable);
-    if (var->checkUnused() &&
-        !CheckNeeded(var, m_value)) {
-      if (m_value->getContainedEffects() != getContainedEffects()) {
-        recomputeEffects();
-      }
-      return replaceValue(m_value);
-    }
-  }
-  return ExpressionPtr();
 }
 
 ExpressionPtr AssignmentExpression::preOptimize(AnalysisResultConstPtr /*ar*/) {

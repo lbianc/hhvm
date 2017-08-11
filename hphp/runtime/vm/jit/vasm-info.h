@@ -14,26 +14,44 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_COMPILER_ANALYSIS_LAMBDA_NAMES_H_
-#define incl_HPHP_COMPILER_ANALYSIS_LAMBDA_NAMES_H_
+#ifndef incl_HPHP_JIT_VASM_INFO_H_
+#define incl_HPHP_JIT_VASM_INFO_H_
 
-#include "hphp/compiler/statement/statement_list.h"
-#include "hphp/compiler/analysis/file_scope.h"
-#include "hphp/compiler/analysis/analysis_result.h"
+#include "hphp/util/asm-x64.h"
+#include "hphp/runtime/vm/jit/vasm-instr.h"
 
-namespace HPHP {
+namespace HPHP { namespace jit {
 
-//////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+struct Vreg;
+struct Vinstr;
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
- * After the first analysis pass over a file, this pass must run to
- * resolve names for lambda expressions and determine their automatic
- * capture lists.
+ * Return the sf reg read by inst, or an invalid register if the
+ * instruction doesn't read an sf.
  */
-void resolve_lambda_names(AnalysisResultPtr ar, const FileScopePtr&);
+Vreg getSFUseReg(const Vinstr& inst);
 
-//////////////////////////////////////////////////////////////////////
+/*
+ * Get a reference to the condition code for inst, which must be known
+ * to have one (eg by calling getSFUseReg and getting a valid register).
+ */
+ConditionCode& getConditionCode(Vinstr& inst);
 
-}
+/*
+ * Returns true if the instruction reads or writes memory.
+ */
+bool touchesMemory(Vinstr::Opcode op);
+
+/*
+ * Returns true if the instruction writes memory.
+ */
+bool writesMemory(Vinstr::Opcode op);
+///////////////////////////////////////////////////////////////////////////////
+
+}}
 
 #endif

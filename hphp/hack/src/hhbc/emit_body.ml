@@ -17,7 +17,8 @@ let has_type_constraint ti =
   | Some ti when (Hhas_type_info.has_type_constraint ti) -> true
   | _ -> false
 
-let emit_method_prolog ~params ~needs_local_this =
+let emit_method_prolog ~pos ~params ~needs_local_this =
+  Emit_pos.emit_pos_then pos @@
   gather (
     (if needs_local_this
     then instr (IMisc (InitThisLoc (Local.Named "$this")))
@@ -117,9 +118,11 @@ let emit_return_type_info ~scope ~skipawaitable ~namespace ret =
       ~kind:Return ~nullable:false ~skipawaitable ~tparams ~namespace h)
 
 let emit_body
+  ~pos
   ~scope
   ~is_closure_body
   ~is_memoize
+  ~is_async
   ~skipawaitable
   ~is_return_by_ref
   ~default_dropthrough
@@ -136,6 +139,24 @@ let emit_body
   let verify_return =
     return_type_info.Hhas_type_info.type_info_user_type <> Some "" &&
     Hhas_type_info.has_type_constraint return_type_info && not is_generator in
+  let default_dropthrough =
+    if default_dropthrough <> None then default_dropthrough else begin
+    let verify_return_instr =
+      match ret with
+      | None
+      | Some (_, (A.Happly ((_, "void"), [])
+                | A.Happly ((_, "WaitHandle"), [])
+                | A.Happly ((_, "Awaitable"),
+                  [_, A.Happly ((_, "void"), [])])
+                | A.Happly ((_, "WaitHandle"),
+                  [_, A.Happly ((_, "void"), [])]))) -> empty
+      | _ when is_generator || is_pair_generator -> empty
+      | _ -> instr_verifyRetTypeC
+    in
+    if is_async
+    then Some (gather [instr_null; verify_return_instr; instr_retc])
+    else None end
+  in
   Emit_statement.set_verify_return verify_return;
   Emit_statement.set_default_dropthrough default_dropthrough;
   Emit_statement.set_default_return_value return_value;
@@ -174,7 +195,7 @@ let emit_body
   in
   let header = gather [
         begin_label;
-        emit_method_prolog ~params ~needs_local_this;
+        emit_method_prolog ~pos ~params ~needs_local_this;
         generator_instr;
       ]
   in

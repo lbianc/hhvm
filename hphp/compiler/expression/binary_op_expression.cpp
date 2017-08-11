@@ -59,9 +59,6 @@ BinaryOpExpression::BinaryOpExpression
     m_exp1->setContext(Expression::LValue);
     m_exp1->setContext(Expression::OprLValue);
     m_exp1->setContext(Expression::DeepOprLValue);
-    if (m_exp1->is(Expression::KindOfObjectPropertyExpression)) {
-      m_exp1->setContext(Expression::NoLValueWrapper);
-    }
     break;
   case T_COLLECTION: {
     std::string s = m_exp1->getLiteralString();
@@ -193,11 +190,6 @@ int BinaryOpExpression::getLocalEffects() const {
   }
   if (m_assign) effect |= AssignEffect;
   return effect;
-}
-
-void BinaryOpExpression::analyzeProgram(AnalysisResultPtr ar) {
-  m_exp1->analyzeProgram(ar);
-  m_exp2->analyzeProgram(ar);
 }
 
 ConstructPtr BinaryOpExpression::getNthKid(int n) const {

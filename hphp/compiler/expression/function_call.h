@@ -33,8 +33,6 @@ protected:
                const std::string &name, bool hadBackslash,
                ExpressionListPtr params, ExpressionPtr classExp);
 public:
-  void analyzeProgram(AnalysisResultPtr ar) override;
-
   bool isRefable(bool /*checkError*/ = false) const override { return true; }
 
   ConstructPtr getNthKid(int n) const override;
@@ -42,6 +40,7 @@ public:
   int getKidCount() const override;
 
   ExpressionPtr preOptimize(AnalysisResultConstPtr ar) override;
+  void analyzeProgram(AnalysisResultPtr ar) override;
 
   const std::string& getName() const = delete;//{ return m_name; }
   const std::string& getOriginalName() const { return m_origName; }

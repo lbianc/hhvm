@@ -55,7 +55,6 @@ ExpressionPtr NewObjectExpression::clone() {
 
 void NewObjectExpression::analyzeProgram(AnalysisResultPtr ar) {
   FunctionCall::analyzeProgram(ar);
-
   if (ar->getPhase() == AnalysisResult::AnalyzeAll ||
       ar->getPhase() == AnalysisResult::AnalyzeFinal) {
     FunctionScopePtr func;

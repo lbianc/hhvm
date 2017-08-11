@@ -105,9 +105,6 @@ void ObjectPropertyExpression::setContext(Context context) {
       !(m_context & AssignmentLHS)) {
     setLocalEffect(CreateEffect);
   }
-  if (context == InvokeArgument) {
-    setContext(NoLValueWrapper);
-  }
 }
 void ObjectPropertyExpression::clearContext(Context context) {
   m_context &= ~context;
@@ -131,14 +128,9 @@ void ObjectPropertyExpression::clearContext(Context context) {
   if (!(m_context & (LValue|RefValue))) {
     clearLocalEffect(CreateEffect);
   }
-  if (context == InvokeArgument) {
-    clearContext(NoLValueWrapper);
-  }
 }
 
 void ObjectPropertyExpression::analyzeProgram(AnalysisResultPtr ar) {
-  m_object->analyzeProgram(ar);
-  m_property->analyzeProgram(ar);
   if (ar->getPhase() == AnalysisResult::AnalyzeFinal) {
     if (m_valid && !hasLocalEffect(UnknownEffect) &&
         !m_object->isThis()) {

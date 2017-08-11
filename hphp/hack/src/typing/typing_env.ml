@@ -125,6 +125,12 @@ let get_upper_bounds env name =
   | Some {upper_bounds; _} -> upper_bounds in
   TySet.elements (TySet.union local global)
 
+(* Get bounds that are both an upper and lower of a given generic *)
+let get_equal_bounds env name =
+  let lower = TySet.of_list (get_lower_bounds env name) in
+  let upper = TySet.of_list (get_upper_bounds env name) in
+  TySet.elements (TySet.inter lower upper)
+
 (* Add a single new upper bound [ty] to generic parameter [name] in [tpenv] *)
 let add_upper_bound_ tpenv name ty =
   match SMap.get name tpenv with
@@ -254,6 +260,8 @@ let empty_local tpenv = {
 
 let empty tcopt file ~droot = {
   pos     = Pos.none;
+  outer_pos = Pos.none;
+  outer_reason = Reason.URnone;
   tenv    = IMap.empty;
   subst   = IMap.empty;
   lenv    = empty_local SMap.empty;
@@ -780,12 +788,12 @@ let anon anon_lenv env f =
   let outer_fun_kind = get_fn_kind env in
   let env = { env with lenv = anon_lenv } in
   (* Typing *)
-  let env, result = f env in
+  let env, tfun, result = f env in
   (* Cleaning up the environment. *)
   let env = { env with lenv = old_lenv } in
   let env = set_return env old_return in
   let env = set_fn_kind env outer_fun_kind in
-  env, result
+  env, tfun, result
 
 let in_loop env f =
   let old_in_loop = env.in_loop in

@@ -21,16 +21,20 @@ module Container = struct
   type t =
   | AfterDoubleColon
   | AfterRightArrow
-  | BinaryExpression
+  | AssignmentExpression
   | ClassBody
   | ClassHeader
   | CompoundStatement
-  | ConstantDeclarator
+  | ConstantDeclaration
   | FunctionHeader
   | FunctionParameterList
+  | IfStatement
+  | InterfaceBody
+  | InterfaceHeader
   | LambdaBodyExpression
   | TopLevel
-  | TypeSpecifier
+  | TraitBody
+  | TraitHeader
   | NoContainer
 end
 
@@ -48,13 +52,17 @@ module Predecessor = struct
   | KeywordExtends
   | KeywordFinal
   | KeywordImplements
+  | KeywordRequire
+  | KeywordReturn
   | KeywordStatic
-  | MarkupSection
-  | OpenBrace
-  | OpenParenthesis
+  | Statement
   | TokenColon
   | TokenComma
+  | TokenEqual
+  | TokenLeftBrace
   | TokenLessThan
+  | TokenOpenParen
+  | TopLevelDeclaration
   | TryWithoutFinally
   | VisibilityModifier
   | NoPredecessor
@@ -68,6 +76,48 @@ type context = {
   inside_async_function: bool;
   inside_class_body: bool;
 }
+
+module ContextPredicates = struct
+  open Container
+  open Predecessor
+
+  let is_class_body_declaration_valid context =
+    context.closest_parent_container = ClassBody &&
+    (context.predecessor = TokenLeftBrace ||
+    context.predecessor = ClassBodyDeclaration)
+
+  let is_in_return_statement context =
+    context.predecessor = KeywordReturn &&
+    context.closest_parent_container = CompoundStatement
+
+  let is_at_beginning_of_new_statement context =
+    context.closest_parent_container = CompoundStatement &&
+    (context.predecessor = Statement ||
+    context.predecessor = TokenLeftBrace ||
+    context.predecessor = IfWithoutElse ||
+    context.predecessor = TryWithoutFinally ||
+    context.predecessor = TokenColon)
+
+  let is_rhs_of_assignment_expression context =
+    context.closest_parent_container = AssignmentExpression &&
+    context.predecessor = TokenEqual
+
+  let is_in_conditional context =
+    context.closest_parent_container = IfStatement &&
+    context.predecessor = TokenOpenParen
+
+  let is_expression_valid context =
+    is_rhs_of_assignment_expression context ||
+    is_in_conditional context ||
+    is_at_beginning_of_new_statement context ||
+    is_in_return_statement context ||
+    context.closest_parent_container = LambdaBodyExpression
+    (* or is parameter, or is inside if/switch/while/etc. clause *)
+
+  let is_top_level_statement_valid context =
+    context.closest_parent_container = TopLevel &&
+    context.predecessor = TopLevelDeclaration
+end
 
 let initial_context = {
   closest_parent_container = Container.NoContainer;
@@ -88,6 +138,10 @@ let is_function_async (function_object:PositionedSyntax.syntax) : bool =
         function_async = async; _
       }; _ }; _
     }
+  | MethodishDeclaration { methodish_function_decl_header = { syntax =
+      FunctionDeclarationHeader { function_async = async; _ }; _
+    }; _ }
+  | AnonymousFunction { anonymous_async_keyword = async; _ }
   | LambdaExpression { lambda_async = async; _ } ->
     is_specific_token Async async
   | _ -> false
@@ -98,6 +152,20 @@ let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
   let open TokenKind in
   let open Predecessor in
   let classify_syntax_as_predecessor node = match syntax node with
+    | AliasDeclaration { alias_semicolon = { syntax = Token _; _ }; _ }
+    | EnumDeclaration { enum_right_brace = { syntax = Token _; _ }; _ }
+    | FunctionDeclaration { function_body = { syntax =
+        CompoundStatement { compound_right_brace = { syntax =
+          Token _; _
+        }; _ }; _
+      }; _ }
+    | InclusionDirective { inclusion_semicolon = { syntax = Token _; _ }; _ }
+    | MarkupSection _
+    | NamespaceBody { namespace_right_brace = { syntax = Token _; _ }; _ }
+    | NamespaceEmptyBody { namespace_semicolon = { syntax = Token _; _ }; _ }
+    | NamespaceUseDeclaration { namespace_use_semicolon = { syntax = Token _; _ }; _ }
+    | ClassishBody { classish_body_right_brace = { syntax = Token _; _ }; _ } ->
+        Some TopLevelDeclaration
     | ClassishDeclaration {
         classish_implements_list = { syntax = SyntaxList _; _ }; _
       } -> Some ImplementsList
@@ -108,7 +176,7 @@ let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
         _
       } -> Some ExtendsList
     | ClassishDeclaration {
-        classish_name = { syntax = Token _ ; _ };
+        classish_name = { syntax = Token _; _ };
         classish_type_parameters = { syntax = Missing; _ };
         classish_extends_keyword = { syntax = Missing; _ };
         classish_extends_list = { syntax = Missing; _ };
@@ -116,32 +184,48 @@ let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
         classish_implements_list = { syntax = Missing; _ };
         _
       } -> Some ClassName
-    | PositionedSyntax.MarkupSection _ -> Some Predecessor.MarkupSection
     | IfStatement { if_else_clause = {
         syntax = Missing; _
       }; _ } -> Some IfWithoutElse
+    | TryStatement { try_finally_clause = {
+        syntax = Missing; _
+      }; _ } -> Some TryWithoutFinally
+    | CaseLabel _
+    | IfStatement _
+    | EchoStatement _
+    | WhileStatement _
+    | DoStatement _
+    | ForStatement _
+    | ForeachStatement _
+    | TryStatement _
+    | SwitchStatement _
+    | ReturnStatement _
+    | ThrowStatement _
+    | BreakStatement _
+    | ContinueStatement _
+    | ExpressionStatement _ -> Some Statement
     | ConstDeclaration _
     | PropertyDeclaration _
     | MethodishDeclaration _
     | TypeConstDeclaration _  -> Some ClassBodyDeclaration
-    | TryStatement { try_finally_clause = {
-        syntax = Missing; _
-      }; _ } -> Some TryWithoutFinally
     | Token { kind = Abstract; _ } -> Some KeywordAbstract
     | Token { kind = Async; _ } -> Some KeywordAsync
     | Token { kind = Class; _ } -> Some KeywordClass
     | Token { kind = Colon; _ } -> Some TokenColon
     | Token { kind = Comma; _ } -> Some TokenComma
     | Token { kind = Const; _ } -> Some KeywordConst
+    | Token { kind = Equal; _ } -> Some TokenEqual
     | Token { kind = Extends; _ } -> Some KeywordExtends
     | Token { kind = Final; _ } -> Some KeywordFinal
     | Token { kind = Implements; _ } -> Some KeywordImplements
-    | Token { kind = LeftBrace; _ } -> Some OpenBrace
-    | Token { kind = LeftParen; _ } -> Some OpenParenthesis
+    | Token { kind = LeftBrace; _ } -> Some TokenLeftBrace
+    | Token { kind = LeftParen; _ } -> Some TokenOpenParen
     | Token { kind = LessThan; _ } -> Some TokenLessThan
     | Token { kind = Public; _ }
     | Token { kind = Private; _ }
     | Token { kind = Protected; _ } -> Some VisibilityModifier
+    | Token { kind = Require; _ } -> Some KeywordRequire
+    | Token { kind = Return; _ } -> Some KeywordReturn
     | Token { kind = Static; _ } -> Some KeywordStatic
     | _ -> None
   in
@@ -159,17 +243,27 @@ let make_context
   let open PositionedToken in
   let open TokenKind in
   let check_node node acc = match syntax node with
-    | SimpleTypeSpecifier _ ->
-      { acc with closest_parent_container = TypeSpecifier }
     | Script _ ->
       { acc with closest_parent_container = TopLevel }
+    | ClassishDeclaration { classish_keyword = {
+        syntax = Token { kind = Interface; _ }; _
+      }; _ } ->
+      { acc with closest_parent_container = InterfaceHeader }
+    | ClassishDeclaration { classish_keyword = {
+        syntax = Token { kind = Trait; _ }; _
+      }; _ } ->
+      { acc with closest_parent_container = TraitHeader }
     | ClassishDeclaration _ ->
       { acc with closest_parent_container = ClassHeader }
-    | ClassishBody _ ->
+    | ClassishBody _ when acc.closest_parent_container = InterfaceHeader ->
+      { acc with closest_parent_container = InterfaceBody }
+    | ClassishBody _ when acc.closest_parent_container = TraitHeader ->
+      { acc with closest_parent_container = TraitBody }
+    | ClassishBody _ when acc.closest_parent_container = ClassHeader ->
       { acc with closest_parent_container = ClassBody;
         inside_class_body = true }
-    | PositionedSyntax.ConstantDeclarator _ ->
-      { acc with closest_parent_container = Container.ConstantDeclarator }
+    | ConstDeclaration _ ->
+      { acc with closest_parent_container = ConstantDeclaration }
     | ForStatement _
     | ForeachStatement _
     | WhileStatement _
@@ -177,10 +271,12 @@ let make_context
       { acc with inside_loop_body = true }
     | SwitchSection _ ->
       { acc with inside_switch_body = true }
+    | MethodishDeclaration _
     | FunctionDeclaration _ as func ->
       { acc with inside_async_function = is_function_async func }
     | FunctionDeclarationHeader _ ->
       { acc with closest_parent_container = FunctionHeader }
+    | AnonymousFunction _
     | LambdaExpression _ as lambda ->
       (* If we see a lambda, almost all context is reset, so each field should
       get consideration on if its context flows into the lambda *)
@@ -194,6 +290,12 @@ let make_context
       }
     | PositionedSyntax.CompoundStatement _ ->
       { acc with closest_parent_container = Container.CompoundStatement }
+    | BinaryExpression {
+        binary_operator = { syntax = Token { kind = Equal; _ }; _ };
+        _
+      } -> { acc with closest_parent_container = AssignmentExpression }
+    | PositionedSyntax.IfStatement _ ->
+      { acc with closest_parent_container = Container.IfStatement }
     | Token { kind = ColonColon; _ } ->
       { acc with closest_parent_container = AfterDoubleColon }
     | Token { kind = MinusGreaterThan; _ } ->

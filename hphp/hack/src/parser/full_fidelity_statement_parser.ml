@@ -208,7 +208,7 @@ module WithExpressionAndDeclAndTypeParser
     let parser, as_token = require_as parser in
     (* let (parser1, token) = next_token parser in *)
     let (parser, after_as) = parse_expression parser in
-    (* let parser, expr = parse_expression parser in *)
+    let parser = SimpleParser.expect_in_new_scope parser [ RightParen ] in
     let (parser, foreach_key, foreach_arrow, foreach_value) =
     match Token.kind (peek_token parser) with
       | RightParen ->
@@ -225,6 +225,7 @@ module WithExpressionAndDeclAndTypeParser
         (parser, after_as, make_error (make_token token), foreach_value)
     in
     let parser, right_paren_token = require_right_paren parser in
+    let parser = SimpleParser.pop_scope parser [ RightParen ] in
     let parser, foreach_statement = parse_statement parser in
     let syntax =
       make_foreach_statement foreach_keyword_token foreach_left_paren
@@ -431,10 +432,9 @@ module WithExpressionAndDeclAndTypeParser
 
   and parse_possible_erroneous_fallthrough parser =
     if is_switch_fallthrough parser then
+      let parser = with_error parser SyntaxError.error1055
+        ~on_whole_token:true in
       let (parser, result) = parse_switch_fallthrough parser in
-      (* TODO: This puts the error on the semi; it should be on
-      the whole thing. *)
-      let parser = with_error parser SyntaxError.error1055 in
       (parser, result)
     else
       parse_expression_statement parser

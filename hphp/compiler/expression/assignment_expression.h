@@ -31,6 +31,7 @@ struct AssignmentExpression : Expression, IParseHandler {
                        bool ref, bool rhsFirst = false);
 
   DECLARE_EXPRESSION_VIRTUAL_FUNCTIONS;
+  void analyzeProgram(AnalysisResultPtr ar) override;
   ExpressionPtr preOptimize(AnalysisResultConstPtr ar) override;
 
   // implementing IParseHandler
@@ -54,8 +55,6 @@ struct AssignmentExpression : Expression, IParseHandler {
   // $GLOBALS[<literal-string>] = <scalar>;
   bool isSimpleGlobalAssign(StringData **name, TypedValue *tv) const;
 private:
-  ExpressionPtr optimize(AnalysisResultConstPtr ar);
-
   ExpressionPtr m_variable;
   ExpressionPtr m_value;
   bool m_ref;

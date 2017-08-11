@@ -19,11 +19,13 @@ val make_body:
   Hhas_body.t
 
 val emit_body:
+  pos: Pos.t ->
   scope: Ast_scope.Scope.t ->
   (* True if this is the body of a closure method *)
   is_closure_body: bool ->
   (* True if this is the body of a <<__Memoize>> method *)
   is_memoize: bool ->
+  is_async: bool ->
   skipawaitable:bool ->
   (* True if the return type is a ref *)
   is_return_by_ref: bool ->
@@ -39,6 +41,7 @@ val emit_body:
 val tparams_to_strings : Ast.tparam list -> string list
 
 val emit_method_prolog :
+  pos: Pos.t ->
   params: Hhas_param.t list ->
   needs_local_this:bool ->
   Instruction_sequence.t

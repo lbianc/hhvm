@@ -59,7 +59,7 @@ bool hasNativeData(const HeapObject* h) {
 }
 
 template<bool apcgc> struct Marker {
-  explicit Marker(BigHeap& heap) : heap_(heap) {}
+  explicit Marker(HeapImpl& heap) : heap_(heap) {}
   void init();
   void traceRoots();
   void trace();
@@ -86,7 +86,7 @@ template<bool apcgc> struct Marker {
     max_worklist_ = std::max(max_worklist_, work_.size());
   }
 
-  BigHeap& heap_;
+  HeapImpl& heap_;
   Counter allocd_, marked_, pinned_, unknown_; // bytes
   Counter cscanned_roots_, cscanned_; // bytes
   Counter xscanned_roots_, xscanned_; // bytes
@@ -99,6 +99,10 @@ template<bool apcgc> struct Marker {
   APCGCManager* apcgc_ ;
 };
 
+// TODO(T20460162): The contiguous heap has a bitmap of which chunks of memory
+// are allocated/free. And it can efficiently find the start of an allocated
+// object using bit operations. So there is an opportunity to speed this up by
+// directly accessing the bitmap instead of using PtrMap.
 template <bool apcgc>
 HdrBlock Marker<apcgc>::find(const void* ptr) {
   if (auto r = ptrs_.region(ptr)) {
@@ -369,7 +373,7 @@ NEVER_INLINE void Marker<apcgc>::sweep() {
       if (big->kind() == HeaderKind::BigObj) {
         big = static_cast<MallocNode*>(big) + 1;
         if (!marked(big)) {
-          mm.freeBigSize(big, big_size - sizeof(MallocNode));
+          mm.freeBigSize(big);
         }
       }
     },
@@ -477,7 +481,7 @@ void logCollection(const char* phase, const Marker<apcgc>& mkr) {
   StructuredLog::log("hhvm_gc", sample);
 }
 
-void collectImpl(BigHeap& heap, const char* phase) {
+void collectImpl(HeapImpl& heap, const char* phase) {
   VMRegAnchor _;
   if (t_eager_gc && RuntimeOption::EvalFilterGCPoints) {
     t_eager_gc = false;

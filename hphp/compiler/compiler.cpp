@@ -418,6 +418,12 @@ int prepareOptions(CompilerOptions &po, int argc, char **argv) {
     Config::ParseHdfString(po.confStrings[i].c_str(), config);
   }
   Hdf runtime = config["Runtime"];
+  if (config.exists("EnableHipHopSyntax")) {
+    // lots of RuntimeOptions depend on Eval.EnableHipHopSyntax, so we
+    // need to make sure it gets set correctly.
+    runtime["Eval.EnableHipHopSyntax"].set(
+      config["EnableHipHopSyntax"].configGet());
+  }
   // The configuration command line strings were already processed above
   // Don't process them again.
   RuntimeOption::Load(ini, runtime);
@@ -815,6 +821,14 @@ int hhbcTarget(const CompilerOptions &po, AnalysisResultPtr&& ar,
      hoistable */
   SystemLib::s_inited = true;
   RuntimeOption::RepoCommit = true;
+
+
+  // the function is only invoked in hhvm --hphp, which is supposed to be in
+  // repo mode only. we are not setting it earlier in `compiler_main` since we
+  // want systemlib to be built without repo-auth == true, or otherwise,
+  // `compile_systemlib_string` will try to load systemlib from repo, while we
+  // are building it.
+  RuntimeOption::RepoAuthoritative = true;
 
   if (po.optimizeLevel > 0) {
     ret = 0;

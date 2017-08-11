@@ -223,23 +223,25 @@ module WithExpressionAndStatementAndTypeParser
     (parser, result)
 
   and parse_namespace_body parser =
-    let (parser, token) = next_token parser in
-    let full_token = make_token token in
-    match Token.kind token with
-    | Semicolon -> (parser, make_namespace_empty_body full_token)
+    match peek_token_kind parser with
+    | Semicolon ->
+      let (parser, token) = next_token parser in
+      (parser, make_namespace_empty_body (make_token token))
     | LeftBrace ->
-      let left = full_token in
+      let (parser, token) = next_token parser in
+      let left = make_token token in
       let (parser, body) =
         parse_terminated_list parser parse_declaration RightBrace in
       let (parser, right) = require_right_brace parser in
       let result = make_namespace_body left body right in
       (parser, result)
     | _ ->
-      (* ERROR RECOVERY: Eat the offending token.
-         TODO: Better would be to attempt to recover to the list of
-         declarations? Suppose the offending token is "class" for instance? *)
+      (* ERROR RECOVERY: return an inert namespace (one with all of its
+       * components 'missing'), and recover--without advancing the parser--
+       * back to the level that the namespace was declared in. *)
       let parser = with_error parser SyntaxError.error1038 in
-      let result = make_error (make_token token) in
+      let missing = make_missing() in
+      let result = make_namespace_body missing missing missing in
       (parser, result)
 
   and parse_namespace_use_kind_opt parser =
@@ -856,7 +858,8 @@ module WithExpressionAndStatementAndTypeParser
        * as an extra, and keep going. *)
       | _, (Async | Coroutine | Function)
         when not (Token.has_leading_end_of_line next_token) ->
-        let parser = with_error parser SyntaxError.error1056 in
+        let parser = with_error parser SyntaxError.error1056
+          ~on_whole_token:true in
         let parser = process_next_as_extra parser ~generate_error:false in
         parse_methodish parser attribute_spec modifiers
       (* Otherwise, continue parsing as a property (which might be a lambda). *)

@@ -149,7 +149,7 @@ let istype_op id =
   | "is_bool" -> Some OpBool
   | "is_float" | "is_real" | "is_double" -> Some OpDbl
   | "is_string" -> Some OpStr
-  | "is_array" -> Some OpArr
+  | "is_array" | "is_varray_or_darray" -> Some OpArr
   | "is_object" -> Some OpObj
   | "is_null" -> Some OpNull
   | "is_scalar" -> Some OpScalar
@@ -213,30 +213,30 @@ let rec expr_and_new env instr_to_add_new instr_to_add = function
       add_instr;
     ]
 
-and get_local env x =
-  if x = SN.SpecialIdents.dollardollar
+and get_local env (pos, str) =
+  if str = SN.SpecialIdents.dollardollar
   then
     match Emit_env.get_pipe_var env with
-    | None -> Emit_fatal.raise_fatal_runtime
+    | None -> Emit_fatal.raise_fatal_runtime pos
       "Pipe variables must occur only in the RHS of pipe expressions"
     | Some v -> v
-  else Local.Named x
+  else Local.Named str
 
-and get_non_pipe_local x =
-  if x = SN.SpecialIdents.dollardollar
-  then Emit_fatal.raise_fatal_parse
+and get_non_pipe_local (pos, str) =
+  if str = SN.SpecialIdents.dollardollar
+  then Emit_fatal.raise_fatal_parse pos
     "Cannot take indirect reference to a pipe variable"
-  else Local.Named x
+  else Local.Named str
 
-and emit_local ~notice ~need_ref env x =
-  if SN.Superglobals.is_superglobal x
+and emit_local ~notice ~need_ref env ((_, str) as id) =
+  if SN.Superglobals.is_superglobal str
   then gather [
-    instr_string (SU.Locals.strip_dollar x);
+    instr_string (SU.Locals.strip_dollar str);
     instr (IGet (if need_ref then VGetG else CGetG))
   ]
   else
-  let local = get_local env x in
-  if is_local_this env x && not (Emit_env.get_needs_local_this env) then
+  let local = get_local env id in
+  if is_local_this env str && not (Emit_env.get_needs_local_this env) then
     if need_ref then
       instr_vgetl local
     else
@@ -250,8 +250,8 @@ and emit_local ~notice ~need_ref env x =
  * the result will be just below the top of the stack *)
 and emit_first_expr env (_, e as expr) =
   match e with
-  | A.Lvar (_, id)
-    when not (is_local_this env id || SN.Superglobals.is_superglobal id) ->
+  | A.Lvar ((_, name) as id)
+    when not (is_local_this env name || SN.Superglobals.is_superglobal name) ->
     instr_cgetl2 (get_local env id), true
   | _ ->
     emit_expr_and_unbox_if_necessary ~need_ref:false env expr, false
@@ -267,7 +267,7 @@ and emit_two_exprs env e1 e2 =
 
 and emit_is_null env e =
   match e with
-  | (_, A.Lvar (_, id)) when not (is_local_this env id) ->
+  | (_, A.Lvar ((_, str) as id)) when not (is_local_this env str) ->
     instr_istypel (get_local env id) OpNull
   | _ ->
     gather [
@@ -276,6 +276,11 @@ and emit_is_null env e =
     ]
 
 and emit_binop env expr op e1 e2 =
+  let default () =
+    gather [
+      emit_two_exprs env e1 e2;
+      from_binop op
+    ] in
   match op with
   | A.AMpamp | A.BArbar -> emit_short_circuit_op env expr
   | A.Eq None -> emit_lval_op env LValOp.Set e1 (Some e2)
@@ -286,7 +291,7 @@ and emit_binop env expr op e1 e2 =
     end
   | _ ->
     if not (optimize_null_check ())
-    then gather [emit_two_exprs env e1 e2; from_binop op]
+    then default ()
     else
     match op with
     | A.EQeqeq when snd e2 = A.Null ->
@@ -304,10 +309,7 @@ and emit_binop env expr op e1 e2 =
         instr_not
       ]
     | _ ->
-      gather [
-        emit_two_exprs env e1 e2;
-        from_binop op
-      ]
+      default ()
 
 and emit_box_if_necessary need_ref instr =
   if need_ref then
@@ -607,7 +609,7 @@ and emit_lambda env fundef ids =
     gather @@ List.map ids
       (fun (x, isref) ->
         instr (IGet (
-          let lid = get_local env (snd x) in
+          let lid = get_local env x in
           if explicit_use
           then
             if isref then VGetL lid else CGetL lid
@@ -671,7 +673,7 @@ and emit_import env flavor e =
     import_instr;
   ]
 
-and emit_lvarvar ~need_ref n (_, id) =
+and emit_lvarvar ~need_ref n id =
   gather [
     instr_cgetl (get_non_pipe_local id);
     if need_ref then
@@ -696,14 +698,14 @@ and emit_call_isset_expr env (_, expr_ as expr) =
     emit_class_get env None QueryOp.Isset false cid id
   | A.Obj_get (expr, prop, nullflavor) ->
     emit_obj_get ~need_ref:false env None QueryOp.Isset expr prop nullflavor
-  | A.Lvar (_, id)
-    when is_local_this env id && not (Emit_env.get_needs_local_this env)->
+  | A.Lvar ((_, name) as id)
+    when is_local_this env name && not (Emit_env.get_needs_local_this env)->
     gather [
       emit_local ~notice:NoNotice ~need_ref:false env id;
       instr_istypec OpNull;
       instr_not
     ]
-  | A.Lvar (_, id) ->
+  | A.Lvar id ->
     instr (IIsset (IssetL (get_local env id)))
   | A.Lvarvar (n, id) ->
     gather [
@@ -736,9 +738,9 @@ and emit_call_empty_expr env (_, expr_ as expr) =
       instr_string @@ SU.Locals.strip_dollar SN.Superglobals.globals;
       instr_emptyg
     ]
-  | A.Lvar(_, id) when not (is_local_this env id) ->
+  | A.Lvar id when not (is_local_this env (snd id)) ->
     instr_emptyl (get_local env id)
-  | A.Lvarvar(n, (_, id)) ->
+  | A.Lvarvar(n, id) ->
     let local = get_non_pipe_local id in
     gather [
       instr_cgetl local;
@@ -836,14 +838,14 @@ and emit_class_alias es =
     instr_alias_cls c1 c2
   ]
 
-and emit_expr env expr ~need_ref =
-  (* Note that this takes an Ast.expr, not a Nast.expr. *)
-  match snd expr with
+and emit_expr env (pos, expr_ as expr) ~need_ref =
+  Emit_pos.emit_pos_then pos @@
+  match expr_ with
   | A.Float _ | A.String _ | A.Int _ | A.Null | A.False | A.True ->
     let v = Ast_constant_folder.expr_to_typed_value (Emit_env.get_namespace env) expr in
     emit_box_if_necessary need_ref @@ instr (ILitConst (TypedValue v))
-  | A.Lvar (_, x) ->
-    emit_local ~notice:Notice ~need_ref env x
+  | A.Lvar id ->
+    emit_local ~notice:Notice ~need_ref env id
   | A.Class_const (cid, id) ->
     emit_class_const env cid id
   | A.Unop (op, e) ->
@@ -1258,8 +1260,8 @@ and emit_short_circuit_op env expr =
 
 and emit_quiet_expr env (_, expr_ as expr) =
   match expr_ with
-  | A.Lvar (_, x) when not (is_local_this env x) ->
-    instr_cgetquietl (get_local env x)
+  | A.Lvar ((_, name) as id) when not (is_local_this env name) ->
+    instr_cgetquietl (get_local env id)
   | A.Lvarvar (n, id) ->
     gather [
       emit_lvarvar ~need_ref:false (n-1) id;
@@ -1356,6 +1358,8 @@ and emit_elem_instrs env opt_elem_expr =
   (* These all have special inline versions of member keys *)
   | Some (_, (A.Int _ | A.String _)) -> empty, 0
   | Some (_, (A.Lvar (_, id))) when not (is_local_this env id) -> empty, 0
+  | Some (_, (A.Class_const (_, (_, id))))
+    when id = SN.Members.mClass -> empty, 0
   | Some expr -> emit_expr ~need_ref:false env expr, 1
   | None -> empty, 0
 
@@ -1373,12 +1377,15 @@ and emit_prop_instrs env (_, expr_ as expr) =
 and get_elem_member_key env stack_index opt_expr =
   match opt_expr with
   (* Special case for local *)
-  | Some (_, A.Lvar (_, x)) when not (is_local_this env x) ->
-    MemberKey.EL (get_local env x)
+  | Some (_, A.Lvar id) when not (is_local_this env (snd id)) ->
+    MemberKey.EL (get_local env id)
   (* Special case for literal integer *)
   | Some (_, A.Int (_, str)) -> MemberKey.EI (Int64.of_string str)
   (* Special case for literal string *)
   | Some (_, A.String (_, str)) -> MemberKey.ET str
+  (* Special case for class name *)
+  | Some (_, (A.Class_const ((_, cid), (_, id))))
+    when id = SN.Members.mClass -> MemberKey.ET cid
   (* General case *)
   | Some _ -> MemberKey.EC stack_index
   (* ELement missing (so it's array append) *)
@@ -1387,7 +1394,7 @@ and get_elem_member_key env stack_index opt_expr =
 (* Get the member key for a property *)
 and get_prop_member_key env null_flavor stack_index prop_expr =
   match snd prop_expr with
-  | A.Id (_, id) when String_utils.string_starts_with id "$" ->
+  | A.Id ((_, name) as id) when String_utils.string_starts_with name "$" ->
     MemberKey.PL (get_local env id)
   (* Special case for known property name *)
   | A.Id (_, id)
@@ -1397,7 +1404,7 @@ and get_prop_member_key env null_flavor stack_index prop_expr =
     | Ast.OG_nullthrows -> MemberKey.PT pid
     | Ast.OG_nullsafe -> MemberKey.QT pid
     end
-  | A.Lvar (_, id) when not (is_local_this env id) ->
+  | A.Lvar ((_, name) as id) when not (is_local_this env name) ->
     MemberKey.PL (get_local env id)
   (* General case *)
   | _ -> MemberKey.PC stack_index
@@ -1449,9 +1456,9 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
      instr (IBase BaseH),
      0
 
-   | A.Lvar (_, x)
-     when not (is_local_this env x) || Emit_env.get_needs_local_this env ->
-     let v = get_local env x in
+   | A.Lvar ((_, str) as id)
+     when not (is_local_this env str) || Emit_env.get_needs_local_this env ->
+     let v = get_local env id in
      empty,
      empty,
      instr (IBase (
@@ -1461,13 +1468,13 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
        )),
      0
 
-   | A.Lvar (_, x) ->
-     emit_local ~notice ~need_ref:false env x,
+   | A.Lvar id ->
+     emit_local ~notice ~need_ref:false env id,
      empty,
      instr (IBase (BaseC base_offset)),
      1
 
-   | A.Array_get((_, A.Lvar (_, x)), Some (_, A.Lvar (_, y)))
+   | A.Array_get((_, A.Lvar (_, x)), Some (_, A.Lvar y))
      when x = SN.Superglobals.globals ->
      let v = get_local env y in
      empty,
@@ -1553,7 +1560,7 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
        total_stack_size
      end
 
-   | A.Class_get(cid, (_, A.Lvarvar (1, (_, id)))) ->
+   | A.Class_get(cid, (_, A.Lvarvar (1, id))) ->
      let cexpr, _ = expr_to_class_expr ~resolve_self:false
        (Emit_env.get_scope env) (id_to_expr cid) in
      (* special case for $x->$$y: use BaseSL *)
@@ -1570,12 +1577,12 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
      cexpr_end,
      instr_basesc base_offset,
      1
-   | A.Lvarvar (1, (_, id)) ->
+   | A.Lvarvar (1, id) ->
      empty,
      empty,
      instr_basenl (get_non_pipe_local id) mode,
      0
-   | A.Lvarvar (n, (_, id)) ->
+   | A.Lvarvar (n, id) ->
      let base_expr_instrs = gather [
        instr_cgetl (get_non_pipe_local id);
        instr_cgetn_seq (n - 1)
@@ -1601,7 +1608,8 @@ and emit_base ~is_object ~notice env mode base_offset param_num_opt (_, expr_ as
                    then BaseR base_offset else BaseC base_offset)),
      1
 
-and emit_arg env i ((_, expr_) as e) =
+and emit_arg env i (pos, expr_ as expr) =
+  Emit_pos.emit_pos_then pos @@
   match expr_ with
   | A.Lvar (_, x) when SN.Superglobals.is_superglobal x ->
     gather [
@@ -1609,10 +1617,10 @@ and emit_arg env i ((_, expr_) as e) =
       instr_fpassg i
     ]
 
-  | A.Lvar (_, x)
-    when not (is_local_this env x) || Emit_env.get_needs_local_this env ->
-    instr_fpassl i (get_local env x)
-  | A.Lvarvar (n, (_, id)) ->
+  | A.Lvar ((_, str) as id)
+    when not (is_local_this env str) || Emit_env.get_needs_local_this env ->
+    instr_fpassl i (get_local env id)
+  | A.Lvarvar (n, id) ->
     gather [
       instr_cgetl (get_non_pipe_local id);
       instr_cgetn_seq (n - 1);
@@ -1633,7 +1641,7 @@ and emit_arg env i ((_, expr_) as e) =
   | A.Class_get (cid, id) ->
     emit_class_get env (Some i) QueryOp.CGet false cid id
 
-  | A.Binop (A.Eq None, (_, A.List _ as e), (_, A.Lvar (_, id))) ->
+  | A.Binop (A.Eq None, (_, A.List _ as e), (_, A.Lvar id)) ->
     let local = get_local env id in
     gather [
       emit_lval_op_list env (Some local) [] e;
@@ -1641,9 +1649,9 @@ and emit_arg env i ((_, expr_) as e) =
     ]
 
   | _ ->
-    let instrs, flavor = emit_flavored_expr env e in
+    let instrs, flavor = emit_flavored_expr env expr in
     let fpass_kind = match flavor with
-      | Flavor.Cell -> instr_fpass (get_passByRefKind e) i
+      | Flavor.Cell -> instr_fpass (get_passByRefKind expr) i
       | Flavor.Ref -> instr_fpassv i
       | Flavor.ReturnVal -> instr_fpassr i
     in
@@ -1687,7 +1695,8 @@ and emit_object_expr env (_, expr_ as expr) =
 
 and emit_call_lhs env (_, expr_ as expr) nargs =
   match expr_ with
-  | A.Obj_get (obj, (_, A.Id (_, id)), null_flavor) when id.[0] = '$' ->
+  | A.Obj_get (obj, (_, A.Id ((_, str) as id)), null_flavor)
+    when str.[0] = '$' ->
     gather [
       emit_object_expr env obj;
       instr_cgetl (get_local env id);
@@ -1782,6 +1791,8 @@ and get_call_builtin_func_info = function
   | "vec" -> Some (1, IOp CastVec)
   | "keyset" -> Some (1, IOp CastKeyset)
   | "dict" -> Some (1, IOp CastDict)
+  | "varray" -> Some (1, IOp CastVArray)
+  | "darray" -> Some (1, IOp CastDArray)
   | _ -> None
 
 and emit_call_user_func_args env i expr =
@@ -1839,57 +1850,64 @@ and emit_call_user_func env id arg args =
 and emit_name_string env e =
   emit_expr ~need_ref:false env e
 
-and emit_call env (_, expr_ as expr) args uargs =
+and emit_special_function env id args uargs default =
   let nargs = List.length args + List.length uargs in
-  let default () =
-    gather [
-      emit_call_lhs env expr nargs;
-      emit_args_and_call env args uargs;
-    ], Flavor.ReturnVal in
-  match expr_, args with
-  | A.Id (_, id), _ when id = SN.SpecialFunctions.echo ->
+  let fq_id, _ =
+    Hhbc_id.Function.elaborate_id (Emit_env.get_namespace env) (Pos.none, id) in
+  (* Make sure that we do not treat a special function that is aliased as not
+   * aliased *)
+  (* Invariant is a special function that needs further special treatment since
+   * it doesn't get a fallback unless it has zero arguments, see emitter.cpp *)
+  if Hhbc_id.Function.to_raw_string fq_id <> id && not (id = "invariant")
+  then None else
+  match id, args with
+  | id, _ when id = SN.SpecialFunctions.echo ->
     let instrs = gather @@ List.mapi args begin fun i arg ->
          gather [
            emit_expr ~need_ref:false env arg;
            instr (IOp Print);
            if i = nargs-1 then empty else instr_popc
          ] end in
-    instrs, Flavor.Cell
-  | A.Id (_, "array_slice"), [
-    _, A.Call ((_, A.Id (_, "func_get_args")), _, [], []); (_, A.Int _ as count)
+    Some (instrs, Flavor.Cell)
+
+  | "array_slice", [
+    _, A.Call ((_, A.Id (_, "func_get_args")), _, [], []);
+    (_, A.Int _ as count)
     ] ->
     let p = Pos.none in
-    emit_call env (p, A.Id (p, "\\__SystemLib\\func_slice_args")) [count] []
-  | A.Id (_, id), _ when
+    Some (emit_call env (p,
+        A.Id (p, "\\__SystemLib\\func_slice_args")) [count] [])
+
+  | id, _ when
     (optimize_cuf ()) && (is_call_user_func id (List.length args)) ->
     if List.length uargs != 0 then
     failwith "Using argument unpacking for a call_user_func is not supported";
     begin match args with
       | [] -> failwith "call_user_func - needs a name"
       | arg :: args ->
-        emit_call_user_func env id arg args
+        Some (emit_call_user_func env id arg args)
     end
 
-  | A.Id (_, "invariant"), _ when List.length args > 0 ->
+  | "invariant", _ when List.length args > 0 ->
     let e = List.hd_exn args in
     let rest = List.tl_exn args in
     let l = Label.next_regular () in
     let p = Pos.none in
     let id = p, A.Id (p, "hh\\invariant_violation") in
-    gather [
+    Some (gather [
       (* Could use emit_jmpnz for better code *)
       emit_expr ~need_ref:false env e;
       instr_jmpnz l;
       emit_ignored_expr env (p, A.Call (id, [], rest, uargs));
-      Emit_fatal.emit_fatal_runtime "invariant_violation";
+      Emit_fatal.emit_fatal_runtime p "invariant_violation";
       instr_label l;
       instr_null;
-    ], Flavor.Cell
+    ], Flavor.Cell)
 
-  | A.Id (_, "assert"), _ ->
+  | "assert", _ ->
     let l0 = Label.next_regular () in
     let l1 = Label.next_regular () in
-    gather [
+    Some (gather [
       instr_string "zend.assertions";
       instr_fcallbuiltin 1 1 "ini_get";
       instr_unboxr_nop;
@@ -1902,9 +1920,9 @@ and emit_call env (_, expr_ as expr) args uargs =
       instr_label l0;
       instr_true;
       instr_label l1;
-    ], Flavor.Cell
+    ], Flavor.Cell)
 
-  | A.Id (_, ("class_exists" | "interface_exists" | "trait_exists" as id)), _
+  | ("class_exists" | "interface_exists" | "trait_exists" as id), _
     when nargs = 1 || nargs = 2 ->
     let class_kind =
       match id with
@@ -1912,7 +1930,7 @@ and emit_call env (_, expr_ as expr) args uargs =
       | "interface_exists" -> KInterface
       | "trait_exists" -> KTrait
       | _ -> failwith "class_kind" in
-    gather [
+    Some (gather [
       emit_name_string env (List.hd_exn args);
       instr (IOp CastString);
       if nargs = 1 then instr_true
@@ -1921,31 +1939,49 @@ and emit_call env (_, expr_ as expr) args uargs =
         instr (IOp CastBool)
       ];
       instr (IMisc (OODeclExists class_kind))
-    ], Flavor.Cell
+    ], Flavor.Cell)
 
-  | A.Id (_, ("exit" | "die")), _ when nargs = 0 || nargs = 1 ->
-    emit_exit env (List.hd args), Flavor.Cell
+  | ("exit" | "die"), _ when nargs = 0 || nargs = 1 ->
+    Some (emit_exit env (List.hd args), Flavor.Cell)
 
+  | _ -> None
+
+
+and emit_call env (_, expr_ as expr) args uargs =
+  let nargs = List.length args + List.length uargs in
+  let default () =
+    gather [
+      emit_call_lhs env expr nargs;
+      emit_args_and_call env args uargs;
+    ], Flavor.ReturnVal in
+
+  match expr_, args with
   | A.Id (_, id), _ ->
-    begin match get_call_builtin_func_info id with
-    | Some (nargs, i) when nargs = List.length args ->
-      gather [
-        emit_exprs env args;
-        instr i
-      ], Flavor.Cell
+    let special_fn_opt = emit_special_function env id args uargs default in
+    begin match special_fn_opt with
+    | Some (instrs, flavor) -> instrs, flavor
+    | None ->
+      begin match get_call_builtin_func_info id with
+      | Some (nargs, i) when nargs = List.length args ->
+        gather [
+          emit_exprs env args;
+          instr i
+        ], Flavor.Cell
 
-    | _ ->
-    begin match args, istype_op id with
-    | [(_, A.Lvar (_, arg_id))], Some i when not (is_local_this env arg_id) ->
-      instr (IIsset (IsTypeL (get_local env arg_id, i))),
-      Flavor.Cell
-    | [arg_expr], Some i ->
-      gather [
-        emit_expr ~need_ref:false env arg_expr;
-        instr (IIsset (IsTypeC i))
-      ], Flavor.Cell
-    | _ -> default ()
-    end
+      | _ ->
+        begin match args, istype_op id with
+        | [(_, A.Lvar (_, arg_str as arg_id))], Some i
+          when not (is_local_this env arg_str) ->
+          instr (IIsset (IsTypeL (get_local env arg_id, i))),
+          Flavor.Cell
+        | [arg_expr], Some i ->
+          gather [
+            emit_expr ~need_ref:false env arg_expr;
+            instr (IIsset (IsTypeC i))
+          ], Flavor.Cell
+        | _ -> default ()
+        end
+      end
     end
   | _ -> default ()
 
@@ -1953,10 +1989,11 @@ and emit_call env (_, expr_ as expr) args uargs =
 (* Emit code for an expression that might leave a cell or reference on the
  * stack. Return which flavor it left.
  *)
-and emit_flavored_expr env (_, expr_ as expr) =
+and emit_flavored_expr env (pos, expr_ as expr) =
   match expr_ with
   | A.Call (e, _, args, uargs) when not (is_special_function e args) ->
-    emit_call env e args uargs
+    let instrs, flavor = emit_call env e args uargs in
+    Emit_pos.emit_pos_then pos instrs, flavor
   | _ ->
     let flavor =
       if binary_assignment_rhs_starts_with_ref expr
@@ -2006,10 +2043,10 @@ and emit_final_static_op cid prop op =
   | LValOp.Unset ->
     let id =
       match snd prop with
-      | A.Lvar (_, id) | A.Lvarvar (_, (_, id)) -> id
-      | _ -> "unknown" (* TODO: get text of property name  *)
-    in Emit_fatal.emit_fatal_runtime
-      ("Attempt to unset static property " ^ cid ^ "::" ^ id)
+      | A.Lvar id | A.Lvarvar (_, id) -> id
+      | _ -> (Pos.none, "unknown") (* TODO: get text of property name  *)
+    in Emit_fatal.emit_fatal_runtime (fst id)
+      ("Attempt to unset static property " ^ cid ^ "::" ^ snd id)
 
 (* Given a local $local and a list of integer array indices i_1, ..., i_n,
  * generate code to extract the value of $local[i_n]...[i_1]:
@@ -2190,12 +2227,12 @@ and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
     rhs_instrs,
     emit_final_global_op op
 
-  | A.Lvar (_, id) when not (is_local_this env id) ->
+  | A.Lvar id when not (is_local_this env (snd id)) ->
     empty,
     rhs_instrs,
     emit_final_local_op op (get_local env id)
 
-  | A.Lvarvar (n, (_, id)) ->
+  | A.Lvarvar (n, id) ->
     handle_lvarvar n id emit_final_named_local_op
 
   | A.Array_get ((_, A.Lvar (_, x)), Some e) when x = SN.Superglobals.globals ->
@@ -2282,7 +2319,7 @@ and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
     let cexpr, _ = expr_to_class_expr ~resolve_self:false
       (Emit_env.get_scope env) (id_to_expr cid) in
     begin match snd prop with
-    | A.Lvarvar (_, (_, id)) | A.BracedExpr (_, A.Lvar (_, id))  ->
+    | A.Lvarvar (_, id) | A.BracedExpr (_, A.Lvar id)  ->
       let n = match snd prop with A.Lvarvar (n, _) -> n | _ -> 1 in
       let lhs, rhs, final =
         handle_lvarvar n id (emit_final_static_op (snd cid) prop)
@@ -2324,6 +2361,8 @@ and from_unop op =
   | A.Uincr | A.Udecr | A.Upincr | A.Updecr | A.Uref | A.Usplat | A.Usilence ->
     emit_nyi "unop - probably does not need translation"
 
+and emit_expr_as_ref env e = emit_expr ~need_ref:true env e
+
 and emit_unop ~need_ref env op e =
   let unop_instr = from_unop op in
   match op with
@@ -2352,7 +2391,7 @@ and emit_unop ~need_ref env op e =
       let instr = emit_lval_op env (LValOp.IncDec incdec_op) e None in
       emit_box_if_necessary need_ref instr
     end
-  | A.Uref -> emit_expr ~need_ref:true env e
+  | A.Uref -> emit_expr_as_ref env e
   | A.Usplat ->
     emit_expr ~need_ref:false env e
   | A.Usilence ->
@@ -2400,8 +2439,8 @@ and with_temp_local temp f =
 and stash_in_local ?(always_stash=false) ?(leave_on_stack=false)
                    ?(always_stash_this=false) env e f =
   match e with
-  | (_, A.Lvar (_, id)) when not always_stash
-    && not (is_local_this env id &&
+  | (_, A.Lvar id) when not always_stash
+    && not (is_local_this env (snd id) &&
     ((Emit_env.get_needs_local_this env) || always_stash_this)) ->
     let break_label = Label.next_regular () in
     gather [
