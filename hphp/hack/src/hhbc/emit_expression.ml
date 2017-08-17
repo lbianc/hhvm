@@ -194,6 +194,12 @@ let is_local_this env id =
   let scope = Emit_env.get_scope env in
   id = SN.SpecialIdents.this && Ast_scope.Scope.has_this scope
 
+let is_legal_lval_op_on_this op =
+  match op with
+  | LValOp.Unset -> true
+  | LValOp.IncDec _ -> true
+  | _ -> false
+
 let extract_shape_field_name_pstring = function
   | A.SFlit p -> A.String p
   | A.SFclass_const (id, p) -> A.Class_const (id, p)
@@ -493,7 +499,7 @@ and emit_load_class_ref env cexpr =
   | Class_id id -> emit_known_class_id env id
   | Class_expr expr ->
   begin match expr with
-  | (_, A.Lvar _) ->
+  | (_, A.Lvar (_, id)) when id <> SN.SpecialIdents.this ->
     stash_in_local ~always_stash_this:true env expr
     begin fun temp _ ->
     instr (IGet (ClsRefGetL (temp, 0)))
@@ -1051,7 +1057,8 @@ and is_struct_init es =
     List.fold_right es ~init:(true, keys) ~f:(fun field (b, keys) ->
       match field with
         | A.AFkvalue ((_, A.String (_, s)), _) ->
-          b && (Option.is_none @@ Typed_value.string_to_int_opt s),
+          b && (Option.is_none
+            @@ Typed_value.string_to_int_opt ~allow_following:false s),
           ULS.add keys s
         | _ -> false, keys)
   in
@@ -2226,6 +2233,10 @@ and emit_lval_op_nonlist_steps env op (_, expr_) rhs_instrs rhs_stack_size =
     instr_string @@ SU.Locals.strip_dollar id,
     rhs_instrs,
     emit_final_global_op op
+
+    (* PHP rejects assignment to $this (even when $this isn't in scope) *)
+  | A.Lvar (pos, str) when str = SN.SpecialIdents.this && not (is_legal_lval_op_on_this op) ->
+    Emit_fatal.raise_fatal_parse pos "Cannot re-assign $this"
 
   | A.Lvar id when not (is_local_this env (snd id)) ->
     empty,

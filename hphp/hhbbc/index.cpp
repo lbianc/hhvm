@@ -41,6 +41,7 @@
 #include <folly/Range.h>
 #include <folly/String.h>
 
+#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/tv-comparisons.h"
 
 #include "hphp/runtime/vm/native.h"
@@ -59,8 +60,6 @@
 #include "hphp/util/algorithm.h"
 #include "hphp/util/assertions.h"
 #include "hphp/util/match.h"
-
-#include "hphp/parser/parser.h"
 
 namespace HPHP { namespace HHBBC {
 
@@ -1058,27 +1057,30 @@ void add_unit_to_index(IndexData& index, const php::Unit& unit) {
 
     for (auto& m : c->methods) {
       index.methods.insert({m->name, borrow(m)});
-      uint64_t refs = 0;
-      uint64_t cur = 1;
-      bool anyByRef = false;
-      for (auto& p : m->params) {
-        if (p.byRef) {
-          refs |= cur;
-          anyByRef = true;
-        }
-        // It doesn't matter that we lose parameters beyond the 64th,
-        // for those, we'll conservatively check everything anyway.
-        cur <<= 1;
-      }
-      if (anyByRef) {
-        // Multiple methods with the same name will be combined in
-        // the same cell, thus we use |=. This only makes sense in
-        // WholeProgram mode since we use this field to check that no functions
-        // uses its n-th parameter byref, which requires global knowledge.
-        index.method_ref_params_by_name[m->name] |= refs;
-      }
       if (m->attrs & AttrInterceptable) {
         index.any_interceptable_functions = true;
+      }
+
+
+      if (RuntimeOption::RepoAuthoritative) {
+        uint64_t refs = 0, cur = 1;
+        bool anyByRef = false;
+        for (auto& p : m->params) {
+          if (p.byRef) {
+            refs |= cur;
+            anyByRef = true;
+          }
+          // It doesn't matter that we lose parameters beyond the 64th,
+          // for those, we'll conservatively check everything anyway.
+          cur <<= 1;
+        }
+        if (anyByRef) {
+          // Multiple methods with the same name will be combined in the same
+          // cell, thus we use |=. This only makes sense in WholeProgram mode
+          // since we use this field to check that no functions uses its n-th
+          // parameter byref, which requires global knowledge.
+          index.method_ref_params_by_name[m->name] |= refs;
+        }
       }
     }
 
@@ -1996,8 +1998,8 @@ Index::Index(borrowed_ptr<php::Program> program)
       // the attributes clear.
       attrSetter(c->attrs, false, AttrUnique | AttrPersistent);
 
-      // Manually set anonymous classes to be unique to maintain invariance.
-      if (ParserBase::IsAnonymousClassName(c->name->slice())) {
+      // Manually set closure classes to be unique to maintain invariance.
+      if (is_closure(*c)) {
         attrSetter(c->attrs, true, AttrUnique);
       }
       preresolve(*m_data, env, c->name);
@@ -2167,6 +2169,9 @@ folly::Optional<res::Class> Index::resolve_class(Context ctx,
 
 folly::Optional<res::Class> Index::selfCls(const Context& ctx) const {
   if (!ctx.cls) return folly::none;
+  if (!RuntimeOption::RepoAuthoritative && ctx.cls->attrs & AttrTrait) {
+    return folly::none;
+  }
   return resolve_class(ctx.cls);
 }
 
@@ -2807,21 +2812,20 @@ PrepKind Index::lookup_param_prep(Context /*ctx*/, res::Func rfunc,
         // by reference.
         return PrepKind::Val;
       }
-      if (paramId < sizeof(it->second) * CHAR_BIT &&
-          !((it->second >> paramId) & 1)) {
-        // no method by this name takes this parameter by reference
-        return PrepKind::Val;
-      }
-      auto const kind = prep_kind_from_set(
-        find_range(m_data->methods, s.name),
-        paramId
-      );
       /*
        * If we think it's supposed to be PrepKind::Ref, we still can't be sure
        * unless we go through some effort to guarantee that it can't be going
        * to an __call function magically (which will never take anything by
        * ref).
        */
+      if (paramId < sizeof(it->second) * CHAR_BIT) {
+        return ((it->second >> paramId) & 1) ?
+          PrepKind::Unknown : PrepKind::Val;
+      }
+      auto const kind = prep_kind_from_set(
+        find_range(m_data->methods, s.name),
+        paramId
+      );
       return kind == PrepKind::Ref ? PrepKind::Unknown : kind;
     },
     [&] (borrowed_ptr<FuncInfo> finfo) {

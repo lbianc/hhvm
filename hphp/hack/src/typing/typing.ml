@@ -210,7 +210,7 @@ let rec check_memoizable env param ty =
       AKvarray ty
       | AKvec ty
       | AKdarray(_, ty)
-      | AKdarray_or_varray ty
+      | AKvarray_or_darray ty
       | AKmap(_, ty)
     ) ->
       check_memoizable env param ty
@@ -412,7 +412,7 @@ and fun_def tcopt f =
         T.f_user_attributes = List.map f.f_user_attributes (user_attribute env);
         T.f_body = T.NamedBody {
           T.fnb_nast = tb;
-          T.fnb_unsafe = false (* TAST get this right *)
+          T.fnb_unsafe = nb.fnb_unsafe;
         }
       },
       env
@@ -1133,8 +1133,9 @@ and expr_
       let env, new_ty = ExprDepTy.make env CIstatic ty in
       make_result env T.This (new_ty)
   | Assert (AE_assert e) ->
+      let env, te, _ = expr env e in
       let env = condition env true e in
-      make_result env T.Any (Reason.Rwitness p, Tprim Tvoid)
+      make_result env (T.Assert (T.AE_assert te)) (Reason.Rwitness p, Tprim Tvoid)
   | True ->
       make_result env T.True (Reason.Rwitness p, Tprim Tbool)
   | False ->
@@ -1394,13 +1395,19 @@ and expr_
       let env, te, result = dispatch_call p env call_type e hl el uel in
       let env = Env.forget_members env p in
       env, te, result
-    (* For example, e1 += e2. This is typed and translated as if
-     * written e1 = e1 + e2.
-     * TODO TAST: is this right? e1 will get evaluated more than once
+    (* This case covers expressions like "e1 += e2". It is typed as if
+     * "e1 = e1 + e2" was written, meaning that e1 is typechecked twice. The
+     * returned typed expression correctly preserves the "e1 += e2" structure.
      *)
   | Binop (Ast.Eq (Some op), e1, e2) ->
-      let e2 = p, Binop (op, e1, e2) in
-      raw_expr in_cond env (p, Binop (Ast.Eq None, e1, e2))
+      let e_fake = (p, Binop (Ast.Eq None, e1, (p, Binop (op, e1, e2)))) in
+      let env, te_fake, ty = raw_expr in_cond env e_fake in
+      begin match snd te_fake with
+        | T.Binop (_, te1, (_, T.Binop (_, _, te2))) ->
+          let te = T.Binop (Ast.Eq (Some op), te1, te2) in
+          make_result env te ty
+        | _ -> assert false
+      end
   | Binop (Ast.Eq None, e1, e2) ->
       let env, te2, ty2 = raw_expr in_cond env e2 in
       let env, te1, ty = assign p env e1 ty2 in
@@ -1496,11 +1503,23 @@ and expr_
             expr_error env (Reason.Rwitness p)
       end
   | Class_const (cid, mid) -> class_const env p (cid, mid)
-  | Class_get (x, (_, y))
+  | Class_get (x, (py, y))
       when Env.FakeMembers.get_static env x y <> None ->
         let env, local = Env.FakeMembers.make_static p env x y in
         let local = p, Lvar (p, local) in
-        expr env local
+        let env, _, ty = expr env local in
+        let cid, env = begin match x with
+          | CIparent -> T.CIparent, env
+          | CIself -> T.CIself, env
+          | CIstatic -> T.CIstatic, env
+          | CIexpr ((_, This) as e)
+          | CIexpr ((_, Lvar (_, _)) as e) ->
+            let env, te, _ = expr env e in
+            T.CIexpr te, env
+          | CI x -> T.CI x, env
+          | CIexpr _ -> assert false
+        end in
+        make_result env (T.Class_get (cid, (py, y))) ty
   | Class_get (cid, mid) ->
       TUtils.process_static_find_ref cid mid;
       let env, te, cty = static_class_id p env cid in
@@ -2226,7 +2245,8 @@ let make_result env te1 ty1 = (env, T.make_typed_expr p ty1 te1, ty1) in
     (* references can be "lvalues" in foreach bindings *)
     if Env.is_strict env then
       Errors.reference_expr pref;
-    assign p env e1' ty2
+    let env, texpr, ty = assign p env e1' ty2 in
+    make_result env (T.Unop (Ast.Uref, texpr)) ty
   | _ ->
       assign_simple p env e1 ty2
 
@@ -2313,7 +2333,7 @@ and call_parent_construct pos env el uel =
         | Tarray (_, _)
         | Tdarray (_, _)
         | Tvarray _
-        | Tdarray_or_varray _
+        | Tvarray_or_darray _
         | Tgeneric _
         | Toption _
         | Tprim _
@@ -2898,8 +2918,8 @@ and array_get ?(lhs_of_null_coalesce=false) is_lvalue p env ty1 e2 ty2 =
       let ty1 = Reason.Ridx (fst e2, fst ety1), Tprim Tint in
       let env = Type.sub_type p Reason.index_array env ty2 ty1 in
       env, ty
-  | Tarraykind (AKdarray_or_varray ty) ->
-      let ty1 = Reason.Rdarray_or_varray_key p, Tprim Tarraykey in
+  | Tarraykind (AKvarray_or_darray ty) ->
+      let ty1 = Reason.Rvarray_or_darray_key p, Tprim Tarraykey in
       let env = Type.sub_type p Reason.index_array env ty2 ty1 in
       env, ty
   | Tclass ((_, cn) as id, argl)
@@ -4055,7 +4075,12 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
         | Tprim _ | Tvar _ | Tfun _ | Tabstract (_, _) | Tclass (_, _)
         | Ttuple _ | Tanon (_, _) | Tunresolved _ | Tobject | Tshape _
             )
-        ), _ -> binop in_cond p env Ast.Minus p1 te1 ty1 p2 te2 ty2
+        ), _ ->
+        let env, texpr, ty =
+          binop in_cond p env Ast.Minus p1 te1 ty1 p2 te2 ty2 in
+        match snd texpr with
+          | T.Binop (_, te1, te2) -> make_result env te1 te2 ty
+          | _ -> assert false
       )
   | Ast.Minus | Ast.Star ->
     begin
@@ -4087,7 +4112,7 @@ and binop in_cond p env bop p1 te1 ty1 p2 te2 ty2 =
           | (Some r, _) | (_, Some r) ->
             make_result env te1 te2 (r, Tprim Tnum)
           (* Otherwise? *)
-          | _, _ -> env, T.make_typed_expr p ty1 T.Any, ty1
+          | _, _ -> make_result env te1 te2 ty1
     end
   | Ast.Slash | Ast.Starstar ->
     begin
@@ -4823,7 +4848,7 @@ and check_extend_abstract_const ~is_final p smap =
         | Tarray (_, _)
         | Tdarray (_, _)
         | Tvarray _
-        | Tdarray_or_varray _
+        | Tvarray_or_darray _
         | Toption _
         | Tprim _
         | Tfun _
@@ -5030,7 +5055,7 @@ and method_def env m =
     T.m_ret = m.m_ret;
     T.m_body = T.NamedBody {
       T.fnb_nast = tb;
-      T.fnb_unsafe = false (* TAST get this right *)
+      T.fnb_unsafe = nb.fnb_unsafe;
     };
   }
 

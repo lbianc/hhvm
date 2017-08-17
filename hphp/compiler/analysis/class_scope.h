@@ -222,7 +222,7 @@ public:
   /**
    * Look up function by name.
    */
-  FunctionScopePtr findFunction(AnalysisResultConstPtr ar,
+  FunctionScopePtr findFunction(AnalysisResultConstRawPtr ar,
                                 const std::string &name,
                                 bool recursive,
                                 bool exclIntfBase = false);
@@ -325,12 +325,6 @@ public:
   const std::vector<FunctionScopePtr>& allFunctions() const {
     return m_functionsVec;
   }
-
-private:
-  void informClosuresAboutScopeClone(ConstructPtr root,
-                                     FunctionScopePtr outerScope,
-                                     AnalysisResultPtr ar);
-
 
   /////////////////////////////////////////////////////////////////////////////
   // Trait flattening.

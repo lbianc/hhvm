@@ -53,7 +53,7 @@ ExpressionPtr NewObjectExpression::clone() {
 ///////////////////////////////////////////////////////////////////////////////
 // static analysis functions
 
-void NewObjectExpression::analyzeProgram(AnalysisResultPtr ar) {
+void NewObjectExpression::analyzeProgram(AnalysisResultConstRawPtr ar) {
   FunctionCall::analyzeProgram(ar);
   if (ar->getPhase() == AnalysisResult::AnalyzeAll ||
       ar->getPhase() == AnalysisResult::AnalyzeFinal) {
@@ -62,7 +62,6 @@ void NewObjectExpression::analyzeProgram(AnalysisResultPtr ar) {
       if (ClassScopePtr cls = resolveClass()) {
         m_origName = m_origClassName;
         func = cls->findConstructor(ar, true);
-        if (func) func->addNewObjCaller(getScope());
       }
     }
 

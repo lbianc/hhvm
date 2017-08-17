@@ -40,7 +40,8 @@ let abstract_keyword = {
     (* Abstract class *)
     is_top_level_statement_valid context
     || (* Abstract method *)
-    is_class_body_declaration_valid context
+    is_class_body_declaration_valid context ||
+    is_trait_body_declaration_valid context
   end;
 }
 
@@ -54,6 +55,8 @@ let final_keyword = {
     is_top_level_statement_valid context
     || (* Final method *)
     is_class_body_declaration_valid context
+    ||
+    is_trait_body_declaration_valid context
     || (* Final after other modifiers *)
     context.closest_parent_container = ClassBody &&
     (context.predecessor = KeywordStatic ||
@@ -95,17 +98,28 @@ let visibility_modifiers = {
   is_valid_in_context = begin fun context ->
     is_class_body_declaration_valid context
     ||
+    is_trait_body_declaration_valid context
+    ||
     context.closest_parent_container = ClassBody &&
     context.predecessor = KeywordFinal
   end;
 }
 
+let interface_visibility_modifiers = {
+  keywords = ["public"];
+  is_valid_in_context = is_interface_body_declaration_valid
+}
+
 let static_keyword = {
   keywords = ["static"];
   is_valid_in_context = begin fun context ->
-    is_class_body_declaration_valid context
+    is_class_body_declaration_valid context ||
+    is_interface_body_declaration_valid context ||
+    is_trait_body_declaration_valid context
     ||
-    context.closest_parent_container = ClassBody &&
+    (context.closest_parent_container = ClassBody ||
+    context.closest_parent_container = InterfaceBody ||
+    context.closest_parent_container = TraitBody) &&
     context.predecessor = VisibilityModifier
   end;
 }
@@ -114,9 +128,11 @@ let async_keyword = {
   keywords = ["async"];
   is_valid_in_context = begin fun context ->
     (* Async method *)
-    is_class_body_declaration_valid context
+    is_class_body_declaration_valid context ||
+    is_trait_body_declaration_valid context
     || (* Async method after modifiers *)
-    context.closest_parent_container = ClassBody &&
+    (context.closest_parent_container = ClassBody ||
+    context.closest_parent_container = TraitBody) &&
     (context.predecessor = VisibilityModifier ||
     context.predecessor = KeywordFinal ||
     context.predecessor = KeywordStatic )
@@ -130,7 +146,8 @@ let async_keyword = {
 let const_keyword = {
   keywords = ["const"];
   is_valid_in_context = begin fun context ->
-    is_class_body_declaration_valid context
+    is_class_body_declaration_valid context ||
+    is_interface_body_declaration_valid context
   end;
 }
 
@@ -149,9 +166,15 @@ let function_keyword = {
   keywords = ["function"];
   is_valid_in_context = begin fun context ->
     (* Class Method *)
-    is_class_body_declaration_valid context
+    (* "function" is not valid without a visibility modifier, but we still suggest it here since a
+       user may wish to write the function before adding the modifier. *)
+    is_class_body_declaration_valid context ||
+    is_interface_body_declaration_valid context ||
+    is_trait_body_declaration_valid context
     || (* Class method, after modifiers *)
     (context.closest_parent_container = ClassBody ||
+    context.closest_parent_container = InterfaceBody ||
+    context.closest_parent_container = TraitBody ||
     context.closest_parent_container = FunctionHeader) &&
     (context.predecessor = VisibilityModifier ||
     context.predecessor = KeywordAsync ||
@@ -197,7 +220,7 @@ let require_constraint_keyword = {
 
 let declaration_keywords = {
   keywords = ["enum"; "require"; "include"; "require_once"; "include_once";
-    "namespace"; "newtype"; "type"; "trait"];
+    "namespace"; "newtype"; "trait"; "type"];
   is_valid_in_context = begin fun context ->
     is_top_level_statement_valid context
   end;
@@ -222,26 +245,9 @@ let noreturn_keyword = {
 }
 
 let primitive_types = {
-  keywords = ["array"; "?array"; "arraykey"; "?arraykey"; "bool"; "?bool"; "classname";
-  "?classname"; "darray"; "?darray"; "float"; "?float"; "int"; "?int"; "mixed"; "num"; "?num";
-  "string"; "?string"; "resource"; "?resource"; "varray"; "?varray"];
-  is_valid_in_context = begin fun context ->
-    (* Function return type *)
-    context.closest_parent_container = FunctionHeader &&
-    context.predecessor = TokenColon
-    || (* Parameter type *)
-    context.closest_parent_container = FunctionHeader &&
-    (context.predecessor = TokenComma ||
-    context.predecessor = TokenOpenParen)
-    || (* Class property type *)
-    context.inside_class_body &&
-    context.closest_parent_container = ClassBody &&
-    (context.predecessor = VisibilityModifier ||
-    context.predecessor = KeywordConst ||
-    context.predecessor = KeywordStatic)
-    || (* Generic type *)
-    context.predecessor = TokenLessThan
-  end;
+  keywords = ["array"; "arraykey"; "bool"; "classname"; "darray"; "float"; "int"; "mixed"; "num";
+  "string"; "resource"; "varray"];
+  is_valid_in_context = is_type_valid
 }
 
 let this_type_keyword = {
@@ -269,11 +275,6 @@ let switch_body_keywords = {
   end;
 }
 
-(*
- * TODO: Ideally, await will always be allowed inside a function body. Typing
- * await in a non-async function should either automatically make the function
- * async or suggest this change.
- *)
 let async_func_body_keywords = {
   keywords = ["await"];
   is_valid_in_context = begin fun context ->
@@ -302,27 +303,31 @@ let general_statements = {
   end;
 }
 
-let if_trailing_keywords = {
-  keywords = ["else"; "elseif"];
+let if_after_else = {
+  keywords = ["if"];
   is_valid_in_context = begin fun context ->
-    context.predecessor = IfWithoutElse
+    context.predecessor = KeywordElse &&
+    (context.closest_parent_container = CompoundStatement ||
+    context.closest_parent_container = IfStatement)
+  end;
+}
+
+let if_trailing_keywords = {
+  keywords = ["else"; "else if"];
+  is_valid_in_context = begin fun context ->
+    context.predecessor = IfWithoutElse &&
+    context.closest_parent_container = CompoundStatement
   end;
 }
 
 let try_trailing_keywords = {
   keywords = ["catch"; "finally"];
   is_valid_in_context = begin fun context ->
-    context.predecessor = TryWithoutFinally
+    context.predecessor = TryWithoutFinally &&
+    context.closest_parent_container = CompoundStatement
   end;
 }
 
-(*
- * According to the spec, vacuous expressions (a function with no side
- * effects is called then has its result discarded) are allowed.
- * TODO: Should we only complete expressions when it makes sense to do so?
- * i.e. Only suggest these keywords in a return statement, as an argument to a
- * function, or on the RHS of an assignment expression.
- *)
 let primary_expressions = {
   keywords = ["tuple"; "shape"];
   is_valid_in_context = begin fun context ->
@@ -337,15 +342,6 @@ let scope_resolution_qualifiers = {
   end;
 }
 
-(*
- * An improperly formatted use body causes the parser to throw an error so we
- * cannot complete these at the moment.
- *)
-(*let use_body_keywords = {
-  keywords = ["insteadof"; "as"];
-  is_valid_in_context = fun _ -> true
-}*)
-
 let keyword_matches: keyword_completion list = [
   abstract_keyword;
   async_keyword;
@@ -357,9 +353,11 @@ let keyword_matches: keyword_completion list = [
   final_keyword;
   function_keyword;
   general_statements;
+  if_after_else;
   if_trailing_keywords;
   implements_keyword;
   interface_keyword;
+  interface_visibility_modifiers;
   loop_body_keywords;
   noreturn_keyword;
   postfix_expressions;

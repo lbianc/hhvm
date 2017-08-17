@@ -27,36 +27,37 @@
 #include <utility>
 #include <vector>
 
-#include "hphp/compiler/analysis/exceptions.h"
-#include "hphp/compiler/analysis/file_scope.h"
 #include "hphp/compiler/analysis/class_scope.h"
 #include "hphp/compiler/analysis/code_error.h"
-#include "hphp/compiler/statement/statement_list.h"
-#include "hphp/compiler/statement/if_branch_statement.h"
-#include "hphp/compiler/statement/method_statement.h"
-#include "hphp/compiler/statement/loop_statement.h"
-#include "hphp/compiler/statement/class_variable.h"
-#include "hphp/compiler/statement/use_trait_statement.h"
-#include "hphp/compiler/statement/class_require_statement.h"
-#include "hphp/compiler/analysis/symbol_table.h"
-#include "hphp/compiler/package.h"
-#include "hphp/compiler/parser/parser.h"
-#include "hphp/compiler/option.h"
-#include "hphp/compiler/analysis/function_scope.h"
-#include "hphp/compiler/builtin_symbols.h"
 #include "hphp/compiler/analysis/constant_table.h"
+#include "hphp/compiler/analysis/exceptions.h"
+#include "hphp/compiler/analysis/file_scope.h"
+#include "hphp/compiler/analysis/function_scope.h"
+#include "hphp/compiler/analysis/symbol_table.h"
 #include "hphp/compiler/analysis/variable_table.h"
-#include "hphp/compiler/expression/scalar_expression.h"
+#include "hphp/compiler/builtin_symbols.h"
+#include "hphp/compiler/expression/array_pair_expression.h"
+#include "hphp/compiler/expression/closure_expression.h"
 #include "hphp/compiler/expression/constant_expression.h"
 #include "hphp/compiler/expression/expression_list.h"
-#include "hphp/compiler/expression/array_pair_expression.h"
+#include "hphp/compiler/expression/scalar_expression.h"
 #include "hphp/compiler/expression/simple_function_call.h"
-#include "hphp/runtime/base/zend-printf.h"
+#include "hphp/compiler/option.h"
+#include "hphp/compiler/package.h"
+#include "hphp/compiler/parser/parser.h"
+#include "hphp/compiler/statement/class_require_statement.h"
+#include "hphp/compiler/statement/class_variable.h"
+#include "hphp/compiler/statement/if_branch_statement.h"
+#include "hphp/compiler/statement/loop_statement.h"
+#include "hphp/compiler/statement/method_statement.h"
+#include "hphp/compiler/statement/statement_list.h"
+#include "hphp/compiler/statement/use_trait_statement.h"
 #include "hphp/runtime/base/program-functions.h"
+#include "hphp/runtime/base/zend-printf.h"
 #include "hphp/runtime/vm/unit-emitter.h"
-#include "hphp/util/logger.h"
 #include "hphp/util/hash.h"
 #include "hphp/util/job-queue.h"
+#include "hphp/util/logger.h"
 #include "hphp/util/timer.h"
 
 using namespace HPHP;
@@ -156,7 +157,7 @@ void AnalysisResult::parseOnDemand(const std::string &name) const {
         Locker l(this);
         if (m_files.find(rname) != m_files.end()) return;
       }
-      m_package->addSourceFile(rname.c_str());
+      m_package->addSourceFile(rname);
     }
   }
 }
@@ -213,7 +214,6 @@ BlockScopePtr AnalysisResult::findConstantDeclarer(
 }
 
 ClassScopePtr AnalysisResult::findClass(const std::string &name) const {
-  AnalysisResultConstPtr ar = shared_from_this();
   auto const lname = toLower(name);
   auto const sysIter = m_systemClasses.find(lname);
   if (sysIter != m_systemClasses.end()) return sysIter->second;
@@ -418,17 +418,27 @@ void AnalysisResult::addSystemClass(ClassScopeRawPtr cs) {
 
 void AnalysisResult::checkClassDerivations() {
   AnalysisResultPtr ar = shared_from_this();
-  for (auto& pair : m_classDecs) {
-    for (ClassScopePtr cls : pair.second) {
-      if (Option::WholeProgram) {
-        try {
-          cls->importUsedTraits(ar);
-        } catch (const AnalysisTimeFatalException& e) {
-          cls->setFatal(e);
+  {
+    Timer timer(Timer::WallTime, "importUsedTraits");
+    for (auto& pair : m_classDecs) {
+      for (ClassScopePtr cls : pair.second) {
+        if (Option::WholeProgram) {
+          try {
+            cls->importUsedTraits(ar);
+          } catch (const AnalysisTimeFatalException& e) {
+            cls->setFatal(e);
+          }
         }
       }
-      hphp_string_iset seen;
-      cls->checkDerivation(ar, seen);
+    }
+  }
+  {
+    Timer timer(Timer::WallTime, "checkDerivation");
+    for (auto& pair : m_classDecs) {
+      for (ClassScopePtr cls : pair.second) {
+        hphp_string_iset seen;
+        cls->checkDerivation(ar, seen);
+      }
     }
   }
 }
@@ -497,12 +507,69 @@ static bool by_filename(const FileScopePtr &f1, const FileScopePtr &f2) {
   return f1->getName() < f2->getName();
 }
 
-void AnalysisResult::analyzeProgram(ConstructPtr c) {
+void AnalysisResult::analyzeProgram(ConstructPtr c) const {
   if (!c) return;
   for (auto i = 0, n = c->getKidCount(); i < n; ++i) {
     analyzeProgram(c->getNthKid(i));
   }
-  c->analyzeProgram(shared_from_this());
+  c->analyzeProgram(AnalysisResultConstRawPtr{this});
+}
+
+namespace {
+
+class AnalyzeWorker
+  : public JobQueueWorker<FileScopeRawPtr, const AnalysisResult*, true, true> {
+ public:
+  AnalyzeWorker() {}
+  void doJob(JobType job) override {
+    try {
+      job->analyzeProgram(AnalysisResultConstRawPtr{m_context});
+    } catch (Exception &e) {
+      Logger::Error("%s", e.getMessage().c_str());
+    } catch (...) {
+      Logger::Error("Fatal: An unexpected exception was thrown");
+    }
+  }
+  void onThreadEnter() override {
+    hphp_session_init();
+  }
+  void onThreadExit() override {
+    hphp_context_exit();
+    hphp_session_exit();
+  }
+};
+
+}
+
+void AnalysisResult::analyzeProgram(AnalysisResult::Phase phase) {
+  {
+    Timer timer(Timer::WallTime,
+                phase == AnalysisResult::AnalyzeFinal ?
+                "analyze final" : "analyze all");
+    setPhase(phase);
+
+    auto const nFiles = m_fileScopes.size();
+    auto threadCount = Option::ParserThreadCount;
+    if (threadCount > nFiles) {
+      threadCount = nFiles;
+    }
+    if (!threadCount) threadCount = 1;
+    JobQueueDispatcher<AnalyzeWorker> dispatcher(threadCount, 0, false, this);
+
+    dispatcher.start();
+    for (auto const& file : m_fileScopes) {
+      dispatcher.enqueue(file);
+    }
+    dispatcher.waitEmpty();
+  }
+
+  if (phase == AnalysisResult::AnalyzeAll) {
+    Timer timer2(Timer::WallTime, "processImportedLambdas");
+    ClosureExpression::processLambdas(AnalysisResultConstRawPtr{this},
+                                      std::move(m_lambdas));
+  } else {
+    always_assert(m_lambdas.empty());
+  }
 }
 
 void AnalysisResult::analyzeProgram() {
@@ -514,9 +581,8 @@ void AnalysisResult::analyzeProgram() {
   // Analyze Includes
   Logger::Verbose("Analyzing Includes");
   sort(m_fileScopes.begin(), m_fileScopes.end(), by_filename); // fixed order
-  unsigned int i = 0;
-  for (i = 0; i < m_fileScopes.size(); i++) {
-    collectFunctionsAndClasses(m_fileScopes[i]);
+  for (auto& scope : m_fileScopes) {
+    collectFunctionsAndClasses(scope);
   }
 
   // Keep generated code identical without randomness
@@ -537,10 +603,7 @@ void AnalysisResult::analyzeProgram() {
 
   // Analyze All
   Logger::Verbose("Analyzing All");
-  setPhase(AnalysisResult::AnalyzeAll);
-  for (i = 0; i < m_fileScopes.size(); i++) {
-    m_fileScopes[i]->analyzeProgram(ar);
-  }
+  analyzeProgram(AnalysisResult::AnalyzeAll);
 
   /*
     Note that cls->collectMethods() can add entries to m_classDecs,
@@ -648,11 +711,7 @@ void AnalysisResult::analyzeProgram() {
 }
 
 void AnalysisResult::analyzeProgramFinal() {
-  AnalysisResultPtr ar = shared_from_this();
-  setPhase(AnalysisResult::AnalyzeFinal);
-  for (size_t i = 0; i < m_fileScopes.size(); i++) {
-    m_fileScopes[i]->analyzeProgram(ar);
-  }
+  analyzeProgram(AnalysisResult::AnalyzeFinal);
 
   // Keep generated code identical without randomness
   canonicalizeSymbolOrder();
@@ -784,7 +843,7 @@ struct DepthFirstVisitor {
       if (auto kid = e->getNthExpr(i)) {
         auto rep = visitExprRecur(kid);
         if (rep) {
-          e->getScope()->addUpdates(BlockScope::UseKindCaller);
+          e->getScope()->addUpdates(BlockScope::UseKindSelf);
           e->setNthKid(i, rep);
         }
       }
@@ -803,14 +862,14 @@ struct DepthFirstVisitor {
           if (scope) scope->incLoopNestedLevel();
           if (auto rep = visitStmtRecur(s)) {
             stmt->setNthKid(i, rep);
-            stmt->getScope()->addUpdates(BlockScope::UseKindCaller);
+            stmt->getScope()->addUpdates(BlockScope::UseKindSelf);
           }
           if (scope) scope->decLoopNestedLevel();
         } else {
           auto e = dynamic_pointer_cast<Expression>(kid);
           if (auto rep = visitExprRecur(e)) {
             stmt->setNthKid(i, rep);
-            stmt->getScope()->addUpdates(BlockScope::UseKindCaller);
+            stmt->getScope()->addUpdates(BlockScope::UseKindSelf);
           }
         }
       }
@@ -831,8 +890,8 @@ struct DepthFirstVisitor {
         updates = scope->getUpdated();
         all_updates |= updates;
       } while (updates);
-      if (all_updates & BlockScope::UseKindCaller) {
-        all_updates &= ~BlockScope::UseKindCaller;
+      if (all_updates & BlockScope::UseKindSelf) {
+        all_updates &= ~BlockScope::UseKindSelf;
       }
       return all_updates;
     }

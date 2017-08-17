@@ -60,19 +60,13 @@ ClassScopeRawPtr ClassConstantExpression::getOriginalClassScope() const {
   return scope ? scope->getContainingClass() : ClassScopeRawPtr();
 }
 
-bool ClassConstantExpression::containsDynamicConstant(AnalysisResultPtr ar)
-  const {
-  if (m_class) return true;
-  ClassScopePtr cls = ar->findClass(m_origClassName);
-  return !cls || cls->isVolatile() ||
-    !cls->getConstants()->isRecursivelyDeclared(ar, m_varName);
-}
-
-void ClassConstantExpression::analyzeProgram(AnalysisResultPtr ar) {
+void ClassConstantExpression::analyzeProgram(AnalysisResultConstRawPtr ar) {
   if (!m_class && ar->getPhase() >= AnalysisResult::AnalyzeAll) {
     if (ClassScopePtr cls = resolveClass()) {
-      ConstructPtr decl = cls->getConstants()->
-        getValueRecur(ar, m_varName, cls);
+      {
+        Lock lock{BlockScope::s_constMutex};
+        cls->getConstants()->getValueRecur(ar, m_varName, cls);
+      }
       cls->addUse(getScope(), BlockScope::UseKindConstRef);
       m_depsSet = true;
     }

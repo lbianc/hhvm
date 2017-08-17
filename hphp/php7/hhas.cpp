@@ -16,6 +16,8 @@
 
 #include "hphp/php7/hhas.h"
 
+#include "hphp/php7/analysis.h"
+#include "hphp/php7/cfg.h"
 #include "hphp/util/match.h"
 
 #include <folly/Format.h>
@@ -24,11 +26,14 @@
 namespace HPHP { namespace php7 {
 
 namespace {
-  std::string dump_pseudomain(const Function& func);
-  std::string dump_function(const Function& func);
-  std::string dump_blocks(std::vector<Block*> blocks);
 
-  std::string dump_declvars(const std::unordered_set<std::string>& locals);
+std::string dump_pseudomain(const Function& func);
+std::string dump_function(const Function& func);
+std::string dump_class(const Class& cls);
+std::string dump_method(const Function& func);
+std::string dump_blocks(const Function& func);
+std::string dump_function_body(const Function& func);
+
 } // namespace
 
 std::string dump_asm(const Unit& unit) {
@@ -37,6 +42,9 @@ std::string dump_asm(const Unit& unit) {
   out.append(dump_pseudomain(*unit.getPseudomain()));
   for (const auto& func : unit.functions) {
     out.append(dump_function(*func));
+  }
+  for (const auto& cls : unit.classes) {
+    out.append(dump_class(*cls));
   }
   return out;
 }
@@ -80,7 +88,22 @@ struct InstrVisitor {
   }
 
   void imm(const bc::Local& local) {
-    folly::format(&out, " ${}", local.name);
+    match<void>(local,
+      [&](const bc::NamedLocal& named){
+        folly::format(&out, " ${}", named.name);
+      },
+      [&](const bc::UniqueLocal& unique){
+        folly::format(&out, " _{}", *unique.id);
+      }
+    );
+  }
+
+  void imm(const std::vector<Block*>& jmps) {
+    out.append(" <");
+    for (const auto& blk : jmps) {
+      folly::format(&out, " L{}", blk->id);
+    }
+    out.append(" >");
   }
 
   void imm(IncDecOp op) {
@@ -128,6 +151,24 @@ struct InstrVisitor {
     }
   }
 
+  void imm(SwitchKind op) {
+    out.append(" ");
+    switch (op) {
+#define KIND(name) case SwitchKind::name: out.append( #name ); break;
+      SWITCH_KINDS
+#undef KIND
+    }
+  }
+
+  void imm(ObjMethodOp op) {
+    out.append(" ");
+    switch (op) {
+#define OBJMETHOD_OP(name) case ObjMethodOp::name: out.append( #name ); break;
+      OBJMETHOD_OPS
+#undef OBJMETHOD_OP
+    }
+  }
+
   void imm(const bc::MemberKey& mk) {
     using namespace bc;
     out.append(" ");
@@ -150,7 +191,8 @@ struct InstrVisitor {
       },
       [&](const LocalMember& m) {
         writeType(m.type);
-        folly::format(&out, "L:${}", m.local.name);
+        out.append("L:");
+        imm(m.local);
       },
       [&](const ImmMember& m) {
         writeType(m.type);
@@ -175,13 +217,58 @@ struct InstrVisitor {
 // This is just a visitor for instructions and exits that will omit a jump
 // (Jmp, JmpNS) iff the block that is the jump target follows immediately after
 // the jump instruction
-struct CFGVisitor : public boost::static_visitor<void> {
-  explicit CFGVisitor(std::string& out)
+struct AssemblyVisitor : public boost::static_visitor<void>
+                       , public CFGVisitor {
+
+  explicit AssemblyVisitor(std::string& out)
     : out(out)
     , instr(out)
   {}
 
-  void beginBlock(Block* blk) {
+  ~AssemblyVisitor() {
+    end();
+  }
+
+  void doIndent() {
+    for (int i = 0 ; i < indent; i++) {
+      out.append("  ");
+    }
+  }
+
+  void beginTry() override {
+    end();
+    doIndent();
+    out.append(".try {\n");
+    indent++;
+  }
+
+  void beginCatch() override {
+    end();
+    indent--;
+    doIndent();
+    out.append("} .catch {\n");
+    indent++;
+  }
+
+  void endRegion() override {
+    end();
+    indent--;
+    doIndent();
+    out.append("}\n");
+
+  }
+
+  void block(Block* blk) override {
+    label(blk);
+    for (const auto& bc : blk->code) {
+      bc.visit(*this);
+    }
+    for (const auto& ex : blk->exits) {
+      exit(ex);
+    }
+  }
+
+  void label(Block* blk) {
     // if there was an unconditional jump and its target was *not* this block
     // actually emit the instruction
     if (nextUnconditionalDestination
@@ -189,12 +276,14 @@ struct CFGVisitor : public boost::static_visitor<void> {
       bytecode(bc::Jmp{nextUnconditionalDestination});
     }
     nextUnconditionalDestination = nullptr;
+    doIndent();
     folly::format(&out, "L{}:\n", blk->id);
   }
 
   void end() {
     if (nextUnconditionalDestination) {
-      instr.bytecode(bc::Jmp{nextUnconditionalDestination});
+      bytecode(bc::Jmp{nextUnconditionalDestination});
+      nextUnconditionalDestination = nullptr;
     }
   }
 
@@ -212,6 +301,7 @@ struct CFGVisitor : public boost::static_visitor<void> {
   }
 
   void bytecode(const Bytecode& bc) {
+    doIndent();
     bc.visit(instr);
   }
 
@@ -222,13 +312,13 @@ struct CFGVisitor : public boost::static_visitor<void> {
   std::string& out;
   InstrVisitor instr;
   Block* nextUnconditionalDestination{nullptr};
+  unsigned indent{1};
 };
 
 std::string dump_pseudomain(const Function& func) {
   std::string out;
   out.append(".main {\n");
-  out.append(dump_declvars(func.locals));
-  out.append(dump_blocks(serializeControlFlowGraph(func.cfg.entry())));
+  out.append(dump_function_body(func));
   out.append("}\n\n");
   return out;
 }
@@ -244,40 +334,71 @@ std::string dump_function(const Function& func) {
         param.name);
   }
   out.append(") {\n");
-  out.append(dump_declvars(func.locals));
-  out.append(dump_blocks(serializeControlFlowGraph(func.cfg.entry())));
+  out.append(dump_function_body(func));
+  out.append("}\n\n");
+  return out;
+}
+
+std::string dump_class(const Class& cls) {
+  std::string out;
+  out.append(".class ");
+  out.append(cls.name);
+  out.append(" {\n");
+  for (const auto& method : cls.methods) {
+    out.append(dump_method(*method));
+  }
   out.append("}\n\n");
   return out;
 
 }
 
-std::string dump_blocks(std::vector<Block*> blocks) {
+std::string dump_method(const Function& func) {
   std::string out;
-  CFGVisitor visitor(out);
+  out.append(".method [");
 
-  for (auto blk : blocks) {
-    visitor.beginBlock(blk);
-    for (const auto& bc : blk->code) {
-      bc.visit(visitor);
-    }
-    for (const auto& exit : blk->exits) {
-      visitor.exit(exit);
-    }
+  if (func.attr & Attr::AttrPublic) {
+    out.append(" public");
+  }
+  if (func.attr & Attr::AttrProtected) {
+    out.append(" protected");
+  }
+  if (func.attr & Attr::AttrPrivate) {
+    out.append(" private");
+  }
+  if (func.attr & Attr::AttrStatic) {
+    out.append(" static");
+  }
+  if (func.attr & Attr::AttrAbstract) {
+    out.append(" abstract");
+  }
+  if (func.attr & Attr::AttrFinal) {
+    out.append(" final");
   }
 
-  visitor.end();
+  out.append(" ] ");
+  out.append(func.name);
+  out.append("(");
+  for (const auto& param : func.params) {
+    folly::format(&out, " {}${},",
+        param.byRef ? "&" : "",
+        param.name);
+  }
+  out.append(") {\n");
+  out.append(dump_function_body(func));
+  out.append("}\n\n");
   return out;
+
 }
 
-std::string dump_declvars(const std::unordered_set<std::string>& locals) {
+std::string dump_function_body(const Function& func) {
   std::string out;
-
+  auto locals = analyzeLocals(func);
   out.append("  .declvars");
-  for (const auto& local : locals) {
-    folly::format(&out, " ${}", local);
+  for (const auto& name : locals) {
+    folly::format(&out, " ${}", name);
   }
   out.append(";\n");
-
+  func.cfg.visit(AssemblyVisitor(out));
   return out;
 }
 

@@ -33,16 +33,13 @@ struct ConstantExpression : Expression, private IParseHandler {
                      const std::string &docComment = "");
 
   DECLARE_BASE_EXPRESSION_VIRTUAL_FUNCTIONS;
-  void analyzeProgram(AnalysisResultPtr ar) override;
+  void analyzeProgram(AnalysisResultConstRawPtr ar) override;
   void onParse(AnalysisResultConstPtr ar, FileScopePtr scope) override;
   ExpressionPtr preOptimize(AnalysisResultConstPtr ar) override;
   bool isScalar() const override;
   bool isLiteralNull() const override;
   int getLocalEffects() const override { return NoEffect; }
   bool getScalarValue(Variant &value) override;
-  bool containsDynamicConstant(AnalysisResultPtr /*ar*/) const override {
-    return !m_valid || m_dynamic;
-  }
 
   const std::string &getName() const { return m_name;}
   const std::string &getOriginalName() const { return m_origName;}

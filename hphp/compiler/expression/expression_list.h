@@ -36,6 +36,8 @@ struct ExpressionList : Expression {
     ListKindLeft
   };
 
+  using iterator = std::vector<ExpressionPtr>::iterator;
+
   explicit ExpressionList(EXPRESSION_CONSTRUCTOR_PARAMETERS,
                           ListKind kind = ListKindParam);
 
@@ -50,7 +52,6 @@ struct ExpressionList : Expression {
   bool isScalar() const override;
   int getLocalEffects() const override { return NoEffect; }
   bool isNoObjectInvolved() const;
-  bool containsDynamicConstant(AnalysisResultPtr ar) const override;
   void removeElement(int index);
   void clearElements();
   bool getScalarValue(Variant &value) override;
@@ -65,6 +66,8 @@ struct ExpressionList : Expression {
 
   int getCount() const { return m_exps.size();}
   ExpressionPtr &operator[](int index);
+  iterator begin() { return m_exps.begin(); }
+  iterator end() { return m_exps.end(); }
 
   void getStrings(std::vector<std::string> &strings);
   void stripConcat();

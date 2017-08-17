@@ -10,33 +10,34 @@
 
 type t = {
   id: int;
-  amount: int;
+  indent: bool;
   parent: t option;
   skip_parent_if_nested: bool;
 }
 
 let dummy =
-  {id = -1; amount = 0; parent = None; skip_parent_if_nested = false;}
+  {id = -1; indent = false; parent = None; skip_parent_if_nested = false;}
 
-let make ~id amount parent skip_parent = {
+let make ~id ~indent parent skip_parent = {
   id;
-  amount;
+  indent;
   parent;
   skip_parent_if_nested = skip_parent;
 }
 
 let get_indent nesting nesting_set =
-  let rec aux n =
+  let rec aux acc n =
     match n with
-      | None -> 0
+      | None -> acc
       | Some n ->
-        if ISet.mem n.id nesting_set then
-          if n.skip_parent_if_nested
-          then n.amount + (aux @@ Option.(>>=) n.parent (fun p -> p.parent))
-          else n.amount + aux n.parent
-        else aux n.parent
+        let in_set = ISet.mem n.id nesting_set in
+        let acc = if n.indent && in_set then acc + 1 else acc in
+        aux acc @@
+          if in_set && n.skip_parent_if_nested
+          then Option.(>>=) n.parent (fun p -> p.parent)
+          else n.parent
   in
-  aux (Some nesting)
+  aux 0 (Some nesting)
 
 let get_self_and_parent_list nesting =
   let rec aux acc n =

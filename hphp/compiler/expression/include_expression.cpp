@@ -218,14 +218,10 @@ bool IncludeExpression::analyzeInclude(AnalysisResultConstPtr ar,
     return false;
   }
 
-  FunctionScopePtr func = getFunctionScope();
-  if (func && file->getPseudoMain()) {
-    file->getPseudoMain()->addUse(func, BlockScope::UseKindInclude);
-  }
   return true;
 }
 
-void IncludeExpression::analyzeProgram(AnalysisResultPtr ar) {
+void IncludeExpression::analyzeProgram(AnalysisResultConstRawPtr ar) {
   if (!m_include.empty()) {
     if (ar->getPhase() == AnalysisResult::AnalyzeAll ||
         ar->getPhase() == AnalysisResult::AnalyzeFinal) {

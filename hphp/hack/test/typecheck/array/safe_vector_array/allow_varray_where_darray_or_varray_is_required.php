@@ -1,5 +1,5 @@
 <?hh
 
-function test(): darray_or_varray<string> {
+function test(): varray_or_darray<string> {
   return varray["foo"];
 }

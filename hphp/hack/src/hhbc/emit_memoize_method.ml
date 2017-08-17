@@ -35,10 +35,10 @@ let make_info ast_class class_id ast_methods =
     if is_memoize ast_method
     then
     let pos = fst ast_method.Ast.m_name in
-    if ast_method.Ast.m_ret_by_ref
-    then Emit_fatal.raise_fatal_runtime pos
-      "<<__Memoize>> cannot be used on functions that return by reference"
-    else if ast_class.Ast.c_kind = Ast.Cinterface
+    Emit_memoize_helpers.check_memoize_possible pos
+      ~ret_by_ref: ast_method.Ast.m_ret_by_ref
+      ~params: ast_method.Ast.m_params;
+    if ast_class.Ast.c_kind = Ast.Cinterface
     then Emit_fatal.raise_fatal_runtime pos
       "<<__Memoize>> cannot be used in interfaces"
     else if List.mem ast_method.Ast.m_kind Ast.Abstract
@@ -417,6 +417,8 @@ let make_memoize_wrapper_method env info index ast_class ast_method =
     false (*method_is_closure_body*)
 
 let emit_wrapper_methods env info ast_class ast_methods =
+  (* Wrapper methods may not have iterators *)
+  Iterator.reset_iterator ();
   let _, hhas_methods =
     List.fold_left ast_methods ~init:(0, []) ~f:(fun (count,acc) ast_method ->
       if Emit_attribute.ast_any_is_memoize ast_method.Ast.m_user_attributes

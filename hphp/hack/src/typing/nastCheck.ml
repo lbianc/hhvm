@@ -324,7 +324,7 @@ and hint_ env p = function
   | Hdarray (ty1, ty2) ->
       hint env ty1;
       hint env ty2
-  | Hdarray_or_varray ty
+  | Hvarray_or_darray ty
   | Hvarray ty ->
       hint env ty
   | Htuple hl -> List.iter hl (hint env)
@@ -369,9 +369,13 @@ and check_params env p x params hl =
 
 and check_arity env p tname arity size =
   if size = arity then () else
-  if size = 0 && not (Typing_env.is_strict env.tenv) then () else
-  let nargs = soi arity in
-  Errors.type_arity p tname nargs
+  if size = 0 && not (Typing_env.is_strict env.tenv)
+  && not (TypecheckerOptions.experimental_feature_enabled (Env.get_options env.tenv)
+    TypecheckerOptions.experimental_generics_arity)
+  then ()
+  else
+    let nargs = soi arity in
+    Errors.type_arity p tname nargs
 
 and check_happly unchecked_tparams env h =
   let env = { env with Env.pos = (fst h) } in
@@ -658,7 +662,7 @@ and check_no_class_tparams class_tparams (pos, ty)  =
     | Hdarray (ty1, ty2) ->
         check_tparams ty1;
         check_tparams ty2
-    | Hdarray_or_varray ty
+    | Hvarray_or_darray ty
     | Hvarray ty ->
         check_tparams ty
     | Htuple tyl -> List.iter tyl check_tparams

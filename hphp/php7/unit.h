@@ -25,15 +25,13 @@
 
 #include <string>
 #include <vector>
-#include <unordered_set>
 
 namespace HPHP { namespace php7 {
 
 struct Function;
+struct Class;
+struct Region;
 struct Unit;
-
-// get the series of block pointers in the control graph that starts at `entry`
-std::vector<Block*> serializeControlFlowGraph(Block* entry);
 
 struct Function {
   struct Param {
@@ -41,8 +39,9 @@ struct Function {
     bool byRef;
   };
 
-  explicit Function(Unit* parent,
-      const std::string& name);
+  explicit Function(Unit* parent, Class* cls = nullptr)
+    : parent(parent)
+    , definingClass(cls) {}
 
   bool returnsByReference() const {
     return attr & Attr::AttrReference;
@@ -51,27 +50,51 @@ struct Function {
   std::string name;
   Attr attr;
   Unit* parent;
+  Class* definingClass;
   CFG cfg;
   std::vector<Param> params;
-  std::unordered_set<std::string> locals;
+};
+
+struct Class {
+  explicit Class(Unit* parent, uint32_t index)
+    : parent(parent)
+    , index(index) {}
+
+  Function* makeMethod() {
+    methods.emplace_back(std::make_unique<Function>(parent, this));
+    return methods.back().get();
+  }
+
+  Unit* parent;
+  std::string name;
+  folly::Optional<std::string> parentName;
+  uint32_t index;
+  Attr attr;
+  std::vector<std::unique_ptr<Function>> methods;
 };
 
 struct Unit {
   explicit Unit()
-    : pseudomain(std::make_unique<Function>(this, "")) {}
+    : pseudomain(std::make_unique<Function>(this)) {}
 
   Function* getPseudomain() const {
     return pseudomain.get();
   }
 
-  Function* makeFunction(const std::string& name) {
-    functions.emplace_back(std::make_unique<Function>(this, name));
+  Function* makeFunction() {
+    functions.emplace_back(std::make_unique<Function>(this));
     return functions.back().get();
+  }
+
+  Class* makeClass() {
+    classes.emplace_back(std::make_unique<Class>(this, classes.size()));
+    return classes.back().get();
   }
 
   std::string name;
   std::unique_ptr<Function> pseudomain;
   std::vector<std::unique_ptr<Function>> functions;
+  std::vector<std::unique_ptr<Class>> classes;
 };
 
 std::unique_ptr<Unit> makeFatalUnit(const std::string& filename,

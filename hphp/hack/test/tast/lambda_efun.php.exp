@@ -21,7 +21,7 @@
                     ((Some _),
                      (AnnotatedAST.Efun (
                         { AnnotatedAST.f_mode = <opaque>; f_ret = None;
-                          f_name = ([L0:-1-L0:-1], ";anonymous");
+                          f_name = ([Pos.none], ";anonymous");
                           f_tparams = []; f_where_constraints = [];
                           f_variadic = AnnotatedAST.FVnonVariadic;
                           f_params =
@@ -35,7 +35,16 @@
                           (AnnotatedAST.NamedBody
                              { AnnotatedAST.fnb_nast =
                                [(AnnotatedAST.Return (<p>,
-                                   (Some ((Some int), AnnotatedAST.Any))))
+                                   (Some ((Some int),
+                                          (AnnotatedAST.Binop (Plus,
+                                             ((Some int),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $y))),
+                                             ((Some _),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $z)))
+                                             ))))
+                                   ))
                                  ];
                                fnb_unsafe = false });
                           f_fun_kind = FSync; f_user_attributes = [] },
@@ -62,7 +71,7 @@
                     ((Some _),
                      (AnnotatedAST.Efun (
                         { AnnotatedAST.f_mode = <opaque>; f_ret = None;
-                          f_name = ([L0:-1-L0:-1], ";anonymous");
+                          f_name = ([Pos.none], ";anonymous");
                           f_tparams = []; f_where_constraints = [];
                           f_variadic = AnnotatedAST.FVnonVariadic;
                           f_params =
@@ -76,7 +85,16 @@
                           (AnnotatedAST.NamedBody
                              { AnnotatedAST.fnb_nast =
                                [(AnnotatedAST.Return (<p>,
-                                   (Some ((Some int), AnnotatedAST.Any))))
+                                   (Some ((Some int),
+                                          (AnnotatedAST.Binop (Plus,
+                                             ((Some int),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $y))),
+                                             ((Some _),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $z)))
+                                             ))))
+                                   ))
                                  ];
                                fnb_unsafe = false });
                           f_fun_kind = FSync; f_user_attributes = [] },
@@ -90,7 +108,7 @@
                     ((Some _),
                      (AnnotatedAST.Efun (
                         { AnnotatedAST.f_mode = <opaque>; f_ret = None;
-                          f_name = ([L0:-1-L0:-1], ";anonymous");
+                          f_name = ([Pos.none], ";anonymous");
                           f_tparams = []; f_where_constraints = [];
                           f_variadic = AnnotatedAST.FVnonVariadic;
                           f_params =
@@ -109,7 +127,16 @@
                           (AnnotatedAST.NamedBody
                              { AnnotatedAST.fnb_nast =
                                [(AnnotatedAST.Return (<p>,
-                                   (Some ((Some _), AnnotatedAST.Any))))
+                                   (Some ((Some _),
+                                          (AnnotatedAST.Binop (Plus,
+                                             ((Some _),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $a))),
+                                             ((Some _),
+                                              (AnnotatedAST.Lvar
+                                                 (<p>, $b)))
+                                             ))))
+                                   ))
                                  ];
                                fnb_unsafe = false });
                           f_fun_kind = FSync; f_user_attributes = [] },

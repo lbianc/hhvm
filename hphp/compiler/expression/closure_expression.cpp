@@ -140,14 +140,15 @@ void ClosureExpression::setNthKid(int n, ConstructPtr cp) {
 // static analysis functions
 
 void ClosureExpression::processLambdas(
-  AnalysisResultPtr ar,
+  AnalysisResultConstRawPtr ar,
   CompactVector<ClosureExpressionRawPtr>&& lambdas) {
   for (auto const ce : lambdas) {
     ce->processLambda(ar);
   }
+  lambdas.clear();
 }
 
-void ClosureExpression::processLambda(AnalysisResultPtr ar) {
+void ClosureExpression::processLambda(AnalysisResultConstRawPtr ar) {
   if (m_captureState == CaptureState::Unknown) {
     assert(m_type == ClosureType::Short);
     auto const closureFuncScope = m_func->getFunctionScope();
@@ -168,15 +169,9 @@ void ClosureExpression::processLambda(AnalysisResultPtr ar) {
       do {
         auto const prev = scope;
         scope = prev->getOuterScope()->getContainingFunction();
-        assert(scope);
-        if (!scope->isClosure() &&
-            scope->getContainingFile() != FileScope::getCurrent()) {
-          // We're processing a closure cloned from a trait in another
-          // file. Its possible that file hasn't been processed yet,
-          // so scope's variable table might not be up to date. We
-          // need to find a clone that *is* in the current file
-          scope = prev->findClonedTraitInFile(FileScope::getCurrent());
-        }
+        always_assert(scope);
+        always_assert(!FileScope::getCurrent() ||
+                      scope->getContainingFile() == FileScope::getCurrent());
         if (scope->getVariables()->getSymbol(m)) {
           toCapture.insert(m);
           break;
@@ -192,20 +187,36 @@ void ClosureExpression::processLambda(AnalysisResultPtr ar) {
   }
 }
 
-void ClosureExpression::analyzeProgram(AnalysisResultPtr ar) {
-  ar->analyzeProgram(m_func);
-  if (m_captureState == CaptureState::Unknown) {
-    assert(m_type == ClosureType::Short);
-    FileScope::getCurrent()->addLambda(ClosureExpressionRawPtr{this});
+void ClosureExpression::analyzeProgram(AnalysisResultConstRawPtr ar) {
+  always_assert(getFileScope() == FileScope::getCurrent());
+
+  auto const sameScope = m_func->getFileScope() == FileScope::getCurrent();
+  if (sameScope) {
+    // Closures in flattened traits could come from another file.
+    // Only let the owner analyze them
+    ar->analyzeProgram(m_func);
+
+    if (m_captureState == CaptureState::Unknown) {
+      assert(m_type == ClosureType::Short);
+      FileScope::getCurrent()->addLambda(ClosureExpressionRawPtr{this});
+    }
+  } else {
+    if (m_captureState == CaptureState::Unknown) {
+      assert(m_type == ClosureType::Short);
+      ar->lock()->addClonedLambda(ClosureExpressionRawPtr{this});
+    }
   }
 
-  if (m_vars) analyzeVars(ar);
+  if (m_vars && ar->getPhase() == AnalysisResult::AnalyzeAll) {
+    if (sameScope) analyzeVarsForClosure(ar);
+    analyzeVarsForClosureExpression(ar);
+  }
 
   auto const funcScope = getFunctionScope();
   if (!m_func->getModifiers()->isStatic()) {
     auto const container = funcScope->getContainingNonClosureFunction();
     if (container && container->isStatic()) {
-      m_func->getModifiers()->add(T_STATIC);
+      if (sameScope) m_func->getModifiers()->add(T_STATIC);
     } else {
       auto const closureFuncScope = m_func->getFunctionScope();
       if (m_type != ClosureType::Short ||
@@ -216,31 +227,30 @@ void ClosureExpression::analyzeProgram(AnalysisResultPtr ar) {
   }
 }
 
-void ClosureExpression::analyzeVars(AnalysisResultPtr ar) {
-  if (ar->getPhase() == AnalysisResult::AnalyzeAll) {
-    getFunctionScope()->addUse(m_func->getFunctionScope(),
-                               BlockScope::UseKindClosure);
+void ClosureExpression::analyzeVarsForClosure(AnalysisResultConstRawPtr ar) {
+  // closure function's variable table (not containing function's)
+  auto const variables = m_func->getFunctionScope()->getVariables();
+  for (auto var : *m_vars) {
+    auto param = dynamic_pointer_cast<ParameterExpression>(var);
+    auto const& name = param->getName();
+    auto const sym = variables->addDeclaredSymbol(name, param);
+    sym->setClosureVar();
+    sym->setDeclaration(ConstructPtr());
+  }
+}
 
-    // closure function's variable table (not containing function's)
-    VariableTablePtr variables = m_func->getFunctionScope()->getVariables();
-    VariableTablePtr containing = getFunctionScope()->getVariables();
-    for (int i = 0; i < m_vars->getCount(); i++) {
-      auto param = dynamic_pointer_cast<ParameterExpression>((*m_vars)[i]);
-      auto const& name = param->getName();
-      {
-        containing->addDeclaredSymbol(name, param);
-
-        Symbol *sym = variables->addDeclaredSymbol(name, param);
-        sym->setClosureVar();
-        sym->setDeclaration(ConstructPtr());
-      }
-    }
-    return;
+void ClosureExpression::analyzeVarsForClosureExpression(
+  AnalysisResultConstRawPtr ar) {
+  auto const containing = getFunctionScope()->getVariables();
+  for (auto var : *m_vars) {
+    auto param = dynamic_pointer_cast<ParameterExpression>(var);
+    auto const& name = param->getName();
+    containing->addDeclaredSymbol(name, param);
   }
 }
 
 void ClosureExpression::setCaptureList(
-    AnalysisResultPtr ar,
+    AnalysisResultConstRawPtr ar,
     const std::set<std::string>& captureNames) {
   assert(m_captureState == CaptureState::Unknown);
   m_captureState = CaptureState::Known;
@@ -290,7 +300,8 @@ void ClosureExpression::setCaptureList(
   }
 
   initializeValuesFromVars();
-  analyzeVars(ar);
+  analyzeVarsForClosure(ar);
+  analyzeVarsForClosureExpression(ar);
 }
 
 std::set<std::string> ClosureExpression::collectParamNames() const {

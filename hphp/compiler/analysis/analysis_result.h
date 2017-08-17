@@ -26,6 +26,7 @@
 #include "hphp/compiler/package.h"
 #include "hphp/compiler/hphp.h"
 
+#include "hphp/util/compact-vector.h"
 #include "hphp/util/string-bag.h"
 #include "hphp/util/thread-local.h"
 
@@ -40,12 +41,12 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-
+DECLARE_BOOST_TYPES(AnalysisResult);
+DECLARE_BOOST_TYPES(ClosureExpression);
+DECLARE_BOOST_TYPES(FunctionScope);
+DECLARE_BOOST_TYPES(ScalarExpression);
 DECLARE_EXTENDED_BOOST_TYPES(ClassScope);
 DECLARE_EXTENDED_BOOST_TYPES(FileScope);
-DECLARE_BOOST_TYPES(FunctionScope);
-DECLARE_BOOST_TYPES(AnalysisResult);
-DECLARE_BOOST_TYPES(ScalarExpression);
 
 struct UnitEmitter;
 
@@ -149,10 +150,14 @@ public:
 
   void addSystemFunction(FunctionScopeRawPtr fs);
   void addSystemClass(ClassScopeRawPtr cs);
-  void analyzeProgram(ConstructPtr);
+  void analyzeProgram(ConstructPtr) const;
+  void analyzeProgram(Phase);
   void analyzeProgram();
   void analyzeProgramFinal();
   void dump();
+
+
+  void addClonedLambda(ClosureExpressionRawPtr c) { m_lambdas.push_back(c); }
 
   void visitFiles(void (*cb)(AnalysisResultPtr, StatementPtr, void*),
                   void *data);
@@ -278,6 +283,11 @@ public:
 
 private:
   std::vector<BlockScopePtr> m_ignoredScopes;
+
+  // Temporary vector of lambda expressions; populated
+  // during analyzeProgram, and then processed at the end
+  // of AnalysisResult::analyzeProgram.
+  CompactVector<ClosureExpressionRawPtr> m_lambdas;
 
   /**
    * Checks whether the file is in one of the on-demand parsing directories.

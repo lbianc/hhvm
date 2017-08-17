@@ -17,6 +17,7 @@
 #include "hphp/php7/compiler.h"
 
 #include "hphp/php7/util.h"
+#include "hphp/util/match.h"
 
 #include <folly/Format.h>
 
@@ -26,16 +27,23 @@ namespace HPHP { namespace php7 {
 
 namespace {
 
+void buildFunction(Function* func, const zend_ast* ast);
+
 CFG compileZvalLiteral(const zval* ast);
 CFG compileConstant(const zend_ast* ast);
 CFG compileVar(const zend_ast* ast, Destination destination);
 CFG compileAssignment(const zend_ast* ast);
 CFG compileBind(const zend_ast* ast);
 CFG compileAssignOp(const zend_ast* ast);
-CFG compileCall(const zend_ast* ast);
+CFG compileFunctionCall(const zend_ast* ast);
+CFG compileMethodCall(const zend_ast_list* params);
+CFG compileNew(const zend_ast* ast);
+CFG compileCall(const zend_ast_list* params);
 CFG compileArray(const zend_ast* ast);
 
 CFG compileGlobalDeclaration(const zend_ast* ast);
+CFG compileCatch(Function* func, const zend_ast_list* catches);
+CFG compileTry(Function* func, const zend_ast* ast);
 CFG compileIf(Function* func, const zend_ast* ast);
 CFG compileWhile(Function* func,
     const zend_ast* cond,
@@ -54,6 +62,10 @@ CFG compileIncDec(const zend_ast* op);
 
 CFG fixFlavor(Destination dest, Flavor actual);
 
+Attr getMemberModifiers(uint32_t flags);
+void compileClassStatement(Class* cls, const zend_ast* ast);
+void compileMethod(Class* cls, const zend_ast* ast);
+
 } // namespace
 
 using namespace bc;
@@ -66,16 +78,50 @@ void compileProgram(Unit* unit, const zend_ast* ast) {
   pseudomain->cfg = compileStatement(pseudomain, ast)
     .then(Int{1})
     .thenReturn(Flavor::Cell)
-    .makeExitsReal();
+    .makeExitsReal()
+    .inRegion(std::make_unique<Region>(Region::Kind::Entry));
 }
 
 void compileFunction(Unit* unit, const zend_ast* ast) {
+  buildFunction(unit->makeFunction(), ast);
+}
+
+CFG compileClass(Unit* unit, const zend_ast* ast) {
   auto decl = zend_ast_get_decl(ast);
-  auto name = decl->name;
+  auto name = ZSTR_VAL(decl->name);
+  auto attr = decl->flags;
+  auto statements = zend_ast_get_list(decl->child[2]);
+
+  auto cls = unit->makeClass();
+  cls->name = name;
+
+  if (attr & ZEND_ACC_EXPLICIT_ABSTRACT_CLASS) {
+    cls->attr |= Attr::AttrAbstract;
+  }
+  if (attr & ZEND_ACC_FINAL) {
+    cls->attr |= Attr::AttrFinal;
+  }
+
+  for (uint32_t i = 0; i < statements->children; i++) {
+    compileClassStatement(cls, statements->child[i]);
+  }
+
+  return CFG(DefCls{cls->index});
+}
+
+void panic(const std::string& msg) {
+  throw CompilerException(folly::sformat("panic: {}", msg));
+}
+
+namespace {
+
+void buildFunction(Function* func, const zend_ast* ast) {
+  auto decl = zend_ast_get_decl(ast);
+  auto name = ZSTR_VAL(decl->name);
   auto params = zend_ast_get_list(decl->child[0]);
   auto body = decl->child[2];
 
-  auto func = unit->makeFunction(ZSTR_VAL(name));
+  func->name = name;
 
   if (decl->flags & ZEND_ACC_RETURN_REFERENCE) {
     func->attr |= Attr::AttrReference;
@@ -103,14 +149,9 @@ void compileFunction(Unit* unit, const zend_ast* ast) {
     .thenReturn(func->returnsByReference()
       ? Flavor::Ref
       : Flavor::Cell)
-    .makeExitsReal();
+    .makeExitsReal()
+    .inRegion(std::make_unique<Region>(Region::Kind::Entry));
 }
-
-void panic(const std::string& msg) {
-  throw CompilerException(folly::sformat("panic: {}", msg));
-}
-
-namespace {
 
 CFG compileZvalLiteral(const zval* zv) {
   switch (Z_TYPE_P(zv)) {
@@ -308,7 +349,7 @@ CFG compileAssignOp(const zend_ast* ast) {
   return getLvalue(lhs)->assignOp(op, rhs);
 }
 
-CFG compileCall(const zend_ast* ast) {
+CFG compileFunctionCall(const zend_ast* ast) {
   auto callee = ast->child[0];
   auto params = zend_ast_get_list(ast->child[1]);
 
@@ -316,20 +357,72 @@ CFG compileCall(const zend_ast* ast) {
       ? zend_ast_get_zval(callee)
       : nullptr;
 
-  CFG call;
-  // push the FPI record
   if (zv && Z_TYPE_P(zv) == IS_STRING) {
-    call.then(FPushFuncD{
+    return CFG(FPushFuncD{
       params->children,
       Z_STRVAL_P(zend_ast_get_zval(callee))
-    });
+    }).then(compileCall(params));
   } else {
-    call.then(compileExpression(callee, Flavor::Cell))
+    return compileExpression(callee, Flavor::Cell)
       .then(FPushFunc{
         params->children
+      })
+      .then(compileCall(params));
+  }
+}
+
+CFG compileMethodCall(const zend_ast* ast) {
+  auto target = ast->child[0];
+  auto method = ast->child[1];
+  auto params = zend_ast_get_list(ast->child[2]);
+
+  auto zv = method->kind == ZEND_AST_ZVAL
+      ? zend_ast_get_zval(method)
+      : nullptr;
+
+  auto targetCfg = compileExpression(target, Flavor::Cell);
+
+  if (zv && Z_TYPE_P(zv) == IS_STRING) {
+    return targetCfg
+      .then(FPushObjMethodD{
+        params->children,
+        Z_STRVAL_P(zv),
+        ObjMethodOp::NullThrows
+      })
+      .then(compileCall(params));
+  } else {
+    return compileExpression(method, Flavor::Cell)
+      .then(std::move(targetCfg))
+      .then(FPushObjMethod{
+        params->children,
+        ObjMethodOp::NullThrows
       });
   }
+}
 
+CFG compileNew(const zend_ast* ast) {
+  auto cls = ast->child[0];
+  auto params = zend_ast_get_list(ast->child[1]);
+
+  auto zv = cls->kind == ZEND_AST_ZVAL
+      ? zend_ast_get_zval(cls)
+      : nullptr;
+
+  // push the FPI record
+  if (zv && Z_TYPE_P(zv) == IS_STRING) {
+    return CFG(FPushCtorD{
+      params->children,
+      Z_STRVAL_P(zv)
+    })
+      .then(compileCall(params))
+      .then(PopR{});
+  } else {
+    panic("new with variable classref");
+  }
+}
+
+CFG compileCall(const zend_ast_list* params) {
+  CFG call;
   for (uint32_t i = 0; i < params->children; i++) {
     call.then(compileExpression(params->child[i], Destination::Param(i)));
   }
@@ -427,8 +520,14 @@ CFG compileExpression(const zend_ast* ast, Destination dest) {
       return compileAssignOp(ast)
         .then(fixFlavor(dest, Flavor::Cell));
     case ZEND_AST_CALL:
-      return compileCall(ast)
+      return compileFunctionCall(ast)
         .then(fixFlavor(dest, Flavor::Return));
+    case ZEND_AST_METHOD_CALL:
+      return compileMethodCall(ast)
+        .then(fixFlavor(dest, Flavor::Return));
+    case ZEND_AST_NEW:
+      return compileNew(ast)
+        .then(fixFlavor(dest, Flavor::Cell));
     case ZEND_AST_ARRAY:
       return compileArray(ast)
         .then(fixFlavor(dest, Flavor::Cell));
@@ -548,9 +647,16 @@ CFG compileStatement(Function* func, const zend_ast* ast) {
         : CFG(Null{}).then(fixFlavor(flavor, Flavor::Cell));
       return expr.thenReturn(flavor);
     }
+    case ZEND_AST_TRY:
+      return compileTry(func, ast);
+    case ZEND_AST_THROW:
+      return compileExpression(ast->child[0], Flavor::Cell)
+        .thenThrow();
     case ZEND_AST_FUNC_DECL:
       compileFunction(func->parent, ast);
       return CFG();
+    case ZEND_AST_CLASS:
+      return compileClass(func->parent, ast);
     default:
       return compileExpression(ast, Flavor::Drop);
   }
@@ -566,9 +672,64 @@ CFG compileGlobalDeclaration(const zend_ast* ast) {
   return {
     String{name},
     VGetG{},
-    BindL{name},
+    BindL{NamedLocal{name}},
     PopV{}
   };
+}
+
+CFG compileCatch(Function* func, const zend_ast_list* catches) {
+  CFG cfg;
+  auto end = cfg.makeBlock();
+
+  for (uint32_t i = 0; i < catches->children; i++) {
+    auto clause = catches->child[i];
+    auto types = zend_ast_get_list(clause->child[0]);
+    auto capture = zval_to_string(zend_ast_get_zval(clause->child[1]));
+    auto body = clause->child[2];
+
+    auto handler = CFG({
+      SetL{NamedLocal{capture}},
+      PopC{}
+    }).then(compileStatement(func, body))
+      .thenJmp(end);
+
+    for (uint32_t j = 0; j < types->children; j++) {
+      auto name = zval_to_string(zend_ast_get_zval(types->child[j]));
+      cfg.then(Dup{})
+        .then(InstanceOfD{name})
+        .branchNZ("handler");
+    }
+
+    cfg.replace("handler", std::move(handler));
+  }
+
+  cfg.thenThrow();
+
+  return cfg.continueFrom(end);
+}
+
+
+CFG compileTry(Function* func, const zend_ast* ast) {
+  auto body = ast->child[0];
+  auto catches = zend_ast_get_list(ast->child[1]);
+  auto finally = ast->child[2];
+
+  if (!finally && catches->children == 0) {
+    throw LanguageException("Cannot use try without catch or finally");
+  }
+
+  CFG cfg = compileStatement(func, body);
+
+  // don't bother adding a catch region if there's no catches
+  if (catches->children > 0) {
+    cfg.addExnHandler(compileCatch(func, catches));
+  }
+
+  if (finally) {
+    cfg.addFinallyGuard(compileStatement(func, finally));
+  }
+
+  return cfg;
 }
 
 CFG compileIf(Function* func, const zend_ast* ast) {
@@ -594,7 +755,9 @@ CFG compileIf(Function* func, const zend_ast* ast) {
     }
   }
 
-  return cfg.thenJmp(end);
+  cfg.thenJmp(end);
+
+  return cfg.continueFrom(end);
 }
 
 
@@ -683,6 +846,45 @@ CFG compileFor(Function* func, const zend_ast* ast) {
   ));
 
   return cfg;
+}
+
+Attr getMemberModifiers(uint32_t flags) {
+  Attr attr{};
+  if (flags & ZEND_ACC_PUBLIC) {
+    attr |= Attr::AttrPublic;
+  }
+  if (flags & ZEND_ACC_PROTECTED) {
+    attr |= Attr::AttrProtected;
+  }
+  if (flags & ZEND_ACC_PRIVATE) {
+    attr |= Attr::AttrPrivate;
+  }
+  if (flags & ZEND_ACC_STATIC) {
+    attr |= Attr::AttrStatic;
+  }
+  if (flags & ZEND_ACC_ABSTRACT) {
+    attr |= Attr::AttrAbstract;
+  }
+  if (flags & ZEND_ACC_FINAL) {
+    attr |= Attr::AttrFinal;
+  }
+  return attr;
+}
+
+void compileClassStatement(Class* cls, const zend_ast* ast) {
+  switch(ast->kind) {
+    case ZEND_AST_METHOD:
+      compileMethod(cls, ast);
+      break;
+    default:
+      panic("unsupported class statement");
+  }
+}
+
+void compileMethod(Class* cls, const zend_ast* ast) {
+  auto func = cls->makeMethod();
+  buildFunction(func, ast);
+  func->attr |= getMemberModifiers(zend_ast_get_decl(ast)->flags);
 }
 
 } // namespace

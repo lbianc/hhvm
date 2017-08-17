@@ -8,14 +8,14 @@
  *
  *)
 
-module SyntaxError = Full_fidelity_syntax_error
 module SyntaxTree = Full_fidelity_syntax_tree
-module EditableSyntax = Full_fidelity_editable_syntax
 module SourceText = Full_fidelity_source_text
 module Logger = HackfmtEventLogger
+module FEnv = Format_env
 
 open Core
 open Printf
+open Libhackfmt
 open Hackfmt_error
 
 type filename = string
@@ -48,6 +48,9 @@ let parse_options () =
   let end_char = ref None in
   let at_char = ref None in
   let inplace = ref false in
+  let indent_width = ref FEnv.(indent_width default) in
+  let indent_with_tabs = ref FEnv.(indent_with_tabs default) in
+  let line_width = ref FEnv.(line_width default) in
   let diff = ref false in
   let root = ref None in
   let diff_dry = ref false in
@@ -69,6 +72,18 @@ let parse_options () =
 
     "-i", Arg.Set inplace, " Format file in-place";
     "--in-place", Arg.Set inplace, " Format file in-place";
+
+    "--indent-width", Arg.Set_int indent_width,
+      sprintf
+        " Specify the number of spaces per indentation level. Defaults to %d"
+        FEnv.(indent_width default);
+
+    "--line-width", Arg.Set_int line_width,
+      sprintf
+        " Specify the maximum length for each line. Defaults to %d"
+        FEnv.(line_width default);
+
+    "--tabs", Arg.Set indent_with_tabs, " Indent with tabs rather than spaces";
 
     "--diff",
       Arg.Set diff,
@@ -100,54 +115,48 @@ let parse_options () =
     | Some s, Some e -> Some (s - 1, e - 1)
     | _ -> None
   in
+  let config = {FEnv.default with
+    FEnv.indent_width = !indent_width;
+    FEnv.indent_with_tabs = !indent_with_tabs;
+    FEnv.line_width = !line_width;
+  } in
   (!files, !filename_for_logging, range, !at_char, !inplace, !diff, !root,
-    !diff_dry),
+    !diff_dry, config),
   (!debug, !test)
 
 let file_exists path = Option.is_some (Sys_utils.realpath path)
 
-module PrintOptions = struct
-  type t = {
-    text_source: text_source;
-    range: range option;
-  }
-end
-
-module InPlaceOptions = struct
-  type t = {
-    filename: filename;
-  }
-end
-
-module AtCharOptions = struct
-  type t = {
-    text_source: text_source;
-    pos: int;
-  }
-end
-
-module DiffOptions = struct
-  type t = {
-    root: string option;
-    dry: bool;
-  }
-end
 type format_options =
-  | Print of PrintOptions.t
-  | InPlace of InPlaceOptions.t
-  | AtChar of AtCharOptions.t
-  | Diff of DiffOptions.t
+  | Print of {
+      text_source: text_source;
+      range: range option;
+      config: FEnv.t;
+    }
+  | InPlace of {
+      filename: filename;
+      config: FEnv.t;
+    }
+  | AtChar of {
+      text_source: text_source;
+      pos: int;
+      config: FEnv.t;
+    }
+  | Diff of {
+      root: string option;
+      dry: bool;
+      config: FEnv.t;
+    }
 
 let mode_string format_options =
   match format_options with
-  | Print {PrintOptions.text_source = File _; range = None; _} -> "FILE"
-  | Print {PrintOptions.text_source = File _; range = Some _; _} -> "RANGE"
-  | Print {PrintOptions.text_source = Stdin _; range = None; _} -> "STDIN"
-  | Print {PrintOptions.text_source = Stdin _; range = Some _; _} -> "STDIN_RANGE"
+  | Print {text_source = File _; range = None; _} -> "FILE"
+  | Print {text_source = File _; range = Some _; _} -> "RANGE"
+  | Print {text_source = Stdin _; range = None; _} -> "STDIN"
+  | Print {text_source = Stdin _; range = Some _; _} -> "STDIN_RANGE"
   | InPlace _ -> "IN_PLACE"
   | AtChar _ -> "AT_CHAR"
-  | Diff {DiffOptions.dry = true; _} -> "DIFF"
-  | Diff {DiffOptions.dry = false; _} -> "DIFF_DRY"
+  | Diff {dry = false; _} -> "DIFF"
+  | Diff {dry = true; _} -> "DIFF_DRY"
 
 type validate_options_input = {
   text_source : text_source;
@@ -158,7 +167,8 @@ type validate_options_input = {
 }
 
 let validate_options env
-  (files, filename_for_logging, range, at_char, inplace, diff, root, diff_dry) =
+  (files, filename_for_logging, range, at_char,
+    inplace, diff, root, diff_dry, config) =
   let fail msg = raise (InvalidCliArg msg) in
   let filename =
     match files with
@@ -201,13 +211,13 @@ let validate_options env
     fail "--at-char expects no range"
 
   | {diff = false; inplace = false; at_char = None; _} ->
-    Print {PrintOptions.text_source; range}
+    Print {text_source; range; config}
   | {diff = false; inplace = true; text_source = File filename; range = None; _} ->
-    InPlace {InPlaceOptions.filename}
+    InPlace {filename; config}
   | {diff = false; inplace = false; range = None; at_char = Some pos; _} ->
-    AtChar {AtCharOptions.text_source; pos}
+    AtChar {text_source; pos; config}
   | {diff = true; text_source = Stdin None; range = None; _} ->
-    Diff {DiffOptions.root; dry = diff_dry}
+    Diff {root; dry = diff_dry; config}
 
 let read_stdin () =
   let buf = Buffer.create 256 in
@@ -233,72 +243,26 @@ let parse text_source =
     then tree
     else raise Hackfmt_error.InvalidSyntax
 
-let get_char_ranges lines =
-  let chars_seen = ref 0 in
-  Array.of_list @@ List.map lines (fun line -> begin
-    let line_start = !chars_seen in
-    let line_end = line_start + String.length line + 1 in
-    chars_seen := line_end;
-    line_start, line_end
-  end)
+let logging_time_taken env logger thunk =
+  let start_t = Unix.gettimeofday () in
+  let res = thunk () in
+  let end_t = Unix.gettimeofday () in
+  if not env.Env.test then
+    logger
+      ~start_t
+      ~end_t
+      ~mode:env.Env.mode
+      ~file:(text_source_to_filename env.Env.text_source)
+      ~root:env.Env.root;
+  res
 
-let expand_to_line_boundaries ?ranges source_text range =
-  let start_char, end_char = range in
-  (* Ensure that 0 <= start_char <= end_char <= source_text length *)
-  let start_char = max start_char 0 in
-  let end_char = max start_char end_char in
-  let end_char = min end_char (SourceText.length source_text) in
-  let start_char = min start_char end_char in
-  (* Ensure that start_char and end_char fall on line boundaries *)
-  let ranges = match ranges with
-    | Some ranges -> ranges
-    | None -> get_char_ranges
-      (SourceText.text source_text |> String_utils.split_on_newlines)
-  in
-  Array.fold_left (fun (st, ed) (line_start, line_end) ->
-    let st = if st > line_start && st < line_end then line_start else st in
-    let ed = if ed > line_start && ed < line_end then line_end else ed in
-    st, ed
-  ) (start_char, end_char) ranges
-
-let get_split_boundaries solve_states =
-  List.fold solve_states
-    ~init:[]
-    ~f:begin fun boundaries solve_state ->
-      let chunks = Solve_state.chunks solve_state in
-      match chunks with
-      | [] -> boundaries
-      | hd :: tl ->
-        let boundaries, last_range = List.fold tl
-          ~init:(boundaries, Chunk.get_range hd)
-          ~f:begin fun (boundaries, curr_range) chunk ->
-            let chunk_range = Chunk.get_range chunk in
-            if Solve_state.has_split_before_chunk solve_state ~chunk
-              then curr_range :: boundaries, chunk_range
-              else boundaries, (fst curr_range, snd chunk_range)
-          end
-        in
-        last_range :: boundaries
-    end
-  |> List.rev
-
-let expand_to_split_boundaries boundaries range =
-  List.fold boundaries ~init:range ~f:(fun (st, ed) (b_st, b_ed) ->
-    let st = if st > b_st && st < b_ed then b_st else st in
-    let ed = if ed > b_st && ed < b_ed then b_ed else ed in
-    st, ed
-  )
-
-let format ?range ?ranges tree =
+let format ?config ?range ?ranges env tree =
   let source_text = SyntaxTree.text tree in
-  let range =
-    Option.map range (expand_to_line_boundaries ?ranges source_text)
-  in
-  tree
-  |> EditableSyntax.from_tree
-  |> Hack_format.transform
-  |> Chunk_builder.build
-  |> Line_splitter.solve ?range (SourceText.text source_text)
+  match range with
+  | None -> logging_time_taken env Logger.format_tree_end (fun () -> format_tree ?config tree)
+  | Some range ->
+    let range = expand_to_line_boundaries ?ranges source_text range in
+    logging_time_taken env Logger.format_range_end (fun () -> format_range ?config range tree)
 
 let output ?text_source str =
   let with_out_channel f =
@@ -331,130 +295,56 @@ let get_root = function
     eprintf "Guessed root: %a\n%!" Path.output root;
     root
 
-let line_interval_to_char_range char_ranges (start_line, end_line) =
-  if start_line > end_line then
-    invalid_arg (sprintf
-      "Illegal line interval: %d,%d" start_line end_line);
-  if start_line < 1 || start_line > Array.length char_ranges ||
-     end_line < 1 || end_line > Array.length char_ranges then
-      invalid_arg (sprintf
-        "Can't format line interval %d,%d in file with %d lines"
-        start_line end_line (Array.length char_ranges));
-  let start_char, _ = char_ranges.(start_line - 1) in
-  let _, end_char = char_ranges.(end_line - 1) in
-  start_char, end_char
-
-let format_intervals intervals tree =
-  let source_text = SyntaxTree.text tree in
-  let text = SourceText.text source_text in
-  let lines = String_utils.split_on_newlines text in
-  let chunk_groups =
-    tree
-    |> EditableSyntax.from_tree
-    |> Hack_format.transform
-    |> Chunk_builder.build
-  in
-  let solve_states = Line_splitter.find_solve_states
-    (SourceText.text source_text) chunk_groups in
-  let line_ranges = get_char_ranges lines in
-  let split_boundaries = get_split_boundaries solve_states in
-  let ranges = intervals
-    |> List.map ~f:(line_interval_to_char_range line_ranges)
-    |> List.map ~f:(expand_to_split_boundaries split_boundaries)
-    |> Interval.union_list
-    |> List.sort ~cmp:Interval.comparator
-  in
-  let formatted_intervals = List.map ranges (fun range ->
-    range, Line_splitter.print ~range solve_states
-  ) in
-  let length = SourceText.length source_text in
-  let buf = Buffer.create (length + 256) in
-  let chars_seen = ref 0 in
-  List.iter formatted_intervals (fun ((st, ed), formatted) ->
-    Buffer.add_string buf (String.sub text !chars_seen (st - !chars_seen));
-    Buffer.add_string buf formatted;
-    chars_seen := ed;
-  );
-  Buffer.add_string buf (String.sub text !chars_seen (length - !chars_seen));
-  Buffer.contents buf
-
-let format_diff_intervals intervals parsed_file =
-  try format_intervals intervals parsed_file with
+let format_diff_intervals ?config env intervals tree =
+  try
+    logging_time_taken env Logger.format_intervals_end
+      (fun () -> format_intervals ?config intervals tree)
+  with
   | Invalid_argument s -> raise (InvalidDiff s)
 
-let format_at_char tree pos =
-  let source_text = SyntaxTree.text tree in
-  let chunk_groups =
-    tree
-    |> EditableSyntax.from_tree
-    |> Hack_format.transform
-    |> Chunk_builder.build in
-  let module PS = Full_fidelity_positioned_syntax in
-  (* Grab the node which is the direct parent of the token at pos *)
-  let token, node = match PS.parentage (PS.from_tree tree) pos with
-    | token :: node :: tl -> token, node
-    | _ -> invalid_arg "Invalid offset" in
-  (* Format up to the end of the token at the given offset. *)
-  let pos = PS.end_offset token in
-  (* Our ranges are half-open, so the range end is the token end offset + 1. *)
-  let ed = pos + 1 in
-  (* Take a half-open range which starts at the beginning of the parent node *)
-  let range = (PS.start_offset node, ed) in
-  (* Expand the start offset to the nearest line boundary in the original
-   * source, since we want to add a leading newline before the node we're
-   * formatting if one should be there and isn't already present. *)
-  let range = (fst (expand_to_line_boundaries source_text range), ed) in
-  (* Find a solution for that range, then expand the range start to a split
-   * boundary (a line boundary in the formatted source). *)
-  let solve_states = Line_splitter.find_solve_states
-    ~range (SourceText.text source_text) chunk_groups in
-  let split_boundaries = get_split_boundaries solve_states in
-  let range = (fst (expand_to_split_boundaries split_boundaries range), ed) in
-  (* Produce the formatted text *)
-  let formatted = Line_splitter.print solve_states ~range in
-  (* We don't want a trailing newline here (in as-you-type-formatting, it would
-   * place the cursor on the next line), but the Line_splitter always prints one
-   * at the end of a formatted range. So, we remove it. *)
-  range, String.sub formatted 0 (String.length formatted - 1)
-
-let debug_print ?range text_source =
+let debug_print ?range ?config text_source =
+  let module EditableSyntax = Full_fidelity_editable_syntax in
   let tree = parse text_source in
   let source_text = SyntaxTree.text tree in
   let range = Option.map range (expand_to_line_boundaries source_text) in
-  let fmt_node = Hack_format.transform (EditableSyntax.from_tree tree) in
-  let chunk_groups = Chunk_builder.build fmt_node in
-  Hackfmt_debug.debug ~range source_text tree fmt_node chunk_groups
+  let env = Libhackfmt.env_from_config config in
+  let doc = Hack_format.transform env (EditableSyntax.from_tree tree) in
+  let chunk_groups = Chunk_builder.build doc in
+  Hackfmt_debug.debug env ~range source_text tree doc chunk_groups
 
 let main (env: Env.t) (options: format_options) =
   env.Env.mode <- Some (mode_string options);
   match options with
-  | Print {PrintOptions.text_source; range} ->
+  | Print {text_source; range; config} ->
     env.Env.text_source <- text_source;
     if env.Env.debug then
-      debug_print ?range text_source
+      debug_print ?range ~config text_source
     else
       text_source
         |> parse
-        |> format ?range
+        |> format ?range ~config env
         |> output
-  | InPlace {InPlaceOptions.filename} ->
+  | InPlace {filename; config} ->
     let text_source = File filename in
     env.Env.text_source <- text_source;
-    if env.Env.debug then debug_print text_source;
+    if env.Env.debug then debug_print ~config text_source;
     text_source
       |> parse
-      |> format
+      |> format ~config env
       |> output ~text_source
-  | AtChar {AtCharOptions.text_source; pos} ->
+  | AtChar {text_source; pos; config} ->
     env.Env.text_source <- text_source;
     let tree = parse text_source in
     let range, formatted =
-      try format_at_char tree pos with
+      try
+        logging_time_taken env Logger.format_at_offset_end
+          (fun () -> format_at_offset ~config tree pos)
+      with
       | Invalid_argument s -> raise (InvalidCliArg s) in
-    if env.Env.debug then debug_print text_source ~range;
+    if env.Env.debug then debug_print text_source ~range ~config;
     Printf.printf "%d %d\n" (fst range) (snd range);
     output formatted;
-  | Diff {DiffOptions.root; dry} ->
+  | Diff {root; dry; config} ->
     let root = get_root root in
     env.Env.root <- Path.to_string root;
     read_stdin ()
@@ -480,7 +370,7 @@ let main (env: Env.t) (options: format_options) =
           let contents =
             text_source
             |> parse
-            |> format_diff_intervals intervals in
+            |> format_diff_intervals ~config env intervals in
           Some (text_source, rel_path, contents)
         with
         (* A parse error isn't a signal that there's something wrong with the

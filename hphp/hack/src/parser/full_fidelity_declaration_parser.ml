@@ -45,8 +45,8 @@ module WithExpressionAndStatementAndTypeParser
   let parse_possible_generic_specifier parser =
     parse_in_type_parser parser TypeParser.parse_possible_generic_specifier
 
-  let parse_type_specifier parser =
-    parse_in_type_parser parser TypeParser.parse_type_specifier
+  let parse_type_specifier ?(allow_var=false) parser =
+    parse_in_type_parser parser (TypeParser.parse_type_specifier ~allow_var)
 
   let parse_return_type parser =
     parse_in_type_parser parser TypeParser.parse_return_type
@@ -712,7 +712,7 @@ module WithExpressionAndStatementAndTypeParser
         make_xhp_enum_type enum_token left_brace values right_brace in
       (parser, result)
     else
-      parse_type_specifier parser
+      parse_type_specifier ~allow_var:true parser
 
   and parse_xhp_required_opt parser =
     (* SPEC (Draft)
@@ -860,7 +860,8 @@ module WithExpressionAndStatementAndTypeParser
         when not (Token.has_leading_end_of_line next_token) ->
         let parser = with_error parser SyntaxError.error1056
           ~on_whole_token:true in
-        let parser = process_next_as_extra parser ~generate_error:false in
+        let parser = skip_and_log_unexpected_token parser
+          ~generate_error:false in
         parse_methodish parser attribute_spec modifiers
       (* Otherwise, continue parsing as a property (which might be a lambda). *)
       | ( _ , _ ) -> parse_property_declaration parser modifiers

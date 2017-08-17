@@ -26,8 +26,8 @@ module Container = struct
   | ClassHeader
   | CompoundStatement
   | ConstantDeclaration
+  | FunctionCallArgumentList
   | FunctionHeader
-  | FunctionParameterList
   | IfStatement
   | InterfaceBody
   | InterfaceHeader
@@ -47,14 +47,28 @@ module Predecessor = struct
   | ExtendsList
   | KeywordAbstract
   | KeywordAsync
+  | KeywordAwait
+  | KeywordCase
   | KeywordClass
   | KeywordConst
+  | KeywordElse
+  | KeywordEnum
   | KeywordExtends
   | KeywordFinal
+  | KeywordFunction
   | KeywordImplements
+  | KeywordInclude
+  | KeywordInterface
+  | KeywordNamespace
+  | KeywordNew
+  | KeywordNewtype
   | KeywordRequire
   | KeywordReturn
   | KeywordStatic
+  | KeywordSwitch
+  | KeywordTrait
+  | KeywordType
+  | KeywordUse
   | Statement
   | TokenColon
   | TokenComma
@@ -62,6 +76,7 @@ module Predecessor = struct
   | TokenLeftBrace
   | TokenLessThan
   | TokenOpenParen
+  | TokenWithoutTrailingTrivia
   | TopLevelDeclaration
   | TryWithoutFinally
   | VisibilityModifier
@@ -70,19 +85,54 @@ end
 
 type context = {
   closest_parent_container: Container.t;
-  predecessor: Predecessor.t;
-  inside_switch_body: bool;
-  inside_loop_body: bool;
   inside_async_function: bool;
   inside_class_body: bool;
+  inside_loop_body: bool;
+  inside_static_method: bool;
+  inside_switch_body: bool;
+  predecessor: Predecessor.t;
 }
 
 module ContextPredicates = struct
   open Container
   open Predecessor
 
+  let is_inside_function_call context =
+    context.closest_parent_container = FunctionCallArgumentList &&
+    (context.predecessor = TokenComma ||
+    context.predecessor = TokenOpenParen ||
+    context.predecessor = TokenWithoutTrailingTrivia)
+
+  let is_type_valid context =
+    (* Function return type *)
+    context.closest_parent_container = FunctionHeader &&
+    context.predecessor = TokenColon
+    || (* Parameter type *)
+    context.closest_parent_container = FunctionHeader &&
+    (context.predecessor = TokenComma ||
+    context.predecessor = TokenOpenParen ||
+    context.predecessor = TokenWithoutTrailingTrivia)
+    || (* Class property type *)
+    (context.closest_parent_container = ClassBody ||
+    context.closest_parent_container = TraitBody) &&
+    (context.predecessor = VisibilityModifier ||
+    context.predecessor = KeywordConst ||
+    context.predecessor = KeywordStatic)
+    || (* Generic type *)
+    context.predecessor = TokenLessThan
+
   let is_class_body_declaration_valid context =
     context.closest_parent_container = ClassBody &&
+    (context.predecessor = TokenLeftBrace ||
+    context.predecessor = ClassBodyDeclaration)
+
+  let is_trait_body_declaration_valid context =
+    context.closest_parent_container = TraitBody &&
+    (context.predecessor = TokenLeftBrace ||
+    context.predecessor = ClassBodyDeclaration)
+
+  let is_interface_body_declaration_valid context =
+    context.closest_parent_container = InterfaceBody &&
     (context.predecessor = TokenLeftBrace ||
     context.predecessor = ClassBodyDeclaration)
 
@@ -95,8 +145,10 @@ module ContextPredicates = struct
     (context.predecessor = Statement ||
     context.predecessor = TokenLeftBrace ||
     context.predecessor = IfWithoutElse ||
-    context.predecessor = TryWithoutFinally ||
-    context.predecessor = TokenColon)
+    context.predecessor = TryWithoutFinally)
+    || (* Cases in a switch body *)
+    context.closest_parent_container = CompoundStatement &&
+    context.predecessor = TokenColon
 
   let is_rhs_of_assignment_expression context =
     context.closest_parent_container = AssignmentExpression &&
@@ -104,15 +156,17 @@ module ContextPredicates = struct
 
   let is_in_conditional context =
     context.closest_parent_container = IfStatement &&
-    context.predecessor = TokenOpenParen
+    (context.predecessor = TokenOpenParen ||
+    context.predecessor = TokenWithoutTrailingTrivia)
 
   let is_expression_valid context =
     is_rhs_of_assignment_expression context ||
     is_in_conditional context ||
     is_at_beginning_of_new_statement context ||
     is_in_return_statement context ||
+    is_inside_function_call context ||
     context.closest_parent_container = LambdaBodyExpression
-    (* or is parameter, or is inside if/switch/while/etc. clause *)
+    (* TODO: or is parameter, or is inside if/switch/while/etc. clause *)
 
   let is_top_level_statement_valid context =
     context.closest_parent_container = TopLevel &&
@@ -121,30 +175,13 @@ end
 
 let initial_context = {
   closest_parent_container = Container.NoContainer;
-  predecessor = Predecessor.NoPredecessor;
-  inside_switch_body = false;
-  inside_loop_body = false;
   inside_async_function = false;
   inside_class_body = false;
+  inside_loop_body = false;
+  inside_static_method = false;
+  inside_switch_body = false;
+  predecessor = Predecessor.NoPredecessor;
 }
-
-let is_function_async (function_object:PositionedSyntax.syntax) : bool =
-  let open PositionedSyntax in
-  let open PositionedToken in
-  let open TokenKind in
-  match function_object with
-  | FunctionDeclaration {
-      function_declaration_header = { syntax = FunctionDeclarationHeader {
-        function_async = async; _
-      }; _ }; _
-    }
-  | MethodishDeclaration { methodish_function_decl_header = { syntax =
-      FunctionDeclarationHeader { function_async = async; _ }; _
-    }; _ }
-  | AnonymousFunction { anonymous_async_keyword = async; _ }
-  | LambdaExpression { lambda_async = async; _ } ->
-    is_specific_token Async async
-  | _ -> false
 
 let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
   let open PositionedSyntax in
@@ -204,34 +241,81 @@ let validate_predecessor (predecessor:PositionedSyntax.t list) : Predecessor.t =
     | BreakStatement _
     | ContinueStatement _
     | ExpressionStatement _ -> Some Statement
+    | TraitUse _
+    | RequireClause _
     | ConstDeclaration _
     | PropertyDeclaration _
     | MethodishDeclaration _
     | TypeConstDeclaration _  -> Some ClassBodyDeclaration
     | Token { kind = Abstract; _ } -> Some KeywordAbstract
     | Token { kind = Async; _ } -> Some KeywordAsync
+    | Token { kind = Await; _ } -> Some KeywordAwait
+    | Token { kind = Case; _ } -> Some KeywordCase
     | Token { kind = Class; _ } -> Some KeywordClass
     | Token { kind = Colon; _ } -> Some TokenColon
     | Token { kind = Comma; _ } -> Some TokenComma
     | Token { kind = Const; _ } -> Some KeywordConst
+    | Token { kind = Else; _ } -> Some KeywordElse
+    | Token { kind = Enum; _ } -> Some KeywordEnum
     | Token { kind = Equal; _ } -> Some TokenEqual
     | Token { kind = Extends; _ } -> Some KeywordExtends
     | Token { kind = Final; _ } -> Some KeywordFinal
+    | Token { kind = Function; _ } -> Some KeywordFunction
     | Token { kind = Implements; _ } -> Some KeywordImplements
+    | Token { kind = Include; _ }
+    | Token { kind = Include_once; _ } -> Some KeywordInclude
+    | Token { kind = Interface; _ } -> Some KeywordInterface
     | Token { kind = LeftBrace; _ } -> Some TokenLeftBrace
     | Token { kind = LeftParen; _ } -> Some TokenOpenParen
     | Token { kind = LessThan; _ } -> Some TokenLessThan
+    | Token { kind = Namespace; _ } -> Some KeywordNamespace
+    | Token { kind = New; _ } -> Some KeywordNew
+    | Token { kind = Newtype; _ } -> Some KeywordNewtype
     | Token { kind = Public; _ }
     | Token { kind = Private; _ }
     | Token { kind = Protected; _ } -> Some VisibilityModifier
     | Token { kind = Require; _ } -> Some KeywordRequire
     | Token { kind = Return; _ } -> Some KeywordReturn
     | Token { kind = Static; _ } -> Some KeywordStatic
+    | Token { kind = Switch; _ } -> Some KeywordSwitch
+    | Token { kind = Trait; _ } -> Some KeywordTrait
+    | Token { kind = Type; _ } -> Some KeywordType
+    | Token { kind = Use; _ } -> Some KeywordUse
+    | Token { trailing_width = 0; _ } -> Some TokenWithoutTrailingTrivia
     | _ -> None
   in
   predecessor
   |> List.find_map ~f:classify_syntax_as_predecessor
   |> Option.value ~default:NoPredecessor
+
+let is_method_static (method_object:PositionedSyntax.syntax) : bool =
+  let open PositionedSyntax in
+  let open PositionedToken in
+  let open TokenKind in
+  match method_object with
+  | MethodishDeclaration { methodish_modifiers; _ } ->
+    List.exists (syntax_node_to_list methodish_modifiers) ~f:(is_specific_token Static)
+  | AnonymousFunction { anonymous_static_keyword = static; _ } ->
+    is_specific_token Static static
+  | _ -> false
+
+let is_function_async (function_object:PositionedSyntax.syntax) : bool =
+  let open PositionedSyntax in
+  let open PositionedToken in
+  let open TokenKind in
+  match function_object with
+  | FunctionDeclaration {
+      function_declaration_header = { syntax = FunctionDeclarationHeader {
+        function_async = async; _
+      }; _ }; _
+    }
+  | MethodishDeclaration { methodish_function_decl_header = { syntax =
+      FunctionDeclarationHeader { function_async = async; _ }; _
+    }; _ }
+  | AnonymousFunction { anonymous_async_keyword = async; _ }
+  | LambdaExpression { lambda_async = async; _ } ->
+    is_specific_token Async async
+  | _ -> false
 
 let make_context
   ~(full_path:PositionedSyntax.t list)
@@ -270,12 +354,16 @@ let make_context
     | DoStatement _ ->
       { acc with inside_loop_body = true }
     | SwitchSection _ ->
-      { acc with inside_switch_body = true }
+      { acc with closest_parent_container = Container.CompoundStatement;
+        inside_switch_body = true }
     | MethodishDeclaration _
     | FunctionDeclaration _ as func ->
-      { acc with inside_async_function = is_function_async func }
+      { acc with inside_async_function = is_function_async func;
+        inside_static_method = is_method_static func }
     | FunctionDeclarationHeader _ ->
       { acc with closest_parent_container = FunctionHeader }
+    | FunctionCallExpression _ ->
+      { acc with closest_parent_container = FunctionCallArgumentList }
     | AnonymousFunction _
     | LambdaExpression _ as lambda ->
       (* If we see a lambda, almost all context is reset, so each field should
@@ -286,6 +374,7 @@ let make_context
         inside_switch_body = false;
         inside_loop_body = false;
         inside_class_body = false;
+        inside_static_method = is_method_static lambda;
         inside_async_function = is_function_async lambda;
       }
     | PositionedSyntax.CompoundStatement _ ->
@@ -308,6 +397,7 @@ let make_context
     full_path
 
 type autocomplete_location_classification =
+  | BeforePunctuationToken
   | InLeadingTrivia
   | InToken
   | InTrailingTrivia
@@ -316,33 +406,48 @@ let classify_autocomplete_location
   (parents:PositionedSyntax.t list) (offset:int)
   : autocomplete_location_classification =
   let open PositionedSyntax in
+  let check_for_specific_token parent =
+    let open PositionedToken in
+    match syntax parent with
+    | Token { kind = TokenKind.EndOfFile; _ } -> InLeadingTrivia
+    | Token { kind = TokenKind.RightParen; _ } -> BeforePunctuationToken
+    | _ -> InToken
+  in
   match parents with
   | [] -> failwith "Empty parentage (this should never happen)"
   | parent :: _ when offset < start_offset parent -> InLeadingTrivia
+  | parent :: _ when offset = start_offset parent -> check_for_specific_token parent
   | parent :: _ when offset <= trailing_start_offset parent -> InToken
   | _ -> InTrailingTrivia
 
-let get_context_and_stub (syntax_tree:SyntaxTree.t) (offset:int)
+let get_context_and_stub (positioned_tree:PositionedSyntax.t) (offset:int)
   : context * string =
   let open PositionedSyntax in
-  let positioned_tree = from_tree syntax_tree in
   (* If the offset is the same as the width of the whole tree, then the cursor is at the end of
   file, so we move our position to before the last character of the file so that our cursor is
   considered to be in the leading trivia of the end of file character. This guarantees our parentage
   is not empty. *)
-  let offset =
+  let new_offset =
     if offset >= full_width positioned_tree then full_width positioned_tree - 1
     else offset
   in
-  let ancestry = parentage positioned_tree offset in
+  let ancestry = parentage positioned_tree new_offset in
   let location = classify_autocomplete_location ancestry offset in
   let autocomplete_leaf_node = List.hd_exn ancestry in
-  let node_text =
-    if location = InToken then text autocomplete_leaf_node else ""
-  in
   let previous_offset = leading_start_offset autocomplete_leaf_node - 1 in
   let predecessor_parentage = parentage positioned_tree previous_offset in
+  let validate_hack_identifier id =
+    let identifier_regex = Str.regexp "^\\$?[a-zA-Z0-9_\x7f-\xff]*$" in
+    if Str.string_match identifier_regex id 0 then id else ""
+  in
+  let node_text = match location with
+    | InToken -> validate_hack_identifier @@ text @@ List.hd_exn ancestry
+    | BeforePunctuationToken ->
+      validate_hack_identifier @@ text @@ List.hd_exn predecessor_parentage
+    | _ -> ""
+  in
   let (full_path, predecessor) = match location with
+    | BeforePunctuationToken
     | InLeadingTrivia -> predecessor_parentage, predecessor_parentage
     | InToken -> ancestry, predecessor_parentage
     | InTrailingTrivia -> ancestry, ancestry
