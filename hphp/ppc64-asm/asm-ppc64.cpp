@@ -611,7 +611,8 @@ void Assembler::limmediate(const Reg64& rt, int64_t imm64,
 
 Label::~Label() {
   for (auto& ji : m_toPatch) {
-    ji.a->patchBranch(ji.addr, m_address);
+    assert(ji.a->contains(ji.addr));
+    ji.a->patchBranch(ji.a->toDestAddress(ji.addr), m_address);
   }
 }
 
