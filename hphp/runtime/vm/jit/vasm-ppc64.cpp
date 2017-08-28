@@ -1013,11 +1013,10 @@ X(addlm, addl, loadw, storew, ONE(s0))
 #define X(vasm_src, vasm_dst_reg, vasm_dst_imm, vasm_load)              \
 void lowerForPPC64(const VLS& e, Vout& v, vasm_src& inst) {             \
   Vptr p = inst.s1;                                                     \
-  Vreg tmp; if (!e.allow_vreg()) tmp = Vreg(PhysReg(rAsm));             \
+  Vreg tmp;                                                             \
   Vreg tmp2 = e.allow_vreg() ? v.makeReg() : Vreg(PhysReg(rAsm));       \
   v << vasm_load{p, tmp2};                                              \
-  if (patchImm(inst.s0, v, tmp))                                        \
-    v << vasm_dst_reg{tmp, tmp2, inst.sf};                              \
+  if (patchImm(inst.s0, v, tmp)) v << vasm_dst_reg{tmp, tmp2, inst.sf}; \
   else v << vasm_dst_imm{inst.s0, tmp2, inst.sf};                       \
 }
 
@@ -1030,13 +1029,12 @@ X(testqim, testq, testqi, load)
 #define X(vasm_src, vasm_dst_reg, vasm_dst_imm, vasm_load, vasm_exts)   \
 void lowerForPPC64(const VLS& e, Vout& v, vasm_src& inst) {             \
   Vptr p = inst.s1;                                                     \
-  Vreg tmp; if (!e.allow_vreg()) tmp = Vreg(PhysReg(rAsm));             \
-  Vreg tmp2 = e.allow_vreg() ? v.makeReg() : Vreg(PhysReg(rAsm));       \
+  Vreg tmp;                                                             \
+  Vreg tmp2 = v.makeReg();                                              \
   Vreg tmp3 = v.makeReg();                                              \
   v << vasm_load{p, tmp2};                                              \
   v << vasm_exts{tmp2, tmp3};                                           \
-  if (patchImm(inst.s0, v, tmp))                                        \
-    v << vasm_dst_reg{tmp, tmp3, inst.sf};                              \
+  if (patchImm(inst.s0, v, tmp)) v << vasm_dst_reg{tmp, tmp3, inst.sf}; \
   else v << vasm_dst_imm{inst.s0, tmp3, inst.sf};                       \
 }
 
@@ -1142,8 +1140,9 @@ X(testli, testqi, extsl,  NONE)
 #define X(vasm_src, vasm_dst_reg, operands)                             \
 void lowerForPPC64(const VLS& e, Vout& v, vasm_src& inst) {             \
   Vreg tmp;                                                             \
-  if (patchImm(inst.s0, v, tmp))                                        \
+  if (patchImm(inst.s0, v, tmp)){                                       \
     v << vasm_dst_reg{tmp, operands inst.sf};                           \
+  }                                                                     \
 }
 
 X(andqi, andq, TWO(s1, d))
