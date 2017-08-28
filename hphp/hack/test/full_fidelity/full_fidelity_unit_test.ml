@@ -205,6 +205,9 @@ let error_tests =
     "context/test_missing_foreach_value";
     "test_namespace_error_recovery";
     "test_correct_code1";
+    "test_misspelling_recovery";
+    "test_misspelling_recovery2";
+    "test_group_use_errors";
   ] ~f:mapper
 
 let test_data = minimal_tests @ error_tests @

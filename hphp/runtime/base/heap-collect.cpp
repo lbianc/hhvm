@@ -258,13 +258,6 @@ NEVER_INLINE void Marker<apcgc>::init() {
     allocd_ += size;
   };
 
-  auto init_unknown = [&](HeapObject* h, size_t size) {
-    // unknown type for a req::malloc'd block. See rationale above.
-    unknown_ += size;
-    h->mark(GCBits::Pin);
-    enqueue(h);
-  };
-
   heap_.iterate(
     [&](HeapObject* h, size_t size) { // onBig
       ptrs_.insert(h, size);
@@ -274,7 +267,9 @@ NEVER_INLINE void Marker<apcgc>::init() {
         assert(h->kind() == HeaderKind::BigMalloc);
         init(h, size);
         if (!type_scan::isKnownType(static_cast<MallocNode*>(h)->typeIndex())) {
-          init_unknown(h, size);
+          unknown_ += size;
+          h->mark(GCBits::Pin);
+          enqueue(h);
         }
       }
     },
@@ -282,10 +277,8 @@ NEVER_INLINE void Marker<apcgc>::init() {
       ptrs_.insert(h, size);
       Slab::fromHeader(h)->initCrossingMap([&](HeapObject* h, size_t size) {
         init(h, size);
-        if (h->kind() == HeaderKind::SmallMalloc &&
-            !type_scan::isKnownType(static_cast<MallocNode*>(h)->typeIndex())) {
-          init_unknown(h, size);
-        }
+        assert(h->kind() != HeaderKind::SmallMalloc ||
+            type_scan::isKnownType(static_cast<MallocNode*>(h)->typeIndex()));
       });
     }
   );
@@ -353,9 +346,13 @@ NEVER_INLINE void Marker<apcgc>::sweep() {
     assert(freed_bytes_ >= 0);
   };
 
+  bool need_reinit_free = false;
   g_context->sweepDynPropTable([&](const ObjectData* obj) {
+    if (need_reinit_free) mm.reinitFree();
     auto r = find(obj);
-    return !r.ptr || !marked(r.ptr);
+    // if we return true, call reinitFree() before calling find() again,
+    // to ensure the heap remains walkable.
+    return need_reinit_free = !r.ptr || !marked(r.ptr);
   });
 
   mm.sweepApcArrays([&](APCLocalArray* a) {
@@ -366,7 +363,7 @@ NEVER_INLINE void Marker<apcgc>::sweep() {
     return !marked(s);
   });
 
-  mm.initFree();
+  mm.reinitFree();
 
   heap_.iterate(
     [&](HeapObject* big, size_t big_size) { // onBig
@@ -486,7 +483,15 @@ void collectImpl(HeapImpl& heap, const char* phase) {
   if (t_eager_gc && RuntimeOption::EvalFilterGCPoints) {
     t_eager_gc = false;
     auto pc = vmpc();
-    if (t_surprise_filter.test(pc)) return;
+    if (t_surprise_filter.test(pc)) {
+      if (RuntimeOption::EvalGCForAPC) {
+        if (!APCGCManager::getInstance().excessedGCTriggerBar()) {
+          return;
+        }
+      } else {
+        return;
+      }
+    }
     t_surprise_filter.insert(pc);
     TRACE(2, "eager gc %s at %p\n", phase, pc);
     phase = "eager";

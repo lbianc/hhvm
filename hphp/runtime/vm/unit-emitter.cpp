@@ -26,6 +26,7 @@
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/repo-auth-type-array.h"
 #include "hphp/runtime/base/variable-serializer.h"
 
 #include "hphp/runtime/ext/std/ext_std_variable.h"
@@ -131,6 +132,17 @@ const StringData* UnitEmitter::lookupLitstr(Id id) const {
 const ArrayData* UnitEmitter::lookupArray(Id id) const {
   assert(id < m_arrays.size());
   return m_arrays[id];
+}
+
+const RepoAuthType::Array* UnitEmitter::lookupArrayType(Id id) const {
+  return RuntimeOption::RepoAuthoritative
+           ? globalArrayTypeTable().lookup(id)
+           : m_arrayTypeTable.lookup(id);
+}
+
+void UnitEmitter::repopulateArrayTypeTable(
+  const ArrayTypeTable::Builder& builder) {
+  m_arrayTypeTable.repopulate(builder);
 }
 
 Id UnitEmitter::mergeLitstr(const StringData* litstr) {
@@ -459,6 +471,7 @@ RepoStatus UnitEmitter::insert(UnitOrigin unitOrigin, RepoTxn& txn) {
         vs.serializeValue(VarNR(m_arrays[i]), false /* limit */).toCppString()
       );
     }
+    urp.insertUnitArrayTypeTable[repoId].insert(txn, usn, m_arrayTypeTable);
     for (auto& fe : m_fes) {
       fe->commit(txn);
     }
@@ -534,10 +547,10 @@ allocateBCRegion(const unsigned char* bc, size_t bclen) {
   return mem;
 }
 
-std::unique_ptr<Unit> UnitEmitter::create() {
+std::unique_ptr<Unit> UnitEmitter::create(bool saveLineTable) {
   INC_TPC(unit_load);
   auto u = std::make_unique<Unit>();
-  u->m_repoId = m_repoId;
+  u->m_repoId = saveLineTable ? RepoIdInvalid : m_repoId;
   u->m_sn = m_sn;
   u->m_bc = allocateBCRegion(m_bc, m_bclen);
   u->m_bclen = m_bclen;
@@ -562,6 +575,7 @@ std::unique_ptr<Unit> UnitEmitter::create() {
     }
     return ret;
   }();
+  u->m_arrayTypeTable = m_arrayTypeTable;
   for (auto const& pce : m_pceVec) {
     u->m_preClasses.push_back(PreClassPtr(pce->create(*u)));
   }
@@ -671,13 +685,15 @@ std::unique_ptr<Unit> UnitEmitter::create() {
    */
   if (m_sourceLocTab.size() != 0) {
     stashLineTable(u.get(), createLineTable(m_sourceLocTab, m_bclen));
+  } else if (saveLineTable) {
+    stashLineTable(u.get(), m_lineTable);
   }
 
   /*
    * Similarly if we plan to dump hhas we will need the extended line table
    * information in the output.
    */
-  if (RuntimeOption::EvalDumpHhas && SystemLib::s_inited) {
+  if (saveLineTable || (RuntimeOption::EvalDumpHhas && SystemLib::s_inited)) {
     stashExtendedLineTable(u.get(), createSourceLocTable());
   }
 
@@ -804,6 +820,13 @@ void UnitRepoProxy::createSchema(int repoId, RepoTxn& txn) {
   }
   {
     std::stringstream ssCreate;
+    ssCreate << "CREATE TABLE " << m_repo.table(repoId, "UnitArrayTypeTable")
+             << "(unitSn INTEGER, arrayTypeTable BLOB,"
+                " PRIMARY KEY (unitSn));";
+    txn.exec(ssCreate.str());
+  }
+  {
+    std::stringstream ssCreate;
     ssCreate << "CREATE TABLE " << m_repo.table(repoId, "UnitMergeables")
              << "(unitSn INTEGER, mergeableIx INTEGER,"
                 " mergeableKind INTEGER, mergeableId INTEGER,"
@@ -848,6 +871,7 @@ RepoStatus UnitRepoProxy::loadHelper(UnitEmitter& ue,
   try {
     getUnitLitstrs[repoId].get(ue);
     getUnitArrays[repoId].get(ue);
+    getUnitArrayTypeTable[repoId].get(ue);
     m_repo.pcrp().getPreClasses[repoId].get(ue);
     getUnitMergeables[repoId].get(ue);
     getUnitLineTable(repoId, ue.m_sn, ue.m_lineTable);
@@ -1007,6 +1031,48 @@ void UnitRepoProxy::GetUnitLitstrsStmt
       assert(id == litstrId);
     }
   } while (!query.done());
+  txn.commit();
+}
+
+void UnitRepoProxy::InsertUnitArrayTypeTableStmt::insert(
+  RepoTxn& txn, int64_t unitSn, const ArrayTypeTable& att) {
+
+  if (!prepared()) {
+    std::stringstream ssInsert;
+    ssInsert << "INSERT INTO " << m_repo.table(m_repoId, "UnitArrayTypeTable")
+             << " VALUES(@unitSn, @arrayTypeTable);";
+    txn.prepare(*this, ssInsert.str());
+  }
+  RepoTxnQuery query(txn, *this);
+  query.bindInt64("@unitSn", unitSn);
+  BlobEncoder dataBlob;
+  dataBlob(att);
+  query.bindBlob("@arrayTypeTable", dataBlob, /* static */ true);
+  query.exec();
+}
+
+void UnitRepoProxy::GetUnitArrayTypeTableStmt
+                  ::get(UnitEmitter& ue) {
+  RepoTxn txn(m_repo);
+  if (!prepared()) {
+    std::stringstream ssSelect;
+    ssSelect << "SELECT unitSn, arrayTypeTable FROM "
+             << m_repo.table(m_repoId, "UnitArrayTypeTable")
+             << " WHERE unitSn == @unitSn;";
+    txn.prepare(*this, ssSelect.str());
+  }
+
+  RepoTxnQuery query(txn, *this);
+  query.bindInt64("@unitSn", ue.m_sn);
+
+  query.step();
+  assert(query.row());
+  BlobDecoder dataBlob = query.getBlob(1);
+  dataBlob(ue.m_arrayTypeTable);
+  dataBlob.assertDone();
+  query.step();
+  assert(query.done());
+
   txn.commit();
 }
 

@@ -2114,7 +2114,16 @@ res::Class Index::resolve_class(borrowed_ptr<const php::Class> cls) const {
       result = cinfo;
     }
   }
-  if (result) return res::Class { this, result };
+
+  // The function is supposed to return a cinfo if we can uniquely resolve cls.
+  // In repo mode, if there is only one cinfo, return it.
+  // In non-repo mode, we don't know all the cinfo's. So "only one cinfo" does
+  // not mean anything unless it is a built-in and we disable rename/intercept.
+  if (result && (RuntimeOption::RepoAuthoritative ||
+                 (!RuntimeOption::EvalJitEnableRenameFunction &&
+                  cls->attrs & AttrBuiltin))) {
+    return res::Class { this, result };
+  }
 
   // We know its a class, not an enum or type alias, so return
   // by name
@@ -2715,12 +2724,21 @@ Type Index::lookup_class_constant(Context ctx,
 }
 
 folly::Optional<Type> Index::lookup_constant(Context ctx,
-                                             SString cnsName) const {
-  auto const it = m_data->constants.find(cnsName);
+                                             SString cnsName,
+                                             SString fallbackName) const {
+  auto it = m_data->constants.find(cnsName);
   if (it == m_data->constants.end()) {
     // flag to indicate that the constant isn't in the index yet.
     if (options.HardConstProp) return folly::none;
     return TInitCell;
+  }
+
+  if (it->second.readonly && fallbackName) {
+    auto it2 = m_data->constants.find(fallbackName);
+    if (it2 != m_data->constants.end() &&
+        !it2->second.readonly) {
+      it = std::move(it2);
+    }
   }
 
   if (it->second.func &&
@@ -2790,6 +2808,16 @@ Type Index::lookup_return_type_raw(borrowed_ptr<const php::Func> f) const {
     return it->second.returnTy;
   }
   return TInitGen;
+}
+
+CompactVector<Type>
+Index::lookup_local_static_types(borrowed_ptr<const php::Func> f) const {
+  auto it = &m_data->funcInfo[f->idx];
+  if (it->first) {
+    assertx(it->first == f);
+    return it->second.localStaticTypes;
+  }
+  return {};
 }
 
 bool Index::lookup_this_available(borrowed_ptr<const php::Func> f) const {

@@ -40,7 +40,7 @@ std::string dump_asm(const Unit& unit) {
   std::string out;
   folly::format(&out, ".filepath \"{}\";\n\n", unit.name);
   out.append(dump_pseudomain(*unit.getPseudomain()));
-  for (const auto& func : unit.functions) {
+  for (auto& func : unit.functions) {
     out.append(dump_function(*func));
   }
   for (const auto& cls : unit.classes) {
@@ -104,6 +104,18 @@ struct InstrVisitor {
       folly::format(&out, " L{}", blk->id);
     }
     out.append(" >");
+  }
+
+  void imm(const bc::ReadClassref& read) {
+    out.append(" ");
+    assert(read.slot.allocated());
+    out.append(folly::to<std::string>(*read.slot.id));
+  }
+
+  void imm(const bc::WriteClassref& write) {
+    out.append(" ");
+    assert(write.slot.allocated());
+    out.append(folly::to<std::string>(*write.slot.id));
   }
 
   void imm(IncDecOp op) {
@@ -343,6 +355,9 @@ std::string dump_class(const Class& cls) {
   std::string out;
   out.append(".class ");
   out.append(cls.name);
+  if (cls.parentName) {
+    folly::format(&out, " extends {}", *cls.parentName);
+  }
   out.append(" {\n");
   for (const auto& method : cls.methods) {
     out.append(dump_method(*method));
@@ -398,6 +413,8 @@ std::string dump_function_body(const Function& func) {
     folly::format(&out, " ${}", name);
   }
   out.append(";\n");
+  folly::format(&out, "  .numclsrefslots {};\n",
+    analyzeClassrefs(func.cfg));
   func.cfg.visit(AssemblyVisitor(out));
   return out;
 }

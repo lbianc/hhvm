@@ -52,7 +52,6 @@ slow/continue_statement/zero.php
 slow/ctor_param_promotion_bad_mod.php
 slow/dict/hh-only1.php
 slow/dict/hh-only2.php
-slow/dict/hhbbc-group.php
 slow/dict/init-parse-error1.php
 slow/dict/init-parse-error2.php
 slow/dict/init-parse-error3.php
@@ -65,7 +64,6 @@ slow/dv_array/parse-error2.php
 slow/dv_array/parse-error3.php
 slow/dv_array/parse-error4.php
 slow/dv_array/parse-error5.php
-slow/dynamic_methods/1214.php
 slow/dynamic_variables/1164.php
 slow/eval_order/1502.php
 slow/exceptions/52.php
@@ -80,7 +78,6 @@ slow/ext_phar/create_zip.php
 slow/ext_process/bad_shell_exec.php
 slow/ext_string/1764.php
 slow/ext_string/setlocale-threaded.php
-slow/ext_variable/ext_variable.php
 slow/finally/finally_break_008.php
 slow/finally/finally_goto_001.php
 slow/finally/finally_goto_002.php
@@ -152,8 +149,6 @@ slow/keyset/hh-only2.php
 slow/keyset/init-parse-error1.php
 slow/keyset/init-parse-error2.php
 slow/lang/deprecated.php
-slow/lang/deprecated_disabled.php
-slow/lang/deprecated_sampled.php
 slow/lang/mixedbag.php
 slow/lang/redefine_function.php
 slow/lang/tuple_non_hh.php
@@ -317,7 +312,6 @@ slow/reflection/1339.php
 slow/reflection/1342.php
 slow/reflection/2695.php
 slow/reflection/closure_namespace.php
-slow/reflection/deprecation.php
 slow/reflection/dynamic_property2.php
 slow/reflection/isCallable.php
 slow/reflection/ns_closure.php

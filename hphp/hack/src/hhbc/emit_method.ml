@@ -8,6 +8,8 @@
  *
 *)
 
+module SU = Hhbc_string_utils
+
 open Core
 open Instruction_sequence
 
@@ -32,9 +34,10 @@ let from_ast_wrapper : bool -> _ ->
     (not method_is_private && not method_is_protected)) in
   let is_memoize =
     Emit_attribute.ast_any_is_memoize ast_method.Ast.m_user_attributes in
+  let deprecation_info = Hhas_attribute.deprecation_info method_attributes in
   let (pos, original_name) = ast_method.Ast.m_name in
   let (_,class_name) = ast_class.Ast.c_name in
-  let class_name = Utils.strip_ns class_name in
+  let class_name = SU.Xhp.mangle @@ Utils.strip_ns class_name in
   let ret = ast_method.Ast.m_ret in
   let method_id = make_name ast_method.Ast.m_name in
   let method_is_async =
@@ -73,6 +76,7 @@ let from_ast_wrapper : bool -> _ ->
       ~is_closure_body:method_is_closure_body
       ~is_memoize
       ~is_async:method_is_async
+      ~deprecation_info
       ~skipawaitable:(ast_method.Ast.m_fun_kind = Ast_defs.FAsync)
       ~is_return_by_ref:ast_method.Ast.m_ret_by_ref
       ~default_dropthrough
@@ -88,7 +92,7 @@ let from_ast_wrapper : bool -> _ ->
     if method_is_closure_body
     then List.concat_map ast_class.Ast.c_body (fun item ->
       match item with
-      | Ast.ClassVars(_, _, cvl) ->
+      | Ast.ClassVars(_, _, cvl, _) ->
         let cvl = List.filter cvl ~f:(fun (_, (_, id), _) ->
           (String.length id) < 9 || (String.sub id 0 9) <> "86static_") in
         List.map cvl (fun (_, (_,id), _) -> "$" ^ id)

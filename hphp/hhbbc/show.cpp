@@ -71,9 +71,9 @@ std::string escaped_string(SString str) {
 };
 
 std::string array_string(SArray arr) {
-  std::ostringstream str;
+  std::string str;
   staticArrayStreamer(const_cast<ArrayData*>(arr), str);
-  return str.str();
+  return str;
 }
 
 }
@@ -168,9 +168,11 @@ std::string show(const Func& func) {
   X(isPairGenerator);
 #undef X
 
-  folly::format(&ret,
-                "digraph {} {{\n  node [shape=box];\n{}}}\n",
-                func.name, indent(2, dot_cfg(func)));
+  if (getenv("HHBBC_DUMP_DOT")) {
+    folly::format(&ret,
+                  "digraph {} {{\n  node [shape=box];\n{}}}\n",
+                  func.name, indent(2, dot_cfg(func)));
+  }
 
   for (auto& blk : func.blocks) {
     if (blk->id == NoBlockId) continue;

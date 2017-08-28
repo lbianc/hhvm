@@ -33,6 +33,7 @@
 #include <limits>
 #include <list>
 #include <stdexcept>
+#include <type_traits>
 
 namespace HPHP {
 namespace Verifier {
@@ -94,9 +95,9 @@ struct FuncChecker {
     {}
   };
 
-  bool checkEdge(Block* b, const State& cur, Block* t, GraphBuilder builder);
-  bool checkBlock(State& cur, Block* b, GraphBuilder builder);
-  bool checkSuccEdges(Block* b, State* cur, GraphBuilder builder);
+  bool checkEdge(Block* b, const State& cur, Block* t);
+  bool checkBlock(State& cur, Block* b);
+  bool checkSuccEdges(Block* b, State* cur);
   bool checkOffset(const char* name, Offset o, const char* regionName,
                    Offset base, Offset past, bool check_instrs = true);
   bool checkRegion(const char* name, Offset b, Offset p,
@@ -124,7 +125,7 @@ struct FuncChecker {
   bool checkIterBreak(State* cur, PC pc);
   bool checkLocal(PC pc, int val);
   bool checkString(PC pc, Id id);
-  bool checkExnEdge(State cur, Block* b, GraphBuilder builder);
+  bool checkExnEdge(State cur, Block* b);
   void reportStkUnderflow(Block*, const State& cur, PC);
   void reportStkOverflow(Block*, const State& cur, PC);
   void reportStkMismatch(Block* b, Block* target, const State& cur);
@@ -592,8 +593,12 @@ bool FuncChecker::checkImmOAImpl(PC& pc, PC const /*instr*/) {
 }
 
 bool FuncChecker::checkImmKA(PC& pc, PC const /*instr*/) {
+  static_assert(
+      std::is_unsigned<typename std::underlying_type<MemberCode>::type>::value,
+      "MemberCode is expected to be unsigned.");
+
   auto const mcode = decode_raw<MemberCode>(pc);
-  if (mcode < 0 || mcode >= NumMemberCodes) {
+  if (mcode >= NumMemberCodes) {
     ferror("Invalid MemberCode {}\n", uint8_t{mcode});
     return false;
   }
@@ -814,10 +819,6 @@ const FlavorDesc* FuncChecker::sig(PC pc) {
 
 bool FuncChecker::checkMemberKey(State* cur, PC pc, Op op) {
   MemberKey key;
-
-  if(RuntimeOption::RepoAuthoritative) { //if the key mcode is ET, MT or QT
-    LitstrTable::get().setReading();     //we need to read from the LitstrTable
-  }
 
   switch(op){
     case Op::IncDecM:
@@ -1358,6 +1359,12 @@ bool FuncChecker::checkOp(State* cur, PC pc, Op op, Block* b) {
       cur->silences[local] = silence == SilenceOp::Start ? 1 : 0;
       break;
     }
+    case Op::Fatal:
+      // fatals skip all fault handlers, and the silence state is reset
+      // by the runtime.
+      cur->silences.clear();
+      break;
+
     default:
       break;
   }
@@ -1562,7 +1569,7 @@ void FuncChecker::copyState(State* to, const State* from) {
   to->guaranteedThis = from->guaranteedThis;
 }
 
-bool FuncChecker::checkExnEdge(State cur, Block* b, GraphBuilder builder) {
+bool FuncChecker::checkExnEdge(State cur, Block* b) {
   // Reachable catch blocks and fault funclets have an empty stack and
   // non-initialized class-ref slots. Checking an edge to the fault
   // handler right before every instruction is unnecessary since
@@ -1575,14 +1582,14 @@ bool FuncChecker::checkExnEdge(State cur, Block* b, GraphBuilder builder) {
   cur.stklen = 0;
   cur.fpilen = 0;
   cur.clsRefSlots.reset();
-  auto const ok = checkEdge(b, cur, b->exn, builder);
+  auto const ok = checkEdge(b, cur, b->exn);
   cur.stklen = save_stklen;
   cur.fpilen = save_fpilen;
   cur.clsRefSlots = std::move(save_slots);
   return ok;
 }
 
-bool FuncChecker::checkBlock(State& cur, Block* b, GraphBuilder builder) {
+bool FuncChecker::checkBlock(State& cur, Block* b) {
   bool ok = true;
   if (m_errmode == kVerbose) {
     std::cout << blockToString(b, m_graph, unit()) << std::endl;
@@ -1596,7 +1603,7 @@ bool FuncChecker::checkBlock(State& cur, Block* b, GraphBuilder builder) {
     }
     auto const op = peek_op(pc);
 
-    if (b->exn) ok &= checkExnEdge(cur, b, builder);
+    if (b->exn) ok &= checkExnEdge(cur, b);
     if (isMemberFinalOp(op)) ok &= checkMemberKey(&cur, pc, op);
     ok &= checkOp(&cur, pc, op, b);
     ok &= checkInputs(&cur, pc, b);
@@ -1608,7 +1615,7 @@ bool FuncChecker::checkBlock(State& cur, Block* b, GraphBuilder builder) {
     ok &= checkClsRefSlots(&cur, pc);
     ok &= checkOutputs(&cur, pc, b);
   }
-  ok &= checkSuccEdges(b, &cur, builder);
+  ok &= checkSuccEdges(b, &cur);
   return ok;
 }
 
@@ -1626,12 +1633,12 @@ bool FuncChecker::checkFlow() {
   initState(&cur);
   // initialize state at all entry points
   for (BlockPtrRange i = entryBlocks(m_graph); !i.empty();) {
-    ok &= checkEdge(0, cur, i.popFront(), builder);
+    ok &= checkEdge(0, cur, i.popFront());
   }
   for (Block* b = m_graph->first_rpo; b; b = b->next_rpo) {
     m_last_rpo_id = b->rpo_id;
     copyState(&cur, &m_info[b->id].state_in);
-    ok &= checkBlock(cur, b, builder);
+    ok &= checkBlock(cur, b);
   }
   // Make sure eval stack is correct at start of each try region
   for (auto& handler : m_func->ehtab()) {
@@ -1643,7 +1650,7 @@ bool FuncChecker::checkFlow() {
   return ok;
 }
 
-bool FuncChecker::checkSuccEdges(Block* b, State* cur, GraphBuilder builder) {
+bool FuncChecker::checkSuccEdges(Block* b, State* cur) {
   bool ok = true;
   int succs = numSuccBlocks(b);
 
@@ -1663,13 +1670,13 @@ bool FuncChecker::checkSuccEdges(Block* b, State* cur, GraphBuilder builder) {
       std::cout << "        " << stateToString(*cur) <<
         " -> B" << b->succs[1]->id << std::endl;
     }
-    ok &= checkEdge(b, *cur, b->succs[1], builder);
+    ok &= checkEdge(b, *cur, b->succs[1]);
     cur->iters[id] = !taken_state;
     if (m_errmode == kVerbose) {
       std::cout << "        " << stateToString(*cur) <<
                    " -> B" << b->succs[0]->id << std::endl;
     }
-    ok &= checkEdge(b, *cur, b->succs[0], builder);
+    ok &= checkEdge(b, *cur, b->succs[0]);
     cur->iters[id] = save;
   } else if (Op(*b->last) == Op::IterBreak) {
     auto pc = b->last + encoded_op_size(Op::IterBreak);
@@ -1677,36 +1684,24 @@ bool FuncChecker::checkSuccEdges(Block* b, State* cur, GraphBuilder builder) {
     for (auto& iter : iterBreakIds(pc)) {
       cur->iters[iter.id] = false;
     }
-    ok &= checkEdge(b, *cur, b->succs[0], builder);
+    ok &= checkEdge(b, *cur, b->succs[0]);
   } else {
     // Other branch instructions send the same state to all successors.
     if (m_errmode == kVerbose) {
       std::cout << "        " << stateToString(*cur) << std::endl;
     }
     for (BlockPtrRange i = succBlocks(b); !i.empty(); ) {
-      ok &= checkEdge(b, *cur, i.popFront(), builder);
+      ok &= checkEdge(b, *cur, i.popFront());
     }
   }
 
   for (int i = 0; i < succs; i++) {
     auto const t = b->succs[i];
     if (t && offset(t->start) == m_func->base()) {
-      // Jump target is the first bytecode in the function. We only want to
-      // allow this if b is in a dvInitializer. b is in a dv initializer if
-      // it is reachable from a DV Entry Point and not reachable from the
-      // beginning of the function
-      auto dv = false;
-      for (auto pair : m_func->getDVFunclets()) {
-        boost::dynamic_bitset<> visited(m_graph->block_count);
-        if (builder.reachable(builder.at(pair.second), b, visited)) {
-          dv = true;
-          break;
-        }
-      }
       boost::dynamic_bitset<> visited(m_graph->block_count);
-      if (!dv || builder.reachable(t, b, visited)) {
-        error("%s: Cannot jump to start of function from outside of DV "
-              "initializer\n", opcodeToName(peek_op(b->last)));
+      if (Block::reachable(t, b, visited)) {
+        error("%s: Control flow cycles from the entry-block "
+              "to itself are not allowed\n", opcodeToName(peek_op(b->last)));
         ok = false;
       }
     }
@@ -1743,8 +1738,7 @@ bool FuncChecker::checkEHStack(const EHEnt& /*handler*/, Block* b) {
  * If this is the first edge ->t we've seen, copy the state to t.
  * Otherwise, require the state exactly match.
  */
-bool FuncChecker::checkEdge(Block* b, const State& cur, Block *t,
-                            GraphBuilder builder) {
+bool FuncChecker::checkEdge(Block* b, const State& cur, Block *t) {
   State& state = m_info[t->id].state_in;
   bool stateChange = false;
   if (!state.stk) {
@@ -1830,7 +1824,7 @@ bool FuncChecker::checkEdge(Block* b, const State& cur, Block *t,
   if (m_last_rpo_id > t->rpo_id && stateChange) {
     State tmp;
     copyState(&tmp, &state);
-    return checkBlock(tmp, t, builder);
+    return checkBlock(tmp, t);
   }
 
   return true;

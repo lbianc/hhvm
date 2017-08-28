@@ -580,6 +580,9 @@ int process(const CompilerOptions &po) {
     processInitRan = true;
   }
 
+  LitstrTable::init();
+  LitstrTable::get().setWriting();
+
   {
     Timer timer2(Timer::WallTime, "parsing inputs");
     if (!po.inputs.empty() && isPickledPHP) {
@@ -799,6 +802,11 @@ int hhbcTarget(const CompilerOptions &po, AnalysisResultPtr&& ar,
   if (po.format.find("text") != std::string::npos) {
     Option::GenerateTextHHBC = true;
     type = "creating text HHBC files";
+    formatCount++;
+  }
+  if (po.format.find("hhas") != std::string::npos) {
+    Option::GenerateHhasHHBC = true;
+    type = "creating hhas HHBC files";
     formatCount++;
   }
   if (po.format.find("binary") != std::string::npos) {

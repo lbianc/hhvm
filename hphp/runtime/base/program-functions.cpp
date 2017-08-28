@@ -754,17 +754,17 @@ void execute_command_line_end(int xhprof, bool coverage, const char *program) {
 #if defined(__APPLE__) || defined(_MSC_VER)
 const void* __hot_start = nullptr;
 const void* __hot_end = nullptr;
-#endif
-
-#if FACEBOOK
-# define AT_END_OF_TEXT       __attribute__((__section__(".stub")))
+#define AT_END_OF_TEXT
 #else
-# define AT_END_OF_TEXT
+#define AT_END_OF_TEXT    __attribute__((__section__(".stub")))
 #endif
 
-static void NEVER_INLINE AT_END_OF_TEXT __attribute__((__optimize__("2")))
+#define ALIGN_HUGE_PAGE   __attribute__((__aligned__(2 * 1024 * 1024)))
+
+static void
+NEVER_INLINE AT_END_OF_TEXT ALIGN_HUGE_PAGE __attribute__((__optimize__("2")))
 hugifyText(char* from, char* to) {
-#if FACEBOOK && !defined FOLLY_SANITIZE_ADDRESS && defined MADV_HUGEPAGE
+#if !defined FOLLY_SANITIZE_ADDRESS && defined MADV_HUGEPAGE
   if (from > to || (to - from) < sizeof(uint64_t)) {
     // This shouldn't happen if HHVM is behaving correctly (I think),
     // but if it does then there is nothing to do and we should bail
@@ -796,6 +796,10 @@ hugifyText(char* from, char* to) {
   free(mem);
   mlock(from, to - from);
   Debug::DebugInfo::setPidMapOverlay(from, to);
+  std::stringstream ss;
+  ss << "Mapped text section onto huge pages from " <<
+      std::hex << (uint64_t*)from << " to " << (uint64_t*)to;
+  Logger::Info(ss.str());
 #endif
 }
 
@@ -854,7 +858,7 @@ static void pagein_self(void) {
           if (to - from >  maxHugeHotTextBytes) {
             to = from + maxHugeHotTextBytes;
           }
-          if (to < (void*)hugifyText) {
+          if (to <= (void*)hugifyText) {
             hugifyText(from, to);
           }
         }
@@ -1800,6 +1804,7 @@ static int execute_program_impl(int argc, char** argv) {
     Logger::Error("Unable to initialize GC type-scanners: %s", exn.what());
     exit(HPHP_EXIT_FAILURE);
   }
+  MemoryManager::TlsWrapper::fixTypeIndex();
 
   // It's okay if this fails.
   init_member_reflection();
@@ -2113,6 +2118,9 @@ static void update_constants_and_options() {
 }
 
 void hphp_thread_init() {
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
+  thread_huge_tcache_create();
+#endif
   ServerStats::GetLogger();
   zend_get_bigint_data();
   zend_rand_init();
@@ -2134,6 +2142,9 @@ void hphp_thread_exit() {
   InitFiniNode::ThreadFini();
   ExtensionRegistry::threadShutdown();
   if (!g_context.isNull()) g_context.destroy();
+#ifdef USE_JEMALLOC_CUSTOM_HOOKS
+  thread_huge_tcache_destroy();
+#endif
 }
 
 void hphp_process_init() {
@@ -2244,6 +2255,7 @@ void hphp_process_init() {
   BootStats::mark("rds::requestExit");
   // Reset the preloaded g_context
   ExecutionContext *context = g_context.getNoCheck();
+  context->onRequestShutdown(); // TODO T20898959 kill early REH usage.
   context->~ExecutionContext();
   new (context) ExecutionContext();
   BootStats::mark("ExecutionContext");
@@ -2390,8 +2402,6 @@ bool hphp_invoke(ExecutionContext *context, const std::string &cmd,
 
   MM().resetCouldOOM(isStandardRequest());
   RID().resetTimer();
-
-  LitstrTable::get().setReading();
 
   bool ret = true;
   if (!warmupOnly) {

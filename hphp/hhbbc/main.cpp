@@ -266,9 +266,11 @@ void write_output(std::vector<std::unique_ptr<UnitEmitter>> ues,
                   std::vector<SString> apcProfile) {
   RuntimeOption::RepoCommit = true;
   RuntimeOption::RepoEvalMode = "local";
+  RuntimeOption::RepoDebugInfo = false; // Don't record UnitSourceLoc
   open_repo(output_repo);
   SCOPE_EXIT { Repo::shutdown(); };
-  batchCommit(std::move(ues));
+  batchCommit(ues);
+  ues.clear();
 
   auto gd                         = Repo::GlobalData{};
   gd.UsedHHBBC                    = true;
@@ -293,7 +295,7 @@ void write_output(std::vector<std::unique_ptr<UnitEmitter>> ues,
   gd.InitialStaticStringTableSize =
     RuntimeOption::EvalInitialStaticStringTableSize;
 
-  gd.arrayTypeTable.repopulate(*arrTable);
+  globalArrayTypeTable().repopulate(*arrTable);
   // NOTE: There's no way to tell if saveGlobalData() fails for some reason.
   Repo::get().saveGlobalData(gd);
 }

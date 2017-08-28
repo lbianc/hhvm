@@ -21,6 +21,8 @@
 #include "hphp/util/trace.h"
 #include <folly/MicroSpinLock.h>
 
+#include <type_traits>
+
 TRACE_SET_MOD(asmppc64);
 
 namespace ppc64_asm {
@@ -598,9 +600,11 @@ void Assembler::li64TOC (const Reg64& rt, int64_t imm64,
 
 void Assembler::limmediate(const Reg64& rt, int64_t imm64,
                            ImmType immt, bool immMayChange) {
-  always_assert(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize >= 0 &&
-    HPHP::RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
-
+  static_assert(
+       std::is_unsigned<
+         decltype(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize)>::value,
+      "RuntimeOption::EvalPPC64MinTOCImmSize is expected to be unsigned.");
+  always_assert(HPHP::RuntimeOption::EvalPPC64MinTOCImmSize <= 64);
   if (immt != ImmType::TocOnly) li64(rt, imm64, immt != ImmType::AnyCompact);
   else li64TOC (rt, imm64, immt, immMayChange);
 }

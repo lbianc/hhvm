@@ -106,15 +106,14 @@ NEVER_INLINE bool ObjectData::destructImpl() {
   // relatively slower case.
   if (g_context->m_unwindingCppException) return true;
 
-  // Some decref paths call release() when --count == 0 and some call it
-  // when count == 1. This difference only matters for objects that
-  // resurrect themselves in their destructors, so make sure count is
-  // consistent here.
+  // Some decref paths call release() when --count == 0 and some call it when
+  // count == 1. This difference only matters for objects that resurrect
+  // themselves in their destructors, so make sure count is consistent here.
   assert(m_count == 0 || m_count == 1);
-  m_count = 0;
+  m_count = static_cast<RefCount>(0);
 
-  // We raise the refcount around the call to __destruct(). This is to
-  // prevent the refcount from going to zero when the destructor returns.
+  // We raise the refcount around the call to __destruct(). This is to prevent
+  // the refcount from going to zero when the destructor returns.
   CountableHelper h(this);
   invoke_destructor(this, dtor);
   return hasExactlyOneRef();
@@ -152,7 +151,8 @@ NEVER_INLINE
 void ObjectData::releaseNoObjDestructCheck() noexcept {
   assert(kindIsValid());
 
-  if (UNLIKELY(!getAttribute(NoDestructor))) {
+  // Destructors are unsupported in one-bit reference counting mode.
+  if (!one_bit_refcount && UNLIKELY(!getAttribute(NoDestructor))) {
     if (UNLIKELY(!destructImpl())) return;
   }
 
@@ -184,6 +184,7 @@ void ObjectData::releaseNoObjDestructCheck() noexcept {
     reinterpret_cast<char*>(stop) - reinterpret_cast<char*>(this);
   assert(size == sizeForNProps(nProps));
   MM().objFree(this, size);
+  AARCH64_WALKABLE_FRAME();
 }
 
 NEVER_INLINE
@@ -195,9 +196,12 @@ static void tail_call_remove_live_bc_obj(ObjectData* obj) {
 void ObjectData::release() noexcept {
   assert(kindIsValid());
   if (UNLIKELY(RuntimeOption::EnableObjDestructCall && m_cls->getDtor())) {
-    return tail_call_remove_live_bc_obj(this);
+    tail_call_remove_live_bc_obj(this);
+    AARCH64_WALKABLE_FRAME();
+    return;
   }
   releaseNoObjDestructCheck();
+  AARCH64_WALKABLE_FRAME();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

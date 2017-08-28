@@ -381,20 +381,27 @@ and fun_def tcopt f =
           let ty = TI.instantiable_hint env ret in
           Phase.localize_with_self env ty
       in
-      (* TODO TAST: convert default expression in param *)
-      let f_params = match f.f_variadic with
-        | FVvariadicArg param -> param :: f.f_params
-        | _ -> f.f_params
-      in
-      TI.check_params_instantiable env f_params;
+      TI.check_params_instantiable env f.f_params;
       TI.check_tparams_instantiable env f.f_tparams;
-      let env, param_tys = List.map_env env f_params make_param_local_ty in
-      let env, tparams = List.map_env env (List.zip_exn param_tys f_params)
+      let env, param_tys = List.map_env env f.f_params make_param_local_ty in
+      let env, typed_params = List.map_env env (List.zip_exn param_tys f.f_params)
         bind_param in
+      let env, t_variadic, v_ty = match f.f_variadic with
+        | FVvariadicArg vparam ->
+          TI.check_param_instantiable env vparam;
+          let env, ty = make_param_local_ty env vparam in
+          let env, t_vparam = bind_param env (ty, vparam) in
+          env, T.FVvariadicArg t_vparam, Some ty
+        | FVellipsis -> env, T.FVellipsis, None
+        | FVnonVariadic -> env, T.FVnonVariadic, None in
       let env, tb = fun_ env hret (fst f.f_name) nb f.f_fun_kind in
       let env = Env.check_todo env in
-      if Env.is_strict env then
-      List.iter2_exn f_params param_tys (check_param env);
+      if Env.is_strict env then begin
+        List.iter2_exn f.f_params param_tys (check_param env);
+        match f.f_variadic, v_ty with
+          | FVvariadicArg vparam, Some ty -> check_param env vparam ty;
+          | _ -> ()
+      end;
       begin match f.f_ret with
         | None when Env.is_strict env -> suggest_return env (fst f.f_name) hret
         | None -> Typing_suggest.save_fun_or_method f.f_name
@@ -406,8 +413,8 @@ and fun_def tcopt f =
         T.f_name = f.f_name;
         T.f_tparams = f.f_tparams;
         T.f_where_constraints = f.f_where_constraints;
-        T.f_variadic = T.FVnonVariadic (* TAST: get this right *);
-        T.f_params = tparams;
+        T.f_variadic = t_variadic;
+        T.f_params = typed_params;
         T.f_fun_kind = f.f_fun_kind;
         T.f_user_attributes = List.map f.f_user_attributes (user_attribute env);
         T.f_body = T.NamedBody {
@@ -770,7 +777,7 @@ and case_list_ parent_lenv ty env = function
     let env, tb = block env b in
     env, [Nast_terminality.Terminal.case env (Default b), env.Env.lenv],
       [T.Default tb]
-  | Case (e, b) :: rl ->
+  | (Case (e, b)) as ce :: rl ->
     (* TODO - we should consider handling the comparisons the same
      * way as Binop Ast.EqEq, since case statements work using ==
      * comparison rules *)
@@ -782,25 +789,18 @@ and case_list_ parent_lenv ty env = function
     let both_are_sub_types env tprim ty1 ty2 =
       (SubType.is_sub_type env ty1 tprim) &&
       (SubType.is_sub_type env ty2 tprim) in
+    let env, te, ty2 = expr env e in
+    let env, _ = if (both_are_sub_types env ty_num ty ty2) ||
+                    (both_are_sub_types env ty_arraykey ty ty2)
+                 then env, ty
+                 else Type.unify (fst e) Reason.URnone env ty ty2 in
+
     if Nast_terminality.Terminal.block env b then
-      let env, te, ty2 = expr env e in
-      let env, _ =
-        if (both_are_sub_types env ty_num ty ty2) ||
-          (both_are_sub_types env ty_arraykey ty ty2)
-        then env, ty
-        else Type.unify (fst e) Reason.URnone env ty ty2 in
       let env, tb = block env b in
       let lenv = env.Env.lenv in
       let env, rl, tcl = case_list parent_lenv ty env rl in
-      env, (Nast_terminality.Terminal.case env (Case (e, b)), lenv) :: rl,
-        T.Case (te, tb)::tcl
+      env, (Nast_terminality.Terminal.case env ce, lenv) :: rl, T.Case (te, tb)::tcl
     else
-      let env, _te, ty2 = expr env e in
-      let env, _ =
-        if (both_are_sub_types env ty_num ty ty2) ||
-          (both_are_sub_types env ty_arraykey ty ty2)
-        then env, ty
-        else Type.unify (fst e) Reason.URnone env ty ty2 in
       (* Since this block is not terminal we will end up falling through to the
        * next block. This means the lenv will include what our current
        * environment is, intersected (or integrated?) with the environment
@@ -816,7 +816,7 @@ and case_list_ parent_lenv ty env = function
        *    ...
        *)
       let lenv1 = env.Env.lenv in
-      let env, _ = block env b in
+      let env, tb = block env b in
       (* PERF: If the case is empty or a Noop then we do not need to intersect
        * the lenv since they will be the same.
        *
@@ -829,7 +829,8 @@ and case_list_ parent_lenv ty env = function
       let env = match b with
         | [] | [Noop] -> env
         | _ -> LEnv.intersect env parent_lenv lenv1 env.Env.lenv in
-      case_list_ parent_lenv ty env rl
+      let env, rl, tcl = case_list_ parent_lenv ty env rl in
+      env, rl, T.Case (te, tb)::tcl
 
 and catch parent_lenv after_try env (sid, exn, b) =
   let env = { env with Env.lenv = after_try } in
@@ -1535,11 +1536,14 @@ and expr_
     (* Fake member property access. For example:
      *   if ($x->f !== null) { ...$x->f... }
      *)
-  | Obj_get (e, (_, Id (_, y)), _)
+  | Obj_get (e, (pid, Id (py, y)), nf)
       when Env.FakeMembers.get env e y <> None ->
         let env, local = Env.FakeMembers.make p env e y in
         let local = p, Lvar (p, local) in
-        expr env local
+        let env, _, ty = expr env local in
+        let env, t_lhs, _ = expr env e in
+        let t_rhs = T.make_typed_expr pid ty (T.Id (py, y)) in
+        make_result env (T.Obj_get (t_lhs, t_rhs, nf)) ty
     (* Statically-known instance property access e.g. $x->f *)
   | Obj_get (e1, (pm, Id m), nullflavor) ->
       let nullsafe =
@@ -1664,18 +1668,20 @@ and expr_
          * valid, not that they match the declared type for the attribute *)
         let namepstr, valexpr = attr in
         let valp, _ = valexpr in
-        let env, _te, valty = expr env valexpr in
-        env, (namepstr, (valp, valty))
+        let env, te, valty = expr env valexpr in
+        env, (namepstr, (valp, valty), te)
       end in
-      let env, _tel, _body = exprs env el in
+      let tal = List.map attr_ptyl (fun (a, _, c) -> (a, c)) in
+      let env, tel, _body = exprs env el in
+      let txml = T.Xml (sid, tal, tel) in
       let env, _te, classes = class_id_for_new p env cid in
       (match classes with
-       | [] -> make_result env T.Any (Reason.Runknown_class p, Tobject)
+       | [] -> make_result env txml (Reason.Runknown_class p, Tobject)
          (* OK to ignore rest of list; class_info only used for errors, and
           * cid = CI sid cannot produce a union of classes anyhow *)
        | (_, class_info, _)::_ ->
         let env = List.fold_left attr_ptyl ~f:begin fun env attr ->
-          let namepstr, valpty = attr in
+          let namepstr, valpty, _ = attr in
           let valp, valty = valpty in
           (* We pretend that XHP attributes are stored as member variables,
            * prefixed with a colon.
@@ -1688,7 +1694,7 @@ and expr_
           let ureason = Reason.URxhp (class_info.tc_name, snd namepstr) in
           Type.sub_type valp ureason env valty declty
         end ~init:env in
-        make_result env T.Any obj
+        make_result env txml obj
       )
     (* TODO TAST: change AST so that order of shape expressions is preserved.
      * At present, evaluation order is unspecified in TAST *)
@@ -2459,7 +2465,7 @@ and dispatch_call p env call_type (fpos, fun_expr as e) hl el uel =
   | Id ((_, array_filter) as id)
       when array_filter = SN.StdlibFunctions.array_filter && el <> [] && uel = [] ->
       (* dispatch the call to typecheck the arguments *)
-      let env, fty = fun_type_of_id env id [] in
+      let env, fty = fun_type_of_id env id hl in
       let env, tel, tuel, res = call p env fty el uel in
       (* but ignore the result and overwrite it with custom return type *)
       let x = List.hd_exn el in
@@ -2491,7 +2497,7 @@ and dispatch_call p env call_type (fpos, fun_expr as e) hl el uel =
         | (r, Terr) ->
             env, (r, Terr)
         | (r, _) ->
-            let tk, tv = Env.fresh_type(), Env.fresh_type() in
+            let tk, tv = Env.fresh_type (), Env.fresh_type () in
             Errors.try_
               (fun () ->
                 let keyed_container = (
@@ -2560,9 +2566,23 @@ and dispatch_call p env call_type (fpos, fun_expr as e) hl el uel =
 
             where R is constructed by build_output_container applied to Tr
           *)
-          let build_function build_output_container =
-            let vars = List.map args (fun _ -> Env.fresh_type()) in
-            let tr = Env.fresh_type() in
+          let build_function env build_output_container =
+            let env, vars, tr =
+              (* If T1, ... Tn, Tr are provided explicitly, instantiate the function parameters with
+               * those directly. *)
+              if List.length hl = 0
+              then env, List.map args (fun _ -> Env.fresh_type()), Env.fresh_type ()
+              else if List.length hl <> List.length args + 1 then begin
+                Errors.expected_tparam fty.ft_pos (1 + (List.length args));
+                env, List.map args (fun _ -> Env.fresh_type()), Env.fresh_type () end
+              else
+              let env, vars_and_tr = List.map_env env hl Phase.hint_locl in
+              let vars, trl = List.split_n vars_and_tr (List.length vars_and_tr - 1) in
+              (* Since we split the arguments and return type at the last index and the length is
+                 non-zero this is safe. *)
+              let tr = List.hd_exn trl in
+              env, vars, tr
+            in
             let f = (None, (
               r_fty,
               Tfun {
@@ -2583,11 +2603,12 @@ and dispatch_call p env call_type (fpos, fun_expr as e) hl el uel =
                 )
               )
             ) in
-            (r_fty, Tfun {fty with
-              ft_arity = Fstandard (arity+1, arity+1);
-              ft_params = f::containers;
-              ft_ret =  build_output_container tr;
-            }) in
+            env, (r_fty, Tfun {fty with
+                               ft_arity = Fstandard (arity+1, arity+1);
+                               ft_params = f::containers;
+                               ft_ret =  build_output_container tr;
+                              })
+          in
 
           (*
             Takes a Container type and returns a function that can "pack" a type
@@ -2671,9 +2692,9 @@ and dispatch_call p env call_type (fpos, fun_expr as e) hl el uel =
             | [x] ->
               let env, _tx, x = expr env x in
               let env, output_container = build_output_container env x in
-              env, build_function output_container
+              build_function env output_container
             | _ ->
-              env, build_function (fun tr ->
+              build_function env (fun tr ->
                 (r_fty, Tarraykind (AKvec(tr)))))
         | _ -> env, fty in
       let env, tel, _tuel, ty = call p env fty el [] in
@@ -2911,7 +2932,7 @@ and array_get ?(lhs_of_null_coalesce=false) is_lvalue p env ty1 e2 ty2 =
   match snd ety1 with
   | Tunresolved tyl ->
       let env, tyl = List.map_env env tyl begin fun env ty1 ->
-        array_get is_lvalue p env ty1 e2 ty2
+        array_get ~lhs_of_null_coalesce is_lvalue p env ty1 e2 ty2
       end in
       env, (fst ety1, Tunresolved tyl)
   | Tarraykind (AKvarray ty | AKvec ty) ->
@@ -3092,6 +3113,12 @@ and array_get ?(lhs_of_null_coalesce=false) is_lvalue p env ty1 e2 ty2 =
           env, (Reason.Rwitness p, Terr)
         | Some { sft_optional = _; sft_ty } -> env, sft_ty)
     )
+  | Toption tyl when lhs_of_null_coalesce ->
+      (* Normally, we would not allow indexing into a nullable container,
+         however, because the pattern shows up so frequently, we are allowing
+         indexing into a nullable container as long as it is on the lhs of a
+         null coalesce *)
+      array_get ~lhs_of_null_coalesce is_lvalue p env tyl e2 ty2
   | Toption _ ->
       Errors.null_container p
         (Reason.to_string
@@ -5008,19 +5035,27 @@ and method_def env m =
         { (Phase.env_with_self env) with
           from_class = Some CIstatic } in
       Phase.localize ~ety_env env ret in
-  let m_params = match m.m_variadic with
-    | FVvariadicArg param -> param :: m.m_params
-    | _ -> m.m_params
-  in
-  TI.check_params_instantiable env m_params;
-  let env, param_tys = List.map_env env m_params make_param_local_ty in
+  TI.check_params_instantiable env m.m_params;
+  let env, param_tys = List.map_env env m.m_params make_param_local_ty in
   if Env.is_strict env then begin
-    List.iter2_exn ~f:(check_param env) m_params param_tys;
+    List.iter2_exn ~f:(check_param env) m.m_params param_tys;
   end;
   if Attributes.mem SN.UserAttributes.uaMemoize m.m_user_attributes then
-    List.iter2_exn ~f:(check_memoizable env) m_params param_tys;
+    List.iter2_exn ~f:(check_memoizable env) m.m_params param_tys;
   let env, typed_params =
-    List.map_env env (List.zip_exn param_tys m_params) bind_param in
+    List.map_env env (List.zip_exn param_tys m.m_params) bind_param in
+  let env, t_variadic = match m.m_variadic with
+    | FVvariadicArg vparam ->
+      TI.check_param_instantiable env vparam;
+      let env, ty = make_param_local_ty env vparam in
+      if Env.is_strict env then
+        check_param env vparam ty;
+      if Attributes.mem SN.UserAttributes.uaMemoize m.m_user_attributes then
+        check_memoizable env vparam ty;
+      let env, t_variadic = bind_param env (ty, vparam) in
+      env, (T.FVvariadicArg t_variadic)
+    | FVellipsis -> env, T.FVellipsis
+    | FVnonVariadic -> env, T.FVnonVariadic in
   let nb = Nast.assert_named_body m.m_body in
   let env, tb =
     fun_ ~abstract:m.m_abstract env ret (fst m.m_name) nb m.m_fun_kind in
@@ -5048,7 +5083,7 @@ and method_def env m =
     T.m_name = m.m_name;
     T.m_tparams = m.m_tparams;
     T.m_where_constraints = m.m_where_constraints;
-    T.m_variadic = T.FVnonVariadic (* TODO TAST: get this right m.m_variadic *);
+    T.m_variadic = t_variadic;
     T.m_params = typed_params;
     T.m_fun_kind = m.m_fun_kind;
     T.m_user_attributes = List.map m.m_user_attributes (user_attribute env);

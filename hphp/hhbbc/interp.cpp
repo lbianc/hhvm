@@ -432,8 +432,10 @@ void in(ISS& env, const bc::ColFromArray& op) {
   push(env, objExact(env.index.builtin_class(name)));
 }
 
-void doCns(ISS& env, SString str)  {
-  auto t = env.index.lookup_constant(env.ctx, str);
+void doCns(ISS& env, SString str, SString fallback)  {
+  if (!options.HardConstProp) return push(env, TInitCell);
+
+  auto t = env.index.lookup_constant(env.ctx, str, fallback);
   if (!t) {
     // There's no entry for this constant in the index. It must be
     // the first iteration, so we'll add a dummy entry to make sure
@@ -445,15 +447,16 @@ void doCns(ISS& env, SString str)  {
     // make sure we're re-analyzed
     env.collect.readsUntrackedConstants = true;
   } else if (t->strictSubtypeOf(TInitCell)) {
-    nothrow(env);
+    // constprop will take care of nothrow *if* its a constant; and if
+    // its not, we might trigger autoload.
     constprop(env);
   }
   push(env, std::move(*t));
 }
 
-void in(ISS& env, const bc::Cns& op)  { doCns(env, op.str1); }
-void in(ISS& env, const bc::CnsE& op) { doCns(env, op.str1); }
-void in(ISS& env, const bc::CnsU&)    { push(env, TInitCell); }
+void in(ISS& env, const bc::Cns& op)  { doCns(env, op.str1, nullptr); }
+void in(ISS& env, const bc::CnsE& op) { doCns(env, op.str1, nullptr); }
+void in(ISS& env, const bc::CnsU& op) { doCns(env, op.str1, op.str2); }
 
 void in(ISS& env, const bc::ClsCns& op) {
   auto const& t1 = peekClsRefSlot(env, op.slot);
@@ -1637,7 +1640,17 @@ void in(ISS& env, const bc::InstanceOf& /*op*/) {
   push(env, TBool);
 }
 
-void in(ISS& env, const bc::SetL& op) {
+namespace {
+
+/*
+ * If the value on the top of the stack is known to be equivalent to the local
+ * its being moved/copied to, return folly::none with modifying any
+ * state. Otherwise, pop the stack value, perform the set, and return a pair
+ * giving the value's type, and any other local its known to be equivalent to.
+ */
+template <typename Op>
+folly::Optional<std::pair<Type, LocalId>> moveToLocImpl(ISS& env,
+                                                        const Op& op) {
   nothrow(env);
   auto equivLoc = topStkEquiv(env);
   // If the local could be a Ref, don't record equality because the stack
@@ -1647,7 +1660,7 @@ void in(ISS& env, const bc::SetL& op) {
     if (equivLoc != NoLocalId) {
       if (equivLoc == op.loc1 ||
           locsAreEquiv(env, equivLoc, op.loc1)) {
-        return reduce(env, bc::Nop {});
+        return folly::none;
       }
     } else {
       equivLoc = op.loc1;
@@ -1658,7 +1671,26 @@ void in(ISS& env, const bc::SetL& op) {
   if (equivLoc != op.loc1 && equivLoc != NoLocalId) {
     addLocEquiv(env, op.loc1, equivLoc);
   }
-  push(env, std::move(val), equivLoc);
+  return { std::make_pair(std::move(val), equivLoc) };
+}
+
+}
+
+void in(ISS& env, const bc::PopL& op) {
+  // If the same value is already in the local, do nothing but pop
+  // it. Otherwise, the set has been done by moveToLocImpl.
+  if (!moveToLocImpl(env, op)) return reduce(env, bc::PopC {});
+}
+
+void in(ISS& env, const bc::SetL& op) {
+  // If the same value is already in the local, do nothing because SetL keeps
+  // the value on the stack. If it isn't, we need to push it back onto the stack
+  // because moveToLocImpl popped it.
+  if (auto p = moveToLocImpl(env, op)) {
+    push(env, std::move(p->first), p->second);
+  } else {
+    reduce(env, bc::Nop {});
+  }
 }
 
 void in(ISS& env, const bc::SetN&) {
@@ -2704,8 +2736,6 @@ void in(ISS& env, const bc::StaticLocDef& op) {
 
 void in(ISS& env, const bc::StaticLocCheck& op) {
   auto const l = op.loc1;
-  setLocRaw(env, l, TGen);
-  maybeBindLocalStatic(env, l);
   if (!env.ctx.func->isMemoizeWrapper &&
       !env.ctx.func->isClosureBody &&
       env.collect.localStaticTypes.size() > l) {
@@ -2719,6 +2749,8 @@ void in(ISS& env, const bc::StaticLocCheck& op) {
                     bc::True {});
     }
   }
+  setLocRaw(env, l, TGen);
+  maybeBindLocalStatic(env, l);
   push(env, TBool);
 }
 
@@ -2911,10 +2943,9 @@ void in(ISS& env, const bc::CreateCl& op) {
   // Closure classes can be cloned and rescoped at runtime, so it's not safe to
   // assert the exact type of closure objects. The best we can do is assert
   // that it's a subclass of Closure.
-  auto const closure = env.index.resolve_class(env.ctx, s_Closure.get());
-  always_assert(closure.hasValue());
+  auto const closure = env.index.builtin_class(s_Closure.get());
 
-  return push(env, subObj(*closure));
+  return push(env, subObj(closure));
 }
 
 void in(ISS& env, const bc::CreateCont& /*op*/) {
@@ -3027,10 +3058,13 @@ void in(ISS& env, const bc::InitProp& op) {
       mergeThisProp(env, op.str1, t);
       break;
   }
-  if (auto const v = tv(t)) {
+  auto const v = tv(t);
+  if (v || !could_run_destructor(t)) {
     for (auto& prop : env.ctx.func->cls->properties) {
       if (prop.name == op.str1) {
         ITRACE(1, "InitProp: {} = {}\n", op.str1, show(t));
+        prop.attrs = (Attr)(prop.attrs & ~AttrDeepInit);
+        if (!v) break;
         prop.val = *v;
         if (op.subop2 == InitPropOp::Static &&
             !env.collect.publicStatics &&

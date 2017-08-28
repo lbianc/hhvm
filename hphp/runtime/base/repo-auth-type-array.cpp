@@ -22,6 +22,7 @@
 
 #include "hphp/util/compilation-flags.h"
 #include "hphp/util/trace.h"
+#include "hphp/runtime/base/runtime-option.h"
 
 namespace HPHP {
 
@@ -87,6 +88,15 @@ struct repo_auth_array_eq {
   }
 };
 
+}
+
+//////////////////////////////////////////////////////////////////////
+
+static ArrayTypeTable s_instance;
+
+ArrayTypeTable& globalArrayTypeTable() {
+  assert(RuntimeOption::RepoAuthoritative);
+  return s_instance;
 }
 
 //////////////////////////////////////////////////////////////////////

@@ -301,7 +301,7 @@ module WithExpressionAndStatementAndTypeParser
     let (parser, use_token) = assert_token parser Use in
     let (parser, use_kind) = parse_namespace_use_kind_opt parser in
     (* We already know that this is a name, qualified name, or prefix. *)
-    (* TODO: Give an error in a later pass if it is not a prefix. *)
+    (* If this is not a prefix, it will be detected as an error in a later pass *)
     let (parser, prefix) = next_token parser in
     let prefix = make_token prefix in
     let (parser, left, clauses, right) =
@@ -375,11 +375,21 @@ module WithExpressionAndStatementAndTypeParser
     parse_classish_modifier_opt parser []
 
   and parse_classish_token parser =
+    let spellcheck_tokens = [Class; Trait; Interface] in
+    let token_str = current_token_text parser in
     let (parser1, token) = next_token parser in
-    match (Token.kind token) with
+    match Token.kind token with
       | Class
       | Trait
       | Interface -> (parser1, make_token token)
+       (* Spellcheck case *)
+      | Name when is_misspelled_from spellcheck_tokens token_str ->
+        (* Default won't be used, since we already checked is_misspelled_from *)
+        let suggested_kind =
+          Option.value (suggested_kind_from spellcheck_tokens token_str)
+            ~default:Name in
+        let parser = skip_and_log_misspelled_token parser suggested_kind in
+        (parser, make_missing())
       | _ -> (with_error parser SyntaxError.error1035, (make_missing()))
 
   and parse_classish_extends_opt parser =
@@ -560,11 +570,11 @@ module WithExpressionAndStatementAndTypeParser
              start a classish element. *)
     (* ERROR RECOVERY: we're in the body of a classish, so we add visibility
      * modifiers to our context. *)
-    let expected_tokens = [Public; Protected; Private] in
-    let parser = SimpleParser.expect_in_new_scope parser expected_tokens in
+    let recovery_tokens = [Public; Protected; Private] in
+    let parser = SimpleParser.expect_in_new_scope parser recovery_tokens in
     let (parser, element_list) =
       parse_terminated_list parser parse_classish_element RightBrace in
-    let parser = SimpleParser.pop_scope parser expected_tokens in
+    let parser = SimpleParser.pop_scope parser recovery_tokens in
     (parser, element_list)
 
   and parse_xhp_children_paren parser =

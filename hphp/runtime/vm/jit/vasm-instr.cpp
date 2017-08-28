@@ -72,8 +72,8 @@ bool isBlockEnd(const Vinstr& inst) {
   }
 }
 
-bool isCall(const Vinstr& inst) {
-  switch (inst.op) {
+bool isCall(Vinstr::Opcode op) {
+  switch (op) {
     case Vinstr::call:
     case Vinstr::callarray:
     case Vinstr::callfaststub:
@@ -345,12 +345,6 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::loadzbq:
     case Vinstr::loadzlq:
     case Vinstr::storeqi:
-      return Width::Quad;
-
-    case Vinstr::loadups:
-    case Vinstr::storeups:
-      return Width::Octa;
-
     case Vinstr::addsd:
     case Vinstr::subsd:
     case Vinstr::cmpsd:
@@ -362,7 +356,11 @@ Width width(Vinstr::Opcode op) {
     case Vinstr::mulsd:
     case Vinstr::roundsd:
     case Vinstr::sqrtsd:
-      return Width::Dbl;
+      return Width::Quad;
+
+    case Vinstr::loadups:
+    case Vinstr::storeups:
+      return Width::Octa;
   }
   not_reached();
 }

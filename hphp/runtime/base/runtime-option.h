@@ -539,6 +539,7 @@ struct RuntimeOption {
   F(string, ProfileHWEvents,           std::string(""))                 \
   F(bool, ProfileHWExcludeKernel,      false)                           \
   F(bool, ProfileHWStructLog,          false)                           \
+  F(int32_t, ProfileHWExportInterval,  30)                              \
   F(bool, JitAlwaysInterpOne,          false)                           \
   F(int32_t, JitNopInterval,           0)                               \
   F(uint32_t, JitMaxTranslations,      10)                              \
@@ -578,7 +579,7 @@ struct RuntimeOption {
   F(bool, HHIRGenOpts,                 true)                            \
   F(bool, HHIRRefcountOpts,            true)                            \
   F(bool, HHIREnableGenTimeInlining,   true)                            \
-  F(uint32_t, HHIRInliningMaxVasmCost, 370)                             \
+  F(uint32_t, HHIRInliningMaxVasmCost, 175)                             \
   F(uint32_t, HHIRInliningMaxReturnDecRefs, 12)                         \
   F(uint32_t, HHIRInliningMaxReturnLocals, 20)                          \
   F(bool, HHIRInlineFrameOpts,         true)                            \

@@ -457,7 +457,7 @@ static_assert(sizeof(FreeNode) <= kSmallSizeAlign,
 struct NativeNode : HeapObject,
                     type_scan::MarkCountable<NativeNode> {
   NativeNode(HeaderKind k, uint32_t off) : obj_offset(off) {
-    initHeader(k, 0);
+    initHeader_32(k, 0);
   }
   uint32_t sweep_index; // index in MM::m_natives
   uint32_t obj_offset; // byte offset from this to ObjectData*
@@ -819,7 +819,9 @@ struct MemoryManager {
   /*
    * Heap iterator methods.  `fn' takes a HeapObject* argument.
    *
-   * initFree(): prepare to iterate by initializing free block headers.
+   * initFree(): prepare to iterate by initializing free block headers,
+   *             initializing dead space past m_front, and sorting slabs.
+   * reinitFree(): like initFree() but only update the freelists.
    * iterate(): Raw iterator loop over every HeapObject in the heap.
    *            Skips BigObj because it's just a detail of which sub-heap we
    *            used to allocate something based on its size, and it can prefix
@@ -830,6 +832,7 @@ struct MemoryManager {
    *                  prefixes (NativeData, AsyncFuncFrame, and ClosureHdr).
    */
   void initFree();
+  void reinitFree();
   template<class Fn> void iterate(Fn fn);
   template<class Fn> void forEachHeapObject(Fn fn);
   template<class Fn> void forEachObject(Fn fn);

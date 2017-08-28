@@ -358,6 +358,7 @@ constexpr uint32_t kMaxConcatN = 4;
   O(PopV,            NA,               ONE(VV),         NOV,        NF) \
   O(PopR,            NA,               ONE(RV),         NOV,        NF) \
   O(PopU,            NA,               ONE(UV),         NOV,        NF) \
+  O(PopL,            ONE(LA),          ONE(CV),         NOV,        NF) \
   O(Dup,             NA,               ONE(CV),         TWO(CV,CV), NF) \
   O(Box,             NA,               ONE(CV),         ONE(VV),    NF) \
   O(Unbox,           NA,               ONE(VV),         ONE(CV),    NF) \
@@ -831,10 +832,10 @@ ArgUnion getImm(PC opcode, int idx, const Unit* u = nullptr);
 // Don't use this with variable-sized immediates!
 ArgUnion* getImmPtr(PC opcode, int idx);
 
-void staticStreamer(const TypedValue* tv, std::stringstream& out);
+void staticStreamer(const TypedValue* tv, std::string& out);
 
 std::string instrToString(PC it, Either<const Unit*, const UnitEmitter*> u);
-void staticArrayStreamer(const ArrayData*, std::ostream&);
+void staticArrayStreamer(const ArrayData*, std::string&);
 
 /*
  * Convert subopcodes or opcodes into strings.

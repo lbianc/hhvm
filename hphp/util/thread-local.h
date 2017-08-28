@@ -228,6 +228,13 @@ struct ThreadLocal {
     return *get();
   }
 
+  void fixTypeIndex() {
+    if (!type_scan::isKnownType(m_node.m_tyindex)) {
+      m_node.m_tyindex = type_scan::getIndexForScan<T>();
+      assert(type_scan::isKnownType(m_node.m_tyindex));
+    }
+  }
+
   ThreadLocalNode<T> m_node;
 };
 
@@ -269,6 +276,13 @@ struct ThreadLocalNoCheck {
 
   T &operator*() const {
     return *getNoCheck();
+  }
+
+  void fixTypeIndex() {
+    if (!type_scan::isKnownType(m_node.m_tyindex)) {
+      m_node.m_tyindex = type_scan::getIndexForScan<T>();
+      assert(type_scan::isKnownType(m_node.m_tyindex));
+    }
   }
 
   ThreadLocalNode<T> m_node;
@@ -340,6 +354,13 @@ struct ThreadLocalSingleton {
 
   T &operator*() const {
     return *getNoCheck();
+  }
+
+  static void fixTypeIndex() {
+    if (!type_scan::isKnownType(s_node.m_tyindex)) {
+      s_node.m_tyindex = type_scan::getIndexForScan<T>();
+      assert(type_scan::isKnownType(s_node.m_tyindex));
+    }
   }
 
 private:
