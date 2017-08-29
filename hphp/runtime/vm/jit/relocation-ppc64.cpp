@@ -356,7 +356,7 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
 
 void adjustMetaDataForRelocation(RelocationInfo& rel, AsmInfo* /*asmInfo*/,
                                  CGMeta& meta) {
-/*  for (auto& li : meta.literals) {
+  for (auto& li : meta.literals) {
     if (auto adjusted = rel.adjustedAddressAfter((TCA)li.second)) {
       li.second = (uint64_t*)adjusted;
     }
@@ -371,7 +371,6 @@ void adjustMetaDataForRelocation(RelocationInfo& rel, AsmInfo* /*asmInfo*/,
     }
   }
   updatedCP.swap(meta.codePointers);
-*/
 }
 
 /*
