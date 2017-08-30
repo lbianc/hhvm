@@ -204,8 +204,7 @@ module WithExpressionAndStatementAndTypeParser
     (* TODO: Some error cases not caught by the parser that should be caught
              in later passes:
              (1) You cannot mix the "semi" and "compound" flavours in one script
-             (2) The declaration list may not contain a namespace decl.
-             (3) Qualified names are a superset of legal namespace names.
+             (2) Qualified names are a superset of legal namespace names.
     *)
     let (parser, namespace_token) = assert_token parser Namespace in
     let (parser1, token) = next_token parser in
@@ -323,12 +322,24 @@ module WithExpressionAndStatementAndTypeParser
       TODO: Add the grammar for the namespace-use-clauses; ensure that it
       indicates that trailing commas are allowed in the list.
     *)
-    (* TODO: ERROR RECOVERY
+    (* ERROR RECOVERY
     In the "simple" format, the kind may only be specified up front.
-    In the "group" format, if the kind is specified up front then it may not
-    be specified in each clause.
-    We do not enforce this rule here. Rather, we allow the kind to be anywhere,
-    and we'll add an error reporting pass later that deduces violations. *)
+
+    The grammar in the specification says that in the "group"
+    format, if the kind is specified up front then it may not
+    be specified in each clause. However, HHVM's parser disallows
+    the kind in each clause regardless of whether it is specified up front.
+    We will fix the specification to match HHVM.
+
+    The grammar in the specification also says that in the "simple" format,
+    the kind may only be specified up front.  But HHVM allows the kind to
+    be specified in each clause.  Again, we will fix the specification to match
+    HHVM.
+
+    TODO: Update the grammar comment above when the specification is fixed.
+
+    We do not enforce these rules here. Rather, we allow the kind to be anywhere,
+    and detect the errors in a later pass. *)
     if is_group_use parser then
       parse_group_use parser
     else
@@ -1070,6 +1081,9 @@ module WithExpressionAndStatementAndTypeParser
        Note that if this logic is changed, it should be changed in
        is_type_in_const above as well.
     *)
+    (* This permits abstract variables to have an initializer, and vice-versa.
+       This is deliberate, and those errors will be detected after the syntax
+       tree is created. *)
     let (parser, const_name) = require_name_allow_keywords parser in
     let (parser, initializer_) = parse_simple_initializer_opt parser in
     (parser, make_constant_declarator const_name initializer_)

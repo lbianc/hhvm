@@ -227,16 +227,17 @@ typename std::enable_if<
     base.subtypeOf(TVec) ? opV(base, args...) :
     base.subtypeOf(TDict) ? opD(base, args...) :
     opK(base, args...);
-  // TODO: we cannot support unreachable() in the middle of a minstr sequence
-  // right now as it causes problems in the verifier when we fall out of the
-  // fault funclet before the minstr is complete.
-  //
-  // if (res.first == TBottom) {
-  //   unreachable(env);
-  // }
-  if (res.second || nullOnFailure) nothrow(env);
-  if (res.first == TBottom) return nullOnFailure ? TInitNull : TInitCell;
-  if (nullOnFailure && !res.second) res.first |= TInitNull;
+
+  if (nullOnFailure) {
+    nothrow(env);
+    if (res.first == TBottom || !res.second) res.first |= TInitNull;
+  } else {
+    if (res.first == TBottom) {
+      unreachable(env);
+    } else if (res.second) {
+      nothrow(env);
+    }
+  }
   return res.first;
 }
 
@@ -640,18 +641,36 @@ SString mStringKey(const Type& key) {
   return v && v->m_type == KindOfPersistentString ? v->m_data.pstr : nullptr;
 }
 
-Type key_type(ISS& env, MKey mkey) {
-  switch (mkey.mcode) {
+template<typename Op>
+folly::Optional<Type> key_type_or_fixup(ISS& env, Op op) {
+  auto fixup = [&] (Type ty, bool isProp) -> folly::Optional<Type> {
+    if (auto const val = tv(ty)) {
+      if (isStringType(val->m_type)) {
+        op.mkey.mcode = isProp ? MPT : MET;
+        op.mkey.litstr = val->m_data.pstr;
+        reduce(env, op);
+        return folly::none;
+      }
+      if (!isProp && val->m_type == KindOfInt64) {
+        op.mkey.mcode = MEI;
+        op.mkey.int64 = val->m_data.num;
+        reduce(env, op);
+        return folly::none;
+      }
+    }
+    return std::move(ty);
+  };
+  switch (op.mkey.mcode) {
+    case MEC: case MPC:
+      return fixup(topC(env, op.mkey.idx), op.mkey.mcode == MPC);
+    case MEL: case MPL:
+      return fixup(locAsCell(env, op.mkey.local), op.mkey.mcode == MPL);
     case MW:
       return TBottom;
-    case MEL: case MPL:
-      return locAsCell(env, mkey.local);
-    case MEC: case MPC:
-      return topC(env, mkey.idx);
     case MEI:
-      return ival(mkey.int64);
+      return ival(op.mkey.int64);
     case MET: case MPT: case MQT:
-      return sval(mkey.litstr);
+      return sval(op.mkey.litstr);
   }
   not_reached();
 }
@@ -1445,8 +1464,8 @@ void handleDualMInstrState(ISS& env, A nondefine, B define) {
 
   env.flags.wasPEI |= nonDefineFlags.wasPEI;
   env.flags.canConstProp &= nonDefineFlags.canConstProp;
-  assert(env.flags.wasPEI);
-  // an FPass instruction can have side effects if it ends up by-ref
+  // Elements of a minstr sequence should never be constprop - it
+  // would leave invalid bytecode.
   assert(!env.flags.canConstProp);
 }
 
@@ -1617,17 +1636,19 @@ void in(ISS& env, const bc::FPassBaseL& op) {
 // Intermediate operations
 
 void in(ISS& env, const bc::Dim& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miProp(env, op.mkey.mcode == MQT, op.subop1, key);
+    miProp(env, op.mkey.mcode == MQT, op.subop1, *key);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miElem(env, op.subop1, key);
+    miElem(env, op.subop1, *key);
   } else {
     miNewElem(env);
   }
 }
 
 void in(ISS& env, const bc::FPassDim& op) {
+  if (!key_type_or_fixup(env, op)) return;
   fpassImpl(env, op.arg1, bc::Dim{MOpMode::Warn, op.mkey});
 }
 
@@ -1635,7 +1656,8 @@ void in(ISS& env, const bc::FPassDim& op) {
 // Final operations
 
 void in(ISS& env, const bc::QueryM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   auto const nDiscard = op.arg1;
 
   if (mcodeIsProp(op.mkey.mcode)) {
@@ -1643,10 +1665,10 @@ void in(ISS& env, const bc::QueryM& op) {
     switch (op.subop2) {
       case QueryMOp::CGet:
       case QueryMOp::CGetQuiet:
-        miFinalCGetProp(env, nDiscard, key);
+        miFinalCGetProp(env, nDiscard, *key);
         break;
       case QueryMOp::Isset:
-        miFinalIssetProp(env, nDiscard, key);
+        miFinalIssetProp(env, nDiscard, *key);
         break;
       case QueryMOp::Empty:
         discard(env, nDiscard);
@@ -1656,10 +1678,10 @@ void in(ISS& env, const bc::QueryM& op) {
   } else if (mcodeIsElem(op.mkey.mcode)) {
     switch (op.subop2) {
       case QueryMOp::CGet:
-        miFinalCGetElem(env, nDiscard, key, false);
+        miFinalCGetElem(env, nDiscard, *key, false);
         break;
       case QueryMOp::CGetQuiet:
-        miFinalCGetElem(env, nDiscard, key, true);
+        miFinalCGetElem(env, nDiscard, *key, true);
         break;
       case QueryMOp::Isset:
       case QueryMOp::Empty:
@@ -1677,67 +1699,73 @@ void in(ISS& env, const bc::QueryM& op) {
 }
 
 void in(ISS& env, const bc::VGetM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalVGetProp(env, op.arg1, key, op.mkey.mcode == MQT);
+    miFinalVGetProp(env, op.arg1, *key, op.mkey.mcode == MQT);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miFinalVGetElem(env, op.arg1, key);
+    miFinalVGetElem(env, op.arg1, *key);
   } else {
     miFinalVGetNewElem(env, op.arg1);
   }
 }
 
 void in(ISS& env, const bc::SetM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalSetProp(env, op.arg1, key);
+    miFinalSetProp(env, op.arg1, *key);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miFinalSetElem(env, op.arg1, key);
+    miFinalSetElem(env, op.arg1, *key);
   } else {
     miFinalSetNewElem(env, op.arg1);
   }
 }
 
 void in(ISS& env, const bc::IncDecM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalIncDecProp(env, op.arg1, op.subop2, key);
+    miFinalIncDecProp(env, op.arg1, op.subop2, *key);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miFinalIncDecElem(env, op.arg1, op.subop2, key);
+    miFinalIncDecElem(env, op.arg1, op.subop2, *key);
   } else {
     miFinalIncDecNewElem(env, op.arg1);
   }
 }
 
 void in(ISS& env, const bc::SetOpM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalSetOpProp(env, op.arg1, op.subop2, key);
+    miFinalSetOpProp(env, op.arg1, op.subop2, *key);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miFinalSetOpElem(env, op.arg1, op.subop2, key);
+    miFinalSetOpElem(env, op.arg1, op.subop2, *key);
   } else {
     miFinalSetOpNewElem(env, op.arg1);
   }
 }
 
 void in(ISS& env, const bc::BindM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalBindProp(env, op.arg1, key);
+    miFinalBindProp(env, op.arg1, *key);
   } else if (mcodeIsElem(op.mkey.mcode)) {
-    miFinalBindElem(env, op.arg1, key);
+    miFinalBindElem(env, op.arg1, *key);
   } else {
     miFinalBindNewElem(env, op.arg1);
   }
 }
 
 void in(ISS& env, const bc::UnsetM& op) {
-  auto const key = key_type(env, op.mkey);
+  auto const key = key_type_or_fixup(env, op);
+  if (!key) return;
   if (mcodeIsProp(op.mkey.mcode)) {
-    miFinalUnsetProp(env, op.arg1, key);
+    miFinalUnsetProp(env, op.arg1, *key);
   } else {
     assert(mcodeIsElem(op.mkey.mcode));
-    miFinalUnsetElem(env, op.arg1, key);
+    miFinalUnsetElem(env, op.arg1, *key);
   }
 }
 
@@ -1754,6 +1782,7 @@ void in(ISS& env, const bc::SetWithRefRML& op) {
 }
 
 void in(ISS& env, const bc::FPassM& op) {
+  if (!key_type_or_fixup(env, op)) return;
   auto const cget = bc::QueryM{op.arg2, QueryMOp::CGet, op.mkey};
   auto const vget = bc::VGetM{op.arg2, op.mkey};
 

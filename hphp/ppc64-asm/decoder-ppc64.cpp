@@ -660,7 +660,6 @@ const DecoderInfo Decoder::decode(const PPC64Instr* const ip) {
       assert(pdi.opcode() == decoded_instr);
       pdi.instruction_image(*ip);
       pdi.setIp(ip);
-//      *m_decoder_table[position] = pdi;
       return pdi;
     }
   }

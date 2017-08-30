@@ -1561,6 +1561,12 @@ let transform (env: Env.t) (node: Syntax.t) : Doc.t =
     match syntax node with
     | CompoundStatement x ->
       handle_compound_statement x;
+    | XHPExpression _ ->
+      WithRule (Rule.Parental, Concat [
+        Space;
+        Split;
+        Nest [t node];
+      ])
     | _ ->
       Concat [
         Space;
@@ -2213,8 +2219,8 @@ let transform (env: Env.t) (node: Syntax.t) : Doc.t =
           let dc = Trivia.make_delimited_comment @@
             String.sub str start_index len in
           Concat [
-            Newline;
             Ignore ("\n", 1);
+            Newline;
             Ignore ((String.make start_index ' '), start_index);
             Comment ((Trivia.text dc), (Trivia.width dc));
           ]

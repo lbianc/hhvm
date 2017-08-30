@@ -88,7 +88,7 @@ let expand_to_split_boundaries boundaries range =
 
 let env_from_config config =
   let env = Option.value config ~default:Env.default in
-  if Env.indent_width env < 1 then invalid_arg "Invalid indent width";
+  if Env.indent_width env < 0 then invalid_arg "Invalid indent width";
   if Env.line_width env < 0 then invalid_arg "Invalid line width";
   env
 
@@ -110,18 +110,19 @@ let format_tree ?config tree =
 
 (** Format a given range in a file.
  *
- * The range is a half-open interval of byte offsets into the file. The range
- * start and end should fall at line boundaries (That is, both offsets should
- * point to one of the following: a character following a newline character, the
- * beginning of the file, or the end of the file).
+ * The range is a half-open interval of byte offsets into the file.
  *
- * The behavior of this function is not fully specified when the range
- * boundaries do not fall at line boundaries in the original source text. All
- * tokens in the range will appear in the formatted output, but the whitespace
- * at the beginning and end of the output may vary. If the range boundaries
- * would bisect a token, the entire token will appear in the formatted output.
- * Under some circumstances, tokens outside the beginning or end of the range
- * will appear in the formatted output. *)
+ * If the range boundaries would bisect a token, the entire token will appear in
+ * the formatted output.
+ *
+ * If the first token in the range would have indentation preceding it in the
+ * full formatted file, the leading indentation will be included in the output.
+ *
+ * If the last token in the range would have a trailing newline in the full
+ * formatted file, the trailing newline will be included in the output.
+ *
+ * Non-indentation space characters are not included at the beginning or end of
+ * the formatted output (unless they are in a comment or string literal). *)
 let format_range ?config range tree =
   let source_text = SourceText.text (SyntaxTree.text tree) in
   let env = env_from_tree config tree in
@@ -161,13 +162,17 @@ let format_intervals ?config intervals tree =
   ) in
   let length = SourceText.length source_text in
   let buf = Buffer.create (length + 256) in
-  let offsets_seen = ref 0 in
+  let bytes_seen = ref 0 in
   List.iter formatted_intervals (fun ((st, ed), formatted) ->
-    Buffer.add_string buf (String.sub text !offsets_seen (st - !offsets_seen));
+    for i = !bytes_seen to st - 1 do
+      Buffer.add_char buf text.[i];
+    done;
     Buffer.add_string buf formatted;
-    offsets_seen := ed;
+    bytes_seen := ed;
   );
-  Buffer.add_string buf (String.sub text !offsets_seen (length - !offsets_seen));
+  for i = !bytes_seen to length - 1 do
+    Buffer.add_char buf text.[i];
+  done;
   Buffer.contents buf
 
 (** Format a node at the given offset.
@@ -210,5 +215,6 @@ let format_at_offset ?config tree offset =
   let formatted = Line_splitter.print env solve_states ~range in
   (* We don't want a trailing newline here (in as-you-type-formatting, it would
    * place the cursor on the next line), but the Line_splitter always prints one
-   * at the end of a formatted range. So, we remove it. *)
-  range, String.sub formatted 0 (String.length formatted - 1)
+   * at the end of a formatted range when the last token ought to have a
+   * trailing newline. So, we remove it. *)
+  range, String_utils.rstrip formatted "\n"

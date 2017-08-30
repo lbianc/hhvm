@@ -165,6 +165,7 @@ let minimal_tests =
     "test_trailing_commas";
     "context/test_extra_error_trivia";
     "test_funcall_with_type_arguments";
+    "test_nested_namespace_declarations";
   ] ~f:mapper
 
 let error_tests =
@@ -208,6 +209,7 @@ let error_tests =
     "test_misspelling_recovery";
     "test_misspelling_recovery2";
     "test_group_use_errors";
+    "test_abstract_initializers";
   ] ~f:mapper
 
 let test_data = minimal_tests @ error_tests @
