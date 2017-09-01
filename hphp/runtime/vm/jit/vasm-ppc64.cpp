@@ -390,7 +390,7 @@ struct Vgen {
     }                                                     \
   } while(0)
 
-  void emit(const loadw& i)   { X(lhz,  Reg64(i.d), i.s); }
+  void emit(const loadw& i)   { /*X(lhz,  Reg64(i.d), i.s);*/ }
   void emit(const loadl& i)   { X(lwz,  Reg64(i.d), i.s); }
   void emit(const loadb& i)   { X(lbz, Reg64(i.d),  i.s); }
   void emit(const loadtqb& i) { X(lbz, Reg64(i.d),  i.s); }
